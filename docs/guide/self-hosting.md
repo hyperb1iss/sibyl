@@ -20,7 +20,7 @@ This page is the end-to-end solo path. If you administer Sibyl for a team behind
 - A local SurrealDB knowledge graph, running on your box
 - The full memory loop (`context → act → remember → reflect`) from any terminal
 - A web UI at `http://localhost:3337` for the graph explorer, tasks, and the memory workspace
-- The `sibyl` CLI as your agents' main interface — any tool that runs shell commands can use it —
+- The `sibyl` CLI as your agents' main interface (any tool that runs shell commands can use it),
   with an MCP endpoint at `http://localhost:3334/mcp` for MCP-native clients
 - One owner account: you
 
@@ -51,12 +51,12 @@ in your environment, you add them in the setup wizard instead (Step 2). Everythi
 
 The first time the web UI opens at `http://localhost:3337`, a short wizard runs:
 
-1. **API keys** — Sibyl needs an Anthropic key for entity extraction and an OpenAI or Gemini key for
+1. **API keys:** Sibyl needs an Anthropic key for entity extraction and an OpenAI or Gemini key for
    embeddings. Keys you enter in the wizard are stored encrypted in your local database.
-2. **Your owner account** — the first account you create holds owner privileges. This is local
+2. **Your owner account:** the first account you create holds owner privileges. This is local
    username/password auth; there is no external sign-in to configure. After setup, new accounts are
    invite-only unless you deliberately turn on public signups.
-3. **Connect** — the wizard shows the MCP config and agent prompt snippet for your tools.
+3. **Connect:** the wizard shows the MCP config and agent prompt snippet for your tools.
 
 That is the whole account story for a solo install. No OIDC, no role claims, no identity provider.
 
@@ -84,7 +84,7 @@ Sibyl is now yours from any terminal.
 
 The primary way an agent uses Sibyl is the `sibyl` CLI. If a tool can run a shell command, it can
 use Sibyl: the agent runs `sibyl context`, `sibyl remember`, and the other task or correction verbs
-against the local server from Step 3. This is the recommended path — it is lighter-weight than MCP
+against the local server from Step 3. This is the recommended path: it is lighter weight than MCP
 (less token overhead) and every Sibyl command is available. Sign in once with `sibyl auth login` if
 a write reports that authentication is required.
 
@@ -191,8 +191,8 @@ local-first auth. Point any CLI at it with `sibyl init --remote https://your-hos
 
 ## Where to Go Next
 
-- [The Memory Loop](./memory-loop.md) — context, act, remember, reflect
-- [Capturing Knowledge](./capturing-knowledge.md) — what is worth saving
-- [Agents & MCP](./claude-code.md) — connect any AI agent
-- [Skills & Hooks](./skills.md) — automatic context injection
-- [Single-Host Deployment](../deployment/ansible.md) — your own always-on instance on a VM
+- [The Memory Loop](./memory-loop.md): context, act, remember, reflect
+- [Capturing Knowledge](./capturing-knowledge.md): what is worth saving
+- [Agents & MCP](./claude-code.md): connect any AI agent
+- [Skills & Hooks](./skills.md): automatic context injection
+- [Single-Host Deployment](../deployment/ansible.md): your own always-on instance on a VM

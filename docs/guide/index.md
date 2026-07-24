@@ -62,7 +62,7 @@ One hook fires automatically at session boundaries:
 
 Per-prompt context injection lived here for a while as `UserPromptSubmit`, but it substituted for
 skill invocation rather than nudging it, so we removed it. The agent is expected to call the `sibyl`
-skill and `sibyl context` / `sibyl context` when it needs working memory.
+skill and `sibyl context` / `sibyl search` when it needs working memory.
 
 ### 3. Web UI
 

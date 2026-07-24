@@ -6,7 +6,7 @@ description: Organization scoping and graph isolation
 # Multi-Tenancy
 
 Sibyl supports multiple organizations with complete data isolation. Each organization gets its own
-knowledge graph, ensuring security and separation.
+knowledge graph, so data stays separate and secure.
 
 ## How It Works
 

@@ -5,8 +5,8 @@ description: Understanding Sibyl's graph architecture
 
 # Knowledge Graph
 
-Sibyl stores knowledge in a graph database, enabling rich relationships between entities and
-semantic search. This guide explains how the graph works.
+Sibyl stores knowledge in a graph database, so entities can relate to each other directly and search
+works by meaning. This guide explains how the graph works.
 
 ## Architecture Overview
 
@@ -133,8 +133,11 @@ namespace or breaks isolation. :::
 
 ## Write Concurrency
 
-The Surreal driver guards the WebSocket with a per-client `asyncio.Lock`. `EntityManager` methods
-are safe to call concurrently; no application-level locking is needed.
+Each organization gets a connection-pooled SurrealDB client scoped to its namespace. The pool hands
+out independent sockets (one query per socket at a time), so queries within an org run concurrently
+with no single per-client query lock. `EntityManager` methods are safe to call concurrently; no
+application-level locking is needed. Embedded and `memory://` URLs are clamped to a single
+connection because a pool would fragment single-writer state.
 
 ## Hybrid Search
 

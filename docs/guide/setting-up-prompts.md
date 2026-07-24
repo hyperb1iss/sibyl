@@ -36,9 +36,9 @@ Your global instructions apply to every project. This is where you establish:
 
 Below is the recommended block to paste into your global CLAUDE.md or AGENTS.md. It is also the
 exact content `sibyl local setup` prints to the terminal and that `sibyl doctor --append` can
-install for you automatically. Each section earns its place — the intent-to-verb bridges in
-particular moved agent trigger accuracy from 17% to 88% in the skill-invocation eval, so keep them
-intact even if you customize the framing.
+install for you automatically. Each section earns its place; the intent-to-verb bridges in
+particular dramatically increase how reliably agents reach for the memory verbs in our internal
+sessions, so keep them intact even if you customize the framing.
 
 ```markdown
 ## Sibyl - Your Persistent Memory

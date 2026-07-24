@@ -202,8 +202,13 @@ This starts:
 - In-process background jobs and schedules
 
 The local FalkorDB/PostgreSQL dev fallback was retired after the v0.6.0 compatibility release. Use
-`sibyld migrate import <archive> --source-type legacy-archive --target-mode surreal` to move an
-exported archive into SurrealDB.
+`sibyld migrate import <archive> --source-type surreal-archive --target-mode surreal` to restore an
+exported Surreal-native archive.
+
+> **Note (2026-07):** The `--source-type legacy-archive` on-ramp for historical FalkorDB/PostgreSQL
+> migration archives was removed in the v0.6–v1.0 line (v0.10.0 was the last release that shipped
+> it). If you still hold a legacy archive, see
+> [Migrating from FalkorDB](./migrating-from-falkor.md).
 
 ### Individual Services
 
@@ -278,11 +283,13 @@ REMOVE NAMESPACE org_<uuid_hex>;
 
 ### Legacy Graph / Migration Errors
 
-Use a retained archive file with
-`sibyld migrate import <archive> --source-type legacy-archive --target-mode surreal`. Only pass
-`--restore-database-dump` when rehearsing a historical `postgres.sql` payload against an explicitly
-managed PostgreSQL database, paired with
-`--source-type legacy-archive --target-mode postgres-rehearsal`.
+Restore a retained Surreal-native archive with
+`sibyld migrate import <archive> --source-type surreal-archive --target-mode surreal`.
+
+> **Note (2026-07):** The historical `--source-type legacy-archive`, `--restore-database-dump`, and
+> `--target-mode postgres-rehearsal` flags were removed in the v0.6–v1.0 line and no longer exist.
+> Legacy archives must be imported from a release that still carries the on-ramp; see
+> [Migrating from FalkorDB](./migrating-from-falkor.md).
 
 ### OpenAI API Errors
 

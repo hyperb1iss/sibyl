@@ -5,9 +5,9 @@ description: Honest competitive positioning for Sibyl in the June 2026 AI memory
 
 # AI Memory Landscape
 
-This page positions Sibyl against the June 2026 AI memory systems field. The headline result —
-[500/500 hit@5, 96.96% strict R@5, 98.90% R@10 on LongMemEval-S](./longmemeval.md) — is one number
-in a noisy landscape. The point of this page is to make the comparison legible without overclaim and
+This page positions Sibyl against the June 2026 AI memory systems field. The headline result
+([500/500 hit@5, 96.96% strict R@5, 98.90% R@10 on LongMemEval-S](./longmemeval.md)) is one number
+in a noisy field. The point of this page is to make the comparison legible without overclaim and
 without burying real competitive strengths.
 
 The single most important framing for the rest of this page comes first.
@@ -65,14 +65,14 @@ Going around the field on those six dimensions:
 - [**Cognee**](https://www.cognee.ai/) gets closest. Self-hosted, graph-native, tenant isolation via
   its permission model (Users/Tenants/Roles plus dataset ACLs, toggled on via the Enable Backend
   Access Control (EBAC) env flag, with physical isolation only on the Kuzu/LanceDB/FalkorDB
-  backends), live benchmarking. Trails on LLM-free retrieval — extraction is LLM-driven.
+  backends), live benchmarking. Trails on LLM-free retrieval: extraction is LLM-driven.
 - [**Graphiti**](https://github.com/getzep/graphiti) (Zep's underlying engine) is the closest
   architectural sibling. Zep itself
   [deprecated self-hosted Community Edition](https://vectorize.io/articles/zep-alternatives) in
   April 2025; Graphiti the library still runs, but you bring your own DB, your own multi-tenancy,
   and your own LLM extraction.
 - [**Memweave**](https://github.com/sachinsharma9780/memweave) hits source-preserving, no-LLM, live,
-  and self-hosted. Trails on graph-native and multi-tenant — it's single-process file-on-disk.
+  and self-hosted. Trails on graph-native and multi-tenant: it's single-process file-on-disk.
 - [**Mastra**](https://mastra.ai/) Observational Memory hits self-hosted and live benchmarking but
   runs two LLMs (Observer + Reflector) continuously to compress conversations into observations. Not
   source-preserving by design.
@@ -103,7 +103,7 @@ A few honest readings of this table:
 retrieval quality. Its 98.0% R@5 / 99.11% R@10 on a 450-question held-out split is real, well
 documented, cross-validated (±0.12% std dev), and methodologically transparent. The held-out split
 excludes 50 questions used for tuning, and the metric is `recall_any` rather than strict
-`recall_all`, so the comparison is not perfectly apples-to-apples — but Memweave is the system to
+`recall_all`, so the comparison is not perfectly apples-to-apples. Still, Memweave is the system to
 point at when someone asks "is anyone close to Sibyl on this axis?". Its real edge is brutal
 simplicity: plain Markdown source files, SQLite + sqlite-vec + FTS5 index, zero infrastructure,
 graceful degradation. For a single developer on a laptop, Memweave is a defensible choice.
@@ -172,9 +172,9 @@ internal entity linking. Physical tenant isolation is usually an Enterprise-tier
 
 [Cognee](https://www.cognee.ai/), [MemOS (MemTensor)](https://github.com/MemTensor/MemOS), and raw
 [Graphiti](https://github.com/getzep/graphiti) as a library. Sibyl's closest architectural siblings.
-Cognee in particular ships per-tenant graph + vector store isolation — a permission model of
+Cognee in particular ships per-tenant graph + vector store isolation (a permission model of
 Users/Tenants/Roles plus dataset ACLs, toggled on via its Enable Backend Access Control (EBAC) env
-flag, with physical isolation only on the Kuzu/LanceDB/FalkorDB backends — the most direct
+flag, with physical isolation only on the Kuzu/LanceDB/FalkorDB backends), the most direct
 production analog to Sibyl's namespace-per-org pattern.
 
 ### Cluster 3: Agent Runtimes That Bundle Memory
@@ -257,8 +257,8 @@ Sibyl trails academic SOTA:
   belief-revision postulates over a property graph runtime. Sibyl handles contradictions implicitly
   through projection.
 - **LongMemEval-V2.** The [agent-shaped successor benchmark](https://arxiv.org/abs/2605.12493) (May
-  2026, 451 questions, up to 115M tokens) tests workflow knowledge, environment gotchas, premise
-  awareness — closer to operational competence than conversational recall. Sibyl has no published
+  2026, 451 questions, up to 115M tokens) tests workflow knowledge, environment gotchas, and premise
+  awareness, closer to operational competence than conversational recall. Sibyl has no published
   number here. Best published is AgentRunbook-C at 72.5%.
 - **BEAM (10M-token long-memory).**
   [Hindsight](https://hindsight.vectorize.io/blog/2026/04/02/beam-sota) reports 64.1% at 10M tokens,
@@ -274,8 +274,9 @@ Things we do not yet have, and want to be explicit about:
 2. **No public local-embedding variant.** The full run uses OpenAI embeddings. A
    `text-embedding-3-small`-free variant with `all-MiniLM-L6-v2` or BGE-M3 would be directly
    comparable to MemPalace raw and agentmemory's measurements.
-3. **No LongMemEval-V2 number.** The benchmark was published mid-2026; Sibyl has not been evaluated
-   against it yet.
+3. **No published LongMemEval-V2 number.** The official full-suite harness path is wired and
+   internal runs exist (see [LongMemEval-V2](./longmemeval-v2.md)), but nothing is published or
+   leaderboard-submitted yet, and nothing should be cited until a pinned receipt exists.
 4. **No LOCOMO, BEAM, FiFA numbers.** LongMemEval-S is one dataset. The field is broader.
 5. **No published latency-cost trade-off curve.** Search p95 is 1,115 ms in the full run; that's a
    working number but not yet contextualized against competitors' published latency-cost envelopes.
@@ -283,31 +284,31 @@ Things we do not yet have, and want to be explicit about:
    strict-recall ranking quality.
 7. **Forgetting is partial, not principled.** A `priority_decay` consolidation job archives
    low-importance, stale entities (reversibly), but it is not yet tuned, benchmarked, or applied as
-   a uniform decay signal across the context/recall path — old facts still compete with new ones in
-   the main recall scoring.
+   a uniform decay signal across the context/recall path, so old facts still compete with new ones
+   in the main recall scoring.
 
 ## How To Read This Page
 
 If you remember one thing: retrieval R@K and end-to-end QA accuracy are different axes, and most
-LongMemEval leaderboard tables mix them. Sibyl's 96.96% strict R@5 is in the retrieval lane. When
-comparing against numbers from Mem0, Mastra, OMEGA, Hindsight, Zep, ByteRover, RetainDB,
-Supermemory, or Emergence AI — those are QA-accuracy numbers and they answer a different question.
-Sibyl's QA lane is wired, but it should not be cited until the pinned artifact exists.
+LongMemEval leaderboard tables mix them. Sibyl's 96.96% strict R@5 is in the retrieval lane. The
+numbers from Mem0, Mastra, OMEGA, Hindsight, Zep, ByteRover, RetainDB, Supermemory, and Emergence AI
+are QA-accuracy numbers, and they answer a different question. Sibyl's QA lane is wired, but it
+should not be cited until the pinned artifact exists.
 
 The retrieval-lane comparison Sibyl can defend right now: Sibyl reaches LongMemEval-S retrieval
 ceiling on a stricter metric (full multi-answer recall, not lenient hit-rate), on the live
 production API path, with per-question physical tenant isolation, and with no LLM in the retrieval
 or extraction path. The retrieval-lane systems with credible published numbers in the same
 neighborhood are MemPalace's honest 98.4% held-out, Memweave's 98.0% held-out, and agentmemory's
-95.2% — all on `recall_any`, all single-tenant, all offline notebook measurements.
+95.2%, all on `recall_any`, all single-tenant, all offline notebook measurements.
 
 That is the position. We are happy to be wrong about anything in this page if a reader brings a
 primary source that contradicts it.
 
 ## Related
 
-- [LongMemEval Results](./longmemeval.md) — the headline eval and methodology
-- [Benchmark Methodology](./benchmark-methodology.md) — the broader eval ladder, gates, reporting
+- [LongMemEval Results](./longmemeval.md): the headline eval and methodology
+- [Benchmark Methodology](./benchmark-methodology.md): the broader eval ladder, gates, reporting
   rules
-- [Retrieval System Architecture](../architecture/retrieval-system.md) — how the eval-passing path
+- [Retrieval System Architecture](../architecture/retrieval-system.md): how the eval-passing path
   actually works

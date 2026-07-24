@@ -8,8 +8,9 @@ description: Release guidance for the SurrealDB-first storage cutover
 > **Note (2026-07):** FalkorDB and PostgreSQL are fully removed from Sibyl as of the v0.6–v1.0 line.
 > This guide documents the historical migration path; the current `sibyld migrate` CLI supports only
 > `surreal-archive` → `surreal`. The `--source-type legacy-archive`,
-> `--target-mode postgres-rehearsal`, `--restore-database-dump`, and `--postgres-base-url` flags
-> below no longer exist.
+> `--target-mode postgres-rehearsal`, and `--restore-database-dump` flags below no longer exist.
+> `--postgres-base-url` was removed from the import and rehearsal commands but remains on
+> `sibyld migrate auth-flow-compare`.
 
 Sibyl now starts the SurrealDB runtime by default. New installs should use SurrealDB for graph,
 content, and auth. Do not start new deployments on FalkorDB or PostgreSQL auth.
@@ -96,7 +97,7 @@ surface:
 - archive import, verify, and cutover commands for existing legacy installs
 - Surreal-native archive restore through explicit
   `--source-type surreal-archive --target-mode surreal`
-- retained `postgres.sql` restore — historically via
+- retained `postgres.sql` restore: historically via
   `--restore-database-dump --source-type legacy-archive --target-mode postgres-rehearsal`; these
   flags were removed in the v0.6–v1.0 line and no longer exist
 - graph archive payload import into SurrealDB with dry-run restore review before writes

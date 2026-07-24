@@ -23,14 +23,14 @@ LLM reranking. Per-question physical tenant isolation. Full artifact and diagnos
 
 ## Pages In This Section
 
-- [LongMemEval Results](./longmemeval.md) — the headline eval claim, full per-type breakdown,
+- [LongMemEval Results](./longmemeval.md): the headline eval claim, full per-type breakdown,
   configuration, latency, score progression, reproduction commands, claim boundary.
-- [LongMemEval-V2](./longmemeval-v2.md) — the official full-suite harness path, live Sibyl memory
+- [LongMemEval-V2](./longmemeval-v2.md): the official full-suite harness path, live Sibyl memory
   adapter contract, and honest-run requirements.
-- [AI Memory Landscape](./ai-memory-landscape.md) — honest competitive positioning. The
+- [AI Memory Landscape](./ai-memory-landscape.md): honest competitive positioning. The
   retrieval-vs-QA-accuracy distinction, where Sibyl sits in the field, what we trail academic SOTA
   on.
-- [Benchmark Methodology](./benchmark-methodology.md) — the full eval ladder, gate profiles,
+- [Benchmark Methodology](./benchmark-methodology.md): the full eval ladder, gate profiles,
   reporting rules, and the AI memory ledger format.
 
 ## What We Measure
@@ -54,7 +54,7 @@ baseline. Reporting rules and gate profiles are documented in
 
 Every full LongMemEval run uploads:
 
-- `longmemeval_live_full.json` — overall, per-type, and per-case results with ranked result IDs,
+- `longmemeval_live_full.json`: overall, per-type, and per-case results with ranked result IDs,
   answer ranks, latencies, ingest stats, readiness probes, and cross-question leakage counts.
 - A diagnostics summary covering warning counts, slow-query totals, SurrealDB resource usage at
   diagnostics time, and any timeout events.

@@ -8,8 +8,9 @@ description: CLI playbook for moving an existing install to SurrealDB
 > **Note (2026-07):** FalkorDB and PostgreSQL are fully removed from Sibyl as of the v0.6–v1.0 line.
 > This guide documents the historical migration path; the current `sibyld migrate` CLI supports only
 > `surreal-archive` → `surreal`. The `--source-type legacy-archive`,
-> `--target-mode postgres-rehearsal`, `--restore-database-dump`, and `--postgres-base-url` flags
-> below no longer exist.
+> `--target-mode postgres-rehearsal`, and `--restore-database-dump` flags below no longer exist.
+> `--postgres-base-url` was removed from the import and rehearsal commands but remains on
+> `sibyld migrate auth-flow-compare`.
 
 Sibyl ships CLI tooling to move an organization (or a whole install) from the legacy FalkorDB +
 PostgreSQL stack to SurrealDB. The migration is explicit and rehearsal-driven. Nothing happens

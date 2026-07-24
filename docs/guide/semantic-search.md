@@ -20,7 +20,7 @@ high-dimensional numerical representation of meaning:
     -> [0.023, -0.041, 0.089, ..., 0.012]  (1536 dimensions)
 ```
 
-Similar concepts produce similar vectors, enabling meaning-based search.
+Similar concepts produce similar vectors, so search can match by meaning.
 
 ### Embedding Model
 

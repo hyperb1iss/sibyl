@@ -1,8 +1,7 @@
 # Benchmark Methodology
 
-Sibyl now treats retrieval evaluation as a small ladder instead of one overloaded command. That
-keeps local smoke checks, runtime artifacts, and offline baselines from drifting into the same
-story.
+Sibyl treats retrieval evaluation as a small ladder instead of one overloaded command. That keeps
+local smoke checks, runtime artifacts, and offline baselines from drifting into the same story.
 
 ## Recommended Order
 
@@ -270,7 +269,7 @@ fixtures.
 
 External AI memory benchmarks live on a stricter evidence track than local smoke checks. Any LOCOMO,
 RULER, Mem0, Zep, LangMem, or similar result that appears in public docs must have a full result
-record, not just a headline score.
+record rather than a headline score alone.
 
 Store new artifacts under `benchmarks/results/ai-memory/` unless the suite requires a larger archive
 outside git. If an artifact is too large to commit, commit a small manifest that names the archive
@@ -315,28 +314,27 @@ that ledger, add it there before citing the result anywhere else.
 
 ## Store Comparison Flow
 
-When you need to compare legacy and Surreal on the same graph data:
+> **Note (2026-07):** the legacy-vs-Surreal comparison below is historical. FalkorDB and PostgreSQL
+> are fully removed, and the current `sibyld migrate` CLI accepts only
+> `--source-type surreal-archive --target-mode surreal`; the `legacy-archive`, `postgres-rehearsal`,
+> and `--restore-database-dump` flags no longer exist.
 
-1. Export a manifest archive from the source store with
+To compare two Surreal deployments (or validate a restore) on the same graph data today:
+
+1. Export a manifest archive from the source with
    `sibyld migrate export --org-id <org> --output /tmp/migration.tar.gz`
-2. Rehearse the import path on the target store with
-   `moon run migrate-rehearse -- /tmp/migration.tar.gz --source-type legacy-archive --target-mode postgres-rehearsal --yes --restore-database-dump`
-3. Run `moon run bench-live -- --label <store> --metadata store=<store>`
+2. Rehearse the import on the target with
+   `moon run migrate-rehearse -- /tmp/migration.tar.gz --source-type surreal-archive --target-mode surreal --yes`
+3. Run `moon run bench-live -- --label <store> --metadata store=<store>` against each stack
 4. Compare the saved artifacts with
-   `uv run python benchmarks/compare_eval_reports.py <legacy.json> <surreal.json>`
+   `uv run python benchmarks/compare_eval_reports.py <baseline.json> <candidate.json>`
 
-The rehearsal command handles archive validation, optional PostgreSQL restore, graph import, runtime
-verification, and the deterministic baseline replay in one pass. Use `--restore-database-dump` with
-`--source-type legacy-archive --target-mode postgres-rehearsal` when you want a full
-FalkorDB/PostgreSQL migration rehearsal instead of a graph-only replay. That keeps the public story
-honest and makes it much easier to compare runs over time.
-
-When you are ready for a real maintenance-window swap, use
-`moon run migrate-cutover -- /tmp/migration.tar.gz --source-type legacy-archive --target-mode surreal --yes --write-freeze-confirmed --base-url <surreal-api>`
-on the Surreal runtime. That command keeps writes frozen through import, verification, baseline
-replay, and any optional live bench checks. Reopening writes is a separate explicit step with
-`--reopen-writes --acknowledge-no-instant-rollback`, because instant zero-loss rollback is not
-promised after Surreal starts accepting new writes.
+Historically, the same flow compared FalkorDB/PostgreSQL against Surreal via
+`--source-type legacy-archive --target-mode postgres-rehearsal --restore-database-dump`, and
+maintenance-window swaps ran `moon run migrate-cutover -- ... --write-freeze-confirmed` with
+reopening writes as a separate explicit `--reopen-writes --acknowledge-no-instant-rollback` step.
+Those enums were removed in the v0.6–v1.0 line; the citable comparison artifacts from that era live
+in the benchmark ledger.
 
 Run `moon run chaos-archive -- /tmp/migration.tar.gz` when you want a quick corruption drill for the
 archive format itself. The current probe mutates checksums, graph counts, and organization IDs to

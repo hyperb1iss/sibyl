@@ -42,7 +42,7 @@ surfaced any of them. Both numbers are real. They measure different things, and 
 This is a live API run. The eval driver does what any real client does:
 
 1. Spins up an ephemeral CI stack: SurrealDB, the API daemon, and the worker.
-2. Signs up a throwaway user and organization per question — every haystack lands in its own
+2. Signs up a throwaway user and organization per question, so every haystack lands in its own
    SurrealDB namespace, physically isolated from every other question.
 3. Bulk-writes the question's haystack as `session` entities through the production
    `POST /api/entities` write path, with sync embedding generation.
@@ -140,8 +140,8 @@ ranking.
 | Created entity count      | 23,868                                     |
 
 The full eval intentionally runs with `SIBYL_AUTO_EXTRACT_ENTITIES=false`. The workflow refuses to
-let the full job run with extraction enabled — that flag is smoke-only. The reason: LLM extraction
-is an async enrichment feature, not a hidden retrieval dependency. The full benchmark proves the
+let the full job run with extraction enabled; that flag is smoke-only. The reason: LLM extraction is
+an async enrichment feature, not a hidden retrieval dependency. The full benchmark proves the
 production retrieval baseline.
 
 ## Reproducibility
@@ -270,8 +270,7 @@ headline update.
 
 ## Why The Eval Looks Like This
 
-We made four deliberate methodology choices that some other published numbers do not match. They are
-intentional:
+We made four deliberate methodology choices that some other published numbers do not match:
 
 1. **Live API path, not offline replay.** The harness uses real signup, real org creation, real
    entity API writes, real `/api/search` queries. An offline benchmark that skips these surfaces
@@ -305,8 +304,8 @@ intentional:
 
 ## Related
 
-- [AI Memory Landscape](./ai-memory-landscape.md) — honest competitive positioning
-- [Retrieval System Architecture](../architecture/retrieval-system.md) — how the eval-passing path
+- [AI Memory Landscape](./ai-memory-landscape.md): honest competitive positioning
+- [Retrieval System Architecture](../architecture/retrieval-system.md): how the eval-passing path
   actually works
-- [Benchmark Methodology](./benchmark-methodology.md) — the broader eval ladder, gates, and
-  reporting rules
+- [Benchmark Methodology](./benchmark-methodology.md): the broader eval ladder, gates, and reporting
+  rules

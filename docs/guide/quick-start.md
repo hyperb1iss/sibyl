@@ -37,10 +37,10 @@ sibyl up
 
 The first time you open the web UI, a setup wizard runs. It walks you through three things:
 
-1. **API keys** — Sibyl needs an Anthropic key for entity extraction and an OpenAI or Gemini key for
+1. **API keys:** Sibyl needs an Anthropic key for entity extraction and an OpenAI or Gemini key for
    embeddings.
-2. **Admin account** — the first account, which holds owner privileges.
-3. **Connect** — how to start using Sibyl from the terminal or an agent.
+2. **Admin account:** the first account, which holds owner privileges.
+3. **Connect:** how to start using Sibyl from the terminal or an agent.
 
 ## Step 4: Connect the CLI
 
@@ -92,10 +92,10 @@ see [Agents & MCP](./claude-code.md).
 
 ## Where to go next
 
-- [The Memory Loop](./memory-loop.md) — recall, act, remember, reflect
-- [Capturing Knowledge](./capturing-knowledge.md) — what is worth saving
-- [Task Management](./task-management.md) — plan and track work
-- [Agents & MCP](./claude-code.md) — connect any AI agent
+- [The Memory Loop](./memory-loop.md): recall, act, remember, reflect
+- [Capturing Knowledge](./capturing-knowledge.md): what is worth saving
+- [Task Management](./task-management.md): plan and track work
+- [Agents & MCP](./claude-code.md): connect any AI agent
 
 ## Common commands
 

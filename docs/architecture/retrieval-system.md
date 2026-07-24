@@ -86,9 +86,9 @@ session; the harness projects it into multiple `session` entities with the same
 
 After the sync write returns, the worker queues:
 
-- **Memory projection** — deterministic propagation of new entities into raw memory records and
+- **Memory projection**: deterministic propagation of new entities into raw memory records and
   derived relationship hints. Async; never blocks the writer.
-- **LLM extraction** (optional, off by default) — entity and relationship extraction from longform
+- **LLM extraction** (optional, off by default): entity and relationship extraction from longform
   content. Off for the full LongMemEval run on purpose; the retrieval baseline must not depend on
   LLM extraction.
 
@@ -165,19 +165,19 @@ improves benchmark scores improves user-facing search.
 `rank_by_query_coverage` takes candidates and produces a ranked list. Each candidate accumulates
 signals:
 
-- **Prior rank and prior score** from fusion — the base order to beat
-- **Keyword overlap** — query tokens present in the candidate text
-- **Weighted IDF-style overlap** — rarer query tokens count more
-- **Best segment overlap** — the strongest contiguous match within the candidate
-- **Phrase adjacency** — bigram/trigram matches score above bag-of-words
-- **Primary user-turn evidence** — direct user statements about themselves
-- **Assistant-turn evidence** — claims and answers the assistant made
-- **Personal-pronoun evidence** — "I", "my", "we" markers in user turns
-- **Concept group overlap** — domain-aware category aliases (kitchen, hair, travel, etc.)
-- **Memory-evidence patterns** — "I told you", "as I mentioned", "previously I said"
-- **Preference evidence** — "I prefer", "I like", "my favorite"
-- **Temporal target alignment** — candidate timestamp vs parsed query temporal target
-- **Typed query-frame score** — see next section
+- **Prior rank and prior score** from fusion: the base order to beat
+- **Keyword overlap**: query tokens present in the candidate text
+- **Weighted IDF-style overlap**: rarer query tokens count more
+- **Best segment overlap**: the strongest contiguous match within the candidate
+- **Phrase adjacency**: bigram/trigram matches score above bag-of-words
+- **Primary user-turn evidence**: direct user statements about themselves
+- **Assistant-turn evidence**: claims and answers the assistant made
+- **Personal-pronoun evidence**: "I", "my", "we" markers in user turns
+- **Concept group overlap**: domain-aware category aliases (kitchen, hair, travel, etc.)
+- **Memory-evidence patterns**: "I told you", "as I mentioned", "previously I said"
+- **Preference evidence**: "I prefer", "I like", "my favorite"
+- **Temporal target alignment**: candidate timestamp vs parsed query temporal target
+- **Typed query-frame score**: see next section
 
 The composite score is a weighted sum (the query-frame component dominates:
 `_QUERY_FRAME_WEIGHT = 0.52`). The ranker does not blindly reorder the top window; it stabilizes
@@ -229,15 +229,15 @@ base retrieval intact while letting genuinely strong evidence outside the top wi
 
 Stabilizers currently in play:
 
-- `_stabilize_preference_ranking` — for preference queries, keep the top window stable when base
+- `_stabilize_preference_ranking`: for preference queries, keep the top window stable when base
   retrieval is already strong
-- `_stabilize_evidence_set_ranking` — for set-completion questions, prefer top windows that cover
+- `_stabilize_evidence_set_ranking`: for set-completion questions, prefer top windows that cover
   multiple distinct events
-- `_stabilize_temporal_evidence_ranking` — for temporal questions, prefer candidates with timestamp
+- `_stabilize_temporal_evidence_ranking`: for temporal questions, prefer candidates with timestamp
   alignment to a parsed temporal target
-- `_stabilize_artifact_evidence_ranking` — for generated-artifact questions, rescue strong artifact
+- `_stabilize_artifact_evidence_ranking`: for generated-artifact questions, rescue strong artifact
   candidates from outside the top window
-- `_rank_preserving_window` — for temporal-instruction questions without a parsed target, preserve
+- `_rank_preserving_window`: for temporal-instruction questions without a parsed target, preserve
   the existing rank in the top window
 
 Each uses margin thresholds and minimum overlap requirements so the system does not overreact to a
@@ -261,7 +261,7 @@ strict R@5 with zero hit regressions.
 | Write timeout         | 20s                         |
 
 Embeddings are provider-pluggable: OpenAI today, Gemini supported, local providers configurable. The
-1024-dim choice is a deliberate trade-off — smaller than `text-embedding-3-small`'s default 1536 to
+1024-dim choice is a deliberate trade-off: smaller than `text-embedding-3-small`'s default 1536 to
 keep the HNSW index lean while staying well above the SOTA-comparable floor.
 
 ::: tip "No LLM" caveat The full LongMemEval run records "no LLM extraction or LLM reranking." That
@@ -272,7 +272,7 @@ numbers. :::
 
 A small number of embedding/vector timeouts occur in the long full-run tail (5 relationship
 embedding timeouts at 20s, 3 query embedding/vector search timeouts). The system returns fallback
-results in these cases and the eval passes — vector timeouts do not produce 5xx responses or broken
+results in these cases and the eval passes. Vector timeouts do not produce 5xx responses or broken
 queries.
 
 ## Diagnostics
@@ -281,7 +281,7 @@ Every run produces diagnostics alongside metrics. From the latest full run:
 
 - Zero HTTP 500s.
 - Zero tracebacks.
-- 3,000 `surreal_query_failed` warnings — almost all expected relation-cleanup `NotFoundError`s on
+- 3,000 `surreal_query_failed` warnings: almost all expected relation-cleanup `NotFoundError`s on
   throwaway org teardown.
 - 513 `surreal_query_slow` warnings (informational, no failure).
 - 1 `graph_embedding_failed` (relationship embedding timeout at 20s).
@@ -297,18 +297,18 @@ The diagnostics surface is the same one a production operator uses: `sibyl debug
 The hit-rate ceiling is essentially saturated on LongMemEval-S. The next quality layer targets
 strict recall and ranking order:
 
-1. **Query-aware set completion** — for "how many", "total", "order", "first vs second" questions,
+1. **Query-aware set completion**: for "how many", "total", "order", "first vs second" questions,
    score the top window as a set rather than as independent candidates.
-2. **Temporal pair coverage** — parse question dates and relative references; for comparison
+2. **Temporal pair coverage**: parse question dates and relative references; for comparison
    questions, ensure both compared events appear in the top window.
-3. **Preference grounding** — distinguish "assistant recommended X generically" from "user said X is
+3. **Preference grounding**: distinguish "assistant recommended X generically" from "user said X is
    their preference"; promote user-evidenced preferences for recommendation queries.
-4. **Async LLM extraction productionization** — keep retrieval baseline LLM-free; surface extraction
+4. **Async LLM extraction productionization**: keep retrieval baseline LLM-free; surface extraction
    as proper async enrichment with backpressure, retries, dead-letter visibility, and queue-depth
    metrics.
-5. **SurrealDB native feature adoption** — evaluate `search::rrf()` end-to-end, graph recursion and
+5. **SurrealDB native feature adoption**: evaluate `search::rrf()` end-to-end, graph recursion and
    shortest-path features where they simplify expansion, `EXPLAIN` for slow-query analysis.
-6. **Beyond LongMemEval-S** — extend the eval ladder to LongMemEval-M and a future LongMemEval-V2,
+6. **Beyond LongMemEval-S**: extend the eval ladder to LongMemEval-M and a future LongMemEval-V2,
    plus larger overlapping-topic and long-context tests.
 
 The general principle: keep interpretable, debuggable ranking primitives and move LLM cost into
@@ -316,8 +316,8 @@ async enrichment, not into the synchronous query path.
 
 ## Related
 
-- [LongMemEval Results](../testing/longmemeval.md) — the public eval claim
-- [AI Memory Landscape](../testing/ai-memory-landscape.md) — comparative positioning
-- [Benchmark Methodology](../testing/benchmark-methodology.md) — the full eval ladder
-- [Semantic Search](../guide/semantic-search.md) — user-facing search guide
-- [Why SurrealDB](../guide/why-surreal.md) — the unified runtime rationale
+- [LongMemEval Results](../testing/longmemeval.md): the public eval claim
+- [AI Memory Landscape](../testing/ai-memory-landscape.md): comparative positioning
+- [Benchmark Methodology](../testing/benchmark-methodology.md): the full eval ladder
+- [Semantic Search](../guide/semantic-search.md): user-facing search guide
+- [Why SurrealDB](../guide/why-surreal.md): the unified runtime rationale

@@ -77,7 +77,10 @@ SIBYL_COORDINATION_BACKEND=local
 - **Legacy → Surreal:** see [migrating-from-falkor.md](./migrating-from-falkor.md). The migration is
   CLI-driven (`sibyld migrate export|import|verify`) and supports rehearsal runs.
 - **Local legacy dev install:** `moon run dev` detects existing legacy data before starting a fresh
-  Surreal runtime. Import a previously exported archive with
-  `uv run --directory apps/api sibyld migrate import <archive> --source-type legacy-archive --target-mode surreal --yes --clean`.
+  Surreal runtime. The historical import command
+  (`uv run --directory apps/api sibyld migrate import <archive> --source-type legacy-archive --target-mode surreal --yes --clean`)
+  was removed in the v0.6–v1.0 line; current binaries only accept
+  `--source-type surreal-archive --target-mode surreal`. See
+  [migrating-from-falkor.md](./migrating-from-falkor.md) for the historical path.
 - **PostgreSQL auth removal:** if an old `.env` still sets `SIBYL_AUTH_STORE=postgres`, remove it.
   The server rejects that value, and `moon run dev` normalizes local startup back to Surreal auth.
