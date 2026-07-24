@@ -17,6 +17,22 @@ Release builds update `version` and `appVersion` from the repository `VERSION` f
 
 ## Installation
 
+Release charts are published to the `sibyl` Helm repository on the `gh-pages` branch. The repository
+serves two charts: `sibyl` (the application) and `sibyl-surrealdb` (a SurrealDB wrapper).
+
+```bash
+# From the published Helm repository (recommended)
+helm repo add sibyl https://raw.githubusercontent.com/hyperb1iss/sibyl/gh-pages
+helm repo update
+
+helm upgrade --install sibyl sibyl/sibyl \
+  -n sibyl \
+  --create-namespace \
+  -f values.yaml
+```
+
+To install from a source checkout instead:
+
 ```bash
 # From local chart
 helm upgrade --install sibyl ./charts/sibyl \

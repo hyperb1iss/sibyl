@@ -80,6 +80,7 @@ interface SearchResponse {
   filters: Record<string, any>;
   graph_count: number; // Results from knowledge graph
   document_count: number; // Results from crawled documents
+  raw_memory_count: number; // Results from raw memories
   limit: number;
   offset: number; // Always 0 for MCP calls
   has_more: boolean;
@@ -94,10 +95,14 @@ interface SearchResult {
   score: number; // Relevance score (0-1)
   source?: string; // Source name for documentation results
   url?: string; // URL for documents
-  result_origin: "graph" | "document";
+  result_origin: "graph" | "document" | "raw_memory";
   metadata: Record<string, any>;
 }
 ```
+
+Raw memories are searched by default alongside graph and documents. The raw-memory filter fields
+(`include_raw_memory`, `memory_scope`, `scope_key`, `participants`, `labels`, `thread_id`,
+`occurred_after`/`occurred_before`) are REST-only; see [rest-search.md](./rest-search.md).
 
 ## Usage Examples
 

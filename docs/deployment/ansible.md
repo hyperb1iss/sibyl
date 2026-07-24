@@ -55,7 +55,7 @@ The role is provider-agnostic: any Ubuntu host reachable over SSH works.
 The role is not published to Ansible Galaxy, so two things must be in place before the playbook runs
 end to end:
 
-- **`roles_path`** — your playbook has to resolve the `sibyl` role from a checkout of this
+- **`roles_path`**: your playbook has to resolve the `sibyl` role from a checkout of this
   repository. Point `ansible.cfg` at it:
 
   ```ini
@@ -63,7 +63,7 @@ end to end:
   roles_path = roles:/path/to/sibyl/infra/ansible/roles
   ```
 
-- **Secrets** — the five vault variables listed under [Variables](#variables) have no defaults. The
+- **Secrets**: the five vault variables listed under [Variables](#variables) have no defaults. The
   role asserts each one before it touches the host, so an unset secret aborts the run cleanly
   instead of leaving a half-built stack.
 

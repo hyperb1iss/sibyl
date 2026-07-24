@@ -268,9 +268,9 @@ GET /api/projects/{project_id}/members
 
 ## Teams
 
-Teams are an internal grouping that feeds the effective-role calculation. There is no public REST
-surface for managing teams. When a user belongs to one or more teams with project access, the
-effective project role resolves to the highest role granted across those memberships:
+Teams are an org-level grouping that feeds the effective-role calculation. When a user belongs to
+one or more teams with project access, the effective project role resolves to the highest role
+granted across those memberships:
 
 ```
 User A -> Team Alpha (project_contributor) -> Project X
@@ -281,6 +281,39 @@ Result: User A has project_maintainer on Project X
 
 This inheritance is applied during access checks alongside direct project assignments and org-level
 roles, as described in [Effective Role Calculation](#effective-role-calculation).
+
+### Teams API
+
+Teams are managed over REST under `/api/teams`. Every endpoint requires org `owner` or `admin` role.
+Creating a team also creates its canonical team memory space; deleting a team removes the
+control-plane record and its memory-space binding.
+
+| Method | Path                                         | Purpose                              |
+| ------ | -------------------------------------------- | ------------------------------------ |
+| GET    | `/api/teams`                                 | List teams in the organization       |
+| POST   | `/api/teams`                                 | Create a team (and its memory space) |
+| GET    | `/api/teams/{team_id}`                       | Inspect a team, members, and links   |
+| PATCH  | `/api/teams/{team_id}`                       | Update team metadata                 |
+| DELETE | `/api/teams/{team_id}`                       | Delete a team                        |
+| POST   | `/api/teams/{team_id}/members`               | Add or update a team member          |
+| DELETE | `/api/teams/{team_id}/members/{user_id}`     | Remove a team member                 |
+| POST   | `/api/teams/{team_id}/projects`              | Grant the team a project role        |
+| DELETE | `/api/teams/{team_id}/projects/{project_id}` | Remove the team's project grant      |
+
+Member roles use the organization role values; project links carry a project role (default
+`project_contributor`).
+
+## OIDC and Enterprise SSO
+
+Organizations can authenticate through corporate OIDC providers instead of (or alongside) local auth
+and GitHub OAuth. Each provider is bound to exactly one organization, and the IdP role claim is
+authoritative for that organization's roles on every OIDC login - including demoting the last owner
+if the claim says so. Configuration and role-mapping details live in the admin guides:
+
+- [Installing Sibyl](../admin/installing.md) - OIDC provider setup and `SIBYL_OIDC` configuration
+- [Inviting Users](../admin/inviting-users.md) - JIT provisioning, IdP role claims, deprovisioning
+
+The OIDC login endpoints are described in [auth-jwt.md](./auth-jwt.md#oidc-enterprise-sso).
 
 ## Security Considerations
 

@@ -40,15 +40,20 @@ interface ContextInput {
 
 ### Intent Values
 
-| Intent    | Use For                              |
-| --------- | ------------------------------------ |
-| `build`   | Implementation work (default)        |
-| `plan`    | Sequencing, milestones, roadmap work |
-| `review`  | Verification and critique            |
-| `debug`   | Diagnosing failures                  |
-| `general` | Unscoped retrieval                   |
+| Intent     | Use For                              |
+| ---------- | ------------------------------------ |
+| `build`    | Implementation work (default)        |
+| `plan`     | Sequencing, milestones, roadmap work |
+| `ideate`   | Brainstorming and idea exploration   |
+| `research` | Investigation and evidence gathering |
+| `debug`    | Diagnosing failures                  |
+| `decide`   | Weighing options, making decisions   |
+| `learn`    | Studying unfamiliar territory        |
+| `general`  | Unscoped retrieval                   |
 
-Intent shapes which facets are emphasized in the resulting pack.
+Intent shapes which facets are emphasized in the resulting pack. Note that `review` is accepted by
+the REST endpoint and the CLI (`sibyl context --intent review`) but is not an MCP intent; the MCP
+tool rejects it.
 
 ### Retrieval Layers
 
@@ -70,6 +75,7 @@ interface ContextPackResponse {
   layer: string;
   sections: ContextSection[];
   total_items: number;
+  usage_metadata: Record<string, any>; // Exposure-recording metadata
   usage_hint: string;
   markdown: string; // Rendered Markdown view of the pack
 }
@@ -109,6 +115,8 @@ interface ContextRelatedItem {
   relationship: string;
   direction: "outgoing" | "incoming";
   distance: number;
+  content: string | null; // Neighbor content, when available
+  metadata: Record<string, any>;
 }
 ```
 
@@ -206,6 +214,10 @@ project raw memory.
   credential cannot access raises a project-access error.
 - The `markdown` field is a rendered view of the same pack, convenient for direct prompt injection.
 - Context pack compilation is audited per call.
+- Enhanced evidence retrieval (`evidence` request field with `retrieval_mode`,
+  `max_planned_queries`, `reserve_distilled_notes`, and diagnostics) is a REST-only surface on
+  `POST /api/context/pack`; the MCP tool does not accept it. See
+  [rest-memory.md](./rest-memory.md#compile-context-pack).
 
 ## Error Handling
 

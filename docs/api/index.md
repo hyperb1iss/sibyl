@@ -8,7 +8,7 @@ same daemon (`sibyld`) and share one SurrealDB-native runtime for graph, content
 
 ```
 Sibyl Combined App (Starlette, port 3334)
-|-- /api/*    --> FastAPI REST endpoints (29 routers)
+|-- /api/*    --> FastAPI REST endpoints (31 routers)
 |-- /mcp      --> MCP streamable-http transport (11 tools, 2 resources)
 |-- /ws       --> WebSocket for real-time updates
 '-- Lifespan  --> Coordination runtime + session management
@@ -52,7 +52,7 @@ The MCP server also exposes two resources: `sibyl://health` (connectivity and en
 
 ### REST API (for Applications)
 
-The REST API spans 29 routers. The pages below cover the most commonly used surfaces; the full
+The REST API spans 31 routers. The pages below cover the most commonly used surfaces; the full
 contract is in the OpenAPI schema.
 
 | Category  | Endpoints                            | Documentation                            |
@@ -64,17 +64,20 @@ contract is in the OpenAPI schema.
 | Memory    | `/api/memory/*`, `/api/context/*`    | [rest-memory.md](./rest-memory.md)       |
 | Synthesis | `/api/synthesis/*`                   | [rest-synthesis.md](./rest-synthesis.md) |
 
-Additional routers not covered by dedicated pages include `auth`, `users`, `epics`, `graph`,
-`crawler`, `ingestion`, `rag`, `resolve`, `jobs`, `backups`, `settings`, `ai_settings`, `metrics`,
-`telemetry`, `admin`, `logs`, `orgs`, `org_members`, `org_invitations`, `invitations`,
-`project_members`, `session`, and `setup`. All are described in the OpenAPI schema.
+Additional routers not covered by dedicated pages include `auth`, `users`, `epics`, `experience`,
+`graph`, `crawler`, `ingestion`, `rag`, `resolve`, `jobs`, `backups`, `settings`, `ai_settings`,
+`metrics`, `telemetry`, `admin`, `logs`, `orgs`, `org_members`, `org_invitations`, `invitations`,
+`project_members`, `session`, `setup`, and `teams`. All are described in the OpenAPI schema.
 
 A few prefixes are worth calling out because they do not match the router name. The `crawler` router
 is mounted under `/sources` (for example `/api/sources/...`), not `/crawler`. The `org_invitations`
 router serves org-scoped invitations under `/api/orgs/{slug}/invitations`, while the separate
 `invitations` router serves invitation acceptance under `/api/invitations`. The `ingestion` router
 (prefix `/ingestion`) backs the `sibyl ingest` CLI with paths under `/api/ingestion/imports`,
-`/api/ingestion/documents`, and `/api/ingestion/collections`.
+`/api/ingestion/documents`, and `/api/ingestion/collections`. The `experience` router is mounted
+under `/memory` and serves `POST /api/memory/experience` (see [rest-memory.md](./rest-memory.md)).
+The `teams` router serves team management under `/api/teams` (see
+[auth-authorization.md](./auth-authorization.md)).
 
 **OpenAPI Spec:** Available at `/api/docs` (Swagger UI) and `/api/openapi.json`
 
@@ -87,6 +90,7 @@ Sibyl supports multiple authentication methods and role-based access control:
 | JWT Sessions   | Web clients, browser-based apps | [auth-jwt.md](./auth-jwt.md)                     |
 | API Keys       | Programmatic access, CI/CD      | [auth-api-keys.md](./auth-api-keys.md)           |
 | OAuth (GitHub) | Social login                    | [auth-jwt.md](./auth-jwt.md)                     |
+| OIDC / SSO     | Corporate identity providers    | [auth-jwt.md](./auth-jwt.md)                     |
 | Authorization  | Roles, permissions, RLS         | [auth-authorization.md](./auth-authorization.md) |
 
 ### Quick Start

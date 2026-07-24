@@ -9,6 +9,7 @@ Sibyl uses JWT (JSON Web Tokens) for session authentication:
 - **Access Tokens**: Short-lived (default 60 minutes), used for API authentication
 - **Refresh Tokens**: Long-lived (default 30 days), used to obtain new access tokens
 - **OAuth Support**: GitHub OAuth integration for social login
+- **OIDC / Enterprise SSO**: Corporate OpenID Connect providers with exact per-organization binding
 
 ## Token Types
 
@@ -207,6 +208,27 @@ Handles GitHub OAuth callback, creates/links user account.
 | `state`   | string | CSRF state token         |
 
 **Response:** Redirects to `SIBYL_FRONTEND_URL` with tokens set.
+
+### OIDC (Enterprise SSO)
+
+Corporate OpenID Connect providers are configured through the `SIBYL_OIDC` setting. Each provider is
+bound to exactly one organization (`organization_slug`), and OIDC login never chooses an
+organization from the user's other memberships. Users are provisioned just-in-time on first login,
+and the IdP role claim is authoritative for the bound organization - an OIDC login carrying a lower
+role can demote the organization's last owner.
+
+| Method | Path                                 | Purpose                                          |
+| ------ | ------------------------------------ | ------------------------------------------------ |
+| GET    | `/api/auth/oidc/{provider}/login`    | Start the OIDC authorization flow                |
+| GET    | `/api/auth/oidc/{provider}/callback` | Complete login, set the session cookie, redirect |
+| GET    | `/api/auth/oidc/{provider}/refresh`  | Silent session refresh (404 unless enabled)      |
+
+The refresh endpoint returns 404 unless `silent_refresh_enabled` is set in `SIBYL_OIDC`. Provider
+configuration, role-claim mapping, and deprovisioning are covered in the admin guides:
+
+- [Installing Sibyl](../admin/installing.md) - OIDC provider setup and `SIBYL_OIDC` reference
+- [Inviting Users](../admin/inviting-users.md) - JIT provisioning and IdP role claims
+- [Break-Glass Access](../admin/break-glass.md) - bounded emergency local login for SSO outages
 
 ### Logout
 

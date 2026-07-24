@@ -53,8 +53,24 @@ SurrealDB is the default and only runtime store. These settings apply to every S
 | `SIBYL_SURREAL_DATABASE`         | `graph` | Database name inside each org namespace                               |
 | `SIBYL_SURREAL_SLOW_QUERY_MS`    | `500`   | Log SurrealDB queries at warning level when elapsed time exceeds this |
 
+### Connection Pooling
+
+| Variable                                | Default     | Description                                           |
+| --------------------------------------- | ----------- | ----------------------------------------------------- |
+| `SIBYL_SURREAL_POOL_SIZE`               | `8`         | Concurrent connections per dedicated client (1-256)   |
+| `SIBYL_SURREAL_AUTH_POOL_SIZE`          | (pool size) | Override for the auth client pool                     |
+| `SIBYL_SURREAL_CONTENT_POOL_SIZE`       | (pool size) | Override for the content client pool                  |
+| `SIBYL_SURREAL_GRAPH_POOL_SIZE`         | (pool size) | Override for org graph client pools                   |
+| `SIBYL_SURREAL_GRAPH_CLIENT_CACHE_SIZE` | `64`        | Org-scoped graph clients kept open per process (LRU)  |
+| `SIBYL_ALLOW_EMBEDDED_SINGLE_WRITER`    | `false`     | Allow embedded (`surrealkv://`) storage in production |
+
 `SIBYL_SURREAL_URL` and `SIBYL_SURREAL_DATA_DIR` are mutually exclusive; set only one. When neither
 is set, Sibyl falls back to in-memory mode. In-memory mode (`memory://`) is rejected in production.
+
+Embedded (`surrealkv://`) and in-memory URLs clamp every pool to a single connection because the
+storage is single-writer. Running embedded storage in production additionally requires the explicit
+`SIBYL_ALLOW_EMBEDDED_SINGLE_WRITER=1` opt-in, and only when one daemon owns the database; otherwise
+startup fails validation.
 
 ## URL Configuration
 
@@ -78,16 +94,19 @@ When using Kong or similar ingress, `SIBYL_PUBLIC_URL` is typically set to the e
 | `SIBYL_DISABLE_AUTH`                | `false`    | Disable auth enforcement (dev only)                     |
 | `SIBYL_MCP_AUTH_MODE`               | `auto`     | MCP auth: auto/on/off                                   |
 | `SIBYL_SETTINGS_KEY`                | (auto)     | Fernet key for encrypting DB-stored secrets             |
-| `SIBYL_LOCAL_AUTH_ENABLED`          | `true`     | Enable local username/password login after setup        |
+| `SIBYL_LOCAL_AUTH_ENABLED`          | `false`    | Enable local username/password login after setup        |
 | `SIBYL_PUBLIC_SIGNUPS_ENABLED`      | `false`    | Allow public self-serve account creation after setup    |
 | `SIBYL_OIDC`                        | `{}`       | JSON object for optional OIDC providers and session UX  |
 | `SIBYL_BREAK_GLASS_ENABLED`         | `false`    | Enable bounded emergency local login for SSO outages    |
 | `SIBYL_BREAK_GLASS_ALLOWED_IPS`     | `[]`       | JSON array of CIDRs allowed to use break-glass login    |
 | `SIBYL_BREAK_GLASS_EXPIRES_AT`      | (empty)    | UTC expiry for break-glass, no more than four hours out |
 
-The default Sibyl mode is local-first and single-user friendly: local auth is enabled, the first
-setup signup creates the owner/admin user, and account creation after setup is invite-based unless
-`SIBYL_PUBLIC_SIGNUPS_ENABLED=true`.
+`SIBYL_LOCAL_AUTH_ENABLED` defaults to `false` and is auto-enabled only when
+`SIBYL_ENVIRONMENT=development` and the variable is unset. Production deployments that want local
+username/password login must set it explicitly. The Helm chart (`auth.localAuthEnabled: true`) and
+the Ansible self-host stack enable it by default; `docker-compose.prod.yml` leaves it `false`. The
+local-first single-user flow is otherwise unchanged: the first setup signup creates the owner/admin
+user, and account creation after setup is invite-based unless `SIBYL_PUBLIC_SIGNUPS_ENABLED=true`.
 
 OIDC, silent refresh, extra OAuth providers, public signups, disabled local auth, and break-glass
 are all opt-in. Enterprise SSO deployments should configure a corporate OIDC provider first, verify
@@ -221,9 +240,30 @@ graph embedding dimensions also size the native Surreal vector indexes.
 | `SIBYL_EMBEDDING_PROVIDER`         | `openai`                 | Document chunk embedding provider: openai or gemini |
 | `SIBYL_EMBEDDING_MODEL`            | `text-embedding-3-small` | Document chunk embedding model                      |
 | `SIBYL_EMBEDDING_DIMENSIONS`       | `1536`                   | Document chunk embedding vector dimensions          |
-| `SIBYL_GRAPH_EMBEDDING_PROVIDER`   | `openai`                 | Graph node/relationship embedding provider          |
+| `SIBYL_GRAPH_EMBEDDING_PROVIDER`   | `openai`                 | Graph embedding provider: openai, gemini, or local  |
 | `SIBYL_GRAPH_EMBEDDING_MODEL`      | `text-embedding-3-small` | Graph node/relationship embedding model             |
 | `SIBYL_GRAPH_EMBEDDING_DIMENSIONS` | `1024`                   | Graph embedding dimensions (sizes vector indexes)   |
+
+The `local` graph embedding provider runs sentence-transformers models in-process with no API key.
+When `SIBYL_GRAPH_EMBEDDING_PROVIDER=local` and no model is set, the model defaults to
+`sentence-transformers/all-MiniLM-L6-v2` and the dimensions are derived from the model. Document
+chunk embeddings (`SIBYL_EMBEDDING_PROVIDER`) support `openai` and `gemini` only.
+
+## Retrieval Tuning
+
+Vector index and reranking knobs. Changing HNSW parameters affects newly built indexes.
+
+| Variable               | Default                                | Description                                             |
+| ---------------------- | -------------------------------------- | ------------------------------------------------------- |
+| `SIBYL_GRAPH_HNSW_EFC` | `150`                                  | Surreal HNSW graph index EF-construction value          |
+| `SIBYL_GRAPH_HNSW_M`   | `12`                                   | Surreal HNSW index max connections per element          |
+| `SIBYL_GRAPH_KNN_EF`   | `40`                                   | Surreal KNN query effort for graph vector retrieval     |
+| `SIBYL_RERANK_ENABLED` | `false`                                | Cross-encoder reranking after RRF fusion                |
+| `SIBYL_RERANK_MODEL`   | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Cross-encoder model for reranking                       |
+| `SIBYL_RERANK_TOP_K`   | `20`                                   | Top candidates to rerank; the rest pass through (1-100) |
+
+Reranking requires the optional `reranking` extra (sentence-transformers). When the extra is not
+installed, the path degrades cleanly to the fused order instead of raising.
 
 ## API Keys
 
@@ -254,9 +294,14 @@ stored encrypted in the database (using `SIBYL_SETTINGS_KEY`).
 
 ## Native Memory Configuration
 
-| Variable             | Default   | Description                                             |
-| -------------------- | --------- | ------------------------------------------------------- |
-| `SIBYL_NATIVE_WRITE` | `enabled` | Set `disabled` to skip persisting reflection candidates |
+| Variable                                         | Default   | Description                                                |
+| ------------------------------------------------ | --------- | ---------------------------------------------------------- |
+| `SIBYL_NATIVE_WRITE`                             | `enabled` | Set `disabled` to skip persisting reflection candidates    |
+| `SIBYL_AUTO_EXTRACT_ENTITIES`                    | `false`   | Queue LLM entity extraction for prose-bearing memories     |
+| `SIBYL_OPERATIONAL_NOTE_DISTILLATION_MAX_TOKENS` | `2048`    | Max output tokens per note distillation call (256-8192)    |
+| `SIBYL_RAW_CAPTURE_CHANGEFEED_POLL_ENABLED`      | `true`    | Poll the raw-captures changefeed for incremental promotion |
+| `SIBYL_RAW_CAPTURE_LIVE_QUERY_ENABLED`           | `false`   | Use SurrealDB live queries for realtime promotion hints    |
+| `SIBYL_RAW_CAPTURE_LIVE_QUERY_RETRY_SECONDS`     | `5.0`     | Delay before reconnecting the raw-capture live query       |
 
 ## Runtime Telemetry
 
@@ -305,9 +350,13 @@ detail.
 
 ## Worker Configuration
 
-| Variable           | Default | Description                                                         |
-| ------------------ | ------- | ------------------------------------------------------------------- |
-| `SIBYL_RUN_WORKER` | `false` | Embed a worker in the API process when Redis coordination is active |
+| Variable                | Default | Description                                                         |
+| ----------------------- | ------- | ------------------------------------------------------------------- |
+| `SIBYL_RUN_WORKER`      | `false` | Embed a worker in the API process when Redis coordination is active |
+| `SIBYL_WORKER_MAX_JOBS` | (auto)  | Override maximum concurrent background jobs (1-1024)                |
+
+When `SIBYL_WORKER_MAX_JOBS` is unset, the limit is derived from CPU count (2x cores, minimum 3)
+capped by the effective content-client pool size.
 
 ## Example Environment Blocks
 

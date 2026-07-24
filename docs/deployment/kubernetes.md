@@ -52,11 +52,17 @@ kubectl create secret generic sibyl-secrets -n sibyl \
 kubectl create secret generic sibyl-surreal -n sibyl \
   --from-literal=password=<your-surreal-password>
 
-# Install with Helm
-helm upgrade --install sibyl ./charts/sibyl \
+# Install with Helm from the published repository
+helm repo add sibyl https://raw.githubusercontent.com/hyperb1iss/sibyl/gh-pages
+helm repo update
+
+helm upgrade --install sibyl sibyl/sibyl \
   -n sibyl \
   -f values-production.yaml
 ```
+
+Installing from a source checkout works the same way with the local chart path: replace
+`sibyl/sibyl` with `./charts/sibyl`.
 
 The Helm chart deploys the SurrealDB-backed runtime only. Keep PostgreSQL archive rehearsal sidecars
 and preserved FalkorDB source deployments outside this release chart.
@@ -455,8 +461,9 @@ Keep image tags and security contexts in lockstep. Current Sibyl images run back
 `backend.podSecurityContext`, `frontend.podSecurityContext`, and `worker.podSecurityContext`.
 
 ```bash
-# Update values
-helm upgrade sibyl ./charts/sibyl \
+# Update values (use ./charts/sibyl instead when installing from source)
+helm repo update
+helm upgrade sibyl sibyl/sibyl \
   -n sibyl \
   -f values-production.yaml \
   --set backend.image.tag=1.0.2 \

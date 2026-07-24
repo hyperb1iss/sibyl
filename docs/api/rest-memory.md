@@ -182,20 +182,44 @@ Compiles a structured context pack for an agent goal. This is the REST equivalen
 }
 ```
 
-| Field             | Type    | Required | Default  | Description                           |
-| ----------------- | ------- | -------- | -------- | ------------------------------------- |
-| `goal`            | string  | Yes      | -        | Agent goal or user task               |
-| `intent`          | string  | No       | `build`  | How the agent will act                |
-| `layer`           | string  | No       | `recall` | `wake`, `recall`, or `deep_search`    |
-| `domain`          | string  | No       | -        | Domain to bias retrieval              |
-| `project`         | string  | No       | -        | Project ID to scope context           |
-| `agent_id`        | string  | No       | -        | Agent diary identity to include       |
-| `limit`           | integer | No       | 24       | Maximum context items (1-50)          |
-| `include_related` | boolean | No       | true     | Include one-hop related graph context |
-| `related_limit`   | integer | No       | 3        | Related items per context item (0-5)  |
+| Field                   | Type    | Required | Default  | Description                                 |
+| ----------------------- | ------- | -------- | -------- | ------------------------------------------- |
+| `goal`                  | string  | Yes      | -        | Agent goal or user task                     |
+| `intent`                | string  | No       | `build`  | How the agent will act                      |
+| `layer`                 | string  | No       | `recall` | `wake`, `recall`, or `deep_search`          |
+| `domain`                | string  | No       | -        | Domain to bias retrieval                    |
+| `project`               | string  | No       | -        | Project ID to scope context                 |
+| `agent_id`              | string  | No       | -        | Agent diary identity to include             |
+| `limit`                 | integer | No       | 24       | Maximum context items (1-50)                |
+| `include_related`       | boolean | No       | true     | Include one-hop related graph context       |
+| `related_limit`         | integer | No       | 3        | Related items per context item (0-5)        |
+| `audit`                 | boolean | No       | false    | Include full retrieval metadata per item    |
+| `record_exposure`       | boolean | No       | true     | Record returned items as exposure signals   |
+| `markdown_token_budget` | integer | No       | -        | Cap rendered markdown (~100-8000 tokens)    |
+| `evidence`              | object  | No       | -        | Enhanced source-evidence retrieval controls |
 
-The response is a context pack with `sections`, `total_items`, `usage_hint`, and a rendered
-`markdown` field. See [mcp-context.md](./mcp-context.md) for the full pack schema.
+#### Evidence Controls
+
+Setting the optional `evidence` object runs an enhanced source-evidence search alongside context
+compilation:
+
+| Field                           | Type     | Default       | Description                                                     |
+| ------------------------------- | -------- | ------------- | --------------------------------------------------------------- |
+| `types`                         | string[] | `["session"]` | Entity types to include in the evidence pool                    |
+| `limit`                         | integer  | 24            | Maximum evidence results (1-50)                                 |
+| `max_results_per_source`        | integer  | -             | In accurate mode, prefer source-diverse evidence first (1-50)   |
+| `content_max_chars`             | integer  | 500           | Maximum content characters per evidence result (0-50000)        |
+| `include_retrieval_diagnostics` | boolean  | false         | Include authorized evidence ranking diagnostics                 |
+| `retrieval_mode`                | string   | `fast`        | `fast` (one search) or `accurate` (multi-step refinement)       |
+| `max_planned_queries`           | integer  | 3             | Maximum feedback searches across accurate-mode refinement (1-3) |
+| `reserve_distilled_notes`       | boolean  | true          | Reserve a typed lane for distilled operational notes            |
+
+The response is a context pack with `sections`, `total_items`, `usage_metadata`, `usage_hint`, and a
+rendered `markdown` field. When evidence retrieval was requested, the response also carries an
+`evidence` field containing a search response (`results`, `total`, `graph_count`, `document_count`,
+`raw_memory_count`; see [rest-search.md](./rest-search.md)). See [mcp-context.md](./mcp-context.md)
+for the full pack schema. Evidence controls are REST-only; the MCP `context` tool does not accept
+them.
 
 ### Reflect into Memory Candidates
 
@@ -225,20 +249,21 @@ Reflects raw notes into durable memory candidates. This is the REST equivalent o
 }
 ```
 
-| Field            | Type     | Required | Default              | Description                                    |
-| ---------------- | -------- | -------- | -------------------- | ---------------------------------------------- |
-| `content`        | string   | Yes      | -                    | Raw session notes                              |
-| `source_title`   | string   | No       | `Session reflection` | Source/session title                           |
-| `intent`         | string   | No       | `general`            | Reflection intent                              |
-| `domain`         | string   | No       | -                    | Domain for candidates                          |
-| `project`        | string   | No       | -                    | Project ID to scope candidates                 |
-| `related_to`     | string[] | No       | -                    | Entity IDs to link persisted candidates        |
-| `task_ids`       | string[] | No       | -                    | Task IDs to link persisted output              |
-| `active_task`    | boolean  | No       | true                 | Link persisted output to the active doing task |
-| `persist`        | boolean  | No       | false                | Persist candidates into the graph              |
-| `persist_source` | boolean  | No       | true                 | Store the raw source notes                     |
-| `persist_review` | boolean  | No       | false                | Store output in the raw review queue           |
-| `limit`          | integer  | No       | 12                   | Maximum candidates (1-25)                      |
+| Field            | Type     | Required | Default              | Description                                     |
+| ---------------- | -------- | -------- | -------------------- | ----------------------------------------------- |
+| `content`        | string   | Yes      | -                    | Raw session notes                               |
+| `source_title`   | string   | No       | `Session reflection` | Source/session title                            |
+| `intent`         | string   | No       | `general`            | Reflection intent                               |
+| `domain`         | string   | No       | -                    | Domain for candidates                           |
+| `project`        | string   | No       | -                    | Project ID to scope candidates                  |
+| `cited_ids`      | string[] | No       | `[]`                 | Context/search IDs that informed the reflection |
+| `related_to`     | string[] | No       | -                    | Entity IDs to link persisted candidates         |
+| `task_ids`       | string[] | No       | -                    | Task IDs to link persisted output               |
+| `active_task`    | boolean  | No       | true                 | Link persisted output to the active doing task  |
+| `persist`        | boolean  | No       | false                | Persist candidates into the graph               |
+| `persist_source` | boolean  | No       | true                 | Store the raw source notes                      |
+| `persist_review` | boolean  | No       | false                | Store output in the raw review queue            |
+| `limit`          | integer  | No       | 12                   | Maximum candidates (1-25)                       |
 
 The response is a reflection pack with `candidates`, `total_candidates`, `persisted_count`, and a
 rendered `markdown` field. See [mcp-reflect.md](./mcp-reflect.md) for the candidate schema.
@@ -255,6 +280,44 @@ rendered `markdown` field. See [mcp-reflect.md](./mcp-reflect.md) for the candid
 These endpoints drive the reflection dream-cycle: candidates flow into the review queue, then are
 promoted automatically (when confident and within policy) or by an operator. Promotion endpoints
 require Member-or-higher role.
+
+## Operational Experience Capture
+
+```http
+POST /api/memory/experience
+```
+
+Persists raw operational evidence (an `OperationalExperience` payload) and its deterministic typed
+projections in one replay-safe write. Requires Member-or-higher org role plus `project_contributor`
+on the experience's project; the experience must carry a `project_id`.
+
+**Request Body:**
+
+| Field              | Type    | Required | Default | Description                                             |
+| ------------------ | ------- | -------- | ------- | ------------------------------------------------------- |
+| `experience`       | object  | Yes      | -       | The `OperationalExperience` payload to persist          |
+| `defer_embeddings` | boolean | No       | true    | Persist lexical records first, queue embedding backfill |
+
+**Response:** `201 Created` with a write receipt: `source_id`, `manifest_id`, `content_hash`,
+`written_entities`, `written_relationships`, `deleted_entities`, `deleted_relationships`,
+`entity_ids`, `relationship_ids`, and `background_jobs` (queued embedding-backfill and
+note-distillation jobs with their job IDs).
+
+Re-submitting a `source_id` bound to another project, or one currently being modified, returns
+`409 Conflict`. Rewriting an existing experience created by someone else requires
+`project_maintainer`.
+
+### Batch Job Status
+
+```http
+POST /api/jobs/status
+```
+
+Poll the background jobs returned in `background_jobs` (or any job IDs) with one authenticated
+request. The body is `{"job_ids": [...]}` (1-64 IDs, deduplicated). The response maps each job ID to
+a status payload (`job_id`, `function`, `status`, `enqueue_time`, `start_time`, `finish_time`,
+`result`, `error`); jobs that do not exist or are not visible to the organization come back with
+status `not_found`.
 
 ## Memory Space Administration
 

@@ -30,6 +30,7 @@ interface ReflectInput {
   related_to?: string[]; // Entity IDs to link
   task_ids?: string[]; // Task IDs for exact task context
   active_task?: boolean; // Link persisted output to the active doing task (default true)
+  cited_ids?: string[]; // Context/search IDs that materially informed the reflection
 
   // Persistence
   persist?: boolean; // Write candidates back into Sibyl (default false)
@@ -44,10 +45,11 @@ interface ReflectInput {
 ### Intent Values
 
 ```
-build, plan, review, debug, general
+build, plan, ideate, research, debug, decide, learn, general
 ```
 
-Intent guides which kinds of candidates the extractor emphasizes.
+Intent guides which kinds of candidates the extractor emphasizes. Note that `review` is accepted by
+the REST endpoint and the CLI but is not an MCP intent; the MCP tool rejects it.
 
 ## Persistence Modes
 

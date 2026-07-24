@@ -6,7 +6,8 @@ Unified semantic search across knowledge graph and crawled documentation.
 
 The search router provides three endpoints:
 
-- `POST /api/search` - semantic search across the knowledge graph and crawled documents
+- `POST /api/search` - semantic search across the knowledge graph, crawled documents, and raw
+  memories
 - `POST /api/search/explore` - graph navigation without semantic search
 - `POST /api/search/temporal` - bi-temporal edge history queries
 
@@ -67,26 +68,43 @@ Search both knowledge graph entities and crawled documentation.
 
 **Request Schema:**
 
-| Field               | Type     | Required | Default | Description                          |
-| ------------------- | -------- | -------- | ------- | ------------------------------------ |
-| `query`             | string   | Yes      | -       | Search query (min 1 char)            |
-| `types`             | string[] | No       | -       | Entity types to search               |
-| `language`          | string   | No       | -       | Programming language filter          |
-| `category`          | string   | No       | -       | Category filter                      |
-| `status`            | string   | No       | -       | Task status filter                   |
-| `project`           | string   | No       | -       | Project ID filter                    |
-| `source`            | string   | No       | -       | Source ID alias                      |
-| `source_id`         | string   | No       | -       | Document source UUID                 |
-| `source_name`       | string   | No       | -       | Document source name (partial)       |
-| `assignee`          | string   | No       | -       | Task assignee filter                 |
-| `since`             | string   | No       | -       | Created after date (ISO or relative) |
-| `limit`             | integer  | No       | 10      | Results per page (1-50)              |
-| `offset`            | integer  | No       | 0       | Pagination offset                    |
-| `include_content`   | boolean  | No       | true    | Include full content                 |
-| `include_documents` | boolean  | No       | true    | Search documents                     |
-| `include_graph`     | boolean  | No       | true    | Search graph entities                |
-| `use_enhanced`      | boolean  | No       | true    | Use hybrid retrieval                 |
-| `boost_recent`      | boolean  | No       | true    | Boost recent results                 |
+| Field                           | Type     | Required | Default   | Description                                     |
+| ------------------------------- | -------- | -------- | --------- | ----------------------------------------------- |
+| `query`                         | string   | Yes      | -         | Search query (min 1 char)                       |
+| `types`                         | string[] | No       | -         | Entity types to search                          |
+| `language`                      | string   | No       | -         | Programming language filter                     |
+| `category`                      | string   | No       | -         | Category filter                                 |
+| `status`                        | string   | No       | -         | Task status filter                              |
+| `project`                       | string   | No       | -         | Project ID filter                               |
+| `source`                        | string   | No       | -         | Source name alias                               |
+| `source_id`                     | string   | No       | -         | Document/raw-memory source ID                   |
+| `source_name`                   | string   | No       | -         | Document source name (partial)                  |
+| `assignee`                      | string   | No       | -         | Task assignee filter                            |
+| `since`                         | string   | No       | -         | Created after date (ISO or relative)            |
+| `reference_time`                | string   | No       | -         | As-of timestamp for relative temporal ranking   |
+| `as_of`                         | string   | No       | -         | Point-in-time validity filter (graph results)   |
+| `limit`                         | integer  | No       | 10        | Results per page (1-50)                         |
+| `offset`                        | integer  | No       | 0         | Pagination offset                               |
+| `include_content`               | boolean  | No       | true      | Include full content                            |
+| `content_max_chars`             | integer  | No       | 500       | Maximum content characters per result (0-50000) |
+| `include_documents`             | boolean  | No       | true      | Search documents                                |
+| `include_graph`                 | boolean  | No       | true      | Search graph entities                           |
+| `include_raw_memory`            | boolean  | No       | true      | Include raw memories in search                  |
+| `memory_scope`                  | string   | No       | `private` | Raw memory scope to search                      |
+| `scope_key`                     | string   | No       | -         | Raw memory scope key                            |
+| `participants`                  | string[] | No       | `[]`      | Participant IDs for imported raw memories       |
+| `labels`                        | string[] | No       | `[]`      | Adapter labels/tags for imported raw memories   |
+| `thread_id`                     | string   | No       | -         | Imported raw-memory thread ID                   |
+| `occurred_after`                | datetime | No       | -         | Earliest source occurrence for raw memories     |
+| `occurred_before`               | datetime | No       | -         | Latest source occurrence for raw memories       |
+| `use_enhanced`                  | boolean  | No       | true      | Use hybrid retrieval                            |
+| `boost_recent`                  | boolean  | No       | true      | Boost recent results                            |
+| `include_retrieval_diagnostics` | boolean  | No       | false     | Include candidate ranking diagnostics           |
+| `record_exposure`               | boolean  | No       | true      | Record returned results as memory exposures     |
+
+`memory_scope` accepts `private`, `delegated`, `project`, `team`, `organization`, `shared`, or
+`public`. The raw-memory filters (`participants`, `labels`, `thread_id`,
+`occurred_after`/`occurred_before`) apply to imported raw memories only.
 
 **Example Request:**
 
@@ -149,11 +167,15 @@ curl -X POST "http://localhost:3334/api/search" \
   },
   "graph_count": 3,
   "document_count": 2,
+  "raw_memory_count": 0,
   "limit": 5,
   "offset": 0,
   "has_more": true
 }
 ```
+
+Each result's `result_origin` is `graph`, `document`, or `raw_memory`. Raw memory results carry
+`type: "raw_memory"` and count toward `raw_memory_count`.
 
 ### Graph Exploration
 
