@@ -18,7 +18,7 @@ services:
       SIBYL_SURREAL_PASSWORD: root
 
   surrealdb:
-    image: surrealdb/surrealdb:v3.2.0
+    image: surrealdb/surrealdb:latest
     command:
       [
         "start",
@@ -35,7 +35,7 @@ services:
     volumes:
       - surreal-data:/data
     healthcheck:
-      test: ["CMD", "/surreal", "is-ready", "--endpoint", "http://localhost:8000"]
+      test: ["CMD", "/surreal", "is-ready", "--conn", "http://localhost:8000"]
       interval: 5s
       timeout: 3s
       retries: 5

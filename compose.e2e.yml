@@ -9,7 +9,7 @@
 
 services:
   surrealdb-e2e:
-    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.0}
+    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.1.0}
     container_name: sibyl-surrealdb-e2e
     command:
       [
@@ -27,7 +27,7 @@ services:
     volumes:
       - sibyl_e2e_surreal:/data
     healthcheck:
-      test: ["CMD", "/surreal", "is-ready", "--endpoint", "http://localhost:8000"]
+      test: ["CMD", "/surreal", "is-ready", "--conn", "http://localhost:8000"]
       interval: 5s
       timeout: 3s
       retries: 5
