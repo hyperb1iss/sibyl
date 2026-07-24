@@ -148,15 +148,10 @@ sibyl show "episode:abc123-uuid-here"
 ### After Solving
 
 ```bash
-# ALWAYS capture the solution
-sibyl entity create \
-  --type episode \
-  --name "Fixed: Descriptive title" \
-  --content "Root cause: ...
-Solution: ...
-Prevention: ..." \
-  --category debugging \
-  --languages python
+# ALWAYS capture the solution: remember preserves raw provenance before
+# graph projection; do not use `entity create` for new knowledge
+sibyl remember "Fixed: Descriptive title" \
+  "Root cause: ... Solution: ... Prevention: ..." --kind error_pattern
 ```
 
 ---

@@ -24,6 +24,12 @@ write intent (`remember`, `correct`, or a task mutation), load the full version-
 sibyl skill get core
 ```
 
+Load packs whole. Never pipe `sibyl skill get` through `head`/`tail`: the flag contracts and enum
+tables sit past the fold, and truncated bootstraps are the leading cause of invented-flag errors.
+
+Loading a pack is not the memory work itself: after `skill get`, still run the `sibyl context` /
+task command you came for. Sessions that load the contract and skip the verb defeat the loop.
+
 **Quick triggers (intent -> verb):**
 
 - "what am i working on" -> `sibyl task list --status doing,blocked`

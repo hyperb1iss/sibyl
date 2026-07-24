@@ -1,7 +1,7 @@
 # Sibyl
 
-Sibyl gives you persistent memory across coding sessions. Search patterns, track tasks, capture
-learnings—all stored in a knowledge graph.
+Sibyl gives you persistent memory across coding sessions. Search patterns, track tasks, and capture
+learnings, all stored in a knowledge graph.
 
 ## Agent Rules (READ FIRST)
 
@@ -9,38 +9,42 @@ These rules exist because real agent sessions consistently fail without them.
 
 1. **NEVER redirect stderr OR hide errors behind a parser.** Do not append `2>/dev/null` to sibyl
    commands, and do not pipe `--json`/`-j` output straight into `jq`/`grep` without checking the
-   exit code. On failure the CLI prints a human-readable `✗ <error>` line and exits non-zero; a
-   blind `... -j | jq` swallows that line (jq aborts on the non-JSON text) and you retry blind.
-   Capture the output first, check the exit code, then parse. Error messages contain diagnostic
-   information you need; suppressing them causes silent failures and blind retry spirals.
+   exit code. On failure the CLI prints a human-readable `✗ <error>` line on stdout and exits
+   non-zero, so capture-then-check works without stream games; a blind `... -j | jq` still swallows
+   that line (jq aborts on the non-JSON text) and you retry blind. Capture the output first, check
+   the exit code, then parse. Error messages contain diagnostic information you need; suppressing
+   them causes silent failures and blind retry spirals.
 
-2. **Link your project BEFORE doing anything else — this is a blocking gate.** Run
+2. **Link your project BEFORE doing anything else. This is a blocking gate.** Run
    `sibyl config context --quick` first. This is only a local link/auth status check, not a
-   replacement for agent context. If it shows `Project: none` or
-   `Project: not linked`, resolve it before any context or task command, in this order:
-   (a) `sibyl project list` → if the project exists, `sibyl project link <project_id>`;
-   (b) if `sibyl project relink` finds no candidate, `sibyl project create --name <dirname>` then
-   link the new ID; (c) only if the user explicitly declined linking, use `--all-projects` and say
-   so — it orphans memories from the project. `--project` takes a `project_xxx` ID, never a
-   directory name. Links are cwd-scoped: a git worktree of a linked repo shows `Project: none` —
-   relink there too. Unscoped context returns cross-project noise; never treat unrelated hits as
-   context. Use `sibyl skill get core` when you need to read this canonical skill contract instead
-   of guessing a filesystem path.
+   replacement for agent context. If it shows `Project: none` or `Project: not linked`, resolve it
+   before any context or task command, in this order: (a) `sibyl project list` → if the project
+   exists, `sibyl project link <project_id>`; (b) if `sibyl project relink` finds no candidate,
+   `sibyl project create --name <dirname>` then link the new ID; (c) only if the user explicitly
+   declined linking, use `--all-projects` and say so, because it orphans memories from the project.
+   `--project` takes a `project_xxx` ID, never a directory name. Links are cwd-scoped: a git
+   worktree of a linked repo shows `Project: none`, so relink there too. Unscoped context returns
+   cross-project noise; never treat unrelated hits as context. Use `sibyl skill get core` when you
+   need to read this canonical skill contract instead of guessing a filesystem path.
 
 3. **Always complete the retrieval pattern.** Context items contain concise previews. When you need
-   details, follow up with `sibyl show <id>` using the returned ID. Working from
-   truncated summaries leads to incomplete understanding.
+   details, follow up with `sibyl show <id>` using the returned ID. Working from truncated summaries
+   leads to incomplete understanding.
 
-4. **Capture learnings proactively.** When you solve something non-obvious, run `sibyl remember`
-   or use `--learnings` on task completion. Do not ask permission first—the whole point is building
+4. **Capture learnings proactively.** When you solve something non-obvious, run `sibyl remember` or
+   use `--learnings` on task completion. Do not ask permission first. The whole point is building
    institutional memory.
 
 5. **Check health before retrying, and follow the auth ladder.** If a command fails with a
-   connection error, run `sibyl health` once. If the server is down, don't retry the same command —
-   report it and move on. On `authentication_required` or `token_refresh_failed`: check
+   connection error, run `sibyl health` once. If the server is down, don't retry the same command.
+   Report it and move on. On `authentication_required` or `token_refresh_failed`: check
    `printenv SIBYL_AUTH_TOKEN`, run `sibyl auth status` once, and if it is not recoverable
-   non-interactively, STOP treating memory as available — state in your final output that memory
-   was unavailable and list any learnings that could not be captured. In a sandboxed environment,
+   non-interactively, STOP treating memory as available. State in your final output that memory was
+   unavailable and list any learnings that could not be captured. The failure hint may say
+   `Run 'sibyl auth login'`. Do NOT run `auth login` while `sibyl health` fails; a down server
+   produces the same message and login cannot fix it. After the server recovers, run
+   `sibyl pending-writes flush`; expect it to skip read-like queued requests (rerun those commands
+   instead) and explicitly re-run any writes it reports as failed. In a sandboxed environment,
    `sibyl config context --quick` succeeding from local state while context retrieval or health
    cannot connect means blocked network egress, not a server outage.
 
@@ -48,31 +52,43 @@ These rules exist because real agent sessions consistently fail without them.
    run `sibyl <group> --help`. Do not guess, and do not pass any flag you have not seen in this
    document or in this session's `--help` output. Commands like `sibyl auth token` and
    `sibyl db backup` do not exist. After a context compaction, reload `sibyl skill get contract` (or
-   re-check `--help`) before your first write verb — corrections learned earlier do not survive
+   re-check `--help`) before your first write verb: corrections learned earlier do not survive
    compaction, but wrong habits do.
 
 7. **Guard shell-special content.** A memory body containing backticks, `$()`, or `<`/`>` must be
    passed via stdin (`echo ... | sibyl remember "Title" --kind ...`), a single-quoted heredoc, or
-   `--content-file` — never as an inline double-quoted argument. Backticks inside double quotes
+   `--content-file`, never as an inline double-quoted argument. Backticks inside double quotes
    execute as shell commands; this has re-run real build commands as a side effect of saving a
    memory. Run sibyl writes as standalone commands, never chained with `&&` after builds or tests.
+   TITLE stays positional and required even when the body arrives via stdin. Never point
+   `--content-file` at `/dev/stdin` or a `$TMPDIR` path: both are symlinks on macOS and hit the
+   symlink guard (`Refusing to read symlink`), so pipe stdin or use a real file path instead. Never
+   feed a command substitution from its own pipe (`cat file | sibyl task create -d "$(cat)"`
+   deadlocks because `$(cat)` expands before the pipe exists). When separating chained commands,
+   quote the separator (`echo "==="`, not `echo ===`): zsh equals-expansion turns bare `===` into a
+   phantom exit-1 that makes a successful sibyl call look failed.
 
-8. **A failed write is lost knowledge.** A non-zero exit from `remember` means nothing was
-   saved. Retry exactly once after applying the printed remediation; if it still fails, include the
-   unsaved learning verbatim in your final message so the user can capture it. Never claim a memory
-   was stored unless you can quote the returned entity ID (e.g. `error_pattern_5f40ca...`) as the
-   receipt.
+8. **A failed write is lost knowledge.** A non-zero exit from `remember` means nothing was saved.
+   Retry exactly once after applying the printed remediation; if it still fails, include the unsaved
+   learning verbatim in your final message so the user can capture it. Never claim a memory was
+   stored unless you can quote the returned entity ID (e.g. `error_pattern_5f40ca...`) as the
+   receipt. On `internal_error`, retry once at most, then walk the fallback ladder instead of
+   spiraling: for a completion, `task complete` → `task update <id> -s done` plus a separate
+   `remember` for the learnings. Never silently drop a capture because the server is sick. Write the
+   body to a scratch file and say so.
 
-9. **Fetch IDs fresh.** Re-run the list command immediately before `show`/`update`/`complete`;
-   never reuse an entity or task UUID remembered from earlier in a long session, and never run the
-   list and its dependent show in the same parallel batch. `task show` accepts task IDs only —
-   every other entity kind goes through `sibyl show <id>`. A `not_found` means re-list, not retry.
+9. **Fetch IDs fresh.** Re-run the list command immediately before `show`/`update`/`complete`; never
+   reuse an entity or task UUID remembered from earlier in a long session, and never run the list
+   and its dependent show in the same parallel batch. IDs come in three shapes: bare task UUIDs from
+   `task list`, prefixed entity IDs (`error_pattern_5f40ca...`), and `raw_memory:<uuid>`.
+   `sibyl show` accepts all three; `task show`/`update`/`complete` accept task IDs only. A
+   `not_found` means re-list, not retry.
 
-10. **Probe availability once (non-Claude hosts).** If `command -v sibyl` fails, note
-    "sibyl unavailable in this environment — proceeding without memory" once and move on; do not
-    re-derive absence per command. Expect context/remember to take 1–10 s over the network — in
-    harnesses with exec yield windows (e.g. Codex `exec_command`), use a generous yield
-    (≥ 5000 ms) and poll the same session instead of re-running the command.
+10. **Probe availability once (non-Claude hosts).** If `command -v sibyl` fails, note "sibyl
+    unavailable in this environment, proceeding without memory" once and move on; do not re-derive
+    absence per command. Expect context/remember to take 1-10 s over the network. In harnesses with
+    exec yield windows (e.g. Codex `exec_command`), use a generous yield (≥ 5000 ms) and poll the
+    same session instead of re-running the command.
 
 ---
 
@@ -80,13 +96,14 @@ These rules exist because real agent sessions consistently fail without them.
 
 Sibyl is the agent's durable brain. Use it as a loop, not a lookup box:
 
-1. **Load context before acting.** Run `sibyl context "<goal>" --intent <mode>` to get compact working
-   memory: active work, decisions, plans, constraints, related graph context, and recent lessons.
+1. **Load context before acting.** Run `sibyl context "<goal>" --intent <mode>` to get compact
+   working memory: active work, decisions, plans, constraints, related graph context, and recent
+   lessons.
 2. **Act with context in hand.** Use recalled IDs for follow-up retrieval with `sibyl show <id>`
-   when a preview is not enough. If a context item materially informs your answer or
-   action, record that with `sibyl cite <id...>` or a `--cited` flag on the write you are making.
-   If it materially leads the answer astray, use `sibyl cite <id...> --misled` instead. Do not mark
-   merely irrelevant or unused context as misleading.
+   when a preview is not enough. If a context item materially informs your answer or action, record
+   that with `sibyl cite <id...>` or a `--cited` flag on the write you are making. If it materially
+   leads the answer astray, use `sibyl cite <id...> --misled` instead. Do not mark merely irrelevant
+   or unused context as misleading.
 3. **Remember while learning.** Run `sibyl remember "Title" "What matters" --kind <type>` whenever
    future agents should not rediscover a decision, plan, idea, claim, artifact, session, procedure,
    or error pattern. In a linked repo, `remember` automatically scopes the memory to that project.
@@ -125,8 +142,8 @@ printf '%s' "Corrected canonical body" | sibyl correct raw_memory:abc123 --actio
 
 Negative examples:
 
-- Do not append a contradictory `remember` entry to work around a bad memory. Mark it wrong,
-  stale, superseded, or revise it so retrieval stops treating both claims as current.
+- Do not append a contradictory `remember` entry to work around a bad memory. Mark it wrong, stale,
+  superseded, or revise it so retrieval stops treating both claims as current.
 - Do not use `duplicate` without `--duplicate-of` or `superseded` without `--replacement`; the
   lineage target is part of the correction receipt.
 - Do not revise a body fetched earlier without `--expected-revision`; the compare-and-set guard
@@ -166,9 +183,9 @@ sibyl task complete task_a1b2c3d4e5f6 --learnings "OAuth tokens expire..."
 
 **Pro tips:**
 
-- **Link your project first** — then task commands just work without `--project`
-- **Table output is default** — use `--json` only for scripting
-- **Show is full fidelity** — use `sibyl show <id>` for complete content; don't use `--json` only to
+- **Link your project first**: task commands then just work without `--project`
+- **Table output is default**: use `--json` only for scripting
+- **Show is full fidelity**: use `sibyl show <id>` for complete content; don't use `--json` only to
   escape context-preview truncation
 - Use `--all` flag to bypass context and see all projects
 
@@ -265,9 +282,10 @@ sibyl context "plan the launch" --intent plan --json
 sibyl context "resume the migration" --budget 1200
 ```
 
-Advertised `--intent` values are `build, plan, review, debug, general`.
-There is no `verify` or `audit` intent — verification work uses `review`. `context` takes one quoted
-GOAL; size the output with `--budget` (tokens) or `--limit` (items). There is no `--max-items`.
+Valid `--intent` values are `build, plan, ideate, research, review, debug, decide, learn, general`.
+There is no `verify`, `audit`, or `explore` intent: verification work uses `review` and exploration
+uses `research`. `context` takes one quoted GOAL; size the output with `--budget` (tokens) or
+`--limit` (items). There is no `--max-items`.
 
 **When to use:** Before acting. This is the agent-ready working memory view. The Active Work section
 is grounded in a direct status lookup, so in-flight tasks always lead it; completed work appears
@@ -283,7 +301,7 @@ sibyl brief "fix the parser crash" --budget 1500
 ```
 
 **When to use:** When dispatching a worker or subagent. Run it as the parent and paste the output
-into the worker's prompt. Workers that only need this do not need the full core skill pack — point
+into the worker's prompt. Workers that only need this do not need the full core skill pack. Point
 them at `sibyl skill get quick` instead.
 
 ---
@@ -335,21 +353,30 @@ sibyl remember "Moon gates" "Use moon for monorepo checks." --kind rule --pin --
 sibyl remember "Review ritual" "Verifier passes are mandatory." --kind rule --propose-scope team
 ```
 
-`remember` has **no** `--title`, `--type`, or `--summary` flags — title and body are positional
+`remember` has **no** `--title`, `--type`, or `--summary` flags. Title and body are positional
 (`sibyl remember "TITLE" "BODY" --kind <kind>`), with stdin, `--content`, or `--content-file` as
-body alternatives. If a flag is rejected (exit 2), switch to the positional form — do not retry
-flag variants. `--kind` values are snake_case; `gotcha` and `learning` are deprecated aliases that
-remap to `error_pattern` and `note` with a warning (full 33-kind list: `sibyl remember --help`).
-Use `--pin` only when ordinary decay would be harmful. `--basis` records whether the memory was
-observed, inferred, told, or assumed. `--propose-scope team` nominates the capture for the audited
-promotion pipeline; it never bypasses scope policy. These optional fields are usage-gated: if any
-remains null on more than 95 percent of writes after one release, rework or demote that surface.
-Remember whenever future agents should not have to rediscover a detail. Project
-scoping stores both `metadata.project_id` and a project edge, and `remember` links to the single
-active `doing` task when exactly one exists. Future context can find the memory from graph
-retrieval, traversal, or task context. Use `--no-active-task` when the memory belongs to the
-project but not the current task. `--content-file` rejects symlinks, non-UTF-8 content, and files
-larger than 1 MiB by default; use `--max-size` or `--follow-symlinks` only when that is intentional.
+body alternatives. **Titles are capped at 200 characters and content at 50,000.** A too-long title
+fails as a bare `✗ validation_error: Invalid request data` that names no field, so when you see that
+error, check title length first and keep titles short with the detail in the body. **Always pass
+`--kind` explicitly**: omitting it auto-classifies the memory (usually `episode`) and misfiles
+deliberate captures. On a usage error (exit 2), fix the rejected flag and nothing else. Do not
+reword the body, drop `--kind`, or mutate content that had nothing to do with the failure. The
+canonical long-body write is: single-quoted heredoc → scratch file → `--content-file ./scratch.md`.
+If a flag is rejected (exit 2), switch to the positional form instead of retrying flag variants.
+`--kind` values are snake_case. Stick to the eleven kinds `sibyl remember --help` advertises; a
+wider legacy enum is accepted but not preferred. The natural words agents reach for are NOT kinds.
+Map them: `insight`/`discovery` → `episode`, `gotcha` → `error_pattern`, `learning` → `note`. If
+`--kind` is rejected, pick from the advertised list; never invent one. Use `--pin` only when
+ordinary decay would be harmful. `--basis` records whether the memory was observed, inferred, told,
+or assumed. `--propose-scope team` nominates the capture for the audited promotion pipeline; it
+never bypasses scope policy. These optional fields are usage-gated: if any remains null on more than
+95 percent of writes after one release, rework or demote that surface. Remember whenever future
+agents should not have to rediscover a detail. Project scoping stores both `metadata.project_id` and
+a project edge, and `remember` links to the single active `doing` task when exactly one exists.
+Future context can find the memory from graph retrieval, traversal, or task context. Use
+`--no-active-task` when the memory belongs to the project but not the current task. `--content-file`
+rejects symlinks, non-UTF-8 content, and files larger than 1 MiB by default; use `--max-size` or
+`--follow-symlinks` only when that is intentional.
 
 ---
 
@@ -390,7 +417,7 @@ sibyl synthesis plan "launch readiness brief" --type documentation --depth stand
 sibyl synthesis draft "launch readiness brief" --audience "release team"
 
 # Verify citations, freshness, redaction, and gap coverage (re-drafts internally
-# from the same goal — it cannot verify a local file)
+# from the same goal; it cannot verify a local file)
 sibyl synthesis verify "launch readiness brief"
 
 # Draft, verify, and persist the artifact into memory in one step
@@ -433,7 +460,11 @@ sibyl task create --title "Implement OAuth"
 sibyl task create --title "Add rate limiting" --priority high --epic epic_a1b2c3d4e5f6
 ```
 
-**IMPORTANT:** Use `--title` for the task name. Project auto-resolves from linked directory.
+**IMPORTANT:** Use `--title` for the task name. Project auto-resolves from linked directory. Valid
+`--priority` values: `critical, high, medium, low, someday` (`soon`/`later` are not values).
+`task create` has **no stdin and no `--content-file`**. That asymmetry with `remember` is a known
+trap. For a long description, write a file first and pass `-d "$(cat ./brief.md)"`; never feed the
+substitution from a pipe.
 
 ```bash
 # List tasks (table output is default, comma-separated values supported)
@@ -574,13 +605,14 @@ sibyl entity create --type episode --name "Redis insight" --content "Discovered 
 # Find related entities
 sibyl entity related epsd_a1b2c3d4e5f6
 
-# Delete (immediate — there is NO confirmation prompt)
+# Delete (immediate: there is NO confirmation prompt)
 sibyl entity delete epsd_a1b2c3d4e5f6
 ```
 
 **Common entity types:** episode, pattern, note, decision, plan, idea, claim, artifact, procedure,
-error_pattern, session, task, epic, project, document, source (full 33-type set: run
-`sibyl remember --help`).
+error_pattern, session, task, epic, project, document, source. Entity types (graph records) are a
+wider set than `remember --kind` values; when unsure, check `sibyl entity list --help` or stay on
+`remember` kinds.
 
 ---
 
@@ -767,30 +799,32 @@ sibyl task complete task_a1b2c3d4e5f6 --hours 4.5 --learnings "Key insight: The 
 
 ## Migrating from FalkorDB + PostgreSQL
 
-If a local install still has legacy FalkorDB + PostgreSQL data — typical signs are `moon run dev`
+If a local install still has legacy FalkorDB + PostgreSQL data (typical signs: `moon run dev`
 aborting with `⚠️  Local legacy data detected`, the Sibyl server unreachable, and writes piling up
-in `~/.config/sibyl/pending_writes/` — follow the agent playbook in the migration pack
+in `~/.config/sibyl/pending_writes/`), follow the agent playbook in the migration pack
 (`sibyl skill get migration`).
 
 The playbook covers:
 
-- Anchoring on commit `290b824b` (v0.6.0 — version-bumped but never tagged; `git tag` stops at
+- Anchoring on commit `290b824b` (v0.6.0, version-bumped but never tagged; `git tag` stops at
   `v0.4.1`).
 - Bringing up legacy FalkorDB + Postgres on the real data volumes (the `_data`-suffixed ones are
   empty post-rename targets).
-- Exporting from the v0.6.0 worktree, then importing through the current branch with
-  `sibyld migrate import --source-type legacy-archive --target-mode surreal --yes --clean`.
+- Exporting from the v0.6.0 worktree, then importing through a pinned `v0.10.0` worktree with
+  `sibyld migrate import --source-type legacy-archive --target-mode surreal --yes --clean` (the
+  current CLI removed the `legacy-archive` on-ramp and accepts only `surreal-archive`).
 - Two latent bugs you will hit:
   - The compose file's `:U` bind-mount flag is silently dropped under `podman compose`'s
     docker-compose plugin → SurrealDB fails to start with
     `Failed to create RocksDB directory: PermissionDenied`. Fix:
     `chmod 0777 .moon/cache/surreal-dev`.
   - `sibyld migrate verify` reports false-positive `missing imported episode` errors on legacy
-    archives — the importer rekeys episodes to native Surreal record IDs while preserving the legacy
+    archives: the importer rekeys episodes to native Surreal record IDs while preserving the legacy
     ID in the `uuid` field. Verify counts directly via the SurrealDB `/sql` endpoint when this
     happens.
 
-Do not auto-start `moon run dev` after migration — propose it; let the user run it. Sacred Boundary.
+Do not auto-start `moon run dev` after migration. Propose it and let the user run it. Sacred
+Boundary.
 
 ## Consolidating Personal Instances
 
@@ -817,27 +851,28 @@ target auth surface; do not import personal-machine auth into a working hosted i
 
 ## Key Principles
 
-1. **Context Before Implementing** — Always load existing knowledge
-2. **Project-First for Tasks** — Link your directory, then filter by project
-3. **Capture Non-Obvious Learnings** — If it took time to figure out, save it
-4. **Complete with Learnings** — Always capture insights when finishing tasks
+1. **Context Before Implementing**: always load existing knowledge
+2. **Project-First for Tasks**: link your directory, then filter by project
+3. **Capture Non-Obvious Learnings**: if it took time to figure out, save it
+4. **Complete with Learnings**: always capture insights when finishing tasks
 5. **Use Entity Types Properly**:
-   - `episode` — Temporal insights, debugging discoveries
-   - `pattern` — Reusable coding patterns
-   - `note` — Progress breadcrumbs, observations
-   - `decision` — A choice made and its rationale
-   - `plan` — Intended sequence of work
-   - `idea` — A proposal or concept worth keeping
-   - `claim` — An assertion to verify or cite
-   - `artifact` — A produced output (synthesis, report, doc reference)
-   - `procedure` — A repeatable how-to
-   - `error_pattern` — A recurring failure and its fix
-   - `session` — A consolidated session checkpoint
-   - `task` — Work items with lifecycle
-   - `document` — Crawled documentation pages
+   - `episode`: temporal insights, debugging discoveries
+   - `pattern`: reusable coding patterns
+   - `note`: progress breadcrumbs, observations
+   - `decision`: a choice made and its rationale
+   - `plan`: intended sequence of work
+   - `idea`: a proposal or concept worth keeping
+   - `claim`: an assertion to verify or cite
+   - `artifact`: a produced output (synthesis, report, doc reference)
+   - `procedure`: a repeatable how-to
+   - `error_pattern`: a recurring failure and its fix
+   - `session`: a consolidated session checkpoint
+   - `task`: work items with lifecycle
+   - `document`: crawled documentation pages
 
-   These cover the advertised `remember --kind <type>` values; run `sibyl remember --help` for
-   compatibility kinds.
+   The `remember --kind` values are the eleven advertised in `sibyl remember --help` (episode,
+   decision, procedure, error_pattern, rule, plan, idea, claim, artifact, session, note). `pattern`,
+   `task`, and `document` are entity types created through other verbs, not `remember` kinds.
 
 ---
 
@@ -914,12 +949,19 @@ sibyl health
 If unhealthy, the server or local data services are down. Do not retry commands blindly. Report it
 and continue without Sibyl for this session.
 
+### "Auth: ✗ refresh needed" in `config context --quick`
+
+Informational, not a failure: the next sibyl command auto-refreshes the token and succeeds. Do not
+run `sibyl auth login` because of this line. Real auth problems announce themselves as
+`token_refresh_failed` or `authentication_required` on an actual command; follow the rule-5 ladder
+for those.
+
 ### Task list shows wrong project's tasks
 
 This happens when your directory is not linked to a project. All commands return global results.
 
 ```bash
-sibyl config context --quick       # Check — does it show your project?
+sibyl config context --quick       # Check: does it show your project?
 sibyl project list                 # Find correct project ID
 sibyl project link proj_xxx        # Link to correct project
 sibyl config context --quick       # Verify the link worked
@@ -945,26 +987,33 @@ If it's already in `doing`, you don't need to start it. If locked, wait a few se
 
 ### Context returns results from other projects
 
-Your directory is not linked. Run `sibyl config context --quick` — if `Project: none`, link it
-first.
+Your directory is not linked. Run `sibyl config context --quick`. If it shows `Project: none`, link
+it first.
 
 ---
 
 ## Common Pitfalls
 
-| Wrong                               | Correct                                          |
-| ----------------------------------- | ------------------------------------------------ |
-| `sibyl task add "..."`              | `sibyl task create --title "..."`                |
-| `sibyl task list --todo`            | `sibyl task list --status todo`                  |
-| `sibyl task create -t "..."`        | `sibyl task create --title "..."` (no `-t` flag) |
-| `sibyl task update --learnings`     | `sibyl task complete <id> --learnings "..."` (!) |
-| `sibyl task note` for completion    | `sibyl task complete <id> --learnings "..."` (!) |
+| Wrong                               | Correct                                           |
+| ----------------------------------- | ------------------------------------------------- |
+| `sibyl task add "..."`              | `sibyl task create --title "..."`                 |
+| `sibyl task list --todo`            | `sibyl task list --status todo`                   |
+| `sibyl task create -t "..."`        | `sibyl task create --title "..."` (no `-t` flag)  |
+| `sibyl task update --learnings`     | `sibyl task complete <id> --learnings "..."` (!)  |
+| `sibyl task note` for completion    | `sibyl task complete <id> --learnings "..."` (!)  |
 | `sibyl remember note "content..."`  | `sibyl remember "Title" "content..." --kind note` |
-| `sibyl context ... 2>/dev/null`     | `sibyl context ...` (never suppress stderr)        |
-| `sibyl context ... \|\| true`       | `sibyl context ...` (let errors surface)           |
-| `sibyl config`                      | `sibyl config show`                              |
-| `sibyl auth token`                  | Not a real command — use `sibyl auth status`     |
-| Using `--kind gotcha` or `learning` | Deprecated aliases — use `error_pattern`/`note`  |
+| `sibyl context ... 2>/dev/null`     | `sibyl context ...` (never suppress stderr)       |
+| `sibyl context ... \|\| true`       | `sibyl context ...` (let errors surface)          |
+| `sibyl config`                      | `sibyl config show`                               |
+| `sibyl auth token`                  | Not a real command: use `sibyl auth status`       |
+| Using `--kind gotcha` or `learning` | Deprecated aliases: use `error_pattern`/`note`    |
+| `--kind insight` / `discovery`      | Not kinds: use `episode` (or `note`)              |
+| `remember --title` / `--body`       | Title and body are positional arguments           |
+| `--intent explore` / `verify`       | Use `research` / `review`                         |
+| `--priority soon` / `later`         | Use `someday` (or `low`)                          |
+| `task create --content-file`        | remember-only flag: use `-d "$(cat file)"`        |
+| `--content-file /dev/stdin`         | Symlink-guard rejection: pipe stdin instead       |
+| `echo ===` between commands         | Quote it: `echo "==="` (zsh equals-expansion)     |
 
 ### Notes vs Learnings
 
@@ -979,8 +1028,8 @@ Use task notes for in-flight observations, user clarifications, roadmap breadcru
 review context. Use `task update --description` when intentionally changing the canonical task
 brief.
 
-Use `--cited` on `task complete` when specific context memory materially informed the
-completion or learning. Do not cite ambient context that did not affect the result.
+Use `--cited` on `task complete` when specific context memory materially informed the completion or
+learning. Do not cite ambient context that did not affect the result.
 
 **Wrong:** Using `task note` when completing a task **Right:** Using `task complete --learnings` -
 this marks done AND creates a searchable episode
@@ -994,11 +1043,11 @@ sibyl task note task_xxx "What I learned..."
 sibyl task complete task_xxx --learnings "What I learned..."
 ```
 
-**Full task IDs are required** - always use the complete ID returned by list/context commands:
-
-```bash
-sibyl task show task_c24fc3228e7c  # Full ID required (17 chars)
-```
+**Task verbs resolve unique ID prefixes.** `task show/update/note/complete` accept a prefix of 8+
+characters when it is unambiguous, so `sibyl task update 1e1caf57 --status todo` works. Prefer the
+full ID from the immediately preceding list output; `sibyl show` (entities and raw memory) needs the
+exact full ID. A successful `task update` confirms with `→ Fields: <changed fields>`. That line
+lists what changed; it does not echo the new values.
 
 ---
 
@@ -1036,5 +1085,5 @@ The `manage` tool accepts an `action` parameter. Task actions: `start_task`, `bl
 `unblock_task`, `submit_review`, `complete_task`, `archive_task`, `update_task`, `add_note`. Epic
 actions: `start_epic`, `complete_epic`, `archive_epic`, `update_epic`. Source actions: `crawl`,
 `sync`, `refresh`, `link_graph`, `link_graph_status`. Analysis actions: `estimate`, `prioritize`,
-`detect_cycles`, `suggest`. Server health and graph statistics are not `manage` actions — they are
-the `sibyl://health` and `sibyl://stats` MCP resources.
+`detect_cycles`, `suggest`. Server health and graph statistics are not `manage` actions; they live
+at the `sibyl://health` and `sibyl://stats` MCP resources.

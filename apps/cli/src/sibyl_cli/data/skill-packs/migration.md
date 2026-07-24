@@ -1,9 +1,16 @@
 # Migrating a Local Sibyl Install to SurrealDB
 
 Agent playbook for moving an existing FalkorDB + PostgreSQL Sibyl install onto SurrealDB.
-Complements the user-facing `docs/guide/migrating-from-falkor.md` with the operational reality —
+Complements the user-facing `docs/guide/migrating-from-falkor.md` with the operational reality:
 which version to anchor on, which gotchas you'll hit, and which "failures" are actually false
 positives.
+
+> **Current CLI reality (v1.0+):** the `--source-type legacy-archive` import on-ramp was removed in
+> `903a738d`; the installed `sibyld migrate import`/`rehearse` accept only
+> `--source-type surreal-archive --target-mode surreal`. Legacy migration now needs TWO pinned
+> worktrees: `290b824b` for the export side (Phase 4) and `v0.10.0` (the last release with the
+> legacy on-ramp) for the import side (Phase 8). Only the consolidation section below uses the
+> current CLI.
 
 ## When to use this
 
@@ -94,8 +101,8 @@ Defaults assume the target host is reachable by SSH and runs the self-hosted Doc
 - Target archive path: `/tmp/sibyl-consolidated.tar.gz`
 
 Override those with `--target-compose-dir`, `--target-service`, `--target-container`, or
-`--target-archive-path` when the deploy shape differs.
-Pass `--target-sudo` when the SSH user needs `sudo -n docker ...` for Docker access.
+`--target-archive-path` when the deploy shape differs. Pass `--target-sudo` when the SSH user needs
+`sudo -n docker ...` for Docker access.
 
 After the live import, verify both stores:
 
@@ -144,16 +151,17 @@ or clobber a live login surface.
 
 `docs/guide/migrating-from-falkor.md` references "the v0.6 compatibility release" for the export
 step. That release was version-bumped in commit `290b824b` (`🔖 v0.6.0`, 2026-05-10) but **never
-git-tagged** — `git tag` stops at `v0.4.1`. The FalkorDB client was removed the next morning in
+git-tagged**: `git tag` stops at `v0.4.1`. The FalkorDB client was removed the next morning in
 `efbd8de8` ("remove falkor client path"), so `290b824b` is the last commit that can read a FalkorDB
 `dump.rdb`.
 
-Use a worktree at `290b824b` for the export side; the current branch for the import. The two halves
-use different `migrate` CLI shapes — that's intentional.
+Use a worktree at `290b824b` for the export side and a worktree at `v0.10.0` for the import side
+(the current branch removed the `legacy-archive` on-ramp). The two halves use different `migrate`
+CLI shapes. That's intentional.
 
 ---
 
-## Phase 1 — Snapshot the legacy volumes
+## Phase 1: Snapshot the legacy volumes
 
 Cheap insurance and the migration guide insists on it.
 
@@ -171,13 +179,13 @@ then touch anything.
 
 ---
 
-## Phase 2 — Identify which volumes hold real data
+## Phase 2: Identify which volumes hold real data
 
 The `_data`-suffixed volumes are typically the **empty** post-Apr-5 compose-rename targets. The real
 data lives in:
 
-- `sibyl_falkordb` — FalkorDB `dump.rdb` (single-digit MB+).
-- `sibyl_postgres` — Postgres 18 PGDATA (tens of MB+).
+- `sibyl_falkordb`: FalkorDB `dump.rdb` (single-digit MB+).
+- `sibyl_postgres`: Postgres 18 PGDATA (tens of MB+).
 
 Inspect quickly:
 
@@ -192,7 +200,7 @@ If the layout is inverted on this install, swap the volume names in Phase 3.
 
 ---
 
-## Phase 3 — Stand up the legacy stack
+## Phase 3: Stand up the legacy stack
 
 Throwaway containers named `sibyl-mig-*` so they don't collide with anything `moon run dev` will
 create.
@@ -212,7 +220,7 @@ podman run -d --name sibyl-mig-postgres \
   docker.io/pgvector/pgvector:pg18
 ```
 
-The PGDATA subpath may be `/18/docker` or `/18/data` — verify:
+The PGDATA subpath may be `/18/docker` or `/18/data`. Verify:
 
 ```bash
 podman run --rm -v sibyl_postgres:/v:ro alpine find /v -maxdepth 4 -name PG_VERSION
@@ -229,7 +237,7 @@ podman exec sibyl-mig-falkordb redis-cli -a sibyl_dev --no-auth-warning GRAPH.LI
 
 The env var only applies on first init of an empty PGDATA. Against an existing cluster, the original
 password is preserved. If TCP auth fails later with `asyncpg.exceptions.InvalidPasswordError`, reset
-over the container's Unix socket (peer/trust auth — passwordless):
+over the container's Unix socket (peer/trust auth, which is passwordless):
 
 ```bash
 podman exec sibyl-mig-postgres psql -U sibyl -d sibyl -c "ALTER USER sibyl PASSWORD 'sibyl_dev';"
@@ -243,7 +251,7 @@ podman exec sibyl-mig-postgres psql "postgresql://sibyl:sibyl_dev@127.0.0.1:5432
 
 ---
 
-## Phase 4 — Build the v0.6.0 worktree
+## Phase 4: Build the v0.6.0 worktree
 
 ```bash
 cd <user's sibyl checkout>     # e.g. ~/dev/sibyl
@@ -258,7 +266,7 @@ Expect ~160 packages including `falkordb`, `graphiti-core`, `asyncpg`, `surreald
 
 ---
 
-## Phase 5 — Upgrade the Postgres schema
+## Phase 5: Upgrade the Postgres schema
 
 The legacy Postgres is typically a few migrations behind v0.6.0's head. Run alembic from the
 worktree's `apps/api`:
@@ -280,9 +288,9 @@ data-bearing tables are touched.
 
 ---
 
-## Phase 6 — Export
+## Phase 6: Export
 
-Get the org UUID — Sibyl FalkorDB graph names are the org UUID:
+Get the org UUID. Sibyl FalkorDB graph names are the org UUID:
 
 ```bash
 podman exec sibyl-mig-falkordb redis-cli -a sibyl_dev --no-auth-warning GRAPH.LIST
@@ -304,7 +312,7 @@ uv run --directory apps/api sibyld migrate export \
   --output /tmp/sibyl-migration.tar.gz
 ```
 
-`--no-include-database-dump` skips the `pg_dump` sidecar — avoids host-binary version-match
+`--no-include-database-dump` skips the `pg_dump` sidecar: it avoids the host-binary version-match
 dependency, and the volume snapshots already cover rollback. The flag is honored by
 `resolve_backup_runtime_options`.
 
@@ -314,12 +322,12 @@ Inspect the archive (validates checksums + prints counts):
 uv run --directory apps/api sibyld migrate check /tmp/sibyl-migration.tar.gz
 ```
 
-Cross-check the graph counts against the raw FalkorDB baseline — `Entity`-label node count should
-equal the archive's `entity_count`; `Episodic`-label count should equal `episode_count`.
+Cross-check the graph counts against the raw FalkorDB baseline: the `Entity`-label node count should
+equal the archive's `entity_count`, and the `Episodic`-label count should equal `episode_count`.
 
 ---
 
-## Phase 7 — Bring up SurrealDB
+## Phase 7: Bring up SurrealDB
 
 Use the same compose service `moon run dev` would use, so the imported data lands where dev expects
 it.
@@ -354,13 +362,16 @@ ls -la .moon/cache/surreal-dev/sibyl.db/                                     # e
 
 ---
 
-## Phase 8 — Import (current-branch CLI)
+## Phase 8: Import (pinned pre-removal CLI)
 
-The current-branch importer requires `--source-type` and `--target-mode`. The v0.6.0 importer
-doesn't — but the current schema is what `moon run dev` will expect, so use the current branch:
+The `legacy-archive` on-ramp is gone from the current branch (`903a738d`). Run the import from a
+worktree at `v0.10.0`, the last release whose importer accepts it. The v0.6.0 exporter and v0.10.0
+importer intentionally use different `migrate` CLI shapes:
 
 ```bash
 cd <user's sibyl checkout>
+git worktree add --detach ~/.sibyl-worktrees/v0.10.0-import v0.10.0
+cd ~/.sibyl-worktrees/v0.10.0-import && uv sync
 export SIBYL_STORE=surreal SIBYL_AUTH_STORE=surreal
 export SIBYL_SURREAL_URL=ws://127.0.0.1:8000/rpc
 export SIBYL_SURREAL_USERNAME=root SIBYL_SURREAL_PASSWORD=root
@@ -377,9 +388,9 @@ uv run --directory apps/api sibyld migrate import /tmp/sibyl-migration.tar.gz \
 
 Expect 3 SurrealDB namespaces afterwards:
 
-- `sibyl_auth/auth` — users, organizations, sessions, audit_logs, projects, etc.
-- `sibyl_content/content` — crawl_sources, crawled_documents, document_chunks.
-- `org_<uuid_hex>/graph` — entity, episode, mentions, community, has_episode, has_member,
+- `sibyl_auth/auth`: users, organizations, sessions, audit_logs, projects, etc.
+- `sibyl_content/content`: crawl_sources, crawled_documents, document_chunks.
+- `org_<uuid_hex>/graph`: entity, episode, mentions, community, has_episode, has_member,
   next_episode tables.
 
 The import reports `Auth restored: N rows across K tables`,
@@ -388,11 +399,11 @@ Cross-check those against the archive's manifest counts (`migrate check` output)
 
 ---
 
-## Phase 9 — Verify (carefully)
+## Phase 9: Verify (carefully)
 
 **Do not trust `sibyld migrate verify` alone on legacy archives.** It reports false-positive
 `missing imported episode: <legacy_id>` errors because the importer rekeys episodes to native
-Surreal record IDs (`episode:<random>`) while preserving the legacy ID in the `uuid` field — and the
+Surreal record IDs (`episode:<random>`) while preserving the legacy ID in the `uuid` field, and the
 verifier looks them up by record id. The aggregate counts in its output ARE accurate; the
 per-episode spot-check is broken.
 
@@ -431,7 +442,7 @@ migration is sound regardless of what `migrate verify`'s exit code says.
 
 ---
 
-## Phase 10 — Unblock dev
+## Phase 10: Unblock dev
 
 `run-surreal-dev.sh`'s `surreal_runtime_data_detected()` checks for
 `.moon/cache/surreal-dev/sibyl.db/CURRENT` or `IDENTITY`. After a successful import both files
@@ -449,15 +460,15 @@ API is back up.
 Safe to remove immediately:
 
 - `sibyl-mig-falkordb`, `sibyl-mig-postgres` containers (`podman rm -f`).
-- The v0.6.0 worktree (`git worktree remove --force ~/.sibyl-worktrees/v0.6.0-export` from the main
-  checkout).
+- The v0.6.0 and v0.10.0 worktrees (`git worktree remove --force ~/.sibyl-worktrees/v0.6.0-export`
+  and `... ~/.sibyl-worktrees/v0.10.0-import` from the main checkout).
 - Any `0001-fix-…FalkorDB-volume…patch` file in the working dir if it predates the FalkorDB removal
   commit (`efbd8de8`).
 
 Keep for at least a few days as rollback:
 
-- `~/sibyl-legacy-backup/*.tar` — volume snapshots.
-- `/tmp/sibyl-migration.tar.gz` — the archive.
+- `~/sibyl-legacy-backup/*.tar`: the volume snapshots.
+- `/tmp/sibyl-migration.tar.gz`: the archive.
 - The four legacy podman volumes (`sibyl_falkordb`, `sibyl_falkordb_data`, `sibyl_postgres`,
   `sibyl_postgres_data`).
 
@@ -473,5 +484,5 @@ feels right.
 - Legacy guard implementation: `tools/dev/run-surreal-dev.sh` (`warn_if_legacy_setup_detected`,
   `surreal_runtime_data_detected`, `docker_legacy_setup_detected`)
 - Export command source: `apps/api/src/sibyl/cli/migrate.py` (at commit `290b824b`)
-- Import command source: `apps/api/src/sibyl/cli/migrate.py` (current branch — has `--source-type` /
-  `--target-mode`)
+- Import command source: `apps/api/src/sibyl/cli/migrate.py` (at tag `v0.10.0`, the last version
+  with the `legacy-archive` on-ramp; removed in `903a738d`)

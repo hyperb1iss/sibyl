@@ -184,24 +184,20 @@ sibyl entity list --type pattern --category security
 sibyl show ptrn_a1b2c3d4e5f6
 ```
 
-### Create Entity (Capture Learning)
+### Capture a Learning (use remember, not entity create)
+
+New knowledge goes through `sibyl remember`, which preserves verbatim provenance before graph
+projection. `entity create` is generic CRUD for structural records, not the capture path.
 
 ```bash
-# Episode for a debugging insight
-sibyl entity create \
-  --type episode \
-  --name "Redis connection pool exhaustion fix" \
-  --content "When using Redis with high concurrency, pool size must match concurrent operations. Pool=10 with 20 concurrent requests causes exhaustion. Solution: pool >= max_concurrent * 1.5" \
-  --category debugging \
-  --languages python
+# Debugging insight with its fix
+sibyl remember "Redis connection pool exhaustion fix" \
+  "Pool=10 with 20 concurrent requests causes exhaustion. Solution: pool >= max_concurrent * 1.5" \
+  --kind error_pattern
 
-# Pattern for a reusable approach
-sibyl entity create \
-  --type pattern \
-  --name "Exponential backoff with jitter" \
-  --content "delay = min(max_delay, base_delay * 2^attempt) + random(0, jitter)" \
-  --category resilience \
-  --languages python,typescript
+# Reusable approach
+sibyl remember "Exponential backoff with jitter" \
+  "delay = min(max_delay, base_delay * 2^attempt) + random(0, jitter)" --kind procedure
 ```
 
 ### Related Entities
@@ -213,7 +209,7 @@ sibyl entity related ptrn_a1b2c3d4e5f6
 ### Delete Entity
 
 ```bash
-# Deletes immediately — there is no confirmation prompt
+# Deletes immediately: there is no confirmation prompt
 sibyl entity delete epsd_a1b2c3d4e5f6
 ```
 

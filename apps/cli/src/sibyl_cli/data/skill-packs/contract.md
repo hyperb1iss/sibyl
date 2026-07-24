@@ -35,7 +35,7 @@ agent instructions. Human and operator surfaces live outside this compact contra
 
 ## Small enums
 
-- Intents: `build`, `plan`, `review`, `debug`, `general`.
+- Intents: `build`, `plan`, `ideate`, `research`, `review`, `debug`, `decide`, `learn`, `general`.
 - Kinds: `episode`, `decision`, `procedure`, `error_pattern`, `rule`, `plan`, `idea`, `claim`,
   `artifact`, `session`, `note`.
 - Scopes: `private`, `project`, `team`, `org`. Scope policy still gates every read, write, and
@@ -58,8 +58,8 @@ Useful write flags:
    receipts, task transitions, correction actions, and conflict handling.
 3. Raw memory is law. New knowledge goes through `sibyl remember`, even when the hidden `add` alias
    would work. This preserves verbatim provenance before graph projection.
-4. Feedback must be material. Positive citation means the memory shaped the result. `--misled`
-   means it shaped the result incorrectly. Mere exposure earns neither signal.
+4. Feedback must be material. Positive citation means the memory shaped the result. `--misled` means
+   it shaped the result incorrectly. Mere exposure earns neither signal.
 5. Trust receipts, not narration. A write is complete only when its mutation receipt says it was
    applied. On `not_found` or revision conflict, re-list or inspect current state before deciding;
    never blind-retry a stale mutation.
