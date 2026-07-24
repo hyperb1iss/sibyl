@@ -2,6 +2,9 @@
 
 Epic lifecycle management. Epics are feature groups that organize related tasks within a project.
 
+::: warning Deprecated An epic is just a task with subtasks. Prefer `sibyl task` and group children
+with `sibyl task create --epic <id>`. These commands keep working as sugar over the task tree. :::
+
 ## Epic States
 
 ```

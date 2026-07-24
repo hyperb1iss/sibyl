@@ -15,10 +15,12 @@ sibyl archive show <capture_id>
 
 ### `sibyl archive list`
 
-List archived raw captures for the current organization.
+List archived raw captures for the current organization. Page through results with `--limit` / `-n`
+(default 20) and `--offset` (skip the first N results).
 
 ```bash
 sibyl archive list --limit 20
+sibyl archive list --limit 20 --offset 20
 sibyl archive list --type pattern
 sibyl archive list --surface cli
 ```

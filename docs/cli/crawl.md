@@ -249,7 +249,7 @@ sibyl crawl documents show <document_id> [options]
 ### Example
 
 ```bash
-sibyl graph-search "proto config" --docs-only
+sibyl context "proto config" --json
 # note the document_id in result metadata
 sibyl crawl documents show 22d4cf79-8561-4be0-8067-da8673e3439d
 ```

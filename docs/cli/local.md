@@ -1,7 +1,7 @@
 # local
 
-Manage a local Sibyl instance (Docker-based). `local` runs the full Sibyl stack — API, worker, web
-UI, and SurrealDB — in Docker with batteries included: first run prompts for API keys, generates
+Manage a local Sibyl instance (Docker-based). `local` runs the full Sibyl stack (API, worker, web
+UI, and SurrealDB) in Docker with batteries included: first run prompts for API keys, generates
 secrets, writes a compose file under `~/.sibyl/local`, and opens the web UI.
 
 The top-level [`sibyl up`](#local-start) and [`sibyl down`](#local-stop) commands are aliases of

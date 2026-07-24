@@ -16,10 +16,13 @@ A context contains:
 
 - `sibyl context <goal>` - Compile a context pack for an agent
 - `sibyl config context` - Show current CLI context
+- `sibyl config context pack` - Compile a context pack via the config group
 - `sibyl config context list` - List all contexts
 - `sibyl config context show` - Show context details
 - `sibyl config context create` - Create a context
 - `sibyl config context use` - Set active context
+- `sibyl config context link` - Pin a directory tree to a context
+- `sibyl config context unlink` - Remove a directory's context pin
 - `sibyl config context update` - Update a context
 - `sibyl config context delete` - Delete a context
 - `sibyl config context clear` - Clear active context
@@ -98,6 +101,23 @@ sibyl context <goal> [options]
 | `--budget`  |       | (none)   | Approximate Markdown token budget                |
 | `--json`    | `-j`  | false    | JSON output                                      |
 
+### Raw-Memory Filters
+
+These flags switch recall to verbatim raw memory and narrow which raw imports qualify:
+
+| Option              | Default   | Description                                          |
+| ------------------- | --------- | ---------------------------------------------------- |
+| `--raw`             | false     | Recall verbatim raw memories                         |
+| `--diary`           | false     | Recall a private agent diary                         |
+| `--scope`           | `private` | Memory scope: `private`, `project`, `team`, or `org` |
+| `--scope-key`       | (none)    | Project/team/shared scope key                        |
+| `--participant`     | (none)    | Filter raw imports by participant                    |
+| `--label`           | (none)    | Filter raw imports by adapter label                  |
+| `--thread`          | (none)    | Filter raw imports by thread                         |
+| `--occurred-after`  | (none)    | Filter raw imports after an ISO timestamp            |
+| `--occurred-before` | (none)    | Filter raw imports before an ISO timestamp           |
+| `--as-of`           | (none)    | Filter raw memory by validity timestamp              |
+
 ### Examples
 
 ```bash
@@ -110,6 +130,53 @@ sibyl context "debug the auth refresh bug" --intent debug
 # Deep search with a wider item budget
 sibyl context "how synthesis verification works" \
   --layer deep_search --limit 40
+
+# Verbatim raw memories from a team scope, time-bounded
+sibyl context "auth outage timeline" \
+  --raw --scope team --scope-key platform --occurred-after 2026-07-01
+```
+
+---
+
+## config context pack
+
+Compile a precise context pack for an agent from the config group. Same compiler as `sibyl context`,
+with pack-tuning flags and a wider intent list.
+
+### Synopsis
+
+```bash
+sibyl config context pack <goal> [options]
+```
+
+### Arguments
+
+| Argument | Required | Description             |
+| -------- | -------- | ----------------------- |
+| `goal`   | Yes      | Agent goal or user task |
+
+### Options
+
+| Option            | Short | Default  | Description                                                                  |
+| ----------------- | ----- | -------- | ---------------------------------------------------------------------------- |
+| `--intent`        | `-i`  | `build`  | `build`, `plan`, `ideate`, `research`, `debug`, `decide`, `learn`, `general` |
+| `--layer`         |       | `recall` | `wake`, `recall`, or `deep_search`                                           |
+| `--domain`        | `-d`  | (none)   | Domain/category to bias retrieval                                            |
+| `--project`       | `-p`  | (auto)   | Project ID to scope context                                                  |
+| `--agent`         |       | (none)   | Agent diary identity to include                                              |
+| `--all`           | `-a`  | false    | Use all accessible projects                                                  |
+| `--limit`         | `-l`  | 24       | Maximum total context items (1-50)                                           |
+| `--related`       |       | on       | Include one-hop related graph context                                        |
+| `--related-limit` |       | 3        | Related items per context item (0-5)                                         |
+| `--markdown`      | `-m`  | false    | Output compact Markdown for agent injection                                  |
+| `--audit`         |       | false    | Include full retrieval metadata                                              |
+| `--budget`        |       | (none)   | Approximate Markdown token budget                                            |
+| `--json`          | `-j`  | false    | JSON output                                                                  |
+
+### Example
+
+```bash
+sibyl config context pack "plan the retrieval refactor" --intent plan --markdown
 ```
 
 ---
@@ -282,6 +349,62 @@ Output:
 ```
 Switched to context 'prod'
   Server: https://sibyl.example.com
+```
+
+---
+
+## config context link
+
+Pin a directory tree to a context so commands run there route to its server. Unlike
+`sibyl project link`, this binds only the context (server/org), not a project, so new repositories
+under the tree route to the right server before they are linked to a specific project.
+
+### Synopsis
+
+```bash
+sibyl config context link <name> [options]
+```
+
+### Arguments
+
+| Argument | Required | Description                           |
+| -------- | -------- | ------------------------------------- |
+| `name`   | Yes      | Context name to pin to this directory |
+
+### Options
+
+| Option   | Short | Default | Description    |
+| -------- | ----- | ------- | -------------- |
+| `--path` | `-p`  | (cwd)   | Directory path |
+
+### Example
+
+```bash
+cd ~/work && sibyl config context link work
+```
+
+---
+
+## config context unlink
+
+Remove the context pin from a directory. Any project link on the directory is kept.
+
+### Synopsis
+
+```bash
+sibyl config context unlink [options]
+```
+
+### Options
+
+| Option   | Short | Default | Description    |
+| -------- | ----- | ------- | -------------- |
+| `--path` | `-p`  | (cwd)   | Directory path |
+
+### Example
+
+```bash
+sibyl config context unlink --path ~/work
 ```
 
 ---

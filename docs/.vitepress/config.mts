@@ -20,6 +20,8 @@ export default defineConfig({
         '_archive/**',
         'research/**',
         'testing/PERMISSION_TEST_STRATEGY.md',
+        'SCREENSHOTS_NEEDED.md',
+        'design/quality-gates-ai-agents.md',
     ],
 
     head: [
@@ -191,6 +193,7 @@ export default defineConfig({
                         { text: 'init', link: '/cli/init' },
                         { text: 'auth', link: '/cli/auth' },
                         { text: 'org', link: '/cli/org' },
+                        { text: 'team', link: '/cli/team' },
                         { text: 'context', link: '/cli/context' },
                         { text: 'doctor', link: '/cli/doctor' },
                         { text: 'service', link: '/cli/service' },

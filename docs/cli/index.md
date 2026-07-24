@@ -52,6 +52,7 @@ Capture knowledge and recall it back into agent context.
 | [`sibyl brief`](./brief.md)            | One-shot lean context brief for a subagent          |
 | [`sibyl remember`](./remember.md)      | Remember a decision, plan, idea, claim, or learning |
 | [`sibyl reflect`](./reflect.md)        | Reflect raw notes into reviewable memory candidates |
+| `sibyl cite`                           | Record citation or misleading-usage feedback        |
 | [`sibyl capture`](./capture.md)        | Quick capture with an auto-derived title            |
 | [`sibyl note`](./remember.md)          | Add a task note or capture a free note memory       |
 | [`sibyl correct`](./memory.md)         | Inspect or correct source memory                    |
@@ -66,11 +67,11 @@ Capture knowledge and recall it back into agent context.
 
 Plan and run tasks, epics, and projects.
 
-| Command                         | Description                     |
-| ------------------------------- | ------------------------------- |
-| [`sibyl task`](./task-list.md)  | Task lifecycle management       |
-| [`sibyl epic`](./epic.md)       | Epic (feature group) management |
-| [`sibyl project`](./project.md) | Project management              |
+| Command                         | Description                                               |
+| ------------------------------- | --------------------------------------------------------- |
+| [`sibyl task`](./task-list.md)  | Task lifecycle management                                 |
+| [`sibyl epic`](./epic.md)       | Deprecated sugar over the task tree; prefer `task --epic` |
+| [`sibyl project`](./project.md) | Project management                                        |
 
 ### Sources and synthesis
 
@@ -93,7 +94,7 @@ Review, promote, share, and audit memory.
 | [`sibyl admin memory inspect`](./memory.md)       | Inspect a memory source and its audit trail |
 | [`sibyl admin memory import-status`](./memory.md) | Inspect a source import receipt             |
 | [`sibyl admin memory promote`](./memory.md)       | Preview or auto-review candidate promotion  |
-| [`sibyl admin memory share`](./memory.md)         | Preview memory sharing across scopes        |
+| [`sibyl admin memory share`](./memory.md)         | Preview or apply memory sharing             |
 | [`sibyl admin memory space`](./memory.md)         | Memory-space inspection and preview         |
 | [`sibyl admin memory review`](./memory.md)        | Reflection review queue and dream-cycle     |
 | [`sibyl pending-writes`](./pending-writes.md)     | Inspect and replay locally buffered writes  |
@@ -109,6 +110,7 @@ Auth, organizations, configuration, and operations.
 | `sibyl logout`                  | Clear stored auth credentials                        |
 | `sibyl whoami`                  | Check auth status for the active context             |
 | [`sibyl org`](./org.md)         | Organizations and member management                  |
+| [`sibyl team`](./team.md)       | Teams, membership, and team project access           |
 | `sibyl config context`          | Server/org/project context bundles (see above)       |
 | [`sibyl init`](./init.md)       | Create a local or remote context for first-run setup |
 | `sibyl config`                  | Manage CLI configuration                             |

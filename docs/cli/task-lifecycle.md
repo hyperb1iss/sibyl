@@ -14,6 +14,13 @@ backlog -> todo -> doing -> review -> done
 done/any -> archived
 ```
 
+## Optimistic Concurrency
+
+Every state-transition verb (`start`, `block`, `unblock`, `review`, `complete`, `update`, `archive`)
+accepts `--expected-revision <n>`. When set, the command is rejected if the task's current revision
+no longer matches, so concurrent agents working the same task fail fast instead of clobbering each
+other's changes. Read the current revision from `sibyl task show <task_id> --json`.
+
 ---
 
 ## task show
@@ -80,10 +87,11 @@ sibyl task start <task_id> [options]
 
 ### Options
 
-| Option       | Short | Description           |
-| ------------ | ----- | --------------------- |
-| `--assignee` | `-a`  | Assign to this person |
-| `--json`     | `-j`  | JSON output           |
+| Option                | Short | Description                  |
+| --------------------- | ----- | ---------------------------- |
+| `--assignee`          | `-a`  | Assign to this person        |
+| `--expected-revision` |       | Reject a stale task revision |
+| `--json`              | `-j`  | JSON output                  |
 
 ### Example
 
@@ -133,9 +141,10 @@ sibyl task block <task_id> --reason <reason> [options]
 
 ### Options
 
-| Option   | Short | Description |
-| -------- | ----- | ----------- |
-| `--json` | `-j`  | JSON output |
+| Option                | Short | Description                  |
+| --------------------- | ----- | ---------------------------- |
+| `--expected-revision` |       | Reject a stale task revision |
+| `--json`              | `-j`  | JSON output                  |
 
 ### Example
 
@@ -172,9 +181,10 @@ sibyl task unblock <task_id> [options]
 
 ### Options
 
-| Option   | Short | Description |
-| -------- | ----- | ----------- |
-| `--json` | `-j`  | JSON output |
+| Option                | Short | Description                  |
+| --------------------- | ----- | ---------------------------- |
+| `--expected-revision` |       | Reject a stale task revision |
+| `--json`              | `-j`  | JSON output                  |
 
 ### Example
 
@@ -202,11 +212,12 @@ sibyl task review <task_id> [options]
 
 ### Options
 
-| Option      | Short | Description                 |
-| ----------- | ----- | --------------------------- |
-| `--pr`      |       | Pull request URL            |
-| `--commits` | `-c`  | Comma-separated commit SHAs |
-| `--json`    | `-j`  | JSON output                 |
+| Option                | Short | Description                  |
+| --------------------- | ----- | ---------------------------- |
+| `--pr`                |       | Pull request URL             |
+| `--commits`           | `-c`  | Comma-separated commit SHAs  |
+| `--expected-revision` |       | Reject a stale task revision |
+| `--json`              | `-j`  | JSON output                  |
 
 ### Example
 
@@ -242,14 +253,16 @@ sibyl task complete <task_id> [options]
 
 ### Options
 
-| Option                   | Short | Default | Description                                       |
-| ------------------------ | ----- | ------- | ------------------------------------------------- |
-| `--hours`                | `-h`  | (none)  | Actual hours spent                                |
-| `--learnings` / `--note` | `-l`  | (none)  | Key learnings (creates an episode)                |
-| `--learnings-file`       |       | (none)  | Read learnings from a file                        |
-| `--max-size`             |       | 1048576 | Maximum learnings file size in bytes              |
-| `--follow-symlinks`      |       | false   | Allow `--learnings-file` to read through symlinks |
-| `--json`                 | `-j`  | false   | JSON output                                       |
+| Option                   | Short | Default | Description                                                 |
+| ------------------------ | ----- | ------- | ----------------------------------------------------------- |
+| `--hours`                | `-h`  | (none)  | Actual hours spent                                          |
+| `--learnings` / `--note` | `-l`  | (none)  | Key learnings (creates an episode)                          |
+| `--learnings-file`       |       | (none)  | Read learnings from a file                                  |
+| `--max-size`             |       | 1048576 | Maximum learnings file size in bytes                        |
+| `--follow-symlinks`      |       | false   | Allow `--learnings-file` to read through symlinks           |
+| `--cited`                |       | (none)  | Comma-separated context/search IDs that informed completion |
+| `--expected-revision`    |       | (none)  | Reject a stale task revision                                |
+| `--json`                 | `-j`  | false   | JSON output                                                 |
 
 ### Basic Completion
 
@@ -302,6 +315,15 @@ For longer write-ups, read learnings from a file instead of an inline string:
 sibyl task complete task_abc123 --hours 6.5 --learnings-file ./task-notes.md
 ```
 
+### With Citations
+
+Credit the memories that materially informed the completion. IDs come from `sibyl context` or search
+results:
+
+```bash
+sibyl task complete task_abc123 --cited "mem_abc123,mem_def456"
+```
+
 ---
 
 ## task archive
@@ -317,12 +339,13 @@ sibyl task archive --stdin [options]
 
 ### Options
 
-| Option     | Short | Description                           |
-| ---------- | ----- | ------------------------------------- |
-| `--reason` | `-r`  | Archive reason                        |
-| `--yes`    | `-y`  | Skip confirmation (required for bulk) |
-| `--stdin`  |       | Read task IDs from stdin              |
-| `--json`   | `-j`  | JSON output                           |
+| Option                | Short | Description                           |
+| --------------------- | ----- | ------------------------------------- |
+| `--reason`            | `-r`  | Archive reason                        |
+| `--yes`               | `-y`  | Skip confirmation (required for bulk) |
+| `--stdin`             |       | Read task IDs from stdin              |
+| `--expected-revision` |       | Reject a stale task revision          |
+| `--json`              | `-j`  | JSON output                           |
 
 ### Single Task
 
@@ -362,21 +385,22 @@ sibyl task update <task_id> [options]
 
 ### Options
 
-| Option          | Short | Description                                        |
-| --------------- | ----- | -------------------------------------------------- |
-| `--status`      | `-s`  | Status: todo, doing, blocked, review, done         |
-| `--priority`    | `-p`  | Priority: critical, high, medium, low, someday     |
-| `--complexity`  |       | Complexity: trivial, simple, medium, complex, epic |
-| `--title`       |       | Task title                                         |
-| `--description` | `-d`  | Task description/content                           |
-| `--assignee`    | `-a`  | Assignee                                           |
-| `--epic`        | `-e`  | Epic ID to group under                             |
-| `--feature`     | `-f`  | Feature area                                       |
-| `--tags`        |       | Comma-separated tags (replaces existing)           |
-| `--tech`        |       | Comma-separated technologies (replaces existing)   |
-| `--add-dep`     |       | Comma-separated task IDs to add as dependencies    |
-| `--remove-dep`  |       | Comma-separated task IDs to remove as dependencies |
-| `--json`        | `-j`  | JSON output                                        |
+| Option                | Short | Description                                        |
+| --------------------- | ----- | -------------------------------------------------- |
+| `--status`            | `-s`  | Status: todo, doing, blocked, review, done         |
+| `--priority`          | `-p`  | Priority: critical, high, medium, low, someday     |
+| `--complexity`        |       | Complexity: trivial, simple, medium, complex, epic |
+| `--title`             |       | Task title                                         |
+| `--description`       | `-d`  | Task description/content                           |
+| `--assignee`          | `-a`  | Assignee                                           |
+| `--epic`              | `-e`  | Epic ID to group under                             |
+| `--feature`           | `-f`  | Feature area                                       |
+| `--tags`              |       | Comma-separated tags (replaces existing)           |
+| `--tech`              |       | Comma-separated technologies (replaces existing)   |
+| `--add-dep`           |       | Comma-separated task IDs to add as dependencies    |
+| `--remove-dep`        |       | Comma-separated task IDs to remove as dependencies |
+| `--expected-revision` |       | Reject a stale task revision                       |
+| `--json`              | `-j`  | JSON output                                        |
 
 To archive a task, use [`task archive`](#task-archive) rather than `task update --status`.
 
@@ -525,4 +549,3 @@ sibyl task complete task_abc123 \
 - [`sibyl task list`](./task-list.md) - List tasks
 - [`sibyl task create`](./task-create.md) - Create new task
 - [`sibyl context`](./context.md) - Recall a context pack before starting a task
-- [`sibyl context`](./context.md) - Find tasks semantically

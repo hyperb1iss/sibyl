@@ -23,7 +23,7 @@ Content is read from stdin when the positional argument is omitted.
 | Option           | Short | Default              | Description                                                                   |
 | ---------------- | ----- | -------------------- | ----------------------------------------------------------------------------- |
 | `--title`        | `-t`  | `Session reflection` | Source/session title                                                          |
-| `--intent`       | `-i`  | `general`            | Intent: build, plan, review, debug, general                                   |
+| `--intent`       | `-i`  | `general`            | Intent: build, plan, ideate, research, review, debug, decide, learn, general  |
 | `--domain`       | `-d`  | (none)               | Domain/category                                                               |
 | `--project`      | `-p`  | (auto)               | Project ID                                                                    |
 | `--all-projects` |       | false                | Do not auto-scope to the linked project                                       |
@@ -33,6 +33,7 @@ Content is read from stdin when the positional argument is omitted.
 | `--persist`      |       | false                | Persist candidates into the graph                                             |
 | `--source`       |       | on                   | When persisting, also store the raw notes as a session memory (`--no-source`) |
 | `--review`       |       | false                | Store persisted output in the raw review queue instead of graph promotion     |
+| `--cited`        |       | (none)               | Comma-separated context/search IDs that informed this reflection              |
 | `--limit`        | `-l`  | 12                   | Maximum candidates (1-25)                                                     |
 | `--json`         | `-j`  | false                | Output as JSON                                                                |
 

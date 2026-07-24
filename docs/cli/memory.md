@@ -246,8 +246,8 @@ sibyl admin memory promote cand_abc123 --auto \
 
 ## memory-share
 
-Preview memory sharing without enabling share writes. `memory-share` reports what sharing one or
-more raw memories into another scope would entail. It is preview-only: it never enables a share.
+Preview or apply promotion-backed memory sharing. `memory-share` reports what sharing one or more
+raw memories into another scope would entail; add `--apply` to perform the sharing writes.
 
 ### Synopsis
 
@@ -265,6 +265,7 @@ sibyl admin memory share <source_ids>... [options]
 
 | Option            | Short | Description                             |
 | ----------------- | ----- | --------------------------------------- |
+| `--apply`         |       | Apply sharing writes                    |
 | `--preview`       |       | Preview without sharing                 |
 | `--target-scope`  |       | Intended target scope                   |
 | `--target-key`    |       | Target scope key                        |
@@ -273,11 +274,16 @@ sibyl admin memory share <source_ids>... [options]
 | `--all-projects`  |       | Do not auto-scope to the linked project |
 | `--json`          | `-j`  | Output as JSON                          |
 
-### Example
+### Examples
 
 ```bash
+# Preview what sharing would entail
 sibyl admin memory share mem_abc123 mem_def456 \
   --target-scope shared --preview
+
+# Apply the sharing writes
+sibyl admin memory share mem_abc123 mem_def456 \
+  --target-scope shared --apply
 ```
 
 ---

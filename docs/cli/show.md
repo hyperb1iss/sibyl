@@ -2,7 +2,7 @@
 
 Show full content for a graph entity or raw memory ID.
 
-Use this after `sibyl context`, `sibyl context`, or any command that prints an ID. The command
+Use this after `sibyl context`, `sibyl search`, or any command that prints an ID. The command
 accepts graph entity IDs, raw memory IDs, and `raw_memory:<id>` references.
 
 ## Synopsis
