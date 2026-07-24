@@ -2567,7 +2567,7 @@ class TestSurrealContentHelpers:
         assert "id AS record_id, uuid" in vector_query
         assert "embedding," not in vector_query
         assert "search::highlight('<mark>', '</mark>', 0) AS title_snippet" in fulltext_query
-        assert "search::highlight('<mark>', '</mark>', 1) AS content_snippet" in fulltext_query
+        assert "search::highlight('<mark>', '</mark>', 2) AS content_snippet" in fulltext_query
         assert "embedding <|8, 40|> $query_embedding" in vector_query
         assert vector_params["query_embedding"] == [1.0, 0.0]
         assert all(memory.score > 0 for memory in memories)
@@ -2809,8 +2809,11 @@ class TestSurrealContentHelpers:
                 },
             )
         ]
-        fulltext_query, _fulltext_params = fake_client.calls[0]
-        assert "title @0@ $search_query OR raw_content @1@ $search_query" in fulltext_query
+        fulltext_query, fulltext_params = fake_client.calls[0]
+        assert "title @0@ $ft_term0" in fulltext_query
+        assert "raw_content @" in fulltext_query
+        assert fulltext_params["ft_term0"] == "surrealdb"
+        assert fulltext_params["ft_term1"] == "graph"
 
     @pytest.mark.asyncio
     async def test_recall_raw_memory_falls_back_when_embedding_provider_setup_fails(
@@ -3034,8 +3037,10 @@ class TestSurrealContentHelpers:
         assert memories[0].score > memories[1].score
         fulltext_query, fulltext_params = fake_client.calls[0]
         fallback_query, fallback_params = fake_client.calls[1]
-        assert "raw_content @1@ $search_query" in fulltext_query
-        assert "raw_content @1@ $search_query" not in fallback_query
+        assert "raw_content @" in fulltext_query
+        assert "$ft_term0" in fulltext_query
+        assert "raw_content @" not in fallback_query
+        assert "$ft_term0" not in fallback_query
         assert fulltext_params["agent_id"] == "nova"
         assert fallback_params["agent_id"] == "nova"
 

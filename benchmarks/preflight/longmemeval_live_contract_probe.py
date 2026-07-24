@@ -218,8 +218,13 @@ def _source_semantics() -> dict[str, Any]:
         "api_search_graph_function": {
             "path": str(graph_source.relative_to(ROOT)),
             "line": graph_start,
-            "uses_fulltext_scores": "search::score" in graph_search_surface
-            and "@0@" in graph_search_surface,
+            "uses_fulltext_scores": (
+                "search::score" in graph_search_surface and "@0@" in graph_search_surface
+            )
+            or (
+                "build_match_disjunction" in graph_search_surface
+                and "match.score_expr" in graph_search_surface
+            ),
             "uses_knn_vector": "name_embedding <|" in graph_search_surface,
             "uses_embedding_provider": "embed_texts" in graph_search_surface,
         },

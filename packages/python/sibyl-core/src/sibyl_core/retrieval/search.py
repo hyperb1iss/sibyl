@@ -19,7 +19,10 @@ from sibyl_core.auth.memory_policy import (
     authorize_memory_read,
     memory_scope_policy_key,
 )
-from sibyl_core.backends.surreal.fulltext import build_fulltext_query
+from sibyl_core.backends.surreal.fulltext import (
+    build_fulltext_terms,
+    build_match_disjunction,
+)
 from sibyl_core.backends.surreal.records import SurrealQueryError, query_error
 from sibyl_core.config import core_config
 from sibyl_core.embeddings.providers import EmbeddingMetadata, EmbeddingProvider
@@ -909,36 +912,29 @@ async def _node_fulltext_candidates(
     search_filter: SearchFilter,
     limit: int,
 ) -> list[RetrievalCandidate]:
-    search_query = build_fulltext_query(plan.query)
-    if not search_query:
+    match = build_match_disjunction(
+        ["name", "summary", "description", "content"],
+        build_fulltext_terms(plan.query),
+    )
+    if match is None:
         return []
     filter_clauses, filter_params = _node_filter_clause(search_filter)
     rows = await _execute_query_records(
         client,
-        """
+        f"""
         SELECT *,
-               math::max([
-                   search::score(0),
-                   search::score(1),
-                   search::score(2),
-                   search::score(3)
-               ]) AS score
+               {match.score_expr} AS score
         FROM entity
         WHERE """
         + _where_clause(["group_id = $group_id", *filter_clauses])
-        + """
-          AND (
-              name @0@ $search_query
-              OR summary @1@ $search_query
-              OR description @2@ $search_query
-              OR content @3@ $search_query
-          )
+        + f"""
+          AND {match.where_clause}
         ORDER BY score DESC, created_at DESC, uuid DESC
         LIMIT $limit;
         """,
         group_id=plan.organization_id,
-        search_query=search_query,
         limit=max(int(limit), 1),
+        **match.params,
         **filter_params,
     )
     return [
@@ -960,22 +956,22 @@ async def _episode_fulltext_candidates(
 ) -> list[RetrievalCandidate]:
     if search_filter.project_ids:
         return []
-    search_query = build_fulltext_query(plan.query)
-    if not search_query:
+    match = build_match_disjunction(["content"], build_fulltext_terms(plan.query))
+    if match is None:
         return []
     rows = await _execute_query_records(
         client,
-        """
-        SELECT *, search::score(0) AS score
+        f"""
+        SELECT *, {match.score_expr} AS score
         FROM episode
         WHERE group_id = $group_id
-          AND content @0@ $search_query
+          AND {match.where_clause}
         ORDER BY score DESC, created_at DESC, uuid DESC
         LIMIT $limit;
         """,
         group_id=plan.organization_id,
-        search_query=search_query,
         limit=max(int(limit), 1),
+        **match.params,
     )
     return [
         _candidate_from_episode_record(
@@ -994,27 +990,27 @@ async def _edge_fulltext_candidates(
     search_filter: SearchFilter,
     limit: int,
 ) -> list[RetrievalCandidate]:
-    search_query = build_fulltext_query(plan.query)
-    if not search_query:
+    match = build_match_disjunction(["fact"], build_fulltext_terms(plan.query))
+    if match is None:
         return []
     result_limit = max(int(limit), 1)
     match_limit = max(result_limit * EDGE_FULLTEXT_MATCH_HEADROOM, EDGE_FULLTEXT_MIN_MATCH_LIMIT)
     match_clauses, match_params = _edge_match_filter_clause(search_filter)
     match_rows = await _execute_query_records(
         client,
-        """
-        SELECT uuid, created_at, search::score(0) AS score
+        f"""
+        SELECT uuid, created_at, {match.score_expr} AS score
         FROM relates_to
         WHERE """
         + _where_clause(["group_id = $group_id", *match_clauses])
-        + """
-          AND fact @0@ $search_query
+        + f"""
+          AND {match.where_clause}
         ORDER BY score DESC, created_at DESC, uuid DESC
         LIMIT $match_limit;
         """,
         group_id=plan.organization_id,
-        search_query=search_query,
         match_limit=match_limit,
+        **match.params,
         **match_params,
     )
     match_scores: dict[str, float] = {}

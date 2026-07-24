@@ -16,7 +16,11 @@ from uuid import uuid4
 import structlog
 
 from sibyl_core.backends.surreal import SurrealContentClient
-from sibyl_core.backends.surreal.fulltext import build_fulltext_query
+from sibyl_core.backends.surreal.fulltext import (
+    build_fulltext_query,
+    build_fulltext_terms,
+    build_match_disjunction,
+)
 from sibyl_core.config import settings
 from sibyl_core.embeddings.providers import (
     DeterministicEmbeddingProvider,
@@ -2182,18 +2186,24 @@ async def _recall_raw_memory_fulltext(
     as_of: datetime | None,
     limit: int,
 ) -> list[RawMemory]:
+    match = build_match_disjunction(["title", "raw_content"], build_fulltext_terms(query))
+    if match is None:
+        return []
+    # Highlights reference one match operator each; pin them to the first
+    # term's operator per field, so snippets mark the leading salient term.
+    term_count = len(match.params)
     rows = await with_timeout(
         _select_many_raw(
             client,
             f"SELECT {_RAW_MEMORY_RECALL_FIELDS}, "
-            "math::max([search::score(0), search::score(1)]) AS score, "
+            f"{match.score_expr} AS score, "
             "search::highlight('<mark>', '</mark>', 0) AS title_snippet, "
-            "search::highlight('<mark>', '</mark>', 1) AS content_snippet "
+            f"search::highlight('<mark>', '</mark>', {term_count}) AS content_snippet "
             f"FROM raw_captures WHERE {where_clause} "
-            "AND (title @0@ $search_query OR raw_content @1@ $search_query) "
+            f"AND {match.where_clause} "
             "ORDER BY score DESC, captured_at DESC LIMIT $limit;",
             **params,
-            search_query=query,
+            **match.params,
             limit=limit * _LIFECYCLE_FILTER_OVERFETCH_FACTOR,
         ),
         timeout_seconds=_DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS,

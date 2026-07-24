@@ -15,7 +15,11 @@ import structlog
 from surrealdb import RecordID
 
 from sibyl_core.backends.surreal.connection import _is_transient_connection_error
-from sibyl_core.backends.surreal.fulltext import build_fulltext_query
+from sibyl_core.backends.surreal.fulltext import (
+    build_fulltext_query,
+    build_fulltext_terms,
+    build_match_disjunction,
+)
 from sibyl_core.backends.surreal.records import raise_on_error
 from sibyl_core.backends.surreal.schema import bootstrap_schema
 from sibyl_core.config import settings
@@ -601,38 +605,34 @@ class EntityManager:
         entity_types: Sequence[EntityType] | None,
         limit: int,
     ) -> list[tuple[Entity, float]]:
+        match = build_match_disjunction(
+            ["name", "summary", "description", "content"],
+            build_fulltext_terms(search_query),
+        )
+        if match is None:
+            return []
         type_values = [entity_type.value for entity_type in entity_types or ()]
         type_clause = "AND entity_type IN $entity_types" if type_values else ""
         rows = normalize_records(
             await self._client.execute_query(
                 "SELECT "
                 + _ENTITY_SEARCH_FIELDS
-                + """,
-                       math::max([
-                           search::score(0),
-                           search::score(1),
-                           search::score(2),
-                           search::score(3)
-                       ]) AS score
+                + f""",
+                       {match.score_expr} AS score
                 FROM entity
                 WHERE group_id = $group_id
                 """
                 + type_clause
-                + """
-                  AND (
-                      name @0@ $search_query
-                      OR summary @1@ $search_query
-                      OR description @2@ $search_query
-                      OR content @3@ $search_query
-                  )
+                + f"""
+                  AND {match.where_clause}
                 ORDER BY score DESC, created_at DESC, uuid DESC
                 LIMIT $limit;
                 """,
                 group_id=self._group_id,
-                search_query=search_query,
                 entity_types=type_values,
                 limit=limit,
                 _query_label="entity.search.fulltext",
+                **match.params,
             )
         )
         fulltext_results: list[tuple[Entity, float]] = []
