@@ -80,7 +80,7 @@ backend:
 
   image:
     repository: ghcr.io/hyperb1iss/sibyl-api
-    tag: "1.1.1"
+    tag: "1.1.2"
     pullPolicy: Always
 
   # Reference pre-created secrets
@@ -144,7 +144,7 @@ frontend:
 
   image:
     repository: ghcr.io/hyperb1iss/sibyl-web
-    tag: "1.1.1"
+    tag: "1.1.2"
 
   apiUrl: "http://sibyl-backend:3334/api"
 
@@ -466,8 +466,8 @@ helm repo update
 helm upgrade sibyl sibyl/sibyl \
   -n sibyl \
   -f values-production.yaml \
-  --set backend.image.tag=1.1.1 \
-  --set frontend.image.tag=1.1.1
+  --set backend.image.tag=1.1.2 \
+  --set frontend.image.tag=1.1.2
 
 # Rollback if needed
 helm rollback sibyl -n sibyl
