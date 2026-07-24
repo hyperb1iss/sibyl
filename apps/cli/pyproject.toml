@@ -42,7 +42,7 @@ dependencies = [
     # WebSocket (logs --follow)
     "websockets>=16.1.1",
     # Shared library
-    "sibyl-core==1.1.0",
+    "sibyl-core==1.1.1",
 ]
 
 # =============================================================================
