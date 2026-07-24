@@ -19,7 +19,12 @@ moon run core:test        # Pytest
 
 - **models/:** Domain entities (Task, Project, Epic, Source, reflection, synthesis)
 - **backends/surreal/:** SurrealDB driver, schema, and per-table operations
-- **retrieval/:** Native context-pack retrieval, compatibility search, fusion, dedup
+- **retrieval/:** Native context-pack retrieval, query planning, refinement, reranking, hybrid
+  retrieval, fusion, dedup
+- **memory_pipeline/:** Canonical memory-pipeline contracts and policies (capture, lifecycle,
+  quality, retrieval)
+- **projection/:** Projection helpers for native memory graph enrichment
+- **audit/:** Audit event helpers shared by Sibyl runtimes
 - **ai/:** Native LLM substrate, model registry, providers, validation
 - **embeddings/:** Embedding provider clients
 - **services/:** Memory loop, reflection, synthesis, autonomy, source adapters, and the
@@ -43,6 +48,14 @@ src/sibyl_core/
 │   └── responses.py      # API response models
 ├── backends/surreal/     # Driver, schema, table operations
 ├── retrieval/            # Native context retrieval, fusion (RRF), dedup
+│   ├── query_planning.py # Structured query planning for the accurate retrieval lane
+│   ├── refinement.py     # Deterministic feedback queries for iterative retrieval
+│   ├── reranking.py      # Cross-encoder reranking of query-document pairs
+│   ├── hybrid.py         # Hybrid retrieval combining vector search and graph traversal
+│   └── operational_evidence.py # Composition of raw and distilled operational evidence
+├── memory_pipeline/      # Memory-pipeline contracts: capture, lifecycle, quality, retrieval
+├── projection/           # Projection helpers for native memory graph enrichment
+├── audit/                # Audit event helpers shared by runtimes
 ├── ai/
 │   ├── registry.py       # Curated LLM/embedding model registry
 │   ├── providers.py      # PydanticAI provider model factory
@@ -166,7 +179,7 @@ RelationshipType.BELONGS_TO, DEPENDS_ON, BLOCKS, REFERENCES
 ## Configuration
 
 ```bash
-SIBYL_LLM_PROVIDER=anthropic          # anthropic | openai
+SIBYL_LLM_PROVIDER=anthropic          # anthropic | openai | gemini
 SIBYL_LLM_MODEL=claude-haiku-4-5
 SIBYL_LLM_TEMPERATURE=0
 SIBYL_LLM_MAX_TOKENS=2048

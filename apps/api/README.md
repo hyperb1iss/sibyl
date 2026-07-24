@@ -25,10 +25,10 @@ moon run api:typecheck    # Type check
 
 - **MCP Server:** eleven tools for search, context packs, exploration, capture, memory, synthesis,
   and management
-- **REST API:** 29 routers covering entities, tasks, projects, memory, synthesis, sources, auth,
-  settings, and admin
-- **Auth System:** JWT sessions, GitHub OAuth, API keys with scopes, MCP OAuth clients, RBAC,
-  SMTP-backed password reset
+- **REST API:** 31 routers covering entities, tasks, teams, projects, experience, memory, synthesis,
+  sources, auth, settings, and admin
+- **Auth System:** JWT sessions, GitHub OAuth, OIDC enterprise SSO (see `docs/admin/`), API keys
+  with scopes, MCP OAuth clients, RBAC, SMTP-backed password reset
 - **Background Jobs:** in-process local runtime or Redis-backed `arq` workers, including the nightly
   reflection dream-cycle
 - **WebSocket:** Real-time updates for entities and tasks
@@ -46,18 +46,18 @@ Sibyl API (port 3334)
 
 ## Key Directories
 
-| Directory       | Purpose                                                                                          |
-| --------------- | ------------------------------------------------------------------------------------------------ |
-| `api/routes/`   | REST endpoints (29 routers: tasks, entities, memory, synthesis, crawler, ingestion, auth, admin) |
-| `ai/`           | DB-backed LLM settings, model validation routes, runtime invalidation                            |
-| `auth/`         | JWT, sessions, API keys, RBAC, MCP OAuth clients                                                 |
-| `persistence/`  | SurrealDB-native runtimes for auth, content, graph, and backups                                  |
-| `crawler/`      | Documentation crawl and ingestion pipeline                                                       |
-| `ingestion/`    | Source import pipeline (mailbox and other adapters)                                              |
-| `jobs/`         | Background jobs (reflection dream-cycle, crawl, backups)                                         |
-| `coordination/` | Local and Redis brokers for jobs, locks, and pub/sub                                             |
-| `email/`        | Transactional email delivery                                                                     |
-| `generator/`    | Synthetic test-data generation                                                                   |
+| Directory       | Purpose                                                                                                             |
+| --------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `api/routes/`   | REST endpoints (31 routers: tasks, entities, teams, experience, memory, synthesis, crawler, ingestion, auth, admin) |
+| `ai/`           | DB-backed LLM settings, model validation routes, runtime invalidation                                               |
+| `auth/`         | JWT, sessions, API keys, RBAC, MCP OAuth clients                                                                    |
+| `persistence/`  | SurrealDB-native runtimes for auth, content, graph, and backups                                                     |
+| `crawler/`      | Documentation crawl and ingestion pipeline                                                                          |
+| `ingestion/`    | Source import pipeline (mailbox and other adapters)                                                                 |
+| `jobs/`         | Background jobs (reflection dream-cycle, crawl, backups)                                                            |
+| `coordination/` | Local and Redis brokers for jobs, locks, and pub/sub                                                                |
+| `email/`        | Transactional email delivery                                                                                        |
+| `generator/`    | Synthetic test-data generation                                                                                      |
 
 ## Configuration
 
@@ -85,7 +85,7 @@ SIBYL_SURREAL_USERNAME=root
 SIBYL_SURREAL_PASSWORD=root
 SIBYL_REDIS_HOST=127.0.0.1            # only needed for Redis coordination
 SIBYL_REDIS_PORT=6381
-SIBYL_LLM_PROVIDER=anthropic          # anthropic | openai
+SIBYL_LLM_PROVIDER=anthropic          # anthropic | openai | gemini
 SIBYL_LLM_MODEL=claude-haiku-4-5
 SIBYL_LLM_CRAWLER_MODEL=claude-haiku-4-5
 SIBYL_LLM_SYNTHESIS_MODEL=claude-sonnet-4-6

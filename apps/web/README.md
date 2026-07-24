@@ -25,8 +25,8 @@ moon run web:generate-types
 - **Search:** Semantic search with filters
 - **Memory:** The memory workspace, raw captures, source imports, and synthesis
 - **Sources:** Documentation crawl management and document inspection
-- **Settings:** Organizations, teams, API keys, security, language models, embeddings, backups, and
-  preferences
+- **Settings:** Organizations, teams, API keys, security, language models, embeddings, backups,
+  audit log, system settings, and preferences
 
 ## Stack
 
@@ -43,12 +43,16 @@ src/
 ├── app/
 │   ├── (main)/       # Authenticated routes
 │   │   ├── tasks/    # Task workflow
+│   │   ├── projects/ # Project management
+│   │   ├── epics/    # Epic planning
+│   │   ├── entities/ # Entity browser
 │   │   ├── graph/    # Visualization
 │   │   ├── memory/   # Memory workspace, captures, imports, synthesize
+│   │   ├── archive/  # Raw capture archive
 │   │   ├── search/   # Semantic search
 │   │   ├── sources/  # Crawl sources and documents
-│   │   └── settings/ # Org, AI, security, backups, preferences
-│   ├── login/        # Authentication
+│   │   └── settings/ # Org, teams, AI, security, backups, audit log, system, preferences
+│   ├── login/        # Authentication (incl. OIDC SSO providers)
 │   └── setup/        # First-run setup
 ├── components/
 │   ├── graph/        # Force-directed visualization

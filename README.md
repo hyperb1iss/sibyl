@@ -60,15 +60,15 @@ yours.**
 
 ## ✦ What You Get
 
-| Capability                       | What It Means                                                                                                           |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| 🔮 **Compounding Context**       | Every session adds to the graph instead of starting over. The longer you use it, the sharper it gets                    |
+| Capability                       | What It Means                                                                                                                   |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| 🔮 **Compounding Context**       | Every session adds to the graph instead of starting over. The longer you use it, the sharper it gets                            |
 | 🪄 **The Memory Loop**           | `context → act → remember → reflect` runs through the CLI, skills, MCP, and hooks. Agents wake with context and leave it behind |
-| 🎯 **Semantic Search**           | Find knowledge by meaning. "Authentication patterns" surfaces OAuth notes even when "OAuth" isn't in the text           |
-| 🦋 **Task Workflow**             | Plan with epics and tasks, then track execution across sessions and teammates in one place                              |
-| 🧪 **Source-Grounded Synthesis** | Draft verified documents from your own memory with citation, freshness, and gap checks                                  |
-| 🌊 **Source Ingestion**          | Crawl docs, import sources (mailboxes, archives), and ingest agent transcripts into scoped raw content and graph memory |
-| 💎 **Scoped Multi-Tenancy**      | Namespace-isolated graphs, org-scoped content/auth records, and policy gates for personal, project, and team scopes     |
+| 🎯 **Semantic Search**           | Find knowledge by meaning. "Authentication patterns" surfaces OAuth notes even when "OAuth" isn't in the text                   |
+| 🦋 **Task Workflow**             | Plan with epics and tasks, then track execution across sessions and teammates in one place                                      |
+| 🧪 **Source-Grounded Synthesis** | Draft verified documents from your own memory with citation, freshness, and gap checks                                          |
+| 🌊 **Source Ingestion**          | Crawl docs, import sources (mailboxes, archives), and ingest agent transcripts into scoped raw content and graph memory         |
+| 💎 **Scoped Multi-Tenancy**      | Namespace-isolated graphs, org-scoped content/auth records, and policy gates for personal, project, and team scopes             |
 
 <table>
   <tr>
@@ -134,8 +134,8 @@ context ──▶ act ──▶ remember ──▶ reflect
    └────────────────────────────────┘
 ```
 
-1. **Context** before you start. `sibyl context "<goal>"` returns a compact context
-   pack: active work, decisions, plans, constraints, and recent lessons, scoped to your project.
+1. **Context** before you start. `sibyl context "<goal>"` returns a compact context pack: active
+   work, decisions, plans, constraints, and recent lessons, scoped to your project.
 2. **Act** with that context in hand.
 3. **Remember** durable knowledge as you learn it. `sibyl remember` stores decisions, plans, ideas,
    claims, procedures, and gotchas so the next session does not rediscover them.
@@ -209,9 +209,9 @@ command, it speaks Sibyl" real. The loader teaches the memory loop, every CLI ve
 that actually exist on your machine, context-pack usage, and the error patterns to avoid, so agents
 stop guessing the interface from stale training data.
 
-**Skills are not Claude-only.** `sibyl skill install` drops the loader into every agent skill root it
-knows: Claude Code (`~/.claude/skills`), Codex (`~/.codex/skills`), and the generic `~/.agents/skills`
-convention. The same workflow follows you across tools.
+**Skills are not Claude-only.** `sibyl skill install` drops the loader into every agent skill root
+it knows: Claude Code (`~/.claude/skills`), Codex (`~/.codex/skills`), and the generic
+`~/.agents/skills` convention. The same workflow follows you across tools.
 
 ```bash
 sibyl skill install        # Install the tiny /sibyl loader into every agent skill root
@@ -221,14 +221,15 @@ moon run hooks:install     # Optional Claude Code context hooks for repo dev
 ```
 
 The installed skill is deliberately tiny: a loader that points the agent back at the CLI. The real
-skill packs (`core`, `quick`, `workflows`, `examples`, `migration`) are **built into the CLI** and
-served on demand with `sibyl skill get`, each matched to the exact Sibyl version on the machine.
-Upgrade the CLI and the guidance upgrades with it. No stale skill copies drift out of sync, and a
-subagent on any host gets the same source of truth from one command.
+skill packs (`contract`, `core`, `quick`, `workflows`, `examples`, `migration`) are **built into the
+CLI** and served on demand with `sibyl skill get`, each matched to the exact Sibyl version on the
+machine. Upgrade the CLI and the guidance upgrades with it. No stale skill copies drift out of sync,
+and a subagent on any host gets the same source of truth from one command.
 
 Hooks are separate and, for now, specific to Claude Code: a single **SessionStart** hook prints a
 compact wake-up bundle with active tasks and relevant memory, then the agent owns invoking the
-`sibyl` skill and calling `sibyl context` for working context. See [Skills & Hooks](docs/guide/skills.md).
+`sibyl` skill and calling `sibyl context` for working context. See
+[Skills & Hooks](docs/guide/skills.md).
 
 ## MCP Integration
 
@@ -317,16 +318,18 @@ honest side-by-side positioning: [LongMemEval](docs/testing/longmemeval.md) ·
 # Docker Compose
 sibyl docker init && sibyl docker up
 
-# Kubernetes (Helm)
-helm install sibyl ./charts/sibyl \
+# Kubernetes (Helm): published chart repo, or ./charts/sibyl from source
+helm repo add sibyl https://raw.githubusercontent.com/hyperb1iss/sibyl/gh-pages
+helm install sibyl sibyl/sibyl \
   --set backend.existingSecret=sibyl-secrets \
   --set backend.surreal.existingSecret=sibyl-surreal \
   --set ingress.enabled=true
 ```
 
 Authentication supports JWT sessions for the web UI, scoped API keys for programmatic access
-(`sibyl auth api-key create --scopes mcp,api:read`), GitHub OAuth, and self-service password reset
-over SMTP. MCP endpoints enforce Bearer auth when a JWT secret is set. Detailed guides:
+(`sibyl auth api-key create --scopes mcp,api:read`), GitHub OAuth, enterprise OIDC/SSO with exact
+provider-to-organization binding, and self-service password reset over SMTP. MCP endpoints enforce
+Bearer auth when a JWT secret is set. Detailed guides:
 [Docker Compose](docs/deployment/docker-compose.md) · [Kubernetes](docs/deployment/kubernetes.md) ·
 [Environment](docs/deployment/environment.md) · [Auth reference](docs/api/).
 
@@ -357,9 +360,9 @@ automatic, but they are not required.
 
 ### How does it compare to Mem0 / LangMem / similar?
 
-Sibyl is **self-hosted and open source**, so you own your data. It includes a full **task workflow
-system**, not just memory, a **web UI** for humans, not just APIs for machines, and it keeps
-knowledge, tasks, and docs connected in one graph instead of scattering them across tools. On
+Sibyl is **self-hosted and open source**, so you own your data. Where most memory products stop at
+recall, Sibyl ships a full task workflow system and a web UI for the humans on your team, and it
+keeps knowledge, tasks, and docs connected in one graph instead of scattering them across tools. On
 retrieval quality, see the [Benchmarks](#-benchmarks) above.
 
 ### What LLM APIs do I need?
@@ -383,7 +386,7 @@ Past 1.0, the work is making memory more automatic and the sources deeper:
 - **Memory Workspace OS:** automatic memory decisions become visible, explainable, correctable, and
   undoable from one product surface.
 - **Correction propagation:** edits, redactions, and rollbacks flow forward into future recall and
-  synthesis, not just the record you touched.
+  synthesis instead of stopping at the record you touched.
 - **Broader ingestion:** source import reaches past mailbox-style archives into more corpora, scoped
   and provenance-tracked.
 

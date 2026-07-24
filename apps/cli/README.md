@@ -44,22 +44,24 @@ sibyl task complete <id> --learnings "..."   # Complete with learnings
 
 ### Memory loop
 
-| Command    | Purpose                                                                |
-| ---------- | ---------------------------------------------------------------------- |
-| `context`  | Recall agent-ready working context                                     |
-| `remember` | Store raw-first durable knowledge                                      |
-| `correct`  | Inspect or correct source memory                                       |
-| `reflect`  | Distill raw notes into reviewable memory candidates                    |
-| `capture`  | Fast verbatim capture from arguments or stdin                          |
-| `note`     | Add a task note or capture a free note memory                          |
-| `session`  | Package wake-up context for a session or agent                         |
+| Command    | Purpose                                                   |
+| ---------- | --------------------------------------------------------- |
+| `context`  | Recall agent-ready working context                        |
+| `brief`    | One-shot lean context brief for a subagent                |
+| `remember` | Store raw-first durable knowledge                         |
+| `correct`  | Inspect or correct source memory                          |
+| `reflect`  | Distill raw notes into reviewable memory candidates       |
+| `cite`     | Record citation or misleading-usage feedback for memories |
+| `capture`  | Fast verbatim capture from arguments or stdin             |
+| `note`     | Add a task note or capture a free note memory             |
+| `session`  | Package wake-up context for a session or agent            |
 
 ### Work tracking
 
 | Command   | Purpose                                                                                                    |
 | --------- | ---------------------------------------------------------------------------------------------------------- |
 | `task`    | Task lifecycle (list, show, create, start, block, unblock, review, complete, archive, update, note, notes) |
-| `epic`    | Epic management (list, show, create, start, complete, archive, update, roadmap, tasks)                     |
+| `epic`    | Deprecated sugar over the task tree; prefer `task create --epic <id>`                                      |
 | `project` | Projects and directory linking (list, show, create, progress, link, relink, unlink, links)                 |
 | `entity`  | Generic entity CRUD and bi-temporal history                                                                |
 | `explore` | Graph navigation (related, traverse, dependencies, path)                                                   |
@@ -77,15 +79,15 @@ sibyl task complete <id> --learnings "..."   # Complete with learnings
 
 ### Memory governance
 
-| Command                        | Purpose                                                   |
-| ------------------------------ | --------------------------------------------------------- |
-| `admin memory audit`           | Inspect memory audit receipts                             |
-| `admin memory inspect`         | Inspect a memory source and its audit trail               |
-| `admin memory import-status`   | Inspect source import receipts                            |
-| `admin memory promote`         | Preview or auto-review reflection candidate promotion     |
-| `admin memory share`           | Preview memory sharing before enabling share writes       |
-| `admin memory space`           | Memory-space inspection and agent-recall preview          |
-| `admin memory review`          | Reflection review queue automation (drain, dream, status) |
+| Command                      | Purpose                                                   |
+| ---------------------------- | --------------------------------------------------------- |
+| `admin memory audit`         | Inspect memory audit receipts                             |
+| `admin memory inspect`       | Inspect a memory source and its audit trail               |
+| `admin memory import-status` | Inspect source import receipts                            |
+| `admin memory promote`       | Preview or auto-review reflection candidate promotion     |
+| `admin memory share`         | Preview or apply promotion-backed memory sharing          |
+| `admin memory space`         | Memory-space inspection and agent-recall preview          |
+| `admin memory review`        | Reflection review queue automation (drain, dream, status) |
 
 ### System
 
@@ -93,8 +95,10 @@ sibyl task complete <id> --learnings "..."   # Complete with learnings
 | ---------------- | ------------------------------------------------- |
 | `show`           | Resolve any entity or raw memory by ID            |
 | `health`         | Check API connectivity and health                 |
+| `doctor`         | Diagnose CLI/server/auth/agent setup              |
 | `auth`           | Login, logout, tokens, API keys                   |
 | `org`            | Organization switching and member management      |
+| `team`           | Teams, membership, and team project access        |
 | `config context` | Multi-server context bundles                      |
 | `config`         | CLI configuration                                 |
 | `serve` / `stop` | Start or stop the local embedded daemon           |
@@ -155,10 +159,9 @@ candidates should still be saved.
 
 ## Context System
 
-A **context** is a named bundle of `{server_url, org, default_project}` with its own
-stored credentials, so you can keep separate Sibyl instances (e.g. a personal server
-and a local work server) cleanly isolated — memories only ever go to the server of the
-context in effect.
+A **context** is a named bundle of `{server_url, org, default_project}` with its own stored
+credentials, so you can keep separate Sibyl instances (e.g. a personal server and a local work
+server) cleanly isolated: memories only ever go to the server of the context in effect.
 
 ```bash
 # Define two servers as contexts (auth login creates + activates one in one step)
@@ -175,8 +178,8 @@ SIBYL_CONTEXT=work sibyl task list
 
 ### Routing by directory
 
-You don't have to switch contexts by hand. Pin a directory to a context and every
-command run there routes to that context's server automatically:
+You don't have to switch contexts by hand. Pin a directory to a context and every command run there
+routes to that context's server automatically:
 
 ```bash
 # Pin a whole tree to a context (new repos under it route correctly before linking)
@@ -189,14 +192,13 @@ sibyl config context --quick  # shows the effective context and directory pin
 sibyl project links   # lists every directory pin (project and/or context)
 ```
 
-This is what keeps work memory out of your personal instance: a work repo is pinned to
-the work context, so `sibyl remember` there writes only to the work server. The only way
-to reach another instance from a pinned directory is to ask for it explicitly with
-`--context` or `SIBYL_CONTEXT`.
+This is what keeps work memory out of your personal instance: a work repo is pinned to the work
+context, so `sibyl remember` there writes only to the work server. The only way to reach another
+instance from a pinned directory is to ask for it explicitly with `--context` or `SIBYL_CONTEXT`.
 
-**Resolution priority:** `--context` flag → `SIBYL_CONTEXT` env → directory pin →
-active context → legacy `server.url`. Pins are stored in `~/.sibyl/config.toml` and are
-git-worktree aware (a worktree inherits its main repo's pin).
+**Resolution priority:** `--context` flag → `SIBYL_CONTEXT` env → directory pin → active context →
+legacy `server.url`. Pins are stored in `~/.sibyl/config.toml` and are git-worktree aware (a
+worktree inherits its main repo's pin).
 
 ## Development
 
