@@ -333,7 +333,7 @@ def test_surreal_container_snapshot_uses_pid_namespace_toolbox(tmp_path: Path) -
 set -euo pipefail
 case "${1:-}" in
   inspect)
-    printf 'name=/sibyl-surrealdb pid=123 running=true oom=false restarting=false started=now image=surrealdb/surrealdb:v3.2.3\\n'
+    printf 'name=/sibyl-surrealdb pid=123 running=true oom=false restarting=false started=now image=surrealdb/surrealdb:v3.2.0\\n'
     ;;
   stats)
     printf 'name=sibyl-surrealdb cpu=101.00%% mem=2GiB / 8GiB net=0B / 0B block=0B / 0B pids=85\\n'

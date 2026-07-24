@@ -59,7 +59,7 @@ runs only the data services; the API and web apps run natively for hot reload.
 ```yaml
 services:
   surrealdb:
-    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.3}
+    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.0}
     container_name: ${COMPOSE_PROJECT_NAME:-sibyl}-surrealdb
     command:
       [
@@ -87,7 +87,7 @@ services:
     command: ["valkey-server", "--save", "", "--appendonly", "no"]
 ```
 
-The default image is pinned to SurrealDB server `v3.2.3` for reproducible local and CI behavior.
+The default image is pinned to SurrealDB server `v3.2.0` for reproducible local and CI behavior.
 Override `SIBYL_SURREAL_IMAGE` when rehearsing a newer server patch. The root compose stores
 SurrealDB data in a bind mount under `.moon/cache/surreal-dev` so it survives container churn and is
 easy to inspect.
@@ -211,7 +211,7 @@ services:
         condition: service_healthy
 
   surrealdb:
-    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.3}
+    image: ${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.0}
     ports:
       - "${SIBYL_SURREAL_PORT:-8000}:8000"
     volumes:

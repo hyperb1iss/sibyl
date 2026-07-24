@@ -9,7 +9,7 @@ Four containers, managed by a `sibyl.service` systemd unit:
 
 | Container   | Source                                              | Purpose                        |
 | ----------- | --------------------------------------------------- | ------------------------------ |
-| `surrealdb` | `surrealdb/surrealdb:v3.2.3`                        | Graph, content, and auth store |
+| `surrealdb` | `surrealdb/surrealdb:v3.2.0`                        | Graph, content, and auth store |
 | `backend`   | `ghcr.io/hyperb1iss/sibyl-api`                      | FastAPI + MCP server           |
 | `frontend`  | `ghcr.io/hyperb1iss/sibyl-web`                      | Next.js web UI                 |
 | `caddy`     | built from `caddy:2` with the Cloudflare DNS module | TLS + path routing             |
