@@ -7,7 +7,7 @@ global:
 surrealdb:
   replicaCount: 1
   image:
-    tag: v3.2.0
+    tag: v3.2.3
   args:
     - start
   surrealdb:
