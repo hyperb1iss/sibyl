@@ -39,7 +39,7 @@
     "iconoir-react": "^7.11.1",
     "lucide-react": "^1.25.0",
     "motion": "^12.42.2",
-    "next": "16.2.9",
+    "next": "16.2.11",
     "next-dynenv": "^4.0.6",
     "react": "19.2.7",
     "react-dom": "19.2.7",
