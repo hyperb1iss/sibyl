@@ -33,7 +33,7 @@ classifiers = [
 
 dependencies = [
     # Sibyl Core Library with daemon/runtime extras
-    "sibyl-core[crawler,embeddings,graph,graphrag,llm]==1.0.2",
+    "sibyl-core[crawler,embeddings,graph,graphrag,llm]==1.1.0",
     # Core Framework
     "fastapi>=0.139.0",
     "mcp>=1.27.2",
