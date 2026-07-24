@@ -13,6 +13,7 @@ allowBuilds:
 
 overrides:
   postcss: ^8.5.15
+  sharp: 0.35.0
 
 # Skip minimumReleaseAge re-verification of the committed lockfile. The
 # 24h cooldown still applies during fresh resolution (and lockfile diffs
