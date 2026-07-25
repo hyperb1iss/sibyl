@@ -167,10 +167,24 @@ def main() -> int:
         action="store_true",
         help="Verify every pin matches VERSION; exit non-zero on drift.",
     )
+    parser.add_argument(
+        "--list-targets",
+        action="store_true",
+        help="Print every path a version bump may touch, one per line.",
+    )
     args = parser.parse_args()
 
     version = _read_version()
     targets = _targets(version)
+
+    if args.list_targets:
+        # The release workflow diffs its own bump commit against this list, so
+        # a bump can never smuggle in a source change. Deriving it here keeps
+        # that guard honest when a new pin is added.
+        emit(VERSION_FILE.relative_to(REPO_ROOT).as_posix())
+        for rel_path in sorted(targets):
+            emit(rel_path)
+        return 0
 
     drifted: list[str] = []
     written: list[str] = []
