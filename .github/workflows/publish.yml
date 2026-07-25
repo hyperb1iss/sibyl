@@ -113,7 +113,14 @@ jobs:
   # =========================================================================
   python:
     name: "◆ Python: Build & Publish"
-    needs: rc-gate
+    # PyPI is the one irreversible destination here: a version number can
+    # never be reused. It therefore waits on the image scan even though it
+    # ships no image, so a CVE cannot leave an unrecallable release behind.
+    # Dry runs still build, because the scan is skipped rather than passed.
+    needs: [rc-gate, docker-security]
+    if: >-
+      ${{ !cancelled() && needs.rc-gate.result == 'success' && (inputs.dry_run ||
+      needs.docker-security.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -429,7 +436,7 @@ jobs:
   # =========================================================================
   docker-merge:
     name: "► Docker: Merge ${{ matrix.image }}"
-    needs: docker-build
+    needs: docker-security
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -507,11 +514,17 @@ jobs:
           echo "Shared manifest digest: $ghcr_digest"
 
   # =========================================================================
-  # Docker: generate SBOMs and fail on high/critical CVEs before signing
+  # Docker: generate SBOMs and fail on high/critical CVEs before any tag exists
+  #
+  # This scans the digests docker-build pushed, which carry no tag yet, so a
+  # CVE stops the release before anything is pullable. Scanning after the
+  # merge published the tag left two releases half-shipped: the image was
+  # already public and immutable, and only signing and Helm were withheld.
+  # Every architecture is scanned; the merged manifest resolved to one.
   # =========================================================================
   docker-security:
-    name: "◆ Docker: Security ${{ matrix.image }}"
-    needs: docker-merge
+    name: "◆ Docker: Security ${{ matrix.image }} (${{ matrix.platform }})"
+    needs: docker-build
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -522,12 +535,30 @@ jobs:
       fail-fast: false
       matrix:
         image: [api, web]
+        platform: [amd64, arm64]
     steps:
       - name: "△ Extract version from tag"
         id: version
         run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
         env:
           TAG: ${{ inputs.tag }}
+
+      - name: "◇ Download digest"
+        uses: actions/download-artifact@v7
+        with:
+          name: digests-${{ matrix.image }}-${{ matrix.platform }}
+          path: /tmp/digests
+
+      - name: "△ Resolve pushed digest"
+        id: digest
+        run: |
+          set -euo pipefail
+          digest="$(find /tmp/digests -type f -printf '%f\n' | head -1)"
+          if [[ -z "$digest" ]]; then
+            echo "::error::No digest artifact for ${{ matrix.image }}/${{ matrix.platform }}"
+            exit 1
+          fi
+          echo "ref=sha256:${digest}" >> "$GITHUB_OUTPUT"
 
       - name: "◇ Login to GHCR"
         uses: docker/login-action@v4
@@ -540,17 +571,23 @@ jobs:
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: >-
-            ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}:${{
-            steps.version.outputs.version }}
+            ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}@${{
+            steps.digest.outputs.ref }}
           format: cyclonedx
-          output: sibyl-${{ matrix.image }}-${{ steps.version.outputs.version }}.cdx.json
+          output:
+            sibyl-${{ matrix.image }}-${{ matrix.platform }}-${{ steps.version.outputs.version
+            }}.cdx.json
           scanners: vuln
 
       - name: "► Upload SBOM"
         uses: actions/upload-artifact@v7
         with:
-          name: sibyl-${{ matrix.image }}-${{ steps.version.outputs.version }}-sbom
-          path: sibyl-${{ matrix.image }}-${{ steps.version.outputs.version }}.cdx.json
+          name:
+            sibyl-${{ matrix.image }}-${{ matrix.platform }}-${{ steps.version.outputs.version
+            }}-sbom
+          path:
+            sibyl-${{ matrix.image }}-${{ matrix.platform }}-${{ steps.version.outputs.version
+            }}.cdx.json
           if-no-files-found: error
           retention-days: 90
 
@@ -558,8 +595,8 @@ jobs:
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: >-
-            ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}:${{
-            steps.version.outputs.version }}
+            ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}@${{
+            steps.digest.outputs.ref }}
           format: table
           exit-code: "1"
           vuln-type: os,library
@@ -571,7 +608,7 @@ jobs:
   # =========================================================================
   docker-sign:
     name: "◆ Docker: Sign ${{ matrix.image }}"
-    needs: docker-security
+    needs: docker-merge
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -187,6 +187,28 @@ jobs:
             echo "- storybook: $run_storybook"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # Catches shipped-dependency CVEs at review time. The image scan in publish
+  # only speaks once a release is already under way, which is how a HIGH
+  # postcss advisory reached two tagged releases. Scoped to --prod so it
+  # tracks what actually ships: dev-only advisories in storybook or vitepress
+  # never reach an image and must not block a merge.
+  dependency-audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup moonrepo toolchain
+        uses: moonrepo/setup-toolchain@v0.6
+        with:
+          auto-install: true
+          auto-setup: true
+          cache-version: surreal-ci-v1
+
+      - name: Audit shipped Node dependencies
+        run: pnpm audit --prod --audit-level=high
+
   static:
     name: Static Checks
     needs: changes
