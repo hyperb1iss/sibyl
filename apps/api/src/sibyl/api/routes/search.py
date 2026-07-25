@@ -275,6 +275,10 @@ async def explore(
                 detail="dependencies mode does not support project_ids",
             )
 
+        # The verified set must reach the core in every mode: the scope guard
+        # denies unstamped project rows when accessible_projects is None, so a
+        # list-mode None empties the board for members whose access was just
+        # verified above.
         if request.project_ids:
             for project_id in request.project_ids:
                 await verify_entity_project_access(
@@ -284,9 +288,7 @@ async def explore(
                     required_role=ProjectRole.VIEWER,
                     require_existing_project=True,
                 )
-            accessible_filter = (
-                set(request.project_ids) if request.mode in {"related", "traverse"} else None
-            )
+            accessible_filter = set(request.project_ids)
         elif request.project:
             await verify_entity_project_access(
                 None,
@@ -295,9 +297,7 @@ async def explore(
                 required_role=ProjectRole.VIEWER,
                 require_existing_project=True,
             )
-            accessible_filter = (
-                {request.project} if request.mode in {"related", "traverse"} else None
-            )
+            accessible_filter = {request.project}
         else:
             accessible_filter = await list_accessible_project_graph_ids(ctx)
 

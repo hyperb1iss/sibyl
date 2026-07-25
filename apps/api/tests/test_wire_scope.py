@@ -630,3 +630,66 @@ class TestGrantContractDrift:
             "read the grant directly so a missing field raises instead of "
             f"granting private scope: {offenders}"
         )
+
+
+class TestScopedTaskListWire:
+    """A member's scoped task list must return their tasks, and only theirs.
+
+    1.1.3 regression: list mode verified project access, then handed the core
+    accessible_projects=None, which the scope guard reads as "memberships
+    unresolvable" and denies every unstamped project row — an empty board for
+    the very member whose access was just verified.
+    """
+
+    def _scoped_list(self, *, project: str) -> Any:
+        from sibyl.api.routes import search as search_routes
+        from sibyl_core.auth import ProjectRole
+        from sibyl_core.models.entities import EntityType
+
+        mine = SimpleNamespace(
+            id="task_mine",
+            entity_type=EntityType.TASK,
+            name="My task",
+            description="ordinary",
+            metadata={"project_id": "proj-mine"},
+        )
+        foreign = SimpleNamespace(
+            id="task_victim",
+            entity_type=EntityType.TASK,
+            name=SECRET_NAME,
+            description=SECRET_TEXT,
+            metadata={"project_id": "proj-victim"},
+        )
+        runtime = SimpleNamespace(
+            entity_manager=SimpleNamespace(list_by_type=AsyncMock(return_value=[mine, foreign]))
+        )
+
+        with (
+            patch(
+                "sibyl.api.routes.search.verify_entity_project_access",
+                AsyncMock(return_value=ProjectRole.VIEWER),
+            ),
+            patch(
+                "sibyl_core.tools.explore.get_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            _wire(search_routes.router, OWNER_ID) as client,
+        ):
+            return client.post(
+                "/search/explore",
+                json={"mode": "list", "types": ["task"], "project": project},
+            )
+
+    def test_member_sees_their_project_tasks_in_a_scoped_list(self) -> None:
+        response = self._scoped_list(project="proj-mine")
+
+        assert response.status_code == 200
+        assert "task_mine" in response.text
+
+    def test_scoped_list_still_drops_rows_from_an_unrequested_project(self) -> None:
+        """The verified set admits exactly the named project, nothing wider."""
+        response = self._scoped_list(project="proj-mine")
+
+        assert response.status_code == 200
+        assert "task_victim" not in response.text
+        assert SECRET_NAME not in response.text
