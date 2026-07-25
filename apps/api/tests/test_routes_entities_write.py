@@ -1287,7 +1287,11 @@ async def test_create_entity_drops_scope_principal_without_authenticated_user() 
         name="Private capture",
         content="Capture this.",
         entity_type=EntityType.DECISION,
-        metadata={"memory_scope": "private", "principal_id": "victim"},
+        metadata={
+            "memory_scope": "private",
+            "principal_id": "victim",
+            "scope_key": "victim",
+        },
     )
     add_result = SimpleNamespace(success=True, id="decision_1", message="ok")
     add_mock = AsyncMock(return_value=add_result)
@@ -1309,7 +1313,11 @@ async def test_create_entity_drops_scope_principal_without_authenticated_user() 
             sync=False,
         )
 
-    assert "principal_id" not in add_mock.await_args.kwargs["metadata"]
+    # Retrieval resolves a private row's owner as principal_id or scope_key, so
+    # an unauthenticated payload must not be able to supply either one.
+    graph_metadata = add_mock.await_args.kwargs["metadata"]
+    assert "principal_id" not in graph_metadata
+    assert "scope_key" not in graph_metadata
 
 
 @pytest.mark.asyncio
