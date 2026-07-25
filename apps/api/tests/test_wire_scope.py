@@ -530,3 +530,103 @@ class TestSynthesisOverMcpGrant:
     @pytest.mark.asyncio
     async def test_full_session_still_renders_it(self) -> None:
         assert SECRET_NAME in await self._render(None)
+
+
+class TestGrantContractDrift:
+    """A context without the grant field must raise, not read as unrestricted.
+
+    Every site used to read the grant as
+    ``getattr(ctx, "api_key_memory_scope_keys", None)``. The field is declared
+    on both context dataclasses so the fallback never fired, but ``None`` is
+    not neutral downstream — the read rule treats it as an unrestricted
+    session — so a rename or a new context type that omitted the field would
+    have turned every one of those reads into a silent full-session read.
+
+    Direct attribute access makes that drift loud. This asserts the effect:
+    the drifted context raises rather than rendering the private row.
+    """
+
+    OWNER = "00000000-0000-0000-0000-0000000000aa"
+
+    class _DriftedContext:
+        """A context type that forgot to carry the grant."""
+
+        org_id = "00000000-0000-0000-0000-000000000111"
+        user_id = "00000000-0000-0000-0000-0000000000aa"
+        scopes = ("mcp",)
+        api_key_project_ids = None
+
+        def to_memory_policy_context(self, **_kwargs: Any):
+            return None
+
+    def _pack(self):
+        from sibyl_core.models.context import (
+            ContextFacet,
+            ContextItem,
+            ContextPack,
+            ContextSection,
+        )
+
+        item = ContextItem(
+            id="decision_private",
+            type="decision",
+            name=SECRET_NAME,
+            content=SECRET_TEXT,
+            score=0.9,
+            facet=ContextFacet.DECISIONS,
+            reason="seed",
+            source="graph",
+            metadata={"memory_scope": "private", "principal_id": self.OWNER},
+        )
+        return ContextPack(
+            goal="ship",
+            intent="decide",
+            query="ship",
+            domain=None,
+            project=None,
+            layer="recall",
+            total_items=1,
+            sections=[
+                ContextSection(facet=ContextFacet.DECISIONS, title="Decisions", items=[item])
+            ],
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_context_missing_the_grant_raises(self) -> None:
+        import sibyl.server as server_module
+
+        async def _context(**_kwargs: Any):
+            return self._pack()
+
+        with (
+            patch.object(
+                server_module,
+                "_require_mcp_context",
+                AsyncMock(return_value=self._DriftedContext()),
+            ),
+            patch.object(
+                server_module, "_resolve_mcp_project_scope", AsyncMock(return_value=set())
+            ),
+            patch("sibyl_core.services.synthesis.default_context_pack", _context),
+            pytest.raises(AttributeError, match="api_key_memory_scope_keys"),
+        ):
+            await server_module._synthesis_mcp_plan(goal="ship", project=None)
+
+    def test_no_site_reads_the_grant_defensively(self) -> None:
+        """The fallback is what made drift silent, so none may come back."""
+        import pathlib
+
+        import sibyl
+
+        root = pathlib.Path(sibyl.__file__).parent
+        offenders = [
+            f"{path.relative_to(root)}:{lineno}"
+            for path in root.rglob("*.py")
+            for lineno, line in enumerate(path.read_text().splitlines(), start=1)
+            if "getattr(" in line and '"api_key_memory_scope_keys"' in line
+        ]
+
+        assert offenders == [], (
+            "read the grant directly so a missing field raises instead of "
+            f"granting private scope: {offenders}"
+        )

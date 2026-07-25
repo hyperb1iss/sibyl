@@ -69,7 +69,7 @@ def _api_key_memory_scope_allowed(
     memory_scope: str,
     scope_key: str | None,
 ) -> bool:
-    allowed_scope_keys = getattr(ctx, "api_key_memory_scope_keys", None)
+    allowed_scope_keys = ctx.api_key_memory_scope_keys
     if allowed_scope_keys is None:
         return True
     if not isinstance(allowed_scope_keys, list | tuple | set | frozenset):
@@ -134,7 +134,7 @@ async def execute_search_request(
     else:
         accessible_projects = await list_accessible_project_graph_ids(ctx)
 
-    api_key_memory_scope_keys = getattr(ctx, "api_key_memory_scope_keys", None)
+    api_key_memory_scope_keys = ctx.api_key_memory_scope_keys
     include_raw_memory = bool(request.include_raw_memory and getattr(ctx, "user_id", None))
     if include_raw_memory:
         raw_accessible_projects = (
@@ -265,7 +265,7 @@ async def explore(
         from sibyl_core.tools.core import explore as core_explore
 
         group_id = str(org.id)
-        explore_scope_keys = getattr(ctx, "api_key_memory_scope_keys", None)
+        explore_scope_keys = ctx.api_key_memory_scope_keys
 
         project_ids = request.project_ids or ([request.project] if request.project else None)
 
@@ -410,7 +410,7 @@ async def temporal_query(
         organization_id=group_id,
         principal_id=str(getattr(getattr(ctx, "user", None), "id", None) or "") or None,
         accessible_projects=accessible_projects,
-        allowed_memory_scope_keys=getattr(ctx, "api_key_memory_scope_keys", None),
+        allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
     )
 
     # Convert dataclass edges to schema objects

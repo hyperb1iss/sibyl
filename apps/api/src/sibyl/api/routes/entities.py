@@ -379,7 +379,7 @@ def _raw_capture_api_key_scope_allowed(
     memory_scope: str,
     scope_key: str | None,
 ) -> bool:
-    allowed_scope_keys = getattr(ctx, "api_key_memory_scope_keys", None)
+    allowed_scope_keys = ctx.api_key_memory_scope_keys
     if allowed_scope_keys is None:
         return True
     if not isinstance(allowed_scope_keys, list | tuple | set | frozenset):
@@ -390,7 +390,7 @@ def _raw_capture_api_key_scope_allowed(
 
 
 def _api_key_delegated_scope_keys(ctx: AuthContext) -> set[str]:
-    allowed_scope_keys = getattr(ctx, "api_key_memory_scope_keys", None)
+    allowed_scope_keys = ctx.api_key_memory_scope_keys
     if not isinstance(allowed_scope_keys, list | tuple | set | frozenset):
         return set()
 
@@ -560,7 +560,7 @@ def _related_entity_visible(
 
 
 def _reader_memory_grants(ctx: AuthContext) -> set[str] | None:
-    grants = getattr(ctx, "api_key_memory_scope_keys", None)
+    grants = ctx.api_key_memory_scope_keys
     return set(grants) if grants is not None else None
 
 

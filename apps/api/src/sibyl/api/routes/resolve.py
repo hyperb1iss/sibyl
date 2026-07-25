@@ -159,7 +159,7 @@ async def _resolve_reader(ctx: AuthContext) -> tuple[str | None, set[str], set[s
         str(project_id) for project_id in await list_accessible_project_graph_ids(ctx) or set()
     }
     principal_id = str(getattr(getattr(ctx, "user", None), "id", None) or "") or None
-    grants = getattr(ctx, "api_key_memory_scope_keys", None)
+    grants = ctx.api_key_memory_scope_keys
     return principal_id, accessible_projects, set(grants) if grants is not None else None
 
 

@@ -545,7 +545,7 @@ async def _resolve_mcp_capture_links(
             organization_id=ctx.org_id,
             principal_id=ctx.user_id,
             accessible_projects=accessible_projects,
-            allowed_memory_scope_keys=getattr(ctx, "api_key_memory_scope_keys", None),
+            allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
         )
     except Exception as exc:
         log.warning("mcp_active_task_lookup_failed", project=project, error=str(exc))
@@ -890,7 +890,7 @@ async def _synthesis_mcp_plan(
         organization_id=ctx.org_id,
         principal_id=ctx.user_id,
         accessible_projects=accessible_projects,
-        allowed_memory_scope_keys=getattr(ctx, "api_key_memory_scope_keys", None),
+        allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
     )
 
 
@@ -935,7 +935,7 @@ async def _synthesis_mcp_verify(
         organization_id=ctx.org_id,
         principal_id=ctx.user_id,
         accessible_projects=accessible_projects,
-        allowed_memory_scope_keys=getattr(ctx, "api_key_memory_scope_keys", None),
+        allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
     )
 
 
@@ -1010,7 +1010,7 @@ async def _synthesis_mcp_draft(
         organization_id=ctx.org_id,
         principal_id=ctx.user_id,
         accessible_projects=accessible_projects,
-        allowed_memory_scope_keys=getattr(ctx, "api_key_memory_scope_keys", None),
+        allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
     )
     if policy_reason:
         payload["policy_reason"] = policy_reason
@@ -1720,7 +1720,7 @@ async def _manage_mcp_action(
             organization_id=ctx.org_id,
             principal_id=ctx.user_id,
             accessible_projects=accessible_projects,
-            allowed_memory_scope_keys=getattr(ctx, "api_key_memory_scope_keys", None),
+            allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
         )
         payload = _to_dict(result)
         if policy_decision is not None:
@@ -1931,7 +1931,7 @@ def _register_tools(mcp: FastMCP) -> None:
         # Get full context from authenticated MCP session
         ctx = await _require_mcp_context()
         accessible_projects = await _get_accessible_projects(ctx)
-        api_key_memory_scope_keys = getattr(ctx, "api_key_memory_scope_keys", None)
+        api_key_memory_scope_keys = ctx.api_key_memory_scope_keys
 
         result = await _search(
             query=query,
@@ -2211,7 +2211,7 @@ def _register_tools(mcp: FastMCP) -> None:
         ctx = await _require_mcp_context()
         accessible_projects = await _get_accessible_projects(ctx)
 
-        api_key_memory_scope_keys = getattr(ctx, "api_key_memory_scope_keys", None)
+        api_key_memory_scope_keys = ctx.api_key_memory_scope_keys
         result = await _explore(
             mode=mode,
             types=types,
