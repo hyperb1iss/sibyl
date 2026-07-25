@@ -1054,6 +1054,13 @@ async def _add_note(
     note_id = f"note_{uuid4()}"
     created_at = datetime.now(UTC)
 
+    # A note carries free-text body and no memory scope, so without the
+    # project its parent task is addressed by it would have neither audience
+    # channel: not scope-gated and not project-gated, readable org-wide.
+    note_metadata: dict[str, Any] = {}
+    if task_project_id := _project_id_for_policy(task):
+        note_metadata["project_id"] = task_project_id
+
     note = Note(
         id=note_id,
         name=content[:50] + ("..." if len(content) > 50 else ""),
@@ -1062,6 +1069,7 @@ async def _add_note(
         author_type=author_type,
         author_name=author_name,
         created_at=created_at,
+        metadata=note_metadata,
     )
 
     # Create in graph
