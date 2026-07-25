@@ -637,6 +637,10 @@ def stamp_memory_scope_metadata(
     }
     scope = _coerce_scope(memory_scope) if memory_scope is not None else None
     if scope is None:
+        # An unrecognized scope is kept rather than dropped: the read check
+        # denies it, while an absent scope is the fail-open case.
+        if memory_scope is not None:
+            stamped["memory_scope"] = memory_scope
         return stamped
 
     stamped["memory_scope"] = scope.value
