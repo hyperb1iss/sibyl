@@ -1099,14 +1099,21 @@ async def _compile_fallback_sections(
     organization_id: str,
     limit: int,
     search_fn: SearchFn,
+    principal_id: str | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
     audit: bool = False,
 ) -> list[ContextSection]:
+    # The degraded path answers to the same reader as the native one. Dropping
+    # the principal here only failed closed for private rows by accident, and
+    # dropping the API-key grant silently widened what a narrowed key returns.
     search_kwargs: dict[str, Any] = {
         "query": query,
         "types": None,
         "category": domain,
         "project": project,
         "accessible_projects": accessible_projects,
+        "principal_id": principal_id,
+        "allowed_memory_scope_keys": allowed_memory_scope_keys,
         "limit": limit,
         "include_content": True,
         "include_documents": True,
@@ -1234,6 +1241,8 @@ async def _default_active_work(
     organization_id: str,
     project: str,
     limit: int,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ) -> list[ContextItem]:
     from sibyl_core.models.entities import EntityType
 
@@ -1244,7 +1253,18 @@ async def _default_active_work(
         project_id=project,
         status=_ACTIVE_WORK_LOOKUP_STATUSES,
     )
-    return [_item_from_active_entity(entity) for entity in entities]
+    # Membership in the project authorizes the section, not every row inside
+    # it: a privately scoped task sitting in an accessible project reaches the
+    # pack carrying its description text unless the row is checked too.
+    return [
+        _item_from_active_entity(entity)
+        for entity in entities
+        if memory_metadata_read_allowed(
+            getattr(entity, "metadata", None),
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        )
+    ]
 
 
 def _merge_active_work(
@@ -1395,6 +1415,8 @@ async def compile_context(
                 organization_id=organization_id,
                 project=project,
                 limit=min(per_facet_limit, _ACTIVE_WORK_LOOKUP_LIMIT),
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
             )
         except Exception as exc:
             active_items = []
@@ -1417,6 +1439,8 @@ async def compile_context(
                 organization_id=organization_id,
                 limit=limit,
                 search_fn=search_fn,
+                principal_id=principal_id,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
                 audit=audit,
             ),
             limit,
