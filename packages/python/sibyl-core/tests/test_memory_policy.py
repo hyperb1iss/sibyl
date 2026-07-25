@@ -9,6 +9,8 @@ from sibyl_core.auth.memory_policy import (
     authorize_memory_reflect,
     authorize_memory_share,
     authorize_memory_write,
+    memory_metadata_read_allowed,
+    stamp_memory_scope_metadata,
 )
 from sibyl_core.auth.models import OrganizationRole
 from sibyl_core.services.surreal_content import MemoryScope
@@ -333,3 +335,82 @@ def test_disabled_mutation_scopes_have_stable_v0_7_reason(authorize) -> None:
 
     assert not decision.allowed
     assert decision.reason == "scope_not_enabled"
+
+
+def test_stamped_metadata_replaces_every_caller_supplied_owner_field() -> None:
+    stamped = stamp_memory_scope_metadata(
+        {
+            "memory_scope": "organization",
+            "principal_id": "victim",
+            "scope_key": "project_victim",
+            "note": "kept",
+        },
+        memory_scope="private",
+        scope_key=None,
+        principal_id="author",
+    )
+
+    assert stamped == {"memory_scope": "private", "principal_id": "author", "note": "kept"}
+
+
+def test_stamped_metadata_drops_owner_fields_when_no_scope_is_declared() -> None:
+    stamped = stamp_memory_scope_metadata(
+        {"principal_id": "victim", "scope_key": "project_victim", "note": "kept"},
+        memory_scope=None,
+        scope_key=None,
+        principal_id="author",
+    )
+
+    assert stamped == {"note": "kept"}
+
+
+def test_stamped_metadata_keeps_an_unrecognized_scope_so_reads_deny() -> None:
+    """A typo must not read as "no scope", which is the fail-open case."""
+    stamped = stamp_memory_scope_metadata(
+        {"memory_scope": "Private", "principal_id": "victim"},
+        memory_scope="Private",
+        scope_key=None,
+        principal_id="author",
+    )
+
+    assert stamped == {"memory_scope": "Private"}
+    assert not memory_metadata_read_allowed(stamped, principal_id="author")
+    assert not memory_metadata_read_allowed(stamped, principal_id="victim")
+
+
+def test_stamped_metadata_keeps_a_project_row_on_its_verified_key() -> None:
+    stamped = stamp_memory_scope_metadata(
+        {"scope_key": "project_victim"},
+        memory_scope="project",
+        scope_key="project_verified",
+        principal_id="author",
+    )
+
+    assert stamped == {"memory_scope": "project", "scope_key": "project_verified"}
+
+
+def test_metadata_read_is_open_only_when_no_scope_is_recorded() -> None:
+    assert memory_metadata_read_allowed({"principal_id": "victim"}, principal_id="attacker")
+    assert not memory_metadata_read_allowed(
+        {"memory_scope": "private", "principal_id": "victim"},
+        principal_id="attacker",
+    )
+    assert not memory_metadata_read_allowed(
+        {"memory_scope": "private", "scope_key": "victim"},
+        principal_id="attacker",
+    )
+    assert memory_metadata_read_allowed(
+        {"memory_scope": "private", "scope_key": "victim"},
+        principal_id="victim",
+    )
+
+
+def test_metadata_read_denies_a_private_row_without_a_private_grant() -> None:
+    metadata = {"memory_scope": "private", "principal_id": "owner"}
+
+    assert memory_metadata_read_allowed(metadata, principal_id="owner")
+    assert not memory_metadata_read_allowed(
+        metadata,
+        principal_id="owner",
+        private_scope_granted=False,
+    )
