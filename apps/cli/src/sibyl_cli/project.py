@@ -377,9 +377,9 @@ def link_project(
         try:
             project = await client.get_entity(project_id)
             project_name = project.get("name", "Unknown")
-        except SibylClientError:
+        except SibylClientError as exc:
             error(f"Project not found: {project_id}. {PROJECT_RELINK_HINT}.")
-            return
+            raise typer.Exit(1) from exc
 
         # Pin the project together with the context it lives on, so this directory
         # always routes to the right server regardless of the active context.
@@ -453,6 +453,7 @@ def relink_project(
         except (SibylClientError, ValueError) as exc:
             error(str(exc))
             info(PROJECT_RELINK_HINT)
+            raise typer.Exit(1) from exc
 
     _relink()
 

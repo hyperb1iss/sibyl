@@ -529,7 +529,7 @@ def _login_auto(
     if email or password:
         if not email or not password:
             error("Local login requires both --email and --password.")
-            return
+            raise typer.Exit(1)
         try:
             tok = _login_via_local_password(
                 api_url=api_url,
@@ -539,12 +539,12 @@ def _login_auto(
             )
         except SibylClientError as e:
             error(str(e))
-            return
+            raise typer.Exit(1) from e
         except _OAuthLoginError as e:
             error(str(e))
             if e.payload is not None:
                 print_json(e.payload)
-            return
+            raise typer.Exit(1) from e
 
         _persist_tokens(
             api_url=api_url,
@@ -578,19 +578,19 @@ def _login_auto(
     except _NoBrowserLoginPrinted as e:
         success(str(e))
         return
-    except TimeoutError:
+    except TimeoutError as e:
         error("Timed out waiting for approval")
-        return
+        raise typer.Exit(1) from e
     except httpx.HTTPStatusError as e:
         # Not supported on server -> fall through to OAuth.
         if e.response.status_code not in {404, 405}:
             error(f"Device login failed: {e}")
-            return
+            raise typer.Exit(1) from e
     except _DeviceLoginError as e:
         error(str(e))
         if e.payload is not None:
             print_json(e.payload)
-        return
+        raise typer.Exit(1) from e
     except Exception as e:
         # Best-effort fall-through to OAuth when device flow isn't available.
         info(f"Device login unavailable ({type(e).__name__}); trying OAuth login.")
@@ -617,13 +617,13 @@ def _login_auto(
     except _NoBrowserLoginPrinted as e:
         success(str(e))
         return
-    except TimeoutError:
+    except TimeoutError as e:
         error("Timed out waiting for browser login")
-        return
+        raise typer.Exit(1) from e
     except httpx.HTTPStatusError as e:
         if e.response.status_code not in {404, 405}:
             error(f"OAuth login failed: {e}")
-            return
+            raise typer.Exit(1) from e
     except _OAuthLoginError as e:
         # OAuth isn't available / misconfigured -> try local.
         if e.payload is not None:
@@ -638,6 +638,7 @@ def _login_auto(
     error(
         "No supported login methods detected for this server (need device/oauth, or provide --email/--password)."
     )
+    raise typer.Exit(1)
 
 
 def _warn_if_env_token_overrides_login() -> None:
@@ -664,7 +665,7 @@ def status_cmd() -> None:
 
     if not token:
         error("No auth token found (set one with: sibyl auth set-token <token>)")
-        return
+        raise typer.Exit(1)
 
     if expires_at is not None and time.time() >= int(expires_at):
         info(f"Stored access token is expired (server: {api_url})")
@@ -692,7 +693,7 @@ def status_cmd() -> None:
         _run()
     except SibylClientError as e:
         error(str(e))
-        return
+        raise typer.Exit(1) from e
 
     success(f"Auth is valid (server: {api_url})")
 
@@ -857,6 +858,7 @@ def local_signup_cmd(
         print_json(result)
     except SibylClientError as e:
         error(str(e))
+        raise typer.Exit(1) from e
 
 
 api_key_app = typer.Typer(help="API key management")
@@ -876,6 +878,7 @@ def api_key_list() -> None:
         print_json(result)
     except SibylClientError as e:
         error(str(e))
+        raise typer.Exit(1) from e
 
 
 @api_key_app.command("create")
@@ -934,6 +937,7 @@ def api_key_create(
         print_json(result)
     except SibylClientError as e:
         error(str(e))
+        raise typer.Exit(1) from e
 
 
 @api_key_app.command("revoke")
@@ -949,3 +953,4 @@ def api_key_revoke(api_key_id: str) -> None:
         print_json(result)
     except SibylClientError as e:
         error(str(e))
+        raise typer.Exit(1) from e
