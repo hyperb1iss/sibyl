@@ -592,3 +592,39 @@ def test_search_scope_policy_still_serves_a_verified_project_filter() -> None:
         allowed_memory_scope_keys=None,
         accessible_projects=None,
     )
+
+
+def test_search_scope_policy_wont_let_a_named_project_beat_membership() -> None:
+    """MCP takes the project straight from a tool argument.
+
+    A narrowing filter must not double as authorization, or naming someone
+    else's project reads its rows.
+    """
+    from sibyl_core.tools.search import _matches_memory_scope_policy
+
+    theirs = SimpleNamespace(metadata={"memory_scope": "project", "scope_key": "proj-theirs"})
+    mine = SimpleNamespace(metadata={"memory_scope": "project", "scope_key": "proj-mine"})
+
+    assert not _matches_memory_scope_policy(
+        theirs,
+        project="proj-theirs",
+        principal_id="reader-1",
+        allowed_memory_scope_keys=None,
+        accessible_projects={"proj-mine"},
+    )
+    assert _matches_memory_scope_policy(
+        mine,
+        project="proj-mine",
+        principal_id="reader-1",
+        allowed_memory_scope_keys=None,
+        accessible_projects={"proj-mine"},
+    )
+    # REST verifies membership itself and passes no set; the named project
+    # stands alone there.
+    assert _matches_memory_scope_policy(
+        theirs,
+        project="proj-theirs",
+        principal_id="reader-1",
+        allowed_memory_scope_keys=None,
+        accessible_projects=None,
+    )

@@ -451,12 +451,18 @@ def _matches_memory_scope_policy(
 ) -> bool:
     metadata = getattr(entity, "metadata", {}) or {}
 
-    # A named project is a narrowing filter the caller already proved access to,
-    # so it becomes the authorized set rather than a second way to say yes.
-    # Without one, membership is the only thing that authorizes a project row —
-    # an unknown set used to mean allow, which served every project-scoped row
-    # in the organization to a credential carrying no user context.
-    effective_projects = {project} if project else accessible_projects
+    # A named project narrows; membership authorizes. When the caller supplies
+    # both, the named project has to be one they hold — MCP takes the project
+    # straight from a tool argument, so without this a caller could name a
+    # project they do not belong to and read its rows. When membership is
+    # unknown the named project stands alone, which is the REST shape: that
+    # route verifies access before retrieval runs and passes no set.
+    if project:
+        if accessible_projects is not None and project not in accessible_projects:
+            return False
+        effective_projects: set[str] | None = {project}
+    else:
+        effective_projects = accessible_projects
 
     return memory_metadata_read_allowed(
         metadata,
