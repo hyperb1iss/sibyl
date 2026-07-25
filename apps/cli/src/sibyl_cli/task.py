@@ -902,6 +902,8 @@ def archive_task(
             print_json(
                 _archive_bulk_payload(results, archived, failed) if len(results) > 1 else results[0]
             )
+            if failed:
+                raise typer.Exit(1)
             return
 
         # Table output
@@ -919,6 +921,9 @@ def archive_task(
                 for result in failed_results:
                     detail = _archive_error_detail(result)
                     console.print(f"  [{CORAL}]{result['id']}[/{CORAL}] {detail}")
+
+        if failed:
+            raise typer.Exit(1)
 
     _archive()
 
