@@ -223,12 +223,58 @@ compact renderer. This is where the paper's 42.8% lives (query→slice at 0.2s),
 surviving re-architecture direction: the client-side kill (geometry reshaping) reshaped fat
 retrievals at read time; this changes what is retrieved. Design seeds from decision `0e0677006a04`:
 state-boundary slice chunking, typed note/event pools (already live at ingest), multi-stream
-retrieval, neighbor-stitch that raises exposure while **shrinking** context. Open design choice
-(§9): slices as graph entities vs a retrieval-layer view over states.
+retrieval, neighbor-stitch that raises exposure while **shrinking** context.
+
+**Design fork RESOLVED (decision `9dd8e3972f42`): slices are first-class graph entities** — new
+`EntityType` rows on the existing `entity` table, not a new table and not a retrieval-layer view. A
+view cannot be ranked: the vector and BM25 lanes are properties of an indexed row, so a view could
+only re-cut fat parents that were already selected, which is the killed geometry approach
+server-side. As rows on the existing table they inherit the HNSW, BM25, and type indexes free, and
+the schema delta is one DDL statement plus a version bump.
+
+**Stage 0/1 measured offline, 2026-07-24/25 (free, no paid calls).** Scored at official fidelity:
+the `lme_v2_small` haystack for all 451 questions is set-identical to the era-3 catalogs, so the
+oracle ran on 92 measurable questions rather than the 45-question subset.
+
+- **Straddle rate is zero** — 31,244 of 31,244 (question, phrase, carrier-state) triples land inside
+  a single slice. Slicing never cuts a gold literal.
+- **A 3-adjacent-slice window reaches the fat-state ceiling exactly**: 95.5% enterprise / 100% web,
+  versus fat 95.5% / 100%. Single-slice is 93.2% / 97.9%. Retrieving a window, not a slice, is
+  therefore load-bearing for the ceiling.
+- Slices per state ~25 (enterprise) / ~37 (web); slice chars mean ~950–1,030. The depth rule holds:
+  line-count fallback fires on 0.14% of enterprise slices and never on web.
+- **Header tax 19% enterprise / 12% web**, and on enterprise the _breadcrumb_ is the expensive half
+  (11.5%, mean 134 chars). Capping to the last two ancestors drops it to 3.9%.
+- **The selection-dilution risk is real but mis-attributed.** The pre-registered rule confirmed
+  (slice recall@10 below fat recall@10 in every arm), but the mechanism is BM25 document length, not
+  semantics — stripping the goal preamble from fat chunks barely moves them, falsifying "the goal
+  carried the query vocabulary." Dense retrieval does not suffer it: dense slices _beat_ dense fat
+  at equal payload on enterprise (0.659 vs 0.591). An unmodified BM25 arm actively poisons the
+  fusion on a sliced substrate (RRF 0.523 vs dense-alone 0.659).
+- **Therefore A2 need not precede A1**, but A1 cannot ship bare-slice index text. Two fixes inside
+  A1 make budget-matched slicing win in both domains: index-time inherited context (goal-carry lifts
+  RRF to 0.727 enterprise / 0.812 web, beating fat's 0.682 / 0.792, at zero reader-token cost
+  because it need not be rendered), and expressing the retrieval budget in **characters** rather
+  than items, since k=10 is a payload knob that must move when unit size drops ~11×.
+- Boundary rules the data argues for, all verified to preserve exposure and the zero straddle rate:
+  3-slice window; bound the ancestor prepend to ~400 chars; cap the breadcrumb at two ancestors;
+  tail-merge sub-floor leftovers; path-extract and truncate header URLs.
+- **Labelled projection, not measurement:** the dense arm used local MiniLM (384-dim, mean-pooled)
+  as a proxy for the production 1024-dim long-context embedder. Mean-pooling favours the fat arm, so
+  the proxy is conservative toward the hypothesis; only the fat-vs-slice contrast transfers.
+
+**The reservation trap.** Slices push `max_items` from 8 to ~28, and both the adapter and production
+compute the note lane as `ceil(max_items × 3/8)` — which would silently widen the reserved note lane
+from 3 slots to 11. The tuning kill established that the tuned quantity is the **absolute** note
+count, so notes must be pinned at 3. The adapter has a `typed_reservation_items` override;
+production `compose_operational_evidence` has none and must gain one. Missing this makes A1 measure
+as a notes regression and get misdiagnosed as a slice failure.
 
 - Gate `slice-substrate-gate`: on the enterprise-45/web-45 replay slices, gold-literal exposure ≥
   50% (from 32%/21%) AND state-level recall@10 ≥ 85% (from 68%) within ≤ 60K chars (target ≤ 48K);
-  then a scored 3-pass paired run vs frozen FAST+notes, GO per protocol law.
+  then a scored 3-pass paired run vs frozen FAST+notes, GO per protocol law. Because
+  `/memory/experience` makes no per-entity LLM call, a corpus rebuild is embeddings-only
+  (~$0.62–0.75/domain) and **this gate is decidable for pennies before any reader spend**.
 
 ### A2. Ranking refinements
 
@@ -387,7 +433,9 @@ Planned per this doc (flag before reversing):
 
 Open (decide during execution):
 
-- A1: slices as first-class graph entities vs retrieval-layer views over states.
+- ~~A1: slices as first-class graph entities vs retrieval-layer views over states.~~ **Resolved
+  2026-07-24 (decision `9dd8e3972f42`): first-class entities on the existing `entity` table.** See
+  §4 A1 for the reasoning and the Stage 0/1 measurements.
 - A3: server-side traversal loop vs client-exposed verbs (MCP surface implications).
 - B1: handbook regeneration trigger (graph-delta threshold vs schedule).
 - Whether B3 (re-extraction) ships in v1.2 or moves whole to v1.3.
