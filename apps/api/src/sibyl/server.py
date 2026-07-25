@@ -890,6 +890,7 @@ async def _synthesis_mcp_plan(
         organization_id=ctx.org_id,
         principal_id=ctx.user_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=getattr(ctx, "api_key_memory_scope_keys", None),
     )
 
 
@@ -934,6 +935,7 @@ async def _synthesis_mcp_verify(
         organization_id=ctx.org_id,
         principal_id=ctx.user_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=getattr(ctx, "api_key_memory_scope_keys", None),
     )
 
 
@@ -1008,6 +1010,7 @@ async def _synthesis_mcp_draft(
         organization_id=ctx.org_id,
         principal_id=ctx.user_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=getattr(ctx, "api_key_memory_scope_keys", None),
     )
     if policy_reason:
         payload["policy_reason"] = policy_reason

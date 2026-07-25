@@ -106,6 +106,7 @@ async def _planned_materialized_run(
         organization_id=str(org.id),
         principal_id=ctx.user_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=getattr(ctx, "api_key_memory_scope_keys", None),
         context_fn=synthesis_service.default_context_pack,
     )
     return run, accessible_projects
