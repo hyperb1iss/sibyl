@@ -703,6 +703,9 @@ async def _remember_mcp_memory(
             related_to=list(request.related_to) if request.related_to is not None else None,
             metadata=dict(graph_metadata),
             project=project,
+            memory_scope=request.memory_scope,
+            scope_key=request.scope_key,
+            principal_id=request.principal_id,
         )
         return _to_dict(result)
 
@@ -1053,9 +1056,10 @@ async def _add_mcp_entity(
         surface="mcp_add",
     )
 
+    authorized_scope = None if normalized_entity_type in _UNSCOPED_ENTITY_TYPES else memory_scope
     full_metadata = stamp_memory_scope_metadata(
         metadata,
-        memory_scope=None if normalized_entity_type in _UNSCOPED_ENTITY_TYPES else memory_scope,
+        memory_scope=authorized_scope,
         scope_key=scope_key,
         principal_id=ctx.user_id,
     )
@@ -1082,6 +1086,9 @@ async def _add_mcp_entity(
         "check_conflicts": check_conflicts,
         "skip_conflicts": skip_conflicts,
         "conflict_threshold": max(conflict_threshold, 0.85),
+        "memory_scope": authorized_scope,
+        "scope_key": scope_key,
+        "principal_id": ctx.user_id,
     }
     if normalized_entity_type == "project":
         add_kwargs["sync"] = True

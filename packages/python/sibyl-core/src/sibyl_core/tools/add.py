@@ -6,6 +6,10 @@ from typing import Any
 
 import structlog
 
+from sibyl_core.auth.memory_policy import (
+    MEMORY_OWNER_METADATA_KEYS,
+    stamp_memory_scope_metadata,
+)
 from sibyl_core.embeddings.providers import configured_embedding_provider
 from sibyl_core.models.entities import (
     Entity,
@@ -173,6 +177,10 @@ async def add(
     check_conflicts: bool = True,
     skip_conflicts: bool = False,
     conflict_threshold: float = 0.85,
+    # Authorized scope of the write, resolved by the calling surface
+    memory_scope: str | None = None,
+    scope_key: str | None = None,
+    principal_id: str | None = None,
 ) -> AddResponse:
     """Add new knowledge to the Sibyl knowledge graph.
 
@@ -223,6 +231,9 @@ async def add(
         skip_conflicts: If True, skip conflict detection even when check_conflicts is True.
         conflict_threshold: Minimum similarity score (0.0-1.0) to flag as potential conflict.
               Default 0.85. Higher = fewer false positives, lower = catch more conflicts.
+        memory_scope: Authorized audience for the row, resolved by the calling surface.
+        scope_key: Authorized audience key (a verified project, never a payload value).
+        principal_id: Authenticated author of the write.
 
     Returns:
         AddResponse with created entity ID, auto-discovered links, conflicts, and timestamp.
@@ -268,6 +279,17 @@ async def add(
             id=None,
             message=f"Content exceeds {MAX_CONTENT_LENGTH} characters",
             timestamp=datetime.now(UTC),
+        )
+
+    declared_owner_keys = MEMORY_OWNER_METADATA_KEYS & set(metadata or {})
+    if declared_owner_keys and not any((memory_scope, scope_key, principal_id)):
+        # Cannot tell a caller that pre-stamped from one forwarding a request
+        # body, and the two need opposite handling: silently dropping the
+        # stamp would republish a private row as org-readable.
+        raise ValueError(
+            "add() received scope metadata "
+            f"({', '.join(sorted(declared_owner_keys))}) without the authorized "
+            "memory_scope/scope_key/principal_id that names its owner"
         )
 
     log.info(
@@ -327,14 +349,22 @@ async def add(
                 # Don't fail creation if conflict detection fails
                 log.warning("conflict_detection_failed", error=str(conflict_err))
 
-        # Merge metadata
+        # Merge metadata. Every graph write funnels through here, so the owner
+        # channels are rebuilt from the authorized values rather than carried
+        # over from the incoming bag — a caller that forwards a request body
+        # cannot name the principal or project its row will read as.
         full_metadata = {
             "category": category,
             "languages": languages or [],
             "tags": tags or [],
             "added_at": datetime.now(UTC).isoformat(),
             "organization_id": org_id,
-            **(metadata or {}),
+            **stamp_memory_scope_metadata(
+                metadata,
+                memory_scope=memory_scope,
+                scope_key=scope_key,
+                principal_id=principal_id,
+            ),
         }
         if project:
             full_metadata["project_id"] = project
