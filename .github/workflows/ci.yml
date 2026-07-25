@@ -207,7 +207,52 @@ jobs:
           cache-version: surreal-ci-v1
 
       - name: Audit shipped Node dependencies
-        run: pnpm audit --prod --audit-level=high
+        env:
+          # Advisories already present when this gate was introduced. The gate
+          # blocks anything new from today; these are tracked debt, not an
+          # exemption, and the list may only shrink. Removing an entry is the
+          # last step of fixing it.
+          #
+          #   GHSA-r28c-9q8g-f849  postcss path traversal, fixed in 8.5.18.
+          #     Held by the pnpm override floor in pnpm-workspace.yaml.
+          KNOWN_ADVISORIES: GHSA-r28c-9q8g-f849
+        run: |
+          set -uo pipefail
+          pnpm audit --prod --audit-level=high --json > /tmp/audit.json || true
+
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          known = {
+              entry.strip()
+              for entry in os.environ["KNOWN_ADVISORIES"].split(",")
+              if entry.strip()
+          }
+          raw = Path("/tmp/audit.json").read_text().strip()
+          advisories = json.loads(raw).get("advisories", {}) if raw else {}
+
+          blocking: list[str] = []
+          waived: list[str] = []
+          for advisory in advisories.values():
+              severity = str(advisory.get("severity", "")).lower()
+              if severity not in {"high", "critical"}:
+                  continue
+              ident = advisory.get("github_advisory_id") or advisory.get("id")
+              label = f"{severity.upper()} {advisory.get('module_name')} {ident}"
+              (waived if ident in known else blocking).append(label)
+
+          for label in sorted(set(waived)):
+              print(f"::notice::known advisory, tracked: {label}")
+          for label in sorted(set(blocking)):
+              print(f"::error::new advisory in a shipped dependency: {label}")
+
+          if blocking:
+              sys.exit(1)
+          print(f"No new high or critical advisories. {len(set(waived))} tracked.")
+          PY
 
   static:
     name: Static Checks
