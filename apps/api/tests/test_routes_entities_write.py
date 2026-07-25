@@ -1771,3 +1771,22 @@ async def test_delete_entity_refuses_a_private_row_owned_by_another_principal() 
 
     assert excinfo.value.status_code == 404
     delete_mock.assert_not_awaited()
+
+
+def test_project_screen_gates_a_note_carrying_only_a_project() -> None:
+    """The API half of the note-gating pair asserted in sibyl-core.
+
+    A note carries its audience as a project id rather than a memory scope, so
+    the project screen is the only thing standing between it and an outsider.
+    """
+    from types import SimpleNamespace
+
+    from sibyl.api.routes.entities import _entity_visible_to_projects
+
+    note = SimpleNamespace(
+        entity_type=SimpleNamespace(value="note"),
+        metadata={"project_id": "proj-secret"},
+    )
+
+    assert not _entity_visible_to_projects(note, set())
+    assert _entity_visible_to_projects(note, {"proj-secret"})
