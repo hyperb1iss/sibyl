@@ -781,6 +781,87 @@ async def test_captured_private_memory_stays_visible_to_its_owner() -> None:
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("memory_scope", "scope_key", "owner_reads", "co_member_reads"),
+    [
+        ("private", None, True, False),
+        ("project", "project_123", True, True),
+        ("team", "team_1", False, False),
+        ("organization", None, False, False),
+        ("shared", "shared_1", False, False),
+        ("public", None, False, False),
+    ],
+)
+async def test_captured_scope_retrieval_matrix(
+    memory_scope: str,
+    scope_key: str | None,
+    owner_reads: bool,
+    co_member_reads: bool,
+) -> None:
+    """Pins which captured scopes graph retrieval can serve back.
+
+    Private and project are the scopes the read path implements. Team denies
+    because no plan carries a team set to hand `authorize_memory_read`, and
+    organization/shared/public fall through to its terminal `scope_not_enabled`
+    branch, so a capture in any of those scopes is written but never readable —
+    including by its own author. Those reads were unimplemented long before
+    scope was stamped onto graph rows; stamping is what makes the gap
+    observable, because an unstamped row bypassed the filter entirely.
+
+    Widening this matrix is a policy decision, not a retrieval tweak. Update
+    these expectations deliberately rather than to make a failure go away.
+    """
+    captured: dict[str, object] = {}
+
+    async def remember_raw_memory(_request: MemoryCaptureRequest) -> Mapping[str, object]:
+        return {"id": "raw_1"}
+
+    async def create_graph_entity(
+        _request: MemoryCaptureRequest,
+        metadata: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        captured.update(metadata)
+        return {"id": "entity_1"}
+
+    await MemoryCaptureService(
+        remember_raw_memory=remember_raw_memory,
+        create_graph_entity=create_graph_entity,
+    ).capture(
+        MemoryCaptureRequest(
+            title="Scoped capture",
+            content="Body",
+            entity_type="note",
+            metadata={"project_id": "project_123"},
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            principal_id="user-alice",
+        )
+    )
+
+    def reads(principal_id: str) -> bool:
+        candidate = search_module._candidate_from_node_record(
+            {
+                "uuid": "entity_1",
+                "name": "Scoped capture",
+                "group_id": "org-123",
+                "project_id": "project_123",
+                "attributes": captured,
+            },
+            signal=RetrievalSignal.NODE_FULLTEXT,
+            score=1.0,
+        )
+        return search_module._candidate_allowed(
+            candidate,
+            plan=_plan_for(principal_id, "project_123"),
+            requested_types=set(),
+            facet=None,
+        )
+
+    assert reads("user-alice") is owner_reads
+    assert reads("user-bob") is co_member_reads
+
+
 def test_build_context_retrieval_plan_requires_principal() -> None:
     plan = build_context_retrieval_plan(
         query="no principal",
