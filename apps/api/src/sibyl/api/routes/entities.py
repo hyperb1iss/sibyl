@@ -62,7 +62,11 @@ from sibyl.persistence.content_runtime import (
     save_raw_capture_record,
 )
 from sibyl_core.auth import AuthOrganization, MemoryPolicyContext, OrganizationRole, ProjectRole
-from sibyl_core.auth.memory_policy import authorize_memory_read
+from sibyl_core.auth.memory_policy import (
+    MEMORY_OWNER_METADATA_KEYS,
+    authorize_memory_read,
+    stamp_memory_scope_metadata,
+)
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.projection import MANIFEST_STATE_COMPLETE, extract_projected_memory_entities
 from sibyl_core.services import KnowledgeReadService
@@ -140,6 +144,27 @@ def _sanitize_raw_capture_metadata(metadata: dict[str, object]) -> dict[str, obj
     return {
         key: value for key, value in metadata.items() if key not in _RAW_CAPTURE_METADATA_DENYLIST
     }
+
+
+def _scoped_graph_metadata(
+    metadata: dict[str, Any] | None,
+    *,
+    principal_id: str | None,
+    verified_project_id: str | None,
+) -> dict[str, Any]:
+    """Stamp a write's scope metadata from the authenticated request context.
+
+    The scope key is taken from the project this request already proved access
+    to, so a payload cannot address a row at a project the caller is not a
+    contributor on.
+    """
+    declared = (metadata or {}).get("memory_scope")
+    return stamp_memory_scope_metadata(
+        metadata,
+        memory_scope=declared,
+        scope_key=verified_project_id,
+        principal_id=principal_id,
+    )
 
 
 # =============================================================================
@@ -233,21 +258,43 @@ def _serialize_raw_capture(capture: RawCaptureRecord) -> RawCaptureResponse:
     )
 
 
-def _entity_from_bulk_create(
+def _bulk_create_metadata(
     entity: EntityCreate,
     *,
     group_id: str,
     now: datetime,
-) -> Entity:
-    content = entity.content or entity.description or entity.name
-    metadata: dict[str, Any] = {
+    principal_id: str | None,
+) -> dict[str, Any]:
+    request_metadata = dict(entity.metadata or {})
+    project_id = str(request_metadata.get("project_id") or "").strip()
+    return {
         "category": entity.category,
         "languages": entity.languages or [],
         "tags": entity.tags or [],
         "added_at": now.isoformat(),
         "organization_id": group_id,
-        **dict(entity.metadata or {}),
+        **_scoped_graph_metadata(
+            request_metadata,
+            principal_id=principal_id,
+            verified_project_id=project_id or None,
+        ),
     }
+
+
+def _entity_from_bulk_create(
+    entity: EntityCreate,
+    *,
+    group_id: str,
+    now: datetime,
+    principal_id: str | None = None,
+) -> Entity:
+    content = entity.content or entity.description or entity.name
+    metadata = _bulk_create_metadata(
+        entity,
+        group_id=group_id,
+        now=now,
+        principal_id=principal_id,
+    )
     identity_parts = [entity.name, entity.category or "general"]
     project_id = str(metadata.get("project_id") or "").strip()
     if project_id:
@@ -271,16 +318,15 @@ def _entity_response_from_bulk_create(
     entity_id: str,
     group_id: str,
     now: datetime,
+    principal_id: str | None = None,
 ) -> EntityResponse:
     content = entity.content or entity.description or entity.name
-    metadata: dict[str, Any] = {
-        "category": entity.category,
-        "languages": entity.languages or [],
-        "tags": entity.tags or [],
-        "added_at": now.isoformat(),
-        "organization_id": group_id,
-        **dict(entity.metadata or {}),
-    }
+    metadata = _bulk_create_metadata(
+        entity,
+        group_id=group_id,
+        now=now,
+        principal_id=principal_id,
+    )
     return EntityResponse(
         id=entity_id,
         entity_type=entity.entity_type,
@@ -531,15 +577,12 @@ async def _resolve_entity_list_project_filter(
     return effective_project_ids, sorted(accessible_projects), True
 
 
-async def _require_entity_read_access(ctx: AuthContext, entity: Any) -> set[str]:
-    project_id = _entity_read_project_id(entity)
-    if project_id is not None:
-        await verify_entity_project_access(
-            None,
-            ctx,
-            project_id,
-            required_role=ProjectRole.VIEWER,
-        )
+async def _require_entity_scope_visible(
+    ctx: AuthContext,
+    entity: Any,
+    *,
+    project_id: str | None,
+) -> set[str]:
     accessible_projects = await _accessible_project_ids_for_read(ctx)
     if project_id is not None:
         accessible_projects.add(project_id)
@@ -551,6 +594,18 @@ async def _require_entity_read_access(ctx: AuthContext, entity: Any) -> set[str]
     ):
         raise HTTPException(status_code=404, detail="Entity not found")
     return accessible_projects
+
+
+async def _require_entity_read_access(ctx: AuthContext, entity: Any) -> set[str]:
+    project_id = _entity_read_project_id(entity)
+    if project_id is not None:
+        await verify_entity_project_access(
+            None,
+            ctx,
+            project_id,
+            required_role=ProjectRole.VIEWER,
+        )
+    return await _require_entity_scope_visible(ctx, entity, project_id=project_id)
 
 
 async def _validate_related_to_targets_for_write(
@@ -1406,8 +1461,10 @@ async def create_entities_bulk(
         )
 
     now = datetime.now(UTC)
+    principal_id = str(ctx.user.id) if ctx.user is not None else None
     entities = [
-        _entity_from_bulk_create(entity, group_id=group_id, now=now) for entity in batch.entities
+        _entity_from_bulk_create(entity, group_id=group_id, now=now, principal_id=principal_id)
+        for entity in batch.entities
     ]
     created_ids = await runtime.entity_manager.create_direct_bulk(
         entities,
@@ -1560,6 +1617,7 @@ async def create_entities_bulk(
             entity_id=entity_id,
             group_id=group_id,
             now=now,
+            principal_id=principal_id,
         )
         for entity_id, entity in zip(created_ids, batch.entities, strict=True)
     ]
@@ -1859,19 +1917,14 @@ async def create_entity(
         if replayed is not None:
             return replayed
 
-    merged_metadata: dict[str, Any] = {**request_metadata, "organization_id": group_id}
-    if merged_metadata.get("memory_scope") is not None:
-        # Scope metadata decides who may retrieve this row, so its principal
-        # binding is taken from the authenticated context rather than the
-        # payload. With no authenticated user both owner channels have to go:
-        # the retrieval check falls back to scope_key when principal_id is
-        # absent, so leaving it would let the payload still name the principal
-        # whose private memory this row reads as.
-        if ctx.user is not None:
-            merged_metadata["principal_id"] = str(ctx.user.id)
-        else:
-            merged_metadata.pop("principal_id", None)
-            merged_metadata.pop("scope_key", None)
+    merged_metadata: dict[str, Any] = {
+        **_scoped_graph_metadata(
+            request_metadata,
+            principal_id=str(ctx.user.id) if ctx.user is not None else None,
+            verified_project_id=str(project) if project else None,
+        ),
+        "organization_id": group_id,
+    }
 
     # Projects are always sync (foundational - tasks depend on them existing)
     # Other entities can be async unless caller explicitly requests sync
@@ -2068,6 +2121,10 @@ async def update_entity(
                 required_role=ProjectRole.CONTRIBUTOR,
                 require_existing_project=True,
             )
+            # Project contribution says nothing about a private memory, and the
+            # response echoes the stored content back, so an update has to clear
+            # the same gate a read does.
+            await _require_entity_scope_visible(ctx, existing, project_id=project_id)
 
             # Build update dict with only provided fields
             update_data: dict[str, Any] = {}
@@ -2084,9 +2141,17 @@ async def update_entity(
             if update.tags is not None:
                 update_data["tags"] = update.tags
             if update.metadata is not None:
-                # Merge metadata
+                # Merge metadata, keeping the stored owner channels: reassigning
+                # them would hand the row to a different principal or project.
                 existing_meta = getattr(existing, "metadata", {}) or {}
-                update_data["metadata"] = {**existing_meta, **update.metadata}
+                update_data["metadata"] = {
+                    **existing_meta,
+                    **{
+                        key: value
+                        for key, value in update.metadata.items()
+                        if key not in MEMORY_OWNER_METADATA_KEYS
+                    },
+                }
 
             # Update timestamp
             update_data["updated_at"] = datetime.now(UTC)
@@ -2196,6 +2261,9 @@ async def delete_entity(
                 required_role=ProjectRole.MAINTAINER,
                 require_existing_project=True,
             )
+            # A project maintainer role does not extend over a co-member's
+            # private memory, so deletion clears the same gate a read does.
+            await _require_entity_scope_visible(ctx, existing, project_id=project_id)
 
             if existing.entity_type == EntityType.PROJECT:
                 await log_audit_event(

@@ -1158,6 +1158,10 @@ async def test_update_project_routes_through_runtime_project_record() -> None:
         patch(
             "sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()
         ) as verify_access,
+        patch(
+            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            AsyncMock(return_value={"project_new"}),
+        ),
         patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
         patch("sibyl.api.routes.entities.update_project_record", AsyncMock()) as update_project,
         patch("sibyl.api.routes.entities.log_audit_event", AsyncMock()) as audit_log,
@@ -1208,6 +1212,10 @@ async def test_delete_project_routes_through_runtime_project_record() -> None:
         patch(
             "sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()
         ) as verify_access,
+        patch(
+            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            AsyncMock(return_value={"project_new"}),
+        ),
         patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
         patch("sibyl.api.routes.entities.delete_project_record", AsyncMock()) as delete_project,
         patch("sibyl.api.routes.entities.log_audit_event", AsyncMock()) as audit_log,
@@ -1371,3 +1379,345 @@ async def test_create_entity_sanitizes_raw_capture_scope_metadata() -> None:
     assert "review_state" not in sent_metadata
     assert "source_id" not in sent_metadata
     assert "raw_source_id" not in sent_metadata
+
+
+@pytest.mark.asyncio
+async def test_create_entity_drops_project_scope_key_without_a_verified_project() -> None:
+    """A project scope key is only honored when the request proved access to it.
+
+    Nothing verifies a bare scope_key, because the contributor check keys on
+    project_id. Left intact it would address the row at a project the caller
+    never proved membership on, and retrieval serves project rows by scope_key.
+    """
+    org = _org()
+    ctx = _ctx()
+    entity = EntityCreate(
+        name="Planted decision",
+        content="Reads as another project's memory.",
+        entity_type=EntityType.DECISION,
+        metadata={"memory_scope": "project", "scope_key": "project_victim"},
+    )
+    add_result = SimpleNamespace(success=True, id="decision_1", message="ok")
+    add_mock = AsyncMock(return_value=add_result)
+    verify_access = AsyncMock()
+
+    with (
+        patch("sibyl.api.routes.entities.verify_entity_project_access", verify_access),
+        patch("sibyl_core.tools.core.add", add_mock),
+        patch("sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock()),
+        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entities.log_audit_event", AsyncMock()),
+    ):
+        await create_entity(
+            request=_request(),
+            entity=entity,
+            org=org,
+            ctx=ctx,
+            content_session=None,
+            sync=False,
+        )
+
+    verify_access.assert_not_awaited()
+    graph_metadata = add_mock.await_args.kwargs["metadata"]
+    assert graph_metadata["memory_scope"] == "project"
+    assert "scope_key" not in graph_metadata
+
+
+def test_bulk_create_binds_scoped_metadata_to_the_authenticated_principal() -> None:
+    entity = EntityCreate(
+        name="Planted episode",
+        content="Reads as the victim's private memory.",
+        entity_type=EntityType.EPISODE,
+        skip_conflicts=True,
+        metadata={"memory_scope": "private", "principal_id": "victim", "scope_key": "victim"},
+    )
+
+    built = _entity_from_bulk_create(
+        entity,
+        group_id=str(_org().id),
+        now=datetime.now(UTC),
+        principal_id="attacker",
+    )
+
+    assert built.metadata["memory_scope"] == "private"
+    assert built.metadata["principal_id"] == "attacker"
+    assert "scope_key" not in built.metadata
+
+
+def test_bulk_create_drops_a_scope_key_the_request_never_verified() -> None:
+    entity = EntityCreate(
+        name="Planted session",
+        content="Reads as another project's memory.",
+        entity_type=EntityType.SESSION,
+        skip_conflicts=True,
+        metadata={"memory_scope": "project", "scope_key": "project_victim"},
+    )
+
+    built = _entity_from_bulk_create(
+        entity,
+        group_id=str(_org().id),
+        now=datetime.now(UTC),
+        principal_id="attacker",
+    )
+
+    assert built.metadata["memory_scope"] == "project"
+    assert "scope_key" not in built.metadata
+
+
+def test_bulk_create_scopes_a_project_row_to_the_verified_project() -> None:
+    entity = EntityCreate(
+        name="Project session",
+        content="Belongs to a project the request verified.",
+        entity_type=EntityType.SESSION,
+        skip_conflicts=True,
+        metadata={
+            "memory_scope": "project",
+            "project_id": "project_real",
+            "scope_key": "project_victim",
+        },
+    )
+
+    built = _entity_from_bulk_create(
+        entity,
+        group_id=str(_org().id),
+        now=datetime.now(UTC),
+        principal_id="author",
+    )
+
+    assert built.metadata["scope_key"] == "project_real"
+
+
+@pytest.mark.asyncio
+async def test_create_entities_bulk_stamps_the_caller_onto_scoped_rows() -> None:
+    org = _org()
+    ctx = _ctx()
+    batch = EntityBulkCreateRequest(
+        entities=[
+            EntityCreate(
+                name="Imported episode",
+                content="private import",
+                entity_type=EntityType.EPISODE,
+                skip_conflicts=True,
+                metadata={"memory_scope": "private", "principal_id": "victim"},
+            )
+        ]
+    )
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(create_direct_bulk=AsyncMock(return_value=["episode_one"])),
+        relationship_manager=SimpleNamespace(create_bulk=AsyncMock(return_value=(0, 0))),
+    )
+
+    with patch(
+        "sibyl.api.routes.entities.get_entity_graph_runtime",
+        AsyncMock(return_value=runtime),
+    ):
+        response = await create_entities_bulk(
+            batch=batch,
+            org=org,
+            ctx=ctx,
+            content_session=None,
+        )
+
+    persisted = runtime.entity_manager.create_direct_bulk.await_args.args[0][0]
+    assert persisted.metadata["principal_id"] == str(ctx.user.id)
+    assert response.entities[0].metadata["principal_id"] == str(ctx.user.id)
+
+
+def _private_memory_entity(*, owner: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        id="decision_private",
+        entity_type=EntityType.DECISION,
+        name="Private decision",
+        description="secret rationale",
+        content="secret rationale",
+        category=None,
+        languages=[],
+        tags=[],
+        metadata={"memory_scope": "private", "principal_id": owner},
+        source_file=None,
+        created_at=None,
+        updated_at=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_entity_refuses_a_private_row_owned_by_another_principal() -> None:
+    """A co-member with contributor rights is still not the owner.
+
+    The response echoes the stored content, so passing only the project check
+    would both reassign and disclose a private memory.
+    """
+    org = _org()
+    ctx = _ctx()
+    existing = _private_memory_entity(owner="victim")
+    update_mock = AsyncMock()
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing),
+            update=update_mock,
+        )
+    )
+
+    with (
+        patch("sibyl.locks.entity_lock", _locked_entity),
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock(return_value=runtime)
+        ),
+        patch("sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()),
+        patch(
+            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            AsyncMock(return_value=set()),
+        ),
+        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        pytest.raises(HTTPException) as excinfo,
+    ):
+        await update_entity(
+            entity_id="decision_private",
+            update=EntityUpdate(metadata={"principal_id": str(ctx.user.id)}),
+            request=_request(),
+            org=org,
+            ctx=ctx,
+            content_session=None,
+        )
+
+    assert excinfo.value.status_code == 404
+    update_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_entity_keeps_owner_metadata_out_of_the_caller_merge() -> None:
+    org = _org()
+    ctx = _ctx()
+    owner = str(ctx.user.id)
+    existing = _private_memory_entity(owner=owner)
+    updated = _private_memory_entity(owner=owner)
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing),
+            update=AsyncMock(return_value=updated),
+        )
+    )
+
+    with (
+        patch("sibyl.locks.entity_lock", _locked_entity),
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock(return_value=runtime)
+        ),
+        patch("sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()),
+        patch(
+            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            AsyncMock(return_value=set()),
+        ),
+        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+    ):
+        await update_entity(
+            entity_id="decision_private",
+            update=EntityUpdate(
+                metadata={
+                    "principal_id": "attacker",
+                    "scope_key": "project_attacker",
+                    "memory_scope": "organization",
+                    "note": "kept",
+                }
+            ),
+            request=_request(),
+            org=org,
+            ctx=ctx,
+            content_session=None,
+        )
+
+    merged = runtime.entity_manager.update.await_args.args[1]["metadata"]
+    assert merged["principal_id"] == owner
+    assert merged["memory_scope"] == "private"
+    assert "scope_key" not in merged
+    assert merged["note"] == "kept"
+
+
+@pytest.mark.asyncio
+async def test_update_entity_refuses_a_project_row_keyed_outside_accessible_projects() -> None:
+    org = _org()
+    ctx = _ctx()
+    existing = SimpleNamespace(
+        id="decision_scoped",
+        entity_type=EntityType.DECISION,
+        name="Project decision",
+        description="scoped rationale",
+        content="scoped rationale",
+        category=None,
+        languages=[],
+        tags=[],
+        metadata={"memory_scope": "project", "scope_key": "project_victim"},
+        source_file=None,
+        created_at=None,
+        updated_at=None,
+    )
+    update_mock = AsyncMock()
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing),
+            update=update_mock,
+        )
+    )
+
+    with (
+        patch("sibyl.locks.entity_lock", _locked_entity),
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock(return_value=runtime)
+        ),
+        patch("sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()),
+        patch(
+            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            AsyncMock(return_value={"project_mine"}),
+        ),
+        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        pytest.raises(HTTPException) as excinfo,
+    ):
+        await update_entity(
+            entity_id="decision_scoped",
+            update=EntityUpdate(name="Renamed"),
+            request=_request(),
+            org=org,
+            ctx=ctx,
+            content_session=None,
+        )
+
+    assert excinfo.value.status_code == 404
+    update_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_entity_refuses_a_private_row_owned_by_another_principal() -> None:
+    org = _org()
+    ctx = _ctx()
+    existing = _private_memory_entity(owner="victim")
+    delete_mock = AsyncMock(return_value=True)
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing),
+            delete=delete_mock,
+        )
+    )
+
+    with (
+        patch("sibyl.locks.entity_lock", _locked_entity),
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock(return_value=runtime)
+        ),
+        patch("sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()),
+        patch(
+            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            AsyncMock(return_value=set()),
+        ),
+        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        pytest.raises(HTTPException) as excinfo,
+    ):
+        await delete_entity(
+            entity_id="decision_private",
+            request=_request(),
+            org=org,
+            ctx=ctx,
+            content_session=None,
+        )
+
+    assert excinfo.value.status_code == 404
+    delete_mock.assert_not_awaited()
