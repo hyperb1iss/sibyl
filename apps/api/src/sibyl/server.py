@@ -1675,6 +1675,8 @@ async def _manage_mcp_action(
             entity_id=entity_id,
             data=full_data,
             organization_id=ctx.org_id,
+            principal_id=ctx.user_id,
+            accessible_projects=accessible_projects,
         )
         payload = _to_dict(result)
         if policy_decision is not None:

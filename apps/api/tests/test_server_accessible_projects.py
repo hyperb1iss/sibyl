@@ -1228,6 +1228,8 @@ async def test_manage_mcp_project_id_action_allows_admin_scope() -> None:
             "user_id": ctx.user_id,
         },
         organization_id=ctx.org_id,
+        principal_id=ctx.user_id,
+        accessible_projects=None,
     )
 
 
