@@ -232,9 +232,20 @@ only re-cut fat parents that were already selected, which is the killed geometry
 server-side. As rows on the existing table they inherit the HNSW, BM25, and type indexes free, and
 the schema delta is one DDL statement plus a version bump.
 
-**Stage 0/1 measured offline, 2026-07-24/25 (free, no paid calls).** Scored at official fidelity:
-the `lme_v2_small` haystack for all 451 questions is set-identical to the era-3 catalogs, so the
-oracle ran on 92 measurable questions rather than the 45-question subset.
+**Stage 0/1 measured offline, 2026-07-24/25.** No paid API calls: local BM25 and a local embedding
+model over catalogs already on disk, so the only cost was local compute. Scored at official
+fidelity: the `lme_v2_small` haystack for all 451 questions is set-identical to the era-3 catalogs,
+so the oracle ran on **92 measurable questions** — every question that is phrase-eligible and
+source-complete across both domains (44 enterprise, 48 web) — rather than the 45-question subset.
+
+**Cohort contract.** Two cohorts appear in this section and they are not interchangeable. The
+**92-question cohort is authoritative for the design decision** above: it is the largest set the
+oracle can score, so it is the honest denominator for "does slicing lose gold." The
+**enterprise-45/web-45 replay cohort is authoritative for `slice-substrate-gate`**, because the
+replay harness, its frozen prompts, and every prior campaign gate are built on it — switching gate
+cohorts mid-campaign would make the +3pp GO threshold incomparable to the four gates already run.
+**Gate thresholds are evaluated per domain, not pooled**, matching the campaign's existing practice
+and preventing one strong domain from carrying a regression in the other.
 
 - **Straddle rate is zero** — 31,244 of 31,244 (question, phrase, carrier-state) triples land inside
   a single slice. Slicing never cuts a gold literal.
@@ -266,15 +277,27 @@ oracle ran on 92 measurable questions rather than the 45-question subset.
 **The reservation trap.** Slices push `max_items` from 8 to ~28, and both the adapter and production
 compute the note lane as `ceil(max_items × 3/8)` — which would silently widen the reserved note lane
 from 3 slots to 11. The tuning kill established that the tuned quantity is the **absolute** note
-count, so notes must be pinned at 3. The adapter has a `typed_reservation_items` override;
-production `compose_operational_evidence` has none and must gain one. Missing this makes A1 measure
-as a notes regression and get misdiagnosed as a slice failure.
+count, so notes must be pinned at 3. Missing this makes A1 measure as a notes regression and get
+misdiagnosed as a slice failure.
 
-- Gate `slice-substrate-gate`: on the enterprise-45/web-45 replay slices, gold-literal exposure ≥
-  50% (from 32%/21%) AND state-level recall@10 ≥ 85% (from 68%) within ≤ 60K chars (target ≤ 48K);
-  then a scored 3-pass paired run vs frozen FAST+notes, GO per protocol law. Because
-  `/memory/experience` makes no per-entity LLM call, a corpus rebuild is embeddings-only
-  (~$0.62–0.75/domain) and **this gate is decidable for pennies before any reader spend**.
+The requirement is **normative, not merely configurable**: exposing a `typed_reservation_items`
+parameter on production `compose_operational_evidence` is necessary but not sufficient, because a
+parameter that accepts any value does not pin the one value that matters. Production must pass the
+absolute value **3** on the slice path — not a ratio, and not a new default that a caller can widen
+by raising `max_items`. Acceptance criterion, to be enforced by a regression test rather than
+review: **at `max_items = 28` the composed evidence set contains exactly 3 typed-note slots**, and
+the same assertion holds at the current `max_items = 8` so the pin cannot silently regress the
+already-shipped configuration.
+
+- Gate `slice-substrate-gate`: on the enterprise-45/web-45 replay cohort, evaluated **per domain**,
+  gold-literal exposure ≥ 50% (from 32%/21%) AND state-level recall@10 ≥ 85% (from 68%) within ≤ 60K
+  chars (target ≤ 48K); then a scored 3-pass paired run vs frozen FAST+notes, GO per protocol law.
+  Cost note, distinct from the free Stage 0/1 work above: reaching this gate does require one paid
+  step, a corpus rebuild whose **embedding calls cost
+  ~$0.62–0.75/domain**. It is cheap only
+  relative to reader spend, because `/memory/experience` makes no per-entity LLM call — so the gate
+  is decidable for roughly a dollar before committing to a ~$5/domain
+  scored regate or a ~$10 full-451 run.
 
 ### A2. Ranking refinements
 
