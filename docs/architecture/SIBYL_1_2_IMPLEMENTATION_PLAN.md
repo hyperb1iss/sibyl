@@ -29,11 +29,13 @@ Three facts drive the release shape:
    451-scale: −0.9pp combined and 2.5× latency vs fast mode. "Multi-step retrieval, locked in"
    therefore means **model-directed traversal over a slice-granular substrate** (the graph-backed
    agentic path, decision `0f4ab0c8a0cc`) — not more deterministic query fan-out.
-3. **Our own memory loop carries trust debt.** The pending-writes queue has stranded offline
-   captures since June 11; raw memory CREATE fails on one path after the 1.1 schema change;
-   embedding backfill false-negatives real entities; two fulltext lanes still run pre-3.2 query
-   shapes. A memory product that strands writes cannot preach memory sovereignty. This gets fixed
-   in-release, not someday.
+3. **Our own memory loop carries trust debt — and it is worse than we thought.** Adjudicated
+   2026-07-24 (§2.5): private memories leak to org co-members through unscoped graph entities; the
+   offline write queue silently and unrecoverably deletes buffered writes on a 409; the content
+   schema ladder has been deadlocked at v15 of 23 since 2026-07-11 while `/api/health` reported
+   healthy; and ~15 CLI commands exit 0 on failure. A memory product that leaks private memories and
+   loses offline writes cannot preach memory sovereignty. This warrants **1.1.3 before 1.2** (§2.6),
+   not someday.
 
 Positioning consequence: coalescence — the big differentiator bet — moves to v1.3. The roadmap's own
 sequencing logic ("team coalescence is isolation-correctness-under-merge and cannot ship credibly
@@ -103,18 +105,93 @@ scale (accurate mode, §2.2). Noise floor: 5 replays of one config span 23–27/
 rescored 22–29 across reader passes; per-question churn ~6.7/45 between passes. **Aggregate flatness
 is not per-question stability; sub-noise deltas are NO-GO by default.**
 
-### 2.5 Dogfood trust debt
+### 2.5 Dogfood trust debt — adjudicated 2026-07-24
 
-- `df317be0` pending-writes queue captures read-like requests and strands idempotency receipts; ~121
-  stranded files in `~/.config/sibyl/pending_writes/` dating to June 11, plus one session of
-  release-saga graph writes awaiting replay.
-- `7a52bf39` raw memory CREATE failure after 1.1 schema updates.
-- `85c4dc53` embedding backfill false-negatives entities that exist (bit two corpus rebuilds).
-- `0ea2177e` doc-chunk lexical lane + anchor-rescue lane still use pre-3.2 fulltext shapes
-  (conjunctive-strict semantics silently zero their recall on 3.2.x).
-- `4fd323a5` fresh-store bootstrap: missing tables surface as opaque 500s; no schema-init verb.
-- `4736bf2d` raw-memory promotion does not carry scope onto graph entities.
-- `659b4ada` task archive exits 0 on failure.
+Five parallel investigations verified every claim below against shipped 1.1.2 and the live store.
+Two items were **overstated**, two are **worse than filed**, and two defects were **newly
+discovered**. The corrected picture drives the 1.1.3 recommendation in §2.6.
+
+**Release-blocking (verified, source-traced):**
+
+- **Private-memory leak on the default capture path** (`4736bf2d`, `error_pattern_8e04647be38f`).
+  Worse than filed: the promotion path is fine, but `MemoryCaptureService.capture()` never copies
+  `memory_scope` (which defaults to `private`) or `scope_key` into `graph_metadata`; `Entity` has no
+  scope field in either the model or the graph schema; and `_candidate_scope_allowed` **fails open**
+  on missing scope. A project co-member can therefore read another user's private memory title and
+  full content. Live: 1,292 capture-path entities, 100% unscoped, 100% carrying content. Org
+  namespace isolation **holds** — same-org only. Latent while single-user. Team scope has the
+  inverse bug and fails **closed** (`accessible_teams` never threaded), so team memory is currently
+  write-only and invisible even to its own members.
+- **Silent unrecoverable loss of offline writes** (`df317be0`). `_should_keep_pending_write` omits
+  409, so the queue file is deleted before the exception raises — and 409 is precisely the
+  stranded-reservation case the client cannot prove was not applied. The payload is never persisted
+  server-side. 74 stranded `102` rows observed; flushing mints more. The alarming `discarded: 1180`
+  counter was a **red herring**, proven by controlled experiment: it counts only explicit
+  `pending-writes discard` invocations, so the client-side deletes recorded nothing at all.
+- **Content schema ladder deadlocked at v15 of 23 since 2026-07-11** (`4fd323a5` root cause,
+  `error_pattern_c01dc4698419`). `DEFINE TABLE IF NOT EXISTS x SCHEMAFULL` silently no-ops against a
+  table SurrealDB auto-created SCHEMALESS, so v16's `FLEXIBLE` field fails forever and the version
+  is never recorded. `/api/health` reports healthy while `/api/health/ready` reports the failure,
+  and the shipped compose healthcheck probes the former. Fresh installs are unaffected;
+  **upgraders** whose store predates 2026-07-03 are the population.
+
+**Confirmed, high:**
+
+- **Lying exit codes** (`659b4ada`). `task archive` exits 0 on failure on both paths; ~15 commands
+  swallow `SibylClientError`, incl. a live-reproduced `sibyl auth status`. Tests actively locked the
+  bug in by asserting `exit_code == 0` on failed runs. This breaks the contract the shipped skill
+  pack makes to agents.
+
+**Overstated — corrected:**
+
+- `0ea2177e` fulltext lanes are **not** a 3.2.x regression (`claim_72dd1444fa8e`). A controlled A/B
+  on ephemeral 3.1.0 and 3.2.3 containers with a validated positive control showed the remaining
+  lanes return zero on **both** engines. Pre-existing recall gap; no user is worse off on 1.1.2 than
+  1.1.0. Rescoped to recall quality, priority lowered.
+- `7a52bf39` raw-memory CREATE is **not** currently failing. The acute 500 is gone — but not because
+  the intended repair ran: content v23 (`content_raw_capture_required_field_repair`) is stuck behind
+  the deadlock and has never executed. The write path works by accident of where v16 died.
+- **Epic linking is not broken.** Working IDs come from `sibyl epic list` (`epic_<12hex>`); the
+  original report used a task UUID and invented prefixes. The real defect is that `errors.py` treats
+  bare UUIDs as secrets and replaces the _entire_ message across 44 sites, so Sibyl redacts its own
+  identifiers and makes 400/404s undiagnosable.
+
+**Newly discovered:**
+
+- Document search returns **empty rather than degraded** when the embedder soft-fails: the scan
+  fallback only fires on `RuntimeError`, so a 2s embedding timeout plus a zero-recall lexical lane
+  yields nothing (`411a5611`).
+- `sibyl debug query` appends its org predicate with no leading space (any plain `SELECT` without
+  `GROUP BY` is a parse error) and strips `id` from projections (`3f20f0e2`).
+- Hierarchy drift: `-e` writes only `epic_id` while `parent_task_id` is the field
+  `get_epic_progress` reads, so re-parenting silently miscounts forever.
+
+**Gate false assurance (flag loudly):** `benchmarks/results/ai-memory/team-scope-trust-receipt.json`
+asserts `leak_count: 0` under a declared surface of "private source isolation". It is a
+hand-maintained static file with no generator anywhere in the repo — honest about being static in
+its own `claim_boundary`, but a blocking gate reports zero leaks while the leak lives outside its
+fixtures. Relatedly, the only unit test of `_candidate_scope_allowed` hand-injects the very
+`memory_scope` field whose absence is the bug, proving the filter works while hiding that it never
+fires. **Any gate whose receipt is hand-authored must be regenerated or deleted in v1.2.**
+
+### 2.6 The 1.1.3 recommendation
+
+Cut a patch release before 1.2 feature work. Drivers, in order: offline write loss (`df317be0`), the
+private-memory leak (`4736bf2d`), the schema deadlock, and the exit-code cluster. Not drivers: the
+fulltext lanes and raw-memory CREATE, both of which were overstated. Root `moon run :check` was
+verified green (55 tasks) on the 1.1.2 cut, so the release gate is clear.
+
+Deferred out of the patch by design: the `_candidate_scope_allowed` fail-open flip (would hide
+legitimately unscoped tasks/epics — needs a first-class `Entity.memory_scope` column), the scope
+backfill migration for existing unscoped rows, the pending-writes park/dead-letter directory and
+attempt cap, the server-side `102`-row reaper, and the `epic_id`/`parent_task_id` unification.
+
+**Live-store repair carries an ordering constraint** (`procedure_4e83bec5631f`): the store holds 179
+duplicate usage-event uuids (181 excess rows). Since the uuid is a SHA-256 of the dedupe tuple, the
+UNIQUE index builds will fail, be silently swallowed, and never retry — leaving dedupe permanently
+unenforced. Collapse duplicates **first**, then run schema repair, then verify both indexes exist.
+Usage counts from 2026-07-11 onward carry a ~1.4% upward bias from unenforced dedupe, so retention
+multipliers derived from that window are slightly inflated.
 
 ## 3. Protocol law (binds every Track A experiment)
 
@@ -223,14 +300,42 @@ are green first.
 
 ## 6. Track C — dogfood trust debt (must-fix)
 
-Fix the §2.5 list as a named campaign, not scattered chores. Priority order: `df317be0` (queue
-correctness + drain + release-saga replay), `7a52bf39`, `85c4dc53`, `0ea2177e`, `4fd323a5`,
-`4736bf2d`, `659b4ada`. Opportunistic seconds (CLI/API hygiene, medium): `7c4cb25a`, `e2206767`,
-`41606e9d`, `6fe13e16`.
+Fix the §2.5 list as a named campaign, not scattered chores. **Most of the acute work moves into
+1.1.3** (§2.6); what remains in Track C is the design work deliberately excluded from the patch,
+plus the residue.
+
+Ships in 1.1.3: `df317be0` (409 retention + delete metrics), `659b4ada` (exit-code cluster), the
+schema-deadlock pairing + repair sweep + `sibyld db init`, and the `4736bf2d` capture-time scope
+stamp.
+
+Stays in Track C for 1.2, in priority order:
+
+1. **Scope model, properly.** A first-class `Entity.memory_scope` column with a sane default, the
+   `_candidate_scope_allowed` fail-open decision, and the backfill joining
+   `entity.attributes.raw_memory_id` back to `raw_captures.memory_scope` across the namespace split.
+   Plus threading `accessible_teams` into the three team-read call sites so team memory stops
+   failing closed.
+2. **Regenerate or delete every hand-authored gate receipt**, starting with
+   `team-scope-trust-receipt.json`. A blocking gate whose zero is typed by a human is worse than no
+   gate. Pair each with a test that fails when the defect is reintroduced — the current scope test
+   injects the field whose absence is the bug.
+3. **Pending-writes durability design:** park/dead-letter directory, attempt cap (`attempts` is
+   incremented and nothing branches on it), server-side `102`-row reaper, and releasing the
+   reservation on route failure. Retaining 404 makes a poisoned queue drainable only one ID at a
+   time, so this is now load-bearing rather than optional.
+4. `85c4dc53` embedding backfill false-negatives; `0ea2177e` rescoped to doc-chunk lexical recall
+   (two duplicated call sites) **plus the engine-level test coverage that does not exist today** —
+   current tests assert on generated query strings via fake clients and pass regardless of engine
+   semantics; `411a5611` empty-vs-degraded document search; `3f20f0e2` debug-query defects;
+   `errors.py` identifier redaction across 44 sites; `epic_id`/`parent_task_id` unification.
+
+Opportunistic seconds (CLI/API hygiene, medium): `7c4cb25a`, `e2206767`, `41606e9d`, `6fe13e16`.
 
 - Gate `dogfood-trust-gate`: pending-writes queue drains to zero against a healthy server with
-  per-file receipts; a regression fixture exists for each bug class; fulltext-lane conversion passes
-  baseline parity on both 3.2.3 and 3.1.0.
+  per-file receipts; a regression fixture exists for each bug class; **every gate receipt in
+  `benchmarks/results/` is machine-generated by a committed generator**; a two-principal leak test
+  proves private capture is unreadable by an org co-member; fulltext-lane conversion passes baseline
+  parity on both 3.2.3 and 3.1.0.
 
 ## 7. What slides to v1.3, and why
 
