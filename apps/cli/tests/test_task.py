@@ -450,7 +450,7 @@ def test_task_archive_stdin_json_reports_failed_ids(mock_get_client: MagicMock) 
         input="task_123456789abc\nnot-a-task\n13364346-8475-4664-8b52-eb963af2fda7\n",
     )
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     payload = json.loads(result.stdout)
     assert payload["total"] == 3
     assert payload["archived"] == 1
@@ -464,6 +464,49 @@ def test_task_archive_stdin_json_reports_failed_ids(mock_get_client: MagicMock) 
     mock_client.archive_task.assert_any_await("task_123456789abc", None)
     mock_client.archive_task.assert_any_await("13364346-8475-4664-8b52-eb963af2fda7", None)
     assert mock_client.archive_task.await_count == 2
+
+
+@patch("sibyl_cli.task.get_client")
+def test_task_archive_exits_non_zero_when_client_rejects_the_id(
+    mock_get_client: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.archive_task = AsyncMock(
+        side_effect=SibylClientError(
+            "API error: not_found",
+            status_code=404,
+            detail="Task not found",
+        )
+    )
+    mock_get_client.return_value = mock_client
+
+    result = CliRunner().invoke(task.app, ["archive", "task_123456789abc"])
+
+    assert result.exit_code == 1
+    assert "Failed" in result.stdout
+
+
+@patch("sibyl_cli.task.get_client")
+def test_task_archive_bulk_exits_non_zero_when_every_id_fails(
+    mock_get_client: MagicMock,
+) -> None:
+    mock_client = MagicMock()
+    mock_client.archive_task = AsyncMock(
+        side_effect=[
+            {"success": False, "message": "already archived"},
+            {"success": False, "message": "already archived"},
+        ]
+    )
+    mock_get_client.return_value = mock_client
+
+    result = CliRunner().invoke(
+        task.app,
+        ["archive", "--stdin", "--yes"],
+        input="task_123456789abc\ntask_abcdef123456\n",
+    )
+
+    assert result.exit_code == 1
+    assert "Failed: 2 task(s)" in result.stdout
 
 
 @patch("sibyl_cli.task.get_client")
