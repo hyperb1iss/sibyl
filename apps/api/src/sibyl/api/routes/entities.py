@@ -1865,9 +1865,8 @@ async def create_entity(
         # binding is taken from the authenticated context rather than the
         # payload. Dropping it when the context has no user keeps a private
         # row unreadable instead of binding it to a caller-supplied identity.
-        principal_id = ctx.user_id
-        if principal_id:
-            merged_metadata["principal_id"] = principal_id
+        if ctx.user is not None:
+            merged_metadata["principal_id"] = str(ctx.user.id)
         else:
             merged_metadata.pop("principal_id", None)
 
