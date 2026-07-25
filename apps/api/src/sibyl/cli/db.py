@@ -818,6 +818,26 @@ class _DuplicateGroup:
         return len(self.record_ids) - 1
 
 
+def _duplicate_bucket_key(
+    row: Mapping[str, object],
+    fields: tuple[str, ...],
+) -> tuple[tuple[str, str], ...] | None:
+    """Return the key a UNIQUE index would enforce over, or None if it enforces nothing.
+
+    SurrealDB skips an index entry whose key has a missing component, so rows without a
+    value for an optional column are all legitimately distinct and must never be
+    collapsed. The type name rides along because the index treats 1 and '1' as separate
+    entries, and stringifying alone would merge them.
+    """
+    key: list[tuple[str, str]] = []
+    for field in fields:
+        value = row.get(field)
+        if value is None:
+            return None
+        key.append((type(value).__name__, str(value)))
+    return tuple(key)
+
+
 async def _duplicate_groups_for_plane(client: Any, invariant_plan: Any) -> list[_DuplicateGroup]:
     """Group rows under every UNIQUE index the schema promises but the store lacks.
 
@@ -849,12 +869,14 @@ async def _duplicate_groups_for_plane(client: Any, invariant_plan: Any) -> list[
                 f"SELECT id AS duplicate_record_id, {projection} FROM {requirement.table};"  # noqa: S608
             )
         )
-        buckets: dict[tuple[str, ...], list[object]] = {}
+        buckets: dict[tuple[tuple[str, str], ...], list[object]] = {}
         for row in rows:
             record_id = row.get("duplicate_record_id")
             if record_id is None:
                 continue
-            key = tuple(str(row.get(field)) for field in requirement.fields)
+            key = _duplicate_bucket_key(row, requirement.fields)
+            if key is None:
+                continue
             buckets.setdefault(key, []).append(record_id)
         for key, record_ids in buckets.items():
             if len(record_ids) > 1:
@@ -862,7 +884,7 @@ async def _duplicate_groups_for_plane(client: Any, invariant_plan: Any) -> list[
                     _DuplicateGroup(
                         table=requirement.table,
                         index_name=requirement.name,
-                        key=key,
+                        key=tuple(value for _, value in key),
                         # Sorted so the surviving row is the same on every run.
                         record_ids=tuple(sorted(record_ids, key=str)),
                     )

@@ -628,3 +628,85 @@ def test_duplicates_collapse_keeps_one_row_per_group() -> None:
     assert result.exit_code == 0
     assert json.loads(result.output)["collapsed"] == 2
     assert [row["uuid"] for row in remaining] == ["dup", "solo"]
+
+
+async def _seeded_users_store():
+    """Users whose optional github_id is absent, plus one genuinely duplicated pair."""
+    from surrealdb import AsyncSurreal
+
+    connection = AsyncSurreal("memory://")
+    await connection.use("cli_users", "auth")
+    for uuid, email, github_id in (
+        ("u1", "a@example.com", None),
+        ("u2", "b@example.com", None),
+        ("u3", "c@example.com", 7),
+        ("u4", "d@example.com", 7),
+    ):
+        github = "" if github_id is None else f", github_id: {github_id}"
+        await connection.query(
+            f"CREATE users CONTENT {{ uuid: '{uuid}', email: '{email}'{github} }};"
+        )
+    return connection
+
+
+def _run_auth_duplicates(connection: object, args: list[str]):
+    from sibyl_core.backends.surreal.auth_schema import auth_schema_invariant_plan
+    from sibyl_core.backends.surreal.schema_invariants import SchemaInvariantPlan
+
+    plan = auth_schema_invariant_plan()
+    users_only = SchemaInvariantPlan(
+        unique_indexes=tuple(item for item in plan.unique_indexes if item.table == "users"),
+    )
+    client = _EmbeddedClient(connection)
+    with (
+        patch("sibyl.persistence.surreal.auth.build_surreal_auth_client", lambda: client),
+        patch(
+            "sibyl_core.backends.surreal.auth_schema.auth_schema_invariant_plan",
+            lambda: users_only,
+        ),
+        patch("sibyl.config.settings.store", "relational"),
+    ):
+        return runner.invoke(db_cli.app, ["duplicates", *args])
+
+
+def test_duplicates_never_groups_rows_whose_unique_key_component_is_missing() -> None:
+    """SurrealDB lets many rows share a UNIQUE index key that has a missing component.
+
+    `github_id` is `option<int>`, so every user who never linked GitHub is a legitimately
+    distinct row. Bucketing them together would make --collapse delete real accounts.
+    """
+    import asyncio
+
+    connection = asyncio.run(_seeded_users_store())
+    try:
+        result = _run_auth_duplicates(connection, ["--json"])
+    finally:
+        asyncio.run(connection.close())
+
+    payload = json.loads(result.output)
+    github_groups = [item for item in payload["groups"] if item["index"].endswith("github_id")]
+
+    assert result.exit_code == 0
+    assert payload["excess_rows"] == 1
+    assert [item["key"] for item in github_groups] == [["7"]]
+
+
+def test_duplicates_collapse_spares_rows_with_a_missing_unique_key_component() -> None:
+    import asyncio
+
+    connection = asyncio.run(_seeded_users_store())
+    try:
+        result = _run_auth_duplicates(connection, ["--collapse", "--yes", "--json"])
+        remaining = asyncio.run(connection.query("SELECT uuid FROM users ORDER BY uuid;"))
+    finally:
+        asyncio.run(connection.close())
+
+    survivors = [row["uuid"] for row in remaining]
+
+    assert result.exit_code == 0
+    assert json.loads(result.output)["collapsed"] == 1
+    # Both github-less users survive; the duplicated pair keeps whichever record id
+    # sorts first, which is not tied to the uuid.
+    assert {"u1", "u2"}.issubset(survivors)
+    assert len([uuid for uuid in survivors if uuid in {"u3", "u4"}]) == 1
+    assert len(survivors) == 3
