@@ -70,7 +70,7 @@ def _row_metadata(row: dict[str, object]) -> dict[str, object]:
     for key in ("attributes", "metadata"):
         value = row.get(key)
         if isinstance(value, dict):
-            return value
+            return {str(field): field_value for field, field_value in value.items()}
     return {}
 
 
