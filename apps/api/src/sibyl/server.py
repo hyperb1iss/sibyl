@@ -47,6 +47,7 @@ from sibyl_core.auth.memory_policy import (
     MemoryPolicyAction,
     MemoryPolicyDecision,
     authorize_memory_write,
+    stamp_memory_scope_metadata,
 )
 from sibyl_core.memory_pipeline.capture import MemoryCaptureRequest, MemoryCaptureService
 from sibyl_core.services.surreal_content import (
@@ -1044,7 +1045,15 @@ async def _add_mcp_entity(
         surface="mcp_add",
     )
 
-    full_metadata = dict(metadata or {})
+    full_metadata = stamp_memory_scope_metadata(
+        metadata,
+        # A project container is discovered through project membership, not
+        # memory scope, so scoping it private would hide a new project from the
+        # organization that owns it.
+        memory_scope=None if normalized_entity_type == "project" else memory_scope,
+        scope_key=scope_key,
+        principal_id=ctx.user_id,
+    )
     full_metadata["organization_id"] = ctx.org_id
     if ctx.user_id:
         full_metadata["created_by"] = ctx.user_id

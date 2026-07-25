@@ -733,6 +733,8 @@ async def test_add_mcp_entity_scopes_project_metadata() -> None:
         related_to=["plan_1"],
         metadata={
             "source": "test",
+            "memory_scope": "project",
+            "scope_key": "project-a",
             "organization_id": ctx.org_id,
             "created_by": ctx.user_id,
         },
@@ -1629,3 +1631,77 @@ async def test_require_owner_mcp_context_rejects_non_owner() -> None:
         pytest.raises(ValueError, match="OWNER role required for log access"),
     ):
         await _require_owner_mcp_context(ctx)
+
+
+@pytest.mark.asyncio
+async def test_add_mcp_entity_scopes_a_projectless_add_to_the_caller() -> None:
+    """A projectless add is authorized as private, so it has to be stored private.
+
+    The graph row carries no scope column, so an unstamped row lands in the
+    fail-open branch of the retrieval check and reads as organization-visible
+    memory despite having been authorized as the caller's own.
+    """
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+    add = AsyncMock(return_value={"success": True, "id": "episode_123"})
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value=None)),
+        patch("sibyl_core.tools.core.add", add),
+    ):
+        await _add_mcp_entity(
+            title="Private learning",
+            content="Only mine.",
+            entity_type="episode",
+            category=None,
+            languages=None,
+            tags=None,
+            related_to=None,
+            metadata={"principal_id": "victim", "scope_key": "victim"},
+            project=None,
+            priority=None,
+            assignees=None,
+            due_date=None,
+            technologies=None,
+            depends_on=None,
+            repository_url=None,
+        )
+
+    metadata = add.await_args.kwargs["metadata"]
+    assert metadata["memory_scope"] == "private"
+    assert metadata["principal_id"] == ctx.user_id
+    assert "scope_key" not in metadata
+
+
+@pytest.mark.asyncio
+async def test_add_mcp_entity_leaves_project_containers_unscoped() -> None:
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+    add = AsyncMock(return_value={"success": True, "id": "project_123"})
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value=None)),
+        patch("sibyl_core.tools.core.add", add),
+        patch("sibyl.server.create_project_record", AsyncMock()),
+    ):
+        await _add_mcp_entity(
+            title="Sibyl",
+            content="Memory runtime",
+            entity_type="project",
+            category=None,
+            languages=None,
+            tags=None,
+            related_to=None,
+            metadata=None,
+            project=None,
+            priority=None,
+            assignees=None,
+            due_date=None,
+            technologies=None,
+            depends_on=None,
+            repository_url=None,
+        )
+
+    metadata = add.await_args.kwargs["metadata"]
+    assert "memory_scope" not in metadata
+    assert "principal_id" not in metadata
