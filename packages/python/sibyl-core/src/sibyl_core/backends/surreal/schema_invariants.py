@@ -145,6 +145,45 @@ async def fetch_table_indexes(execute_query: SurrealExecute, table: str) -> dict
     return {str(name): str(definition) for name, definition in typed.items()}
 
 
+async def fetch_declared_fields(execute_query: SurrealExecute, table: str) -> frozenset[str]:
+    """Return the top-level field names a table declares.
+
+    Nested declarations (`errors.*`, `metadata.foo`) are folded into their top-level
+    parent because a declared `object FLEXIBLE` field accepts arbitrary keys beneath it,
+    so only the top level of an incoming record needs checking. An empty result means the
+    table declares nothing and therefore constrains nothing.
+    """
+    result = await execute_query(f"INFO FOR TABLE {table};")
+    info = _as_mapping(result)
+    fields = info.get("fields") if info else None
+    if not isinstance(fields, Mapping):
+        return frozenset()
+    typed = cast(Mapping[str, object], fields)
+    return frozenset(str(name).split(".", 1)[0] for name in typed)
+
+
+_IMPLICIT_FIELDS = frozenset({"id", "in", "out"})
+
+
+def drop_undeclared_fields(
+    record: Mapping[str, object],
+    declared: frozenset[str],
+) -> tuple[dict[str, object], tuple[str, ...]]:
+    """Conform a record to a SCHEMAFULL table, returning it with the names it shed.
+
+    A SCHEMAFULL table hard-errors on any undeclared key, and the error names one field
+    at a time, so a record carrying historical drift can never be written. Shedding the
+    unmapped keys loses strictly less than losing the whole row, which is what a restore
+    would otherwise do. The caller is expected to report the names.
+    """
+    if not declared:
+        return dict(record), ()
+    keep = declared | _IMPLICIT_FIELDS
+    kept = {key: value for key, value in record.items() if key in keep}
+    dropped = tuple(sorted(key for key in record if key not in keep))
+    return kept, dropped
+
+
 async def check_schema_invariants(
     execute_query: SurrealExecute,
     plan: SchemaInvariantPlan,
@@ -251,8 +290,10 @@ __all__ = [
     "SchemaInvariantViolation",
     "UniqueIndexRequirement",
     "check_schema_invariants",
+    "drop_undeclared_fields",
     "ensure_schema_invariants",
     "expected_unique_indexes",
+    "fetch_declared_fields",
     "fetch_table_definitions",
     "fetch_table_indexes",
 ]

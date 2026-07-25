@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from enum import Enum
 from uuid import UUID
 
+import structlog
+
 from sibyl import config as config_module
 from sibyl_core.backends.surreal import SurrealContentClient, bootstrap_content_schema
 from sibyl_core.backends.surreal.records import (
@@ -15,6 +17,12 @@ from sibyl_core.backends.surreal.records import (
     query_error as _query_error,
     raise_on_error as _raise_on_error,
 )
+from sibyl_core.backends.surreal.schema_invariants import (
+    drop_undeclared_fields as _drop_undeclared_fields,
+    fetch_declared_fields,
+)
+
+log = structlog.get_logger()
 
 CONTENT_ARCHIVE_VERSION = "1.0"
 
@@ -198,6 +206,7 @@ class ContentArchiveRestoreResult:
     tables_restored: int
     rows_restored: int
     errors: list[str] = field(default_factory=list)
+    dropped_fields: dict[str, list[str]] = field(default_factory=dict)
 
 
 def build_surreal_content_client() -> SurrealContentClient:
@@ -444,6 +453,7 @@ async def restore_content_archive_payload(
     tables_restored = 0
     rows_restored = 0
     errors: list[str] = []
+    dropped_fields: dict[str, set[str]] = {}
 
     try:
         await bootstrap_content_schema(client, reset=False)
@@ -460,6 +470,7 @@ async def restore_content_archive_payload(
             if not rows:
                 continue
 
+            declared = await fetch_declared_fields(client.execute_query, spec.name)
             tables_restored += 1
             for row in rows:
                 if not isinstance(row, dict):
@@ -489,6 +500,9 @@ async def restore_content_archive_payload(
                 if spec.name == "document_chunks":
                     record["embedding"] = _deserialize_vector(record.get("embedding"))
                 record[spec.target_identity_field] = identity
+                record, dropped = _drop_undeclared_fields(record, declared)
+                if dropped:
+                    dropped_fields.setdefault(spec.name, set()).update(dropped)
 
                 # Delete+create must be atomic: a create that fails after the
                 # delete would otherwise drop the existing row on a restore, the
@@ -511,11 +525,21 @@ async def restore_content_archive_payload(
                 except Exception as exc:
                     errors.append(f"{spec.name}:{identity}: {exc}")
 
+        if dropped_fields:
+            log.warning(
+                "content_archive_restore_dropped_undeclared_fields",
+                dropped_fields={
+                    table: sorted(names) for table, names in sorted(dropped_fields.items())
+                },
+            )
         return ContentArchiveRestoreResult(
             success=not errors,
             tables_restored=tables_restored,
             rows_restored=rows_restored,
             errors=errors[:50],
+            dropped_fields={
+                table: sorted(names) for table, names in sorted(dropped_fields.items())
+            },
         )
     finally:
         await client.close()
