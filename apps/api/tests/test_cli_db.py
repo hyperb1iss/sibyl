@@ -359,3 +359,272 @@ def test_backup_create_uses_database_dump_request_field() -> None:
         "include_database_dump": False,
         "include_graph": True,
     }
+
+
+class _StubSchemaClient:
+    """Minimal Surreal stand-in for the schema-init introspection queries."""
+
+    def __init__(
+        self,
+        *,
+        version: int,
+        tables: dict[str, str] | None = None,
+        indexes: dict[str, dict[str, str]] | None = None,
+        version_read_error: str = "",
+    ) -> None:
+        self.version = version
+        self.tables = tables or {}
+        self.indexes = indexes or {}
+        self.version_read_error = version_read_error
+        self.statements: list[str] = []
+
+    async def execute_query(self, statement: str, **_params: object) -> object:
+        self.statements.append(statement)
+        stripped = statement.strip()
+        if stripped.startswith("SELECT version FROM schema_version"):
+            if self.version_read_error:
+                raise RuntimeError(self.version_read_error)
+            return [{"version": self.version}]
+        if stripped == "INFO FOR DB;":
+            return [{"tables": self.tables}]
+        if stripped.startswith("INFO FOR TABLE "):
+            table = stripped.removeprefix("INFO FOR TABLE ").rstrip(";").strip()
+            return [{"indexes": self.indexes.get(table, {})}]
+        if stripped.startswith("DEFINE INDEX"):
+            raise RuntimeError("Database index already contains 'dirty'")
+        return None
+
+    async def close(self) -> None:
+        return None
+
+
+def _run_db_init(auth_client: object, content_client: object, *, args: list[str] | None = None):
+    from sibyl_core.backends.surreal.schema_invariants import SchemaInvariantPlan
+
+    empty_plan = SchemaInvariantPlan()
+    with (
+        patch("sibyl.persistence.surreal.auth.build_surreal_auth_client", lambda: auth_client),
+        patch(
+            "sibyl.persistence.surreal.content.build_surreal_content_client",
+            lambda: content_client,
+        ),
+        patch("sibyl_core.backends.surreal.bootstrap_auth_schema", AsyncMock()),
+        patch("sibyl_core.backends.surreal.bootstrap_content_schema", AsyncMock()),
+        patch(
+            "sibyl_core.backends.surreal.auth_schema.auth_schema_invariant_plan",
+            lambda: empty_plan,
+        ),
+        patch(
+            "sibyl_core.backends.surreal.content_schema.content_schema_invariant_plan",
+            lambda **_kwargs: empty_plan,
+        ),
+        patch("sibyl.config.settings.store", "surreal"),
+    ):
+        return runner.invoke(db_cli.app, ["init", *(args or [])])
+
+
+def test_db_init_reports_a_version_read_failure_instead_of_assuming_zero() -> None:
+    """A store that cannot be read must not look like a fresh one that migrated cleanly."""
+    from sibyl_core.backends.surreal.auth_schema import AUTH_SCHEMA_CURRENT_VERSION
+    from sibyl_core.backends.surreal.content_schema import CONTENT_SCHEMA_CURRENT_VERSION
+
+    result = _run_db_init(
+        _StubSchemaClient(version=AUTH_SCHEMA_CURRENT_VERSION, version_read_error="socket closed"),
+        _StubSchemaClient(version=CONTENT_SCHEMA_CURRENT_VERSION),
+    )
+
+    assert result.exit_code == 1
+    assert "schema state could not be read" in result.output
+    assert "socket closed" in result.output
+
+
+def test_db_init_fails_when_migrations_stop_short_of_the_target() -> None:
+    from sibyl_core.backends.surreal.auth_schema import AUTH_SCHEMA_CURRENT_VERSION
+    from sibyl_core.backends.surreal.content_schema import CONTENT_SCHEMA_CURRENT_VERSION
+
+    result = _run_db_init(
+        _StubSchemaClient(version=AUTH_SCHEMA_CURRENT_VERSION),
+        _StubSchemaClient(version=CONTENT_SCHEMA_CURRENT_VERSION - 1),
+    )
+
+    assert result.exit_code == 1
+    assert f"expected v{CONTENT_SCHEMA_CURRENT_VERSION}" in result.output
+
+
+def test_db_init_succeeds_when_both_planes_reach_their_target() -> None:
+    from sibyl_core.backends.surreal.auth_schema import AUTH_SCHEMA_CURRENT_VERSION
+    from sibyl_core.backends.surreal.content_schema import CONTENT_SCHEMA_CURRENT_VERSION
+
+    result = _run_db_init(
+        _StubSchemaClient(version=AUTH_SCHEMA_CURRENT_VERSION),
+        _StubSchemaClient(version=CONTENT_SCHEMA_CURRENT_VERSION),
+    )
+
+    assert result.exit_code == 0
+    assert "Schema up to date" in result.output
+
+
+def test_db_init_fails_when_a_required_unique_index_is_missing() -> None:
+    """Reaching the target version is not enough if a skipped index left dedupe unenforced."""
+    from sibyl_core.backends.surreal.auth_schema import AUTH_SCHEMA_CURRENT_VERSION
+    from sibyl_core.backends.surreal.content_schema import CONTENT_SCHEMA_CURRENT_VERSION
+    from sibyl_core.backends.surreal.schema_invariants import (
+        SchemaInvariantPlan,
+        UniqueIndexRequirement,
+    )
+
+    plan = SchemaInvariantPlan(
+        schemafull_tables=("memory_usage_events",),
+        unique_indexes=(
+            UniqueIndexRequirement(
+                name="idx_memory_usage_events_uuid",
+                table="memory_usage_events",
+                fields=("uuid",),
+                statement=(
+                    "DEFINE INDEX IF NOT EXISTS idx_memory_usage_events_uuid "
+                    "ON memory_usage_events FIELDS uuid UNIQUE;"
+                ),
+            ),
+        ),
+    )
+    content_client = _StubSchemaClient(
+        version=CONTENT_SCHEMA_CURRENT_VERSION,
+        tables={"memory_usage_events": "DEFINE TABLE memory_usage_events TYPE ANY SCHEMAFULL"},
+        indexes={"memory_usage_events": {}},
+    )
+
+    with (
+        patch(
+            "sibyl.persistence.surreal.auth.build_surreal_auth_client",
+            lambda: _StubSchemaClient(version=AUTH_SCHEMA_CURRENT_VERSION),
+        ),
+        patch(
+            "sibyl.persistence.surreal.content.build_surreal_content_client",
+            lambda: content_client,
+        ),
+        patch("sibyl_core.backends.surreal.bootstrap_auth_schema", AsyncMock()),
+        patch("sibyl_core.backends.surreal.bootstrap_content_schema", AsyncMock()),
+        patch(
+            "sibyl_core.backends.surreal.auth_schema.auth_schema_invariant_plan",
+            SchemaInvariantPlan,
+        ),
+        patch(
+            "sibyl_core.backends.surreal.content_schema.content_schema_invariant_plan",
+            lambda **_kwargs: plan,
+        ),
+        patch("sibyl.config.settings.store", "surreal"),
+    ):
+        result = runner.invoke(db_cli.app, ["init"])
+
+    assert result.exit_code == 1
+    assert "unmet" in result.output
+    assert "idx_memory_usage_events_uuid" in result.output
+    assert "sibyld db duplicates" in result.output
+
+
+class _EmbeddedClient:
+    """Adapter that gives the CLI its client shape over an embedded SurrealDB."""
+
+    def __init__(self, connection: object) -> None:
+        self._connection = connection
+
+    async def execute_query(self, statement: str, **params: object) -> object:
+        return await self._connection.query(statement, params or None)
+
+    async def close(self) -> None:
+        return None
+
+
+def _usage_event(uuid: str, item_id: str) -> str:
+    return f"""
+    CREATE memory_usage_events CONTENT {{
+        uuid: '{uuid}',
+        organization_id: 'org-a',
+        session_key: 's',
+        message_key: 'm',
+        source_surface: 'recall',
+        item_kind: 'raw_capture',
+        item_id: '{item_id}',
+        signal_type: 'exposure',
+        metadata: {{}},
+        event_at: d'2026-07-11T00:00:00Z',
+        created_at: d'2026-07-11T00:00:00Z'
+    }};
+    """
+
+
+async def _seeded_usage_store():
+    from surrealdb import AsyncSurreal
+
+    connection = AsyncSurreal("memory://")
+    await connection.use("cli_duplicates", "content")
+    for item_id in ("item-0", "item-1", "item-2"):
+        await connection.query(_usage_event("dup", item_id))
+    await connection.query(_usage_event("solo", "item-3"))
+    return connection
+
+
+def _run_duplicates(connection: object, args: list[str]):
+    from sibyl_core.backends.surreal.content_schema import content_schema_invariant_plan
+    from sibyl_core.backends.surreal.schema_invariants import SchemaInvariantPlan
+
+    plan = content_schema_invariant_plan()
+    usage_only = SchemaInvariantPlan(
+        unique_indexes=tuple(
+            item for item in plan.unique_indexes if item.table == "memory_usage_events"
+        ),
+    )
+    client = _EmbeddedClient(connection)
+    with (
+        patch(
+            "sibyl.persistence.surreal.auth.build_surreal_auth_client",
+            lambda: _StubSchemaClient(version=0),
+        ),
+        patch("sibyl.persistence.surreal.content.build_surreal_content_client", lambda: client),
+        patch(
+            "sibyl_core.backends.surreal.auth_schema.auth_schema_invariant_plan",
+            SchemaInvariantPlan,
+        ),
+        patch(
+            "sibyl_core.backends.surreal.content_schema.content_schema_invariant_plan",
+            lambda **_kwargs: usage_only,
+        ),
+        patch("sibyl.config.settings.store", "surreal"),
+    ):
+        return runner.invoke(db_cli.app, ["duplicates", *args])
+
+
+def test_duplicates_inventories_rows_blocking_a_missing_unique_index() -> None:
+    import asyncio
+
+    connection = asyncio.run(_seeded_usage_store())
+    try:
+        result = _run_duplicates(connection, ["--json"])
+    finally:
+        asyncio.run(connection.close())
+
+    payload = json.loads(result.output)
+
+    assert result.exit_code == 0
+    assert payload["excess_rows"] == 2
+    assert payload["collapsed"] == 0
+    uuid_groups = [item for item in payload["groups"] if item["index"].endswith("_uuid")]
+    assert uuid_groups[0]["copies"] == 3
+    assert uuid_groups[0]["key"] == ["dup"]
+
+
+def test_duplicates_collapse_keeps_one_row_per_group() -> None:
+    import asyncio
+
+    connection = asyncio.run(_seeded_usage_store())
+    try:
+        result = _run_duplicates(connection, ["--collapse", "--yes", "--json"])
+        remaining = asyncio.run(
+            connection.query("SELECT uuid FROM memory_usage_events ORDER BY uuid;")
+        )
+    finally:
+        asyncio.run(connection.close())
+
+    assert result.exit_code == 0
+    assert json.loads(result.output)["collapsed"] == 2
+    assert [row["uuid"] for row in remaining] == ["dup", "solo"]

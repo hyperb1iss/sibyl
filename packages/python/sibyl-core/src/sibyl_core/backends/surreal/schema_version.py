@@ -262,10 +262,13 @@ def _optional_int(value: object) -> int | None:
         return None
 
 
-def _validate_identifier(value: str) -> None:
+def validate_identifier(value: str) -> None:
     if not _IDENTIFIER_RE.fullmatch(value):
         msg = f"invalid SurrealDB identifier: {value!r}"
         raise ValueError(msg)
+
+
+_validate_identifier = validate_identifier
 
 
 def schema_version_record_id(name: str) -> str:
@@ -289,5 +292,6 @@ __all__ = [
     "rebuild_index_concurrently",
     "record_schema_version",
     "schema_version_record_id",
+    "validate_identifier",
     "wait_for_index_ready",
 ]
