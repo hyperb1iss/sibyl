@@ -129,15 +129,27 @@ class TestGraphRoutes:
                         )
                     ]
                 )
-            )
+            ),
+            entity_manager=SimpleNamespace(
+                get_many=AsyncMock(
+                    return_value=[
+                        SimpleNamespace(id="task-1", metadata={}),
+                        SimpleNamespace(id="project-1", metadata={}),
+                    ]
+                )
+            ),
         )
 
-        with patch(
-            "sibyl.api.routes.graph.get_entity_graph_runtime",
-            AsyncMock(return_value=runtime),
+        with (
+            patch(
+                "sibyl.api.routes.graph.get_entity_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            _accessible_projects(),
         ):
             edges = await graph_routes.get_all_edges(
                 org=_org(),
+                ctx=_ctx(),
                 relationship_types=[RelationshipType.BELONGS_TO],
                 limit=25,
                 offset=5,
@@ -512,6 +524,60 @@ class TestGraphRoutes:
         for surface in ("clusters", "nodes", "hierarchical"):
             assert adapter_calls[surface]["principal_id"] == reader, surface
             assert adapter_calls[surface]["accessible_projects"] == {"proj-1"}, surface
+
+    @pytest.mark.asyncio
+    async def test_edges_drop_an_edge_naming_a_private_endpoint(self) -> None:
+        """An edge names both endpoints, so it discloses that a hidden row exists.
+
+        Entity ids are a deterministic hash of title and category, which makes
+        a disclosed id a confirmation oracle for a guessed title.
+        """
+        private = SimpleNamespace(
+            id="decision_private",
+            metadata={"memory_scope": "private", "principal_id": "victim"},
+        )
+        shared = SimpleNamespace(id="episode_shared", metadata={})
+        runtime = SimpleNamespace(
+            relationship_manager=SimpleNamespace(
+                list_all=AsyncMock(
+                    return_value=[
+                        SimpleNamespace(
+                            id="rel-1",
+                            source_id="decision_private",
+                            target_id="episode_shared",
+                            relationship_type=RelationshipType.RELATED_TO,
+                        ),
+                        SimpleNamespace(
+                            id="rel-2",
+                            source_id="episode_shared",
+                            target_id="episode_shared",
+                            relationship_type=RelationshipType.RELATED_TO,
+                        ),
+                    ]
+                )
+            ),
+            entity_manager=SimpleNamespace(
+                get_many=AsyncMock(return_value=[private, shared]),
+            ),
+        )
+
+        with (
+            patch(
+                "sibyl.api.routes.graph.get_entity_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            _accessible_projects(),
+        ):
+            edges = await graph_routes.get_all_edges(
+                org=_org(),
+                ctx=_ctx(),
+                relationship_types=None,
+                limit=100,
+                offset=0,
+            )
+
+        assert [edge.id for edge in edges] == ["rel-2"]
+        assert "decision_private" not in str(edges)
 
     @pytest.mark.asyncio
     async def test_subgraph_refuses_a_co_members_private_center(self) -> None:
