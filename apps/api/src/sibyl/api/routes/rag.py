@@ -48,6 +48,7 @@ from sibyl.persistence.content_runtime import (
     search_rag_chunks,
 )
 from sibyl_core.auth import OrganizationRole
+from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
 
 log = structlog.get_logger()
 
@@ -703,6 +704,7 @@ async def get_document_related_entities(
             limit=15,
         )
 
+        reader_user_id = str(getattr(getattr(auth, "user", None), "id", None) or "") or None
         for entity, score in search_results:
             # Skip very low relevance matches
             if score < 0.1:
@@ -714,6 +716,16 @@ async def get_document_related_entities(
                 accessible_projects is not None
                 and project_id is not None
                 and project_id not in accessible_projects
+            ):
+                continue
+
+            # The project screen above passes any row without a project, and a
+            # private memory has none. This block returns the entity's name and
+            # description, so the scope rule has to hold as well.
+            if not memory_metadata_read_allowed(
+                entity.metadata,
+                principal_id=reader_user_id,
+                accessible_projects=accessible_projects,
             ):
                 continue
 
