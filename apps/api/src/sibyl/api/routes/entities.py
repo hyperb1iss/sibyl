@@ -530,6 +530,30 @@ def _entity_visible_to_reader(
     )
 
 
+def _related_entity_visible(
+    entity: Any,
+    *,
+    reader_user_id: str | None,
+    accessible_projects: set[str],
+) -> bool:
+    """Both constraints a neighbour has to clear before its name is returned.
+
+    Project membership and memory scope are orthogonal: a work item is
+    addressed by its project and carries no scope, while a private memory
+    carries a scope and no project. Checking either one alone lets the other
+    kind through, and a neighbour summary carries the entity's name.
+    """
+    return _entity_visible_to_projects(entity, accessible_projects) and _entity_visible_to_reader(
+        entity,
+        reader_user_id=reader_user_id,
+        accessible_projects=accessible_projects,
+    )
+
+
+def _reader_user_id(ctx: AuthContext) -> str | None:
+    return str(getattr(getattr(ctx, "user", None), "id", None) or "") or None
+
+
 async def _accessible_project_ids_for_read(ctx: AuthContext) -> set[str]:
     accessible_projects = await list_accessible_project_graph_ids(ctx)
     return {str(project_id) for project_id in accessible_projects or set()}
@@ -805,6 +829,7 @@ async def _enrich_entity_with_related(
     preloaded_related: list[RelatedEntitySummary] | None = None,
     *,
     accessible_projects: set[str],
+    reader_user_id: str | None,
     related_limit: int = 5,
 ) -> tuple[dict[str, Any], list[RelatedEntitySummary] | None]:
     """Enrich entity metadata and fetch related entities based on entity type.
@@ -864,6 +889,7 @@ async def _enrich_entity_with_related(
             relationship_manager,
             entity_id=entity_id,
             accessible_projects=accessible_projects,
+            reader_user_id=reader_user_id,
             limit=related_limit,
         )
 
@@ -876,6 +902,7 @@ def _summarize_related_entities(
     related_entities: list[Any],
     relationships: list[Any],
     accessible_projects: set[str],
+    reader_user_id: str | None,
     limit: int | None = None,
 ) -> list[RelatedEntitySummary] | None:
     if not related_entities or not relationships:
@@ -896,7 +923,11 @@ def _summarize_related_entities(
     summaries: list[RelatedEntitySummary] = []
     seen_ids: set[str] = set()
     for related_entity in related_entities:
-        if not _entity_visible_to_projects(related_entity, accessible_projects):
+        if not _related_entity_visible(
+            related_entity,
+            reader_user_id=reader_user_id,
+            accessible_projects=accessible_projects,
+        ):
             continue
         relationship_pair = relationships_by_other_id.get(related_entity.id)
         if relationship_pair is None:
@@ -925,6 +956,7 @@ async def _fetch_related_entity_summaries(
     *,
     entity_id: str,
     accessible_projects: set[str],
+    reader_user_id: str | None,
     limit: int,
 ) -> list[RelatedEntitySummary] | None:
     try:
@@ -937,7 +969,11 @@ async def _fetch_related_entity_summaries(
         seen_ids: set[str] = set()
         deduped: list[RelatedEntitySummary] = []
         for rel_entity, rel in related_pairs:
-            if not _entity_visible_to_projects(rel_entity, accessible_projects):
+            if not _related_entity_visible(
+                rel_entity,
+                reader_user_id=reader_user_id,
+                accessible_projects=accessible_projects,
+            ):
                 continue
             if rel_entity.id in seen_ids:
                 continue
@@ -1261,6 +1297,7 @@ async def get_entity(
                     runtime.relationship_manager,
                     entity_id=entity_id,
                     accessible_projects=accessible_projects,
+                    reader_user_id=_reader_user_id(ctx),
                     limit=related_limit,
                 )
 
@@ -1296,6 +1333,7 @@ async def get_entity(
                     runtime.relationship_manager,
                     preloaded_related=None,
                     accessible_projects=accessible_projects,
+                    reader_user_id=_reader_user_id(ctx),
                     related_limit=0,
                 )
 
@@ -1327,6 +1365,7 @@ async def get_entity(
             related_entities=graph_bundle.related_entities,
             relationships=graph_bundle.relationships,
             accessible_projects=accessible_projects,
+            reader_user_id=_reader_user_id(ctx),
             limit=related_limit,
         )
 
@@ -1342,6 +1381,7 @@ async def get_entity(
                 runtime.relationship_manager,
                 preloaded_related=related,
                 accessible_projects=accessible_projects,
+                reader_user_id=_reader_user_id(ctx),
                 related_limit=related_limit,
             )
 
