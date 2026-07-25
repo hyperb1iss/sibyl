@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -377,8 +379,18 @@ def test_stamped_metadata_keeps_an_unrecognized_scope_so_reads_deny() -> None:
     )
 
     assert stamped == {"memory_scope": "Private"}
-    assert not memory_metadata_read_allowed(stamped, principal_id="author")
-    assert not memory_metadata_read_allowed(stamped, principal_id="victim")
+    assert not memory_metadata_read_allowed(
+        stamped,
+        principal_id="author",
+        private_scope_granted=True,
+        accessible_projects=set(),
+    )
+    assert not memory_metadata_read_allowed(
+        stamped,
+        principal_id="victim",
+        private_scope_granted=True,
+        accessible_projects=set(),
+    )
 
 
 def test_stamped_metadata_keeps_a_project_row_on_its_verified_key() -> None:
@@ -397,29 +409,46 @@ def test_stamped_metadata_keeps_a_project_row_on_its_verified_key() -> None:
 
 
 def test_metadata_read_is_open_only_when_no_scope_is_recorded() -> None:
-    assert memory_metadata_read_allowed({"principal_id": "victim"}, principal_id="attacker")
+    assert memory_metadata_read_allowed(
+        {"principal_id": "victim"},
+        principal_id="attacker",
+        private_scope_granted=True,
+        accessible_projects=set(),
+    )
     assert not memory_metadata_read_allowed(
         {"memory_scope": "private", "principal_id": "victim"},
         principal_id="attacker",
+        private_scope_granted=True,
+        accessible_projects=set(),
     )
     assert not memory_metadata_read_allowed(
         {"memory_scope": "private", "scope_key": "victim"},
         principal_id="attacker",
+        private_scope_granted=True,
+        accessible_projects=set(),
     )
     assert memory_metadata_read_allowed(
         {"memory_scope": "private", "scope_key": "victim"},
         principal_id="victim",
+        private_scope_granted=True,
+        accessible_projects=set(),
     )
 
 
 def test_metadata_read_denies_a_private_row_without_a_private_grant() -> None:
     metadata = {"memory_scope": "private", "principal_id": "owner"}
 
-    assert memory_metadata_read_allowed(metadata, principal_id="owner")
+    assert memory_metadata_read_allowed(
+        metadata,
+        principal_id="owner",
+        private_scope_granted=True,
+        accessible_projects=set(),
+    )
     assert not memory_metadata_read_allowed(
         metadata,
         principal_id="owner",
         private_scope_granted=False,
+        accessible_projects=set(),
     )
 
 
@@ -458,8 +487,18 @@ def test_promoted_candidate_cannot_inherit_a_forged_owner_from_its_capture() -> 
     assert entity.metadata["memory_scope"] == "private"
     assert entity.metadata["principal_id"] == "attacker"
     assert "scope_key" not in entity.metadata
-    assert not memory_metadata_read_allowed(entity.metadata, principal_id="victim")
-    assert memory_metadata_read_allowed(entity.metadata, principal_id="attacker")
+    assert not memory_metadata_read_allowed(
+        entity.metadata,
+        principal_id="victim",
+        private_scope_granted=True,
+        accessible_projects=set(),
+    )
+    assert memory_metadata_read_allowed(
+        entity.metadata,
+        principal_id="attacker",
+        private_scope_granted=True,
+        accessible_projects=set(),
+    )
 
 
 def test_operational_capture_cannot_name_an_owner_through_its_metadata_bag() -> None:
@@ -531,45 +570,67 @@ def test_search_scope_policy_denies_bands_it_cannot_verify() -> None:
         ), scope
 
 
-def test_search_scope_policy_never_diverges_from_the_shared_rule() -> None:
-    """Search kept its own copy of the read rule, with a fail-open branch.
+# Every place in sibyl-core that reads a row's memory_scope out of a metadata
+# bag, with why it is not a second copy of the read rule. Authorization must
+# go through memory_metadata_read_allowed; these do something else with the
+# value. A new entry here is the review question, which is the point.
+_SCOPE_READERS_THAT_DO_NOT_AUTHORIZE = {
+    "session_bundle.py": "serializes the scope into a bundle for display",
+    "tools/add.py": "write guard: refuses a declared scope it was not authorized to keep",
+    "tools/admin.py": "write stamp: normalizes a restored row's owner metadata",
+    "tools/search.py": "reports the scope on a candidate contract and as a filter",
+    "tools/reflect.py": "passes an authorized scope through to the write",
+    "models/reflection.py": "deserializes a stored field",
+    "audit/filters.py": "filters an audit log by a recorded scope value",
+    "projection/memory.py": "write stamp: mirrors an inherited project scope key",
+    "services/surreal_content.py": "deserializes a raw memory's stored scope",
+}
 
-    An unknown accessible-project set meant allow, so a credential carrying no
-    user context saw every project-scoped row in the organization. Any shape
-    the two implementations disagree on is reachable through one surface and
-    hidden on the other, which is the drift this convergence exists to end.
+
+def test_no_second_implementation_of_the_read_rule_exists() -> None:
+    """The convergence guarantee, asserted against source rather than a call.
+
+    An earlier version compared _matches_memory_scope_policy against
+    memory_metadata_read_allowed, which it already delegates to, so it could
+    only ever pass. This finds every module that reads a row's scope out of
+    metadata and requires each to be a known non-authorizing use.
     """
-    from sibyl_core.tools.search import _matches_memory_scope_policy
+    import sibyl_core
 
-    reader = "reader-1"
-    shapes: list[tuple[dict[str, str], set[str] | None]] = [
-        ({"memory_scope": "project", "scope_key": "proj-x"}, None),
-        ({"memory_scope": "project", "scope_key": "proj-x"}, set()),
-        ({"memory_scope": "project", "scope_key": "proj-x"}, {"proj-x"}),
-        ({"memory_scope": "project", "project_id": "proj-x"}, None),
-        ({"memory_scope": "private", "principal_id": "victim"}, set()),
-        ({"memory_scope": "private", "principal_id": reader}, set()),
-        ({"memory_scope": "private", "scope_key": reader}, set()),
-        ({"memory_scope": "team", "scope_key": "team-x"}, set()),
-        ({"memory_scope": "delegated", "scope_key": "del-x"}, set()),
-        ({"memory_scope": "sooper_sekrit", "scope_key": "x"}, set()),
-        ({}, set()),
-    ]
+    root = Path(sibyl_core.__file__).parent
+    policy_module = root / "auth" / "memory_policy.py"
+    scope_branch = re.compile(r"""(get\(\s*["']memory_scope["']|\[\s*["']memory_scope["']\s*\])""")
 
-    for metadata, projects in shapes:
-        local = _matches_memory_scope_policy(
-            SimpleNamespace(metadata=metadata),
-            project=None,
-            principal_id=reader,
-            allowed_memory_scope_keys=None,
-            accessible_projects=projects,
-        )
-        shared = memory_metadata_read_allowed(
-            metadata,
-            principal_id=reader,
-            accessible_projects=projects,
-        )
-        assert local == shared, (metadata, projects, local, shared)
+    found: dict[str, list[str]] = {}
+    for path in sorted(root.rglob("*.py")):
+        if path == policy_module:
+            continue
+        for lineno, line in enumerate(path.read_text().splitlines(), start=1):
+            if scope_branch.search(line):
+                found.setdefault(str(path.relative_to(root)), []).append(
+                    f"{lineno}: {line.strip()}"
+                )
+
+    unexpected = {
+        module: lines
+        for module, lines in found.items()
+        if module not in _SCOPE_READERS_THAT_DO_NOT_AUTHORIZE
+    }
+    assert unexpected == {}, (
+        "new code reads a row's memory_scope out of its metadata. If it decides "
+        "who may see the row, call memory_metadata_read_allowed instead; if it "
+        "does something else, add it to the inventory with a reason:\n"
+        + "\n".join(f"{m}\n  " + "\n  ".join(v) for m, v in unexpected.items())
+    )
+
+
+def test_the_read_rule_requires_its_dangerous_arguments() -> None:
+    """Both defaulted open, and a caller that forgot either looked converged."""
+    import inspect
+
+    signature = inspect.signature(memory_metadata_read_allowed)
+    for name in ("private_scope_granted", "accessible_projects"):
+        assert signature.parameters[name].default is inspect.Parameter.empty, name
 
 
 def test_search_scope_policy_still_serves_a_verified_project_filter() -> None:
