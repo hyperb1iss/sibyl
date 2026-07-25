@@ -545,6 +545,7 @@ async def _resolve_mcp_capture_links(
             organization_id=ctx.org_id,
             principal_id=ctx.user_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=getattr(ctx, "api_key_memory_scope_keys", None),
         )
     except Exception as exc:
         log.warning("mcp_active_task_lookup_failed", project=project, error=str(exc))
@@ -1613,6 +1614,11 @@ async def _manage_mcp_action(
         entity_id=entity_id,
         accessible_projects=accessible_projects,
     )
+    # A denied decision has to stop the call, not annotate it. This ran before
+    # the idempotency reservation deliberately: a refused action must not
+    # strand a reservation row that a later legitimate retry would replay.
+    if policy_decision is not None and not policy_decision.allowed:
+        raise ValueError(policy_decision.reason)
 
     normalized_action = action.lower().strip()
     request_data = dict(data or {})
@@ -1711,6 +1717,7 @@ async def _manage_mcp_action(
             organization_id=ctx.org_id,
             principal_id=ctx.user_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=getattr(ctx, "api_key_memory_scope_keys", None),
         )
         payload = _to_dict(result)
         if policy_decision is not None:

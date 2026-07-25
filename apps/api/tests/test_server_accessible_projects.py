@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 import pytest
 
+import sibyl.server as server_module
 from sibyl.auth.api_key_common import api_key_memory_scope_key
 from sibyl.server import (
     McpContext,
@@ -1230,6 +1232,7 @@ async def test_manage_mcp_project_id_action_allows_admin_scope() -> None:
         organization_id=ctx.org_id,
         principal_id=ctx.user_id,
         accessible_projects=None,
+        allowed_memory_scope_keys=None,
     )
 
 
@@ -1338,6 +1341,7 @@ async def test_remember_mcp_memory_links_single_active_project_task() -> None:
         organization_id=ctx.org_id,
         principal_id=ctx.user_id,
         accessible_projects={"project-a"},
+        allowed_memory_scope_keys=None,
     )
 
 
@@ -1874,3 +1878,92 @@ async def test_manage_refuses_a_private_target_owned_by_another_principal() -> N
     # An ordinary work item is still addressed by its project.
     unscoped = await _decide(_target(None, None))
     assert unscoped.allowed is True
+
+
+@pytest.mark.asyncio
+async def test_manage_dispatch_does_not_mutate_a_foreign_private_target() -> None:
+    """Asserts the effect, not the decision.
+
+    The previous test called the resolver directly and checked what it
+    returned. The dispatcher computed that decision and then ignored it —
+    twenty-one references to policy_decision and not one read .allowed — so
+    the mutation ran anyway and the response merely carried a policy_reason
+    explaining why it should not have. A test that asserts a returned decision
+    cannot see that.
+
+    This drives the dispatcher and asserts three effects: no workflow
+    transition ran, no idempotency reservation was taken, and the owner is
+    still able to act on their own row.
+    """
+    bob = str(uuid4())
+    transitions: list[str] = []
+    reservations: list[str] = []
+
+    def _target(memory_scope: str | None, owner: str | None) -> SimpleNamespace:
+        metadata: dict[str, str] = {"project_id": "project-shared"}
+        if memory_scope:
+            metadata["memory_scope"] = memory_scope
+        if owner:
+            metadata["principal_id"] = owner
+        return SimpleNamespace(
+            id="task_target",
+            entity_type=SimpleNamespace(value="task"),
+            name="Target",
+            project_id="project-shared",
+            metadata=metadata,
+        )
+
+    async def _spy_transition(**kwargs: Any) -> dict[str, Any]:
+        transitions.append(str(kwargs.get("action")))
+        return {"success": True}
+
+    async def _spy_reserve(**kwargs: Any):
+        reservations.append(str(kwargs.get("idempotency_key")))
+        raise AssertionError("a refused action must not reserve idempotency")
+
+    async def _dispatch(
+        entity: SimpleNamespace, user_id: str, *, idempotency_key: str | None = None
+    ) -> str:
+        ctx = McpContext(org_id=str(uuid4()), user_id=user_id, scopes=["mcp"])
+        runtime = SimpleNamespace(
+            entity_manager=SimpleNamespace(get=AsyncMock(return_value=entity))
+        )
+        with (
+            patch(
+                "sibyl_core.services.graph.get_surreal_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            patch.object(server_module, "_require_mcp_context", AsyncMock(return_value=ctx)),
+            patch.object(
+                server_module,
+                "_get_accessible_projects",
+                AsyncMock(return_value={"project-shared"}),
+            ),
+            patch.object(server_module, "_manage_workflow_transition", _spy_transition),
+            patch.object(server_module, "reserve_idempotency_record", _spy_reserve),
+        ):
+            try:
+                await server_module._manage_mcp_action(
+                    action="complete_task",
+                    entity_id="task_target",
+                    data={"idempotency_key": idempotency_key} if idempotency_key else {},
+                )
+            except ValueError as exc:
+                return str(exc)
+        return "executed"
+
+    outcome = await _dispatch(_target("private", "alice"), bob, idempotency_key="key-1")
+    assert outcome == "private_target_not_owned"
+    # The effect: nothing ran and nothing was reserved.
+    assert transitions == []
+    assert reservations == []
+
+    # The owner is unaffected: the transition actually runs for them.
+    transitions.clear()
+    assert await _dispatch(_target("private", bob), bob) == "executed"
+    assert transitions == ["complete_task"]
+
+    # An ordinary work item is still addressed by its project.
+    transitions.clear()
+    assert await _dispatch(_target(None, None), bob) == "executed"
+    assert transitions == ["complete_task"]
