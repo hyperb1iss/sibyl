@@ -234,8 +234,9 @@ class TestGraphRoutes:
                     ]
                 ),
             ) as get_clusters,
+            _accessible_projects(),
         ):
-            result = await graph_routes.get_clusters(org=_org(), refresh=True)
+            result = await graph_routes.get_clusters(org=_org(), ctx=_ctx(), refresh=True)
 
         assert result["total_nodes"] == 3
         assert result["total_clusters"] == 1
@@ -243,6 +244,8 @@ class TestGraphRoutes:
             runtime.client,
             str(_org().id),
             force_refresh=True,
+            principal_id=str(_ctx().user.id),
+            accessible_projects=set(),
         )
 
     @pytest.mark.asyncio
@@ -334,9 +337,11 @@ class TestGraphRoutes:
                 "sibyl.api.routes.graph.get_hierarchical_graph",
                 AsyncMock(return_value=data),
             ) as get_hierarchical_graph,
+            _accessible_projects(),
         ):
             result = await graph_routes.get_hierarchical_graph_data(
                 org=_org(),
+                ctx=_ctx(),
                 projects=["proj-1"],
                 types=[EntityType.TASK],
                 max_nodes=200,
@@ -359,6 +364,8 @@ class TestGraphRoutes:
             max_edges=300,
             resolution="overview",
             cluster_id="cluster-1",
+            principal_id=str(_ctx().user.id),
+            accessible_projects=set(),
         )
 
     @pytest.mark.asyncio
@@ -386,9 +393,11 @@ class TestGraphRoutes:
                 "sibyl.api.routes.graph.get_hierarchical_graph",
                 AsyncMock(return_value=data),
             ),
+            _accessible_projects(),
         ):
             result = await graph_routes.get_hierarchical_graph_data(
                 org=_org(),
+                ctx=_ctx(),
                 types=[EntityType.TOPIC],
                 max_nodes=200,
                 max_edges=300,
@@ -446,6 +455,63 @@ class TestGraphRoutes:
             )
 
         assert [node.id for node in nodes] == ["episode_shared"]
+
+    @pytest.mark.asyncio
+    async def test_cluster_routes_authorize_as_the_reader(self) -> None:
+        """The cluster funnels return an entity's description, not just its id."""
+        runtime = SimpleNamespace(client=object())
+        adapter_calls: dict[str, dict] = {}
+
+        async def _clusters(_client, group_id, **kwargs):
+            adapter_calls["clusters"] = kwargs
+            return []
+
+        async def _nodes(_client, group_id, cluster_id, **kwargs):
+            adapter_calls["nodes"] = kwargs
+            return {"nodes": [], "edges": []}
+
+        async def _hierarchical(_client, group_id, **kwargs):
+            adapter_calls["hierarchical"] = kwargs
+            return SimpleNamespace(
+                nodes=[],
+                edges=[],
+                clusters=[],
+                cluster_edges=[],
+                total_nodes=0,
+                total_edges=0,
+                displayed_nodes=0,
+                displayed_edges=0,
+                resolution="detail",
+                recommended_resolution="detail",
+            )
+
+        with (
+            patch(
+                "sibyl.api.routes.graph.get_entity_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            patch("sibyl.api.routes.graph.get_clusters_for_visualization", _clusters),
+            patch("sibyl.api.routes.graph.get_cluster_nodes", _nodes),
+            patch("sibyl.api.routes.graph.get_hierarchical_graph", _hierarchical),
+            _accessible_projects("proj-1"),
+        ):
+            await graph_routes.get_clusters(org=_org(), ctx=_ctx(), refresh=False)
+            await graph_routes.get_cluster_detail("cluster-1", org=_org(), ctx=_ctx())
+            await graph_routes.get_hierarchical_graph_data(
+                org=_org(),
+                ctx=_ctx(),
+                projects=None,
+                types=None,
+                max_nodes=1000,
+                max_edges=5000,
+                resolution="detail",
+                cluster_id=None,
+            )
+
+        reader = str(_ctx().user.id)
+        for surface in ("clusters", "nodes", "hierarchical"):
+            assert adapter_calls[surface]["principal_id"] == reader, surface
+            assert adapter_calls[surface]["accessible_projects"] == {"proj-1"}, surface
 
     @pytest.mark.asyncio
     async def test_subgraph_refuses_a_co_members_private_center(self) -> None:

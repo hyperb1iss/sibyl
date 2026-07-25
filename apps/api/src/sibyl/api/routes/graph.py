@@ -49,18 +49,31 @@ async def get_clusters_for_visualization(
     group_id: str,
     *,
     force_refresh: bool = False,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ):
     adapter = await get_graph_query_adapter(group_id)
-    return await adapter.get_clusters_for_visualization(force_refresh=force_refresh)
+    return await adapter.get_clusters_for_visualization(
+        force_refresh=force_refresh,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+    )
 
 
 async def get_cluster_nodes(
     _client: object,
     group_id: str,
     cluster_id: str,
+    *,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ):
     adapter = await get_graph_query_adapter(group_id)
-    return await adapter.get_cluster_nodes(cluster_id)
+    return await adapter.get_cluster_nodes(
+        cluster_id,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+    )
 
 
 async def get_hierarchical_graph(
@@ -73,6 +86,8 @@ async def get_hierarchical_graph(
     max_edges: int = 5000,
     resolution: str = "detail",
     cluster_id: str | None = None,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ):
     adapter = await get_graph_query_adapter(group_id)
     return await adapter.get_hierarchical_graph(
@@ -82,6 +97,8 @@ async def get_hierarchical_graph(
         max_edges=max_edges,
         resolution=resolution,
         cluster_id=cluster_id,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
     )
 
 
@@ -541,6 +558,7 @@ async def get_subgraph(
 @handle_workflow_errors("get_clusters")
 async def get_clusters(
     org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
     refresh: bool = Query(default=False, description="Force refresh clusters"),
 ) -> dict:
     """Get clusters for bubble visualization.
@@ -550,11 +568,14 @@ async def get_clusters(
     """
     group_id = str(org.id)
     runtime = await get_entity_graph_runtime(group_id)
+    principal_id, accessible_projects = await _graph_scope_reader(ctx)
 
     clusters = await get_clusters_for_visualization(
         runtime.client,
         group_id,
         force_refresh=refresh,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
     )
 
     # Transform to API response format
@@ -583,12 +604,20 @@ async def get_clusters(
 async def get_cluster_detail(
     cluster_id: str,
     org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
 ) -> dict:
     """Get nodes and edges within a specific cluster for drill-down view."""
     group_id = str(org.id)
     runtime = await get_entity_graph_runtime(group_id)
+    principal_id, accessible_projects = await _graph_scope_reader(ctx)
 
-    result = await get_cluster_nodes(runtime.client, group_id, cluster_id)
+    result = await get_cluster_nodes(
+        runtime.client,
+        group_id,
+        cluster_id,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+    )
 
     if result.get("error"):
         raise HTTPException(status_code=404, detail=result["error"])
@@ -636,6 +665,7 @@ async def get_cluster_detail(
 @handle_workflow_errors("get_hierarchical_graph")
 async def get_hierarchical_graph_data(
     org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
     projects: list[str] | None = Query(default=None, description="Filter by project IDs"),
     types: list[EntityType] | None = Query(default=None, description="Filter by entity types"),
     max_nodes: int = Query(default=1000, ge=100, le=2000, description="Maximum nodes"),
@@ -660,6 +690,7 @@ async def get_hierarchical_graph_data(
     """
     group_id = str(org.id)
     runtime = await get_entity_graph_runtime(group_id)
+    principal_id, accessible_projects = await _graph_scope_reader(ctx)
 
     data = await get_hierarchical_graph(
         runtime.client,
@@ -670,6 +701,8 @@ async def get_hierarchical_graph_data(
         max_edges=max_edges,
         resolution=resolution,
         cluster_id=cluster_id,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
     )
 
     # Guard against focused-mode totals undercounting. If filtered data exists,

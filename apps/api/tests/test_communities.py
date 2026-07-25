@@ -1,5 +1,6 @@
 """Tests for community detection module."""
 
+import contextlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -770,6 +771,199 @@ class TestClusterVisualization:
 
         assert [node["id"] for node in result["nodes"]] == ["task-1", "task-2"]
         assert result["edges"] == [{"source": "task-1", "target": "task-2", "type": "RELATED_TO"}]
+
+
+class TestClusterGraphScope:
+    """The cluster and hierarchical funnels answer to the reader.
+
+    Both surfaces emit an entity's name and its description text, so an
+    unauthorized row reaching them is a content disclosure, not just a leaked
+    identifier. Neither took a reader at all before this.
+    """
+
+    OWNER = "owner-1"
+    OUTSIDER = "outsider-1"
+
+    @pytest.fixture
+    def mock_client(self) -> MagicMock:
+        client = MagicMock()
+        client.execute_read_org = AsyncMock(return_value=[])
+        client.execute_write_org = AsyncMock(return_value=[])
+        return client
+
+    @staticmethod
+    def _private() -> Entity:
+        return Entity(
+            id="decision_private",
+            name="Acquisition target is Initech",
+            description="board voted 5-2, do not disclose",
+            entity_type=EntityType.EPISODE,
+            metadata={"memory_scope": "private", "principal_id": "owner-1"},
+        )
+
+    @staticmethod
+    def _shared() -> Entity:
+        return Entity(
+            id="episode_shared",
+            name="Shared episode",
+            description="org visible",
+            entity_type=EntityType.EPISODE,
+            metadata={},
+        )
+
+    def _graph(self) -> tuple[list[Entity], list[Relationship]]:
+        entities = [self._private(), self._shared()]
+        relationships = [_make_relationship("rel-1", "decision_private", "episode_shared")]
+        return entities, relationships
+
+    def _snapshot_patches(self):
+        entities, relationships = self._graph()
+        return (
+            patch.dict("sibyl_core.services.graph_communities.CLUSTER_CACHE", {}, clear=True),
+            patch.dict("sibyl_core.services.graph_communities.HIERARCHICAL_CACHE", {}, clear=True),
+            patch.dict(
+                "sibyl_core.services.graph_communities.GRAPH_SNAPSHOT_CACHE", {}, clear=True
+            ),
+            patch.dict("sibyl_core.services.graph_communities.GRAPH_LOD_CACHE", {}, clear=True),
+            patch(
+                "sibyl_core.services.graph_communities._list_all_entities",
+                AsyncMock(return_value=entities),
+            ),
+            patch(
+                "sibyl_core.services.graph_communities._list_all_relationships",
+                AsyncMock(return_value=relationships),
+            ),
+        )
+
+    @pytest.mark.asyncio
+    async def test_cluster_drilldown_hides_a_co_members_private_memory(
+        self,
+        mock_client: MagicMock,
+    ) -> None:
+        with contextlib.ExitStack() as stack:
+            for patcher in self._snapshot_patches():
+                stack.enter_context(patcher)
+            clusters = await get_clusters_for_visualization(
+                mock_client,
+                TEST_ORG_ID,
+                principal_id=self.OUTSIDER,
+                accessible_projects=set(),
+            )
+            nodes = [
+                node
+                for cluster in clusters
+                for node in (
+                    await get_cluster_nodes(
+                        mock_client,
+                        TEST_ORG_ID,
+                        cluster.id,
+                        principal_id=self.OUTSIDER,
+                        accessible_projects=set(),
+                    )
+                )["nodes"]
+            ]
+
+        assert [node["id"] for node in nodes] == ["episode_shared"]
+        rendered = str(nodes) + str([cluster.member_ids for cluster in clusters])
+        assert "decision_private" not in rendered
+        assert "do not disclose" not in rendered
+
+    @pytest.mark.asyncio
+    async def test_cluster_drilldown_serves_the_owner_their_own_memory(
+        self,
+        mock_client: MagicMock,
+    ) -> None:
+        with contextlib.ExitStack() as stack:
+            for patcher in self._snapshot_patches():
+                stack.enter_context(patcher)
+            clusters = await get_clusters_for_visualization(
+                mock_client,
+                TEST_ORG_ID,
+                principal_id=self.OWNER,
+                accessible_projects=set(),
+            )
+            nodes = [
+                node
+                for cluster in clusters
+                for node in (
+                    await get_cluster_nodes(
+                        mock_client,
+                        TEST_ORG_ID,
+                        cluster.id,
+                        principal_id=self.OWNER,
+                        accessible_projects=set(),
+                    )
+                )["nodes"]
+            ]
+
+        assert "decision_private" in {node["id"] for node in nodes}
+
+    @pytest.mark.asyncio
+    async def test_cluster_cache_is_not_shared_across_readers(
+        self,
+        mock_client: MagicMock,
+    ) -> None:
+        """An org-keyed cache would hand the owner's rows to the next caller."""
+        with contextlib.ExitStack() as stack:
+            for patcher in self._snapshot_patches():
+                stack.enter_context(patcher)
+            owner_clusters = await get_clusters_for_visualization(
+                mock_client,
+                TEST_ORG_ID,
+                principal_id=self.OWNER,
+                accessible_projects=set(),
+            )
+            outsider_clusters = await get_clusters_for_visualization(
+                mock_client,
+                TEST_ORG_ID,
+                principal_id=self.OUTSIDER,
+                accessible_projects=set(),
+            )
+
+        owner_members = {member for c in owner_clusters for member in c.member_ids}
+        outsider_members = {member for c in outsider_clusters for member in c.member_ids}
+        assert "decision_private" in owner_members
+        assert "decision_private" not in outsider_members
+
+    @pytest.mark.asyncio
+    async def test_hierarchical_detail_hides_a_co_members_private_memory(
+        self,
+        mock_client: MagicMock,
+    ) -> None:
+        with contextlib.ExitStack() as stack:
+            for patcher in self._snapshot_patches():
+                stack.enter_context(patcher)
+            data = await get_hierarchical_graph(
+                mock_client,
+                TEST_ORG_ID,
+                resolution="detail",
+                principal_id=self.OUTSIDER,
+                accessible_projects=set(),
+            )
+
+        assert "decision_private" not in {node["id"] for node in data.nodes}
+        assert "do not disclose" not in str(data.nodes)
+        assert data.edges == []
+
+    @pytest.mark.asyncio
+    async def test_hierarchical_overview_label_omits_a_private_members_name(
+        self,
+        mock_client: MagicMock,
+    ) -> None:
+        """Overview bubbles are labeled with their top members' names."""
+        with contextlib.ExitStack() as stack:
+            for patcher in self._snapshot_patches():
+                stack.enter_context(patcher)
+            data = await get_hierarchical_graph(
+                mock_client,
+                TEST_ORG_ID,
+                resolution="overview",
+                principal_id=self.OUTSIDER,
+                accessible_projects=set(),
+            )
+
+        assert "Acquisition target" not in str(data.nodes)
+        assert "Acquisition target" not in str(data.clusters)
 
 
 class TestStoreCommunities:
