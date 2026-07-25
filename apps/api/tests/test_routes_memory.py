@@ -76,11 +76,15 @@ def _ctx(
     *,
     user_id: str = "user-123",
     org_role: OrganizationRole = OrganizationRole.MEMBER,
+    api_key_memory_scope_keys: set[str] | None = None,
 ) -> MagicMock:
     ctx = MagicMock()
     ctx.user_id = user_id
     ctx.organization_id = "org-1"
     ctx.org_role = org_role
+    # Set explicitly: a bare MagicMock would hand production code an
+    # auto-created attribute that is neither a grant set nor None.
+    ctx.api_key_memory_scope_keys = api_key_memory_scope_keys
     return ctx
 
 

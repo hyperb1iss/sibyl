@@ -11,13 +11,15 @@ import pytest
 
 from sibyl.api.routes import entities as entities_routes
 from sibyl.api.routes.entities import SortField, SortOrder, list_entities
+from sibyl.auth.context import AuthContext
 from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl_core.auth import ProjectRole
 from sibyl_core.models.entities import EntityType
+from tests.harness.auth import stub_auth_context
 
 
-def _ctx() -> SimpleNamespace:
-    return SimpleNamespace(user=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222")))
+def _ctx() -> AuthContext:
+    return stub_auth_context()
 
 
 def _entity(

@@ -13,8 +13,10 @@ from fastapi import HTTPException
 from sibyl.api.routes.search import explore, search
 from sibyl.api.schemas import ExploreRequest, SearchRequest
 from sibyl.auth.api_key_common import api_key_memory_scope_key
+from sibyl.auth.context import AuthContext
 from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl_core.auth import OrganizationRole, ProjectRole
+from tests.harness.auth import stub_auth_context
 
 
 @dataclass
@@ -33,12 +35,11 @@ class _SearchResult:
 
 def _ctx(
     *,
-    user_id: str = "user-123",
+    user_id: str = "00000000-0000-0000-0000-000000000123",
     api_key_memory_scope_keys: set[str] | list[str] | None = None,
-) -> SimpleNamespace:
-    return SimpleNamespace(
+) -> AuthContext:
+    return stub_auth_context(
         user_id=user_id,
-        organization_id="org-1",
         org_role=OrganizationRole.MEMBER,
         api_key_memory_scope_keys=api_key_memory_scope_keys,
     )
@@ -51,7 +52,7 @@ class TestSearchRoute:
     @pytest.mark.asyncio
     async def test_search_without_project_passes_default_accessible_scope(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-        ctx = SimpleNamespace()
+        ctx = stub_auth_context()
         result = _SearchResult(
             results=[
                 {
@@ -104,7 +105,10 @@ class TestSearchRoute:
         assert response.results[0].id == "pattern_unassigned"
         assert core_search.await_args.kwargs["project"] is None
         assert core_search.await_args.kwargs["accessible_projects"] == {"proj_1"}
-        assert core_search.await_args.kwargs["include_raw_memory"] is False
+        # True because the request asks for it and the session has a user. This
+        # asserted False while the stub simply lacked user_id, which the route
+        # reads to decide the same thing.
+        assert core_search.await_args.kwargs["include_raw_memory"] is True
         assert core_search.await_args.kwargs["content_max_chars"] == 18_000
         assert core_search.await_args.kwargs["record_exposure"] is False
         assert core_search.await_args.kwargs["include_retrieval_diagnostics"] is True
@@ -116,7 +120,7 @@ class TestSearchRoute:
     @pytest.mark.asyncio
     async def test_search_verifies_project_filter_directly(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-        ctx = SimpleNamespace()
+        ctx = stub_auth_context()
         result = _SearchResult(
             results=[
                 {
@@ -182,7 +186,7 @@ class TestSearchRoute:
             await search(
                 request=SearchRequest(query="seam", project="proj_2"),
                 org=org,
-                ctx=SimpleNamespace(),
+                ctx=stub_auth_context(),
             )
 
         assert exc.value.status_code == 403
@@ -206,7 +210,7 @@ class TestSearchRoute:
                     reference_time="2026/01/20 00:00",
                 ),
                 org=org,
-                ctx=SimpleNamespace(),
+                ctx=stub_auth_context(),
             )
 
         assert core_search.await_args.kwargs["reference_time"] == "2026/01/20 00:00"
@@ -229,7 +233,7 @@ class TestSearchRoute:
                     as_of="2025-03-15T00:00:00+00:00",
                 ),
                 org=org,
-                ctx=SimpleNamespace(),
+                ctx=stub_auth_context(),
             )
 
         assert core_search.await_args.kwargs["as_of"] == "2025-03-15T00:00:00+00:00"
@@ -298,7 +302,7 @@ class TestSearchRoute:
         assert kwargs["thread_id"] == "thread-1"
         assert kwargs["occurred_after"] == occurred_after
         assert kwargs["occurred_before"] == occurred_before
-        assert kwargs["principal_id"] == "user-123"
+        assert kwargs["principal_id"] == str(_ctx().user_id)
         assert kwargs["accessible_projects"] == {"project_123"}
 
     @pytest.mark.asyncio
@@ -332,7 +336,7 @@ class TestExploreRoute:
     @pytest.mark.asyncio
     async def test_explore_verifies_project_id_lists_directly(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-        ctx = SimpleNamespace()
+        ctx = stub_auth_context()
         result = SimpleNamespace(
             mode="list",
             entities=[{"id": "task_1", "name": "Ship it"}],
@@ -372,7 +376,7 @@ class TestExploreRoute:
     @pytest.mark.asyncio
     async def test_explore_related_with_project_ids_preserves_accessible_filter(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-        ctx = SimpleNamespace()
+        ctx = stub_auth_context()
         result = SimpleNamespace(
             mode="related",
             entities=[{"id": "task_1", "name": "Ship it"}],
@@ -405,7 +409,7 @@ class TestExploreRoute:
     @pytest.mark.asyncio
     async def test_explore_without_project_passes_default_accessible_scope(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-        ctx = SimpleNamespace()
+        ctx = stub_auth_context()
         result = SimpleNamespace(
             mode="list",
             entities=[
@@ -442,7 +446,7 @@ class TestExploreRoute:
     @pytest.mark.asyncio
     async def test_explore_verifies_single_project_filter_directly(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-        ctx = SimpleNamespace()
+        ctx = stub_auth_context()
         result = SimpleNamespace(
             mode="dependencies",
             entities=[{"id": "task_1", "name": "Ship it"}],
@@ -498,7 +502,7 @@ class TestExploreRoute:
             await explore(
                 request=ExploreRequest(mode="list", project_ids=["proj_2"]),
                 org=org,
-                ctx=SimpleNamespace(),
+                ctx=stub_auth_context(),
             )
 
         assert exc.value.status_code == 403
@@ -533,7 +537,7 @@ class TestExploreRoute:
             )
 
         kwargs = core_explore.await_args.kwargs
-        assert kwargs["principal_id"] == "user-123"
+        assert kwargs["principal_id"] == str(_ctx().user_id)
         assert kwargs["allowed_memory_scope_keys"] == {
             api_key_memory_scope_key("project", "proj_1")
         }

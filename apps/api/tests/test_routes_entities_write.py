@@ -24,9 +24,11 @@ from sibyl.api.schemas import (
     EntityCreate,
     EntityUpdate,
 )
+from sibyl.auth.context import AuthContext
 from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl_core.auth import ProjectRole
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
+from tests.harness.auth import stub_auth_context
 
 
 def _request() -> MagicMock:
@@ -41,8 +43,8 @@ def _org() -> SimpleNamespace:
     return SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
 
 
-def _ctx() -> SimpleNamespace:
-    return SimpleNamespace(user=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222")))
+def _ctx() -> AuthContext:
+    return stub_auth_context()
 
 
 def test_bulk_entity_ids_are_idempotent_within_project_and_isolated_between_projects() -> None:

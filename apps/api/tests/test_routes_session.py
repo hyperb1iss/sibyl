@@ -7,11 +7,13 @@ from uuid import UUID
 import pytest
 
 from sibyl.api.routes.session import get_session_bundle
+from sibyl.auth.context import AuthContext
 from sibyl.auth.errors import ProjectAccessDeniedError
+from tests.harness.auth import stub_auth_context
 
 
-def _ctx() -> SimpleNamespace:
-    return SimpleNamespace(user_id="user-123")
+def _ctx() -> AuthContext:
+    return stub_auth_context(user_id=UUID("00000000-0000-0000-0000-000000000123"))
 
 
 class TestSessionBundleRoute:

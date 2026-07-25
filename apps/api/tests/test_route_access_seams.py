@@ -10,12 +10,13 @@ from sibyl.api.routes.epics import _verify_epic_access
 from sibyl.api.routes.tasks import _verify_task_access
 from sibyl_core.auth import ProjectRole
 from sibyl_core.models.entities import EntityType
+from tests.harness.auth import stub_auth_context
 
 
 @pytest.mark.asyncio
 async def test_verify_task_access_uses_knowledge_read_adapter() -> None:
     org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-    ctx = SimpleNamespace()
+    ctx = stub_auth_context()
     entity = SimpleNamespace(metadata={"project_id": "project-1"})
     service = AsyncMock()
     service.get_entity.return_value = entity
@@ -40,7 +41,7 @@ async def test_verify_task_access_uses_knowledge_read_adapter() -> None:
 @pytest.mark.asyncio
 async def test_verify_epic_access_uses_knowledge_read_adapter() -> None:
     org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
-    ctx = SimpleNamespace()
+    ctx = stub_auth_context()
     epic = SimpleNamespace(entity_type=EntityType.EPIC, metadata={"project_id": "project-9"})
     service = AsyncMock()
     service.get_entity.return_value = epic

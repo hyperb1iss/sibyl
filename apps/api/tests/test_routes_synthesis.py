@@ -14,6 +14,7 @@ from sibyl.api.schemas import (
     SynthesisPlanRequest,
     SynthesisSectionPlanRequest,
 )
+from sibyl.auth.context import AuthContext
 from sibyl_core.auth import OrganizationRole
 from sibyl_core.models.context import (
     ContextFacet,
@@ -29,14 +30,18 @@ from sibyl_core.models.synthesis import (
     SynthesisRunStatus,
 )
 from sibyl_core.tools.responses import SearchResponse, SearchResult
+from tests.harness.auth import stub_auth_context
 
 
 def _org() -> SimpleNamespace:
     return SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
 
 
-def _ctx() -> SimpleNamespace:
-    return SimpleNamespace(user_id="user-123", org_role=OrganizationRole.MEMBER)
+def _ctx() -> AuthContext:
+    return stub_auth_context(
+        user_id=UUID("00000000-0000-0000-0000-000000000123"),
+        org_role=OrganizationRole.MEMBER,
+    )
 
 
 def test_synthesis_plan_route_is_registered() -> None:
