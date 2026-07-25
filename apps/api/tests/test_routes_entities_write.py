@@ -186,6 +186,56 @@ async def test_create_entity_can_defer_embeddings_to_background_backfill() -> No
 
 
 @pytest.mark.asyncio
+async def test_create_entity_broadcast_carries_no_memory_content() -> None:
+    """The broadcast reaches every connection in the org, authorized as none.
+
+    A connection authenticates as an organization and carries no principal,
+    so a private memory's content on this channel reaches every client.
+    """
+    org = _org()
+    ctx = _ctx()
+    entity = EntityCreate(
+        name="Acquisition target is Initech",
+        content="board voted 5-2, do not disclose",
+        entity_type=EntityType.EPISODE,
+        metadata={"memory_scope": "private"},
+    )
+    add_result = SimpleNamespace(
+        success=True,
+        id="decision_private",
+        message="ok",
+        background_jobs=None,
+    )
+    runtime = SimpleNamespace(entity_manager=SimpleNamespace(get=AsyncMock()))
+    broadcast = AsyncMock()
+
+    with (
+        patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)),
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch("sibyl.api.routes.entities.broadcast_event", broadcast),
+    ):
+        response = await create_entity(
+            request=_request(),
+            entity=entity,
+            org=org,
+            ctx=ctx,
+            content_session=None,
+            sync=False,
+        )
+
+    # The response still carries the content to its authorized caller.
+    assert response.content == "board voted 5-2, do not disclose"
+    assert broadcast.await_args_list
+    for call in broadcast.await_args_list:
+        assert call.args[1] == {"id": "decision_private", "entity_type": "episode"}
+    assert "do not disclose" not in str(broadcast.await_args_list)
+    assert "Acquisition target" not in str(broadcast.await_args_list)
+
+
+@pytest.mark.asyncio
 async def test_create_entities_bulk_uses_runtime_bulk_create() -> None:
     org = _org()
     ctx = _ctx()

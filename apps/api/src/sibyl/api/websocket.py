@@ -293,6 +293,19 @@ async def broadcast_event(event: str, data: dict[str, Any], *, org_id: str | Non
         await manager.broadcast(event, data, org_id=org_id)
 
 
+def entity_change_payload(entity_id: str, entity_type: str) -> dict[str, Any]:
+    """Reduce an entity change to the identifiers a broadcast may carry.
+
+    A broadcast fans out to every connection in the organization, and a
+    connection is authenticated as an org, not as a reader, so there is no
+    identity here to run the scope rule against. Rather than reimplement
+    authorization for the fan-out, the channel stops carrying memory: clients
+    receive that a row changed and refetch it through the REST endpoint, which
+    authorizes them individually.
+    """
+    return {"id": entity_id, "entity_type": entity_type}
+
+
 async def local_broadcast(event: str, data: dict[str, Any], org_id: str | None) -> None:
     """Broadcast to local WebSocket connections only.
 

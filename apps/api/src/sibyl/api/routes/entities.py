@@ -37,7 +37,7 @@ from sibyl.api.schemas import (
     RawCaptureSummary,
     RelatedEntitySummary,
 )
-from sibyl.api.websocket import broadcast_event
+from sibyl.api.websocket import broadcast_event, entity_change_payload
 from sibyl.auth.api_key_common import api_key_memory_scope_key
 from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
@@ -2004,7 +2004,9 @@ async def create_entity(
         )
         # Broadcast pending creation event
         await broadcast_event(
-            WSEvent.ENTITY_PENDING, response.model_dump(mode="json"), org_id=str(org.id)
+            WSEvent.ENTITY_PENDING,
+            entity_change_payload(result.id, entity.entity_type.value),
+            org_id=str(org.id),
         )
         if ctx.user is not None:
             await save_idempotent_response(
@@ -2039,7 +2041,9 @@ async def create_entity(
 
     # Broadcast creation event (scoped to org)
     await broadcast_event(
-        WSEvent.ENTITY_CREATED, response.model_dump(mode="json"), org_id=str(org.id)
+        WSEvent.ENTITY_CREATED,
+        entity_change_payload(result.id, entity.entity_type.value),
+        org_id=str(org.id),
     )
 
     if entity.entity_type == EntityType.PROJECT:
@@ -2181,7 +2185,9 @@ async def update_entity(
 
             # Broadcast update event (scoped to org)
             await broadcast_event(
-                WSEvent.ENTITY_UPDATED, response.model_dump(mode="json"), org_id=str(org.id)
+                WSEvent.ENTITY_UPDATED,
+                entity_change_payload(response.id, response.entity_type.value),
+                org_id=str(org.id),
             )
 
             if existing.entity_type == EntityType.PROJECT:
@@ -2289,7 +2295,7 @@ async def delete_entity(
             # Broadcast deletion event (scoped to org)
             await broadcast_event(
                 WSEvent.ENTITY_DELETED,
-                {"id": entity_id, "type": existing.entity_type.value, "name": existing.name},
+                entity_change_payload(entity_id, existing.entity_type.value),
                 org_id=str(org.id),
             )
 

@@ -12,6 +12,7 @@ from sibyl.api.websocket import (
     Connection,
     ConnectionManager,
     _extract_org_from_token,
+    entity_change_payload,
 )
 from sibyl.auth.jwt import create_access_token
 from sibyl.config import Settings
@@ -32,6 +33,44 @@ class TestConnection:
         ws = MagicMock()
         conn = Connection(websocket=ws)
         assert conn.org_id is None
+
+
+class TestEntityBroadcastPayload:
+    """A broadcast fans out to an organization, not to a reader.
+
+    A connection authenticates as an org and carries no principal, so there
+    is no identity here to run the scope rule against. The channel therefore
+    carries no memory: clients learn a row changed and refetch it through the
+    REST endpoint, which authorizes them individually.
+    """
+
+    def test_entity_change_payload_carries_identifiers_only(self) -> None:
+        payload = entity_change_payload("decision_private", "episode")
+
+        assert payload == {"id": "decision_private", "entity_type": "episode"}
+        for content_field in ("content", "description", "name", "metadata"):
+            assert content_field not in payload
+
+    @pytest.mark.asyncio
+    async def test_broadcast_reaches_every_connection_in_the_org(self) -> None:
+        """Which is exactly why the payload may not carry memory."""
+        manager = ConnectionManager()
+        sockets = [MagicMock(), MagicMock()]
+        for socket in sockets:
+            socket.accept = AsyncMock()
+            socket.send_json = AsyncMock()
+            await manager.connect(socket, org_id="org-1")
+
+        await manager.broadcast(
+            "entity_created",
+            entity_change_payload("decision_private", "episode"),
+            org_id="org-1",
+        )
+
+        for socket in sockets:
+            sent = socket.send_json.await_args.args[0]
+            assert sent["data"] == {"id": "decision_private", "entity_type": "episode"}
+            assert "do not disclose" not in str(sent)
 
 
 class TestConnectionManagerOrgScoping:
