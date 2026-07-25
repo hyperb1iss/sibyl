@@ -10,7 +10,9 @@ import structlog
 
 from sibyl_core.auth.memory_policy import (
     memory_metadata_read_allowed,
+    memory_row_project_id,
     memory_scope_policy_key,
+    private_scope_granted_for,
 )
 from sibyl_core.embeddings.providers import configured_embedding_provider
 from sibyl_core.models.context import (
@@ -413,6 +415,14 @@ def _related_scope_allowed(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        private_scope_granted=private_scope_granted_for(
+            allowed_memory_scope_keys, principal_id=principal_id
+        ),
+        row_project_id=memory_row_project_id(
+            getattr(entity, "metadata", None),
+            entity_type=getattr(getattr(entity, "entity_type", None), "value", None),
+            entity_id=getattr(entity, "id", None),
+        ),
     )
 
 
@@ -1243,6 +1253,7 @@ async def _default_active_work(
     limit: int,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> list[ContextItem]:
     from sibyl_core.models.entities import EntityType
 
@@ -1263,6 +1274,11 @@ async def _default_active_work(
             getattr(entity, "metadata", None),
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+            private_scope_granted=private_scope_granted_for(
+                allowed_memory_scope_keys, principal_id=principal_id
+            ),
+            row_project_id=memory_row_project_id(getattr(entity, "metadata", None)),
         )
     ]
 
@@ -1417,6 +1433,7 @@ async def compile_context(
                 limit=min(per_facet_limit, _ACTIVE_WORK_LOOKUP_LIMIT),
                 principal_id=principal_id,
                 accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
             )
         except Exception as exc:
             active_items = []

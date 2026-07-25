@@ -9,6 +9,7 @@ from typing import Literal, Protocol
 
 from sibyl_core.auth.memory_policy import (
     memory_metadata_read_allowed,
+    private_scope_granted_for,
 )
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.projection import MANIFEST_STATE_COMPLETE, operational_experience_manifest_id
@@ -132,6 +133,14 @@ async def fetch_operational_source_inventory(
         principal_id=principal_id,
         accessible_projects=allowed_project_ids,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        private_scope_granted=private_scope_granted_for(
+            allowed_memory_scope_keys, principal_id=principal_id
+        ),
+        # The project gate for a manifest is the allowed_project_ids check
+        # above, which treats an unknown set as "no project filtering" for the
+        # operator paths that read inventories. Re-deriving it here would apply
+        # the stricter read semantics and deny those.
+        row_project_id=None,
     )
     if memory_scope == "private" and scope_key and owner_principal_id != scope_key:
         # Two owner channels naming different principals is a shape no write

@@ -66,6 +66,7 @@ from sibyl_core.auth.memory_policy import (
     MEMORY_OWNER_METADATA_KEYS,
     authorize_memory_read,
     memory_metadata_read_allowed,
+    private_scope_granted_for,
     stamp_memory_scope_metadata,
 )
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
@@ -519,6 +520,7 @@ def _entity_visible_to_reader(
     *,
     reader_user_id: str | None,
     accessible_projects: set[str],
+    allowed_memory_scope_keys: set[str] | None,
 ) -> bool:
     # Reading a row here and finding it through search are the same question,
     # so they answer to one implementation. A local copy handled only project
@@ -527,6 +529,11 @@ def _entity_visible_to_reader(
         getattr(entity, "metadata", None),
         principal_id=reader_user_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+        private_scope_granted=private_scope_granted_for(
+            allowed_memory_scope_keys, principal_id=reader_user_id
+        ),
+        row_project_id=_entity_read_project_id(entity),
     )
 
 
@@ -535,6 +542,7 @@ def _related_entity_visible(
     *,
     reader_user_id: str | None,
     accessible_projects: set[str],
+    allowed_memory_scope_keys: set[str] | None,
 ) -> bool:
     """Both constraints a neighbour has to clear before its name is returned.
 
@@ -547,7 +555,13 @@ def _related_entity_visible(
         entity,
         reader_user_id=reader_user_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
+
+
+def _reader_memory_grants(ctx: AuthContext) -> set[str] | None:
+    grants = getattr(ctx, "api_key_memory_scope_keys", None)
+    return set(grants) if grants is not None else None
 
 
 def _reader_user_id(ctx: AuthContext) -> str | None:
@@ -610,6 +624,7 @@ async def _require_entity_scope_visible(
         entity,
         reader_user_id=reader_user_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=_reader_memory_grants(ctx),
     ):
         raise HTTPException(status_code=404, detail="Entity not found")
     return accessible_projects
@@ -687,6 +702,7 @@ def _entity_matches_list_filters(
     has_unassigned: bool,
     reader_user_id: str | None,
     accessible_projects: set[str],
+    allowed_memory_scope_keys: set[str] | None,
     language: str | None,
     category: str | None,
     search: str | None,
@@ -705,6 +721,7 @@ def _entity_matches_list_filters(
     if not _entity_visible_to_reader(
         entity,
         reader_user_id=reader_user_id,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
         accessible_projects=accessible_projects,
     ):
         return False
@@ -764,6 +781,7 @@ async def _list_entities_bounded(
     single_project_id: str | None,
     reader_user_id: str | None,
     accessible_projects: set[str],
+    allowed_memory_scope_keys: set[str] | None,
 ) -> tuple[list[Any], int, bool]:
     start = (page - 1) * page_size
     target = start + page_size + 1
@@ -801,6 +819,7 @@ async def _list_entities_bounded(
                 real_project_ids=real_project_ids,
                 has_unassigned=has_unassigned,
                 reader_user_id=reader_user_id,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
                 accessible_projects=accessible_projects,
                 language=None,
                 category=None,
@@ -830,6 +849,7 @@ async def _enrich_entity_with_related(
     *,
     accessible_projects: set[str],
     reader_user_id: str | None,
+    allowed_memory_scope_keys: set[str] | None = None,
     related_limit: int = 5,
 ) -> tuple[dict[str, Any], list[RelatedEntitySummary] | None]:
     """Enrich entity metadata and fetch related entities based on entity type.
@@ -890,6 +910,7 @@ async def _enrich_entity_with_related(
             entity_id=entity_id,
             accessible_projects=accessible_projects,
             reader_user_id=reader_user_id,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
             limit=related_limit,
         )
 
@@ -903,6 +924,7 @@ def _summarize_related_entities(
     relationships: list[Any],
     accessible_projects: set[str],
     reader_user_id: str | None,
+    allowed_memory_scope_keys: set[str] | None = None,
     limit: int | None = None,
 ) -> list[RelatedEntitySummary] | None:
     if not related_entities or not relationships:
@@ -926,6 +948,7 @@ def _summarize_related_entities(
         if not _related_entity_visible(
             related_entity,
             reader_user_id=reader_user_id,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
             accessible_projects=accessible_projects,
         ):
             continue
@@ -957,6 +980,7 @@ async def _fetch_related_entity_summaries(
     entity_id: str,
     accessible_projects: set[str],
     reader_user_id: str | None,
+    allowed_memory_scope_keys: set[str] | None = None,
     limit: int,
 ) -> list[RelatedEntitySummary] | None:
     try:
@@ -972,6 +996,7 @@ async def _fetch_related_entity_summaries(
             if not _related_entity_visible(
                 rel_entity,
                 reader_user_id=reader_user_id,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
                 accessible_projects=accessible_projects,
             ):
                 continue
@@ -1137,6 +1162,7 @@ async def list_entities(
     )
 
     reader_user_id = str(getattr(getattr(ctx, "user", None), "id", None) or "") or None
+    allowed_memory_scope_keys = _reader_memory_grants(ctx)
     project_ids, real_project_ids, has_unassigned = await _resolve_entity_list_project_filter(
         ctx=ctx,
         project_ids=project_ids,
@@ -1178,6 +1204,7 @@ async def list_entities(
             has_unassigned=bool(has_unassigned),
             single_project_id=single_project_id,
             reader_user_id=reader_user_id,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
             accessible_projects=accessible_projects,
         )
     else:
@@ -1199,6 +1226,7 @@ async def list_entities(
                 real_project_ids=real_project_ids,
                 has_unassigned=bool(has_unassigned),
                 reader_user_id=reader_user_id,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
                 accessible_projects=accessible_projects,
                 language=language,
                 category=category,
@@ -1298,6 +1326,7 @@ async def get_entity(
                     entity_id=entity_id,
                     accessible_projects=accessible_projects,
                     reader_user_id=_reader_user_id(ctx),
+                    allowed_memory_scope_keys=_reader_memory_grants(ctx),
                     limit=related_limit,
                 )
 
@@ -1334,6 +1363,7 @@ async def get_entity(
                     preloaded_related=None,
                     accessible_projects=accessible_projects,
                     reader_user_id=_reader_user_id(ctx),
+                    allowed_memory_scope_keys=_reader_memory_grants(ctx),
                     related_limit=0,
                 )
 
@@ -1366,6 +1396,7 @@ async def get_entity(
             relationships=graph_bundle.relationships,
             accessible_projects=accessible_projects,
             reader_user_id=_reader_user_id(ctx),
+            allowed_memory_scope_keys=_reader_memory_grants(ctx),
             limit=related_limit,
         )
 
@@ -1382,6 +1413,7 @@ async def get_entity(
                 preloaded_related=related,
                 accessible_projects=accessible_projects,
                 reader_user_id=_reader_user_id(ctx),
+                allowed_memory_scope_keys=_reader_memory_grants(ctx),
                 related_limit=related_limit,
             )
 

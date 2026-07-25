@@ -34,7 +34,10 @@ from sibyl.locks import entity_lock
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl.services.work_item_workflow import WorkItemAction, transition_work_item
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole, ProjectRole
-from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
+from sibyl_core.auth.memory_policy import (
+    memory_metadata_read_allowed,
+    private_scope_granted_for,
+)
 from sibyl_core.errors import RevisionConflictError
 from sibyl_core.models.tasks import AuthorType, Note, TaskComplexity, TaskPriority, TaskStatus
 from sibyl_core.tools.helpers import _project_id_for_policy
@@ -87,10 +90,14 @@ async def _verify_task_access(
     # project, so membership alone cannot decide a scope-only row. Anything
     # reachable by id through this route answers to the scope rule as well.
     reader_user_id = str(getattr(getattr(ctx, "user", None), "id", None) or "") or None
+    grants = getattr(ctx, "api_key_memory_scope_keys", None)
     if not memory_metadata_read_allowed(
         getattr(entity, "metadata", None),
         principal_id=reader_user_id,
         accessible_projects={project_id} if project_id else set(),
+        allowed_memory_scope_keys=grants,
+        private_scope_granted=private_scope_granted_for(grants, principal_id=reader_user_id),
+        row_project_id=project_id,
     ):
         raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
     return entity

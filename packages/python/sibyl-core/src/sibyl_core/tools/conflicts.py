@@ -15,7 +15,11 @@ from typing import TYPE_CHECKING, Literal
 
 import structlog
 
-from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
+from sibyl_core.auth.memory_policy import (
+    memory_metadata_read_allowed,
+    memory_row_project_id,
+    private_scope_granted_for,
+)
 from sibyl_core.services.graph import get_surreal_graph_runtime
 from sibyl_core.tools.responses import ConflictWarning
 
@@ -49,6 +53,7 @@ async def find_similar_entities(
     min_score: float = CONFLICT_THRESHOLD,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> list[tuple[str, str, str, float]]:
     """Find existing entities semantically similar to the new content.
 
@@ -97,6 +102,15 @@ async def find_similar_entities(
                 getattr(entity, "metadata", None),
                 principal_id=principal_id,
                 accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
+                private_scope_granted=private_scope_granted_for(
+                    allowed_memory_scope_keys, principal_id=principal_id
+                ),
+                row_project_id=memory_row_project_id(
+                    getattr(entity, "metadata", None),
+                    entity_type=getattr(getattr(entity, "entity_type", None), "value", None),
+                    entity_id=getattr(entity, "id", None),
+                ),
             ):
                 continue
             content_preview = (entity.content or entity.description or "")[:200]
@@ -239,6 +253,7 @@ async def detect_conflicts(
     min_similarity: float = CONFLICT_THRESHOLD,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> list[ConflictWarning]:
     """Detect potential conflicts before adding new knowledge.
 
@@ -274,6 +289,7 @@ async def detect_conflicts(
         min_score=min_similarity,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
 
     if not similar:

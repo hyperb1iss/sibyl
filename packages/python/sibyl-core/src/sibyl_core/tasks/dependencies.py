@@ -5,7 +5,11 @@ from typing import Any
 
 import structlog
 
-from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
+from sibyl_core.auth.memory_policy import (
+    memory_metadata_read_allowed,
+    memory_row_project_id,
+    private_scope_granted_for,
+)
 from sibyl_core.models.entities import EntityType, RelationshipType
 from sibyl_core.models.tasks import TaskStatus
 
@@ -94,6 +98,7 @@ async def _list_task_entities(
     project_id: str | None = None,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> list[Any]:
     tasks: list[Any] = []
     offset = 0
@@ -117,6 +122,15 @@ async def _list_task_entities(
                 getattr(entity, "metadata", None),
                 principal_id=principal_id,
                 accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
+                private_scope_granted=private_scope_granted_for(
+                    allowed_memory_scope_keys, principal_id=principal_id
+                ),
+                row_project_id=memory_row_project_id(
+                    getattr(entity, "metadata", None),
+                    entity_type=getattr(getattr(entity, "entity_type", None), "value", None),
+                    entity_id=getattr(entity, "id", None),
+                ),
             )
         )
         offset += len(batch)
@@ -331,6 +345,7 @@ async def detect_dependency_cycles(
     relationship_manager: Any | None = None,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> CycleResult:
     """Detect circular dependencies in the task graph.
 
@@ -356,6 +371,7 @@ async def detect_dependency_cycles(
             project_id=project_id,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
         task_ids = {task.id for task in tasks if getattr(task, "id", None)}
         rows = await _list_dependency_relationships(
@@ -436,6 +452,10 @@ async def suggest_task_order(
     organization_id: str,
     project_id: str | None = None,
     status_filter: list[TaskStatus] | None = None,
+    *,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> TaskOrderResult:
     """Suggest task execution order using topological sort.
 
@@ -454,7 +474,13 @@ async def suggest_task_order(
 
     try:
         entity_manager, relationship_manager = _get_graph_managers(client, organization_id)
-        task_entities = await _list_task_entities(entity_manager, project_id=project_id)
+        task_entities = await _list_task_entities(
+            entity_manager,
+            project_id=project_id,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+        )
         task_rows = [
             {
                 "task_id": task.id,

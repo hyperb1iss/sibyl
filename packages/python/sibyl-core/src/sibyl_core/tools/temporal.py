@@ -17,7 +17,11 @@ from typing import Any, Literal
 
 import structlog
 
-from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
+from sibyl_core.auth.memory_policy import (
+    memory_metadata_read_allowed,
+    memory_row_project_id,
+    private_scope_granted_for,
+)
 from sibyl_core.tools.responses import TemporalEdge, TemporalResponse
 
 log = structlog.get_logger()
@@ -40,6 +44,7 @@ async def temporal_query(
     organization_id: str | None = None,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> TemporalResponse:
     """Query knowledge graph with temporal awareness.
 
@@ -113,6 +118,7 @@ async def temporal_query(
             limit=limit,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
     elif mode == "timeline":
         runtime = await get_graph_runtime(organization_id)
@@ -123,6 +129,7 @@ async def temporal_query(
             limit=limit,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
     elif mode == "conflicts":
         runtime = await get_graph_runtime(organization_id)
@@ -133,6 +140,7 @@ async def temporal_query(
             limit=limit,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
     else:
         return TemporalResponse(
@@ -153,6 +161,7 @@ async def get_entity_history(
     limit: int = 50,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> TemporalResponse:
     """Get edges for an entity, optionally filtered to a point in time.
 
@@ -186,6 +195,7 @@ async def get_entity_history(
             conflicts_only=False,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
         filtered = _filter_history_edges(edges, as_of=as_of, include_expired=include_expired)
         filtered.sort(key=_created_at_sort_key, reverse=True)
@@ -217,6 +227,7 @@ async def get_entity_timeline(
     limit: int = 100,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> TemporalResponse:
     """Get all edges for an entity over time, including expired ones.
 
@@ -246,6 +257,7 @@ async def get_entity_timeline(
             conflicts_only=False,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
         edges.sort(key=_created_at_sort_key)
         temporal_edges = edges[:limit]
@@ -279,6 +291,7 @@ async def find_conflicts(
     limit: int = 50,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> TemporalResponse:
     """Find edges that have been invalidated (superseded facts).
 
@@ -304,6 +317,7 @@ async def find_conflicts(
             conflicts_only=True,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
         temporal_edges.sort(
             key=lambda edge: (
@@ -403,6 +417,7 @@ async def _load_native_temporal_edges(
     conflicts_only: bool,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> list[TemporalEdge]:
     from sibyl_core.services.graph import normalize_records
 
@@ -449,6 +464,7 @@ async def _load_native_temporal_edges(
             rows,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
     )
 
@@ -458,6 +474,7 @@ def _reader_visible_edge_rows(
     *,
     principal_id: str | None,
     accessible_projects: set[str] | None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Drop edge rows naming an endpoint this reader may not see.
 
@@ -474,6 +491,13 @@ def _reader_visible_edge_rows(
                 attributes if isinstance(attributes, dict) else None,
                 principal_id=principal_id,
                 accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
+                private_scope_granted=private_scope_granted_for(
+                    allowed_memory_scope_keys, principal_id=principal_id
+                ),
+                row_project_id=memory_row_project_id(
+                    attributes if isinstance(attributes, dict) else None
+                ),
             )
             for attributes in endpoints
         ):

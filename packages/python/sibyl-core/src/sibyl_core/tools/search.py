@@ -11,7 +11,9 @@ import structlog
 
 from sibyl_core.auth.memory_policy import (
     memory_metadata_read_allowed,
+    memory_row_project_id,
     memory_scope_policy_key,
+    private_scope_granted_for,
 )
 from sibyl_core.embeddings.providers import configured_embedding_provider
 from sibyl_core.memory_pipeline.retrieval import CandidateSourceFailure
@@ -469,6 +471,14 @@ def _matches_memory_scope_policy(
         principal_id=principal_id,
         accessible_projects=effective_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        private_scope_granted=private_scope_granted_for(
+            allowed_memory_scope_keys, principal_id=principal_id
+        ),
+        row_project_id=memory_row_project_id(
+            metadata,
+            entity_type=getattr(getattr(entity, "entity_type", None), "value", None),
+            entity_id=getattr(entity, "id", None),
+        ),
     )
 
 
