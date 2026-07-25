@@ -19,7 +19,11 @@ from typing import Any
 
 import structlog
 
-from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
+from sibyl_core.auth.memory_policy import (
+    memory_metadata_read_allowed,
+    memory_row_project_id,
+    private_scope_granted_for,
+)
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 
 log = structlog.get_logger()
@@ -31,7 +35,7 @@ _relationship_manager_factory: _ManagerFactory | None = None
 # Cluster Cache for Visualization
 # =============================================================================
 
-type _ReaderCacheKey = tuple[str, tuple[str, ...]]
+type _ReaderCacheKey = tuple[str, tuple[str, ...], tuple[str, ...] | None]
 CLUSTER_CACHE: dict[tuple[str, _ReaderCacheKey], tuple[datetime, list[ClusterSummary]]] = {}
 CLUSTER_CACHE_TTL = timedelta(minutes=5)
 
@@ -366,7 +370,8 @@ def _entity_index(entities: list[Entity]) -> dict[str, Entity]:
 def _reader_cache_key(
     principal_id: str | None,
     accessible_projects: set[str] | None,
-) -> tuple[str, tuple[str, ...]]:
+    allowed_memory_scope_keys: set[str] | None = None,
+) -> tuple[str, tuple[str, ...], tuple[str, ...] | None]:
     """Identity component for every cache holding reader-visible graph rows.
 
     Detection input, cluster summaries and rendered levels of detail are all
@@ -376,6 +381,9 @@ def _reader_cache_key(
     return (
         str(principal_id or ""),
         tuple(sorted(str(project_id) for project_id in accessible_projects or ())),
+        None
+        if allowed_memory_scope_keys is None
+        else tuple(sorted(str(key) for key in allowed_memory_scope_keys)),
     )
 
 
@@ -384,6 +392,7 @@ def _reader_visible_snapshot(
     *,
     principal_id: str | None,
     accessible_projects: set[str] | None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> GraphSnapshot:
     """Reduce a snapshot to the rows this reader is authorized to see.
 
@@ -402,6 +411,15 @@ def _reader_visible_snapshot(
             getattr(entity, "metadata", None),
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+            private_scope_granted=private_scope_granted_for(
+                allowed_memory_scope_keys, principal_id=principal_id
+            ),
+            row_project_id=memory_row_project_id(
+                getattr(entity, "metadata", None),
+                entity_type=getattr(getattr(entity, "entity_type", None), "value", None),
+                entity_id=getattr(entity, "id", None),
+            ),
         )
     ]
     entity_by_id = _entity_index(entities)
@@ -423,6 +441,7 @@ async def _get_visible_graph_snapshot(
     *,
     principal_id: str | None,
     accessible_projects: set[str] | None,
+    allowed_memory_scope_keys: set[str] | None = None,
     max_entities: int | None = None,
     max_relationships: int | None = None,
 ) -> GraphSnapshot:
@@ -436,6 +455,7 @@ async def _get_visible_graph_snapshot(
         snapshot,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
 
 
@@ -528,6 +548,7 @@ def _lod_cache_key(
     max_edges: int,
     principal_id: str | None,
     accessible_projects: set[str] | None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> tuple[Any, ...]:
     return (
         organization_id,
@@ -537,7 +558,7 @@ def _lod_cache_key(
         cluster_id,
         max_nodes,
         max_edges,
-        _reader_cache_key(principal_id, accessible_projects),
+        _reader_cache_key(principal_id, accessible_projects, allowed_memory_scope_keys),
     )
 
 
@@ -1564,6 +1585,7 @@ async def get_clusters_for_visualization(
     *,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> list[ClusterSummary]:
     """Get clusters optimized for bubble visualization.
 
@@ -1579,7 +1601,10 @@ async def get_clusters_for_visualization(
     Returns:
         List of ClusterSummary objects for visualization.
     """
-    cache_key = (organization_id, _reader_cache_key(principal_id, accessible_projects))
+    cache_key = (
+        organization_id,
+        _reader_cache_key(principal_id, accessible_projects, allowed_memory_scope_keys),
+    )
 
     # Check cache
     if not force_refresh and cache_key in CLUSTER_CACHE:
@@ -1595,6 +1620,7 @@ async def get_clusters_for_visualization(
         organization_id,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
         max_entities=DETECTION_MAX_ENTITIES,
         max_relationships=DETECTION_MAX_RELATIONSHIPS,
     )
@@ -1742,6 +1768,7 @@ async def get_cluster_nodes(
     max_edges: int = CLUSTER_DETAIL_MAX_EDGES,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     """Get nodes and edges for a specific cluster.
 
@@ -1761,6 +1788,7 @@ async def get_cluster_nodes(
         organization_id,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
     cluster = next((c for c in clusters if c.id == cluster_id), None)
 
@@ -1776,6 +1804,7 @@ async def get_cluster_nodes(
             organization_id,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
             max_entities=DETECTION_MAX_ENTITIES,
             max_relationships=DETECTION_MAX_RELATIONSHIPS,
         )
@@ -1804,6 +1833,15 @@ async def get_cluster_nodes(
             getattr(entity, "metadata", None),
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+            private_scope_granted=private_scope_granted_for(
+                allowed_memory_scope_keys, principal_id=principal_id
+            ),
+            row_project_id=memory_row_project_id(
+                getattr(entity, "metadata", None),
+                entity_type=getattr(getattr(entity, "entity_type", None), "value", None),
+                entity_id=getattr(entity, "id", None),
+            ),
         )
     ]
     visible_ids = {node["id"] for node in nodes}
@@ -2105,6 +2143,7 @@ async def get_hierarchical_graph(
     *,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> HierarchicalGraphData:
     """Get graph data with cluster assignments for rich visualization.
 
@@ -2144,6 +2183,7 @@ async def get_hierarchical_graph(
         max_edges=max_edges,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
     cached_lod = GRAPH_LOD_CACHE.get(cache_key)
     if cached_lod is not None:
@@ -2165,6 +2205,7 @@ async def get_hierarchical_graph(
         organization_id,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
         max_entities=DETECTION_MAX_ENTITIES,
         max_relationships=DETECTION_MAX_RELATIONSHIPS,
     )
@@ -2200,7 +2241,10 @@ async def get_hierarchical_graph(
 
     # Check cache for community detection (expensive operation). Detection runs
     # on the reader's visible subgraph, so its key carries the reader too.
-    community_cache_key = (organization_id, _reader_cache_key(principal_id, accessible_projects))
+    community_cache_key = (
+        organization_id,
+        _reader_cache_key(principal_id, accessible_projects, allowed_memory_scope_keys),
+    )
     node_to_cluster: dict[str, str] = {}
     clusters_meta: list[dict[str, Any]] = []
 
