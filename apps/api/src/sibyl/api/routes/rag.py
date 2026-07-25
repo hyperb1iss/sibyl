@@ -709,7 +709,7 @@ async def get_document_related_entities(
         )
 
         reader_user_id = str(getattr(getattr(auth, "user", None), "id", None) or "") or None
-        memory_grants = getattr(auth, "api_key_memory_scope_keys", None)
+        memory_grants = auth.api_key_memory_scope_keys
         for entity, score in search_results:
             # Skip very low relevance matches
             if score < 0.1:

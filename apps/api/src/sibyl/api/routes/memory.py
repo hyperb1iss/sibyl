@@ -266,7 +266,7 @@ def _api_key_memory_scope_allowed(
     memory_scope: str,
     scope_key: str | None,
 ) -> bool:
-    allowed_scope_keys = getattr(ctx, "api_key_memory_scope_keys", None)
+    allowed_scope_keys = ctx.api_key_memory_scope_keys
     if allowed_scope_keys is None:
         return True
     if not isinstance(allowed_scope_keys, list | tuple | set | frozenset):
@@ -1482,7 +1482,7 @@ async def _authorize_raw_promotion_api_key_scopes(
     http_request: Request | None,
     surface: str,
 ) -> None:
-    allowed_scope_keys = getattr(ctx, "api_key_memory_scope_keys", None)
+    allowed_scope_keys = ctx.api_key_memory_scope_keys
     if allowed_scope_keys is None or not isinstance(
         allowed_scope_keys, list | tuple | set | frozenset
     ):
@@ -1571,7 +1571,7 @@ async def _authorize_share_api_key_scopes(
     http_request: Request | None,
     surface: str,
 ) -> None:
-    allowed_scope_keys = getattr(ctx, "api_key_memory_scope_keys", None)
+    allowed_scope_keys = ctx.api_key_memory_scope_keys
     if allowed_scope_keys is None or not isinstance(
         allowed_scope_keys, list | tuple | set | frozenset
     ):

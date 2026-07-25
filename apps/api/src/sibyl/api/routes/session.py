@@ -198,7 +198,7 @@ async def get_session_bundle(
         effective_query = derive_query(query, tasks, project_name=None)
         relevant_entities: list[dict[str, Any]] = []
         if effective_query and memory_limit > 0:
-            api_key_memory_scope_keys = getattr(ctx, "api_key_memory_scope_keys", None)
+            api_key_memory_scope_keys = ctx.api_key_memory_scope_keys
             await _append_raw_memories(
                 memories=relevant_entities,
                 query=effective_query,

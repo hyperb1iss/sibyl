@@ -196,7 +196,7 @@ async def _graph_scope_reader(ctx: AuthContext) -> tuple[str | None, set[str], s
     """
     accessible_projects = await list_accessible_project_graph_ids(ctx)
     principal_id = str(getattr(getattr(ctx, "user", None), "id", None) or "") or None
-    grants = getattr(ctx, "api_key_memory_scope_keys", None)
+    grants = ctx.api_key_memory_scope_keys
     return (
         principal_id,
         {str(project_id) for project_id in accessible_projects or set()},

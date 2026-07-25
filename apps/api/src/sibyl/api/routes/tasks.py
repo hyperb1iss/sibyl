@@ -90,7 +90,7 @@ async def _verify_task_access(
     # project, so membership alone cannot decide a scope-only row. Anything
     # reachable by id through this route answers to the scope rule as well.
     reader_user_id = str(getattr(getattr(ctx, "user", None), "id", None) or "") or None
-    grants = getattr(ctx, "api_key_memory_scope_keys", None)
+    grants = ctx.api_key_memory_scope_keys
     if not memory_metadata_read_allowed(
         getattr(entity, "metadata", None),
         principal_id=reader_user_id,
