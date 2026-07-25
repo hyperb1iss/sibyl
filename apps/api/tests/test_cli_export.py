@@ -94,8 +94,24 @@ def test_export_tasks_pages_all_results(tmp_path: Path, monkeypatch) -> None:
     exported = json.loads(output.with_suffix(".json").read_text())
     assert [item["id"] for item in exported] == ["task-1", "task-2", "task-3"]
     assert explore.await_args_list == [
-        call(mode="list", types=["task"], project=None, status=None, limit=2, offset=0),
-        call(mode="list", types=["task"], project=None, status=None, limit=2, offset=2),
+        call(
+            limit=2,
+            offset=0,
+            enforce_memory_scope=False,
+            mode="list",
+            types=["task"],
+            project=None,
+            status=None,
+        ),
+        call(
+            limit=2,
+            offset=2,
+            enforce_memory_scope=False,
+            mode="list",
+            types=["task"],
+            project=None,
+            status=None,
+        ),
     ]
 
 
@@ -125,8 +141,8 @@ def test_export_entities_pages_all_results(tmp_path: Path, monkeypatch) -> None:
     exported = json.loads(output.with_suffix(".json").read_text())
     assert [item["id"] for item in exported] == ["pattern-1", "pattern-2", "pattern-3"]
     assert explore.await_args_list == [
-        call(mode="list", types=["pattern"], limit=2, offset=0),
-        call(mode="list", types=["pattern"], limit=2, offset=2),
+        call(limit=2, offset=0, enforce_memory_scope=False, mode="list", types=["pattern"]),
+        call(limit=2, offset=2, enforce_memory_scope=False, mode="list", types=["pattern"]),
     ]
 
 

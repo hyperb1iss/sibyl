@@ -8,7 +8,10 @@ from typing import Any
 
 import structlog
 
-from sibyl_core.auth.memory_policy import memory_scope_policy_key
+from sibyl_core.auth.memory_policy import (
+    memory_metadata_read_allowed,
+    memory_scope_policy_key,
+)
 from sibyl_core.embeddings.providers import configured_embedding_provider
 from sibyl_core.models.context import (
     ContextFacet,
@@ -392,11 +395,34 @@ def _related_source_metadata(entity: Any, relationship: Any, *, seed_id: str) ->
     }
 
 
+def _related_scope_allowed(
+    entity: Any,
+    *,
+    principal_id: str | None,
+    accessible_projects: set[str] | None,
+    allowed_memory_scope_keys: set[str] | None,
+) -> bool:
+    """Neighbors are attached after candidate filtering, so they gate here.
+
+    A one-hop walk off an authorized item can otherwise surface a private
+    memory the reader was never allowed to retrieve directly, and a
+    DERIVED_FROM neighbor carries source content with it.
+    """
+    return memory_metadata_read_allowed(
+        getattr(entity, "metadata", None),
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+    )
+
+
 async def _default_related_items(
     *,
     entity_id: str,
     organization_id: str,
     accessible_projects: set[str] | None = None,
+    principal_id: str | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
     limit: int = 3,
 ) -> list[ContextRelatedItem]:
     runtime = await get_graph_runtime(organization_id)
@@ -408,6 +434,13 @@ async def _default_related_items(
 
     related: list[ContextRelatedItem] = []
     for entity, relationship in raw_results:
+        if not _related_scope_allowed(
+            entity,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+        ):
+            continue
         if accessible_projects is not None:
             entity_project = _project_id_for(entity)
             if entity_project is not None and entity_project not in accessible_projects:
@@ -447,6 +480,8 @@ async def _default_related_items_batch(
     entity_ids: Sequence[str],
     organization_id: str,
     accessible_projects: set[str] | None = None,
+    principal_id: str | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
     limit: int = 3,
 ) -> dict[str, list[ContextRelatedItem]]:
     ids = list(dict.fromkeys(str(entity_id) for entity_id in entity_ids if entity_id))
@@ -472,6 +507,13 @@ async def _default_related_items_batch(
     for seed_id, raw_results in raw_by_seed.items():
         related: list[ContextRelatedItem] = []
         for entity, relationship in raw_results:
+            if not _related_scope_allowed(
+                entity,
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
+            ):
+                continue
             if accessible_projects is not None:
                 entity_project = _project_id_for(entity)
                 if entity_project is not None and entity_project not in accessible_projects:
@@ -993,6 +1035,8 @@ async def _attach_related_items(
     accessible_projects: set[str] | None,
     related_limit: int,
     related_fn: RelatedFn,
+    principal_id: str | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
     related_batch_fn: RelatedBatchFn | None = _default_related_items_batch,
 ) -> list[ContextSection]:
     related_limit = max(0, min(related_limit, 5))
@@ -1012,6 +1056,8 @@ async def _attach_related_items(
                 entity_ids=eligible_ids,
                 organization_id=organization_id,
                 accessible_projects=accessible_projects,
+                principal_id=principal_id,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
                 limit=related_limit,
             )
         except Exception:
@@ -1032,6 +1078,8 @@ async def _attach_related_items(
                     entity_id=item.id,
                     organization_id=organization_id,
                     accessible_projects=accessible_projects,
+                    principal_id=principal_id,
+                    allowed_memory_scope_keys=allowed_memory_scope_keys,
                     limit=related_limit,
                 )
             except Exception:
@@ -1384,6 +1432,8 @@ async def compile_context(
             accessible_projects=related_projects,
             related_limit=related_limit,
             related_fn=related_fn,
+            principal_id=principal_id,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
     usage_metadata: dict[str, Any] = {}
     if sections and record_exposure:

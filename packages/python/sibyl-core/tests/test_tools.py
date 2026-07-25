@@ -4080,3 +4080,201 @@ class TestToolsIntegration:
         # _generate_id with special characters
         id1 = _generate_id("task", "Title with spaces!", "category/sub")
         assert id1.startswith("task_")
+
+
+class TestExploreMemoryScope:
+    """Browsing and traversal answer to the same scope rule search does."""
+
+    @staticmethod
+    def _private_memory(owner: str) -> MockEntity:
+        return MockEntity(
+            id="decision_private",
+            entity_type=EntityType.DECISION,
+            name="Private decision",
+            description="secret rationale",
+            metadata={"memory_scope": "private", "principal_id": owner},
+        )
+
+    @pytest.mark.asyncio
+    async def test_list_hides_a_private_row_from_an_organization_co_member(self) -> None:
+        from sibyl_core.tools.explore import explore
+
+        entity_manager = AsyncMock()
+        entity_manager.list_by_type = AsyncMock(return_value=[self._private_memory("victim")])
+
+        with patch(
+            "sibyl_core.tools.explore.get_graph_runtime",
+            AsyncMock(return_value=make_graph_runtime(entity_manager=entity_manager)),
+        ):
+            response = await explore(
+                mode="list",
+                types=["decision"],
+                accessible_projects=set(),
+                organization_id="org_123",
+                principal_id="attacker",
+            )
+
+        assert response.entities == []
+
+    @pytest.mark.asyncio
+    async def test_list_keeps_a_private_row_for_its_owner(self) -> None:
+        from sibyl_core.tools.explore import explore
+
+        entity_manager = AsyncMock()
+        entity_manager.list_by_type = AsyncMock(return_value=[self._private_memory("owner")])
+
+        with patch(
+            "sibyl_core.tools.explore.get_graph_runtime",
+            AsyncMock(return_value=make_graph_runtime(entity_manager=entity_manager)),
+        ):
+            response = await explore(
+                mode="list",
+                types=["decision"],
+                accessible_projects=set(),
+                organization_id="org_123",
+                principal_id="owner",
+            )
+
+        assert [entity.id for entity in response.entities] == ["decision_private"]
+
+    @pytest.mark.asyncio
+    async def test_list_hides_a_project_row_keyed_outside_accessible_projects(self) -> None:
+        from sibyl_core.tools.explore import explore
+
+        planted = MockEntity(
+            id="decision_planted",
+            entity_type=EntityType.DECISION,
+            name="Planted decision",
+            metadata={"memory_scope": "project", "scope_key": "project_victim"},
+        )
+        entity_manager = AsyncMock()
+        entity_manager.list_by_type = AsyncMock(return_value=[planted])
+
+        with patch(
+            "sibyl_core.tools.explore.get_graph_runtime",
+            AsyncMock(return_value=make_graph_runtime(entity_manager=entity_manager)),
+        ):
+            response = await explore(
+                mode="list",
+                types=["decision"],
+                accessible_projects={"project_mine"},
+                organization_id="org_123",
+                principal_id="reader",
+            )
+
+        assert response.entities == []
+
+    @pytest.mark.asyncio
+    async def test_list_keeps_private_rows_for_an_operator_namespace_dump(self) -> None:
+        from sibyl_core.tools.explore import explore
+
+        entity_manager = AsyncMock()
+        entity_manager.list_by_type = AsyncMock(return_value=[self._private_memory("victim")])
+
+        with patch(
+            "sibyl_core.tools.explore.get_graph_runtime",
+            AsyncMock(return_value=make_graph_runtime(entity_manager=entity_manager)),
+        ):
+            response = await explore(
+                mode="list",
+                types=["decision"],
+                organization_id="org_123",
+                enforce_memory_scope=False,
+            )
+
+        assert [entity.id for entity in response.entities] == ["decision_private"]
+
+    @pytest.mark.asyncio
+    async def test_related_hides_a_private_neighbor_from_a_co_member(self) -> None:
+        from sibyl_core.tools.explore import explore
+
+        relationship_manager = SimpleNamespace(
+            get_related_entities=AsyncMock(
+                return_value=[
+                    (
+                        self._private_memory("victim"),
+                        SimpleNamespace(
+                            source_id="pattern_seed",
+                            target_id="decision_private",
+                            relationship_type=MockEnum("RELATED_TO"),
+                        ),
+                    )
+                ]
+            )
+        )
+
+        with patch(
+            "sibyl_core.tools.explore.get_graph_runtime",
+            AsyncMock(return_value=make_graph_runtime(relationship_manager=relationship_manager)),
+        ):
+            response = await explore(
+                mode="related",
+                entity_id="pattern_seed",
+                accessible_projects=set(),
+                organization_id="org_123",
+                principal_id="attacker",
+            )
+
+        assert response.entities == []
+
+    @pytest.mark.asyncio
+    async def test_dependencies_hides_a_private_task_from_a_co_member(self) -> None:
+        from sibyl_core.tools.explore import explore
+
+        root = MockEntity(
+            id="task_root",
+            entity_type=EntityType.TASK,
+            name="Root",
+            project_id="project_shared",
+        )
+        private_dep = MockEntity(
+            id="task_private_dep",
+            entity_type=EntityType.TASK,
+            name="Private dependency",
+            project_id="project_shared",
+            metadata={"memory_scope": "private", "principal_id": "victim"},
+        )
+        entity_manager = SimpleNamespace(
+            get=AsyncMock(
+                side_effect=lambda entity_id: {
+                    "task_root": root,
+                    "task_private_dep": private_dep,
+                }.get(entity_id)
+            )
+        )
+        relationship_manager = SimpleNamespace(
+            get_related_entities=AsyncMock(
+                side_effect=[
+                    [
+                        (
+                            private_dep,
+                            SimpleNamespace(
+                                source_id="task_root",
+                                target_id="task_private_dep",
+                                relationship_type=RelationshipType.DEPENDS_ON,
+                            ),
+                        )
+                    ],
+                    [],
+                ]
+            )
+        )
+
+        with patch(
+            "sibyl_core.tools.explore.get_graph_runtime",
+            AsyncMock(
+                return_value=make_graph_runtime(
+                    entity_manager=entity_manager,
+                    relationship_manager=relationship_manager,
+                )
+            ),
+        ):
+            response = await explore(
+                mode="dependencies",
+                entity_id="task_root",
+                accessible_projects={"project_shared"},
+                organization_id="org_123",
+                principal_id="attacker",
+            )
+
+        assert [entity.id for entity in response.entities] == ["task_root"]

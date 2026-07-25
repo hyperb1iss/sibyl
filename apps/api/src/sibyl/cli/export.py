@@ -136,7 +136,15 @@ async def _explore_paginated(**filters: object) -> list[object]:
     offset = 0
 
     while True:
-        response = await explore(limit=EXPLORE_PAGE_SIZE, offset=offset, **filters)
+        # An operator dumping their own namespace has no reader identity to
+        # authorize against, and a backup that silently omitted every private
+        # memory would be worse than no backup.
+        response = await explore(
+            limit=EXPLORE_PAGE_SIZE,
+            offset=offset,
+            enforce_memory_scope=False,
+            **filters,
+        )
         batch = list(response.entities or [])
         if not batch:
             break

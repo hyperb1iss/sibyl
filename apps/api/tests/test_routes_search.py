@@ -12,6 +12,7 @@ from fastapi import HTTPException
 
 from sibyl.api.routes.search import explore, search
 from sibyl.api.schemas import ExploreRequest, SearchRequest
+from sibyl.auth.api_key_common import api_key_memory_scope_key
 from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl_core.auth import OrganizationRole, ProjectRole
 
@@ -502,3 +503,37 @@ class TestExploreRoute:
 
         assert exc.value.status_code == 403
         assert exc.value.detail["error"] == "project_access_denied"
+
+    @pytest.mark.asyncio
+    async def test_explore_passes_the_reader_identity_and_key_grants(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        ctx = _ctx(api_key_memory_scope_keys=[api_key_memory_scope_key("project", "proj_1")])
+        result = SimpleNamespace(
+            mode="list",
+            entities=[],
+            total=0,
+            filters={},
+            limit=10,
+            offset=0,
+            has_more=False,
+            actual_total=0,
+        )
+
+        with (
+            patch(
+                "sibyl.api.routes.search.list_accessible_project_graph_ids",
+                AsyncMock(return_value={"proj_1"}),
+            ),
+            patch("sibyl_core.tools.core.explore", AsyncMock(return_value=result)) as core_explore,
+        ):
+            await explore(
+                request=ExploreRequest(mode="list"),
+                org=org,
+                ctx=ctx,
+            )
+
+        kwargs = core_explore.await_args.kwargs
+        assert kwargs["principal_id"] == "user-123"
+        assert kwargs["allowed_memory_scope_keys"] == {
+            api_key_memory_scope_key("project", "proj_1")
+        }

@@ -1,9 +1,11 @@
 """Explore tool for navigating the Sibyl knowledge graph."""
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
 
+from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
 from sibyl_core.models.entities import Entity, EntityType, RelationshipType
 from sibyl_core.tools.helpers import (
     VALID_ENTITY_TYPES,
@@ -32,6 +34,35 @@ async def get_graph_runtime(group_id: str):
     from sibyl_core.services.graph import get_surreal_graph_runtime
 
     return await get_surreal_graph_runtime(group_id)
+
+
+ScopeGuard = Callable[[Any], bool]
+
+
+def _memory_scope_guard(
+    *,
+    principal_id: str | None,
+    accessible_projects: set[str] | None,
+    allowed_memory_scope_keys: set[str] | None,
+    enforce_memory_scope: bool,
+) -> ScopeGuard:
+    """Build the per-entity scope check graph navigation shares with search.
+
+    Project membership alone does not authorize a private memory, so browsing
+    and traversal answer to the same rule the retrieval candidate filter uses.
+    """
+    if not enforce_memory_scope:
+        return lambda _entity: True
+
+    def allowed(entity: Any) -> bool:
+        return memory_metadata_read_allowed(
+            getattr(entity, "metadata", None),
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+        )
+
+    return allowed
 
 
 def _normalize_project_ids(
@@ -72,6 +103,9 @@ async def explore(
     limit: int = 50,
     offset: int = 0,
     organization_id: str | None = None,
+    principal_id: str | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
+    enforce_memory_scope: bool = True,
 ) -> ExploreResponse:
     """Navigate and browse the Sibyl knowledge graph structure.
 
@@ -120,6 +154,11 @@ async def explore(
         tags: Filter tasks by tags (comma-separated, matches if task has ANY).
         limit: Maximum results (1-200, default 50).
         offset: Offset for pagination (default 0).
+        principal_id: Reader identity used to authorize scoped memory rows.
+        allowed_memory_scope_keys: API-key memory-space grants, when the caller
+                                   is a restricted credential.
+        enforce_memory_scope: Apply memory-scope filtering. Only an operator
+                              tool dumping its own namespace turns this off.
 
     Returns:
         ExploreResponse with:
@@ -185,6 +224,13 @@ async def explore(
     if not organization_id:
         raise ValueError("organization_id is required - cannot access graph without org context")
 
+    scope_guard = _memory_scope_guard(
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+        enforce_memory_scope=enforce_memory_scope,
+    )
+
     try:
         if mode == "dependencies":
             return await _explore_dependencies(
@@ -194,6 +240,7 @@ async def explore(
                 filters=filters,
                 group_id=organization_id,
                 accessible_projects=accessible_projects,
+                scope_guard=scope_guard,
             )
         if mode in ("related", "traverse"):
             return await _explore_related(
@@ -205,6 +252,7 @@ async def explore(
                 mode=mode,
                 group_id=organization_id,
                 accessible_projects=accessible_projects,
+                scope_guard=scope_guard,
             )
         return await _explore_list(
             types=types,
@@ -225,6 +273,7 @@ async def explore(
             offset=offset,
             filters=filters,
             group_id=organization_id,
+            scope_guard=scope_guard,
         )
 
     except Exception as e:
@@ -246,8 +295,12 @@ def _passes_entity_filters(
     tags: str | None,
     include_archived: bool,
     project_ids: set[str] | None = None,
+    scope_guard: ScopeGuard | None = None,
 ) -> bool:
     """Check if an entity passes all specified filters."""
+    if scope_guard is not None and not scope_guard(entity):
+        return False
+
     # RBAC: Filter by accessible projects
     # Include entities that: have no project_id OR project_id is in accessible set
     entity_project = _project_id_for_policy(entity)
@@ -356,6 +409,7 @@ async def _explore_list(
     offset: int,
     filters: dict[str, Any],
     group_id: str,
+    scope_guard: ScopeGuard | None = None,
 ) -> ExploreResponse:
     """List entities by type with filters."""
     runtime = await get_graph_runtime(group_id)
@@ -424,6 +478,7 @@ async def _explore_list(
             feature=None,
             tags=None,
             include_archived=include_archived,
+            scope_guard=scope_guard,
         )
     ]
 
@@ -463,6 +518,7 @@ async def _explore_dependencies(
     filters: dict[str, Any],
     group_id: str,
     accessible_projects: set[str] | None = None,
+    scope_guard: ScopeGuard | None = None,
 ) -> ExploreResponse:
     """Traverse task dependency chains with topological sorting.
 
@@ -482,6 +538,8 @@ async def _explore_dependencies(
     entity_manager = runtime.entity_manager
 
     def entity_is_visible(entity: Any) -> bool:
+        if scope_guard is not None and not scope_guard(entity):
+            return False
         entity_project = _project_id_for_policy(entity)
         if project and entity_project != project:
             return False
@@ -601,6 +659,7 @@ async def _explore_related(
     mode: str,
     group_id: str,
     accessible_projects: set[str] | None = None,
+    scope_guard: ScopeGuard | None = None,
 ) -> ExploreResponse:
     """Find related entities via graph traversal."""
     if not entity_id:
@@ -634,6 +693,9 @@ async def _explore_related(
 
     results = []
     for entity, relationship in raw_results:
+        if scope_guard is not None and not scope_guard(entity):
+            continue
+
         # RBAC: Filter by accessible projects
         entity_project = _project_id_for_policy(entity)
         if (

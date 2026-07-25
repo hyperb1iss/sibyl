@@ -265,6 +265,7 @@ async def explore(
         from sibyl_core.tools.core import explore as core_explore
 
         group_id = str(org.id)
+        explore_scope_keys = getattr(ctx, "api_key_memory_scope_keys", None)
 
         project_ids = request.project_ids or ([request.project] if request.project else None)
 
@@ -322,6 +323,10 @@ async def explore(
             limit=request.limit,
             offset=request.offset,
             organization_id=group_id,
+            principal_id=getattr(ctx, "user_id", None),
+            allowed_memory_scope_keys=(
+                set(explore_scope_keys) if explore_scope_keys is not None else None
+            ),
         )
 
         # Convert dataclass to dict, handling nested dataclasses
