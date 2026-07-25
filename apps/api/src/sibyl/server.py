@@ -1005,6 +1005,14 @@ async def _synthesis_mcp_draft(
     return payload
 
 
+# Work items are addressed by project membership through project_id, which
+# every read path already enforces. Giving them a memory scope as well would
+# add a second audience channel that only MCP-created rows carry, splitting
+# the population in two and hiding them from lookups that thread project
+# access but no reader identity.
+_UNSCOPED_ENTITY_TYPES = frozenset({"project", "epic", "task"})
+
+
 async def _add_mcp_entity(
     *,
     title: str,
@@ -1047,10 +1055,7 @@ async def _add_mcp_entity(
 
     full_metadata = stamp_memory_scope_metadata(
         metadata,
-        # A project container is discovered through project membership, not
-        # memory scope, so scoping it private would hide a new project from the
-        # organization that owns it.
-        memory_scope=None if normalized_entity_type == "project" else memory_scope,
+        memory_scope=None if normalized_entity_type in _UNSCOPED_ENTITY_TYPES else memory_scope,
         scope_key=scope_key,
         principal_id=ctx.user_id,
     )
