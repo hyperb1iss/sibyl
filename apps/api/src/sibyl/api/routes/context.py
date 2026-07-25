@@ -641,6 +641,8 @@ async def _resolve_reflection_links(
     related_to: list[str] | None,
     task_ids: list[str] | None,
     active_task: bool,
+    principal_id: str | None,
+    accessible_projects: set[str] | None,
 ) -> list[str] | None:
     links = _append_unique_ids(related_to, task_ids)
     if not active_task or not project:
@@ -656,6 +658,8 @@ async def _resolve_reflection_links(
             status="doing",
             limit=2,
             organization_id=org_id,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
         )
     except Exception as exc:
         log.warning("reflect_active_task_lookup_failed", project=project, error=str(exc))
@@ -931,6 +935,8 @@ async def reflect_context(
             related_to=request.related_to,
             task_ids=request.task_ids,
             active_task=request.active_task and request.persist,
+            principal_id=getattr(ctx, "user_id", None),
+            accessible_projects=accessible_projects,
         )
 
         pack = await reflect_memory(

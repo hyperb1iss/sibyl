@@ -527,6 +527,7 @@ async def _resolve_mcp_capture_links(
     related_to: list[str] | None,
     task_ids: list[str] | None,
     active_task: bool,
+    accessible_projects: set[str] | None,
 ) -> list[str] | None:
     links = _append_unique_ids(related_to, task_ids)
     if not active_task or not project:
@@ -542,6 +543,8 @@ async def _resolve_mcp_capture_links(
             status="doing",
             limit=2,
             organization_id=ctx.org_id,
+            principal_id=ctx.user_id,
+            accessible_projects=accessible_projects,
         )
     except Exception as exc:
         log.warning("mcp_active_task_lookup_failed", project=project, error=str(exc))
@@ -652,6 +655,7 @@ async def _remember_mcp_memory(
         related_to=related_to,
         task_ids=task_ids,
         active_task=active_task,
+        accessible_projects=accessible_projects,
     )
     capture_request = MemoryCaptureRequest(
         title=title,
@@ -772,6 +776,7 @@ async def _reflect_mcp_memory(
         related_to=related_to,
         task_ids=task_ids,
         active_task=active_task and persist,
+        accessible_projects=accessible_projects,
     )
     memory_scope = "project" if project else "private"
     scope_key = project

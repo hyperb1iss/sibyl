@@ -54,13 +54,29 @@ def _memory_scope_guard(
     if not enforce_memory_scope:
         return lambda _entity: True
 
+    # Enforcing against no reader denies every scoped row, so a caller that
+    # forgot to thread its principal gets an empty result that is
+    # indistinguishable from having found nothing. Say so the first time it
+    # actually costs a row; an operator browsing anonymously opts out through
+    # enforce_memory_scope instead.
+    unauthenticated = principal_id is None
+    reported = False
+
     def allowed(entity: Any) -> bool:
-        return memory_metadata_read_allowed(
+        nonlocal reported
+        decision = memory_metadata_read_allowed(
             getattr(entity, "metadata", None),
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
+        if not decision and unauthenticated and not reported:
+            reported = True
+            log.warning(
+                "explore_scope_filtered_without_principal",
+                entity_id=getattr(entity, "id", None),
+            )
+        return decision
 
     return allowed
 

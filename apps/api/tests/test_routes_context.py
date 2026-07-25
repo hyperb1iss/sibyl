@@ -1799,6 +1799,8 @@ class TestReflectRoute:
             status="doing",
             limit=2,
             organization_id=str(org.id),
+            principal_id=ctx.user_id,
+            accessible_projects={"proj_1"},
         )
 
     @pytest.mark.asyncio
