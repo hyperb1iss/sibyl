@@ -6,7 +6,11 @@ from typing import Any
 
 import structlog
 
-from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
+from sibyl_core.auth.memory_policy import (
+    memory_metadata_read_allowed,
+    memory_row_project_id,
+    private_scope_granted_for,
+)
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.tasks import (
     SimilarTaskInfo,
@@ -118,6 +122,7 @@ class TaskManager:
         *,
         principal_id: str | None = None,
         accessible_projects: set[str] | None = None,
+        allowed_memory_scope_keys: set[str] | None = None,
     ) -> TaskKnowledgeSuggestion:
         """Suggest relevant knowledge for a new task.
 
@@ -164,6 +169,15 @@ class TaskManager:
                     getattr(entity, "metadata", None),
                     principal_id=principal_id,
                     accessible_projects=accessible_projects,
+                    allowed_memory_scope_keys=allowed_memory_scope_keys,
+                    private_scope_granted=private_scope_granted_for(
+                        allowed_memory_scope_keys, principal_id=principal_id
+                    ),
+                    row_project_id=memory_row_project_id(
+                        getattr(entity, "metadata", None),
+                        entity_type=getattr(getattr(entity, "entity_type", None), "value", None),
+                        entity_id=getattr(entity, "id", None),
+                    ),
                 )
             ]
 
@@ -184,6 +198,7 @@ class TaskManager:
         *,
         principal_id: str | None = None,
         accessible_projects: set[str] | None = None,
+        allowed_memory_scope_keys: set[str] | None = None,
     ) -> list[tuple[Task, float]]:
         """Find tasks similar to the given task.
 
@@ -216,6 +231,15 @@ class TaskManager:
                 getattr(entity, "metadata", None),
                 principal_id=principal_id,
                 accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
+                private_scope_granted=private_scope_granted_for(
+                    allowed_memory_scope_keys, principal_id=principal_id
+                ),
+                row_project_id=memory_row_project_id(
+                    getattr(entity, "metadata", None),
+                    entity_type=getattr(getattr(entity, "entity_type", None), "value", None),
+                    entity_id=getattr(entity, "id", None),
+                ),
             ):
                 continue
             # Skip self
@@ -243,6 +267,7 @@ class TaskManager:
         *,
         principal_id: str | None = None,
         accessible_projects: set[str] | None = None,
+        allowed_memory_scope_keys: set[str] | None = None,
     ) -> TaskEstimate:
         """Estimate task effort based on similar completed tasks.
 
@@ -261,6 +286,7 @@ class TaskManager:
             limit=20,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
 
         if not similar:

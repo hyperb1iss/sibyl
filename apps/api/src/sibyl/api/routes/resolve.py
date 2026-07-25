@@ -18,7 +18,11 @@ from sibyl.auth.dependencies import (
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl.persistence.graph_runtime import execute_surreal_graph_query, get_entity_graph_runtime
 from sibyl_core.auth import AuthOrganization, OrganizationRole
-from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
+from sibyl_core.auth.memory_policy import (
+    memory_metadata_read_allowed,
+    memory_row_project_id,
+    private_scope_granted_for,
+)
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services.surreal_content import RawMemory, resolve_raw_memory_prefix
 
@@ -127,6 +131,9 @@ def _scope_visible(
     *,
     principal_id: str | None,
     accessible_projects: set[str],
+    allowed_memory_scope_keys: set[str] | None,
+    entity_type: str | None = None,
+    entity_id: str | None = None,
 ) -> bool:
     # A resolve candidate carries the entity's name, so the scope rule has to
     # run before one is built. Matching on project alone let every row without
@@ -135,15 +142,25 @@ def _scope_visible(
         metadata if isinstance(metadata, dict) else None,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+        private_scope_granted=private_scope_granted_for(
+            allowed_memory_scope_keys, principal_id=principal_id
+        ),
+        row_project_id=memory_row_project_id(
+            metadata if isinstance(metadata, dict) else None,
+            entity_type=entity_type,
+            entity_id=entity_id,
+        ),
     )
 
 
-async def _resolve_reader(ctx: AuthContext) -> tuple[str | None, set[str]]:
+async def _resolve_reader(ctx: AuthContext) -> tuple[str | None, set[str], set[str] | None]:
     accessible_projects = {
         str(project_id) for project_id in await list_accessible_project_graph_ids(ctx) or set()
     }
     principal_id = str(getattr(getattr(ctx, "user", None), "id", None) or "") or None
-    return principal_id, accessible_projects
+    grants = getattr(ctx, "api_key_memory_scope_keys", None)
+    return principal_id, accessible_projects, set(grants) if grants is not None else None
 
 
 def _filter_visible_candidates(
@@ -190,6 +207,7 @@ async def _resolve_via_surreal(
     limit: int,
     principal_id: str | None,
     accessible_projects: set[str],
+    allowed_memory_scope_keys: set[str] | None,
 ) -> list[ResolveCandidate] | None:
     clauses = []
     params: dict[str, object] = {"limit": limit}
@@ -220,6 +238,9 @@ async def _resolve_via_surreal(
             _row_metadata(row),
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+            entity_type=str(row.get("entity_type") or "") or None,
+            entity_id=str(row.get("uuid") or row.get("id") or "") or None,
         )
     ]
 
@@ -232,6 +253,7 @@ async def _resolve_via_entity_manager(
     limit: int,
     principal_id: str | None,
     accessible_projects: set[str],
+    allowed_memory_scope_keys: set[str] | None,
 ) -> list[ResolveCandidate]:
     runtime = await get_entity_graph_runtime(group_id)
     manager = runtime.entity_manager
@@ -254,6 +276,9 @@ async def _resolve_via_entity_manager(
             getattr(entity, "metadata", None),
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+            entity_type=str(getattr(getattr(entity, "entity_type", ""), "value", "")) or None,
+            entity_id=entity_id,
         ):
             continue
         matches.append(
@@ -319,7 +344,7 @@ async def resolve_id_prefix(
     prefixes = _prefix_candidates(normalized, type_value)
     group_id = str(org.id)
 
-    principal_id, accessible_projects = await _resolve_reader(ctx)
+    principal_id, accessible_projects, memory_grants = await _resolve_reader(ctx)
 
     try:
         candidates = await _resolve_via_surreal(
@@ -329,6 +354,7 @@ async def resolve_id_prefix(
             limit=limit,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=memory_grants,
         )
         if candidates is None:
             candidates = await _resolve_via_entity_manager(
@@ -338,6 +364,7 @@ async def resolve_id_prefix(
                 limit=limit,
                 principal_id=principal_id,
                 accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=memory_grants,
             )
         visible = _filter_visible_candidates(
             candidates,

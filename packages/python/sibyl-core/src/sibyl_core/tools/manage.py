@@ -27,7 +27,11 @@ from uuid import uuid4
 import structlog
 
 from sibyl_core.auth import MemoryPolicyContext, authorize_memory_write
-from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
+from sibyl_core.auth.memory_policy import (
+    memory_metadata_read_allowed,
+    memory_row_project_id,
+    private_scope_granted_for,
+)
 from sibyl_core.errors import RevisionConflictError
 from sibyl_core.models.entities import EntityType
 from sibyl_core.runtime_ports import (
@@ -464,6 +468,7 @@ async def manage(
     organization_id: str | None = None,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> ManageResponse:
     """Manage operations that modify state in the knowledge graph.
 
@@ -547,6 +552,7 @@ async def manage(
             organization_id=organization_id,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
     except Exception as e:
         log.exception("manage_failed", action=valid_action, error=str(e))
@@ -570,6 +576,7 @@ async def _dispatch(
     organization_id: str,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> ManageResponse:
     """Route a validated action to its category handler (exhaustive)."""
     if action in TASK_ACTIONS:
@@ -591,6 +598,7 @@ async def _dispatch(
         organization_id=organization_id,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
 
 
@@ -1618,6 +1626,7 @@ async def _handle_analysis_action(
     organization_id: str | None,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> ManageResponse:
     """Handle analysis actions."""
     if not entity_id:
@@ -1646,6 +1655,7 @@ async def _handle_analysis_action(
             entity_id,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
 
     if action == "prioritize":
@@ -1655,6 +1665,7 @@ async def _handle_analysis_action(
             entity_id,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
 
     if action == "detect_cycles":
@@ -1666,6 +1677,7 @@ async def _handle_analysis_action(
             relationship_manager=relationship_manager,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
 
     if action == "suggest":
@@ -1675,6 +1687,7 @@ async def _handle_analysis_action(
             entity_id,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
 
     return ManageResponse(success=False, action=action, message="Unknown analysis action")
@@ -1685,6 +1698,7 @@ def _reader_visible_entities(
     *,
     principal_id: str | None,
     accessible_projects: set[str] | None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> list[Any]:
     """Drop rows the caller may not read from an analysis result.
 
@@ -1699,6 +1713,15 @@ def _reader_visible_entities(
             getattr(entity, "metadata", None),
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+            private_scope_granted=private_scope_granted_for(
+                allowed_memory_scope_keys, principal_id=principal_id
+            ),
+            row_project_id=memory_row_project_id(
+                getattr(entity, "metadata", None),
+                entity_type=getattr(getattr(entity, "entity_type", None), "value", None),
+                entity_id=getattr(entity, "id", None),
+            ),
         )
     ]
 
@@ -1710,6 +1733,7 @@ async def _estimate_effort(
     *,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> ManageResponse:
     """Estimate task effort based on similar completed tasks."""
     from sibyl_core.tasks.manager import TaskManager
@@ -1733,6 +1757,7 @@ async def _estimate_effort(
         task,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
 
     return ManageResponse(
@@ -1757,6 +1782,7 @@ async def _prioritize_tasks(
     *,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> ManageResponse:
     """Get smart task ordering for a project."""
     batch_size = 500
@@ -1778,6 +1804,7 @@ async def _prioritize_tasks(
                 batch,
                 principal_id=principal_id,
                 accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
             )
         )
         if len(batch) < batch_size:
@@ -1840,6 +1867,7 @@ async def _detect_cycles(
     relationship_manager: Any | None = None,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> ManageResponse:
     """Detect circular dependencies in a project's task graph."""
     cycle_result = await detect_dependency_cycles(
@@ -1850,6 +1878,7 @@ async def _detect_cycles(
         relationship_manager=relationship_manager,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
     return ManageResponse(
         success=True,
@@ -1871,6 +1900,7 @@ async def _suggest_knowledge(
     *,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> ManageResponse:
     """Suggest relevant knowledge for a task."""
     from sibyl_core.tasks.manager import TaskManager
@@ -1897,6 +1927,7 @@ async def _suggest_knowledge(
         limit=5,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
 
     return ManageResponse(

@@ -410,6 +410,7 @@ async def temporal_query(
         organization_id=group_id,
         principal_id=str(getattr(getattr(ctx, "user", None), "id", None) or "") or None,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=getattr(ctx, "api_key_memory_scope_keys", None),
     )
 
     # Convert dataclass edges to schema objects

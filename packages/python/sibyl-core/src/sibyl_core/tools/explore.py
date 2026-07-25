@@ -5,7 +5,11 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
 
-from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
+from sibyl_core.auth.memory_policy import (
+    memory_metadata_read_allowed,
+    memory_row_project_id,
+    private_scope_granted_for,
+)
 from sibyl_core.models.entities import Entity, EntityType, RelationshipType
 from sibyl_core.tools.helpers import (
     VALID_ENTITY_TYPES,
@@ -69,6 +73,14 @@ def _memory_scope_guard(
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
+            private_scope_granted=private_scope_granted_for(
+                allowed_memory_scope_keys, principal_id=principal_id
+            ),
+            row_project_id=memory_row_project_id(
+                getattr(entity, "metadata", None),
+                entity_type=getattr(getattr(entity, "entity_type", None), "value", None),
+                entity_id=getattr(entity, "id", None),
+            ),
         )
         if not decision and unauthenticated and not reported:
             reported = True

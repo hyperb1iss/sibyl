@@ -451,28 +451,29 @@ def _context_item_allowed_for_render(
     project_id: str | None,
     principal_id: str | None,
     accessible_projects: set[str] | None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> bool:
-    memory_scope = metadata.get("memory_scope")
-    memory_scope_value = str(memory_scope) if memory_scope is not None else None
-    if memory_scope_value == "private":
-        item_principal = metadata.get("principal_id")
-        if item_principal is None or principal_id != str(item_principal):
-            return False
-    if memory_scope_value:
-        from sibyl_core.auth.memory_policy import authorize_memory_read
+    """Whether a synthesized section may render this item.
 
-        decision = authorize_memory_read(
-            principal_id=principal_id,
-            memory_scope=memory_scope_value,
-            scope_key=str(metadata.get("scope_key") or project_id or "") or None,
-            project_id=project_id,
-            accessible_projects=accessible_projects,
-        )
-        return decision.allowed
-    return not (
-        accessible_projects is not None
-        and project_id is not None
-        and project_id not in accessible_projects
+    This decided the audience itself, which made it another copy of the read
+    rule with its own answers for a scope_key falling back to the project and
+    for an unscoped row. It asks the shared rule now.
+    """
+    from sibyl_core.auth.memory_policy import (
+        memory_metadata_read_allowed,
+        private_scope_granted_for,
+    )
+
+    return memory_metadata_read_allowed(
+        metadata,
+        principal_id=principal_id,
+        project_id=project_id,
+        accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+        private_scope_granted=private_scope_granted_for(
+            allowed_memory_scope_keys, principal_id=principal_id
+        ),
+        row_project_id=str(metadata.get("project_id") or project_id or "") or None,
     )
 
 

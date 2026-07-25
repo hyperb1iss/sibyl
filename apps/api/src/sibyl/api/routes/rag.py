@@ -48,7 +48,11 @@ from sibyl.persistence.content_runtime import (
     search_rag_chunks,
 )
 from sibyl_core.auth import OrganizationRole
-from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
+from sibyl_core.auth.memory_policy import (
+    memory_metadata_read_allowed,
+    memory_row_project_id,
+    private_scope_granted_for,
+)
 
 log = structlog.get_logger()
 
@@ -705,6 +709,7 @@ async def get_document_related_entities(
         )
 
         reader_user_id = str(getattr(getattr(auth, "user", None), "id", None) or "") or None
+        memory_grants = getattr(auth, "api_key_memory_scope_keys", None)
         for entity, score in search_results:
             # Skip very low relevance matches
             if score < 0.1:
@@ -726,6 +731,15 @@ async def get_document_related_entities(
                 entity.metadata,
                 principal_id=reader_user_id,
                 accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=memory_grants,
+                private_scope_granted=private_scope_granted_for(
+                    memory_grants, principal_id=reader_user_id
+                ),
+                row_project_id=memory_row_project_id(
+                    entity.metadata,
+                    entity_type=getattr(entity.entity_type, "value", None),
+                    entity_id=entity.id,
+                ),
             ):
                 continue
 
