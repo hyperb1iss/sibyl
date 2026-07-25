@@ -19,10 +19,12 @@ from sibyl_core.backends.surreal.schema_version import SchemaMigration, SurrealE
 
 _IDENTIFIER = r"[A-Za-z_][A-Za-z0-9_]*"
 
+# `COLUMNS` is a synonym for `FIELDS` that SurrealDB normalizes away on read, so a
+# migration written either way defines the same index and both spellings must parse.
 _DEFINE_INDEX_RE = re.compile(
     rf"^\s*DEFINE\s+INDEX\s+(?:IF\s+NOT\s+EXISTS\s+|OVERWRITE\s+)?"
     rf"(?P<name>{_IDENTIFIER})\s+ON\s+(?:TABLE\s+)?"
-    rf"(?P<table>{_IDENTIFIER})\s+FIELDS\s+(?P<body>.+?)\s*;?\s*$",
+    rf"(?P<table>{_IDENTIFIER})\s+(?:FIELDS|COLUMNS)\s+(?P<body>.+?)\s*;?\s*$",
     re.IGNORECASE | re.DOTALL,
 )
 _REMOVE_INDEX_RE = re.compile(
@@ -31,7 +33,9 @@ _REMOVE_INDEX_RE = re.compile(
     rf"(?P<table>{_IDENTIFIER})\s*;?\s*$",
     re.IGNORECASE,
 )
-_UNIQUE_TAIL_RE = re.compile(r"\bUNIQUE\b\s*$", re.IGNORECASE)
+# UNIQUE is a modifier, not necessarily the last token: `... FIELDS uuid UNIQUE
+# CONCURRENTLY;` is valid, so anchoring at the end would read it as non-unique.
+_UNIQUE_RE = re.compile(r"\bUNIQUE\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,7 +115,7 @@ def _unique_requirement(
     statement: str,
 ) -> UniqueIndexRequirement | None:
     body = definition.group("body")
-    unique = _UNIQUE_TAIL_RE.search(body)
+    unique = _UNIQUE_RE.search(body)
     if unique is None:
         return None
     fields = tuple(part.strip() for part in body[: unique.start()].split(",") if part.strip())

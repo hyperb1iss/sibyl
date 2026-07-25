@@ -252,3 +252,83 @@ async def test_duplicate_rows_leave_dedupe_unenforced_after_a_clean_migration(
 
     assert healed.ok
     assert "idx_memory_usage_events_uuid" in healed.repaired_indexes
+
+
+@pytest.mark.parametrize(
+    ("statement", "expected_fields"),
+    [
+        ("DEFINE INDEX idx_a ON widgets FIELDS uuid UNIQUE;", ("uuid",)),
+        ("DEFINE INDEX idx_a ON widgets COLUMNS uuid UNIQUE;", ("uuid",)),
+        ("DEFINE INDEX idx_a ON widgets FIELDS uuid UNIQUE CONCURRENTLY;", ("uuid",)),
+        ("DEFINE INDEX idx_a ON widgets COLUMNS uuid UNIQUE CONCURRENTLY;", ("uuid",)),
+        (
+            "DEFINE INDEX IF NOT EXISTS idx_a ON TABLE widgets COLUMNS org, uuid UNIQUE;",
+            ("org", "uuid"),
+        ),
+    ],
+)
+def test_expected_unique_indexes_reads_both_spellings_and_trailing_clauses(
+    statement: str,
+    expected_fields: tuple[str, ...],
+) -> None:
+    """COLUMNS is a synonym for FIELDS and UNIQUE is a modifier, not the final token.
+
+    SurrealDB accepts every spelling here and normalizes them to the same index, so a
+    parser that only reads `FIELDS ... UNIQUE;` silently drops a required invariant.
+    """
+    requirements = expected_unique_indexes(
+        (SchemaMigration(version=1, name="one", statements=(statement,)),)
+    )
+
+    assert [item.name for item in requirements] == ["idx_a"]
+    assert requirements[0].fields == expected_fields
+    assert requirements[0].table == "widgets"
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "DEFINE INDEX idx_a ON widgets FIELDS org, created_at;",
+        "DEFINE INDEX idx_a ON widgets COLUMNS org, created_at CONCURRENTLY;",
+        "DEFINE INDEX idx_a ON widgets FIELDS content FULLTEXT ANALYZER title_analyzer BM25;",
+        (
+            "DEFINE INDEX idx_a ON widgets FIELDS embedding "
+            "HNSW DIMENSION 8 DIST COSINE TYPE F32 EFC 150 M 12;"
+        ),
+    ],
+)
+def test_expected_unique_indexes_ignores_indexes_that_promise_no_uniqueness(
+    statement: str,
+) -> None:
+    assert (
+        expected_unique_indexes((SchemaMigration(version=1, name="one", statements=(statement,)),))
+        == ()
+    )
+
+
+@pytest.mark.asyncio
+async def test_ensure_rebuilds_a_unique_index_declared_with_columns(db: AsyncSurreal) -> None:
+    """The COLUMNS spelling has to survive the whole derive-then-rebuild round trip."""
+    await db.query("DEFINE TABLE widgets SCHEMAFULL;")
+    await db.query("DEFINE FIELD uuid ON widgets TYPE string;")
+    await db.query("CREATE widgets CONTENT { uuid: 'w1' };")
+    plan = SchemaInvariantPlan(
+        schemafull_tables=("widgets",),
+        unique_indexes=expected_unique_indexes(
+            (
+                SchemaMigration(
+                    version=1,
+                    name="one",
+                    statements=(
+                        "DEFINE INDEX IF NOT EXISTS idx_widgets_uuid "
+                        "ON widgets COLUMNS uuid UNIQUE CONCURRENTLY;",
+                    ),
+                ),
+            )
+        ),
+    )
+
+    report = await ensure_schema_invariants(_execute(db), plan)
+
+    assert report.ok
+    assert report.repaired_indexes == ("idx_widgets_uuid",)
