@@ -461,6 +461,8 @@ async def manage(
     data: dict[str, Any] | None = None,
     *,
     organization_id: str | None = None,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ) -> ManageResponse:
     """Manage operations that modify state in the knowledge graph.
 
@@ -537,7 +539,14 @@ async def manage(
         )
 
     try:
-        response = await _dispatch(valid_action, entity_id, data, organization_id=organization_id)
+        response = await _dispatch(
+            valid_action,
+            entity_id,
+            data,
+            organization_id=organization_id,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        )
     except Exception as e:
         log.exception("manage_failed", action=valid_action, error=str(e))
         return ManageResponse(
@@ -558,6 +567,8 @@ async def _dispatch(
     data: dict[str, Any],
     *,
     organization_id: str,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ) -> ManageResponse:
     """Route a validated action to its category handler (exhaustive)."""
     if action in TASK_ACTIONS:
@@ -573,7 +584,12 @@ async def _dispatch(
             cast("SourceAction", action), entity_id, data, organization_id=organization_id
         )
     return await _handle_analysis_action(
-        cast("AnalysisAction", action), entity_id, data, organization_id=organization_id
+        cast("AnalysisAction", action),
+        entity_id,
+        data,
+        organization_id=organization_id,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
     )
 
 
@@ -1591,6 +1607,8 @@ async def _handle_analysis_action(
     _data: dict[str, Any],
     *,
     organization_id: str | None,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ) -> ManageResponse:
     """Handle analysis actions."""
     if not entity_id:
@@ -1628,7 +1646,13 @@ async def _handle_analysis_action(
         )
 
     if action == "suggest":
-        return await _suggest_knowledge(entity_manager, relationship_manager, entity_id)
+        return await _suggest_knowledge(
+            entity_manager,
+            relationship_manager,
+            entity_id,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        )
 
     return ManageResponse(success=False, action=action, message="Unknown analysis action")
 
@@ -1778,6 +1802,9 @@ async def _suggest_knowledge(
     entity_manager: Any,
     relationship_manager: Any,
     task_id: str,
+    *,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ) -> ManageResponse:
     """Suggest relevant knowledge for a task."""
     from sibyl_core.tasks.manager import TaskManager
@@ -1802,6 +1829,8 @@ async def _suggest_knowledge(
         task_description=task.description,
         technologies=task.technologies,
         limit=5,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
     )
 
     return ManageResponse(

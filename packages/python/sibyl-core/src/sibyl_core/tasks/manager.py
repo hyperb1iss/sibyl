@@ -6,6 +6,7 @@ from typing import Any
 
 import structlog
 
+from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.tasks import (
     SimilarTaskInfo,
@@ -109,7 +110,14 @@ class TaskManager:
         return task_id
 
     async def suggest_task_knowledge(
-        self, task_title: str, task_description: str, technologies: list[str], limit: int = 5
+        self,
+        task_title: str,
+        task_description: str,
+        technologies: list[str],
+        limit: int = 5,
+        *,
+        principal_id: str | None = None,
+        accessible_projects: set[str] | None = None,
     ) -> TaskKnowledgeSuggestion:
         """Suggest relevant knowledge for a new task.
 
@@ -146,13 +154,26 @@ class TaskManager:
             ),
         )
 
+        def _visible(results: list[tuple[Any, float]]) -> list[tuple[str, float]]:
+            # Suggestions name knowledge rows by id, which is enough to
+            # enumerate private memories to whoever asks for a hint.
+            return [
+                (entity.id, score)
+                for entity, score in results
+                if memory_metadata_read_allowed(
+                    getattr(entity, "metadata", None),
+                    principal_id=principal_id,
+                    accessible_projects=accessible_projects,
+                )
+            ]
+
         return TaskKnowledgeSuggestion(
-            patterns=[(e.id, s) for e, s in patterns],
-            rules=[(e.id, s) for e, s in rules],
-            templates=[(e.id, s) for e, s in templates],
-            procedures=[(e.id, s) for e, s in procedures],
-            past_learnings=[(e.id, s) for e, s in episodes],
-            error_patterns=[(e.id, s) for e, s in error_patterns],
+            patterns=_visible(patterns),
+            rules=_visible(rules),
+            templates=_visible(templates),
+            procedures=_visible(procedures),
+            past_learnings=_visible(episodes),
+            error_patterns=_visible(error_patterns),
         )
 
     async def find_similar_tasks(
