@@ -182,11 +182,13 @@ def test_entity_visibility_matches_the_search_rule_on_every_scope(
         entity,
         reader_user_id=reader,
         accessible_projects=set(),
+        allowed_memory_scope_keys=None,
     )
     search_allows = memory_metadata_read_allowed(
         metadata,
         principal_id=reader,
         accessible_projects=set(),
+        private_scope_granted=True,
     )
 
     assert route_allows is False
@@ -248,10 +250,16 @@ def test_entity_visibility_treats_scope_key_as_a_private_owner_channel() -> None
     other = SimpleNamespace(metadata={"memory_scope": "private", "scope_key": "someone-else"})
 
     assert (
-        _entity_visible_to_reader(owned, reader_user_id=reader, accessible_projects=set()) is True
+        _entity_visible_to_reader(
+            owned, reader_user_id=reader, accessible_projects=set(), allowed_memory_scope_keys=None
+        )
+        is True
     )
     assert (
-        _entity_visible_to_reader(other, reader_user_id=reader, accessible_projects=set()) is False
+        _entity_visible_to_reader(
+            other, reader_user_id=reader, accessible_projects=set(), allowed_memory_scope_keys=None
+        )
+        is False
     )
 
 

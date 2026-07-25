@@ -436,10 +436,16 @@ class TestRestoreBackup:
         assert key_owned["principal_id"] == "user-a"
         assert "scope_key" not in key_owned
         assert memory_metadata_read_allowed(
-            key_owned, principal_id="user-a", accessible_projects=set()
+            key_owned,
+            principal_id="user-a",
+            accessible_projects=set(),
+            private_scope_granted=True,
         )
         assert not memory_metadata_read_allowed(
-            key_owned, principal_id="someone-else", accessible_projects=set()
+            key_owned,
+            principal_id="someone-else",
+            accessible_projects=set(),
+            private_scope_granted=True,
         )
 
     @pytest.mark.asyncio

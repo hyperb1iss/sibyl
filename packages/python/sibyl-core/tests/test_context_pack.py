@@ -840,6 +840,8 @@ async def test_compile_context_batches_default_related_items(
             organization_id="org-123",
             limit=2,
             include_related=True,
+            principal_id="reader-1",
+            accessible_projects={"project-1"},
         )
 
     relationship_manager.get_related_entities_batch.assert_awaited_once_with(

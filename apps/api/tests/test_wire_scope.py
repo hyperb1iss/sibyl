@@ -256,3 +256,184 @@ class TestProjectMetricsWire:
 
     def test_member_still_gets_metrics(self) -> None:
         assert self._request(member=True).status_code == 200
+
+
+class TestRestrictedApiKeyWire:
+    """A narrowed API key must not regain a memory space by another route.
+
+    `private_scope_granted` used to default True, so any call site that did not
+    pass it silently granted private access. Only native retrieval passed it.
+    """
+
+    @staticmethod
+    def _rows() -> list[dict[str, Any]]:
+        return [
+            {
+                "edge_id": "edge-private",
+                "name": "RELATED_TO",
+                "fact": SECRET_TEXT,
+                "source_id": "decision_private",
+                "source_name": SECRET_NAME,
+                "target_id": "episode_shared",
+                "target_name": "Shared episode",
+                "source_attributes": {
+                    "memory_scope": "private",
+                    "principal_id": str(OWNER_ID),
+                },
+                "target_attributes": {},
+                "created_at": None,
+                "expired_at": None,
+                "valid_at": None,
+                "invalid_at": None,
+            }
+        ]
+
+    def _request(self, grants: set[str] | None):
+        from sibyl.api.routes.search import router
+
+        rows = self._rows()
+
+        class _Client:
+            async def execute_query(self, _query: str, **_params: object):
+                return rows
+
+        ctx = AuthContext(
+            user=AuthUser(id=OWNER_ID, email="owner@example.test"),
+            organization=_org(),
+            org_role=OrganizationRole.MEMBER,
+            api_key_memory_scope_keys=grants,
+        )
+        app = FastAPI()
+        app.include_router(router)
+        app.dependency_overrides[get_current_organization] = _org
+        app.dependency_overrides[get_auth_context] = lambda: ctx
+        app.dependency_overrides[get_current_org_role] = lambda: OrganizationRole.MEMBER
+
+        with (
+            patch(
+                "sibyl_core.tools.temporal.get_graph_runtime",
+                AsyncMock(return_value=SimpleNamespace(client=_Client())),
+            ),
+            patch(
+                "sibyl.api.routes.search.list_accessible_project_graph_ids",
+                AsyncMock(return_value=set()),
+            ),
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
+            return client.post(
+                "/search/temporal",
+                json={"mode": "timeline", "entity_id": "episode_shared"},
+            )
+
+    def test_project_only_key_cannot_read_its_owners_private_rows(self) -> None:
+        from sibyl_core.auth.memory_policy import memory_scope_policy_key
+        from sibyl_core.models.memory_scope import MemoryScope
+
+        response = self._request({memory_scope_policy_key(MemoryScope.PROJECT, "proj-1")})
+
+        assert response.status_code == 200
+        assert SECRET_NAME not in response.text
+
+    def test_key_granting_private_still_reads_them(self) -> None:
+        from sibyl_core.auth.memory_policy import memory_scope_policy_key
+        from sibyl_core.models.memory_scope import MemoryScope
+
+        response = self._request({memory_scope_policy_key(MemoryScope.PRIVATE, str(OWNER_ID))})
+
+        assert response.status_code == 200
+        assert SECRET_NAME in response.text
+
+    def test_full_session_is_unaffected(self) -> None:
+        response = self._request(None)
+
+        assert response.status_code == 200
+        assert SECRET_NAME in response.text
+
+
+class TestInaccessibleProjectWire:
+    """Work items are deliberately unstamped, so their project is the gate."""
+
+    def _nodes(self, accessible: set[str]):
+        from sibyl.api.routes import graph as graph_routes
+        from sibyl_core.models.entities import EntityType
+
+        victim = SimpleNamespace(
+            id="task_victim",
+            entity_type=EntityType.TASK,
+            name=SECRET_NAME,
+            description=SECRET_TEXT,
+            metadata={"project_id": "proj-victim"},
+        )
+        mine = SimpleNamespace(
+            id="task_mine",
+            entity_type=EntityType.TASK,
+            name="My task",
+            description="ordinary",
+            metadata={"project_id": "proj-mine"},
+        )
+        runtime = SimpleNamespace(
+            entity_manager=SimpleNamespace(list_all=AsyncMock(return_value=[victim, mine]))
+        )
+        adapter = SimpleNamespace(get_connection_counts=AsyncMock(return_value={}))
+
+        with (
+            patch(
+                "sibyl.api.routes.graph.get_entity_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            patch(
+                "sibyl.api.routes.graph.get_graph_query_adapter",
+                AsyncMock(return_value=adapter),
+            ),
+            patch(
+                "sibyl.api.routes.graph.list_accessible_project_graph_ids",
+                AsyncMock(return_value=accessible),
+            ),
+            _wire(graph_routes.router, OUTSIDER_ID) as client,
+        ):
+            return client.get("/graph/nodes?limit=50")
+
+    def test_nodes_exclude_a_project_the_reader_is_not_in(self) -> None:
+        response = self._nodes({"proj-mine"})
+
+        assert response.status_code == 200
+        assert "task_victim" not in response.text
+        assert SECRET_NAME not in response.text
+        assert "task_mine" in response.text
+
+    def test_hierarchical_refuses_a_project_the_caller_named(self) -> None:
+        from sibyl.api.routes import graph as graph_routes
+
+        captured: dict[str, Any] = {}
+
+        async def _hierarchical(_client, _group_id, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                nodes=[],
+                edges=[],
+                clusters=[],
+                cluster_edges=[],
+                total_nodes=0,
+                total_edges=0,
+                displayed_nodes=0,
+                displayed_edges=0,
+                resolution="detail",
+                recommended_resolution="detail",
+            )
+
+        with (
+            patch(
+                "sibyl.api.routes.graph.get_entity_graph_runtime",
+                AsyncMock(return_value=SimpleNamespace(client=object())),
+            ),
+            patch("sibyl.api.routes.graph.get_hierarchical_graph", _hierarchical),
+            patch(
+                "sibyl.api.routes.graph.list_accessible_project_graph_ids",
+                AsyncMock(return_value={"proj-mine"}),
+            ),
+            _wire(graph_routes.router, OUTSIDER_ID) as client,
+        ):
+            response = client.get("/graph/hierarchical?projects=proj-victim")
+
+        assert response.status_code == 200
+        assert "proj-victim" not in (captured.get("project_ids") or [])

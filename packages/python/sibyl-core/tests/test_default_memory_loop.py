@@ -238,6 +238,8 @@ async def main():
             types=["decision"],
             include_documents=False,
             organization_id=group_id,
+            principal_id=principal_id,
+            accessible_projects={project_id},
         )
         assert any(result.id == remembered.id for result in search.results)
 
@@ -246,6 +248,8 @@ async def main():
             types=["decision"],
             project=project_id,
             organization_id=group_id,
+            principal_id=principal_id,
+            accessible_projects={project_id},
         )
         assert any(result.id == remembered.id for result in explored.entities)
 
@@ -253,6 +257,8 @@ async def main():
             mode="history",
             entity_id=str(remembered.id),
             organization_id=group_id,
+            principal_id=principal_id,
+            accessible_projects={project_id},
         )
         temporal_edge = next(
             edge for edge in temporal.edges if edge.id == "rel_no_graphiti_temporal"
@@ -272,6 +278,8 @@ async def main():
             action="prioritize",
             entity_id=project_id,
             organization_id=group_id,
+            principal_id=principal_id,
+            accessible_projects={project_id},
         )
         assert prioritized.success, prioritized.message
         assert prioritized.data["tasks"][0]["id"] == task_a.id
@@ -280,6 +288,8 @@ async def main():
             action="detect_cycles",
             entity_id=project_id,
             organization_id=group_id,
+            principal_id=principal_id,
+            accessible_projects={project_id},
         )
         assert cycles.success, cycles.message
         assert cycles.data["has_cycles"] is True
@@ -292,7 +302,13 @@ async def main():
         assert blocking.dependencies == [task_a.id]
         assert blocking.blockers == [task_a.id]
 
-        suggested_order = await suggest_task_order(runtime.client, group_id, project_id=project_id)
+        suggested_order = await suggest_task_order(
+            runtime.client,
+            group_id,
+            project_id=project_id,
+            principal_id=principal_id,
+            accessible_projects={project_id},
+        )
         assert sorted(suggested_order.unordered_tasks) == sorted([task_a.id, task_b.id])
         assert suggested_order.warnings
 

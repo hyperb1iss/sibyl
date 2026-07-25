@@ -3049,7 +3049,9 @@ class TestExploreTool:
                 mode="list",
                 types=["project"],
                 project_ids=["project_visible"],
+                accessible_projects={"project_visible"},
                 organization_id="org_123",
+                principal_id="reader-1",
             )
 
         assert response.total == 1
