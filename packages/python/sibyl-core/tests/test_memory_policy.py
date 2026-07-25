@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import re
+import ast
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -570,58 +570,130 @@ def test_search_scope_policy_denies_bands_it_cannot_verify() -> None:
         ), scope
 
 
-# Every place in sibyl-core that reads a row's memory_scope out of a metadata
-# bag, with why it is not a second copy of the read rule. Authorization must
-# go through memory_metadata_read_allowed; these do something else with the
-# value. A new entry here is the review question, which is the point.
+# Every function in sibyl-core that reads a row's memory_scope, keyed by
+# "module::function" so an exemption covers one function rather than a whole
+# file, with why it is not a second copy of the read rule. Authorization goes
+# through memory_metadata_read_allowed; these do something else with the value.
 _SCOPE_READERS_THAT_DO_NOT_AUTHORIZE = {
-    "session_bundle.py": "serializes the scope into a bundle for display",
-    "tools/add.py": "write guard: refuses a declared scope it was not authorized to keep",
-    "tools/admin.py": "write stamp: normalizes a restored row's owner metadata",
-    "tools/search.py": "reports the scope on a candidate contract and as a filter",
-    "tools/reflect.py": "passes an authorized scope through to the write",
-    "models/reflection.py": "deserializes a stored field",
-    "audit/filters.py": "filters an audit log by a recorded scope value",
-    "projection/memory.py": "write stamp: mirrors an inherited project scope key",
-    "services/surreal_content.py": "deserializes a raw memory's stored scope",
+    "audit/filters.py::audit_event_matches_resource": "filters an audit log by a recorded value",
+    "models/reflection.py::from_dict": "deserializes a stored field",
+    "projection/memory.py::_projected_entity": "write stamp: mirrors an inherited scope",
+    "projection/memory.py::_projected_fact_entity": "write stamp: mirrors an inherited scope",
+    "projection/memory.py::_projection_allowed": "derivation gate: refuses to project private and delegated sources at all",
+    "projection/memory.py::_projection_identity_scope": "builds a dedupe identity for a projection",
+    "services/surreal_content.py::_raw_memory_from_record": "deserializes a raw memory's stored scope",
+    "services/surreal_content.py::get_raw_memory_by_dedupe_key": "matches a stored dedupe key",
+    "services/surreal_content.py::get_raw_memory_by_source_id": "matches a stored source id",
+    "session_bundle.py::summarize_memory": "serializes the scope for display",
+    "session_bundle.py::summarize_raw_memory": "serializes the scope for display",
+    "tools/add.py::add": "write guard: refuses a scope it was not authorized to keep",
+    "tools/admin.py::_normalized_backup_metadata": "write stamp for a restored row",
+    "tools/reflect.py::_persist_reflection_source_review": "passes an authorized scope to a write",
+    "tools/search.py::_graph_candidate_metadata": "reports the scope on a candidate contract",
+    "tools/search.py::search": "passes the scope through as a response filter",
 }
 
 
+def _scope_reading_functions(root: Path) -> dict[str, list[int]]:
+    """Every function that reads memory_scope, found structurally.
+
+    A line-oriented regex missed multiline reads, .pop(), aliases, constants,
+    helper indirection and mapping destructuring, and its exemptions were
+    module-wide so a new authorizing copy inside an already-listed file passed
+    silently. Walking the AST catches the read however it is spelled and
+    attributes it to the enclosing function.
+    """
+    policy_module = root / "auth" / "memory_policy.py"
+    found: dict[str, list[int]] = {}
+
+    for path in sorted(root.rglob("*.py")):
+        if path == policy_module:
+            continue
+        try:
+            tree = ast.parse(path.read_text())
+        except SyntaxError:  # pragma: no cover - not expected in-tree
+            continue
+
+        scopes: list[str] = []
+
+        class _Visitor(ast.NodeVisitor):
+            def __init__(self, module: str, stack: list[str]) -> None:
+                self.module = module
+                self.stack = stack
+
+            def _enter(self, node: ast.AST) -> None:
+                self.stack.append(getattr(node, "name", "<module>"))
+                self.generic_visit(node)
+                self.stack.pop()
+
+            visit_FunctionDef = _enter
+            visit_AsyncFunctionDef = _enter
+
+            def _record(self, node: ast.AST) -> None:
+                key = f"{self.module}::{self.stack[-1] if self.stack else '<module>'}"
+                found.setdefault(key, []).append(node.lineno)
+
+            def _is_scope_key(self, node: ast.AST) -> bool:
+                return isinstance(node, ast.Constant) and node.value == "memory_scope"
+
+            def visit_Subscript(self, node: ast.Subscript) -> None:
+                # bag["memory_scope"]
+                if self._is_scope_key(node.slice):
+                    self._record(node)
+                self.generic_visit(node)
+
+            def visit_Call(self, node: ast.Call) -> None:
+                # bag.get("memory_scope"), .pop(...), .setdefault(...)
+                func = node.func
+                if (
+                    isinstance(func, ast.Attribute)
+                    and func.attr in {"get", "pop", "setdefault"}
+                    and node.args
+                    and self._is_scope_key(node.args[0])
+                ):
+                    self._record(node)
+                self.generic_visit(node)
+
+        _Visitor(str(path.relative_to(root)), scopes).visit(tree)
+
+    return found
+
+
 def test_no_second_implementation_of_the_read_rule_exists() -> None:
-    """The convergence guarantee, asserted against source rather than a call.
+    """The convergence guarantee, asserted structurally.
 
     An earlier version compared _matches_memory_scope_policy against
     memory_metadata_read_allowed, which it already delegates to, so it could
-    only ever pass. This finds every module that reads a row's scope out of
-    metadata and requires each to be a known non-authorizing use.
+    only ever pass. Its replacement grepped single lines with module-wide
+    exemptions, which is how the synthesis copy survived. This walks the AST
+    and exempts one function at a time.
     """
     import sibyl_core
 
     root = Path(sibyl_core.__file__).parent
-    policy_module = root / "auth" / "memory_policy.py"
-    scope_branch = re.compile(r"""(get\(\s*["']memory_scope["']|\[\s*["']memory_scope["']\s*\])""")
-
-    found: dict[str, list[str]] = {}
-    for path in sorted(root.rglob("*.py")):
-        if path == policy_module:
-            continue
-        for lineno, line in enumerate(path.read_text().splitlines(), start=1):
-            if scope_branch.search(line):
-                found.setdefault(str(path.relative_to(root)), []).append(
-                    f"{lineno}: {line.strip()}"
-                )
+    found = _scope_reading_functions(root)
 
     unexpected = {
-        module: lines
-        for module, lines in found.items()
-        if module not in _SCOPE_READERS_THAT_DO_NOT_AUTHORIZE
+        where: lines
+        for where, lines in found.items()
+        if where not in _SCOPE_READERS_THAT_DO_NOT_AUTHORIZE
     }
     assert unexpected == {}, (
-        "new code reads a row's memory_scope out of its metadata. If it decides "
-        "who may see the row, call memory_metadata_read_allowed instead; if it "
-        "does something else, add it to the inventory with a reason:\n"
-        + "\n".join(f"{m}\n  " + "\n  ".join(v) for m, v in unexpected.items())
+        "new code reads a row's memory_scope. If it decides who may see the "
+        "row, call memory_metadata_read_allowed instead; if it does something "
+        "else, add it to the inventory with a reason:\n"
+        + "\n".join(f"  {where} (lines {lines})" for where, lines in sorted(unexpected.items()))
     )
+
+
+def test_the_scope_reader_inventory_has_no_stale_entries() -> None:
+    """An exemption that no longer matches real code is quiet rot."""
+    import sibyl_core
+
+    found = _scope_reading_functions(Path(sibyl_core.__file__).parent)
+    stale = sorted(set(_SCOPE_READERS_THAT_DO_NOT_AUTHORIZE) - set(found))
+
+    assert stale == [], f"inventory entries no longer correspond to a real read: {stale}"
 
 
 def test_the_read_rule_requires_its_dangerous_arguments() -> None:
