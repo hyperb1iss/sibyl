@@ -25,6 +25,8 @@ from sibyl.auth.dependencies import (
     get_current_organization,
 )
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole
+from sibyl_core.auth.memory_policy import memory_scope_policy_key
+from sibyl_core.models.memory_scope import MemoryScope
 
 ORG_ID = UUID("00000000-0000-0000-0000-000000000111")
 OWNER_ID = UUID("00000000-0000-0000-0000-0000000000aa")
@@ -437,3 +439,94 @@ class TestInaccessibleProjectWire:
 
         assert response.status_code == 200
         assert "proj-victim" not in (captured.get("project_ids") or [])
+
+
+class TestSynthesisOverMcpGrant:
+    """MCP synthesis rendered private rows for a key that never granted them.
+
+    The public functions were widened to accept the grant and the three MCP
+    adapters were never connected to it, so the plumbing existed and carried
+    nothing. `None` is not neutral here: memory_policy reads it as unrestricted
+    session semantics, so omitting the argument granted private scope.
+
+    This drives the MCP adapter and asserts the rendered output, not the
+    resolver's return value — the previous adapter test asserted call kwargs it
+    did not include, so it passed while the hole was open.
+    """
+
+    OWNER = "00000000-0000-0000-0000-0000000000aa"
+
+    def _pack(self):
+        from sibyl_core.models.context import (
+            ContextFacet,
+            ContextItem,
+            ContextPack,
+            ContextSection,
+        )
+
+        item = ContextItem(
+            id="decision_private",
+            type="decision",
+            name=SECRET_NAME,
+            content=SECRET_TEXT,
+            score=0.9,
+            facet=ContextFacet.DECISIONS,
+            reason="seed",
+            source="graph",
+            metadata={"memory_scope": "private", "principal_id": self.OWNER},
+        )
+        return ContextPack(
+            goal="ship",
+            intent="decide",
+            query="ship",
+            domain=None,
+            project=None,
+            layer="recall",
+            total_items=1,
+            sections=[
+                ContextSection(facet=ContextFacet.DECISIONS, title="Decisions", items=[item])
+            ],
+        )
+
+    async def _render(self, grants: set[str] | None) -> str:
+        import json
+
+        import sibyl.server as server_module
+        from sibyl.server import McpContext
+
+        ctx = McpContext(
+            org_id="00000000-0000-0000-0000-000000000111",
+            user_id=self.OWNER,
+            scopes=["mcp"],
+            api_key_memory_scope_keys=grants,
+        )
+
+        async def _context(**_kwargs: Any):
+            return self._pack()
+
+        with (
+            patch.object(server_module, "_require_mcp_context", AsyncMock(return_value=ctx)),
+            patch.object(
+                server_module, "_resolve_mcp_project_scope", AsyncMock(return_value=set())
+            ),
+            patch("sibyl_core.services.synthesis.default_context_pack", _context),
+        ):
+            plan = await server_module._synthesis_mcp_plan(goal="ship", project=None)
+        return json.dumps(plan, default=str)
+
+    @pytest.mark.asyncio
+    async def test_project_only_key_renders_no_private_row(self) -> None:
+        rendered = await self._render({memory_scope_policy_key(MemoryScope.PROJECT, "proj-1")})
+
+        assert SECRET_NAME not in rendered
+        assert SECRET_TEXT not in rendered
+
+    @pytest.mark.asyncio
+    async def test_key_granting_private_still_renders_it(self) -> None:
+        rendered = await self._render({memory_scope_policy_key(MemoryScope.PRIVATE, self.OWNER)})
+
+        assert SECRET_NAME in rendered
+
+    @pytest.mark.asyncio
+    async def test_full_session_still_renders_it(self) -> None:
+        assert SECRET_NAME in await self._render(None)
