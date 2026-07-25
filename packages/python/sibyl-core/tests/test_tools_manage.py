@@ -2147,9 +2147,5 @@ class TestAddNoteAudienceChannel:
             accessible_projects={"proj-secret"},
             private_scope_granted=True,
         )
-        # The project screen can, which is the channel a note now carries.
-        from sibyl.api.routes.entities import _entity_visible_to_projects
-
-        note = SimpleNamespace(entity_type=SimpleNamespace(value="note"), metadata=gated)
-        assert not _entity_visible_to_projects(note, set())
-        assert _entity_visible_to_projects(note, {"proj-secret"})
+        # The API-side project screen consumes the same channel; that half is
+        # pinned in apps/api/tests, which is where the sibyl package imports.
