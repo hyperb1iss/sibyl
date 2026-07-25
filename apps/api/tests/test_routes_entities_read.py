@@ -8,11 +8,16 @@ from uuid import UUID
 import pytest
 from fastapi import HTTPException
 
-from sibyl.api.routes.entities import _should_fallback_to_document_entity, get_entity
+from sibyl.api.routes.entities import (
+    _entity_visible_to_reader,
+    _should_fallback_to_document_entity,
+    get_entity,
+)
 from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl.persistence.content_common import DocumentEntityRecord
 from sibyl.persistence.graph_runtime import GraphEntityStore
 from sibyl_core.auth import ProjectRole
+from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
 from sibyl_core.models.entities import (
     Entity,
     EntityType,
@@ -149,6 +154,56 @@ async def test_get_entity_denies_private_memory_projection_for_non_owner() -> No
         await get_entity("person-1", org=org, ctx=_ctx(), service=service)
 
     assert exc.value.status_code == 404
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        pytest.param({"memory_scope": "team", "scope_key": "team-x"}, id="team"),
+        pytest.param({"memory_scope": "delegated", "scope_key": "del-x"}, id="delegated"),
+        pytest.param({"memory_scope": "agent", "scope_key": "agent-x"}, id="agent"),
+        pytest.param({"memory_scope": "sooper_sekrit", "scope_key": "x"}, id="unrecognized"),
+    ],
+)
+def test_entity_visibility_matches_the_search_rule_on_every_scope(
+    metadata: dict[str, str],
+) -> None:
+    """A local copy served every scope it did not name to the whole org.
+
+    Reading a row and finding it through search ask the same question, so a
+    shape either implementation allows and the other refuses is reachable on
+    one surface and hidden on the other.
+    """
+    reader = "reader-1"
+    entity = SimpleNamespace(metadata=metadata)
+
+    route_allows = _entity_visible_to_reader(
+        entity,
+        reader_user_id=reader,
+        accessible_projects=set(),
+    )
+    search_allows = memory_metadata_read_allowed(
+        metadata,
+        principal_id=reader,
+        accessible_projects=set(),
+    )
+
+    assert route_allows is False
+    assert route_allows == search_allows
+
+
+def test_entity_visibility_treats_scope_key_as_a_private_owner_channel() -> None:
+    """`owner = principal_id or scope_key`, so both channels resolve an owner."""
+    reader = "reader-1"
+    owned = SimpleNamespace(metadata={"memory_scope": "private", "scope_key": reader})
+    other = SimpleNamespace(metadata={"memory_scope": "private", "scope_key": "someone-else"})
+
+    assert (
+        _entity_visible_to_reader(owned, reader_user_id=reader, accessible_projects=set()) is True
+    )
+    assert (
+        _entity_visible_to_reader(other, reader_user_id=reader, accessible_projects=set()) is False
+    )
 
 
 @pytest.mark.asyncio
