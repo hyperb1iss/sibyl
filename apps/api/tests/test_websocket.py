@@ -51,6 +51,35 @@ class TestEntityBroadcastPayload:
         for content_field in ("content", "description", "name", "metadata"):
             assert content_field not in payload
 
+    def test_entity_change_payload_drops_prose_but_keeps_workflow_signals(self) -> None:
+        """Task and epic events pass a field bag straight through.
+
+        Those rows are reachable only by project members at REST but their
+        events fan out to the whole org, so the title and body have to be
+        dropped here rather than at each call site.
+        """
+        payload = entity_change_payload(
+            "task-1",
+            "task",
+            action="update_task",
+            status="doing",
+            name="Acquisition target is Initech",
+            title="Acquisition target is Initech",
+            description="board voted 5-2, do not disclose",
+            summary="do not disclose",
+            content="do not disclose",
+            metadata={"memory_scope": "private"},
+        )
+
+        assert payload == {
+            "id": "task-1",
+            "entity_type": "task",
+            "action": "update_task",
+            "status": "doing",
+        }
+        assert "do not disclose" not in str(payload)
+        assert "Acquisition" not in str(payload)
+
     @pytest.mark.asyncio
     async def test_broadcast_reaches_every_connection_in_the_org(self) -> None:
         """Which is exactly why the payload may not carry memory."""

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.event_types import WSEvent
-from sibyl.api.websocket import broadcast_event
+from sibyl.api.websocket import broadcast_event, entity_change_payload
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
 from sibyl.persistence.auth_runtime import verify_entity_project_access
@@ -139,12 +139,7 @@ async def _broadcast_epic_update(
     """Broadcast epic update event (scoped to org)."""
     await broadcast_event(
         WSEvent.ENTITY_UPDATED,
-        {
-            "id": epic_id,
-            "entity_type": "epic",
-            "action": action,
-            **data,
-        },
+        entity_change_payload(epic_id, "epic", action=action, **data),
         org_id=org_id,
     )
 

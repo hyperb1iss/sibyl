@@ -20,7 +20,7 @@ from sibyl.api.idempotency import (
     serialize_idempotent_request,
 )
 from sibyl.api.schemas import MutationReceipt
-from sibyl.api.websocket import broadcast_event
+from sibyl.api.websocket import broadcast_event, entity_change_payload
 from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import (
@@ -296,7 +296,7 @@ async def create_task(
 
     await broadcast_event(
         WSEvent.ENTITY_CREATED,
-        {"id": task_id, "entity_type": "task", "name": request.title},
+        entity_change_payload(task_id, "task"),
         org_id=str(org.id),
     )
 
@@ -338,12 +338,7 @@ async def _broadcast_task_update(
     """Broadcast task update event (scoped to org)."""
     await broadcast_event(
         WSEvent.ENTITY_UPDATED,
-        {
-            "id": task_id,
-            "entity_type": "task",
-            "action": action,
-            **data,
-        },
+        entity_change_payload(task_id, "task", action=action, **data),
         org_id=org_id,
     )
 
