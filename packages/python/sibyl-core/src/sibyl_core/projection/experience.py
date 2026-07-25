@@ -10,6 +10,7 @@ from collections.abc import Iterable, Iterator
 from itertools import pairwise
 from typing import Any, Literal, Protocol
 
+from sibyl_core.auth.memory_policy import stamp_memory_scope_metadata
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.experience import (
     OperationalEvidencePart,
@@ -118,7 +119,16 @@ def _common_metadata(
     content_hash: str,
 ) -> dict[str, Any]:
     metadata: dict[str, Any] = {
-        **experience.metadata,
+        # The capture body carries a free-form bag and its own scope_key, and
+        # only project_id is verified on the way in. Owner fields are dropped
+        # and the scope key is taken from the verified project, so a payload
+        # cannot address these rows at another principal or project.
+        **stamp_memory_scope_metadata(
+            experience.metadata,
+            memory_scope=None,
+            scope_key=None,
+            principal_id=None,
+        ),
         "category": "operational_experience",
         "operational_source_id": experience.source_id,
         "operational_schema_version": OPERATIONAL_EXPERIENCE_SCHEMA_VERSION,
@@ -126,8 +136,7 @@ def _common_metadata(
     }
     if experience.project_id:
         metadata["project_id"] = experience.project_id
-    if experience.scope_key:
-        metadata["scope_key"] = experience.scope_key
+        metadata["scope_key"] = experience.project_id
     return metadata
 
 

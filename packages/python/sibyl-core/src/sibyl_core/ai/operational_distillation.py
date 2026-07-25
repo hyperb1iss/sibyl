@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, StringConstraints, model_validator
 from pydantic_ai import Agent
 
 from sibyl_core.ai.llm import Extractor, LLMSurface
+from sibyl_core.auth.memory_policy import stamp_memory_scope_metadata
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.models.experience import OperationalExperience, OperationalObservation
 
@@ -194,7 +195,14 @@ def build_operational_note_entities(
     entities: list[Entity] = []
     for note_kind, body in bodies:
         metadata: dict[str, Any] = {
-            **experience.metadata,
+            # Same untrusted capture bag the projection sees, reaching the graph
+            # through the distillation job instead.
+            **stamp_memory_scope_metadata(
+                experience.metadata,
+                memory_scope=None,
+                scope_key=None,
+                principal_id=None,
+            ),
             "category": OPERATIONAL_NOTE_CATEGORY,
             "operational_source_id": experience.source_id,
             "operational_content_hash": content_hash,
@@ -204,8 +212,7 @@ def build_operational_note_entities(
         }
         if experience.project_id:
             metadata["project_id"] = experience.project_id
-        if experience.scope_key:
-            metadata["scope_key"] = experience.scope_key
+            metadata["scope_key"] = experience.project_id
         if provider:
             metadata["note_distillation_provider"] = provider
         if model:
