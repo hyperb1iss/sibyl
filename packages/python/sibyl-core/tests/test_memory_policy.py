@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from sibyl_core.auth.context import MemoryPolicyContext
@@ -10,6 +12,7 @@ from sibyl_core.auth.memory_policy import (
     authorize_memory_share,
     authorize_memory_write,
     memory_metadata_read_allowed,
+    memory_scope_policy_key,
     stamp_memory_scope_metadata,
 )
 from sibyl_core.auth.models import OrganizationRole
@@ -488,3 +491,41 @@ def test_operational_capture_cannot_name_an_owner_through_its_metadata_bag() -> 
     assert "memory_scope" not in metadata
     assert "principal_id" not in metadata
     assert metadata["scope_key"] == "project_verified"
+
+
+def test_api_key_grant_narrows_a_read_it_can_never_authorize_one() -> None:
+    """A private grant names the reader, so it cannot stand in for the owner."""
+    from sibyl_core.tools.search import _matches_memory_scope_policy
+
+    victim_row = SimpleNamespace(metadata={"memory_scope": "private", "principal_id": "victim"})
+    own_row = SimpleNamespace(metadata={"memory_scope": "private", "principal_id": "reader"})
+    private_grant = {memory_scope_policy_key(MemoryScope.PRIVATE, "reader")}
+
+    def allowed(entity: object, grants: set[str] | None) -> bool:
+        return _matches_memory_scope_policy(
+            entity,
+            project=None,
+            principal_id="reader",
+            allowed_memory_scope_keys=grants,
+            accessible_projects=set(),
+        )
+
+    assert not allowed(victim_row, None)
+    assert not allowed(victim_row, private_grant)
+    assert allowed(own_row, None)
+    assert allowed(own_row, private_grant)
+    assert not allowed(own_row, {memory_scope_policy_key(MemoryScope.PROJECT, "p1")})
+
+
+def test_search_scope_policy_denies_bands_it_cannot_verify() -> None:
+    from sibyl_core.tools.search import _matches_memory_scope_policy
+
+    for scope in ("team", "delegated", "organization", "shared", "public"):
+        entity = SimpleNamespace(metadata={"memory_scope": scope, "scope_key": "not_mine"})
+        assert not _matches_memory_scope_policy(
+            entity,
+            project=None,
+            principal_id="reader",
+            allowed_memory_scope_keys=None,
+            accessible_projects=set(),
+        ), scope
