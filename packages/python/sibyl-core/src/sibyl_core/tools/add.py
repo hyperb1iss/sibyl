@@ -337,6 +337,12 @@ async def add(
                     exclude_id=entity_id,  # Exclude self for updates
                     max_conflicts=3,
                     min_similarity=conflict_threshold,
+                    # The duplicate check reads existing rows back to whoever
+                    # is writing, so it answers to the same reader the write
+                    # was authorized as. A project write can see its own
+                    # project; nothing here widens beyond that.
+                    principal_id=principal_id,
+                    accessible_projects={scope_key} if scope_key else set(),
                 )
                 if conflicts:
                     log.info(
