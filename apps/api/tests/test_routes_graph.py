@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
+from fastapi import HTTPException
 
 from sibyl.api.routes import graph as graph_routes
 from sibyl.api.schemas import SubgraphRequest
@@ -13,6 +14,17 @@ from sibyl_core.models.entities import EntityType, RelationshipType
 
 def _org() -> SimpleNamespace:
     return SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+
+
+def _ctx() -> SimpleNamespace:
+    return SimpleNamespace(user=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222")))
+
+
+def _accessible_projects(*project_ids: str):
+    return patch(
+        "sibyl.api.routes.graph.list_accessible_project_graph_ids",
+        AsyncMock(return_value=set(project_ids)),
+    )
 
 
 class TestGraphRoutes:
@@ -37,11 +49,14 @@ class TestGraphRoutes:
             ),
         )
 
-        with patch(
-            "sibyl.api.routes.graph.get_entity_graph_runtime",
-            AsyncMock(return_value=runtime),
+        with (
+            patch(
+                "sibyl.api.routes.graph.get_entity_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            _accessible_projects(),
         ):
-            result = await graph_routes.debug_graph(org=_org())
+            result = await graph_routes.debug_graph(org=_org(), ctx=_ctx())
 
         assert result["node_count"] == 2
         assert result["edge_count"] == 2
@@ -80,9 +95,11 @@ class TestGraphRoutes:
                 "sibyl.api.routes.graph.get_graph_query_adapter",
                 AsyncMock(return_value=adapter),
             ),
+            _accessible_projects(),
         ):
             nodes = await graph_routes.get_all_nodes(
                 org=_org(),
+                ctx=_ctx(),
                 types=[EntityType.TASK],
                 limit=25,
                 offset=0,
@@ -165,13 +182,17 @@ class TestGraphRoutes:
             ),
         )
 
-        with patch(
-            "sibyl.api.routes.graph.get_entity_graph_runtime",
-            AsyncMock(return_value=runtime),
+        with (
+            patch(
+                "sibyl.api.routes.graph.get_entity_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            _accessible_projects(),
         ):
             result = await graph_routes.get_subgraph(
                 SubgraphRequest(entity_id="task-1", depth=1, max_nodes=10),
                 org=_org(),
+                ctx=_ctx(),
             )
 
         assert result.node_count == 2
@@ -266,9 +287,11 @@ class TestGraphRoutes:
                 "sibyl.api.routes.graph.get_graph_query_adapter",
                 AsyncMock(return_value=adapter),
             ),
+            _accessible_projects(),
         ):
             result = await graph_routes.get_full_graph(
                 org=_org(),
+                ctx=_ctx(),
                 types=[EntityType.TASK, EntityType.PROJECT],
                 max_nodes=50,
                 max_edges=75,
@@ -374,3 +397,82 @@ class TestGraphRoutes:
         assert result["total_nodes"] == 1
         assert result["total_edges"] == 1
         assert result["resolution"] == "detail"
+
+    @pytest.mark.asyncio
+    async def test_nodes_hide_a_co_members_private_memory(self) -> None:
+        """A visualization node carries the entity's label and metadata bag.
+
+        Graph endpoints took no reader identity at all, so every private
+        memory in the organization reached the picture as a readable title.
+        """
+        private = SimpleNamespace(
+            id="decision_private",
+            entity_type=EntityType.EPISODE,
+            name="Private decision",
+            description="secret rationale",
+            metadata={"memory_scope": "private", "principal_id": "victim"},
+        )
+        shared = SimpleNamespace(
+            id="episode_shared",
+            entity_type=EntityType.EPISODE,
+            name="Shared episode",
+            description="org visible",
+            metadata={},
+        )
+        runtime = SimpleNamespace(
+            entity_manager=SimpleNamespace(
+                list_all=AsyncMock(return_value=[private, shared]),
+            ),
+        )
+        adapter = SimpleNamespace(get_connection_counts=AsyncMock(return_value={}))
+
+        with (
+            patch(
+                "sibyl.api.routes.graph.get_entity_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            patch(
+                "sibyl.api.routes.graph.get_graph_query_adapter",
+                AsyncMock(return_value=adapter),
+            ),
+            _accessible_projects(),
+        ):
+            nodes = await graph_routes.get_all_nodes(
+                org=_org(),
+                ctx=_ctx(),
+                types=None,
+                limit=50,
+                offset=0,
+            )
+
+        assert [node.id for node in nodes] == ["episode_shared"]
+
+    @pytest.mark.asyncio
+    async def test_subgraph_refuses_a_co_members_private_center(self) -> None:
+        private = SimpleNamespace(
+            id="decision_private",
+            entity_type=EntityType.EPISODE,
+            name="Private decision",
+            description="secret rationale",
+            metadata={"memory_scope": "private", "principal_id": "victim"},
+        )
+        runtime = SimpleNamespace(
+            entity_manager=SimpleNamespace(get=AsyncMock(return_value=private)),
+            relationship_manager=SimpleNamespace(get_related_entities=AsyncMock(return_value=[])),
+        )
+
+        with (
+            patch(
+                "sibyl.api.routes.graph.get_entity_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            _accessible_projects(),
+            pytest.raises(HTTPException) as excinfo,
+        ):
+            await graph_routes.get_subgraph(
+                SubgraphRequest(entity_id="decision_private", depth=1, max_nodes=10),
+                org=_org(),
+                ctx=_ctx(),
+            )
+
+        assert excinfo.value.status_code == 404
