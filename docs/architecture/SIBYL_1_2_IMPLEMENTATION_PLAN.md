@@ -185,11 +185,16 @@ drivers, for the record: offline write loss (`df317be0`), the private-memory lea
 schema deadlock, and the exit-code cluster. Not drivers: the fulltext lanes and raw-memory CREATE,
 both of which were overstated.
 
-**Known 1.1.3 regression** (found same day, task `bcdf1b3a`): project-scoped `task list` returns
-empty for an org owner with no membership rows — `org_role` fails to resolve on the explore surface,
-so the non-admin branch of `list_accessible_project_graph_ids` filters everything. Workaround
-`--all`; fix folds into Track C item 1 (the scope-model chokepoint work), and the fix must add an
-owner-role fallback test on every list surface — the leak tests all guard the opposite direction.
+**1.1.3 regression, fixed in 1.1.4** (found and fixed same day, task `bcdf1b3a`): every
+project-scoped `task list`/`epic list` returned empty. Diagnosis correction with receipts: the org
+role resolved fine — the explore route verified VIEWER access on the named project, then handed the
+core `accessible_projects=None` in list/dependencies modes (only related/traverse got the verified
+set), and the PR 264 read rule denies scope-unstamped project rows on None by design ("a caller that
+cannot resolve memberships must pass None, which denies rather than admits"). Fix: thread the
+verified project set in every mode (`search.py`), with a wire-level allow/deny regression pair — the
+member sees their board, an unrequested project's rows still drop. Lesson stands from both
+directions now: scope hardening needs the allow-direction test pair on every surface, not just leak
+tests.
 
 Deferred out of the patch by design: the `_candidate_scope_allowed` fail-open flip (would hide
 legitimately unscoped tasks/epics — needs a first-class `Entity.memory_scope` column), the scope
