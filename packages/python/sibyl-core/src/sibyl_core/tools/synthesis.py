@@ -85,6 +85,7 @@ async def _planned_materialized_run(
     organization_id: str,
     principal_id: str | None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> Any:
     run = await synthesis_service.plan_synthesis(
         request,
@@ -98,6 +99,7 @@ async def _planned_materialized_run(
         organization_id=organization_id,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
         context_fn=synthesis_service.default_context_pack,
     )
 
@@ -108,6 +110,7 @@ async def synthesis_plan(
     organization_id: str,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
     output_type: str = SynthesisOutputType.DOCUMENTATION.value,
     audience: str | None = None,
     depth: str = SynthesisDepth.STANDARD.value,
@@ -147,6 +150,7 @@ async def synthesis_plan(
         organization_id=organization_id,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
     return synthesis_service.synthesis_run_to_dict(run)
 
@@ -157,6 +161,7 @@ async def synthesis_verify(
     organization_id: str,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
     output_type: str = SynthesisOutputType.DOCUMENTATION.value,
     audience: str | None = None,
     depth: str = SynthesisDepth.STANDARD.value,
@@ -196,6 +201,7 @@ async def synthesis_verify(
         organization_id=organization_id,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
     run = synthesis_service.apply_synthesis_verification(run)
     return synthesis_service.synthesis_run_to_dict(run)
@@ -207,6 +213,7 @@ async def synthesis_draft(
     organization_id: str,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
     output_type: str = SynthesisOutputType.DOCUMENTATION.value,
     audience: str | None = None,
     depth: str = SynthesisDepth.STANDARD.value,
@@ -251,6 +258,7 @@ async def synthesis_draft(
         organization_id=organization_id,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
     artifact = synthesis_service.draft_synthesis_artifact(
         run,

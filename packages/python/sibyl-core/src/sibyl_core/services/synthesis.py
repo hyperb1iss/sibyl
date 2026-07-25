@@ -483,6 +483,7 @@ async def materialize_synthesis_section_packs(
     organization_id: str,
     principal_id: str | None,
     accessible_projects: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
     context_fn: SynthesisContextFn = default_context_pack,
 ) -> SynthesisRun:
     """Populate section packs with policy-filtered context-pack sources."""
@@ -534,6 +535,7 @@ async def materialize_synthesis_section_packs(
                 project_id=project_id,
                 principal_id=principal_id,
                 accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
             ):
                 hidden_count += 1
                 continue
