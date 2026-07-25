@@ -293,8 +293,15 @@ async def broadcast_event(event: str, data: dict[str, Any], *, org_id: str | Non
         await manager.broadcast(event, data, org_id=org_id)
 
 
-def entity_change_payload(entity_id: str, entity_type: str) -> dict[str, Any]:
-    """Reduce an entity change to the identifiers a broadcast may carry.
+# An entity's own prose. A broadcast reaches connections that may not be
+# authorized for the row, so none of these may ride along with the notification.
+ENTITY_CONTENT_FIELDS = frozenset(
+    {"name", "title", "description", "content", "summary", "metadata"}
+)
+
+
+def entity_change_payload(entity_id: str, entity_type: str, **fields: Any) -> dict[str, Any]:
+    """Reduce an entity change to what a broadcast may carry.
 
     A broadcast fans out to every connection in the organization, and a
     connection is authenticated as an org, not as a reader, so there is no
@@ -302,8 +309,16 @@ def entity_change_payload(entity_id: str, entity_type: str) -> dict[str, Any]:
     authorization for the fan-out, the channel stops carrying memory: clients
     receive that a row changed and refetch it through the REST endpoint, which
     authorizes them individually.
+
+    Workflow signals a caller passes through (action, status, revision) are
+    kept — they are not the entity's prose — while its own text is dropped
+    here rather than at each call site.
     """
-    return {"id": entity_id, "entity_type": entity_type}
+    payload: dict[str, Any] = {"id": entity_id, "entity_type": entity_type}
+    payload.update(
+        {key: value for key, value in fields.items() if key not in ENTITY_CONTENT_FIELDS}
+    )
+    return payload
 
 
 async def local_broadcast(event: str, data: dict[str, Any], org_id: str | None) -> None:

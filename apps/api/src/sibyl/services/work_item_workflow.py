@@ -22,7 +22,7 @@ from typing import Any
 import structlog
 
 from sibyl.api.event_types import WSEvent
-from sibyl.api.websocket import broadcast_event
+from sibyl.api.websocket import broadcast_event, entity_change_payload
 from sibyl.locks import entity_lock
 from sibyl.persistence.graph_runtime import (
     get_task_graph_runtime,
@@ -108,12 +108,12 @@ async def _broadcast(
     *,
     group_id: str,
 ) -> dict[str, Any]:
-    payload = {
-        "id": item_id,
-        "entity_type": _broadcast_entity_type(entity_type),
-        "action": action.value,
+    payload = entity_change_payload(
+        item_id,
+        _broadcast_entity_type(entity_type),
+        action=action.value,
         **data,
-    }
+    )
     await broadcast_event(WSEvent.ENTITY_UPDATED, payload, org_id=group_id)
     return payload
 
