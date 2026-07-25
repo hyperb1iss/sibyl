@@ -43,7 +43,7 @@ EXTENDED_AUTH_TABLES = (
     "llm_usage_buckets",
 )
 AUTH_TABLES = (*CORE_AUTH_TABLES, *EXTENDED_AUTH_TABLES)
-AUTH_SCHEMA_CURRENT_VERSION = 5
+AUTH_SCHEMA_CURRENT_VERSION = 6
 AUTH_SCHEMA_NAME = "auth"
 _AUTH_ORGANIZATION_ROLE_VALUES = tuple(role.value for role in OrganizationRole)
 _AUTH_PROJECT_ROLE_VALUES = tuple(role.value for role in ProjectRole)
@@ -59,6 +59,7 @@ def _surql_string_array(values: tuple[str, ...]) -> str:
 
 AUTH_SCHEMA_DEFINITIONS = """
 DEFINE TABLE IF NOT EXISTS users SCHEMAFULL;
+ALTER TABLE IF EXISTS users SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON users TYPE string;
 DEFINE FIELD IF NOT EXISTS github_id ON users TYPE option<int>;
 DEFINE FIELD IF NOT EXISTS email ON users TYPE option<string>;
@@ -84,6 +85,7 @@ DEFINE INDEX IF NOT EXISTS idx_users_github_id ON users FIELDS github_id UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_users_purge_after ON users FIELDS purge_after;
 
 DEFINE TABLE IF NOT EXISTS identity_provider SCHEMAFULL;
+ALTER TABLE IF EXISTS identity_provider SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON identity_provider TYPE string;
 DEFINE FIELD IF NOT EXISTS name ON identity_provider TYPE string;
 DEFINE FIELD IF NOT EXISTS issuer ON identity_provider TYPE string;
@@ -102,6 +104,7 @@ DEFINE INDEX IF NOT EXISTS idx_identity_provider_issuer
     ON identity_provider FIELDS issuer;
 
 DEFINE TABLE IF NOT EXISTS user_identity SCHEMAFULL;
+ALTER TABLE IF EXISTS user_identity SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON user_identity TYPE string;
 DEFINE FIELD IF NOT EXISTS provider_name ON user_identity TYPE string;
 DEFINE FIELD IF NOT EXISTS issuer ON user_identity TYPE string;
@@ -121,6 +124,7 @@ DEFINE INDEX IF NOT EXISTS idx_user_identity_provider_subject
 DEFINE INDEX IF NOT EXISTS idx_user_identity_email ON user_identity FIELDS email;
 
 DEFINE TABLE IF NOT EXISTS llm_usage_buckets SCHEMAFULL;
+ALTER TABLE IF EXISTS llm_usage_buckets SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON llm_usage_buckets TYPE string;
 DEFINE FIELD IF NOT EXISTS bucket_key ON llm_usage_buckets TYPE string;
 DEFINE FIELD IF NOT EXISTS bucket_month ON llm_usage_buckets TYPE string;
@@ -141,6 +145,7 @@ DEFINE INDEX IF NOT EXISTS idx_llm_usage_buckets_org
     ON llm_usage_buckets FIELDS organization_id, bucket_month;
 
 DEFINE TABLE IF NOT EXISTS organizations SCHEMAFULL;
+ALTER TABLE IF EXISTS organizations SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON organizations TYPE string;
 DEFINE FIELD IF NOT EXISTS name ON organizations TYPE string DEFAULT '';
 DEFINE FIELD IF NOT EXISTS slug ON organizations TYPE string DEFAULT '';
@@ -153,6 +158,7 @@ DEFINE INDEX IF NOT EXISTS idx_organizations_uuid ON organizations FIELDS uuid U
 DEFINE INDEX IF NOT EXISTS idx_organizations_slug ON organizations FIELDS slug UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS organization_members SCHEMAFULL;
+ALTER TABLE IF EXISTS organization_members SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON organization_members TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON organization_members TYPE string;
 DEFINE FIELD IF NOT EXISTS user_id ON organization_members TYPE string;
@@ -167,6 +173,7 @@ DEFINE INDEX IF NOT EXISTS idx_organization_members_org_user
     ON organization_members FIELDS organization_id, user_id UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS user_sessions SCHEMAFULL;
+ALTER TABLE IF EXISTS user_sessions SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON user_sessions TYPE string;
 DEFINE FIELD IF NOT EXISTS user_id ON user_sessions TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON user_sessions TYPE option<string>;
@@ -198,6 +205,7 @@ DEFINE INDEX IF NOT EXISTS idx_user_sessions_last_active
     ON user_sessions FIELDS last_active_at;
 
 DEFINE TABLE IF NOT EXISTS password_reset_tokens SCHEMAFULL;
+ALTER TABLE IF EXISTS password_reset_tokens SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON password_reset_tokens TYPE string;
 DEFINE FIELD IF NOT EXISTS user_id ON password_reset_tokens TYPE string;
 DEFINE FIELD IF NOT EXISTS token_hash ON password_reset_tokens TYPE string;
@@ -218,6 +226,7 @@ DEFINE INDEX IF NOT EXISTS idx_password_reset_tokens_expires
     ON password_reset_tokens FIELDS expires_at;
 
 DEFINE TABLE IF NOT EXISTS login_history SCHEMAFULL;
+ALTER TABLE IF EXISTS login_history SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON login_history TYPE string;
 DEFINE FIELD IF NOT EXISTS user_id ON login_history TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS event_type ON login_history TYPE string;
@@ -237,6 +246,7 @@ DEFINE INDEX IF NOT EXISTS idx_login_history_event ON login_history FIELDS event
 DEFINE INDEX IF NOT EXISTS idx_login_history_created ON login_history FIELDS created_at;
 
 DEFINE TABLE IF NOT EXISTS organization_invitations SCHEMAFULL;
+ALTER TABLE IF EXISTS organization_invitations SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON organization_invitations TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON organization_invitations TYPE string;
 DEFINE FIELD IF NOT EXISTS invited_email ON organization_invitations TYPE string;
@@ -260,6 +270,7 @@ DEFINE INDEX IF NOT EXISTS idx_organization_invitations_email
     ON organization_invitations FIELDS invited_email;
 
 DEFINE TABLE IF NOT EXISTS api_keys SCHEMAFULL;
+ALTER TABLE IF EXISTS api_keys SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON api_keys TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON api_keys TYPE string;
 DEFINE FIELD IF NOT EXISTS user_id ON api_keys TYPE string;
@@ -280,6 +291,7 @@ DEFINE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys FIELDS user_id;
 DEFINE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys FIELDS key_prefix;
 
 DEFINE TABLE IF NOT EXISTS api_key_project_scopes SCHEMAFULL;
+ALTER TABLE IF EXISTS api_key_project_scopes SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON api_key_project_scopes TYPE string;
 DEFINE FIELD IF NOT EXISTS api_key_id ON api_key_project_scopes TYPE string;
 DEFINE FIELD IF NOT EXISTS project_id ON api_key_project_scopes TYPE string;
@@ -300,6 +312,7 @@ DEFINE INDEX IF NOT EXISTS idx_api_key_project_scopes_key_project
     ON api_key_project_scopes FIELDS api_key_id, project_id UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS api_key_memory_space_scopes SCHEMAFULL;
+ALTER TABLE IF EXISTS api_key_memory_space_scopes SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON api_key_memory_space_scopes TYPE string;
 DEFINE FIELD IF NOT EXISTS api_key_id ON api_key_memory_space_scopes TYPE string;
 DEFINE FIELD IF NOT EXISTS memory_space_id ON api_key_memory_space_scopes TYPE string;
@@ -320,6 +333,7 @@ DEFINE INDEX IF NOT EXISTS idx_api_key_memory_space_scopes_key_space
     ON api_key_memory_space_scopes FIELDS api_key_id, memory_space_id UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS oauth_client_registrations SCHEMAFULL;
+ALTER TABLE IF EXISTS oauth_client_registrations SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON oauth_client_registrations TYPE string;
 DEFINE FIELD IF NOT EXISTS client_id ON oauth_client_registrations TYPE string;
 DEFINE FIELD IF NOT EXISTS client_info ON oauth_client_registrations TYPE object FLEXIBLE;
@@ -334,6 +348,7 @@ DEFINE INDEX IF NOT EXISTS idx_oauth_client_registrations_client
     ON oauth_client_registrations FIELDS client_id UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS device_authorization_requests SCHEMAFULL;
+ALTER TABLE IF EXISTS device_authorization_requests SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON device_authorization_requests TYPE string;
 DEFINE FIELD IF NOT EXISTS device_code_hash ON device_authorization_requests TYPE string;
 DEFINE FIELD IF NOT EXISTS user_code ON device_authorization_requests TYPE string;
@@ -369,6 +384,7 @@ DEFINE INDEX IF NOT EXISTS idx_device_authorization_requests_org
     ON device_authorization_requests FIELDS organization_id;
 
 DEFINE TABLE IF NOT EXISTS audit_logs SCHEMAFULL;
+ALTER TABLE IF EXISTS audit_logs SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON audit_logs TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON audit_logs TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS user_id ON audit_logs TYPE option<string>;
@@ -385,6 +401,7 @@ DEFINE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs FIELDS user_id;
 DEFINE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs FIELDS action;
 
 DEFINE TABLE IF NOT EXISTS teams SCHEMAFULL;
+ALTER TABLE IF EXISTS teams SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON teams TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON teams TYPE string;
 DEFINE FIELD IF NOT EXISTS name ON teams TYPE string DEFAULT '';
@@ -403,6 +420,7 @@ DEFINE INDEX IF NOT EXISTS idx_teams_org ON teams FIELDS organization_id;
 DEFINE INDEX IF NOT EXISTS idx_teams_org_slug ON teams FIELDS organization_id, slug UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS team_members SCHEMAFULL;
+ALTER TABLE IF EXISTS team_members SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON team_members TYPE string;
 DEFINE FIELD IF NOT EXISTS team_id ON team_members TYPE string;
 DEFINE FIELD IF NOT EXISTS user_id ON team_members TYPE string;
@@ -418,6 +436,7 @@ DEFINE INDEX IF NOT EXISTS idx_team_members_team_user
     ON team_members FIELDS team_id, user_id UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS projects SCHEMAFULL;
+ALTER TABLE IF EXISTS projects SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON projects TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON projects TYPE string;
 DEFINE FIELD IF NOT EXISTS name ON projects TYPE string DEFAULT '';
@@ -441,6 +460,7 @@ DEFINE INDEX IF NOT EXISTS idx_projects_org_graph_id
     ON projects FIELDS organization_id, graph_project_id UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS project_members SCHEMAFULL;
+ALTER TABLE IF EXISTS project_members SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON project_members TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON project_members TYPE string;
 DEFINE FIELD IF NOT EXISTS project_id ON project_members TYPE string;
@@ -462,6 +482,7 @@ DEFINE INDEX IF NOT EXISTS idx_project_members_user
     ON project_members FIELDS user_id;
 
 DEFINE TABLE IF NOT EXISTS team_projects SCHEMAFULL;
+ALTER TABLE IF EXISTS team_projects SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON team_projects TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON team_projects TYPE string;
 DEFINE FIELD IF NOT EXISTS team_id ON team_projects TYPE string;
@@ -482,6 +503,7 @@ DEFINE INDEX IF NOT EXISTS idx_team_projects_project
     ON team_projects FIELDS project_id;
 
 DEFINE TABLE IF NOT EXISTS memory_spaces SCHEMAFULL;
+ALTER TABLE IF EXISTS memory_spaces SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON memory_spaces TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON memory_spaces TYPE string;
 DEFINE FIELD IF NOT EXISTS memory_scope ON memory_spaces TYPE string;
@@ -505,6 +527,7 @@ DEFINE INDEX IF NOT EXISTS idx_memory_spaces_creator
     ON memory_spaces FIELDS created_by_user_id;
 
 DEFINE TABLE IF NOT EXISTS memory_space_members SCHEMAFULL;
+ALTER TABLE IF EXISTS memory_space_members SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON memory_space_members TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON memory_space_members TYPE string;
 DEFINE FIELD IF NOT EXISTS space_id ON memory_space_members TYPE string;
@@ -609,6 +632,14 @@ ALTER TABLE IF EXISTS memory_space_members PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 """
 
+# `DEFINE TABLE IF NOT EXISTS ... SCHEMAFULL` silently no-ops against a table Surreal
+# already auto-created SCHEMALESS on an application write, so a table whose writer shipped
+# ahead of its migration stays SCHEMALESS forever. Every DEFINE is paired with an ALTER at
+# the definition site; this sweep repairs tables that already drifted before that pairing.
+AUTH_SCHEMAFULL_REPAIR_DEFINITIONS = "\n".join(
+    f"ALTER TABLE IF EXISTS {table} SCHEMAFULL;" for table in AUTH_TABLES
+)
+
 AUTH_SCHEMA_MIGRATIONS = (
     SchemaMigration(
         version=1,
@@ -634,6 +665,11 @@ AUTH_SCHEMA_MIGRATIONS = (
         version=5,
         name="auth_table_permissions",
         statements=tuple(split_statements(AUTH_PERMISSION_MIGRATION_DEFINITIONS)),
+    ),
+    SchemaMigration(
+        version=6,
+        name="auth_schemafull_repair",
+        statements=tuple(split_statements(AUTH_SCHEMAFULL_REPAIR_DEFINITIONS)),
     ),
 )
 
@@ -769,6 +805,7 @@ __all__ = [
     "AUTH_INVITATION_TOKEN_MIGRATION_DEFINITIONS",
     "AUTH_PERMISSION_MIGRATION_DEFINITIONS",
     "AUTH_PROJECT_SLUG_MIGRATION_DEFINITIONS",
+    "AUTH_SCHEMAFULL_REPAIR_DEFINITIONS",
     "AUTH_SCHEMA_CURRENT_VERSION",
     "AUTH_SCHEMA_DEFINITIONS",
     "AUTH_SCHEMA_MIGRATIONS",
