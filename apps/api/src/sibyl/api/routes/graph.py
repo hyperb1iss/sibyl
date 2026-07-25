@@ -330,6 +330,7 @@ async def get_all_nodes(
 @handle_workflow_errors("get_edges")
 async def get_all_edges(
     org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
     relationship_types: list[RelationshipType] | None = Query(
         default=None, description="Filter by relationship types"
     ),
@@ -339,12 +340,31 @@ async def get_all_edges(
     """Get all edges for graph visualization."""
     group_id = str(org.id)
     runtime = await get_entity_graph_runtime(group_id)
+    principal_id, accessible_projects = await _graph_scope_reader(ctx)
 
     all_relationships = await runtime.relationship_manager.list_all(
         relationship_types=relationship_types,
         limit=limit,
         offset=offset,
     )
+
+    # An edge names both of its endpoints, so an unfiltered list discloses that
+    # a hidden row exists and what it connects to. Resolving only the endpoints
+    # of the page being returned keeps the lookup bounded by the edge budget.
+    endpoint_ids = {rel.source_id for rel in all_relationships} | {
+        rel.target_id for rel in all_relationships
+    }
+    endpoints = await runtime.entity_manager.get_many(sorted(endpoint_ids))
+    visible_ids = {
+        entity.id
+        for entity in endpoints
+        if entity.id
+        and _graph_entity_visible(
+            entity,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        )
+    }
 
     return [
         GraphEdge(
@@ -356,6 +376,7 @@ async def get_all_edges(
             weight=1.0,  # Could be based on strength/confidence
         )
         for rel in all_relationships
+        if rel.source_id in visible_ids and rel.target_id in visible_ids
     ]
 
 
