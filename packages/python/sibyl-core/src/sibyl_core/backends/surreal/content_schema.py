@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -30,12 +31,17 @@ if TYPE_CHECKING:
     from sibyl_core.backends.surreal.content_client import SurrealContentClient
 
 
-CONTENT_RELATION_TABLES = (
-    "derived_from",
-    "chunk_of",
-    "supersedes",
-    "extracted_into",
-)
+# RELATE auto-creates an absent edge table as `TYPE ANY SCHEMALESS`, and a guarded
+# `DEFINE TABLE IF NOT EXISTS` then no-ops against it. ALTER accepts the full relation
+# clause on SurrealDB 3.x, so the repair has to carry IN/OUT/ENFORCED as well as the
+# schema mode or the table stays untyped while reporting itself repaired.
+CONTENT_RELATION_SPECS: Mapping[str, str] = {
+    "derived_from": "TYPE RELATION IN raw_captures OUT source_imports ENFORCED",
+    "chunk_of": "TYPE RELATION IN document_chunks OUT crawled_documents ENFORCED",
+    "supersedes": "TYPE RELATION IN raw_captures OUT raw_captures ENFORCED",
+    "extracted_into": "TYPE RELATION IN entity OUT document_chunks",
+}
+CONTENT_RELATION_TABLES = tuple(CONTENT_RELATION_SPECS)
 CONTENT_TABLES = (
     *CONTENT_RELATION_TABLES,
     "entity",
@@ -77,6 +83,12 @@ _SCHEMA_DIR = Path(__file__).with_name("schemas") / "content"
 
 def _surql_string_array(values: tuple[str, ...]) -> str:
     return "[" + ", ".join(f"'{value}'" for value in values) + "]"
+
+
+def content_schemafull_repair_statement(table: str) -> str:
+    relation_clause = CONTENT_RELATION_SPECS.get(table)
+    suffix = f"{relation_clause} SCHEMAFULL" if relation_clause else "SCHEMAFULL"
+    return f"ALTER TABLE IF EXISTS {table} {suffix};"
 
 
 def _load_schema_file(filename: str) -> str:
@@ -253,9 +265,9 @@ DEFINE INDEX IF NOT EXISTS idx_raw_captures_embedding ON raw_captures FIELDS emb
     HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC 150 M 12;
 """
 
-CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS = """
+CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS = f"""
 DEFINE TABLE IF NOT EXISTS derived_from SCHEMAFULL TYPE RELATION IN raw_captures OUT source_imports ENFORCED;
-ALTER TABLE IF EXISTS derived_from SCHEMAFULL;
+{content_schemafull_repair_statement("derived_from")}
 DEFINE FIELD IF NOT EXISTS uuid ON derived_from TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON derived_from TYPE string;
 DEFINE FIELD IF NOT EXISTS raw_memory_id ON derived_from TYPE string;
@@ -269,7 +281,7 @@ ALTER TABLE IF EXISTS derived_from PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 
 DEFINE TABLE IF NOT EXISTS chunk_of SCHEMAFULL TYPE RELATION IN document_chunks OUT crawled_documents ENFORCED;
-ALTER TABLE IF EXISTS chunk_of SCHEMAFULL;
+{content_schemafull_repair_statement("chunk_of")}
 DEFINE FIELD IF NOT EXISTS uuid ON chunk_of TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON chunk_of TYPE string;
 DEFINE FIELD IF NOT EXISTS chunk_id ON chunk_of TYPE string;
@@ -283,7 +295,7 @@ ALTER TABLE IF EXISTS chunk_of PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 
 DEFINE TABLE IF NOT EXISTS supersedes SCHEMAFULL TYPE RELATION IN raw_captures OUT raw_captures ENFORCED;
-ALTER TABLE IF EXISTS supersedes SCHEMAFULL;
+{content_schemafull_repair_statement("supersedes")}
 DEFINE FIELD IF NOT EXISTS uuid ON supersedes TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON supersedes TYPE string;
 DEFINE FIELD IF NOT EXISTS raw_memory_id ON supersedes TYPE string;
@@ -297,7 +309,7 @@ ALTER TABLE IF EXISTS supersedes PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 
 DEFINE TABLE IF NOT EXISTS extracted_into SCHEMAFULL TYPE RELATION IN entity OUT document_chunks;
-ALTER TABLE IF EXISTS extracted_into SCHEMAFULL;
+{content_schemafull_repair_statement("extracted_into")}
 DEFINE FIELD IF NOT EXISTS uuid ON extracted_into TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON extracted_into TYPE string;
 DEFINE FIELD IF NOT EXISTS entity_id ON extracted_into TYPE string;
@@ -312,9 +324,9 @@ ALTER TABLE IF EXISTS extracted_into PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 """
 
-CONTENT_EXTRACTED_INTO_RELATION_MIGRATION_DEFINITIONS = """
+CONTENT_EXTRACTED_INTO_RELATION_MIGRATION_DEFINITIONS = f"""
 DEFINE TABLE IF NOT EXISTS extracted_into SCHEMAFULL TYPE RELATION IN entity OUT document_chunks;
-ALTER TABLE IF EXISTS extracted_into SCHEMAFULL;
+{content_schemafull_repair_statement("extracted_into")}
 DEFINE FIELD IF NOT EXISTS uuid ON extracted_into TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON extracted_into TYPE string;
 DEFINE FIELD IF NOT EXISTS entity_id ON extracted_into TYPE string;
@@ -557,7 +569,7 @@ DEFINE FIELD OVERWRITE misled_count ON raw_captures TYPE int DEFAULT 0;
 # ahead of its migration stays SCHEMALESS forever. Every DEFINE is paired with an ALTER at
 # the definition site; this sweep repairs tables that already drifted before that pairing.
 CONTENT_SCHEMAFULL_REPAIR_DEFINITIONS = "\n".join(
-    f"ALTER TABLE IF EXISTS {table} SCHEMAFULL;" for table in CONTENT_TABLES
+    content_schemafull_repair_statement(table) for table in CONTENT_TABLES
 )
 
 
@@ -1058,6 +1070,7 @@ __all__ = [
     "CONTENT_RAW_CAPTURE_REQUIRED_FIELD_OPTIONAL_DEFINITIONS",
     "CONTENT_RAW_CAPTURE_REQUIRED_FIELD_REPAIR_DEFINITIONS",
     "CONTENT_RAW_CAPTURE_REVISION_MIGRATION_DEFINITIONS",
+    "CONTENT_RELATION_SPECS",
     "CONTENT_RELATION_TABLES",
     "CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS",
     "CONTENT_SCHEMAFULL_REPAIR_DEFINITIONS",
@@ -1069,4 +1082,5 @@ __all__ = [
     "CONTENT_TABLES",
     "CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS",
     "bootstrap_content_schema",
+    "content_schemafull_repair_statement",
 ]

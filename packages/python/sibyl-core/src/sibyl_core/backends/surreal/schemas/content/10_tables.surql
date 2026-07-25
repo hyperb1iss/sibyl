@@ -274,7 +274,7 @@ DEFINE INDEX IF NOT EXISTS idx_content_changefeed_cursors_updated_at
     ON content_changefeed_cursors FIELDS updated_at;
 
 DEFINE TABLE IF NOT EXISTS derived_from SCHEMAFULL TYPE RELATION IN raw_captures OUT source_imports ENFORCED;
-ALTER TABLE IF EXISTS derived_from SCHEMAFULL;
+ALTER TABLE IF EXISTS derived_from TYPE RELATION IN raw_captures OUT source_imports ENFORCED SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON derived_from TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON derived_from TYPE string;
 DEFINE FIELD IF NOT EXISTS raw_memory_id ON derived_from TYPE string;
@@ -287,7 +287,7 @@ DEFINE INDEX IF NOT EXISTS idx_derived_from_org_raw ON derived_from FIELDS organ
 DEFINE INDEX IF NOT EXISTS idx_derived_from_org_import ON derived_from FIELDS organization_id, source_import_id;
 
 DEFINE TABLE IF NOT EXISTS chunk_of SCHEMAFULL TYPE RELATION IN document_chunks OUT crawled_documents ENFORCED;
-ALTER TABLE IF EXISTS chunk_of SCHEMAFULL;
+ALTER TABLE IF EXISTS chunk_of TYPE RELATION IN document_chunks OUT crawled_documents ENFORCED SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON chunk_of TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON chunk_of TYPE string;
 DEFINE FIELD IF NOT EXISTS chunk_id ON chunk_of TYPE string;
@@ -300,7 +300,7 @@ DEFINE INDEX IF NOT EXISTS idx_chunk_of_org_chunk ON chunk_of FIELDS organizatio
 DEFINE INDEX IF NOT EXISTS idx_chunk_of_org_document ON chunk_of FIELDS organization_id, document_id;
 
 DEFINE TABLE IF NOT EXISTS supersedes SCHEMAFULL TYPE RELATION IN raw_captures OUT raw_captures ENFORCED;
-ALTER TABLE IF EXISTS supersedes SCHEMAFULL;
+ALTER TABLE IF EXISTS supersedes TYPE RELATION IN raw_captures OUT raw_captures ENFORCED SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON supersedes TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON supersedes TYPE string;
 DEFINE FIELD IF NOT EXISTS raw_memory_id ON supersedes TYPE string;
@@ -313,7 +313,7 @@ DEFINE INDEX IF NOT EXISTS idx_supersedes_org_raw ON supersedes FIELDS organizat
 DEFINE INDEX IF NOT EXISTS idx_supersedes_org_superseded ON supersedes FIELDS organization_id, superseded_raw_memory_id;
 
 DEFINE TABLE IF NOT EXISTS extracted_into SCHEMAFULL TYPE RELATION IN entity OUT document_chunks;
-ALTER TABLE IF EXISTS extracted_into SCHEMAFULL;
+ALTER TABLE IF EXISTS extracted_into TYPE RELATION IN entity OUT document_chunks SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON extracted_into TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON extracted_into TYPE string;
 DEFINE FIELD IF NOT EXISTS entity_id ON extracted_into TYPE string;
