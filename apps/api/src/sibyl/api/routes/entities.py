@@ -1863,12 +1863,15 @@ async def create_entity(
     if merged_metadata.get("memory_scope") is not None:
         # Scope metadata decides who may retrieve this row, so its principal
         # binding is taken from the authenticated context rather than the
-        # payload. Dropping it when the context has no user keeps a private
-        # row unreadable instead of binding it to a caller-supplied identity.
+        # payload. With no authenticated user both owner channels have to go:
+        # the retrieval check falls back to scope_key when principal_id is
+        # absent, so leaving it would let the payload still name the principal
+        # whose private memory this row reads as.
         if ctx.user is not None:
             merged_metadata["principal_id"] = str(ctx.user.id)
         else:
             merged_metadata.pop("principal_id", None)
+            merged_metadata.pop("scope_key", None)
 
     # Projects are always sync (foundational - tasks depend on them existing)
     # Other entities can be async unless caller explicitly requests sync
