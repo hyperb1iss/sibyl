@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -418,3 +419,23 @@ async def test_mutating_request_records_completed_pending_write(
     assert metrics["attempted"] == 1
     assert metrics["completed"] == 1
     assert metrics["dropped"] == 0
+
+
+def test_read_pending_metrics_folds_retired_expired_into_discarded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    path = pending_writes.pending_metrics_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"attempted": 10, "discarded": 3, "expired": 4, "replayed": 3}),
+        encoding="utf-8",
+    )
+
+    metrics = pending_writes.read_pending_metrics()
+
+    assert metrics["discarded"] == 7
+    assert "expired" not in metrics
+    outcomes = metrics["completed"] + metrics["replayed"] + metrics["dropped"] + metrics["discarded"]
+    assert outcomes == metrics["attempted"]

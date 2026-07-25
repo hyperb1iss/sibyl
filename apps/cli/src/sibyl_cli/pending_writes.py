@@ -156,7 +156,13 @@ def read_pending_metrics() -> dict[str, int]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return defaults
-    return {key: int(data.get(key) or 0) for key in defaults}
+    metrics = {key: int(data.get(key) or 0) for key in defaults}
+    # `expired` was retired in favour of the outcome names above. Folding its
+    # historical count into `discarded` keeps the sum invariant true across the
+    # upgrade; projecting it away would leave `attempted` describing writes with
+    # no recorded outcome.
+    metrics["discarded"] += int(data.get("expired") or 0)
+    return metrics
 
 
 def record_pending_metric(name: PendingMetric, count: int = 1) -> dict[str, int]:
