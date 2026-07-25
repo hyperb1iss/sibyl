@@ -23,6 +23,7 @@ class MemoryCaptureRequest:
     source_id: str | None = None
     memory_scope: str = "private"
     scope_key: str | None = None
+    principal_id: str | None = None
     capture_surface: str = "cli"
     wait_searchable: bool = False
     skip_conflicts: bool = False
@@ -75,6 +76,14 @@ class MemoryCaptureService:
         mutation_receipt = dict(raw_receipt) if isinstance(raw_receipt, Mapping) else None
 
         graph_metadata = normalize_memory_quality_metadata(request.metadata)
+        # The graph row carries no scope column, so retrieval and projection
+        # authorize a candidate from this metadata alone. An unstamped row reads
+        # as unscoped and is served to every principal in the organization.
+        graph_metadata["memory_scope"] = request.memory_scope
+        if request.scope_key:
+            graph_metadata["scope_key"] = request.scope_key
+        if request.principal_id:
+            graph_metadata["principal_id"] = request.principal_id
         if raw_memory_id:
             graph_metadata["raw_memory_id"] = raw_memory_id
         if raw_source_id:
