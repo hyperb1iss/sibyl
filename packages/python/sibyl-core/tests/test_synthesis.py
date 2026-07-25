@@ -401,6 +401,7 @@ async def test_materialize_synthesis_section_packs_filters_unauthorized_text() -
         principal_id="user-123",
         accessible_projects={"proj-allowed"},
         context_fn=fake_context,
+        allowed_memory_scope_keys=None,
     )
 
     pack = materialized.source_packs[0]
@@ -469,6 +470,7 @@ async def test_materialize_synthesis_section_packs_redacts_visible_text() -> Non
         organization_id="org-123",
         principal_id="user-123",
         context_fn=fake_context,
+        allowed_memory_scope_keys=None,
     )
 
     pack = materialized.source_packs[0]
@@ -550,6 +552,7 @@ async def test_materialize_synthesis_section_packs_hides_private_sources_by_prin
         organization_id="org-123",
         principal_id="user-123",
         context_fn=fake_context,
+        allowed_memory_scope_keys=None,
     )
 
     pack = materialized.source_packs[0]
@@ -653,6 +656,7 @@ async def test_materialize_synthesis_section_packs_omits_corrected_sources() -> 
         organization_id="org-123",
         principal_id="user-123",
         context_fn=fake_context,
+        allowed_memory_scope_keys=None,
     )
     artifact = draft_synthesis_artifact(materialized)
     pack = materialized.source_packs[0]
@@ -739,6 +743,7 @@ async def test_draft_synthesis_artifact_renders_citable_markdown_and_json() -> N
         principal_id="user-123",
         accessible_projects={"proj-allowed"},
         context_fn=fake_context,
+        allowed_memory_scope_keys=None,
     )
 
     artifact = draft_synthesis_artifact(materialized)
@@ -804,6 +809,7 @@ async def test_draft_synthesis_artifact_reports_unresolved_and_freshness_gaps() 
         organization_id="org-123",
         principal_id="user-123",
         context_fn=fake_context,
+        allowed_memory_scope_keys=None,
     )
 
     artifact = draft_synthesis_artifact(materialized)
@@ -868,6 +874,7 @@ async def test_remember_synthesis_artifact_persists_source_link_metadata() -> No
         organization_id="org-123",
         principal_id="user-123",
         context_fn=fake_context,
+        allowed_memory_scope_keys=None,
     )
     artifact = draft_synthesis_artifact(
         materialized,

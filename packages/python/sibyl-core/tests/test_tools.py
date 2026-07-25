@@ -4042,6 +4042,7 @@ async def test_synthesis_plan_tool_materializes_section_sources() -> None:
             organization_id="org-123",
             principal_id="user-123",
             accessible_projects={"project-sibyl"},
+            allowed_memory_scope_keys=None,
         )
 
     assert result["outline"]["sections"][0]["title"] == "Current State"
@@ -4079,6 +4080,7 @@ async def test_synthesis_draft_tool_can_remember_artifact() -> None:
             organization_id="org-123",
             principal_id="user-123",
             accessible_projects={"project-sibyl"},
+            allowed_memory_scope_keys=None,
         )
 
     artifact = result["artifact"]
@@ -4118,6 +4120,7 @@ async def test_synthesis_verify_tool_reports_gaps_without_artifact() -> None:
             organization_id="org-123",
             principal_id="user-123",
             accessible_projects=set(),
+            allowed_memory_scope_keys=None,
         )
 
     assert "artifact" not in result
