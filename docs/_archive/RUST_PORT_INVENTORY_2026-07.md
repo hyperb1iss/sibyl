@@ -1,3 +1,4 @@
+<!-- Frozen 2026-07-25 when inventory-check became guards-only. Regenerate with tools/inventory/runtime_surface.py if the Rust port becomes active. -->
 # Runtime Inventory
 
 Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
