@@ -37,6 +37,7 @@ from sibyl_core.backends.surreal.content_schema import (
     CONTENT_RAW_CAPTURE_LOOKUP_MIGRATION_DEFINITIONS,
     CONTENT_RAW_CAPTURE_REQUIRED_FIELD_REPAIR_DEFINITIONS,
     CONTENT_RAW_CAPTURE_REVISION_MIGRATION_DEFINITIONS,
+    CONTENT_RELATION_SPECS,
     CONTENT_RELATION_TABLES,
     CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS,
     CONTENT_SCHEMA_CURRENT_VERSION,
@@ -46,6 +47,7 @@ from sibyl_core.backends.surreal.content_schema import (
     CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS,
     _content_schema_migrations,
     bootstrap_content_schema,
+    content_schemafull_repair_statement,
 )
 from sibyl_core.backends.surreal.schema import (
     CURRENT_SCHEMA_MAINTENANCE_DEFINITIONS,
@@ -201,7 +203,7 @@ def test_runtime_schemafull_tables_pair_define_with_alter() -> None:
     assert "ALTER TABLE IF EXISTS raw_captures SCHEMAFULL;" in schema
     for table in CONTENT_RELATION_TABLES:
         assert f"DEFINE TABLE IF NOT EXISTS {table} SCHEMAFULL TYPE RELATION" in schema
-        assert f"ALTER TABLE IF EXISTS {table} SCHEMAFULL;" in schema
+        assert content_schemafull_repair_statement(table) in schema
 
 
 def test_auth_invitation_schema_supports_hashed_tokens() -> None:
@@ -1410,7 +1412,12 @@ def _schemafull_define_pairing_gaps(text: str) -> list[str]:
             continue
         table = match.group(1)
         following = lines[index + 1].strip() if index + 1 < len(lines) else ""
-        if following != f"ALTER TABLE IF EXISTS {table} SCHEMAFULL;":
+        paired = re.fullmatch(
+            rf"ALTER TABLE IF EXISTS {table}(?: TYPE RELATION [^;]+?)? SCHEMAFULL;"
+            rf"|\{{content_schemafull_repair_statement\(['\"]{table}['\"]\)\}}",
+            following,
+        )
+        if paired is None:
             gaps.append(f"{table} (line {index + 1})")
     return gaps
 
@@ -1465,7 +1472,7 @@ def test_schemafull_repair_migrations_cover_every_table() -> None:
     assert CONTENT_SCHEMA_CURRENT_VERSION >= 24
     assert repair.version == 24
     for table in CONTENT_TABLES:
-        assert f"ALTER TABLE IF EXISTS {table} SCHEMAFULL;" in repair.statements
+        assert content_schemafull_repair_statement(table) in repair.statements
 
     auth_repair = next(
         migration
@@ -1545,3 +1552,71 @@ async def test_schemafull_repair_migration_converts_drifted_table() -> None:
     assert "SCHEMALESS" in before["tables"]["entity"]
     assert "SCHEMAFULL" in after["tables"]["entity"]
     assert rows == [{"uuid": "entity-a"}]
+
+
+def test_relation_repair_alter_matches_the_relation_define() -> None:
+    """The repair ALTER must promise exactly what the DEFINE promises.
+
+    `ALTER TABLE ... SCHEMAFULL` alone fixes the schema mode but leaves an edge table
+    RELATE auto-created as `TYPE ANY`, so the table would report itself repaired while
+    its IN/OUT contract stayed absent.
+    """
+    schema = "\n".join(
+        (
+            CONTENT_SCHEMA_DEFINITIONS,
+            CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS,
+            CONTENT_EXTRACTED_INTO_RELATION_MIGRATION_DEFINITIONS,
+        )
+    )
+    for table, clause in CONTENT_RELATION_SPECS.items():
+        assert f"DEFINE TABLE IF NOT EXISTS {table} SCHEMAFULL {clause};" in schema
+        assert content_schemafull_repair_statement(table) == (
+            f"ALTER TABLE IF EXISTS {table} {clause} SCHEMAFULL;"
+        )
+
+    for table in CONTENT_TABLES:
+        if table in CONTENT_RELATION_SPECS:
+            continue
+        assert content_schemafull_repair_statement(table) == (
+            f"ALTER TABLE IF EXISTS {table} SCHEMAFULL;"
+        )
+
+
+@pytest.mark.asyncio
+async def test_schemafull_repair_restores_relation_metadata_on_auto_created_edge() -> None:
+    """RELATE auto-creates a missing edge table as TYPE ANY SCHEMALESS.
+
+    A guarded DEFINE then no-ops against it forever, so the sweep is the only statement
+    that can restore the relation contract on a store that already drifted.
+    """
+    from sibyl_core.backends.surreal.content_schema import CONTENT_SCHEMAFULL_REPAIR_DEFINITIONS
+
+    db = AsyncSurreal("memory://")
+    try:
+        await db.use("relation_repair", "content")
+        await db.query("CREATE raw_captures:one; CREATE source_imports:one;")
+        await db.query("RELATE raw_captures:one->derived_from->source_imports:one SET uuid='e1';")
+        before = await db.query("INFO FOR DB;")
+
+        await db.query(
+            "DEFINE TABLE IF NOT EXISTS derived_from SCHEMAFULL "
+            "TYPE RELATION IN raw_captures OUT source_imports ENFORCED;"
+        )
+        guarded = await db.query("INFO FOR DB;")
+
+        for statement in split_statements(CONTENT_SCHEMAFULL_REPAIR_DEFINITIONS):
+            await db.query(statement)
+
+        after = await db.query("INFO FOR DB;")
+        rows = await db.query("SELECT uuid FROM derived_from;")
+    finally:
+        await db.close()
+
+    assert "TYPE ANY SCHEMALESS" in before["tables"]["derived_from"]
+    assert "TYPE ANY" in guarded["tables"]["derived_from"]
+    assert (
+        "TYPE RELATION IN raw_captures OUT source_imports ENFORCED"
+        in (after["tables"]["derived_from"])
+    )
+    assert "SCHEMAFULL" in after["tables"]["derived_from"]
+    assert rows == [{"uuid": "e1"}]
