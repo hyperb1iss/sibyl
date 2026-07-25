@@ -733,8 +733,6 @@ async def test_add_mcp_entity_scopes_project_metadata() -> None:
         related_to=["plan_1"],
         metadata={
             "source": "test",
-            "memory_scope": "project",
-            "scope_key": "project-a",
             "organization_id": ctx.org_id,
             "created_by": ctx.user_id,
         },
@@ -1674,7 +1672,7 @@ async def test_add_mcp_entity_scopes_a_projectless_add_to_the_caller() -> None:
 
 
 @pytest.mark.asyncio
-async def test_add_mcp_entity_leaves_project_containers_unscoped() -> None:
+async def test_add_mcp_entity_leaves_work_items_unscoped() -> None:
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
     add = AsyncMock(return_value={"success": True, "id": "project_123"})
 
@@ -1705,6 +1703,45 @@ async def test_add_mcp_entity_leaves_project_containers_unscoped() -> None:
     metadata = add.await_args.kwargs["metadata"]
     assert "memory_scope" not in metadata
     assert "principal_id" not in metadata
+
+
+@pytest.mark.asyncio
+async def test_add_mcp_entity_leaves_a_project_task_unscoped() -> None:
+    """A work item is addressed by project_id, not by a memory scope.
+
+    Scoping it as well would hide it from the internal lookups that resolve a
+    capture's active task, which carry project access but no reader identity.
+    """
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+    add = AsyncMock(return_value={"success": True, "id": "task_123"})
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl_core.tools.core.add", add),
+    ):
+        await _add_mcp_entity(
+            title="Wire the lookup",
+            content="Work item content.",
+            entity_type="task",
+            category=None,
+            languages=None,
+            tags=None,
+            related_to=None,
+            metadata={"principal_id": "victim", "scope_key": "project-victim"},
+            project="project-a",
+            priority=None,
+            assignees=None,
+            due_date=None,
+            technologies=None,
+            depends_on=None,
+            repository_url=None,
+        )
+
+    metadata = add.await_args.kwargs["metadata"]
+    assert "memory_scope" not in metadata
+    assert "principal_id" not in metadata
+    assert "scope_key" not in metadata
 
 
 def _mcp_tool(name: str):
