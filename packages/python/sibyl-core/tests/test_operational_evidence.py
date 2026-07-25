@@ -26,29 +26,31 @@ def _result(
     )
 
 
-@pytest.mark.parametrize(
-    ("limit", "expected_typed", "expected_raw"),
-    [(1, 1, 0), (2, 1, 1), (3, 2, 1), (8, 3, 5)],
-)
-def test_reserved_lane_matches_three_eighths_law(
-    limit: int,
-    expected_typed: int,
-    expected_raw: int,
-) -> None:
-    typed = [
+def _note_pool(count: int) -> list[SearchResult]:
+    return [
         _result(
             f"note-{index}",
             result_type="note",
             source_id=f"capture-{index}",
             distilled=True,
         )
-        for index in range(8)
+        for index in range(count)
     ]
-    raw = [_result(f"raw-{index}") for index in range(8)]
 
+
+@pytest.mark.parametrize(
+    ("limit", "expected_typed", "expected_raw"),
+    [(1, 1, 0), (2, 1, 1), (3, 2, 1), (8, 3, 5)],
+)
+def test_reserved_lane_never_consumes_a_small_pack(
+    limit: int,
+    expected_typed: int,
+    expected_raw: int,
+) -> None:
+    """Packs at or below the shipped size keep the behaviour they shipped with."""
     selected, receipt = compose_operational_evidence(
-        typed_results=typed,
-        raw_results=raw,
+        typed_results=_note_pool(8),
+        raw_results=[_result(f"raw-{index}") for index in range(8)],
         limit=limit,
     )
 
@@ -58,6 +60,42 @@ def test_reserved_lane_matches_three_eighths_law(
     ]
     assert receipt["selected_typed_count"] == expected_typed
     assert receipt["selected_raw_count"] == expected_raw
+
+
+@pytest.mark.parametrize("limit", [8, 24, 28])
+def test_reserved_lane_is_an_absolute_count_a_wider_pack_cannot_widen(limit: int) -> None:
+    """A slice-granular pack raises `limit`; it must not raise the note lane.
+
+    The proportional law this replaced would have reserved 11 of 28 slots,
+    and the tuning kill measured that widening as a total loss of the note
+    gain. Both ends are pinned so neither the shipped pack size nor the
+    slice pack size can drift.
+    """
+    selected, receipt = compose_operational_evidence(
+        typed_results=_note_pool(limit),
+        raw_results=[_result(f"raw-{index}") for index in range(limit)],
+        limit=limit,
+    )
+
+    assert receipt["reservation_target"] == 3
+    assert receipt["selected_typed_count"] == 3
+    assert receipt["selected_raw_count"] == limit - 3
+    assert len(selected) == limit
+    assert [item.id for item in selected[:3]] == ["note-0", "note-1", "note-2"]
+
+
+def test_reserved_lane_honours_an_explicit_override() -> None:
+    """The pin is the default, not a hard-coded constant callers cannot move."""
+    _, receipt = compose_operational_evidence(
+        typed_results=_note_pool(8),
+        raw_results=[_result(f"raw-{index}") for index in range(16)],
+        limit=16,
+        typed_reservation_items=5,
+    )
+
+    assert receipt["reservation_target"] == 5
+    assert receipt["typed_reservation"] == 5
+    assert receipt["selected_typed_overflow_count"] == 0
 
 
 def test_reserved_lane_preserves_source_diversity_and_excludes_generic_notes() -> None:
