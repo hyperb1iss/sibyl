@@ -14,6 +14,7 @@ from sibyl.api.routes.entities import (
     _summarize_related_entities,
     get_entity,
 )
+from sibyl.auth.context import AuthContext
 from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl.persistence.content_common import DocumentEntityRecord
 from sibyl.persistence.graph_runtime import GraphEntityStore
@@ -27,6 +28,7 @@ from sibyl_core.models.entities import (
     RelationshipType,
 )
 from sibyl_core.storage import EntityBundle
+from tests.harness.auth import stub_auth_context
 
 
 class _AsyncContext:
@@ -40,8 +42,8 @@ class _AsyncContext:
         return None
 
 
-def _ctx() -> SimpleNamespace:
-    return SimpleNamespace(user=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222")))
+def _ctx() -> AuthContext:
+    return stub_auth_context()
 
 
 @pytest.mark.parametrize(

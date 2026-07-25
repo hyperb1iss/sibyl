@@ -9,15 +9,17 @@ from fastapi import HTTPException
 
 from sibyl.api.routes import graph as graph_routes
 from sibyl.api.schemas import SubgraphRequest
+from sibyl.auth.context import AuthContext
 from sibyl_core.models.entities import EntityType, RelationshipType
+from tests.harness.auth import stub_auth_context
 
 
 def _org() -> SimpleNamespace:
     return SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
 
 
-def _ctx() -> SimpleNamespace:
-    return SimpleNamespace(user=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000222")))
+def _ctx() -> AuthContext:
+    return stub_auth_context()
 
 
 def _accessible_projects(*project_ids: str):
