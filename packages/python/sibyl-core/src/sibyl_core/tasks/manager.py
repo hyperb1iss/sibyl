@@ -177,7 +177,13 @@ class TaskManager:
         )
 
     async def find_similar_tasks(
-        self, task: Task, status_filter: list[TaskStatus] | None = None, limit: int = 10
+        self,
+        task: Task,
+        status_filter: list[TaskStatus] | None = None,
+        limit: int = 10,
+        *,
+        principal_id: str | None = None,
+        accessible_projects: set[str] | None = None,
     ) -> list[tuple[Task, float]]:
         """Find tasks similar to the given task.
 
@@ -203,6 +209,15 @@ class TaskManager:
         # Filter and convert to Task objects
         results = []
         for entity, score in similar:
+            # This search spans the organization rather than the seed task's
+            # project, so each candidate answers to the caller before its
+            # title reaches an estimate.
+            if not memory_metadata_read_allowed(
+                getattr(entity, "metadata", None),
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
+            ):
+                continue
             # Skip self
             if entity.id == task.id:
                 continue
@@ -222,7 +237,13 @@ class TaskManager:
         log.info("Found similar tasks", count=len(results))
         return results
 
-    async def estimate_task_effort(self, task: Task) -> TaskEstimate:
+    async def estimate_task_effort(
+        self,
+        task: Task,
+        *,
+        principal_id: str | None = None,
+        accessible_projects: set[str] | None = None,
+    ) -> TaskEstimate:
         """Estimate task effort based on similar completed tasks.
 
         Args:
@@ -234,7 +255,13 @@ class TaskManager:
         log.info("Estimating task effort", task_id=task.id)
 
         # Find similar completed tasks
-        similar = await self.find_similar_tasks(task, status_filter=[TaskStatus.DONE], limit=20)
+        similar = await self.find_similar_tasks(
+            task,
+            status_filter=[TaskStatus.DONE],
+            limit=20,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        )
 
         if not similar:
             return TaskEstimate(

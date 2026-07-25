@@ -1788,6 +1788,8 @@ class TestAnalysisActions:
                 project_id="project_123",
                 entity_manager=mock_entity_manager,
                 relationship_manager=mock_rel_manager,
+                principal_id=None,
+                accessible_projects=None,
             )
 
 

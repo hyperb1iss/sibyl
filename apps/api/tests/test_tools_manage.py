@@ -775,6 +775,8 @@ class TestAnalysisActions:
                 project_id="proj_123",
                 entity_manager=entity_manager_cls.return_value,
                 relationship_manager=relationship_manager_cls.return_value,
+                principal_id=None,
+                accessible_projects=None,
             )
 
 

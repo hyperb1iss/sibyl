@@ -27,6 +27,7 @@ from uuid import uuid4
 import structlog
 
 from sibyl_core.auth import MemoryPolicyContext, authorize_memory_write
+from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
 from sibyl_core.errors import RevisionConflictError
 from sibyl_core.models.entities import EntityType
 from sibyl_core.runtime_ports import (
@@ -1639,10 +1640,22 @@ async def _handle_analysis_action(
     relationship_manager = runtime.relationship_manager
 
     if action == "estimate":
-        return await _estimate_effort(entity_manager, relationship_manager, entity_id)
+        return await _estimate_effort(
+            entity_manager,
+            relationship_manager,
+            entity_id,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        )
 
     if action == "prioritize":
-        return await _prioritize_tasks(entity_manager, relationship_manager, entity_id)
+        return await _prioritize_tasks(
+            entity_manager,
+            relationship_manager,
+            entity_id,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        )
 
     if action == "detect_cycles":
         return await _detect_cycles(
@@ -1651,6 +1664,8 @@ async def _handle_analysis_action(
             entity_id,
             entity_manager=entity_manager,
             relationship_manager=relationship_manager,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
         )
 
     if action == "suggest":
@@ -1665,10 +1680,36 @@ async def _handle_analysis_action(
     return ManageResponse(success=False, action=action, message="Unknown analysis action")
 
 
+def _reader_visible_entities(
+    entities: list[Any],
+    *,
+    principal_id: str | None,
+    accessible_projects: set[str] | None,
+) -> list[Any]:
+    """Drop rows the caller may not read from an analysis result.
+
+    Membership in the project authorizes the question, not every row inside
+    it: a privately scoped row sitting in an accessible project still answers
+    to its own owner.
+    """
+    return [
+        entity
+        for entity in entities
+        if memory_metadata_read_allowed(
+            getattr(entity, "metadata", None),
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        )
+    ]
+
+
 async def _estimate_effort(
     entity_manager: Any,
     relationship_manager: Any,
     task_id: str,
+    *,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ) -> ManageResponse:
     """Estimate task effort based on similar completed tasks."""
     from sibyl_core.tasks.manager import TaskManager
@@ -1688,7 +1729,11 @@ async def _estimate_effort(
         )
 
     # Get estimate
-    estimate = await task_manager.estimate_task_effort(task)
+    estimate = await task_manager.estimate_task_effort(
+        task,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+    )
 
     return ManageResponse(
         success=True,
@@ -1709,6 +1754,9 @@ async def _prioritize_tasks(
     entity_manager: Any,
     _relationship_manager: Any,
     project_id: str,
+    *,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ) -> ManageResponse:
     """Get smart task ordering for a project."""
     batch_size = 500
@@ -1725,7 +1773,13 @@ async def _prioritize_tasks(
         if not batch:
             break
 
-        project_tasks.extend(batch)
+        project_tasks.extend(
+            _reader_visible_entities(
+                batch,
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
+            )
+        )
         if len(batch) < batch_size:
             break
 
@@ -1784,6 +1838,8 @@ async def _detect_cycles(
     *,
     entity_manager: Any | None = None,
     relationship_manager: Any | None = None,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ) -> ManageResponse:
     """Detect circular dependencies in a project's task graph."""
     cycle_result = await detect_dependency_cycles(
@@ -1792,6 +1848,8 @@ async def _detect_cycles(
         project_id=project_id,
         entity_manager=entity_manager,
         relationship_manager=relationship_manager,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
     )
     return ManageResponse(
         success=True,

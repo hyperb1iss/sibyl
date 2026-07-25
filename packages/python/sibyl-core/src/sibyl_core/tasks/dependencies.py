@@ -5,6 +5,7 @@ from typing import Any
 
 import structlog
 
+from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
 from sibyl_core.models.entities import EntityType, RelationshipType
 from sibyl_core.models.tasks import TaskStatus
 
@@ -91,6 +92,8 @@ async def _list_task_entities(
     entity_manager: Any,
     *,
     project_id: str | None = None,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ) -> list[Any]:
     tasks: list[Any] = []
     offset = 0
@@ -106,7 +109,16 @@ async def _list_task_entities(
         if not batch:
             break
 
-        tasks.extend(batch)
+        # Cycle members are reported by id, and an id identifies a row.
+        tasks.extend(
+            entity
+            for entity in batch
+            if memory_metadata_read_allowed(
+                getattr(entity, "metadata", None),
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
+            )
+        )
         offset += len(batch)
         if len(batch) < _PAGINATION_BATCH_SIZE:
             break
@@ -317,6 +329,8 @@ async def detect_dependency_cycles(
     *,
     entity_manager: Any | None = None,
     relationship_manager: Any | None = None,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ) -> CycleResult:
     """Detect circular dependencies in the task graph.
 
@@ -337,7 +351,12 @@ async def detect_dependency_cycles(
             if client is None:
                 raise ValueError("client required when graph managers are not provided")
             entity_manager, relationship_manager = _get_graph_managers(client, organization_id)
-        tasks = await _list_task_entities(entity_manager, project_id=project_id)
+        tasks = await _list_task_entities(
+            entity_manager,
+            project_id=project_id,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        )
         task_ids = {task.id for task in tasks if getattr(task, "id", None)}
         rows = await _list_dependency_relationships(
             relationship_manager,
