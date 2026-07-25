@@ -401,6 +401,16 @@ def create_mock_entity(
     return entity
 
 
+@pytest.fixture(autouse=True)
+def _allow_project_access():
+    """Project membership is asserted in test_wire_scope; stub it here."""
+    with patch(
+        "sibyl.api.routes.metrics.verify_entity_project_access",
+        AsyncMock(return_value=None),
+    ):
+        yield
+
+
 def create_mock_org(org_id: str = "test-org-123") -> MagicMock:
     """Create a mock organization."""
     org = MagicMock()
@@ -455,7 +465,7 @@ class TestGetProjectMetrics:
             patch("sibyl.api.routes.metrics.get_entity_graph_runtime", AsyncMock()),
         ):
             with pytest.raises(HTTPException) as exc_info:
-                await get_project_metrics("nonexistent", org=mock_org)
+                await get_project_metrics("nonexistent", org=mock_org, ctx=MagicMock(spec=AuthContext))
 
             assert exc_info.value.status_code == 404
             assert "not found" in exc_info.value.detail.lower()
@@ -515,7 +525,7 @@ class TestGetProjectMetrics:
                 AsyncMock(return_value=mock_runtime),
             ),
         ):
-            result = await get_project_metrics("proj_123", org=mock_org)
+            result = await get_project_metrics("proj_123", org=mock_org, ctx=MagicMock(spec=AuthContext))
 
             assert result.metrics.project_id == "proj_123"
             assert result.metrics.project_name == "Test Project"
@@ -561,7 +571,7 @@ class TestGetProjectMetrics:
                 AsyncMock(return_value=mock_runtime),
             ),
         ):
-            result = await get_project_metrics("proj_empty", org=mock_org)
+            result = await get_project_metrics("proj_empty", org=mock_org, ctx=MagicMock(spec=AuthContext))
 
             assert result.metrics.total_tasks == 0
             assert result.metrics.completion_rate == 0.0
@@ -617,7 +627,7 @@ class TestGetProjectMetrics:
                 AsyncMock(return_value=mock_runtime),
             ),
         ):
-            result = await get_project_metrics("proj_big", org=mock_org)
+            result = await get_project_metrics("proj_big", org=mock_org, ctx=MagicMock(spec=AuthContext))
 
         assert result.metrics.total_tasks == 1001
         assert result.metrics.status_distribution.done == 1
@@ -1555,7 +1565,7 @@ class TestMetricsErrorHandling:
             ),
         ):
             with pytest.raises(HTTPException) as exc_info:
-                await get_project_metrics("proj_123", org=mock_org)
+                await get_project_metrics("proj_123", org=mock_org, ctx=MagicMock(spec=AuthContext))
 
             assert exc_info.value.status_code == 500
             assert "Failed to get project metrics" in exc_info.value.detail

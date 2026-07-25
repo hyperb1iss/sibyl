@@ -20,10 +20,11 @@ from sibyl.api.schemas import (
     TaskStatusDistribution,
     TimeSeriesPoint,
 )
+from sibyl.auth.authorization import verify_entity_project_access
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
-from sibyl_core.auth import AuthOrganization, OrganizationRole
+from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services import KnowledgeReadService
 
@@ -509,9 +510,13 @@ async def _list_summary_metric_tasks(
 async def get_project_metrics(
     project_id: str,
     org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
 ) -> ProjectMetricsResponse:
     """Get metrics for a specific project."""
     group_id = str(org.id)
+    # Metrics summarize a project's tasks, so reaching them requires the same
+    # membership that reading the project itself does.
+    await verify_entity_project_access(None, ctx, project_id, required_role=ProjectRole.VIEWER)
     service = await get_knowledge_read_adapter(group_id)
     entity_runtime = await get_entity_graph_runtime(group_id)
 
