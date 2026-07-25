@@ -65,6 +65,7 @@ from sibyl_core.auth import AuthOrganization, MemoryPolicyContext, OrganizationR
 from sibyl_core.auth.memory_policy import (
     MEMORY_OWNER_METADATA_KEYS,
     authorize_memory_read,
+    memory_metadata_read_allowed,
     stamp_memory_scope_metadata,
 )
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
@@ -519,20 +520,14 @@ def _entity_visible_to_reader(
     reader_user_id: str | None,
     accessible_projects: set[str],
 ) -> bool:
-    metadata = getattr(entity, "metadata", None) or {}
-    memory_scope = str(metadata.get("memory_scope") or "").strip().lower()
-
-    if memory_scope == "project":
-        project_id = str(metadata.get("scope_key") or metadata.get("project_id") or "").strip()
-        return bool(project_id and project_id in accessible_projects)
-
-    if memory_scope == "private":
-        owner = str(metadata.get("principal_id") or "").strip()
-        if not owner:
-            owner = str(getattr(entity, "created_by_user_id", None) or "").strip()
-        return bool(owner and reader_user_id and owner == reader_user_id)
-
-    return True
+    # Reading a row here and finding it through search are the same question,
+    # so they answer to one implementation. A local copy handled only project
+    # and private and served every other scope to the whole organization.
+    return memory_metadata_read_allowed(
+        getattr(entity, "metadata", None),
+        principal_id=reader_user_id,
+        accessible_projects=accessible_projects,
+    )
 
 
 async def _accessible_project_ids_for_read(ctx: AuthContext) -> set[str]:
