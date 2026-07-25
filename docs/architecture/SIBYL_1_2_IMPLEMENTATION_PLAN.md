@@ -1,7 +1,7 @@
 # Sibyl v1.2 Implementation Plan — "Retrieve It"
 
-- Status: active execution plan
-- Created: 2026-07-24 (the day v1.1.0 → v1.1.2 shipped)
+- Status: **locked 2026-07-25** (SOTA-validated; industry landscape in §2.7)
+- Created: 2026-07-24 (the day v1.1.0 → v1.1.2 shipped); v1.1.3 shipped 2026-07-25
 - Fills the v1.2 slot of [`SIBYL_POST_1_0_ROADMAP.md`](SIBYL_POST_1_0_ROADMAP.md) §5 and **re-scopes
   it from "Coalesce It" to "Retrieve It"**: live coalescence (roadmap v1.2 W1–W3) and TeamMemBench
   (W5) slide to v1.3; the projection layers (W6–W7) stay; retroactive re-extraction (W8) stays as
@@ -174,12 +174,22 @@ fixtures. Relatedly, the only unit test of `_candidate_scope_allowed` hand-injec
 `memory_scope` field whose absence is the bug, proving the filter works while hiding that it never
 fires. **Any gate whose receipt is hand-authored must be regenerated or deleted in v1.2.**
 
-### 2.6 The 1.1.3 recommendation
+### 2.6 The 1.1.3 recommendation — EXECUTED 2026-07-25
 
-Cut a patch release before 1.2 feature work. Drivers, in order: offline write loss (`df317be0`), the
-private-memory leak (`4736bf2d`), the schema deadlock, and the exit-code cluster. Not drivers: the
-fulltext lanes and raw-memory CREATE, both of which were overstated. Root `moon run :check` was
-verified green (55 tasks) on the 1.1.2 cut, so the release gate is clear.
+**v1.1.3 shipped 2026-07-25** (tag `774a9c65`, 78 commits): PR 264 closed the private-memory leak
+whole (~60 commits scoping every read surface to the reader), PR 265 fixed offline write loss (409
+retention deny-list) plus the exit-code cluster, PR 266 unwedged the schema ladder, PR 267 landed
+the A1 design docs. The tag was deliberately held ~12h for 264 to land whole
+(`decision_a34d2503a05e`) rather than ship a trust release with the trust defect open. Original
+drivers, for the record: offline write loss (`df317be0`), the private-memory leak (`4736bf2d`), the
+schema deadlock, and the exit-code cluster. Not drivers: the fulltext lanes and raw-memory CREATE,
+both of which were overstated.
+
+**Known 1.1.3 regression** (found same day, task `bcdf1b3a`): project-scoped `task list` returns
+empty for an org owner with no membership rows — `org_role` fails to resolve on the explore surface,
+so the non-admin branch of `list_accessible_project_graph_ids` filters everything. Workaround
+`--all`; fix folds into Track C item 1 (the scope-model chokepoint work), and the fix must add an
+owner-role fallback test on every list surface — the leak tests all guard the opposite direction.
 
 Deferred out of the patch by design: the `_candidate_scope_allowed` fail-open flip (would hide
 legitimately unscoped tasks/epics — needs a first-class `Entity.memory_scope` column), the scope
@@ -192,6 +202,33 @@ UNIQUE index builds will fail, be silently swallowed, and never retry — leavin
 unenforced. Collapse duplicates **first**, then run schema repair, then verify both indexes exist.
 Usage counts from 2026-07-11 onward carry a ~1.4% upward bias from unenforced dedupe, so retention
 multipliers derived from that window are slightly inflated.
+
+### 2.7 Industry landscape (SOTA sweep, 2026-07-25)
+
+Six-lane sweep (competitors, benchmarks, academic, platform memory, retrieval practice,
+team/privacy) run before locking this plan; full synthesis with sources in
+[`SOTA_LANDSCAPE_2026-07-25.md`](SOTA_LANDSCAPE_2026-07-25.md). The short version:
+
+- **Every Track A/B/C bet is independently validated** by 2026 production practice and literature.
+  Slices-with-inherited-context, char budgets, reserved notes lane, and bounded substrate-first
+  traversal are the field's consensus shapes — the differentiation is execution speed and the graph
+  substrate, not the ideas.
+- **The official LME-V2 leaderboard is live and EMPTY.** No vendor has published a v2 number;
+  Sibyl's would be the first third-party entry, and the official LAFS metric is the accuracy+latency
+  shape we already report. The A4 hold stays; the payoff for passing it grew.
+- **The field re-sorted**: Letta vacated the memory-layer lane (pivoted to a coding agent), Zep
+  killed self-hosting (enterprise cloud only), Cognee is the live OSS threat (17.5k→29.3k stars in
+  ~2 months, weekly ships). Big-lab memory is default-on everywhere and siloed per platform —
+  fragmentation Sibyl exists to solve, actively getting worse.
+- **Projection layers are the industry-standard architecture** (OpenAI/Anthropic/Google all ship
+  distilled-summary + greppable-index + detail-on-demand, per-tool siloed), and Google published OKF
+  v0.1 (2026-06-12) as a public spec Sibyl already exports. The window to be the cross-agent
+  convention is ~6–12 months — B2 is on the clock.
+- **Coalescence-under-privacy is still shipped by nobody** — the v1.3 deferral holds, with named
+  tripwires (§7).
+- **Three adjustments adopted** from the sweep, marked ⚡SOTA in the tracks below: A2's lexical
+  escape hatch / rerank stage, A1's contextualized-embedder offline arm, A3's single-hop routing
+  rule.
 
 ## 3. Protocol law (binds every Track A experiment)
 
@@ -214,7 +251,9 @@ multipliers derived from that window are slightly inflated.
 ## 4. Track A — beat the naive-RAG baseline (headline)
 
 Target: combined full-451 **≥ 42.8%** (193/451) at ≤ 10s avg. Stretch: approach the 51.0%
-slice+notes frontier. Phases are ordered by evidence strength; each gates before the next spends.
+slice+notes frontier. Both reference numbers are the paper's **Small-tier** baselines (Medium tier:
+38.1%/45.9%) — our harness runs the Small-tier haystack; say the tier in every writeup. Phases are
+ordered by evidence strength; each gates before the next spends.
 
 ### A1. Slice-granular substrate + compact rendering
 
@@ -273,6 +312,12 @@ and preventing one strong domain from carrying a regression in the other.
 - **Labelled projection, not measurement:** the dense arm used local MiniLM (384-dim, mean-pooled)
   as a proxy for the production 1024-dim long-context embedder. Mean-pooling favours the fat arm, so
   the proxy is conservative toward the hypothesis; only the fat-vs-slice contrast transfers.
+- ⚡SOTA **Contextualized-embedder offline arm** (adopted 2026-07-25): contextualized chunk
+  embeddings (voyage-context-4, 2026-06-29, $0.12/1M) beat manual header prepends ~7% chunk-level on
+  their benchmarks by baking document context into the chunk vector. Run one offline arm comparing
+  goal-carry headers vs a contextualized-embedding proxy before the paid corpus rebuild locks an
+  embedder. Headers stay regardless — they feed BM25 and the reader; this arm decides only the
+  vector side.
 
 **The reservation trap.** Slices push `max_items` from 8 to ~28, and both the adapter and production
 compute the note lane as `ceil(max_items × 3/8)` — which would silently widen the reserved note lane
@@ -304,10 +349,22 @@ already-shipped configuration.
 Semantic/embedding region scoring where query-anchored ranking misses no-vocabulary-overlap gold;
 entity-overlap ranking for typed notes (the known `fa504f5e` refinement); gotcha/premise notes aimed
 at the errors-gotchas pool (67–71% confidently wrong — the one pool where notes can check a premise
-instead of answering it).
+instead of answering it; MemSyco-Bench, arXiv `2607.01071`, now measures exactly this failure class
+and is a candidate secondary eval).
+
+⚡SOTA **Named requirement (adopted 2026-07-25): identifier-shaped queries need a lexical escape
+hatch or a rerank stage.** Dropping BM25 from the fusion is measured and stands (mechanism confirmed
+by the sweep: rank-only RRF weights a weak arm equally — the industry moved defaults to score-aware
+fusion; b=0.75 is mistuned for <100-word chunks, and inherited headers crater IDF on slice corpora).
+But identifiers, error strings, and exact names are lexical's win zone, and the field's fix of
+record is retrieve-wide + cross-encoder rerank (+50–200ms; Anthropic's ladder −35/−49/−67%). A1 may
+ship dense-first; A2 must close the flank with either (a) an exact-match lexical arm that fires only
+on identifier-shaped queries, or (b) a rerank stage over a widened candidate set — measured per
+protocol law, chosen by receipts.
 
 - Gate `ranking-gate`: recovers ≥ 2 of the 3 known no-vocab misses on the 23-phrase slice without
-  net exposure regression; scored effects per protocol law.
+  net exposure regression; scored effects per protocol law. The identifier-flank fix ships with a
+  regression probe: an identifier/error-string query set that dense-alone measurably misses.
 
 ### A3. Agentic graph retrieval — multi-step done right
 
@@ -316,6 +373,15 @@ verbs, ≤ 3 rounds, deterministic final composition (the evidence composer and 
 stay; the model chooses what to gather, never how it renders). This is the graph-backed path of
 decision `0f4ab0c8a0cc`, attempted only after A1 — traversal over fat states would re-buy the format
 defect at higher latency.
+
+⚡SOTA (adopted 2026-07-25): **route single-hop queries around the loop entirely.** The June 2026
+ablation literature (arXiv `2606.21553`) finds two retrieval iterations capture 95% of the gain of
+five, fixed pipelines beat un-learned adaptive routing (the accurate-mode −4pp/2.5× kill is textbook
+— predicted, not anomalous), and token-space agentic loops run ~15× single-step latency (arXiv
+`2605.06285`). Expect the win concentrated in rounds 1–2 on genuinely multi-hop questions; prefer a
+sufficiency-style stop ("is the evidence gap closed?") over always spending the round budget. Graph
+traversal pays on associative/multi-hop and temporal queries (HippoRAG 2, ICML 2025); flat dense
+wins factoid lookups — route, don't force.
 
 - Gate `agentic-retrieval-gate`: score-blind, question-text-only; p95 memory latency ≤ 15s (hard
   ceiling: the 27s knee); GO = ≥ +3pp mean paired over the then-best config, numbers pre-registered
@@ -327,6 +393,15 @@ defect at higher latency.
   **Submission is held until this gate passes** (Bliss, 2026-07-24): a dominated point on an empty
   board invites the wrong comparison. When it passes, submit promptly — first credible entry on an
   empty leaderboard is the payoff the v1.1 W5 harness was built for.
+- ⚡SOTA context (2026-07-25): the official leaderboard is **confirmed live and empty** — no vendor
+  has published any LME-V2 number; ours would be the first third-party number in existence. The
+  official metric is LAFS Gain (accuracy over 1s–200s latency budgets vs the reference frontier),
+  i.e. exactly the accuracy+latency reporting Sibyl already produces; submissions are
+  multi-operating-point packages (`submission_overview.json`, repo `leaderboard/README.md`). Sizing
+  note: LAFS gain is computed against the Small-tier frontier, so a below-frontier accuracy point
+  contributes only where its latency sits left of the frontier — one more reason the hold is right.
+  Watch item: if someone else lands the first v2 entry, the first-mover payoff shrinks; the gate's
+  numbers do not change.
 
 ### A5. Accurate-mode fate
 
@@ -358,8 +433,19 @@ read-only files. Filesystem-native agents grep at zero marginal latency and surv
 the citation contract still routes usage back over the API. Structured substrate, curated
 projection.
 
+⚡SOTA context (2026-07-25): this is now the **industry-standard architecture, on a clock**. OpenAI
+(Agents SDK `memory_summary.md` + `MEMORY.md`, Codex `~/.codex/memories/`), Anthropic (Claude Code
+auto-memory), and Google (Gemini CLI) all shipped distilled-summary + greppable-index +
+detail-on-demand memory in Feb–May 2026 — each siloed per tool. A repo-local `.sibyl/memory/` is
+readable by every one of them with zero integration work, and Google's OKF v0.1 (2026-06-12,
+Markdown + YAML frontmatter in git-shippable directories) gives the export a public spec to align
+with where cheap — Sibyl already ships OKF export. The window to be the cross-agent convention is
+~6–12 months (AGENTS.md went launch → 60k repos → Linux Foundation in about a year). B2 is the
+plan's most time-sensitive item after Track A.
+
 - Gate `files-projection-gate`: deterministic re-materialization; grep-usable with the server down;
-  citations still recorded when it returns.
+  citations still recorded when it returns; materialized layout OKF-compatible (frontmatter `type`
+  at minimum) unless a measured cost says otherwise.
 
 ### B3. Retroactive re-extraction loop (stretch)
 
@@ -415,6 +501,21 @@ untouched; only its timing moves: the credibility spend has to go to retrieval f
 team substrate plus usage loop remain in place, un-rotted, for a v1.3 engine. Nothing in Track A/B
 forecloses any coalescence decision.
 
+⚡SOTA verdict on the window (2026-07-25): **the deferral holds — cross-user merge under privacy
+constraints is shipped by zero products** (within-scope consolidation is commoditized; the giants
+chose containment over gradation and explicitly declined org-shared memory). Closest threats are
+papers, not products (MemClaw, arXiv `2606.24535`; AgentPrizm, weak signals). The literature also
+backs the order: retention beats consolidation at loose token budgets (arXiv `2607.17545`), so
+substrate-first is measured, not just convenient. **Named tripwires**: (1) that same paper's
+crossover means consolidation becomes load-bearing exactly when packs stop fitting budgets — if A1
+regularly saturates its char budget, coalescence's priority rises; (2) interference research says an
+unconsolidated store eventually degrades retrieval _precision_, so the deferral is time-boxed, not
+indefinite; (3) the strategic risk is narrative capture ("governed team memory") before our version
+is demonstrable — keep the scope/provenance story visibly intact in every v1.2 surface. Bonus for
+v1.3 planning: GroupMemBench (Microsoft, arXiv `2605.14498`) now exists as a public multi-party
+memory benchmark — best system 46%, BM25 matches most memory systems — a ready-made external target
+for the TeamMemBench slot.
+
 ## 8. Task board: triage and grooming
 
 ### 8.1 Sidequests pulled into v1.2
@@ -428,7 +529,10 @@ gates), `48395009` (attach audits beyond session chunks).
 `6e69bc0c` bulk personal-archive ingestion (strong v1.3 candidate beside the OKF importer),
 `41aba0d4` namespace-cleanup retries, `e5b328c3` GitOps-stable Surreal secret.
 
-### 8.3 Stale-task dispositions (grooming pass to execute)
+### 8.3 Stale-task dispositions (grooming pass — EXECUTED, verified 2026-07-25)
+
+All eight dispositions below are done: the three archives landed, the five completions carry
+learnings pointers, and the 1.1.3 trust-patch task (`7d549bc9`) was completed on release day.
 
 - `04e5f940` refresh same-SHA RC evidence (critical) → archive; superseded by 1.1 release receipts.
 - `801e1f67` align 1.0 RC version metadata → archive.
@@ -453,6 +557,10 @@ Planned per this doc (flag before reversing):
 
 - Coalescence W1–W3 + TeamMemBench slide to v1.3; W1 design-doc optional in v1.2.
 - Accurate mode deprecated; no per-domain retrieval-mode fork.
+- ⚡SOTA adjustments (2026-07-25, receipts in `SOTA_LANDSCAPE_2026-07-25.md`): A2 identifier-flank
+  requirement (lexical escape hatch or rerank), A1 contextualized-embedder offline arm, A3
+  single-hop routing, B2 OKF alignment. A 1.1.4 point release for the owner-role task-list
+  regression (`bcdf1b3a`) runs as a separate lane and does not gate Track A/B work.
 
 Open (decide during execution):
 
@@ -494,4 +602,7 @@ v2 GO), `01e6ed6e4006` (enterprise v2 GO), `7a6a1d49b32c` (reservation tuning ki
 agentic path). Plans: `17188e6e7820`. Runs: `.moon/cache/evals/nova-full-451-fast/`. Commits:
 `12ac2243` (note distillation), `430dea04` (content-aware digest v2), `1f086b22` (conjunctive-safe
 fulltext), `83c8dd7b` (defaults reverted after tuning kill). Production port: task `1e1caf57`
-(done).
+(done). SOTA sweep 2026-07-25: [`SOTA_LANDSCAPE_2026-07-25.md`](SOTA_LANDSCAPE_2026-07-25.md) (six
+lanes, primary-sourced; anchors: LME-V2 arXiv `2605.12493` + empty official leaderboard,
+Fidelity-Before-Structure `2601.00821`, Dissecting-Agentic-RAG `2606.21553`, Retain-or-Consolidate
+`2607.17545`, TriMem `2605.19952`, MemClaw `2606.24535`, OKF v0.1, Penfield LoCoMo audit).
