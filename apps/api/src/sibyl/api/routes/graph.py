@@ -6,8 +6,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.dependencies import get_knowledge_read_service
 from sibyl.api.schemas import GraphData, GraphEdge, GraphNode, SubgraphRequest
-from sibyl.auth.dependencies import get_current_organization, require_org_role
+from sibyl.auth.context import AuthContext
+from sibyl.auth.dependencies import (
+    get_auth_context,
+    get_current_organization,
+    require_org_role,
+)
+from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl_core.auth import AuthOrganization, OrganizationRole
+from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.models.entities import Entity, EntityType, RelationshipType
 from sibyl_core.services import KnowledgeReadService
@@ -86,13 +93,19 @@ router = APIRouter(
 
 
 @router.get("/debug", dependencies=[Depends(require_org_role(*_ADMIN_ROLES))])
-async def debug_graph(org: AuthOrganization = Depends(get_current_organization)):
+async def debug_graph(
+    org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+):
     """Debug endpoint to trace graph data issue."""
     group_id = str(org.id)
     runtime = await get_entity_graph_runtime(group_id)
+    principal_id, accessible_projects = await _graph_scope_reader(ctx)
 
     nodes = await _list_graph_entities(
         runtime.entity_manager,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
         limit=500,
         include_archived=True,
     )
@@ -145,9 +158,34 @@ def get_entity_color(entity_type: EntityType) -> str:
     return ENTITY_COLORS.get(entity_type, DEFAULT_COLOR)
 
 
+async def _graph_scope_reader(ctx: AuthContext) -> tuple[str | None, set[str]]:
+    """Resolve the identity a visualization request is authorized as."""
+    accessible_projects = await list_accessible_project_graph_ids(ctx)
+    principal_id = str(getattr(getattr(ctx, "user", None), "id", None) or "") or None
+    return principal_id, {str(project_id) for project_id in accessible_projects or set()}
+
+
+def _graph_entity_visible(
+    entity: Entity,
+    *,
+    principal_id: str | None,
+    accessible_projects: set[str],
+) -> bool:
+    # A visualization node carries the entity's label and metadata bag, so a
+    # private memory reaches the picture as a readable title unless the same
+    # scope rule that governs search is applied here too.
+    return memory_metadata_read_allowed(
+        getattr(entity, "metadata", None),
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+    )
+
+
 async def _list_graph_entities(
     entity_manager: object,
     *,
+    principal_id: str | None,
+    accessible_projects: set[str],
     entity_types: list[EntityType] | None = None,
     limit: int = 100,
     offset: int = 0,
@@ -172,6 +210,12 @@ async def _list_graph_entities(
         for entity in batch:
             if allowed_types and entity.entity_type not in allowed_types:
                 continue
+            if not _graph_entity_visible(
+                entity,
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
+            ):
+                continue
             if remaining_offset:
                 remaining_offset -= 1
                 continue
@@ -184,17 +228,33 @@ async def _list_graph_entities(
     return entities
 
 
-async def _get_graph_entity(entity_manager: object, entity_id: str) -> Entity | None:
+async def _get_graph_entity(
+    entity_manager: object,
+    entity_id: str,
+    *,
+    principal_id: str | None,
+    accessible_projects: set[str],
+) -> Entity | None:
     try:
-        return await entity_manager.get(entity_id)
+        entity = await entity_manager.get(entity_id)
     except EntityNotFoundError:
         return None
+    if entity is None:
+        return None
+    if not _graph_entity_visible(
+        entity,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+    ):
+        return None
+    return entity
 
 
 @router.get("/nodes", response_model=list[GraphNode])
 @handle_workflow_errors("get_nodes")
 async def get_all_nodes(
     org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
     types: list[EntityType] | None = Query(default=None, description="Filter by entity types"),
     limit: int = Query(default=500, ge=1, le=2000, description="Maximum nodes"),
     offset: int = Query(default=0, ge=0, description="Offset for pagination"),
@@ -205,8 +265,11 @@ async def get_all_nodes(
     """
     group_id = str(org.id)
     runtime = await get_entity_graph_runtime(group_id)
+    principal_id, accessible_projects = await _graph_scope_reader(ctx)
     entities = await _list_graph_entities(
         runtime.entity_manager,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
         entity_types=types,
         limit=limit,
         offset=offset,
@@ -283,6 +346,7 @@ async def get_all_edges(
 @handle_workflow_errors("get_full_graph")
 async def get_full_graph(
     org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
     types: list[EntityType] | None = Query(default=None, description="Filter by entity types"),
     max_nodes: int = Query(default=500, ge=1, le=1000, description="Maximum nodes"),
     max_edges: int = Query(default=1000, ge=1, le=5000, description="Maximum edges"),
@@ -291,9 +355,12 @@ async def get_full_graph(
     group_id = str(org.id)
     runtime = await get_entity_graph_runtime(group_id)
     adapter = await get_graph_query_adapter(group_id)
+    principal_id, accessible_projects = await _graph_scope_reader(ctx)
 
     entities = await _list_graph_entities(
         runtime.entity_manager,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
         entity_types=types,
         limit=max_nodes,
         include_archived=True,
@@ -361,13 +428,20 @@ async def get_full_graph(
 async def get_subgraph(
     payload: SubgraphRequest,
     org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
 ) -> GraphData:
     """Get a subgraph centered on a specific entity."""
     group_id = str(org.id)
     runtime = await get_entity_graph_runtime(group_id)
+    principal_id, accessible_projects = await _graph_scope_reader(ctx)
 
     # Get center entity
-    center = await _get_graph_entity(runtime.entity_manager, payload.entity_id)
+    center = await _get_graph_entity(
+        runtime.entity_manager,
+        payload.entity_id,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+    )
     if not center:
         raise HTTPException(status_code=404, detail=f"Entity not found: {payload.entity_id}")
 
@@ -383,7 +457,12 @@ async def get_subgraph(
         if entity_id in visited_nodes:
             return
 
-        entity = await _get_graph_entity(runtime.entity_manager, entity_id)
+        entity = await _get_graph_entity(
+            runtime.entity_manager,
+            entity_id,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        )
         if not entity:
             return
 
