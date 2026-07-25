@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Literal
 
 import structlog
 
+from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
 from sibyl_core.services.graph import get_surreal_graph_runtime
 from sibyl_core.tools.responses import ConflictWarning
 
@@ -46,6 +47,8 @@ async def find_similar_entities(
     entity_types: list[str] | None = None,
     limit: int = 5,
     min_score: float = CONFLICT_THRESHOLD,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ) -> list[tuple[str, str, str, float]]:
     """Find existing entities semantically similar to the new content.
 
@@ -85,9 +88,19 @@ async def find_similar_entities(
 
         similar: list[tuple[str, str, str, float]] = []
         for entity, score in results:
-            if score >= min_score:
-                content_preview = (entity.content or entity.description or "")[:200]
-                similar.append((entity.id, entity.name, content_preview, score))
+            if score < min_score:
+                continue
+            # A conflict warning quotes the matched row's name and the first
+            # 200 characters of its body, so a duplicate check against a
+            # private memory would read it back to whoever triggered it.
+            if not memory_metadata_read_allowed(
+                getattr(entity, "metadata", None),
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
+            ):
+                continue
+            content_preview = (entity.content or entity.description or "")[:200]
+            similar.append((entity.id, entity.name, content_preview, score))
 
         # Sort by score and limit
         similar.sort(key=lambda x: x[3], reverse=True)
@@ -224,6 +237,8 @@ async def detect_conflicts(
     exclude_id: str | None = None,
     max_conflicts: int = 3,
     min_similarity: float = CONFLICT_THRESHOLD,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ) -> list[ConflictWarning]:
     """Detect potential conflicts before adding new knowledge.
 
@@ -257,6 +272,8 @@ async def detect_conflicts(
         entity_types=entity_types,
         limit=max_conflicts * 2,  # Fetch extra for filtering
         min_score=min_similarity,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
     )
 
     if not similar:
