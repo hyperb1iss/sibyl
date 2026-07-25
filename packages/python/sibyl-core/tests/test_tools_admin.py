@@ -355,6 +355,75 @@ class TestRestoreBackup:
         relationship_manager.create.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_restore_normalizes_owner_metadata_it_cannot_authorize(self) -> None:
+        """A restore rebuilds rows from a request body, not from a caller.
+
+        It keeps the ownership the backup recorded, but must not introduce
+        owner shapes no write path can produce: a private row with a second
+        owner channel in scope_key, or owner fields with no scope at all,
+        which reads org-visible while looking owned.
+        """
+        org_id = "00000000-0000-0000-0000-000000000111"
+        entity_manager = AsyncMock()
+        entity_manager.bulk_create_direct = AsyncMock(return_value=(2, 0))
+        relationship_manager = AsyncMock()
+        backup_data = BackupData(
+            version="2.0",
+            created_at="2026-04-19T00:00:00Z",
+            organization_id=org_id,
+            entity_count=2,
+            relationship_count=0,
+            entities=[
+                {
+                    "id": "episode_planted",
+                    "entity_type": "episode",
+                    "name": "Planted",
+                    "metadata": {
+                        "memory_scope": "private",
+                        "principal_id": "victim",
+                        "scope_key": "also-victim",
+                    },
+                },
+                {
+                    "id": "episode_halfstamped",
+                    "entity_type": "episode",
+                    "name": "Half stamped",
+                    "metadata": {"principal_id": "victim"},
+                },
+            ],
+            relationships=[],
+        )
+
+        with patch(
+            "sibyl_core.tools.admin.get_graph_runtime",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    client=SimpleNamespace(get_org_driver=lambda group_id: None),
+                    entity_manager=entity_manager,
+                    relationship_manager=relationship_manager,
+                )
+            ),
+        ):
+            result = await restore_backup(
+                backup_data,
+                organization_id=org_id,
+                skip_existing=False,
+            )
+
+        assert result.success is True
+        restored = {
+            entity.id: entity.metadata
+            for entity in entity_manager.bulk_create_direct.await_args.args[0]
+        }
+        # Recorded ownership survives; the extra owner channel does not.
+        assert restored["episode_planted"]["memory_scope"] == "private"
+        assert restored["episode_planted"]["principal_id"] == "victim"
+        assert "scope_key" not in restored["episode_planted"]
+        # Owner fields with no scope carry no ownership at all.
+        assert "principal_id" not in restored["episode_halfstamped"]
+        assert "memory_scope" not in restored["episode_halfstamped"]
+
+    @pytest.mark.asyncio
     async def test_restore_rehydrates_typed_entities_losslessly(self) -> None:
         org_id = "00000000-0000-0000-0000-000000000111"
         entity_manager = AsyncMock()

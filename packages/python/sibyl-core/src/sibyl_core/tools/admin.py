@@ -12,6 +12,7 @@ from uuid import uuid4
 import structlog
 from pydantic import ValidationError
 
+from sibyl_core.auth.memory_policy import stamp_memory_scope_metadata
 from sibyl_core.config import settings
 from sibyl_core.migrate.legacy_graph_archive import (
     episode_from_payload as _episode_from_payload,
@@ -566,8 +567,29 @@ def _entity_restore_model(entity_type: EntityType) -> EntityModel:
     return ENTITY_RESTORE_MODELS.get(entity_type, Entity)
 
 
+def _normalized_backup_metadata(metadata: Any) -> dict[str, Any]:
+    """Put a restored row's owner metadata through the shared write stamp.
+
+    A restore rebuilds entities from a request body, so it is the one write
+    path whose owner triple is not resolved from an authenticated caller. It
+    keeps the ownership the backup recorded — losing that would make a restore
+    cycle destroy every private memory's owner — but it may not introduce
+    shapes no write can produce: a private row carrying a second owner channel
+    in scope_key, or owner fields with no scope at all, which reads as
+    org-visible while looking owned.
+    """
+    fields = dict(metadata) if isinstance(metadata, dict) else {}
+    return stamp_memory_scope_metadata(
+        fields,
+        memory_scope=fields.get("memory_scope"),
+        scope_key=fields.get("scope_key"),
+        principal_id=fields.get("principal_id"),
+    )
+
+
 def _entity_from_backup_data(entity_data: dict[str, Any]) -> Entity:
     payload = dict(entity_data)
+    payload["metadata"] = _normalized_backup_metadata(payload.get("metadata"))
     entity_type = EntityType(str(payload.get("entity_type") or EntityType.TOPIC.value))
     model = _entity_restore_model(entity_type)
     if model in {Task, Project, Epic} and "title" not in payload:
