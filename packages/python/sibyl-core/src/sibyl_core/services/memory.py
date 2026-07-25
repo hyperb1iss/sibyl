@@ -18,6 +18,7 @@ from sibyl_core.auth.memory_policy import (
     authorize_memory_reflect,
     authorize_memory_share,
     authorize_memory_write,
+    stamp_memory_scope_metadata,
 )
 from sibyl_core.memory_pipeline.quality import normalize_memory_quality_metadata
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
@@ -3118,20 +3119,28 @@ def _entity_from_candidate(
     if not capture_surface:
         capture_surface = "reflection"
     metadata = normalize_memory_quality_metadata(
-        {
-            **candidate.metadata,
-            "tags": list(candidate.tags),
-            "organization_id": organization_id,
-            "capture_mode": capture_mode,
-            "capture_surface": capture_surface,
-            "remember_kind": candidate.kind,
-            "reflection_reason": candidate.reason,
-            "confidence": candidate.confidence,
-            "raw_source_ids": source_ids,
-            "source_ids": source_ids,
-            "native_write_path": native_write_path,
-            **dict(policy_metadata),
-        }
+        # The candidate bag reaches here from a capture's caller-supplied
+        # metadata, so the owner fields it carries are rebuilt from the values
+        # this promotion was authorized against rather than trusted.
+        stamp_memory_scope_metadata(
+            {
+                **candidate.metadata,
+                "tags": list(candidate.tags),
+                "organization_id": organization_id,
+                "capture_mode": capture_mode,
+                "capture_surface": capture_surface,
+                "remember_kind": candidate.kind,
+                "reflection_reason": candidate.reason,
+                "confidence": candidate.confidence,
+                "raw_source_ids": source_ids,
+                "source_ids": source_ids,
+                "native_write_path": native_write_path,
+                **dict(policy_metadata),
+            },
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            principal_id=principal_id,
+        )
     )
     if domain:
         metadata["category"] = domain

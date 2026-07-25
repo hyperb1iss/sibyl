@@ -386,7 +386,11 @@ def test_stamped_metadata_keeps_a_project_row_on_its_verified_key() -> None:
         principal_id="author",
     )
 
-    assert stamped == {"memory_scope": "project", "scope_key": "project_verified"}
+    assert stamped == {
+        "memory_scope": "project",
+        "scope_key": "project_verified",
+        "principal_id": "author",
+    }
 
 
 def test_metadata_read_is_open_only_when_no_scope_is_recorded() -> None:
@@ -414,3 +418,42 @@ def test_metadata_read_denies_a_private_row_without_a_private_grant() -> None:
         principal_id="owner",
         private_scope_granted=False,
     )
+
+
+def test_promoted_candidate_cannot_inherit_a_forged_owner_from_its_capture() -> None:
+    """A capture's metadata bag reaches the promoted graph row.
+
+    POST /memory/raw takes free-form metadata, and promotion spreads that bag
+    into the entity. The raw memory's principal_id column is authoritative, but
+    the bag copy is not, and retrieval resolves a private row's owner from the
+    bag alone.
+    """
+    from sibyl_core.models.reflection import ReflectionCandidate
+    from sibyl_core.services.memory import _entity_from_candidate
+
+    candidate = ReflectionCandidate(
+        kind="decision",
+        title="Planted decision",
+        content="Attacker-authored content.",
+        reason="promote",
+        confidence=0.9,
+        metadata={"principal_id": "victim", "scope_key": "victim"},
+    )
+
+    entity = _entity_from_candidate(
+        candidate,
+        organization_id="org-1",
+        principal_id="attacker",
+        domain=None,
+        project=None,
+        source_id=None,
+        memory_scope=MemoryScope.PRIVATE,
+        scope_key=None,
+        policy_metadata={"memory_scope": "private", "scope_key": None},
+    )
+
+    assert entity.metadata["memory_scope"] == "private"
+    assert entity.metadata["principal_id"] == "attacker"
+    assert "scope_key" not in entity.metadata
+    assert not memory_metadata_read_allowed(entity.metadata, principal_id="victim")
+    assert memory_metadata_read_allowed(entity.metadata, principal_id="attacker")

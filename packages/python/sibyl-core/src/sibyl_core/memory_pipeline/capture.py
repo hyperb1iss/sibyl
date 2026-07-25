@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from sibyl_core.auth.memory_policy import stamp_memory_scope_metadata
 from sibyl_core.memory_pipeline.quality import normalize_memory_quality_metadata
 
 
@@ -75,15 +76,19 @@ class MemoryCaptureService:
         raw_receipt = raw_memory.get("mutation_receipt")
         mutation_receipt = dict(raw_receipt) if isinstance(raw_receipt, Mapping) else None
 
-        graph_metadata = normalize_memory_quality_metadata(request.metadata)
         # The graph row carries no scope column, so retrieval and projection
         # authorize a candidate from this metadata alone. An unstamped row reads
-        # as unscoped and is served to every principal in the organization.
-        graph_metadata["memory_scope"] = request.memory_scope
-        if request.scope_key:
-            graph_metadata["scope_key"] = request.scope_key
-        if request.principal_id:
-            graph_metadata["principal_id"] = request.principal_id
+        # as unscoped and is served to every principal in the organization, and
+        # an owner field surviving from request.metadata names whoever the
+        # caller chose rather than whoever the capture was authorized for.
+        graph_metadata = normalize_memory_quality_metadata(
+            stamp_memory_scope_metadata(
+                request.metadata,
+                memory_scope=request.memory_scope,
+                scope_key=request.scope_key,
+                principal_id=request.principal_id,
+            )
+        )
         if raw_memory_id:
             graph_metadata["raw_memory_id"] = raw_memory_id
         if raw_source_id:
