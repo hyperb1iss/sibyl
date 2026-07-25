@@ -15,6 +15,7 @@ With this registry:
 
 from __future__ import annotations
 
+import contextlib
 import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -220,6 +221,7 @@ async def _process_add_note(
     """Process a queued add_note operation."""
     from sibyl_core.models.entities import Relationship, RelationshipType
     from sibyl_core.models.tasks import AuthorType, Note
+    from sibyl_core.tools.helpers import _project_id_for_policy
 
     note_id = payload.get("note_id", f"note_{uuid.uuid4()}")
     created_at = (
@@ -231,6 +233,14 @@ async def _process_add_note(
     # Generate name from content (matches Note validator logic)
     name = content[:50] + ("..." if len(content) > 50 else "")
 
+    # Mirror the synchronous path: without its task's project a note has
+    # neither audience channel, since it carries no memory scope of its own.
+    note_metadata: dict[str, Any] = {}
+    with contextlib.suppress(Exception):
+        if (task := await entity_manager.get(task_id)) is not None:
+            if task_project_id := _project_id_for_policy(task):
+                note_metadata["project_id"] = task_project_id
+
     note = Note(
         id=note_id,
         name=name,
@@ -240,6 +250,7 @@ async def _process_add_note(
         author_name=payload.get("author_name", ""),
         created_at=created_at,
         created_by=payload.get("user_id"),
+        metadata=note_metadata,
     )
 
     await entity_manager.create_direct(note)

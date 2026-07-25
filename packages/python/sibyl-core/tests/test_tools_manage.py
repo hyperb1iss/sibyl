@@ -12,7 +12,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import get_args
+from typing import Any, get_args
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
@@ -2051,3 +2051,81 @@ class TestResponseFormatting:
             organization_id="org_123",
         )
         assert response.timestamp.tzinfo == UTC
+
+
+class TestAddNoteAudienceChannel:
+    """A note is addressed by the project its parent task belongs to.
+
+    Notes carry free-text agent output and no memory scope of their own, so
+    without the project channel they had neither: the scope rule reads an
+    absent scope as unscoped, and no project id meant the project screen had
+    nothing to match on either.
+    """
+
+    @staticmethod
+    def _runtime(written: dict[str, Any]):
+        task = SimpleNamespace(
+            id="task-1",
+            entity_type=SimpleNamespace(value="task"),
+            metadata={"project_id": "proj-secret"},
+            project_id="proj-secret",
+        )
+
+        class _Entities:
+            async def get(self, _entity_id: str):
+                return task
+
+            async def create_direct(self, entity: Any, **_kwargs: Any):
+                written["note"] = entity
+                return entity.id
+
+        class _Relationships:
+            async def create(self, *_args: Any, **_kwargs: Any):
+                return None
+
+        return SimpleNamespace(
+            client=object(),
+            entity_manager=_Entities(),
+            relationship_manager=_Relationships(),
+        )
+
+    @pytest.mark.asyncio
+    async def test_note_inherits_its_tasks_project(self) -> None:
+        from sibyl_core.tools.manage import manage
+
+        written: dict[str, Any] = {}
+        with patch(
+            "sibyl_core.tools.manage.get_graph_runtime",
+            AsyncMock(return_value=self._runtime(written)),
+        ):
+            response = await manage(
+                "add_note",
+                entity_id="task-1",
+                data={"content": "internal finding: do not disclose"},
+                organization_id="org-1",
+            )
+
+        assert response.success is True
+        assert written["note"].metadata["project_id"] == "proj-secret"
+
+    @pytest.mark.asyncio
+    async def test_note_without_the_project_would_be_ungated(self) -> None:
+        """Pins why the project id matters rather than just that it is set."""
+        from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
+
+        ungated = {}
+        gated = {"project_id": "proj-secret"}
+
+        # The scope rule alone cannot tell these apart: neither declares a scope.
+        assert memory_metadata_read_allowed(
+            ungated, principal_id="outsider", accessible_projects=set()
+        )
+        assert memory_metadata_read_allowed(
+            gated, principal_id="outsider", accessible_projects=set()
+        )
+        # The project screen can, which is the channel a note now carries.
+        from sibyl.api.routes.entities import _entity_visible_to_projects
+
+        note = SimpleNamespace(entity_type=SimpleNamespace(value="note"), metadata=gated)
+        assert not _entity_visible_to_projects(note, set())
+        assert _entity_visible_to_projects(note, {"proj-secret"})
