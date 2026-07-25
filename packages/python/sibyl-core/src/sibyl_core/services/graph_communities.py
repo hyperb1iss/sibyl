@@ -19,6 +19,7 @@ from typing import Any
 
 import structlog
 
+from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 
 log = structlog.get_logger()
@@ -30,11 +31,14 @@ _relationship_manager_factory: _ManagerFactory | None = None
 # Cluster Cache for Visualization
 # =============================================================================
 
-CLUSTER_CACHE: dict[str, tuple[datetime, list[ClusterSummary]]] = {}
+type _ReaderCacheKey = tuple[str, tuple[str, ...]]
+CLUSTER_CACHE: dict[tuple[str, _ReaderCacheKey], tuple[datetime, list[ClusterSummary]]] = {}
 CLUSTER_CACHE_TTL = timedelta(minutes=5)
 
 # Cache for hierarchical graph community detection (expensive operation)
-HIERARCHICAL_CACHE: dict[str, tuple[datetime, dict[str, str], list[dict]]] = {}
+HIERARCHICAL_CACHE: dict[
+    tuple[str, _ReaderCacheKey], tuple[datetime, dict[str, str], list[dict]]
+] = {}
 HIERARCHICAL_CACHE_TTL = timedelta(minutes=5)
 GRAPH_SNAPSHOT_CACHE: dict[tuple[str, int | None, int | None], tuple[datetime, GraphSnapshot]] = {}
 GRAPH_SNAPSHOT_CACHE_TTL = timedelta(minutes=5)
@@ -359,6 +363,82 @@ def _entity_index(entities: list[Entity]) -> dict[str, Entity]:
     return {entity.id: entity for entity in entities if entity.id}
 
 
+def _reader_cache_key(
+    principal_id: str | None,
+    accessible_projects: set[str] | None,
+) -> tuple[str, tuple[str, ...]]:
+    """Identity component for every cache holding reader-visible graph rows.
+
+    Detection input, cluster summaries and rendered levels of detail are all
+    derived from a filtered snapshot, so an org-only key would serve one
+    reader's allowed set to the next reader who asks.
+    """
+    return (
+        str(principal_id or ""),
+        tuple(sorted(str(project_id) for project_id in accessible_projects or ())),
+    )
+
+
+def _reader_visible_snapshot(
+    snapshot: GraphSnapshot,
+    *,
+    principal_id: str | None,
+    accessible_projects: set[str] | None,
+) -> GraphSnapshot:
+    """Reduce a snapshot to the rows this reader is authorized to see.
+
+    The scope predicate is expressible in SurrealQL against the flexible
+    attributes object, but pushing it down would restate a policy whose
+    branches (owner as principal_id or scope_key, unrecognized scopes denied,
+    team and delegated scopes closed pending their membership threads) already
+    live in memory_metadata_read_allowed. Two implementations in two languages
+    is the drift this filter exists to prevent, so the snapshot loads whole and
+    is narrowed here, once, through the shared rule.
+    """
+    entities = [
+        entity
+        for entity in snapshot.entities
+        if memory_metadata_read_allowed(
+            getattr(entity, "metadata", None),
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        )
+    ]
+    entity_by_id = _entity_index(entities)
+    relationships = [
+        relationship
+        for relationship in snapshot.relationships
+        if relationship.source_id in entity_by_id and relationship.target_id in entity_by_id
+    ]
+    return GraphSnapshot(
+        entities=entities,
+        relationships=relationships,
+        entity_by_id=entity_by_id,
+    )
+
+
+async def _get_visible_graph_snapshot(
+    client: Any,
+    organization_id: str,
+    *,
+    principal_id: str | None,
+    accessible_projects: set[str] | None,
+    max_entities: int | None = None,
+    max_relationships: int | None = None,
+) -> GraphSnapshot:
+    snapshot = await _get_graph_snapshot(
+        client,
+        organization_id,
+        max_entities=max_entities,
+        max_relationships=max_relationships,
+    )
+    return _reader_visible_snapshot(
+        snapshot,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+    )
+
+
 def _count_int(value: object) -> int:
     if isinstance(value, bool):
         return int(value)
@@ -446,6 +526,8 @@ def _lod_cache_key(
     cluster_id: str | None,
     max_nodes: int,
     max_edges: int,
+    principal_id: str | None,
+    accessible_projects: set[str] | None,
 ) -> tuple[Any, ...]:
     return (
         organization_id,
@@ -455,6 +537,7 @@ def _lod_cache_key(
         cluster_id,
         max_nodes,
         max_edges,
+        _reader_cache_key(principal_id, accessible_projects),
     )
 
 
@@ -1478,6 +1561,9 @@ async def get_clusters_for_visualization(
     client: Any,
     organization_id: str,
     force_refresh: bool = False,
+    *,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ) -> list[ClusterSummary]:
     """Get clusters optimized for bubble visualization.
 
@@ -1487,11 +1573,13 @@ async def get_clusters_for_visualization(
         client: Graph client.
         organization_id: Organization UUID.
         force_refresh: Bypass cache and recompute.
+        principal_id: Reader the clusters are authorized as.
+        accessible_projects: Graph project IDs the reader is a member of.
 
     Returns:
         List of ClusterSummary objects for visualization.
     """
-    cache_key = organization_id
+    cache_key = (organization_id, _reader_cache_key(principal_id, accessible_projects))
 
     # Check cache
     if not force_refresh and cache_key in CLUSTER_CACHE:
@@ -1502,9 +1590,11 @@ async def get_clusters_for_visualization(
 
     log.info("cluster_cache_miss", org_id=organization_id)
 
-    snapshot = await _get_graph_snapshot(
+    snapshot = await _get_visible_graph_snapshot(
         client,
         organization_id,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
         max_entities=DETECTION_MAX_ENTITIES,
         max_relationships=DETECTION_MAX_RELATIONSHIPS,
     )
@@ -1550,9 +1640,13 @@ async def _create_type_based_clusters(
     entities: list[Entity] | None = None,
 ) -> list[ClusterSummary]:
     """Create clusters based on entity type (fallback when no networkx)."""
-    native_clusters = await _native_type_based_clusters(client, organization_id)
-    if native_clusters is not None:
-        return native_clusters
+    if entities is None:
+        # No reader-filtered entity list to group, so the aggregate query is
+        # the only source; it counts every row in the org and must not be
+        # reached from a request that carries a reader.
+        native_clusters = await _native_type_based_clusters(client, organization_id)
+        if native_clusters is not None:
+            return native_clusters
 
     try:
         if entities is None:
@@ -1646,6 +1740,8 @@ async def get_cluster_nodes(
     *,
     max_nodes: int = CLUSTER_DETAIL_MAX_NODES,
     max_edges: int = CLUSTER_DETAIL_MAX_EDGES,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ) -> dict[str, Any]:
     """Get nodes and edges for a specific cluster.
 
@@ -1653,12 +1749,19 @@ async def get_cluster_nodes(
         client: Graph client.
         organization_id: Organization UUID.
         cluster_id: Cluster ID to drill into.
+        principal_id: Reader the drill-down is authorized as.
+        accessible_projects: Graph project IDs the reader is a member of.
 
     Returns:
         Dict with 'nodes' and 'edges' for the cluster.
     """
     # Get cluster from cache
-    clusters = await get_clusters_for_visualization(client, organization_id)
+    clusters = await get_clusters_for_visualization(
+        client,
+        organization_id,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+    )
     cluster = next((c for c in clusters if c.id == cluster_id), None)
 
     if not cluster:
@@ -1668,9 +1771,11 @@ async def get_cluster_nodes(
     member_id_set = set(member_ids)
     entity_by_id = await _native_entities_by_ids(client, organization_id, member_ids)
     if entity_by_id is None:
-        snapshot = await _get_graph_snapshot(
+        snapshot = await _get_visible_graph_snapshot(
             client,
             organization_id,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
             max_entities=DETECTION_MAX_ENTITIES,
             max_relationships=DETECTION_MAX_RELATIONSHIPS,
         )
@@ -1683,6 +1788,9 @@ async def get_cluster_nodes(
         max_edges=max_edges,
     )
 
+    # This is the surface that emits an entity's name and description text, so
+    # the rows fetched by id answer to the scope rule again rather than
+    # trusting the membership list that selected them.
     nodes = [
         {
             "id": member_id,
@@ -1692,7 +1800,20 @@ async def get_cluster_nodes(
         }
         for member_id in member_ids
         if (entity := entity_by_id.get(member_id)) is not None
+        and memory_metadata_read_allowed(
+            getattr(entity, "metadata", None),
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        )
     ]
+    visible_ids = {node["id"] for node in nodes}
+    member_id_set &= visible_ids
+    if edges is not None:
+        edges = [
+            edge
+            for edge in edges
+            if edge["source"] in visible_ids and edge["target"] in visible_ids
+        ]
 
     if edges is None:
         snapshot = await _get_graph_snapshot(
@@ -1981,6 +2102,9 @@ async def get_hierarchical_graph(
     max_edges: int = 5000,
     resolution: str = GRAPH_RESOLUTION_DETAIL,
     cluster_id: str | None = None,
+    *,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ) -> HierarchicalGraphData:
     """Get graph data with cluster assignments for rich visualization.
 
@@ -1994,6 +2118,8 @@ async def get_hierarchical_graph(
         entity_types: Optional list of entity types to filter by.
         max_nodes: Maximum nodes to return (will sample if exceeded).
         max_edges: Maximum edges to return.
+        principal_id: Reader the graph is authorized as.
+        accessible_projects: Graph project IDs the reader is a member of.
 
     Returns:
         HierarchicalGraphData with nodes, edges, and cluster metadata.
@@ -2016,6 +2142,8 @@ async def get_hierarchical_graph(
         cluster_id=cluster_id,
         max_nodes=max_nodes,
         max_edges=max_edges,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
     )
     cached_lod = GRAPH_LOD_CACHE.get(cache_key)
     if cached_lod is not None:
@@ -2032,9 +2160,11 @@ async def get_hierarchical_graph(
     # Load the whole graph (within analytic caps) for detection and selection.
     # max_nodes/max_edges are render budgets applied later, never here — capping
     # the snapshot is what produced the disconnected starfield.
-    snapshot = await _get_graph_snapshot(
+    snapshot = await _get_visible_graph_snapshot(
         client,
         organization_id,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
         max_entities=DETECTION_MAX_ENTITIES,
         max_relationships=DETECTION_MAX_RELATIONSHIPS,
     )
@@ -2068,9 +2198,9 @@ async def get_hierarchical_graph(
         filtered_by_projects=bool(project_ids),
     )
 
-    # Check cache for community detection (expensive operation)
-    # Cache key includes org only - community structure is org-wide
-    community_cache_key = organization_id
+    # Check cache for community detection (expensive operation). Detection runs
+    # on the reader's visible subgraph, so its key carries the reader too.
+    community_cache_key = (organization_id, _reader_cache_key(principal_id, accessible_projects))
     node_to_cluster: dict[str, str] = {}
     clusters_meta: list[dict[str, Any]] = []
 

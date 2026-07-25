@@ -1094,19 +1094,39 @@ class GraphQueryAdapter:
             **params,
         )
 
-    async def get_clusters_for_visualization(self, *, force_refresh: bool = False) -> list[Any]:
+    async def get_clusters_for_visualization(
+        self,
+        *,
+        force_refresh: bool = False,
+        principal_id: str | None = None,
+        accessible_projects: set[str] | None = None,
+    ) -> list[Any]:
         from sibyl_core.services.graph_communities import get_clusters_for_visualization
 
         return await get_clusters_for_visualization(
             self._client,
             self._group_id,
             force_refresh=force_refresh,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
         )
 
-    async def get_cluster_nodes(self, cluster_id: str) -> dict[str, Any]:
+    async def get_cluster_nodes(
+        self,
+        cluster_id: str,
+        *,
+        principal_id: str | None = None,
+        accessible_projects: set[str] | None = None,
+    ) -> dict[str, Any]:
         from sibyl_core.services.graph_communities import get_cluster_nodes
 
-        return await get_cluster_nodes(self._client, self._group_id, cluster_id)
+        return await get_cluster_nodes(
+            self._client,
+            self._group_id,
+            cluster_id,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        )
 
     async def get_hierarchical_graph(
         self,
@@ -1117,6 +1137,8 @@ class GraphQueryAdapter:
         max_edges: int = 5000,
         resolution: str = "detail",
         cluster_id: str | None = None,
+        principal_id: str | None = None,
+        accessible_projects: set[str] | None = None,
     ) -> Any:
         from sibyl_core.services.graph_communities import get_hierarchical_graph
 
@@ -1129,6 +1151,8 @@ class GraphQueryAdapter:
             max_edges=max_edges,
             resolution=resolution,
             cluster_id=cluster_id,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
         )
 
 
