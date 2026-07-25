@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
-import math
 from typing import Any, Protocol
+
+# The tuned quantity is an absolute note count, not a share of the pack.
+# Widening the lane from 3 to 5 lost the entire measured note gain
+# (-3.70pp/domain), so the reservation must not scale with `limit`: a
+# slice-granular pack raises `limit` from 8 to ~28 for reasons that have
+# nothing to do with how many distilled notes are worth reading.
+TYPED_NOTE_RESERVATION_ITEMS = 3
 
 
 class OperationalEvidenceResult(Protocol):
@@ -25,8 +31,14 @@ def compose_operational_evidence[ResultT: OperationalEvidenceResult](
     typed_results: list[ResultT],
     raw_results: list[ResultT],
     limit: int,
+    typed_reservation_items: int = TYPED_NOTE_RESERVATION_ITEMS,
 ) -> tuple[list[ResultT], dict[str, Any]]:
-    """Reserve three eighths of output slots for independently ranked notes."""
+    """Reserve a fixed count of output slots for independently ranked notes.
+
+    The reservation is absolute rather than proportional; see
+    `TYPED_NOTE_RESERVATION_ITEMS`. Small packs still shrink it, because a
+    reservation may never consume the whole pack.
+    """
     output_limit = max(1, limit)
     typed_candidates: list[ResultT] = []
     raw_candidates: list[ResultT] = []
@@ -54,7 +66,7 @@ def compose_operational_evidence[ResultT: OperationalEvidenceResult](
         raw_candidates.append(result)
         seen_ids.add(result.id)
 
-    reservation_target = max(1, math.ceil(output_limit * 3 / 8))
+    reservation_target = max(1, typed_reservation_items)
     typed_reservation = min(
         len(typed_candidates),
         max(1, min(reservation_target, output_limit - 1)),
@@ -91,6 +103,7 @@ def compose_operational_evidence[ResultT: OperationalEvidenceResult](
 
 
 __all__ = [
+    "TYPED_NOTE_RESERVATION_ITEMS",
     "compose_operational_evidence",
     "is_distilled_operational_note",
 ]
