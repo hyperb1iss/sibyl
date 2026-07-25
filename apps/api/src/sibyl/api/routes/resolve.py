@@ -18,6 +18,7 @@ from sibyl.auth.dependencies import (
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl.persistence.graph_runtime import execute_surreal_graph_query, get_entity_graph_runtime
 from sibyl_core.auth import AuthOrganization, OrganizationRole
+from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services.surreal_content import RawMemory, resolve_raw_memory_prefix
 
@@ -58,6 +59,21 @@ def _prefix_candidates(prefix: str, entity_type: str | None) -> list[str]:
     return list(dict.fromkeys(candidate for candidate in candidates if candidate))
 
 
+def _row_metadata(row: dict[str, object]) -> dict[str, object]:
+    """Read a row's metadata bag.
+
+    A graph row stores it in the flexible `attributes` column; `metadata` is
+    the name the Entity model gives it. The projection is accepted under
+    either name so a row's scope is never read as absent — an absent scope
+    reads as unscoped, which fails open.
+    """
+    for key in ("attributes", "metadata"):
+        value = row.get(key)
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
 def _row_project_id(row: dict[str, object]) -> str | None:
     entity_type = str(row.get("entity_type") or "")
     entity_id = str(row.get("uuid") or row.get("id") or "")
@@ -68,11 +84,8 @@ def _row_project_id(row: dict[str, object]) -> str | None:
     if project_id:
         return str(project_id)
 
-    metadata = row.get("metadata")
-    if isinstance(metadata, dict):
-        metadata_project = metadata.get("project_id")
-        return str(metadata_project) if metadata_project else None
-    return None
+    metadata_project = _row_metadata(row).get("project_id")
+    return str(metadata_project) if metadata_project else None
 
 
 def _candidate_from_row(row: dict[str, object]) -> ResolveCandidate:
@@ -109,14 +122,35 @@ def _entity_project_id(entity: Any, entity_id: str) -> str | None:
     return None
 
 
-async def _filter_visible_candidates(
-    candidates: list[ResolveCandidate],
+def _scope_visible(
+    metadata: object,
     *,
-    ctx: AuthContext,
-) -> list[ResolveCandidate]:
+    principal_id: str | None,
+    accessible_projects: set[str],
+) -> bool:
+    # A resolve candidate carries the entity's name, so the scope rule has to
+    # run before one is built. Matching on project alone let every row without
+    # a project through, private ones included.
+    return memory_metadata_read_allowed(
+        metadata if isinstance(metadata, dict) else None,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+    )
+
+
+async def _resolve_reader(ctx: AuthContext) -> tuple[str | None, set[str]]:
     accessible_projects = {
         str(project_id) for project_id in await list_accessible_project_graph_ids(ctx) or set()
     }
+    principal_id = str(getattr(getattr(ctx, "user", None), "id", None) or "") or None
+    return principal_id, accessible_projects
+
+
+def _filter_visible_candidates(
+    candidates: list[ResolveCandidate],
+    *,
+    accessible_projects: set[str],
+) -> list[ResolveCandidate]:
     visible: list[ResolveCandidate] = []
     for candidate in candidates:
         project_id = candidate.project_id
@@ -154,6 +188,8 @@ async def _resolve_via_surreal(
     prefixes: list[str],
     entity_type: str | None,
     limit: int,
+    principal_id: str | None,
+    accessible_projects: set[str],
 ) -> list[ResolveCandidate] | None:
     clauses = []
     params: dict[str, object] = {"limit": limit}
@@ -166,7 +202,7 @@ async def _resolve_via_surreal(
     entity_type_clause = "AND entity_type = $entity_type" if entity_type else ""
     prefix_clause = " OR ".join(clauses)
     query = (
-        "SELECT uuid, name, entity_type, project_id, metadata "  # noqa: S608
+        "SELECT uuid, name, entity_type, attributes "  # noqa: S608
         "FROM entity "
         "WHERE group_id = $group_id "
         f"AND ({prefix_clause}) "
@@ -177,7 +213,15 @@ async def _resolve_via_surreal(
     rows = await execute_surreal_graph_query(group_id, query, **params)
     if rows is None:
         return None
-    return [_candidate_from_row(row) for row in rows]
+    return [
+        _candidate_from_row(row)
+        for row in rows
+        if _scope_visible(
+            _row_metadata(row),
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        )
+    ]
 
 
 async def _resolve_via_entity_manager(
@@ -186,6 +230,8 @@ async def _resolve_via_entity_manager(
     prefixes: list[str],
     entity_type: str | None,
     limit: int,
+    principal_id: str | None,
+    accessible_projects: set[str],
 ) -> list[ResolveCandidate]:
     runtime = await get_entity_graph_runtime(group_id)
     manager = runtime.entity_manager
@@ -203,6 +249,12 @@ async def _resolve_via_entity_manager(
     for entity in entities:
         entity_id = str(getattr(entity, "id", ""))
         if not _matches_candidate_prefix(entity_id, prefixes):
+            continue
+        if not _scope_visible(
+            getattr(entity, "metadata", None),
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        ):
             continue
         matches.append(
             ResolveCandidate(
@@ -267,12 +319,16 @@ async def resolve_id_prefix(
     prefixes = _prefix_candidates(normalized, type_value)
     group_id = str(org.id)
 
+    principal_id, accessible_projects = await _resolve_reader(ctx)
+
     try:
         candidates = await _resolve_via_surreal(
             group_id,
             prefixes=prefixes,
             entity_type=type_value,
             limit=limit,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
         )
         if candidates is None:
             candidates = await _resolve_via_entity_manager(
@@ -280,8 +336,13 @@ async def resolve_id_prefix(
                 prefixes=prefixes,
                 entity_type=type_value,
                 limit=limit,
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
             )
-        visible = await _filter_visible_candidates(candidates, ctx=ctx)
+        visible = _filter_visible_candidates(
+            candidates,
+            accessible_projects=accessible_projects,
+        )
         return ResolveResponse(prefix=normalized, matches=visible, count=len(visible))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid entity type: {type_value}") from exc
