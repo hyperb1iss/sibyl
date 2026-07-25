@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any, Literal
 from unittest.mock import AsyncMock, patch
 
@@ -2061,3 +2062,120 @@ def test_markdown_skips_memory_line_when_content_equals_name() -> None:
 
     assert "**De-noise context packs** (task · doing)" in markdown
     assert "Memory:" not in markdown
+
+
+def _neighbor(entity_id: str, metadata: dict[str, Any]) -> Any:
+    return SimpleNamespace(
+        id=entity_id,
+        entity_type=SimpleNamespace(value="decision"),
+        name="Neighbor decision",
+        content="derived support content",
+        metadata=metadata,
+    )
+
+
+def _edge(source_id: str, target_id: str) -> Any:
+    return SimpleNamespace(
+        source_id=source_id,
+        target_id=target_id,
+        relationship_type=SimpleNamespace(value="RELATED_TO"),
+        metadata={},
+    )
+
+
+@pytest.mark.asyncio
+async def test_default_related_items_drop_a_private_neighbor_from_a_co_member() -> None:
+    """A one-hop walk cannot surface memory the reader could not retrieve.
+
+    Neighbors are attached after candidate filtering, so a project-only check
+    here would hand back a co-member's private row that context search itself
+    would have refused.
+    """
+    private_neighbor = _neighbor(
+        "decision_private",
+        {"memory_scope": "private", "principal_id": "victim"},
+    )
+    runtime = SimpleNamespace(
+        relationship_manager=SimpleNamespace(
+            get_related_entities=AsyncMock(
+                return_value=[(private_neighbor, _edge("session_seed", "decision_private"))]
+            )
+        )
+    )
+
+    with patch(
+        "sibyl_core.tools.context.get_graph_runtime",
+        AsyncMock(return_value=runtime),
+    ):
+        related = await context_module._default_related_items(
+            entity_id="session_seed",
+            organization_id="org-123",
+            accessible_projects=set(),
+            principal_id="attacker",
+        )
+
+    assert related == []
+
+
+@pytest.mark.asyncio
+async def test_default_related_items_batch_drops_a_private_neighbor() -> None:
+    private_neighbor = _neighbor(
+        "decision_private",
+        {"memory_scope": "private", "principal_id": "victim"},
+    )
+    shared_neighbor = _neighbor("decision_shared", {})
+    runtime = SimpleNamespace(
+        relationship_manager=SimpleNamespace(
+            get_related_entities_batch=AsyncMock(
+                return_value={
+                    "session_seed": [
+                        (private_neighbor, _edge("session_seed", "decision_private")),
+                        (shared_neighbor, _edge("session_seed", "decision_shared")),
+                    ]
+                }
+            )
+        )
+    )
+
+    with patch(
+        "sibyl_core.tools.context.get_graph_runtime",
+        AsyncMock(return_value=runtime),
+    ):
+        related = await context_module._default_related_items_batch(
+            entity_ids=["session_seed"],
+            organization_id="org-123",
+            accessible_projects=set(),
+            principal_id="attacker",
+        )
+
+    assert [item.id for item in related["session_seed"]] == ["decision_shared"]
+
+
+@pytest.mark.asyncio
+async def test_compile_context_hands_the_reader_identity_to_related_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    related_calls: list[dict[str, Any]] = []
+
+    async def fake_related(**kwargs: Any) -> list[ContextRelatedItem]:
+        related_calls.append(kwargs)
+        return []
+
+    responses = {
+        ContextFacet.DECISIONS: [_result("decision-1", "decision", "A decision")],
+    }
+    monkeypatch.setattr(context_module, "context_search", _facet_native_search(responses))
+
+    await compile_context(
+        "scoped related items",
+        intent="decide",
+        accessible_projects={"project_a"},
+        principal_id="user-123",
+        organization_id="org-123",
+        include_related=True,
+        related_fn=fake_related,
+        record_exposure=False,
+    )
+
+    assert related_calls
+    assert all(call["principal_id"] == "user-123" for call in related_calls)

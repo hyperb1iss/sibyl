@@ -1705,3 +1705,42 @@ async def test_add_mcp_entity_leaves_project_containers_unscoped() -> None:
     metadata = add.await_args.kwargs["metadata"]
     assert "memory_scope" not in metadata
     assert "principal_id" not in metadata
+
+
+def _mcp_tool(name: str):
+    from mcp.server.fastmcp import FastMCP
+
+    from sibyl.server import _register_tools
+
+    mcp = FastMCP("scope-tests")
+    _register_tools(mcp)
+    return mcp._tool_manager.get_tool(name).fn
+
+
+@pytest.mark.asyncio
+async def test_mcp_explore_authorizes_graph_navigation_as_the_caller() -> None:
+    """Browsing the graph is a read, so it carries the reader's identity.
+
+    Project membership alone does not authorize a private memory, and explore
+    returns names, descriptions and the metadata bag.
+    """
+    ctx = McpContext(
+        org_id=str(uuid4()),
+        user_id=str(uuid4()),
+        scopes=["mcp"],
+        api_key_memory_scope_keys=[api_key_memory_scope_key("project", "project-a")],
+    )
+    core_explore = AsyncMock(
+        return_value=SimpleNamespace(mode="list", entities=[], total=0, filters={})
+    )
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl_core.tools.core.explore", core_explore),
+    ):
+        await _mcp_tool("explore")(mode="list", types=["decision"])
+
+    kwargs = core_explore.await_args.kwargs
+    assert kwargs["principal_id"] == ctx.user_id
+    assert kwargs["allowed_memory_scope_keys"] == {api_key_memory_scope_key("project", "project-a")}

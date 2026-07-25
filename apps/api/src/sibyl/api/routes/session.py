@@ -191,6 +191,7 @@ async def get_session_bundle(
             limit=task_limit,
             offset=0,
             organization_id=organization_id,
+            principal_id=getattr(ctx, "user_id", None),
         )
         tasks = [summarize_task(_as_mapping(task)) for task in task_result.entities][:task_limit]
 

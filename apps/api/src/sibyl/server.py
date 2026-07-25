@@ -2148,6 +2148,7 @@ def _register_tools(mcp: FastMCP) -> None:
         ctx = await _require_mcp_context()
         accessible_projects = await _get_accessible_projects(ctx)
 
+        api_key_memory_scope_keys = getattr(ctx, "api_key_memory_scope_keys", None)
         result = await _explore(
             mode=mode,
             types=types,
@@ -2161,6 +2162,10 @@ def _register_tools(mcp: FastMCP) -> None:
             status=status,
             limit=limit,
             organization_id=ctx.org_id,
+            principal_id=getattr(ctx, "user_id", None),
+            allowed_memory_scope_keys=(
+                set(api_key_memory_scope_keys) if api_key_memory_scope_keys is not None else None
+            ),
         )
         return _to_dict(result)
 
