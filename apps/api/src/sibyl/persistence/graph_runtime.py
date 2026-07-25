@@ -1100,6 +1100,7 @@ class GraphQueryAdapter:
         force_refresh: bool = False,
         principal_id: str | None = None,
         accessible_projects: set[str] | None = None,
+        allowed_memory_scope_keys: set[str] | None = None,
     ) -> list[Any]:
         from sibyl_core.services.graph_communities import get_clusters_for_visualization
 
@@ -1109,6 +1110,7 @@ class GraphQueryAdapter:
             force_refresh=force_refresh,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
 
     async def get_cluster_nodes(
@@ -1117,6 +1119,7 @@ class GraphQueryAdapter:
         *,
         principal_id: str | None = None,
         accessible_projects: set[str] | None = None,
+        allowed_memory_scope_keys: set[str] | None = None,
     ) -> dict[str, Any]:
         from sibyl_core.services.graph_communities import get_cluster_nodes
 
@@ -1126,6 +1129,7 @@ class GraphQueryAdapter:
             cluster_id,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
 
     async def get_hierarchical_graph(
@@ -1139,6 +1143,7 @@ class GraphQueryAdapter:
         cluster_id: str | None = None,
         principal_id: str | None = None,
         accessible_projects: set[str] | None = None,
+        allowed_memory_scope_keys: set[str] | None = None,
     ) -> Any:
         from sibyl_core.services.graph_communities import get_hierarchical_graph
 
@@ -1153,6 +1158,7 @@ class GraphQueryAdapter:
             cluster_id=cluster_id,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
 
 

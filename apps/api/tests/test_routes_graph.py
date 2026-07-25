@@ -199,7 +199,7 @@ class TestGraphRoutes:
                 "sibyl.api.routes.graph.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
             ),
-            _accessible_projects(),
+            _accessible_projects("project-1"),
         ):
             result = await graph_routes.get_subgraph(
                 SubgraphRequest(entity_id="task-1", depth=1, max_nodes=10),
@@ -258,6 +258,7 @@ class TestGraphRoutes:
             force_refresh=True,
             principal_id=str(_ctx().user.id),
             accessible_projects=set(),
+            allowed_memory_scope_keys=None,
         )
 
     @pytest.mark.asyncio
@@ -302,7 +303,7 @@ class TestGraphRoutes:
                 "sibyl.api.routes.graph.get_graph_query_adapter",
                 AsyncMock(return_value=adapter),
             ),
-            _accessible_projects(),
+            _accessible_projects("project-1"),
         ):
             result = await graph_routes.get_full_graph(
                 org=_org(),
@@ -349,7 +350,7 @@ class TestGraphRoutes:
                 "sibyl.api.routes.graph.get_hierarchical_graph",
                 AsyncMock(return_value=data),
             ) as get_hierarchical_graph,
-            _accessible_projects(),
+            _accessible_projects("proj-1"),
         ):
             result = await graph_routes.get_hierarchical_graph_data(
                 org=_org(),
@@ -377,7 +378,8 @@ class TestGraphRoutes:
             resolution="overview",
             cluster_id="cluster-1",
             principal_id=str(_ctx().user.id),
-            accessible_projects=set(),
+            accessible_projects={"proj-1"},
+            allowed_memory_scope_keys=None,
         )
 
     @pytest.mark.asyncio
