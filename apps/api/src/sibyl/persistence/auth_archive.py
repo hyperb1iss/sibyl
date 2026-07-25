@@ -9,6 +9,8 @@ from enum import Enum
 from typing import Any
 from uuid import UUID
 
+import structlog
+
 from sibyl.persistence.surreal.auth import build_surreal_auth_client
 from sibyl_core.backends.surreal import bootstrap_auth_schema
 from sibyl_core.backends.surreal.records import (
@@ -16,6 +18,12 @@ from sibyl_core.backends.surreal.records import (
     query_error as _query_error,
     raise_on_error as _raise_on_error,
 )
+from sibyl_core.backends.surreal.schema_invariants import (
+    drop_undeclared_fields as _drop_undeclared_fields,
+    fetch_declared_fields,
+)
+
+log = structlog.get_logger()
 
 AUTH_ARCHIVE_VERSION = "1.0"
 _AUTH_ARCHIVE_SQL = {
@@ -234,6 +242,7 @@ class AuthArchiveRestoreResult:
     tables_restored: int
     rows_restored: int
     errors: list[str] = field(default_factory=list)
+    dropped_fields: dict[str, list[str]] = field(default_factory=dict)
 
 
 def _serialize_value(value: object) -> object:
@@ -492,6 +501,42 @@ async def export_auth_archive_payload(
     return await _export_surreal_auth_archive_payload(organization_id)
 
 
+def _auth_archive_record(
+    row: dict[Any, Any],
+    declared: frozenset[str],
+) -> tuple[dict[str, object], str, tuple[str, ...]]:
+    normalized_row = {str(key): value for key, value in row.items()}
+    record = {
+        str(key): _deserialize_value(value) for key, value in normalized_row.items() if key != "id"
+    }
+    uuid = str(normalized_row.get("id") or normalized_row.get("uuid") or "").strip()
+    if not uuid:
+        return record, "", ()
+    record["uuid"] = uuid
+    record, dropped = _drop_undeclared_fields(record, declared)
+    return record, uuid, dropped
+
+
+async def _create_auth_archive_row(
+    client: Any,
+    table: str,
+    *,
+    uuid: str,
+    record: dict[str, object],
+) -> bool:
+    existing_result = await client.execute_query(_SELECT_BY_UUID[table], uuid=uuid)
+    existing_error = _query_error(existing_result)
+    if existing_error is not None:
+        raise RuntimeError(existing_error)
+    if _normalize_records(existing_result):
+        return False
+    create_result = await client.execute_query(_CREATE_RECORD[table], record=record)
+    create_error = _query_error(create_result)
+    if create_error is not None:
+        raise RuntimeError(create_error)
+    return True
+
+
 async def restore_auth_archive_payload(
     payload: dict[str, object],
     *,
@@ -512,6 +557,7 @@ async def restore_auth_archive_payload(
     tables_restored = 0
     rows_restored = 0
     errors: list[str] = []
+    dropped_fields: dict[str, set[str]] = {}
 
     try:
         await bootstrap_auth_schema(client, reset=False)
@@ -528,46 +574,42 @@ async def restore_auth_archive_payload(
             if not rows:
                 continue
 
+            declared = await fetch_declared_fields(client.execute_query, table)
             restored_table = False
             for row in rows:
                 if not isinstance(row, dict):
                     errors.append(f"{table} row payload must be an object")
                     continue
-                normalized_row = {str(key): value for key, value in row.items()}
-
-                record = {
-                    str(key): _deserialize_value(value)
-                    for key, value in normalized_row.items()
-                    if key != "id"
-                }
-                uuid = str(normalized_row.get("id") or normalized_row.get("uuid") or "").strip()
+                record, uuid, dropped = _auth_archive_record(row, declared)
                 if not uuid:
                     errors.append(f"{table} row is missing id")
                     continue
-                record["uuid"] = uuid
+                if dropped:
+                    dropped_fields.setdefault(table, set()).update(dropped)
 
                 try:
-                    existing_result = await client.execute_query(_SELECT_BY_UUID[table], uuid=uuid)
-                    existing_error = _query_error(existing_result)
-                    if existing_error is not None:
-                        raise RuntimeError(existing_error)
-                    if _normalize_records(existing_result):
-                        continue
-                    create_result = await client.execute_query(_CREATE_RECORD[table], record=record)
-                    create_error = _query_error(create_result)
-                    if create_error is not None:
-                        raise RuntimeError(create_error)
-                    rows_restored += 1
-                    restored_table = True
+                    if await _create_auth_archive_row(client, table, uuid=uuid, record=record):
+                        rows_restored += 1
+                        restored_table = True
                 except Exception as exc:
                     errors.append(f"{table}:{uuid}: {exc}")
             if restored_table:
                 tables_restored += 1
+        if dropped_fields:
+            log.warning(
+                "auth_archive_restore_dropped_undeclared_fields",
+                dropped_fields={
+                    table: sorted(names) for table, names in sorted(dropped_fields.items())
+                },
+            )
         return AuthArchiveRestoreResult(
             success=not errors,
             tables_restored=tables_restored,
             rows_restored=rows_restored,
             errors=errors[:50],
+            dropped_fields={
+                table: sorted(names) for table, names in sorted(dropped_fields.items())
+            },
         )
     finally:
         await client.close()
