@@ -465,7 +465,9 @@ class TestGetProjectMetrics:
             patch("sibyl.api.routes.metrics.get_entity_graph_runtime", AsyncMock()),
         ):
             with pytest.raises(HTTPException) as exc_info:
-                await get_project_metrics("nonexistent", org=mock_org, ctx=MagicMock(spec=AuthContext))
+                await get_project_metrics(
+                    "nonexistent", org=mock_org, ctx=MagicMock(spec=AuthContext)
+                )
 
             assert exc_info.value.status_code == 404
             assert "not found" in exc_info.value.detail.lower()
@@ -525,7 +527,9 @@ class TestGetProjectMetrics:
                 AsyncMock(return_value=mock_runtime),
             ),
         ):
-            result = await get_project_metrics("proj_123", org=mock_org, ctx=MagicMock(spec=AuthContext))
+            result = await get_project_metrics(
+                "proj_123", org=mock_org, ctx=MagicMock(spec=AuthContext)
+            )
 
             assert result.metrics.project_id == "proj_123"
             assert result.metrics.project_name == "Test Project"
@@ -571,7 +575,9 @@ class TestGetProjectMetrics:
                 AsyncMock(return_value=mock_runtime),
             ),
         ):
-            result = await get_project_metrics("proj_empty", org=mock_org, ctx=MagicMock(spec=AuthContext))
+            result = await get_project_metrics(
+                "proj_empty", org=mock_org, ctx=MagicMock(spec=AuthContext)
+            )
 
             assert result.metrics.total_tasks == 0
             assert result.metrics.completion_rate == 0.0
@@ -627,7 +633,9 @@ class TestGetProjectMetrics:
                 AsyncMock(return_value=mock_runtime),
             ),
         ):
-            result = await get_project_metrics("proj_big", org=mock_org, ctx=MagicMock(spec=AuthContext))
+            result = await get_project_metrics(
+                "proj_big", org=mock_org, ctx=MagicMock(spec=AuthContext)
+            )
 
         assert result.metrics.total_tasks == 1001
         assert result.metrics.status_distribution.done == 1
