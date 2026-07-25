@@ -7,6 +7,7 @@ from unittest.mock import ANY, AsyncMock, call, patch
 
 import pytest
 
+from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
 from sibyl_core.migrate.legacy_graph_archive import parse_backup_datetime
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.tasks import Epic, Project, ProjectStatus, Task, TaskPriority, TaskStatus
@@ -365,13 +366,13 @@ class TestRestoreBackup:
         """
         org_id = "00000000-0000-0000-0000-000000000111"
         entity_manager = AsyncMock()
-        entity_manager.bulk_create_direct = AsyncMock(return_value=(2, 0))
+        entity_manager.bulk_create_direct = AsyncMock(return_value=(3, 0))
         relationship_manager = AsyncMock()
         backup_data = BackupData(
             version="2.0",
             created_at="2026-04-19T00:00:00Z",
             organization_id=org_id,
-            entity_count=2,
+            entity_count=3,
             relationship_count=0,
             entities=[
                 {
@@ -389,6 +390,12 @@ class TestRestoreBackup:
                     "entity_type": "episode",
                     "name": "Half stamped",
                     "metadata": {"principal_id": "victim"},
+                },
+                {
+                    "id": "episode_keyowned",
+                    "entity_type": "episode",
+                    "name": "Owned through scope_key",
+                    "metadata": {"memory_scope": "private", "scope_key": "user-a"},
                 },
             ],
             relationships=[],
@@ -422,6 +429,18 @@ class TestRestoreBackup:
         # Owner fields with no scope carry no ownership at all.
         assert "principal_id" not in restored["episode_halfstamped"]
         assert "memory_scope" not in restored["episode_halfstamped"]
+        # A private row owned only through scope_key keeps its owner: the stamp
+        # drops scope_key on private rows, so dropping it here too would leave
+        # the row readable by nobody rather than by whoever owned it.
+        key_owned = restored["episode_keyowned"]
+        assert key_owned["principal_id"] == "user-a"
+        assert "scope_key" not in key_owned
+        assert memory_metadata_read_allowed(
+            key_owned, principal_id="user-a", accessible_projects=set()
+        )
+        assert not memory_metadata_read_allowed(
+            key_owned, principal_id="someone-else", accessible_projects=set()
+        )
 
     @pytest.mark.asyncio
     async def test_restore_rehydrates_typed_entities_losslessly(self) -> None:

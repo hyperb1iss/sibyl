@@ -55,6 +55,7 @@ from sibyl_core.models.entities import (
     Tool,
     Topic,
 )
+from sibyl_core.models.memory_scope import MemoryScope
 from sibyl_core.models.sources import Community, Document, Source
 from sibyl_core.models.tasks import Epic, ErrorPattern, Milestone, Note, Project, Task, Team
 
@@ -579,11 +580,21 @@ def _normalized_backup_metadata(metadata: Any) -> dict[str, Any]:
     org-visible while looking owned.
     """
     fields = dict(metadata) if isinstance(metadata, dict) else {}
+    scope = fields.get("memory_scope")
+    scope_key = fields.get("scope_key")
+    principal_id = fields.get("principal_id")
+    if str(scope or "") == MemoryScope.PRIVATE.value:
+        # On a private row scope_key is an owner channel, not an audience, and
+        # the stamp drops it. Resolving the owner the way a read does —
+        # principal_id or scope_key — carries it into the channel that
+        # survives, so a row owned only through scope_key stays readable by
+        # its owner instead of becoming readable by nobody.
+        principal_id = principal_id or scope_key
     return stamp_memory_scope_metadata(
         fields,
-        memory_scope=fields.get("memory_scope"),
-        scope_key=fields.get("scope_key"),
-        principal_id=fields.get("principal_id"),
+        memory_scope=scope,
+        scope_key=scope_key,
+        principal_id=principal_id,
     )
 
 
