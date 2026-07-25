@@ -911,6 +911,7 @@ def db_duplicates(
     from sibyl.persistence.surreal.content import build_surreal_content_client
     from sibyl_core.backends.surreal.auth_schema import auth_schema_invariant_plan
     from sibyl_core.backends.surreal.content_schema import content_schema_invariant_plan
+    from sibyl_core.backends.surreal.records import normalize_records
 
     @run_async
     async def _duplicates() -> None:
@@ -1002,8 +1003,13 @@ def db_duplicates(
             try:
                 for start in range(0, len(doomed), 200):
                     batch = doomed[start : start + 200]
-                    await client.execute_query("DELETE $ids;", ids=batch)
-                    collapsed += len(batch)
+                    # A bare DELETE returns nothing, so counting the batch size would
+                    # report the request rather than the rows that were actually there.
+                    removed = await client.execute_query(
+                        "DELETE $ids RETURN BEFORE;",
+                        ids=batch,
+                    )
+                    collapsed += len(normalize_records(removed))
             finally:
                 await client.close()
 

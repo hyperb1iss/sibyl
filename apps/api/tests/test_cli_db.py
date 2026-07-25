@@ -710,3 +710,67 @@ def test_duplicates_collapse_spares_rows_with_a_missing_unique_key_component() -
     assert {"u1", "u2"}.issubset(survivors)
     assert len([uuid for uuid in survivors if uuid in {"u3", "u4"}]) == 1
     assert len(survivors) == 3
+
+
+class _StubDuplicateClient:
+    """Serves one table with three colliding rows but deletes fewer than it is asked to."""
+
+    def __init__(self) -> None:
+        self.deleted_batches: list[int] = []
+
+    async def execute_query(self, statement: str, **params: object) -> object:
+        stripped = statement.strip()
+        if stripped == "INFO FOR DB;":
+            return [{"tables": {"widgets": "DEFINE TABLE widgets TYPE ANY SCHEMAFULL"}}]
+        if stripped.startswith("INFO FOR TABLE "):
+            return [{"indexes": {}}]
+        if stripped.startswith("SELECT id AS duplicate_record_id"):
+            return [
+                {"duplicate_record_id": f"widgets:{suffix}", "uuid": "same"}
+                for suffix in ("a", "b", "c")
+            ]
+        if stripped.startswith("DELETE"):
+            ids = params.get("ids")
+            self.deleted_batches.append(len(ids) if isinstance(ids, list) else 0)
+            # Only one of the two requested rows was still present.
+            return [{"id": "widgets:b", "uuid": "same"}]
+        return None
+
+    async def close(self) -> None:
+        return None
+
+
+def test_duplicates_collapse_counts_rows_actually_removed_not_ids_requested() -> None:
+    """A bare DELETE returns nothing, so the count has to come from the query result."""
+    from sibyl_core.backends.surreal.schema_invariants import (
+        SchemaInvariantPlan,
+        UniqueIndexRequirement,
+    )
+
+    client = _StubDuplicateClient()
+    plan = SchemaInvariantPlan(
+        unique_indexes=(
+            UniqueIndexRequirement(
+                name="idx_widgets_uuid",
+                table="widgets",
+                fields=("uuid",),
+                statement="DEFINE INDEX idx_widgets_uuid ON widgets FIELDS uuid UNIQUE;",
+            ),
+        ),
+    )
+    with (
+        patch("sibyl.persistence.surreal.auth.build_surreal_auth_client", lambda: client),
+        patch(
+            "sibyl_core.backends.surreal.auth_schema.auth_schema_invariant_plan",
+            lambda: plan,
+        ),
+        patch("sibyl.config.settings.store", "relational"),
+    ):
+        result = runner.invoke(db_cli.app, ["duplicates", "--collapse", "--yes", "--json"])
+
+    payload = json.loads(result.output)
+
+    assert result.exit_code == 0
+    assert client.deleted_batches == [2]
+    assert payload["excess_rows"] == 2
+    assert payload["collapsed"] == 1
