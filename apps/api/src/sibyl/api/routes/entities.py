@@ -1860,6 +1860,16 @@ async def create_entity(
             return replayed
 
     merged_metadata: dict[str, Any] = {**request_metadata, "organization_id": group_id}
+    if merged_metadata.get("memory_scope") is not None:
+        # Scope metadata decides who may retrieve this row, so its principal
+        # binding is taken from the authenticated context rather than the
+        # payload. Dropping it when the context has no user keeps a private
+        # row unreadable instead of binding it to a caller-supplied identity.
+        principal_id = ctx.user_id
+        if principal_id:
+            merged_metadata["principal_id"] = principal_id
+        else:
+            merged_metadata.pop("principal_id", None)
 
     # Projects are always sync (foundational - tasks depend on them existing)
     # Other entities can be async unless caller explicitly requests sync

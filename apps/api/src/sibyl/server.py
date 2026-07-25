@@ -664,6 +664,7 @@ async def _remember_mcp_memory(
         source_id=f"mcp:remember:{kind}",
         memory_scope=memory_scope,
         scope_key=project,
+        principal_id=ctx.user_id,
         capture_surface="mcp",
     )
     raw_revision = 1
