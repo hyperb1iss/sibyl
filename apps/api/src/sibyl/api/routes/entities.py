@@ -1917,11 +1917,14 @@ async def create_entity(
         if replayed is not None:
             return replayed
 
+    authorized_principal_id = str(ctx.user.id) if ctx.user is not None else None
+    authorized_scope_key = str(project) if project else None
+    declared_memory_scope = request_metadata.get("memory_scope")
     merged_metadata: dict[str, Any] = {
         **_scoped_graph_metadata(
             request_metadata,
-            principal_id=str(ctx.user.id) if ctx.user is not None else None,
-            verified_project_id=str(project) if project else None,
+            principal_id=authorized_principal_id,
+            verified_project_id=authorized_scope_key,
         ),
         "organization_id": group_id,
     }
@@ -1950,6 +1953,9 @@ async def create_entity(
         sync=is_sync,
         skip_conflicts=entity.skip_conflicts,
         generate_embeddings=not entity.defer_embeddings,
+        memory_scope=str(declared_memory_scope) if declared_memory_scope is not None else None,
+        scope_key=authorized_scope_key,
+        principal_id=authorized_principal_id,
     )
 
     if not result.success or not result.id:

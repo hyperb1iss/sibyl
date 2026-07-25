@@ -477,6 +477,9 @@ async def test_remember_mcp_memory_scopes_project_metadata() -> None:
             "raw_source_id": "mcp:remember:decision",
         },
         project="project-a",
+        memory_scope="project",
+        scope_key="project-a",
+        principal_id=ctx.user_id,
     )
 
 
@@ -746,6 +749,11 @@ async def test_add_mcp_entity_scopes_project_metadata() -> None:
         check_conflicts=True,
         skip_conflicts=False,
         conflict_threshold=0.85,
+        # A task is addressed by its project, so it carries no memory scope;
+        # the owner channels still reach the choke point as authorized values.
+        memory_scope=None,
+        scope_key="project-a",
+        principal_id=ctx.user_id,
     )
 
 

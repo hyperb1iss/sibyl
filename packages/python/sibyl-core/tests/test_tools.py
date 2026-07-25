@@ -3507,6 +3507,79 @@ class TestAddTool:
             assert "require a project" in response.message
 
     @pytest.mark.asyncio
+    async def test_add_rebuilds_owner_metadata_from_authorized_values(self) -> None:
+        """Every graph write funnels through add(), so the stamp belongs here.
+
+        `owner = principal_id or scope_key`, so a payload reaching this
+        function must not be able to set either one for itself.
+        """
+        from sibyl_core.tools.add import add
+
+        written: dict[str, Any] = {}
+
+        class RecordingEntityManager:
+            async def create(self, entity: Any, **_kwargs: Any) -> Any:
+                written.update(entity.metadata)
+                return entity
+
+            async def upsert(self, entity: Any, **_kwargs: Any) -> Any:
+                written.update(entity.metadata)
+                return entity
+
+            async def get(self, _entity_id: str) -> None:
+                return None
+
+        runtime = make_graph_runtime(entity_manager=RecordingEntityManager())
+
+        with (
+            patch("sibyl_core.tools.add.get_graph_runtime", AsyncMock(return_value=runtime)),
+            patch("sibyl_core.tools.add._auto_discover_links", AsyncMock(return_value=[])),
+            patch("sibyl_core.tools.add.get_queue_port", lambda: None),
+        ):
+            response = await add(
+                title="Innocuous note",
+                content="body",
+                metadata={
+                    "organization_id": "org_123",
+                    "memory_scope": "private",
+                    "principal_id": "victim",
+                    "scope_key": "proj_not_mine",
+                },
+                memory_scope="private",
+                principal_id="real-author",
+                scope_key=None,
+                check_conflicts=False,
+                sync=True,
+            )
+
+        assert response.success is True
+        assert written["memory_scope"] == "private"
+        assert written["principal_id"] == "real-author"
+        assert "scope_key" not in written
+
+    @pytest.mark.asyncio
+    async def test_add_refuses_scope_metadata_without_an_authorized_owner(self) -> None:
+        """Silently dropping the stamp would republish a private row org-wide."""
+        from sibyl_core.tools.add import add
+
+        with (
+            patch(
+                "sibyl_core.tools.add.get_graph_runtime",
+                AsyncMock(return_value=make_graph_runtime()),
+            ),
+            pytest.raises(ValueError, match="without the authorized"),
+        ):
+            await add(
+                title="Innocuous note",
+                content="body",
+                metadata={
+                    "organization_id": "org_123",
+                    "memory_scope": "private",
+                    "principal_id": "victim",
+                },
+            )
+
+    @pytest.mark.asyncio
     async def test_add_returns_response_structure(self) -> None:
         """Add returns properly structured AddResponse."""
         from sibyl_core.tools.add import add
