@@ -6,26 +6,21 @@ import pytest
 from tools.inventory.runtime_surface import (
     GRAPHITI_COMPATIBILITY_ALLOWLIST,
     GRAPHITI_EXIT_INVENTORY_PATH,
-    LEGACY_TERM_ALLOWLIST,
     PYPROJECT_PATHS,
     REPO_ROOT,
-    SNAPSHOT_PATH,
+    DependencyRecord,
+    GraphitiCompatibilityRecord,
     GraphitiImportRecord,
-    LegacyTermAllowlistRecord,
-    LegacyTermRecord,
     RuntimeSurface,
+    SqlUsageRecord,
     _path_matches_allowlist,
-    check_legacy_term_inventory,
+    check_runtime_purity,
     collect_runtime_surface,
     default_runtime_graphiti_imports,
     graphiti_allowlist_record,
     graphiti_dynamic_import_name,
-    iter_legacy_term_files,
-    legacy_term_allowlist_record,
     parse_dependency_name,
-    render_markdown,
     unclassified_graphiti_imports,
-    unclassified_legacy_term_records,
 )
 
 EXPECTED_ROUTER_COUNT = 31
@@ -36,46 +31,6 @@ EXPECTED_MCP_RESOURCE_COUNT = 2
 EXPECTED_SQLMODEL_TABLE_COUNT = 0
 _GRAPHITI_PACKAGE = "graphiti" + "-core"
 _GRAPHITI_MODULE = "graphiti" + "_core"
-EXPECTED_LEGACY_TERM_SCAN_PATHS = {
-    ".devcontainer/Dockerfile",
-    ".devcontainer/devcontainer.json",
-    ".env.example",
-    ".env.quickstart.example",
-    ".env.quickstart.test",
-    ".env.test.example",
-    "AGENTS.md",
-    "CLAUDE.md",
-    "Tiltfile",
-    "apps/api/Dockerfile",
-    "apps/api/pyproject.toml",
-    "apps/web/Dockerfile",
-    "apps/web/package.json",
-    "charts/sibyl/templates/_helpers.tpl",
-    "infra/local/README.md",
-    "infra/local/secrets.yaml.example",
-    "infra/local/sibyl-values.yaml",
-    "infra/local/valkey-values.yaml",
-    "moon.yml",
-    "package.json",
-    "packages/python/sibyl-core/README.md",
-    "packages/python/sibyl-core/moon.yml",
-    "pnpm-workspace.yaml",
-    "pyproject.toml",
-    "skills/agent-activity-audit/EXAMPLES.md",
-    "setup-dev.sh",
-    "tools/dev/run-surreal-dev.sh",
-}
-EXPECTED_LEGACY_TERM_RECORD_PATHS = EXPECTED_LEGACY_TERM_SCAN_PATHS - {
-    ".devcontainer/Dockerfile",
-    ".devcontainer/devcontainer.json",
-    "apps/api/Dockerfile",
-    "apps/web/Dockerfile",
-    "apps/web/package.json",
-    "charts/sibyl/templates/_helpers.tpl",
-    "package.json",
-    "pnpm-workspace.yaml",
-    "pyproject.toml",
-}
 CORE_LEGACY_GRAPH_CONTRACT_TESTS = (
     "tests/graph/surreal",
     "tests/test_graph_batch.py",
@@ -246,13 +201,16 @@ def runtime_surface_with_graphiti(
         raw_sql_usage=(),
         session_storage_usage=(),
         graphiti_imports=records,
-        legacy_term_records=(),
         dependencies=(),
     )
 
 
-def runtime_surface_with_legacy_terms(
-    *records: LegacyTermRecord,
+def runtime_surface_with_storage(
+    *,
+    sqlmodel_tables: tuple[str, ...] = (),
+    raw_sql_usage: tuple[SqlUsageRecord, ...] = (),
+    session_storage_usage: tuple[SqlUsageRecord, ...] = (),
+    dependencies: tuple[DependencyRecord, ...] = (),
 ) -> RuntimeSurface:
     return RuntimeSurface(
         rest_routers=(),
@@ -260,23 +218,17 @@ def runtime_surface_with_legacy_terms(
         websocket_routes=(),
         mcp_tools=(),
         mcp_resources=(),
-        sqlmodel_tables=(),
-        raw_sql_usage=(),
-        session_storage_usage=(),
+        sqlmodel_tables=sqlmodel_tables,
+        raw_sql_usage=raw_sql_usage,
+        session_storage_usage=session_storage_usage,
         graphiti_imports=(),
-        legacy_term_records=records,
-        dependencies=(),
+        dependencies=dependencies,
     )
 
 
 def test_dependency_parser_strips_extras_and_markers() -> None:
     requirement = f'{_GRAPHITI_PACKAGE}[falkordb,anthropic]>=0.28.2 ; python_version >= "3.13"'
     assert parse_dependency_name(requirement) == _GRAPHITI_PACKAGE
-
-
-def test_runtime_surface_snapshot_is_current() -> None:
-    surface = collect_runtime_surface()
-    assert render_markdown(surface) == SNAPSHOT_PATH.read_text(encoding="utf-8")
 
 
 def test_graphiti_exit_inventory_covers_runtime_imports() -> None:
@@ -396,70 +348,74 @@ def test_graphiti_exit_inventory_tracks_no_graphiti_smoke_plan() -> None:
     assert "Current blockers:" not in inventory
 
 
-def test_legacy_term_inventory_covers_active_docs_and_configs() -> None:
-    surface = collect_runtime_surface()
-    inventory = SNAPSHOT_PATH.read_text(encoding="utf-8")
-    legacy_inventory = inventory.split("## Retained Legacy Term Inventory", maxsplit=1)[1].split(
-        "\n## Dependency Inventory",
-        maxsplit=1,
-    )[0]
-    record_paths = {record.path for record in surface.legacy_term_records}
-    literal_allowlist_paths = {
-        allowed.path for allowed in LEGACY_TERM_ALLOWLIST if not allowed.path.endswith("*")
-    }
-
-    assert "## Retained Legacy Term Inventory" in inventory
-    assert unclassified_legacy_term_records(surface) == ()
-    assert record_paths >= EXPECTED_LEGACY_TERM_RECORD_PATHS
-    assert record_paths >= literal_allowlist_paths
-    for record in surface.legacy_term_records:
-        allowed = legacy_term_allowlist_record(record.path)
-        assert allowed is not None
-        matching_rows = [
-            line
-            for line in legacy_inventory.splitlines()
-            if line.startswith(f"| `{record.path}` |")
-        ]
-        assert len(matching_rows) == 1
-        row = matching_rows[0]
-        assert f"| {allowed.owner} |" in row
-        assert f"| {allowed.reason} |" in row
-
-
-def test_legacy_term_scanner_covers_active_docs_and_configs() -> None:
-    scanned_paths = {path.relative_to(REPO_ROOT).as_posix() for path in iter_legacy_term_files()}
-
-    assert scanned_paths >= EXPECTED_LEGACY_TERM_SCAN_PATHS
-
-
-def test_legacy_term_inventory_rejects_unowned_active_doc() -> None:
-    record = LegacyTermRecord(
-        path="docs/guide/new-default-postgres.md",
-        terms=("postgres",),
-        count=1,
+def test_runtime_purity_rejects_raw_sql_usage(capsys) -> None:
+    record = SqlUsageRecord(
+        path="apps/api/src/sibyl/db/queries.py",
+        session_imports=(),
+        query_imports=("select",),
+        session_calls=(),
+        query_calls=("select",),
     )
-    surface = runtime_surface_with_legacy_terms(record)
+    surface = runtime_surface_with_storage(raw_sql_usage=(record,))
 
-    assert legacy_term_allowlist_record(record.path) is None
-    assert unclassified_legacy_term_records(surface) == (record,)
-
-
-def test_legacy_term_inventory_check_reports_unowned_doc(capsys) -> None:
-    record = LegacyTermRecord(
-        path="docs/guide/new-default-postgres.md",
-        terms=("postgres",),
-        count=1,
-    )
-    surface = runtime_surface_with_legacy_terms(record)
-
-    assert check_legacy_term_inventory(surface) == 1
+    assert check_runtime_purity(surface) == 1
     captured = capsys.readouterr()
-    assert "Legacy term inventory is missing 1 active doc/config files:" in captured.err
-    assert "- docs/guide/new-default-postgres.md" in captured.err
+    assert "Runtime contains 1 raw SQL query usage files:" in captured.err
+    assert "- apps/api/src/sibyl/db/queries.py" in captured.err
+
+
+def test_runtime_purity_rejects_session_storage_usage(capsys) -> None:
+    record = SqlUsageRecord(
+        path="apps/api/src/sibyl/persistence/content_runtime.py",
+        session_imports=("AsyncSession",),
+        query_imports=(),
+        session_calls=("commit",),
+        query_calls=(),
+    )
+    surface = runtime_surface_with_storage(session_storage_usage=(record,))
+
+    assert check_runtime_purity(surface) == 1
+    captured = capsys.readouterr()
+    assert "Runtime contains 1 session-backed storage access files:" in captured.err
+    assert "- apps/api/src/sibyl/persistence/content_runtime.py" in captured.err
+
+
+def test_runtime_purity_rejects_sqlmodel_tables(capsys) -> None:
+    surface = runtime_surface_with_storage(sqlmodel_tables=("User",))
+
+    assert check_runtime_purity(surface) == 1
+    captured = capsys.readouterr()
+    assert "Runtime declares 1 SQLModel tables:" in captured.err
+    assert "- User" in captured.err
+
+
+def test_runtime_purity_rejects_unpinned_legacy_dependency(capsys) -> None:
+    record = DependencyRecord(
+        project="apps/api/pyproject.toml",
+        dependency="sqlalchemy>=2.0",
+        classification="legacy",
+        scope="default",
+    )
+    surface = runtime_surface_with_storage(dependencies=(record,))
+
+    assert check_runtime_purity(surface) == 1
+    captured = capsys.readouterr()
+    assert "Runtime declares 1 legacy dependencies outside the frozen allowlist:" in captured.err
+    assert "- apps/api/pyproject.toml: sqlalchemy>=2.0 (default)" in captured.err
+
+
+def test_runtime_purity_holds_on_real_surface(capsys) -> None:
+    surface = collect_runtime_surface()
+
+    assert check_runtime_purity(surface) == 0
+    captured = capsys.readouterr()
+    assert "Runtime purity holds" in captured.out
 
 
 def test_allowlist_matching_rejects_bare_wildcard() -> None:
-    record = LegacyTermAllowlistRecord(path="*", owner="bad", reason="bad")
+    record = GraphitiCompatibilityRecord(
+        path="*", classification="test", owner="bad", criteria="bad"
+    )
 
     with pytest.raises(ValueError, match="Bare wildcard"):
         _path_matches_allowlist("docs/guide/new-default-postgres.md", record)
