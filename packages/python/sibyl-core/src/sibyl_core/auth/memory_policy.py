@@ -644,11 +644,12 @@ def stamp_memory_scope_metadata(
         return stamped
 
     stamped["memory_scope"] = scope.value
-    if scope is MemoryScope.PRIVATE:
-        if owner := _optional_str(principal_id):
-            stamped["principal_id"] = owner
-        return stamped
-    if key := _optional_str(scope_key):
+    if author := _optional_str(principal_id):
+        stamped["principal_id"] = author
+    # A private row resolves its owner as principal_id or scope_key, so it
+    # carries no scope key at all; on every other scope the key names the
+    # audience and principal_id is only authorship.
+    if scope is not MemoryScope.PRIVATE and (key := _optional_str(scope_key)):
         stamped["scope_key"] = key
     return stamped
 
