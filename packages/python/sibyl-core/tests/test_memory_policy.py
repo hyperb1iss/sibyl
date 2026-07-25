@@ -576,7 +576,7 @@ def test_search_scope_policy_denies_bands_it_cannot_verify() -> None:
 # through memory_metadata_read_allowed; these do something else with the value.
 _SCOPE_READERS_THAT_DO_NOT_AUTHORIZE = {
     "audit/filters.py::audit_event_matches_resource": "filters an audit log by a recorded value",
-    "models/reflection.py::from_dict": "deserializes a stored field",
+    "models/reflection.py::ClaimRecord.from_dict": "deserializes a stored field",
     "projection/memory.py::_projected_entity": "write stamp: mirrors an inherited scope",
     "projection/memory.py::_projected_fact_entity": "write stamp: mirrors an inherited scope",
     "projection/memory.py::_projection_allowed": "derivation gate: refuses to project private and delegated sources at all",
@@ -597,11 +597,18 @@ _SCOPE_READERS_THAT_DO_NOT_AUTHORIZE = {
 def _scope_reading_functions(root: Path) -> dict[str, list[int]]:
     """Every function that reads memory_scope, found structurally.
 
-    A line-oriented regex missed multiline reads, .pop(), aliases, constants,
-    helper indirection and mapping destructuring, and its exemptions were
-    module-wide so a new authorizing copy inside an already-listed file passed
-    silently. Walking the AST catches the read however it is spelled and
-    attributes it to the enclosing function.
+    Catches the literal key in a subscript or a .get/.pop/.setdefault, and the
+    same read through a name bound to that literal, so
+    `KEY = "memory_scope"; bag.get(KEY)` is not a way around the inventory.
+    Functions are recorded by their full nested path, so two same-named methods
+    in one module do not collide into a single exemption.
+
+    Known limits, stated rather than implied. It does not follow a value
+    through a helper that returns it, an attribute read (`getattr(bag, name)`),
+    a key built at runtime from pieces, or a mapping unpacked by `**`. It reads
+    one module at a time and does not resolve imported constants. Those remain
+    reachable by a determined author; the inventory raises the cost and makes
+    the common spellings fail loudly, it does not prove their absence.
     """
     policy_module = root / "auth" / "memory_policy.py"
     found: dict[str, list[int]] = {}
@@ -614,12 +621,29 @@ def _scope_reading_functions(root: Path) -> dict[str, list[int]]:
         except SyntaxError:  # pragma: no cover - not expected in-tree
             continue
 
-        scopes: list[str] = []
+        # Names bound to the literal anywhere in the module, so the indirect
+        # spelling resolves back to the same read.
+        aliases: set[str] = set()
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Assign)
+                and isinstance(node.value, ast.Constant)
+                and node.value.value == "memory_scope"
+            ):
+                aliases.update(target.id for target in node.targets if isinstance(target, ast.Name))
+            elif (
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.value, ast.Constant)
+                and node.value.value == "memory_scope"
+                and isinstance(node.target, ast.Name)
+            ):
+                aliases.add(node.target.id)
 
         class _Visitor(ast.NodeVisitor):
-            def __init__(self, module: str, stack: list[str]) -> None:
+            def __init__(self, module: str, keys: set[str]) -> None:
                 self.module = module
-                self.stack = stack
+                self.keys = keys
+                self.stack: list[str] = []
 
             def _enter(self, node: ast.AST) -> None:
                 self.stack.append(getattr(node, "name", "<module>"))
@@ -628,22 +652,23 @@ def _scope_reading_functions(root: Path) -> dict[str, list[int]]:
 
             visit_FunctionDef = _enter
             visit_AsyncFunctionDef = _enter
+            visit_ClassDef = _enter
 
             def _record(self, node: ast.AST) -> None:
-                key = f"{self.module}::{self.stack[-1] if self.stack else '<module>'}"
-                found.setdefault(key, []).append(node.lineno)
+                where = ".".join(self.stack) if self.stack else "<module>"
+                found.setdefault(f"{self.module}::{where}", []).append(node.lineno)
 
             def _is_scope_key(self, node: ast.AST) -> bool:
-                return isinstance(node, ast.Constant) and node.value == "memory_scope"
+                if isinstance(node, ast.Constant):
+                    return node.value == "memory_scope"
+                return isinstance(node, ast.Name) and node.id in self.keys
 
             def visit_Subscript(self, node: ast.Subscript) -> None:
-                # bag["memory_scope"]
                 if self._is_scope_key(node.slice):
                     self._record(node)
                 self.generic_visit(node)
 
             def visit_Call(self, node: ast.Call) -> None:
-                # bag.get("memory_scope"), .pop(...), .setdefault(...)
                 func = node.func
                 if (
                     isinstance(func, ast.Attribute)
@@ -654,7 +679,7 @@ def _scope_reading_functions(root: Path) -> dict[str, list[int]]:
                     self._record(node)
                 self.generic_visit(node)
 
-        _Visitor(str(path.relative_to(root)), scopes).visit(tree)
+        _Visitor(str(path.relative_to(root)), aliases).visit(tree)
 
     return found
 
