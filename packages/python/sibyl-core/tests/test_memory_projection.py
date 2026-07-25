@@ -628,6 +628,52 @@ async def test_project_extracted_memory_entities_scopes_private_documents_by_pri
 
 
 @pytest.mark.asyncio
+async def test_project_extracted_memory_entities_inherits_private_scope_binding() -> None:
+    """Extraction projects private sources, so children must inherit the binding.
+
+    Unlike the heuristic path this one does not skip private sources; it relies
+    on every projected row carrying the owner's scope forward. If that
+    inheritance breaks, the derived entities read as unscoped and retrieval
+    hands a private memory's extracted topics to the whole organization.
+    """
+    source = _document(
+        "A private dossier says SurrealDB powers the memory graph.",
+        metadata={"memory_scope": "private", "principal_id": "user-1"},
+    )
+    entity_manager = SimpleNamespace(
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda entities, **_: [entity.id for entity in entities]
+        )
+    )
+    relationship_manager = SimpleNamespace(create_bulk=AsyncMock(return_value=(1, 0)))
+
+    result = await project_extracted_memory_entities(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        sources=[source],
+        group_id="org-123",
+        created_source_ids=["raw-doc"],
+        extractions_by_source_id={
+            "raw-doc": [
+                ExtractedMemoryEntity(
+                    name="SurrealDB",
+                    entity_type="tool",
+                    summary="Native graph database",
+                    evidence="SurrealDB powers the memory graph.",
+                    confidence=0.9,
+                )
+            ]
+        },
+        generate_embeddings=False,
+    )
+
+    assert result.projected_entities == 1
+    created_entities = entity_manager.create_direct_bulk.await_args.args[0]
+    assert created_entities[0].metadata["memory_scope"] == "private"
+    assert created_entities[0].metadata["principal_id"] == "user-1"
+
+
+@pytest.mark.asyncio
 async def test_project_memory_entities_skips_private_scope() -> None:
     source = _session(
         "My private notes mention Samsung TV purchase details.",

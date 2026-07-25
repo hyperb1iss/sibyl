@@ -1235,6 +1235,84 @@ async def test_delete_project_routes_through_runtime_project_record() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_entity_binds_scoped_metadata_to_authenticated_principal() -> None:
+    """Scoped graph rows bind to the caller's identity, not the payload's claim.
+
+    The CLI captures over HTTP and cannot know its own principal, so the route
+    supplies it. Trusting the body instead would let a client plant a row that
+    reads as another user's private memory.
+    """
+    org = _org()
+    ctx = _ctx()
+    entity = EntityCreate(
+        name="Private capture",
+        content="Capture this.",
+        entity_type=EntityType.DECISION,
+        metadata={
+            "capture_mode": "remember",
+            "memory_scope": "private",
+            "principal_id": "victim",
+        },
+    )
+    add_result = SimpleNamespace(success=True, id="decision_1", message="ok")
+    add_mock = AsyncMock(return_value=add_result)
+
+    with (
+        patch("sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()),
+        patch("sibyl_core.tools.core.add", add_mock),
+        patch("sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock()),
+        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entities.log_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.entities._archive_raw_capture", AsyncMock()),
+    ):
+        await create_entity(
+            request=_request(),
+            entity=entity,
+            org=org,
+            ctx=ctx,
+            content_session=None,
+            sync=False,
+        )
+
+    graph_metadata = add_mock.await_args.kwargs["metadata"]
+    assert graph_metadata["memory_scope"] == "private"
+    assert graph_metadata["principal_id"] == str(ctx.user.id)
+
+
+@pytest.mark.asyncio
+async def test_create_entity_drops_scope_principal_without_authenticated_user() -> None:
+    org = _org()
+    ctx = SimpleNamespace(user=None)
+    entity = EntityCreate(
+        name="Private capture",
+        content="Capture this.",
+        entity_type=EntityType.DECISION,
+        metadata={"memory_scope": "private", "principal_id": "victim"},
+    )
+    add_result = SimpleNamespace(success=True, id="decision_1", message="ok")
+    add_mock = AsyncMock(return_value=add_result)
+
+    with (
+        patch("sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()),
+        patch("sibyl_core.tools.core.add", add_mock),
+        patch("sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock()),
+        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entities.log_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.entities._archive_raw_capture", AsyncMock()),
+    ):
+        await create_entity(
+            request=_request(),
+            entity=entity,
+            org=org,
+            ctx=ctx,
+            content_session=None,
+            sync=False,
+        )
+
+    assert "principal_id" not in add_mock.await_args.kwargs["metadata"]
+
+
+@pytest.mark.asyncio
 async def test_create_entity_sanitizes_raw_capture_scope_metadata() -> None:
     org = _org()
     ctx = _ctx()

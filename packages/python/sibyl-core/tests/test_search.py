@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -23,6 +24,7 @@ from sibyl_core.embeddings.providers import (
     embedding_usage_delta,
     embedding_usage_snapshot,
 )
+from sibyl_core.memory_pipeline.capture import MemoryCaptureRequest, MemoryCaptureService
 from sibyl_core.memory_pipeline.retrieval import CandidateSourceResult
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.retrieval.candidates import CandidateKind, CandidateScope
@@ -679,6 +681,101 @@ def test_candidate_allowed_allows_private_scope_key_match() -> None:
             project_id=None,
         ),
         plan=plan,
+        requested_types=set(),
+        facet=None,
+    )
+
+
+async def _capture_private_note_metadata(principal_id: str, project_id: str) -> dict[str, object]:
+    """Run a real capture and hand back the metadata the graph row would carry."""
+    captured: dict[str, object] = {}
+
+    async def remember_raw_memory(_request: MemoryCaptureRequest) -> dict[str, object]:
+        return {"id": "raw_private_1"}
+
+    async def create_graph_entity(
+        _request: MemoryCaptureRequest,
+        metadata: Mapping[str, object],
+    ) -> dict[str, object]:
+        captured.update(metadata)
+        return {"id": "note_private_1"}
+
+    await MemoryCaptureService(
+        remember_raw_memory=remember_raw_memory,
+        create_graph_entity=create_graph_entity,
+    ).capture(
+        MemoryCaptureRequest(
+            title="Salary negotiation notes",
+            content="Numbers I do not want my teammates reading.",
+            entity_type="note",
+            metadata={"capture_mode": "remember", "project_id": project_id},
+            principal_id=principal_id,
+        )
+    )
+    return captured
+
+
+def _plan_for(principal_id: str, project_id: str) -> search_module.RetrievalPlan:
+    return build_context_retrieval_plan(
+        query="salary",
+        organization_id="org-123",
+        facets=[ContextFacet.RECENT_MEMORY],
+        facet_types={ContextFacet.RECENT_MEMORY: ["episode", "note"]},
+        principal_id=principal_id,
+        project=project_id,
+        accessible_projects={project_id},
+    )
+
+
+@pytest.mark.asyncio
+async def test_captured_private_memory_is_hidden_from_project_co_member() -> None:
+    """A private capture must not reach another principal who shares the project.
+
+    Graph rows are filtered by group_id alone, and the project filter passes any
+    co-member, so the scope stamped at capture time is the only thing standing
+    between a private memory and the rest of the organization.
+    """
+    metadata = await _capture_private_note_metadata("user-alice", "project_123")
+
+    candidate = search_module._candidate_from_node_record(
+        {
+            "uuid": "note_private_1",
+            "name": "Salary negotiation notes",
+            "group_id": "org-123",
+            "project_id": "project_123",
+            "attributes": metadata,
+        },
+        signal=RetrievalSignal.NODE_FULLTEXT,
+        score=1.0,
+    )
+
+    assert not search_module._candidate_allowed(
+        candidate,
+        plan=_plan_for("user-bob", "project_123"),
+        requested_types=set(),
+        facet=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_captured_private_memory_stays_visible_to_its_owner() -> None:
+    metadata = await _capture_private_note_metadata("user-alice", "project_123")
+
+    candidate = search_module._candidate_from_node_record(
+        {
+            "uuid": "note_private_1",
+            "name": "Salary negotiation notes",
+            "group_id": "org-123",
+            "project_id": "project_123",
+            "attributes": metadata,
+        },
+        signal=RetrievalSignal.NODE_FULLTEXT,
+        score=1.0,
+    )
+
+    assert search_module._candidate_allowed(
+        candidate,
+        plan=_plan_for("user-alice", "project_123"),
         requested_types=set(),
         facet=None,
     )
