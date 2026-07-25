@@ -157,3 +157,102 @@ def test_temporal_wire_rejects_nothing_by_accident(user_id: UUID) -> None:
     response = TestTemporalWire()._request(user_id)
 
     assert response.status_code == 200
+
+
+class TestRagRelatedEntitiesWire:
+    """GET /rag/pages/{id}/entities returns entity names and descriptions."""
+
+    def _request(self, user_id: UUID):
+        from sibyl.api.routes.rag import router
+
+        private = SimpleNamespace(
+            id="decision_private",
+            name=SECRET_NAME,
+            description=SECRET_TEXT,
+            content=SECRET_TEXT,
+            entity_type=SimpleNamespace(value="episode"),
+            metadata={"memory_scope": "private", "principal_id": str(OWNER_ID)},
+        )
+        shared = SimpleNamespace(
+            id="episode_shared",
+            name="Shared episode",
+            description="org visible",
+            content="org visible",
+            entity_type=SimpleNamespace(value="episode"),
+            metadata={},
+        )
+        entity_manager = SimpleNamespace(
+            search=AsyncMock(return_value=[(private, 0.9), (shared, 0.8)])
+        )
+
+        with (
+            patch(
+                "sibyl.api.routes.rag.get_entity_graph_runtime",
+                AsyncMock(return_value=SimpleNamespace(entity_manager=entity_manager)),
+            ),
+            patch(
+                "sibyl.api.routes.rag.list_accessible_project_graph_ids",
+                AsyncMock(return_value=set()),
+            ),
+            patch("sibyl.api.routes.rag.get_content_read_session") as session,
+            patch(
+                "sibyl.api.routes.rag.get_crawled_document_for_org",
+                AsyncMock(return_value=SimpleNamespace(title="Doc title")),
+            ),
+            _wire(router, user_id) as client,
+        ):
+            session.return_value.__aenter__ = AsyncMock(return_value=object())
+            session.return_value.__aexit__ = AsyncMock(return_value=False)
+            return client.get("/rag/pages/00000000-0000-0000-0000-0000000000cc/entities")
+
+    def test_non_owner_sees_no_private_entity(self) -> None:
+        response = self._request(OUTSIDER_ID)
+
+        assert response.status_code == 200
+        assert SECRET_NAME not in response.text
+        assert SECRET_TEXT not in response.text
+
+    def test_owner_still_sees_their_own_entity(self) -> None:
+        response = self._request(OWNER_ID)
+
+        assert response.status_code == 200
+        assert SECRET_NAME in response.text
+
+
+class TestProjectMetricsWire:
+    """GET /metrics/projects/{id} summarized any project for any org member."""
+
+    def _request(self, *, member: bool):
+        from sibyl.api.routes.metrics import router
+        from sibyl.auth.errors import ProjectAccessDeniedError
+
+        acl = (
+            AsyncMock(return_value=None)
+            if member
+            else AsyncMock(side_effect=ProjectAccessDeniedError("proj-x", "viewer", None))
+        )
+        service = AsyncMock()
+        service.get_entity.return_value = SimpleNamespace(id="proj-x", name="P", metadata={})
+        runtime = SimpleNamespace(
+            entity_manager=SimpleNamespace(list_by_type=AsyncMock(return_value=[]))
+        )
+
+        with (
+            patch("sibyl.api.routes.metrics.verify_entity_project_access", acl),
+            patch(
+                "sibyl.api.routes.metrics.get_knowledge_read_adapter",
+                AsyncMock(return_value=service),
+            ),
+            patch(
+                "sibyl.api.routes.metrics.get_entity_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            _wire(router, OUTSIDER_ID) as client,
+        ):
+            return client.get("/metrics/projects/proj-x")
+
+    def test_non_member_is_refused(self) -> None:
+        assert self._request(member=False).status_code == 403
+
+    def test_member_still_gets_metrics(self) -> None:
+        assert self._request(member=True).status_code == 200
