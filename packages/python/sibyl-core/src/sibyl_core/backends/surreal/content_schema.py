@@ -11,6 +11,10 @@ from sibyl_core.backends.surreal.schema import (
     render_surreal_compatible_sql,
 )
 from sibyl_core.backends.surreal.schema_helpers import is_missing_table_error, split_statements
+from sibyl_core.backends.surreal.schema_invariants import (
+    SchemaInvariantPlan,
+    expected_unique_indexes,
+)
 from sibyl_core.backends.surreal.schema_version import (
     SCHEMA_VERSION_TABLE,
     SchemaMigration,
@@ -726,6 +730,14 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
     )
 
 
+def content_schema_invariant_plan(*, url: str = "") -> SchemaInvariantPlan:
+    return SchemaInvariantPlan(
+        schemafull_tables=CONTENT_TABLES,
+        relation_tables=CONTENT_RELATION_TABLES,
+        unique_indexes=expected_unique_indexes(_content_schema_migrations(url=url)),
+    )
+
+
 async def bootstrap_content_schema(client: SurrealContentClient, *, reset: bool = False) -> None:
     if reset:
         for table in (*CONTENT_TABLES, SCHEMA_VERSION_TABLE):
@@ -1082,5 +1094,6 @@ __all__ = [
     "CONTENT_TABLES",
     "CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS",
     "bootstrap_content_schema",
+    "content_schema_invariant_plan",
     "content_schemafull_repair_statement",
 ]

@@ -6,6 +6,10 @@ from typing import TYPE_CHECKING
 
 from sibyl_core.auth import OrganizationRole, ProjectRole, ProjectVisibility
 from sibyl_core.backends.surreal.schema_helpers import is_missing_table_error, split_statements
+from sibyl_core.backends.surreal.schema_invariants import (
+    SchemaInvariantPlan,
+    expected_unique_indexes,
+)
 from sibyl_core.backends.surreal.schema_version import (
     SCHEMA_VERSION_TABLE,
     SchemaMigration,
@@ -674,6 +678,13 @@ AUTH_SCHEMA_MIGRATIONS = (
 )
 
 
+def auth_schema_invariant_plan() -> SchemaInvariantPlan:
+    return SchemaInvariantPlan(
+        schemafull_tables=AUTH_TABLES,
+        unique_indexes=expected_unique_indexes(AUTH_SCHEMA_MIGRATIONS),
+    )
+
+
 async def bootstrap_auth_schema(client: SurrealAuthClient, *, reset: bool = False) -> None:
     if reset:
         for table in (*AUTH_TABLES, SCHEMA_VERSION_TABLE):
@@ -813,5 +824,6 @@ __all__ = [
     "AUTH_TABLES",
     "CORE_AUTH_TABLES",
     "EXTENDED_AUTH_TABLES",
+    "auth_schema_invariant_plan",
     "bootstrap_auth_schema",
 ]
