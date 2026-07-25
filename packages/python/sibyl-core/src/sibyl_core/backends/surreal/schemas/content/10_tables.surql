@@ -1,4 +1,5 @@
 DEFINE TABLE IF NOT EXISTS crawl_sources SCHEMAFULL;
+ALTER TABLE IF EXISTS crawl_sources SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON crawl_sources TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON crawl_sources TYPE string;
 DEFINE FIELD IF NOT EXISTS name ON crawl_sources TYPE string DEFAULT '';
@@ -32,6 +33,7 @@ DEFINE INDEX IF NOT EXISTS idx_crawl_sources_org_status_created ON crawl_sources
 DEFINE INDEX IF NOT EXISTS idx_crawl_sources_name_ft ON crawl_sources FIELDS name FULLTEXT ANALYZER title_analyzer BM25 HIGHLIGHTS;
 
 DEFINE TABLE IF NOT EXISTS crawled_documents SCHEMAFULL;
+ALTER TABLE IF EXISTS crawled_documents SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON crawled_documents TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON crawled_documents TYPE option<string> DEFAULT '';
 DEFINE FIELD IF NOT EXISTS source_id ON crawled_documents TYPE string;
@@ -68,6 +70,7 @@ DEFINE INDEX IF NOT EXISTS idx_crawled_documents_title_ft ON crawled_documents F
 DEFINE INDEX IF NOT EXISTS idx_crawled_documents_content_ft ON crawled_documents FIELDS content FULLTEXT ANALYZER content_analyzer BM25 HIGHLIGHTS;
 
 DEFINE TABLE IF NOT EXISTS document_chunks SCHEMAFULL;
+ALTER TABLE IF EXISTS document_chunks SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON document_chunks TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON document_chunks TYPE option<string> DEFAULT '';
 DEFINE FIELD IF NOT EXISTS source_id ON document_chunks TYPE option<string> DEFAULT '';
@@ -106,6 +109,7 @@ DEFINE INDEX IF NOT EXISTS idx_document_chunks_embedding ON document_chunks FIEL
     HNSW DIMENSION {EMBEDDING_DIM} DIST COSINE TYPE F32 EFC 150 M 12;
 
 DEFINE TABLE IF NOT EXISTS entity SCHEMAFULL;
+ALTER TABLE IF EXISTS entity SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON entity TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON entity TYPE string;
 DEFINE FIELD IF NOT EXISTS created_at ON entity TYPE datetime DEFAULT time::now();
@@ -115,6 +119,7 @@ DEFINE INDEX IF NOT EXISTS idx_content_entity_uuid ON entity FIELDS uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_content_entity_org_uuid ON entity FIELDS organization_id, uuid UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS raw_captures SCHEMAFULL CHANGEFEED 7d;
+ALTER TABLE IF EXISTS raw_captures SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON raw_captures TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON raw_captures TYPE string;
 DEFINE FIELD IF NOT EXISTS source_id ON raw_captures TYPE string DEFAULT '';
@@ -170,6 +175,7 @@ DEFINE INDEX IF NOT EXISTS idx_raw_captures_last_used ON raw_captures FIELDS org
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_created_at ON raw_captures FIELDS created_at;
 
 DEFINE TABLE IF NOT EXISTS memory_usage_events SCHEMAFULL;
+ALTER TABLE IF EXISTS memory_usage_events SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON memory_usage_events TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON memory_usage_events TYPE string;
 DEFINE FIELD IF NOT EXISTS session_key ON memory_usage_events TYPE string;
@@ -194,6 +200,7 @@ DEFINE INDEX IF NOT EXISTS idx_memory_usage_events_session ON memory_usage_event
 DEFINE INDEX IF NOT EXISTS idx_memory_usage_events_created_at ON memory_usage_events FIELDS created_at;
 
 DEFINE TABLE IF NOT EXISTS api_idempotency_records SCHEMAFULL;
+ALTER TABLE IF EXISTS api_idempotency_records SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON api_idempotency_records TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON api_idempotency_records TYPE string;
 DEFINE FIELD IF NOT EXISTS principal_id ON api_idempotency_records TYPE string;
@@ -211,6 +218,7 @@ DEFINE INDEX IF NOT EXISTS idx_api_idempotency_records_scope ON api_idempotency_
 DEFINE INDEX IF NOT EXISTS idx_api_idempotency_records_created_at ON api_idempotency_records FIELDS created_at;
 
 DEFINE TABLE IF NOT EXISTS source_imports SCHEMAFULL;
+ALTER TABLE IF EXISTS source_imports SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON source_imports TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON source_imports TYPE string;
 DEFINE FIELD IF NOT EXISTS principal_id ON source_imports TYPE string;
@@ -248,6 +256,7 @@ DEFINE INDEX IF NOT EXISTS idx_source_imports_principal ON source_imports FIELDS
 DEFINE INDEX IF NOT EXISTS idx_source_imports_status ON source_imports FIELDS organization_id, status;
 
 DEFINE TABLE IF NOT EXISTS content_changefeed_cursors SCHEMAFULL;
+ALTER TABLE IF EXISTS content_changefeed_cursors SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON content_changefeed_cursors TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON content_changefeed_cursors TYPE string;
 DEFINE FIELD IF NOT EXISTS table_name ON content_changefeed_cursors TYPE string;
@@ -265,6 +274,7 @@ DEFINE INDEX IF NOT EXISTS idx_content_changefeed_cursors_updated_at
     ON content_changefeed_cursors FIELDS updated_at;
 
 DEFINE TABLE IF NOT EXISTS derived_from SCHEMAFULL TYPE RELATION IN raw_captures OUT source_imports ENFORCED;
+ALTER TABLE IF EXISTS derived_from SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON derived_from TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON derived_from TYPE string;
 DEFINE FIELD IF NOT EXISTS raw_memory_id ON derived_from TYPE string;
@@ -277,6 +287,7 @@ DEFINE INDEX IF NOT EXISTS idx_derived_from_org_raw ON derived_from FIELDS organ
 DEFINE INDEX IF NOT EXISTS idx_derived_from_org_import ON derived_from FIELDS organization_id, source_import_id;
 
 DEFINE TABLE IF NOT EXISTS chunk_of SCHEMAFULL TYPE RELATION IN document_chunks OUT crawled_documents ENFORCED;
+ALTER TABLE IF EXISTS chunk_of SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON chunk_of TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON chunk_of TYPE string;
 DEFINE FIELD IF NOT EXISTS chunk_id ON chunk_of TYPE string;
@@ -289,6 +300,7 @@ DEFINE INDEX IF NOT EXISTS idx_chunk_of_org_chunk ON chunk_of FIELDS organizatio
 DEFINE INDEX IF NOT EXISTS idx_chunk_of_org_document ON chunk_of FIELDS organization_id, document_id;
 
 DEFINE TABLE IF NOT EXISTS supersedes SCHEMAFULL TYPE RELATION IN raw_captures OUT raw_captures ENFORCED;
+ALTER TABLE IF EXISTS supersedes SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON supersedes TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON supersedes TYPE string;
 DEFINE FIELD IF NOT EXISTS raw_memory_id ON supersedes TYPE string;
@@ -301,6 +313,7 @@ DEFINE INDEX IF NOT EXISTS idx_supersedes_org_raw ON supersedes FIELDS organizat
 DEFINE INDEX IF NOT EXISTS idx_supersedes_org_superseded ON supersedes FIELDS organization_id, superseded_raw_memory_id;
 
 DEFINE TABLE IF NOT EXISTS extracted_into SCHEMAFULL TYPE RELATION IN entity OUT document_chunks;
+ALTER TABLE IF EXISTS extracted_into SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON extracted_into TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON extracted_into TYPE string;
 DEFINE FIELD IF NOT EXISTS entity_id ON extracted_into TYPE string;
@@ -314,6 +327,7 @@ DEFINE INDEX IF NOT EXISTS idx_extracted_into_org_entity ON extracted_into FIELD
 DEFINE INDEX IF NOT EXISTS idx_extracted_into_org_chunk ON extracted_into FIELDS organization_id, chunk_id;
 
 DEFINE TABLE IF NOT EXISTS system_settings SCHEMAFULL;
+ALTER TABLE IF EXISTS system_settings SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS key ON system_settings TYPE string;
 DEFINE FIELD IF NOT EXISTS value ON system_settings TYPE string DEFAULT '';
 DEFINE FIELD IF NOT EXISTS is_secret ON system_settings TYPE bool DEFAULT false;
@@ -324,6 +338,7 @@ DEFINE FIELD IF NOT EXISTS updated_at ON system_settings TYPE datetime DEFAULT t
 DEFINE INDEX IF NOT EXISTS idx_system_settings_key ON system_settings FIELDS key UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS telemetry_rollups SCHEMAFULL;
+ALTER TABLE IF EXISTS telemetry_rollups SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON telemetry_rollups TYPE string;
 DEFINE FIELD IF NOT EXISTS bucket_key ON telemetry_rollups TYPE string;
 DEFINE FIELD IF NOT EXISTS bucket_start ON telemetry_rollups TYPE datetime;
@@ -341,6 +356,7 @@ DEFINE INDEX IF NOT EXISTS idx_telemetry_rollups_bucket_key ON telemetry_rollups
 DEFINE INDEX IF NOT EXISTS idx_telemetry_rollups_bucket_start ON telemetry_rollups FIELDS bucket_start;
 
 DEFINE TABLE IF NOT EXISTS backup_settings SCHEMAFULL;
+ALTER TABLE IF EXISTS backup_settings SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON backup_settings TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON backup_settings TYPE string;
 DEFINE FIELD IF NOT EXISTS enabled ON backup_settings TYPE bool DEFAULT true;
@@ -357,6 +373,7 @@ DEFINE INDEX IF NOT EXISTS idx_backup_settings_uuid ON backup_settings FIELDS uu
 DEFINE INDEX IF NOT EXISTS idx_backup_settings_org ON backup_settings FIELDS organization_id UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS backups SCHEMAFULL;
+ALTER TABLE IF EXISTS backups SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON backups TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON backups TYPE string;
 DEFINE FIELD IF NOT EXISTS backup_id ON backups TYPE string DEFAULT '';

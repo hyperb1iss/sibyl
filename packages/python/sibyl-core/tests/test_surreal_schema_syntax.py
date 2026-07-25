@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 import time
+from pathlib import Path
 
 import jwt
 import pytest
@@ -174,7 +176,13 @@ def test_flexible_object_fields_keep_server_accepted_token_order() -> None:
     assert "TYPE object FLEXIBLE" in schema
 
 
-def test_runtime_schemafull_tables_define_schemafull_without_redundant_alter() -> None:
+def test_runtime_schemafull_tables_pair_define_with_alter() -> None:
+    """The ALTER is not redundant with the DEFINE: it is the only statement that converts.
+
+    `DEFINE TABLE IF NOT EXISTS` no-ops against a table Surreal already auto-created
+    SCHEMALESS on a first application write, so without the ALTER such a table never
+    becomes SCHEMAFULL and its FLEXIBLE fields fail forever.
+    """
     schema = "\n".join((AUTH_SCHEMA_DEFINITIONS, CONTENT_SCHEMA_DEFINITIONS))
     content_tables = tuple(
         table
@@ -188,11 +196,12 @@ def test_runtime_schemafull_tables_define_schemafull_without_redundant_alter() -
 
     for table in tables:
         assert f"DEFINE TABLE IF NOT EXISTS {table} SCHEMAFULL;" in schema
-        assert f"ALTER TABLE IF EXISTS {table} SCHEMAFULL;" not in schema
+        assert f"ALTER TABLE IF EXISTS {table} SCHEMAFULL;" in schema
     assert "DEFINE TABLE IF NOT EXISTS raw_captures SCHEMAFULL CHANGEFEED 7d;" in schema
+    assert "ALTER TABLE IF EXISTS raw_captures SCHEMAFULL;" in schema
     for table in CONTENT_RELATION_TABLES:
         assert f"DEFINE TABLE IF NOT EXISTS {table} SCHEMAFULL TYPE RELATION" in schema
-        assert f"ALTER TABLE IF EXISTS {table} SCHEMAFULL;" not in schema
+        assert f"ALTER TABLE IF EXISTS {table} SCHEMAFULL;" in schema
 
 
 def test_auth_invitation_schema_supports_hashed_tokens() -> None:
@@ -1390,3 +1399,149 @@ async def test_content_bootstrap_does_not_repeat_migrations_after_recording_vers
     assert not any(
         "DEFINE TABLE IF NOT EXISTS crawl_sources" in statement for statement in second_calls
     )
+
+
+def _schemafull_define_pairing_gaps(text: str) -> list[str]:
+    lines = text.splitlines()
+    gaps: list[str] = []
+    for index, line in enumerate(lines):
+        match = re.match(r"^\s*DEFINE TABLE (?:IF NOT EXISTS|OVERWRITE) (\w+) SCHEMAFULL\b", line)
+        if match is None:
+            continue
+        table = match.group(1)
+        following = lines[index + 1].strip() if index + 1 < len(lines) else ""
+        if following != f"ALTER TABLE IF EXISTS {table} SCHEMAFULL;":
+            gaps.append(f"{table} (line {index + 1})")
+    return gaps
+
+
+def _schema_source_texts() -> dict[str, str]:
+    from sibyl_core.backends.surreal import auth_schema, content_schema, schema
+
+    sources = {
+        module.__name__: Path(str(module.__file__)).read_text(encoding="utf-8")
+        for module in (content_schema, auth_schema, schema)
+    }
+    surql = Path(str(content_schema.__file__)).with_name("schemas") / "content" / "10_tables.surql"
+    sources[surql.name] = surql.read_text(encoding="utf-8")
+    return sources
+
+
+def test_every_schemafull_define_is_paired_with_an_alter() -> None:
+    """`DEFINE TABLE IF NOT EXISTS ... SCHEMAFULL` no-ops on an auto-created SCHEMALESS table.
+
+    Without the paired ALTER the table stays SCHEMALESS forever, so any FLEXIBLE field in the
+    same migration fails on every startup and blocks every later migration.
+    """
+    gaps = {
+        name: found
+        for name, text in _schema_source_texts().items()
+        if (found := _schemafull_define_pairing_gaps(text))
+    }
+
+    assert not gaps, f"SCHEMAFULL DEFINE without paired ALTER: {gaps}"
+
+
+def test_usage_signal_migration_pairs_define_with_alter() -> None:
+    statements = split_statements(CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS)
+    define_index = statements.index("DEFINE TABLE IF NOT EXISTS memory_usage_events SCHEMAFULL;")
+
+    assert statements[define_index + 1] == "ALTER TABLE IF EXISTS memory_usage_events SCHEMAFULL;"
+    flexible_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if "metadata ON memory_usage_events" in statement and "FLEXIBLE" in statement
+    )
+    assert define_index + 1 < flexible_index
+
+
+def test_schemafull_repair_migrations_cover_every_table() -> None:
+    repair = next(
+        migration
+        for migration in _content_schema_migrations(url="memory://")
+        if migration.name == "content_schemafull_repair"
+    )
+
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= 24
+    assert repair.version == 24
+    for table in CONTENT_TABLES:
+        assert f"ALTER TABLE IF EXISTS {table} SCHEMAFULL;" in repair.statements
+
+    auth_repair = next(
+        migration
+        for migration in AUTH_SCHEMA_MIGRATIONS
+        if migration.name == "auth_schemafull_repair"
+    )
+
+    assert AUTH_SCHEMA_CURRENT_VERSION >= 6
+    for table in AUTH_TABLES:
+        assert f"ALTER TABLE IF EXISTS {table} SCHEMAFULL;" in auth_repair.statements
+
+
+@pytest.mark.asyncio
+async def test_usage_signal_migration_converts_auto_created_schemaless_table() -> None:
+    """The exact scenario that deadlocked a live store.
+
+    `memory_usage_events` is written by the usage service, which shipped ahead of the
+    migration that defines it, so Surreal auto-created the table SCHEMALESS. The guarded
+    DEFINE then no-ops and the table can never accept its FLEXIBLE metadata field.
+    """
+    db = AsyncSurreal("memory://")
+    try:
+        await db.use("schemafull_repair", "content")
+        await db.query(
+            """
+            CREATE memory_usage_events CONTENT {
+                uuid: 'event-a',
+                organization_id: 'org-a',
+                session_key: 's',
+                message_key: 'm',
+                source_surface: 'recall',
+                item_kind: 'raw_capture',
+                item_id: 'item-a',
+                signal_type: 'exposure',
+                metadata: { nested: { depth: 2 } },
+                event_at: d'2026-07-11T00:00:00Z',
+                created_at: d'2026-07-11T00:00:00Z'
+            };
+            """
+        )
+        before = await db.query("INFO FOR DB;")
+
+        for statement in split_statements(CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS):
+            if "memory_usage_events" not in statement:
+                continue
+            await db.query(statement)
+
+        after = await db.query("INFO FOR DB;")
+        rows = await db.query("SELECT uuid, metadata FROM memory_usage_events;")
+    finally:
+        await db.close()
+
+    assert "SCHEMALESS" in before["tables"]["memory_usage_events"]
+    assert "SCHEMAFULL" in after["tables"]["memory_usage_events"]
+    assert rows == [{"uuid": "event-a", "metadata": {"nested": {"depth": 2}}}]
+
+
+@pytest.mark.asyncio
+async def test_schemafull_repair_migration_converts_drifted_table() -> None:
+    """Tables that drifted SCHEMALESS before the pairing shipped are healed by the sweep."""
+    from sibyl_core.backends.surreal.content_schema import CONTENT_SCHEMAFULL_REPAIR_DEFINITIONS
+
+    db = AsyncSurreal("memory://")
+    try:
+        await db.use("schemafull_sweep", "content")
+        await db.query("CREATE entity CONTENT { uuid: 'entity-a', organization_id: 'org-a' };")
+        before = await db.query("INFO FOR DB;")
+
+        for statement in split_statements(CONTENT_SCHEMAFULL_REPAIR_DEFINITIONS):
+            await db.query(statement)
+
+        after = await db.query("INFO FOR DB;")
+        rows = await db.query("SELECT uuid FROM entity;")
+    finally:
+        await db.close()
+
+    assert "SCHEMALESS" in before["tables"]["entity"]
+    assert "SCHEMAFULL" in after["tables"]["entity"]
+    assert rows == [{"uuid": "entity-a"}]

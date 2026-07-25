@@ -52,7 +52,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 23
+CONTENT_SCHEMA_CURRENT_VERSION = 24
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -202,6 +202,7 @@ CONTENT_RAW_CAPTURE_CHANGEFEED_MIGRATION_DEFINITIONS = """
 ALTER TABLE IF EXISTS raw_captures CHANGEFEED 7d;
 
 DEFINE TABLE IF NOT EXISTS content_changefeed_cursors SCHEMAFULL;
+ALTER TABLE IF EXISTS content_changefeed_cursors SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON content_changefeed_cursors TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON content_changefeed_cursors TYPE string;
 DEFINE FIELD IF NOT EXISTS table_name ON content_changefeed_cursors TYPE string;
@@ -254,6 +255,7 @@ DEFINE INDEX IF NOT EXISTS idx_raw_captures_embedding ON raw_captures FIELDS emb
 
 CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS = """
 DEFINE TABLE IF NOT EXISTS derived_from SCHEMAFULL TYPE RELATION IN raw_captures OUT source_imports ENFORCED;
+ALTER TABLE IF EXISTS derived_from SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON derived_from TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON derived_from TYPE string;
 DEFINE FIELD IF NOT EXISTS raw_memory_id ON derived_from TYPE string;
@@ -267,6 +269,7 @@ ALTER TABLE IF EXISTS derived_from PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 
 DEFINE TABLE IF NOT EXISTS chunk_of SCHEMAFULL TYPE RELATION IN document_chunks OUT crawled_documents ENFORCED;
+ALTER TABLE IF EXISTS chunk_of SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON chunk_of TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON chunk_of TYPE string;
 DEFINE FIELD IF NOT EXISTS chunk_id ON chunk_of TYPE string;
@@ -280,6 +283,7 @@ ALTER TABLE IF EXISTS chunk_of PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 
 DEFINE TABLE IF NOT EXISTS supersedes SCHEMAFULL TYPE RELATION IN raw_captures OUT raw_captures ENFORCED;
+ALTER TABLE IF EXISTS supersedes SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON supersedes TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON supersedes TYPE string;
 DEFINE FIELD IF NOT EXISTS raw_memory_id ON supersedes TYPE string;
@@ -293,6 +297,7 @@ ALTER TABLE IF EXISTS supersedes PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 
 DEFINE TABLE IF NOT EXISTS extracted_into SCHEMAFULL TYPE RELATION IN entity OUT document_chunks;
+ALTER TABLE IF EXISTS extracted_into SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON extracted_into TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON extracted_into TYPE string;
 DEFINE FIELD IF NOT EXISTS entity_id ON extracted_into TYPE string;
@@ -309,6 +314,7 @@ ALTER TABLE IF EXISTS extracted_into PERMISSIONS
 
 CONTENT_EXTRACTED_INTO_RELATION_MIGRATION_DEFINITIONS = """
 DEFINE TABLE IF NOT EXISTS extracted_into SCHEMAFULL TYPE RELATION IN entity OUT document_chunks;
+ALTER TABLE IF EXISTS extracted_into SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON extracted_into TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON extracted_into TYPE string;
 DEFINE FIELD IF NOT EXISTS entity_id ON extracted_into TYPE string;
@@ -325,6 +331,7 @@ ALTER TABLE IF EXISTS extracted_into PERMISSIONS
 
 CONTENT_ENTITY_ANCHOR_MIGRATION_DEFINITIONS = """
 DEFINE TABLE IF NOT EXISTS entity SCHEMAFULL;
+ALTER TABLE IF EXISTS entity SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON entity TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON entity TYPE string;
 DEFINE FIELD IF NOT EXISTS created_at ON entity TYPE datetime DEFAULT time::now();
@@ -383,6 +390,7 @@ DEFINE INDEX IF NOT EXISTS idx_raw_captures_last_used
     ON raw_captures FIELDS organization_id, last_used_at, uuid;
 
 DEFINE TABLE IF NOT EXISTS memory_usage_events SCHEMAFULL;
+ALTER TABLE IF EXISTS memory_usage_events SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS uuid ON memory_usage_events TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON memory_usage_events TYPE string;
 DEFINE FIELD IF NOT EXISTS session_key ON memory_usage_events TYPE string;
@@ -544,6 +552,15 @@ DEFINE FIELD OVERWRITE misled_count ON raw_captures TYPE int DEFAULT 0;
 )
 
 
+# `DEFINE TABLE IF NOT EXISTS ... SCHEMAFULL` silently no-ops against a table Surreal
+# already auto-created SCHEMALESS on an application write, so a table whose writer shipped
+# ahead of its migration stays SCHEMALESS forever. Every DEFINE is paired with an ALTER at
+# the definition site; this sweep repairs tables that already drifted before that pairing.
+CONTENT_SCHEMAFULL_REPAIR_DEFINITIONS = "\n".join(
+    f"ALTER TABLE IF EXISTS {table} SCHEMAFULL;" for table in CONTENT_TABLES
+)
+
+
 def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
     compatible_schema = render_fulltext_compatible_sql(
         CONTENT_SCHEMA_DEFINITIONS,
@@ -688,6 +705,11 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             statements=tuple(
                 split_statements(CONTENT_RAW_CAPTURE_REQUIRED_FIELD_REPAIR_DEFINITIONS)
             ),
+        ),
+        SchemaMigration(
+            version=24,
+            name="content_schemafull_repair",
+            statements=tuple(split_statements(CONTENT_SCHEMAFULL_REPAIR_DEFINITIONS)),
         ),
     )
 
@@ -1038,6 +1060,7 @@ __all__ = [
     "CONTENT_RAW_CAPTURE_REVISION_MIGRATION_DEFINITIONS",
     "CONTENT_RELATION_TABLES",
     "CONTENT_REVIEW_STATE_DEFERRED_MIGRATION_DEFINITIONS",
+    "CONTENT_SCHEMAFULL_REPAIR_DEFINITIONS",
     "CONTENT_SCHEMA_CURRENT_VERSION",
     "CONTENT_SCHEMA_DEFINITIONS",
     "CONTENT_SCHEMA_NAME",
