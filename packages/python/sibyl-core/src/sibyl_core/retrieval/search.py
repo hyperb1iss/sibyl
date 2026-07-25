@@ -17,6 +17,7 @@ import structlog
 from sibyl_core.auth.memory_policy import (
     MemoryPolicyDecision,
     authorize_memory_read,
+    memory_metadata_read_allowed,
     memory_scope_policy_key,
 )
 from sibyl_core.backends.surreal.fulltext import (
@@ -2249,40 +2250,19 @@ def _candidate_allowed(
 
 def _candidate_scope_allowed(candidate: RetrievalCandidate, plan: RetrievalPlan) -> bool:
     metadata = candidate.metadata if isinstance(candidate.metadata, Mapping) else {}
-    raw_scope = metadata.get("memory_scope")
-    if raw_scope is None:
-        return True
-    memory_scope = _coerce_memory_scope(raw_scope)
-    if memory_scope is None:
-        return False
-    scope_key = _string_value(metadata.get("scope_key"))
-    plan_principal = plan.scopes[0].principal_id if plan.scopes else None
-    if memory_scope is MemoryScope.PRIVATE:
-        owner = _string_value(metadata.get("principal_id")) or scope_key
+    return memory_metadata_read_allowed(
+        metadata,
+        principal_id=plan.scopes[0].principal_id if plan.scopes else None,
+        project_id=plan.project,
+        accessible_projects=plan.accessible_projects,
+        agent_id=next((scope.agent_id for scope in plan.scopes if scope.agent_id), None),
         # A private candidate is only authorized if a private scope survived
         # plan filtering; otherwise an API key without a private memory grant
         # could still read the principal's own private graph rows.
-        has_private_scope = any(scope.memory_scope is MemoryScope.PRIVATE for scope in plan.scopes)
-        return has_private_scope and bool(plan_principal) and owner == plan_principal
-    agent_id = next((scope.agent_id for scope in plan.scopes if scope.agent_id), None)
-    decision = authorize_memory_read(
-        principal_id=plan_principal,
-        memory_scope=memory_scope,
-        scope_key=scope_key,
-        project_id=plan.project,
-        agent_id=agent_id,
-        accessible_projects=plan.accessible_projects,
+        private_scope_granted=any(
+            scope.memory_scope is MemoryScope.PRIVATE for scope in plan.scopes
+        ),
     )
-    return decision.allowed
-
-
-def _coerce_memory_scope(value: object) -> MemoryScope | None:
-    if isinstance(value, MemoryScope):
-        return value
-    try:
-        return MemoryScope(str(value))
-    except ValueError:
-        return None
 
 
 def _candidate_matches_types(
