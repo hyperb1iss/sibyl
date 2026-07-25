@@ -4190,6 +4190,62 @@ class TestExploreMemoryScope:
         assert response.entities == []
 
     @pytest.mark.asyncio
+    async def test_list_reports_when_scope_filtering_runs_without_a_principal(self) -> None:
+        """An empty result and 'no matches' look identical to the caller.
+
+        Enforcing against no reader denies every scoped row, so a caller that
+        forgot to thread its principal must not fail silently. An operator
+        with no reader identity opts out through enforce_memory_scope.
+        """
+        from sibyl_core.tools import explore as explore_module
+
+        entity_manager = AsyncMock()
+        entity_manager.list_by_type = AsyncMock(return_value=[self._private_memory("owner")])
+        recorded_log = MagicMock()
+
+        with (
+            patch(
+                "sibyl_core.tools.explore.get_graph_runtime",
+                AsyncMock(return_value=make_graph_runtime(entity_manager=entity_manager)),
+            ),
+            patch.object(explore_module, "log", recorded_log),
+        ):
+            response = await explore_module.explore(
+                mode="list",
+                types=["decision"],
+                accessible_projects=set(),
+                organization_id="org_123",
+            )
+
+        assert response.entities == []
+        assert recorded_log.warning.call_args[0][0] == "explore_scope_filtered_without_principal"
+
+    @pytest.mark.asyncio
+    async def test_list_stays_quiet_when_a_principal_is_present(self) -> None:
+        from sibyl_core.tools import explore as explore_module
+
+        entity_manager = AsyncMock()
+        entity_manager.list_by_type = AsyncMock(return_value=[self._private_memory("victim")])
+        recorded_log = MagicMock()
+
+        with (
+            patch(
+                "sibyl_core.tools.explore.get_graph_runtime",
+                AsyncMock(return_value=make_graph_runtime(entity_manager=entity_manager)),
+            ),
+            patch.object(explore_module, "log", recorded_log),
+        ):
+            await explore_module.explore(
+                mode="list",
+                types=["decision"],
+                accessible_projects=set(),
+                organization_id="org_123",
+                principal_id="attacker",
+            )
+
+        assert recorded_log.warning.call_count == 0
+
+    @pytest.mark.asyncio
     async def test_list_keeps_a_private_row_for_its_owner(self) -> None:
         from sibyl_core.tools.explore import explore
 

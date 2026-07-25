@@ -1334,6 +1334,8 @@ async def test_remember_mcp_memory_links_single_active_project_task() -> None:
         status="doing",
         limit=2,
         organization_id=ctx.org_id,
+        principal_id=ctx.user_id,
+        accessible_projects={"project-a"},
     )
 
 
@@ -1348,6 +1350,7 @@ async def test_resolve_mcp_capture_links_skips_active_lookup_without_project() -
             related_to=["plan_1"],
             task_ids=["task_1", "plan_1"],
             active_task=True,
+            accessible_projects={"project-a"},
         )
 
     assert links == ["plan_1", "task_1"]
@@ -1370,9 +1373,35 @@ async def test_resolve_mcp_capture_links_skips_ambiguous_active_tasks() -> None:
             related_to=["plan_1"],
             task_ids=None,
             active_task=True,
+            accessible_projects={"project-a"},
         )
 
     assert links == ["plan_1"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_mcp_capture_links_looks_up_the_active_task_as_the_caller() -> None:
+    """Enforcing scope against no reader hides every scoped task.
+
+    The lookup then returns nothing, which is indistinguishable from the
+    project genuinely having no task in flight.
+    """
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+    explore = AsyncMock(return_value=SimpleNamespace(entities=[SimpleNamespace(id="task_one")]))
+
+    with patch("sibyl_core.tools.core.explore", explore):
+        links = await _resolve_mcp_capture_links(
+            ctx=ctx,
+            project="project-a",
+            related_to=None,
+            task_ids=None,
+            active_task=True,
+            accessible_projects={"project-a"},
+        )
+
+    assert links == ["task_one"]
+    assert explore.await_args.kwargs["principal_id"] == ctx.user_id
+    assert explore.await_args.kwargs["accessible_projects"] == {"project-a"}
 
 
 @pytest.mark.asyncio
@@ -1386,6 +1415,7 @@ async def test_resolve_mcp_capture_links_falls_back_when_lookup_fails() -> None:
             related_to=["plan_1"],
             task_ids=["task_1"],
             active_task=True,
+            accessible_projects={"project-a"},
         )
 
     assert links == ["plan_1", "task_1"]
