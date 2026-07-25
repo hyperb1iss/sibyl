@@ -43,7 +43,7 @@ def test_debug_status_includes_pending_write_metrics(
     mock_get_client.return_value = _FakeClientContext(mock_client)
     mock_pending_write_status.return_value = {
         "count": 2,
-        "metrics": {"attempted": 3, "replayed": 1, "discarded": 1, "expired": 0},
+        "metrics": {"attempted": 3, "completed": 1, "replayed": 1, "dropped": 0, "discarded": 1},
     }
 
     result = CliRunner().invoke(debug.app, ["status", "--json"])
