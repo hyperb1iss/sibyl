@@ -44,7 +44,7 @@ def test_project_relink_rejects_inaccessible_direct_id() -> None:
             ["relink", "--id", "project_missing", "--path", "/tmp/hypercolor"],
         )
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert "Project not found: project_missing" in result.stdout
     mock_set_path_mapping.assert_not_called()
 

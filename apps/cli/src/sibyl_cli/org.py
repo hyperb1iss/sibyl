@@ -50,6 +50,7 @@ def list_cmd() -> None:
         print_json(result)
     except SibylClientError as e:
         error(str(e))
+        raise typer.Exit(1) from e
 
 
 @app.command("create")
@@ -83,6 +84,7 @@ def create_cmd(
         print_json(result)
     except SibylClientError as e:
         error(str(e))
+        raise typer.Exit(1) from e
 
 
 @app.command("switch")
@@ -111,6 +113,7 @@ def switch_cmd(slug: str) -> None:
         print_json(result)
     except SibylClientError as e:
         error(str(e))
+        raise typer.Exit(1) from e
 
 
 # =============================================================================
@@ -160,6 +163,7 @@ def list_members_cmd(
         console.print(table)
     except SibylClientError as e:
         error(str(e))
+        raise typer.Exit(1) from e
 
 
 @members_app.command("add")
@@ -181,6 +185,7 @@ def add_member_cmd(
         print_json(result)
     except SibylClientError as e:
         error(str(e))
+        raise typer.Exit(1) from e
 
 
 @members_app.command("remove")
@@ -206,6 +211,7 @@ def remove_member_cmd(
         success(f"Removed user {user_id} from {slug}")
     except SibylClientError as e:
         error(str(e))
+        raise typer.Exit(1) from e
 
 
 @members_app.command("role")
@@ -227,3 +233,4 @@ def update_role_cmd(
         print_json(result)
     except SibylClientError as e:
         error(str(e))
+        raise typer.Exit(1) from e

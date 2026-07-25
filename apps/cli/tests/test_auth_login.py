@@ -4,9 +4,11 @@ import re
 from pathlib import Path
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
-from sibyl_cli import auth, config_store
+from sibyl_cli import auth, auth_store, config_store
+from sibyl_cli.client import SibylClientError
 from sibyl_cli.main import app
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -310,12 +312,55 @@ def test_login_auto_requires_complete_local_credentials(
         lambda **_kwargs: pytest.fail("partial local credentials must not call local login"),
     )
 
-    auth._login_auto(
-        api_url="http://testserver/api",
-        no_browser=False,
-        timeout_seconds=180,
-        email="stef@example.com",
-        password=None,
+    with pytest.raises(typer.Exit) as exc:
+        auth._login_auto(
+            api_url="http://testserver/api",
+            no_browser=False,
+            timeout_seconds=180,
+            email="stef@example.com",
+            password=None,
+        )
+
+    assert exc.value.exit_code == 1
+    assert "Local login requires both --email and --password." in _plain(capsys.readouterr().out)
+
+
+def test_login_auto_exits_non_zero_when_local_login_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def rejected(**_kwargs: object) -> dict:
+        raise SibylClientError("API error: invalid credentials", status_code=401)
+
+    monkeypatch.setattr(auth, "_login_via_local_password", rejected)
+    monkeypatch.setattr(
+        auth,
+        "_persist_tokens",
+        lambda **_kwargs: pytest.fail("a rejected login must not persist tokens"),
     )
 
-    assert "Local login requires both --email and --password." in _plain(capsys.readouterr().out)
+    with pytest.raises(typer.Exit) as exc:
+        auth._login_auto(
+            api_url="http://testserver/api",
+            no_browser=False,
+            timeout_seconds=180,
+            email="stef@example.com",
+            password="wrong",
+        )
+
+    assert exc.value.exit_code == 1
+    assert "invalid credentials" in _plain(capsys.readouterr().out)
+
+
+def test_auth_status_exits_non_zero_without_a_stored_token(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SIBYL_AUTH_TOKEN", raising=False)
+    monkeypatch.setattr(config_store.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(auth_store.Path, "home", lambda: tmp_path)
+
+    result = CliRunner().invoke(auth.app, ["status"])
+
+    assert result.exit_code == 1
+    assert "No auth token found" in _plain(result.stdout)
