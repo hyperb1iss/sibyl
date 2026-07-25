@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from sibyl.api.routes.entities import (
     _entity_visible_to_reader,
     _should_fallback_to_document_entity,
+    _summarize_related_entities,
     get_entity,
 )
 from sibyl.auth.errors import ProjectAccessDeniedError
@@ -190,6 +191,54 @@ def test_entity_visibility_matches_the_search_rule_on_every_scope(
 
     assert route_allows is False
     assert route_allows == search_allows
+
+
+def test_related_summaries_hide_a_private_neighbour_but_keep_your_own() -> None:
+    """A readable row must not become a pivot onto its private neighbours.
+
+    Neighbour summaries carry the entity name, and they were screened by
+    project membership alone — which a private memory, having no project,
+    passes. Both constraints are orthogonal and both have to hold.
+    """
+    reader = "reader-1"
+    others_private = SimpleNamespace(
+        id="decision_private",
+        name="Acquisition target is Initech",
+        entity_type="episode",
+        metadata={"memory_scope": "private", "principal_id": "victim"},
+    )
+    own_private = SimpleNamespace(
+        id="decision_mine",
+        name="My own note",
+        entity_type="episode",
+        metadata={"memory_scope": "private", "principal_id": reader},
+    )
+    unscoped = SimpleNamespace(
+        id="episode_shared",
+        name="Shared episode",
+        entity_type="episode",
+        metadata={},
+    )
+    neighbours = [others_private, own_private, unscoped]
+    relationships = [
+        SimpleNamespace(
+            source_id="task-1",
+            target_id=neighbour.id,
+            relationship_type="RELATED_TO",
+        )
+        for neighbour in neighbours
+    ]
+
+    summaries = _summarize_related_entities(
+        "task-1",
+        related_entities=neighbours,
+        relationships=relationships,
+        accessible_projects=set(),
+        reader_user_id=reader,
+    )
+
+    assert [summary.id for summary in summaries or []] == ["decision_mine", "episode_shared"]
+    assert "Acquisition target" not in str(summaries)
 
 
 def test_entity_visibility_treats_scope_key_as_a_private_owner_channel() -> None:
