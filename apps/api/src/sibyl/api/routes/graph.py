@@ -488,7 +488,16 @@ async def get_subgraph(
         )
 
         for related_entity, relationship in related:
-            # Add edge
+            # An edge naming a hidden neighbour still discloses that the row
+            # exists and its id, so the endpoint drops it before it is built
+            # rather than relying on the node check further down the traversal.
+            if not _graph_entity_visible(
+                related_entity,
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
+            ):
+                continue
+
             edges.append(
                 GraphEdge(
                     id=relationship.id,

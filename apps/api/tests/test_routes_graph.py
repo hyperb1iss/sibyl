@@ -476,3 +476,52 @@ class TestGraphRoutes:
             )
 
         assert excinfo.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_subgraph_drops_edges_naming_a_private_neighbour(self) -> None:
+        """An edge to a hidden node still discloses that the row exists."""
+        center = SimpleNamespace(
+            id="task-1",
+            entity_type=EntityType.TASK,
+            name="Center",
+            description="Center node",
+            metadata={},
+        )
+        private = SimpleNamespace(
+            id="decision_private",
+            entity_type=EntityType.EPISODE,
+            name="Private decision",
+            description="secret rationale",
+            metadata={"memory_scope": "private", "principal_id": "victim"},
+        )
+        relationship = SimpleNamespace(
+            id="rel-1",
+            source_id="task-1",
+            target_id="decision_private",
+            relationship_type=RelationshipType.RELATED_TO,
+        )
+        entities = {"task-1": center, "decision_private": private}
+        runtime = SimpleNamespace(
+            entity_manager=SimpleNamespace(
+                get=AsyncMock(side_effect=lambda entity_id: entities[entity_id]),
+            ),
+            relationship_manager=SimpleNamespace(
+                get_related_entities=AsyncMock(return_value=[(private, relationship)]),
+            ),
+        )
+
+        with (
+            patch(
+                "sibyl.api.routes.graph.get_entity_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            _accessible_projects(),
+        ):
+            result = await graph_routes.get_subgraph(
+                SubgraphRequest(entity_id="task-1", depth=1, max_nodes=10),
+                org=_org(),
+                ctx=_ctx(),
+            )
+
+        assert [node.id for node in result.nodes] == ["task-1"]
+        assert result.edges == []
