@@ -99,10 +99,12 @@ async def bootstrap_surreal_runtime_schemas() -> bool:
                 error=str(exc),
             )
         )
-        log.warning(
+        log.exception(
             "Surreal auth schema bootstrap failed",
+            plane="auth",
             target_version=AUTH_SCHEMA_CURRENT_VERSION,
             error=str(exc),
+            remediation="run `sibyld db init` to retry the pending migrations",
         )
 
     try:
@@ -120,10 +122,12 @@ async def bootstrap_surreal_runtime_schemas() -> bool:
                 error=str(exc),
             )
         )
-        log.warning(
+        log.exception(
             "Surreal content schema bootstrap failed",
+            plane="content",
             target_version=CONTENT_SCHEMA_CURRENT_VERSION,
             error=str(exc),
+            remediation="run `sibyld db init` to retry the pending migrations",
         )
 
     _schema_bootstrap_state.status = RuntimeSchemaBootstrapStatus(

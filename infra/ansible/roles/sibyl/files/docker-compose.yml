@@ -84,8 +84,14 @@ services:
       SIBYL_SERVER_HOST: 0.0.0.0
       SIBYL_SERVER_PORT: "3334"
     healthcheck:
+      # Readiness, not liveness: /api/health is always 200 once the process is up, so it
+      # cannot see a failed schema bootstrap. /api/health/ready returns 503 for that, and
+      # raise_for_status turns the 503 into a non-zero exit the healthcheck acts on.
       test:
-        ["CMD-SHELL", 'python -c "import httpx; httpx.get(''http://localhost:3334/api/health'')"']
+        [
+          "CMD-SHELL",
+          'python -c "import httpx; httpx.get(''http://localhost:3334/api/health/ready'').raise_for_status()"',
+        ]
       interval: 30s
       timeout: 10s
       retries: 3

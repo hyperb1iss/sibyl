@@ -70,7 +70,16 @@ services:
     volumes:
       - sibyl_secrets:/home/sibyl/.sibyl
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:3334/api/health')"]
+      # Readiness, not liveness: /api/health is always 200 once the process is up, so it
+      # cannot see a failed schema bootstrap. /api/health/ready returns 503 for that, and
+      # raise_for_status turns the 503 into a non-zero exit the healthcheck acts on.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import httpx; httpx.get('http://localhost:3334/api/health/ready').raise_for_status()",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
