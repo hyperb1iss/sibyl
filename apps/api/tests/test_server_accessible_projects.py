@@ -317,6 +317,7 @@ async def test_synthesis_mcp_plan_scopes_accessible_projects() -> None:
         organization_id=ctx.org_id,
         principal_id=ctx.user_id,
         accessible_projects={"project-a"},
+        allowed_memory_scope_keys=None,
     )
 
 
