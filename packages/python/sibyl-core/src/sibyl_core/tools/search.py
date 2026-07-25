@@ -9,7 +9,10 @@ from typing import Any
 
 import structlog
 
-from sibyl_core.auth.memory_policy import memory_scope_policy_key
+from sibyl_core.auth.memory_policy import (
+    memory_metadata_read_allowed,
+    memory_scope_policy_key,
+)
 from sibyl_core.embeddings.providers import configured_embedding_provider
 from sibyl_core.memory_pipeline.retrieval import CandidateSourceFailure
 from sibyl_core.models.entities import EntityType
@@ -447,39 +450,20 @@ def _matches_memory_scope_policy(
     accessible_projects: set[str] | None,
 ) -> bool:
     metadata = getattr(entity, "metadata", {}) or {}
-    raw_scope = metadata.get("memory_scope")
-    if raw_scope is None:
-        return True
 
-    memory_scope = str(raw_scope).strip()
-    scope_key = metadata.get("scope_key")
+    # A named project is a narrowing filter the caller already proved access to,
+    # so it becomes the authorized set rather than a second way to say yes.
+    # Without one, membership is the only thing that authorizes a project row —
+    # an unknown set used to mean allow, which served every project-scoped row
+    # in the organization to a credential carrying no user context.
+    effective_projects = {project} if project else accessible_projects
 
-    if memory_scope == "private":
-        owner = metadata.get("principal_id") or scope_key
-        allowed = bool(principal_id) and str(owner) == str(principal_id)
-    elif memory_scope == "project":
-        scoped_project = str(scope_key or metadata.get("project_id") or "")
-        if project:
-            allowed = scoped_project == project
-        elif accessible_projects is not None:
-            allowed = scoped_project in accessible_projects
-        else:
-            allowed = True
-    else:
-        # Every other band needs a membership thread this surface does not
-        # carry, so it denies rather than falling through to visible.
-        allowed = False
-
-    if not allowed:
-        return False
-    if allowed_memory_scope_keys is None:
-        return True
-
-    # An API-key grant narrows what an authorized read may return; on its own
-    # it authorizes nothing, and a private row's key is derived from the reader
-    # rather than the row, so it can never stand in for the owner check.
-    effective_scope_key = principal_id if memory_scope == "private" else scope_key
-    return memory_scope_policy_key(memory_scope, effective_scope_key) in allowed_memory_scope_keys
+    return memory_metadata_read_allowed(
+        metadata,
+        principal_id=principal_id,
+        accessible_projects=effective_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+    )
 
 
 def _dedupe_document_rows(

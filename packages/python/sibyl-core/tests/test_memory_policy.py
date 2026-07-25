@@ -529,3 +529,66 @@ def test_search_scope_policy_denies_bands_it_cannot_verify() -> None:
             allowed_memory_scope_keys=None,
             accessible_projects=set(),
         ), scope
+
+
+def test_search_scope_policy_never_diverges_from_the_shared_rule() -> None:
+    """Search kept its own copy of the read rule, with a fail-open branch.
+
+    An unknown accessible-project set meant allow, so a credential carrying no
+    user context saw every project-scoped row in the organization. Any shape
+    the two implementations disagree on is reachable through one surface and
+    hidden on the other, which is the drift this convergence exists to end.
+    """
+    from sibyl_core.tools.search import _matches_memory_scope_policy
+
+    reader = "reader-1"
+    shapes: list[tuple[dict[str, str], set[str] | None]] = [
+        ({"memory_scope": "project", "scope_key": "proj-x"}, None),
+        ({"memory_scope": "project", "scope_key": "proj-x"}, set()),
+        ({"memory_scope": "project", "scope_key": "proj-x"}, {"proj-x"}),
+        ({"memory_scope": "project", "project_id": "proj-x"}, None),
+        ({"memory_scope": "private", "principal_id": "victim"}, set()),
+        ({"memory_scope": "private", "principal_id": reader}, set()),
+        ({"memory_scope": "private", "scope_key": reader}, set()),
+        ({"memory_scope": "team", "scope_key": "team-x"}, set()),
+        ({"memory_scope": "delegated", "scope_key": "del-x"}, set()),
+        ({"memory_scope": "sooper_sekrit", "scope_key": "x"}, set()),
+        ({}, set()),
+    ]
+
+    for metadata, projects in shapes:
+        local = _matches_memory_scope_policy(
+            SimpleNamespace(metadata=metadata),
+            project=None,
+            principal_id=reader,
+            allowed_memory_scope_keys=None,
+            accessible_projects=projects,
+        )
+        shared = memory_metadata_read_allowed(
+            metadata,
+            principal_id=reader,
+            accessible_projects=projects,
+        )
+        assert local == shared, (metadata, projects, local, shared)
+
+
+def test_search_scope_policy_still_serves_a_verified_project_filter() -> None:
+    """A named project was proved accessible before retrieval ran."""
+    from sibyl_core.tools.search import _matches_memory_scope_policy
+
+    row = SimpleNamespace(metadata={"memory_scope": "project", "scope_key": "proj-x"})
+
+    assert _matches_memory_scope_policy(
+        row,
+        project="proj-x",
+        principal_id="reader-1",
+        allowed_memory_scope_keys=None,
+        accessible_projects=None,
+    )
+    assert not _matches_memory_scope_policy(
+        row,
+        project="proj-other",
+        principal_id="reader-1",
+        allowed_memory_scope_keys=None,
+        accessible_projects=None,
+    )
