@@ -201,6 +201,9 @@ async def reflect_memory(
                 # UUID collisions across organizations/projects.
                 sync=False,
                 check_conflicts=False,
+                memory_scope=resolved_scope.value,
+                scope_key=resolved_scope_key,
+                principal_id=principal_id,
             )
         if source.success:
             source_id = source.id
@@ -314,6 +317,9 @@ async def reflect_memory(
             metadata=metadata,
             sync=True,
             check_conflicts=True,
+            memory_scope=resolved_scope.value,
+            scope_key=resolved_scope_key,
+            principal_id=principal_id,
         )
         persisted.append(
             replace(

@@ -3557,8 +3557,22 @@ class TestAddTool:
         assert written["principal_id"] == "real-author"
         assert "scope_key" not in written
 
+    @pytest.mark.parametrize(
+        "authorized",
+        [
+            pytest.param({}, id="nothing-authorized"),
+            # An authorized author does not make a declared scope safe to drop:
+            # the stamp keys off memory_scope, so the row would land unscoped
+            # and read as org-visible.
+            pytest.param({"principal_id": "real-author"}, id="principal-only"),
+            pytest.param({"scope_key": "proj_1"}, id="scope-key-only"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_add_refuses_scope_metadata_without_an_authorized_owner(self) -> None:
+    async def test_add_refuses_a_declared_scope_it_was_not_authorized_to_keep(
+        self,
+        authorized: dict[str, str],
+    ) -> None:
         """Silently dropping the stamp would republish a private row org-wide."""
         from sibyl_core.tools.add import add
 
@@ -3567,7 +3581,7 @@ class TestAddTool:
                 "sibyl_core.tools.add.get_graph_runtime",
                 AsyncMock(return_value=make_graph_runtime()),
             ),
-            pytest.raises(ValueError, match="without the authorized"),
+            pytest.raises(ValueError, match="without the authorized memory_scope"),
         ):
             await add(
                 title="Innocuous note",
@@ -3577,6 +3591,7 @@ class TestAddTool:
                     "memory_scope": "private",
                     "principal_id": "victim",
                 },
+                **authorized,
             )
 
     @pytest.mark.asyncio

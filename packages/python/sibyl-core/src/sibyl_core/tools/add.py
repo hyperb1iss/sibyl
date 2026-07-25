@@ -7,7 +7,6 @@ from typing import Any
 import structlog
 
 from sibyl_core.auth.memory_policy import (
-    MEMORY_OWNER_METADATA_KEYS,
     stamp_memory_scope_metadata,
 )
 from sibyl_core.embeddings.providers import configured_embedding_provider
@@ -281,15 +280,16 @@ async def add(
             timestamp=datetime.now(UTC),
         )
 
-    declared_owner_keys = MEMORY_OWNER_METADATA_KEYS & set(metadata or {})
-    if declared_owner_keys and not any((memory_scope, scope_key, principal_id)):
-        # Cannot tell a caller that pre-stamped from one forwarding a request
-        # body, and the two need opposite handling: silently dropping the
-        # stamp would republish a private row as org-readable.
+    if (metadata or {}).get("memory_scope") is not None and memory_scope is None:
+        # The stamp rebuilds the triple from the authorized values, so a scope
+        # the caller does not restate is dropped — turning a private row into
+        # an unscoped one, which reads as org-visible. Refuse instead: an
+        # authorized principal alone does not make a declared scope safe to
+        # discard, so this fires on the scope rather than on the triple.
         raise ValueError(
-            "add() received scope metadata "
-            f"({', '.join(sorted(declared_owner_keys))}) without the authorized "
-            "memory_scope/scope_key/principal_id that names its owner"
+            "add() received metadata declaring memory_scope="
+            f"{(metadata or {}).get('memory_scope')!r} without the authorized "
+            "memory_scope that names its audience"
         )
 
     log.info(
