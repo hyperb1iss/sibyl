@@ -26,6 +26,7 @@ from sibyl_cli.auth_store import (
     set_tokens,
 )
 from sibyl_cli.pending_writes import (
+    PendingMetric,
     create_pending_write,
     delete_pending_write,
     record_pending_metric,
@@ -285,7 +286,7 @@ def _should_keep_pending_write(status_code: int) -> bool:
     return status_code not in UNAPPLIED_WRITE_STATUS_CODES
 
 
-def _resolve_pending_write(write_id: str | None, outcome: str | None) -> None:
+def _resolve_pending_write(write_id: str | None, outcome: PendingMetric | None) -> None:
     """Drop a buffered write from the queue and record why it left.
 
     A replay is accounted by the flush command that drives it, so it resolves
