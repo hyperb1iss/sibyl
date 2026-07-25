@@ -12,7 +12,7 @@ Generated from code by `tools/inventory/runtime_surface.py`. Do not hand-edit.
 - Raw SQL query usage files: 0
 - Session-backed storage access files: 0
 - Graphiti import files: 0
-- Retained legacy term files: 88
+- Retained legacy term files: 89
 - Dependency records: 4
 
 ## API Surface
@@ -131,6 +131,7 @@ must carry an owner and reason here.
 | `docs/architecture/SIBYL_1_0_ROADMAP.md` | `graphiti`, `redis` | 33 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/SIBYL_NORTHSTAR.md` | `falkor`, `graphiti`, `postgres`, `redis` | 46 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/architecture/SIBYL_POST_1_0_ROADMAP.md` | `falkor`, `graphiti`, `postgres`, `redis` | 4 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
+| `docs/architecture/SOTA_LANDSCAPE_2026-07-25.md` | `graphiti`, `postgres` | 5 | competitive research | SOTA and competitive landscape docs name rival stacks as external products, not dependencies. |
 | `docs/architecture/retrieval-system.md` | `graphiti` | 1 | v0.8 architecture | Architecture and release plans preserve migration, benchmark, and compatibility history. |
 | `docs/cli/add.md` | `redis` | 2 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |
 | `docs/cli/docker.md` | `valkey` | 2 | v0.8 API/CLI docs | API and CLI docs reference memory history, migration payloads, or optional coordination. |

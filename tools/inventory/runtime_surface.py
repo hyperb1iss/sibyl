@@ -265,6 +265,7 @@ ARCHITECTURE_LEGACY_TERM_FILES = (
     "docs/architecture/SIBYL_NORTHSTAR.md",
     "docs/architecture/SIBYL_POST_1_0_ROADMAP.md",
 )
+COMPETITIVE_RESEARCH_LEGACY_TERM_FILES = ("docs/architecture/SOTA_LANDSCAPE_2026-07-25.md",)
 ENTERPRISE_LEGACY_TERM_FILES = (
     "docs/admin/installing.md",
     "docs/users/sharing-memory.md",
@@ -432,6 +433,11 @@ LEGACY_TERM_ALLOWLIST = (
         ARCHITECTURE_LEGACY_TERM_FILES,
         owner="v0.8 architecture",
         reason="Architecture and release plans preserve migration, benchmark, and compatibility history.",
+    ),
+    *legacy_term_allowlist_records(
+        COMPETITIVE_RESEARCH_LEGACY_TERM_FILES,
+        owner="competitive research",
+        reason="SOTA and competitive landscape docs name rival stacks as external products, not dependencies.",
     ),
     *legacy_term_allowlist_records(
         ENTERPRISE_LEGACY_TERM_FILES,
