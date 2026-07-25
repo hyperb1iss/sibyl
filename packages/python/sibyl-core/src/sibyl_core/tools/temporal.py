@@ -17,6 +17,7 @@ from typing import Any, Literal
 
 import structlog
 
+from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
 from sibyl_core.tools.responses import TemporalEdge, TemporalResponse
 
 log = structlog.get_logger()
@@ -37,6 +38,8 @@ async def temporal_query(
     include_expired: bool = False,
     limit: int = 50,
     organization_id: str | None = None,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ) -> TemporalResponse:
     """Query knowledge graph with temporal awareness.
 
@@ -56,6 +59,8 @@ async def temporal_query(
         include_expired: Include expired/invalidated edges (default False).
         limit: Maximum edges to return.
         organization_id: Organization context (required).
+        principal_id: Reader the history is authorized as.
+        accessible_projects: Graph project IDs the reader is a member of.
 
     Returns:
         TemporalResponse with edges and their temporal metadata.
@@ -106,6 +111,8 @@ async def temporal_query(
             as_of=as_of_dt,
             include_expired=include_expired,
             limit=limit,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
         )
     elif mode == "timeline":
         runtime = await get_graph_runtime(organization_id)
@@ -114,6 +121,8 @@ async def temporal_query(
             organization_id,
             entity_id,
             limit=limit,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
         )
     elif mode == "conflicts":
         runtime = await get_graph_runtime(organization_id)
@@ -122,6 +131,8 @@ async def temporal_query(
             organization_id,
             entity_id=entity_id,
             limit=limit,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
         )
     else:
         return TemporalResponse(
@@ -140,6 +151,8 @@ async def get_entity_history(
     as_of: datetime | None = None,
     include_expired: bool = False,
     limit: int = 50,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ) -> TemporalResponse:
     """Get edges for an entity, optionally filtered to a point in time.
 
@@ -171,6 +184,8 @@ async def get_entity_history(
             entity_id=entity_id,
             limit=min(max(limit * 4, 100), 1000),
             conflicts_only=False,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
         )
         filtered = _filter_history_edges(edges, as_of=as_of, include_expired=include_expired)
         filtered.sort(key=_created_at_sort_key, reverse=True)
@@ -200,6 +215,8 @@ async def get_entity_timeline(
     organization_id: str,
     entity_id: str | None,
     limit: int = 100,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ) -> TemporalResponse:
     """Get all edges for an entity over time, including expired ones.
 
@@ -227,6 +244,8 @@ async def get_entity_timeline(
             entity_id=entity_id,
             limit=min(max(limit, 100), 1000),
             conflicts_only=False,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
         )
         edges.sort(key=_created_at_sort_key)
         temporal_edges = edges[:limit]
@@ -258,6 +277,8 @@ async def find_conflicts(
     organization_id: str,
     entity_id: str | None = None,
     limit: int = 50,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ) -> TemporalResponse:
     """Find edges that have been invalidated (superseded facts).
 
@@ -281,6 +302,8 @@ async def find_conflicts(
             entity_id=entity_id,
             limit=min(max(limit * 4, 100), 1000),
             conflicts_only=True,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
         )
         temporal_edges.sort(
             key=lambda edge: (
@@ -378,6 +401,8 @@ async def _load_native_temporal_edges(
     entity_id: str | None,
     limit: int,
     conflicts_only: bool,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
 ) -> list[TemporalEdge]:
     from sibyl_core.services.graph import normalize_records
 
@@ -397,6 +422,8 @@ async def _load_native_temporal_edges(
         await client.execute_query(
             f"""
             SELECT uuid AS edge_id,
+                   in.attributes AS source_attributes,
+                   out.attributes AS target_attributes,
                    name,
                    fact,
                    in.uuid AS source_id,
@@ -417,7 +444,41 @@ async def _load_native_temporal_edges(
             limit=max(int(limit), 1),
         )
     )
-    return _parse_edge_results(rows)
+    return _parse_edge_results(
+        _reader_visible_edge_rows(
+            rows,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        )
+    )
+
+
+def _reader_visible_edge_rows(
+    rows: list[dict[str, Any]],
+    *,
+    principal_id: str | None,
+    accessible_projects: set[str] | None,
+) -> list[dict[str, Any]]:
+    """Drop edge rows naming an endpoint this reader may not see.
+
+    A temporal edge carries both endpoint names and the fact text, so an
+    unfiltered history is a whole-organization content dump. The endpoint
+    metadata bags are projected only to answer this question and are stripped
+    before an edge is built, so they never reach a response.
+    """
+    visible: list[dict[str, Any]] = []
+    for row in rows:
+        endpoints = (row.pop("source_attributes", None), row.pop("target_attributes", None))
+        if all(
+            memory_metadata_read_allowed(
+                attributes if isinstance(attributes, dict) else None,
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
+            )
+            for attributes in endpoints
+        ):
+            visible.append(row)
+    return visible
 
 
 def _parse_edge_results(
