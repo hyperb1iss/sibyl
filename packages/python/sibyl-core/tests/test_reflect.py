@@ -106,6 +106,60 @@ async def test_reflect_memory_can_use_compatibility_write_when_native_disabled(
 
 
 @pytest.mark.asyncio
+async def test_reflect_memory_hands_add_the_authorized_scope_it_stamps_with(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The compatibility write path has to satisfy add()'s stamp contract.
+
+    Reflection always injects memory_scope and scope_key into the bag it hands
+    over, and add() rebuilds the owner triple from its arguments rather than
+    that bag. A caller that declares a scope in metadata without restating it
+    as an authorized argument is refused, so stubbing add_fn without enforcing
+    that precondition hides a crash on this path.
+    """
+    calls: list[dict[str, Any]] = []
+
+    async def contract_checked_add(**kwargs: Any) -> AddResponse:
+        metadata = kwargs.get("metadata") or {}
+        if metadata.get("memory_scope") is not None and kwargs.get("memory_scope") is None:
+            raise ValueError(
+                "add() received metadata declaring memory_scope without the "
+                "authorized memory_scope that names its audience"
+            )
+        calls.append(kwargs)
+        return AddResponse(
+            success=True,
+            id=f"{kwargs['entity_type']}_{len(calls)}",
+            message="ok",
+            timestamp=datetime.now(UTC),
+        )
+
+    monkeypatch.setenv("SIBYL_NATIVE_WRITE", "disabled")
+
+    pack = await reflect_memory(
+        "Confirmed the local Sibyl project is linked.",
+        source_title="Dogfood setup",
+        intent="build",
+        domain="sibyl",
+        project="project_123",
+        organization_id="org_123",
+        principal_id="user_123",
+        accessible_projects={"project_123"},
+        memory_scope="project",
+        scope_key="project_123",
+        persist=True,
+        add_fn=contract_checked_add,
+    )
+
+    assert pack.persisted_count == len(pack.candidates)
+    assert calls, "every add_fn call was refused by add()'s stamp contract"
+    for call in calls:
+        assert call["memory_scope"] == "project"
+        assert call["scope_key"] == "project_123"
+        assert call["principal_id"] == "user_123"
+
+
+@pytest.mark.asyncio
 async def test_reflect_memory_persist_denies_unverified_project_without_native_write() -> None:
     add_fn = AsyncMock(side_effect=AssertionError("compatibility add path should not run"))
 
