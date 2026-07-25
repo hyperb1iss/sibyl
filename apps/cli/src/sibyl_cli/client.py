@@ -25,7 +25,11 @@ from sibyl_cli.auth_store import (
     read_server_credentials,
     set_tokens,
 )
-from sibyl_cli.pending_writes import create_pending_write, delete_pending_write
+from sibyl_cli.pending_writes import (
+    create_pending_write,
+    delete_pending_write,
+    record_pending_metric,
+)
 
 # Default server port (matches sibyl-server default)
 DEFAULT_SERVER_PORT = 3334
@@ -268,8 +272,29 @@ def _requires_initialized_context(method: str, path: str) -> bool:
     return not path.startswith("/auth/")
 
 
+# Discarding a buffered write destroys the only copy of its payload: the server
+# stores a request hash, never the body. So the queue only drops a write when
+# the status proves the server rejected the payload itself and no retry could
+# ever land it. Everything else stays buffered, including 409 - a stranded
+# idempotency reservation reports 409 for a write that may already have applied,
+# and the client cannot tell the two apart.
+UNAPPLIED_WRITE_STATUS_CODES = {400, 422}
+
+
 def _should_keep_pending_write(status_code: int) -> bool:
-    return status_code in {401, 408, 429} or status_code >= 500
+    return status_code not in UNAPPLIED_WRITE_STATUS_CODES
+
+
+def _resolve_pending_write(write_id: str | None, outcome: str | None) -> None:
+    """Drop a buffered write from the queue and record why it left.
+
+    A replay is accounted by the flush command that drives it, so it resolves
+    with no outcome of its own here.
+    """
+    if write_id is None:
+        return
+    if delete_pending_write(write_id) and outcome is not None:
+        record_pending_metric(outcome)
 
 
 def _refresh_failure_status_code(message: str | None) -> int | None:
@@ -540,6 +565,7 @@ class SibylClient:
         _retry_on_401: bool = True,
         _buffer_pending: bool = True,
         _pending_write_id: str | None = None,
+        _pending_write_created: bool = False,
         _idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Make an HTTP request to the API.
@@ -572,6 +598,7 @@ class SibylClient:
                 )
 
         pending_write_id = _pending_write_id
+        pending_write_created = _pending_write_created
         idempotency_key = _idempotency_key
         if _buffer_pending and pending_write_id is None and _should_buffer_request(method, path):
             pending = create_pending_write(
@@ -582,6 +609,7 @@ class SibylClient:
                 params=params,
             )
             pending_write_id = str(pending["id"])
+            pending_write_created = True
             idempotency_key = str(pending["idempotency_key"])
 
         refresh_failure: str | None = None
@@ -627,13 +655,14 @@ class SibylClient:
                         _retry_on_401=False,
                         _buffer_pending=False,
                         _pending_write_id=pending_write_id,
+                        _pending_write_created=pending_write_created,
                         _idempotency_key=idempotency_key,
                     )
 
             # Handle error responses
             if response.status_code >= 400:
-                if pending_write_id and not _should_keep_pending_write(response.status_code):
-                    delete_pending_write(pending_write_id)
+                if not _should_keep_pending_write(response.status_code):
+                    _resolve_pending_write(pending_write_id, "dropped")
                 try:
                     payload = _parse_error_payload(response.json())
                 except Exception:
@@ -665,16 +694,16 @@ class SibylClient:
                     details=payload.details,
                 )
 
+            applied_outcome = "completed" if pending_write_created else None
+
             # Return empty dict for 204 No Content
             if response.status_code == 204:
-                if pending_write_id:
-                    delete_pending_write(pending_write_id)
+                _resolve_pending_write(pending_write_id, applied_outcome)
                 _record_success(breaker_key)
                 return {}
 
             data = response.json()
-            if pending_write_id:
-                delete_pending_write(pending_write_id)
+            _resolve_pending_write(pending_write_id, applied_outcome)
             _record_success(breaker_key)
             return data
 

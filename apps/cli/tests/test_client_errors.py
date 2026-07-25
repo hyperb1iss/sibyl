@@ -317,3 +317,104 @@ async def test_mutating_request_deletes_pending_write_on_validation_error(
 
     await client.close()
     assert pending_writes.list_pending_writes() == []
+    assert pending_writes.read_pending_metrics()["dropped"] == 1
+
+
+@pytest.mark.parametrize("status_code", [400, 422])
+@pytest.mark.asyncio
+async def test_mutating_request_drops_pending_write_when_payload_is_unusable(
+    status_code: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    client_module._FAILURE_WINDOWS.clear()
+    transport = httpx.MockTransport(
+        lambda _request: httpx.Response(
+            status_code,
+            json={"error": "validation_error", "message": "Bad payload"},
+        )
+    )
+    client = _client_with_transport(transport)
+
+    with pytest.raises(SibylClientError):
+        await client.post("/memory/raw", json={"title": "Doomed", "raw_content": "Body"})
+
+    await client.close()
+    assert pending_writes.list_pending_writes() == []
+    assert pending_writes.read_pending_metrics()["dropped"] == 1
+
+
+@pytest.mark.asyncio
+async def test_mutating_request_keeps_pending_write_on_idempotency_conflict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    client_module._FAILURE_WINDOWS.clear()
+    transport = httpx.MockTransport(
+        lambda _request: httpx.Response(
+            409,
+            json={
+                "error": "conflict",
+                "message": (
+                    "Idempotent operation is still in progress or was interrupted "
+                    "before its receipt completed"
+                ),
+            },
+        )
+    )
+    client = _client_with_transport(transport)
+
+    with pytest.raises(SibylClientError):
+        await client.post("/memory/raw", json={"title": "Keep me", "raw_content": "Body"})
+
+    await client.close()
+    pending = pending_writes.list_pending_writes()
+    assert len(pending) == 1
+    assert pending[0]["json"] == {"title": "Keep me", "raw_content": "Body"}
+    assert pending_writes.read_pending_metrics()["dropped"] == 0
+
+
+@pytest.mark.parametrize("status_code", [401, 403, 404, 405, 408, 409, 410, 413, 429, 500, 503])
+@pytest.mark.asyncio
+async def test_mutating_request_keeps_pending_write_unless_payload_is_unusable(
+    status_code: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    client_module._FAILURE_WINDOWS.clear()
+    transport = httpx.MockTransport(
+        lambda _request: httpx.Response(
+            status_code,
+            json={"error": "failed", "message": "Not applied, or unknowable"},
+        )
+    )
+    client = _client_with_transport(transport)
+
+    with pytest.raises(SibylClientError):
+        await client.post("/memory/raw", json={"title": "Keep me", "raw_content": "Body"})
+
+    await client.close()
+    assert len(pending_writes.list_pending_writes()) == 1
+    assert pending_writes.read_pending_metrics()["dropped"] == 0
+
+
+@pytest.mark.asyncio
+async def test_mutating_request_records_completed_pending_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200, json={"id": "entity_1"}))
+    client = _client_with_transport(transport)
+
+    await client.post("/memory/raw", json={"title": "Landed", "raw_content": "Body"})
+
+    await client.close()
+    metrics = pending_writes.read_pending_metrics()
+    assert pending_writes.list_pending_writes() == []
+    assert metrics["attempted"] == 1
+    assert metrics["completed"] == 1
+    assert metrics["dropped"] == 0

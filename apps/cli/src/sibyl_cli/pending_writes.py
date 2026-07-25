@@ -11,6 +11,11 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+# Every buffered write leaves the queue through exactly one of these outcomes,
+# so `attempted` should equal their sum plus whatever is still queued. A gap
+# means writes are vanishing without an accounted reason.
+PENDING_METRIC_NAMES = ("attempted", "completed", "replayed", "dropped", "discarded")
+
 
 def pending_writes_dir() -> Path:
     return Path.home() / ".config" / "sibyl" / "pending_writes"
@@ -142,7 +147,7 @@ def increment_attempts(write_id: str) -> dict[str, Any]:
 
 def read_pending_metrics() -> dict[str, int]:
     path = pending_metrics_path()
-    defaults = {"attempted": 0, "replayed": 0, "expired": 0, "discarded": 0}
+    defaults = dict.fromkeys(PENDING_METRIC_NAMES, 0)
     if not path.exists():
         return defaults
     try:
