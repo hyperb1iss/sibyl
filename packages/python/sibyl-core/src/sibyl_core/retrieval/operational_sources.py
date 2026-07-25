@@ -7,7 +7,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-from sibyl_core.auth.memory_policy import memory_scope_policy_key
+from sibyl_core.auth.memory_policy import (
+    memory_metadata_read_allowed,
+)
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.projection import MANIFEST_STATE_COMPLETE, operational_experience_manifest_id
 from sibyl_core.retrieval.query_ranking import extract_keywords
@@ -117,24 +119,24 @@ async def fetch_operational_source_inventory(
             project_id=project_id,
             scope_key=scope_key,
         )
-    scope_denied = False
-    if memory_scope == "private":
-        conflicting_owner = bool(
-            scope_key and owner_principal_id and scope_key != owner_principal_id
-        )
-        owner = owner_principal_id or scope_key
-        if conflicting_owner or not owner:
-            scope_denied = True
-        elif allowed_memory_scope_keys is not None:
-            scope_denied = (
-                memory_scope_policy_key(memory_scope, owner) not in allowed_memory_scope_keys
-            )
-        else:
-            scope_denied = not principal_id or owner != principal_id
-    elif memory_scope is not None and allowed_memory_scope_keys is not None:
-        scope_denied = (
-            memory_scope_policy_key(memory_scope, scope_key) not in allowed_memory_scope_keys
-        )
+    # This surface returns raw observation content, so the audience question is
+    # the shared one. The band it used to answer itself only denied when an
+    # API-key grant was present, which left team, delegated, organization,
+    # shared and public manifests visible to any session without one.
+    scope_denied = not memory_metadata_read_allowed(
+        {
+            "memory_scope": memory_scope,
+            "principal_id": owner_principal_id,
+            "scope_key": scope_key,
+        },
+        principal_id=principal_id,
+        accessible_projects=allowed_project_ids,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+    )
+    if memory_scope == "private" and scope_key and owner_principal_id != scope_key:
+        # Two owner channels naming different principals is a shape no write
+        # produces; refuse rather than picking one.
+        scope_denied = scope_denied or bool(owner_principal_id)
     if scope_denied:
         return _inventory(
             normalized_source_id,
