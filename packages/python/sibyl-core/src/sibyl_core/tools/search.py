@@ -453,25 +453,33 @@ def _matches_memory_scope_policy(
 
     memory_scope = str(raw_scope).strip()
     scope_key = metadata.get("scope_key")
-    effective_scope_key = principal_id if memory_scope == "private" else scope_key
-
-    if allowed_memory_scope_keys is not None:
-        return (
-            memory_scope_policy_key(memory_scope, effective_scope_key) in allowed_memory_scope_keys
-        )
 
     if memory_scope == "private":
         owner = metadata.get("principal_id") or scope_key
-        return bool(principal_id) and str(owner) == str(principal_id)
-
-    if memory_scope == "project":
+        allowed = bool(principal_id) and str(owner) == str(principal_id)
+    elif memory_scope == "project":
         scoped_project = str(scope_key or metadata.get("project_id") or "")
         if project:
-            return scoped_project == project
-        if accessible_projects is not None:
-            return scoped_project in accessible_projects
+            allowed = scoped_project == project
+        elif accessible_projects is not None:
+            allowed = scoped_project in accessible_projects
+        else:
+            allowed = True
+    else:
+        # Every other band needs a membership thread this surface does not
+        # carry, so it denies rather than falling through to visible.
+        allowed = False
 
-    return True
+    if not allowed:
+        return False
+    if allowed_memory_scope_keys is None:
+        return True
+
+    # An API-key grant narrows what an authorized read may return; on its own
+    # it authorizes nothing, and a private row's key is derived from the reader
+    # rather than the row, so it can never stand in for the owner check.
+    effective_scope_key = principal_id if memory_scope == "private" else scope_key
+    return memory_scope_policy_key(memory_scope, effective_scope_key) in allowed_memory_scope_keys
 
 
 def _dedupe_document_rows(
