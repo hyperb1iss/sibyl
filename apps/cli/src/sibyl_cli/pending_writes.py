@@ -8,13 +8,15 @@ import stat
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, get_args
 from uuid import uuid4
 
 # Every buffered write leaves the queue through exactly one of these outcomes,
 # so `attempted` should equal their sum plus whatever is still queued. A gap
-# means writes are vanishing without an accounted reason.
-PENDING_METRIC_NAMES = ("attempted", "completed", "replayed", "dropped", "discarded")
+# means writes are vanishing without an accounted reason. Reads project onto
+# these names, so an unlisted one would be written and then silently dropped.
+PendingMetric = Literal["attempted", "completed", "replayed", "dropped", "discarded"]
+PENDING_METRIC_NAMES: tuple[PendingMetric, ...] = get_args(PendingMetric)
 
 
 def pending_writes_dir() -> Path:
@@ -147,7 +149,7 @@ def increment_attempts(write_id: str) -> dict[str, Any]:
 
 def read_pending_metrics() -> dict[str, int]:
     path = pending_metrics_path()
-    defaults = dict.fromkeys(PENDING_METRIC_NAMES, 0)
+    defaults: dict[str, int] = dict.fromkeys(PENDING_METRIC_NAMES, 0)
     if not path.exists():
         return defaults
     try:
@@ -157,7 +159,7 @@ def read_pending_metrics() -> dict[str, int]:
     return {key: int(data.get(key) or 0) for key in defaults}
 
 
-def record_pending_metric(name: str, count: int = 1) -> dict[str, int]:
+def record_pending_metric(name: PendingMetric, count: int = 1) -> dict[str, int]:
     metrics = read_pending_metrics()
     metrics[name] = int(metrics.get(name) or 0) + count
     _secure_write_json(pending_metrics_path(), metrics)
