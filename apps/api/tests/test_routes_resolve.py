@@ -80,6 +80,89 @@ async def test_resolve_id_prefix_filters_inaccessible_project_matches(
 
 
 @pytest.mark.asyncio
+async def test_resolve_id_prefix_hides_a_co_members_private_memory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A candidate carries the entity's name, so the scope rule runs first.
+
+    Matching on project alone let every row without a project through, and a
+    private memory has no project.
+    """
+    org = AuthOrganization(id=uuid4(), name="Sibyl", slug="sibyl")
+    ctx = _auth_context(org)
+
+    async def fake_execute(_group_id: str, _query: str, **_params: object):
+        return [
+            {
+                "uuid": "decision_private1234",
+                "entity_type": "episode",
+                "name": "Acquisition target is Initech",
+                "attributes": {"memory_scope": "private", "principal_id": "victim"},
+            },
+            {
+                "uuid": "episode_shared12345",
+                "entity_type": "episode",
+                "name": "Shared episode",
+                "attributes": {},
+            },
+        ]
+
+    async def fake_accessible(_: AuthContext) -> set[str]:
+        return set()
+
+    monkeypatch.setattr(resolve_route, "execute_surreal_graph_query", fake_execute)
+    monkeypatch.setattr(resolve_route, "list_accessible_project_graph_ids", fake_accessible)
+
+    response = await resolve_route.resolve_id_prefix(
+        "de",
+        org=org,
+        ctx=ctx,
+        entity_type=None,
+        limit=20,
+    )
+
+    assert [match.id for match in response.matches] == ["episode_shared12345"]
+    assert "Acquisition target" not in str(response.matches)
+
+
+@pytest.mark.asyncio
+async def test_resolve_id_prefix_serves_the_owner_their_private_memory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    org = AuthOrganization(id=uuid4(), name="Sibyl", slug="sibyl")
+    ctx = _auth_context(org)
+
+    async def fake_execute(_group_id: str, _query: str, **_params: object):
+        return [
+            {
+                "uuid": "decision_private1234",
+                "entity_type": "episode",
+                "name": "Acquisition target is Initech",
+                "attributes": {
+                    "memory_scope": "private",
+                    "principal_id": str(ctx.user.id),
+                },
+            }
+        ]
+
+    async def fake_accessible(_: AuthContext) -> set[str]:
+        return set()
+
+    monkeypatch.setattr(resolve_route, "execute_surreal_graph_query", fake_execute)
+    monkeypatch.setattr(resolve_route, "list_accessible_project_graph_ids", fake_accessible)
+
+    response = await resolve_route.resolve_id_prefix(
+        "de",
+        org=org,
+        ctx=ctx,
+        entity_type=None,
+        limit=20,
+    )
+
+    assert [match.id for match in response.matches] == ["decision_private1234"]
+
+
+@pytest.mark.asyncio
 async def test_resolve_raw_memory_prefix_filters_policy_denied_matches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
