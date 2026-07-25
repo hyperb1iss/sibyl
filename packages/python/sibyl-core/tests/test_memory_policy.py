@@ -457,3 +457,34 @@ def test_promoted_candidate_cannot_inherit_a_forged_owner_from_its_capture() -> 
     assert "scope_key" not in entity.metadata
     assert not memory_metadata_read_allowed(entity.metadata, principal_id="victim")
     assert memory_metadata_read_allowed(entity.metadata, principal_id="attacker")
+
+
+def test_operational_capture_cannot_name_an_owner_through_its_metadata_bag() -> None:
+    """POST /experience verifies project_id and nothing else.
+
+    Its metadata bag and its scope_key are both request-body fields, and every
+    projected entity inherits them, so an unfiltered bag lets a contributor on
+    one project plant rows that resolve as a named victim's private memory.
+    """
+    from sibyl_core.models.experience import (
+        OperationalEvidencePart,
+        OperationalExperience,
+        OperationalObservation,
+    )
+    from sibyl_core.projection.experience import _common_metadata
+
+    evidence = OperationalEvidencePart(id="e1", content_type="text", content="x")
+    experience = OperationalExperience(
+        source_id="src1",
+        goal="g",
+        observations=(OperationalObservation(id="o1", ordinal=1, evidence=(evidence,)),),
+        project_id="project_verified",
+        scope_key="project_victim",
+        metadata={"memory_scope": "private", "principal_id": "victim"},
+    )
+
+    metadata = _common_metadata(experience, content_hash="h")
+
+    assert "memory_scope" not in metadata
+    assert "principal_id" not in metadata
+    assert metadata["scope_key"] == "project_verified"
