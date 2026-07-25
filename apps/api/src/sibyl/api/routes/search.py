@@ -377,6 +377,7 @@ async def explore(
 async def temporal_query(
     request: TemporalRequest,
     org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
 ) -> TemporalResponse:
     """Query bi-temporal history of edges.
 
@@ -396,6 +397,9 @@ async def temporal_query(
     from sibyl_core.tools.temporal import temporal_query as core_temporal_query
 
     group_id = str(org.id)
+    accessible_projects = {
+        str(project_id) for project_id in await list_accessible_project_graph_ids(ctx) or set()
+    }
 
     result = await core_temporal_query(
         mode=request.mode,
@@ -404,6 +408,8 @@ async def temporal_query(
         include_expired=request.include_expired,
         limit=request.limit,
         organization_id=group_id,
+        principal_id=str(getattr(getattr(ctx, "user", None), "id", None) or "") or None,
+        accessible_projects=accessible_projects,
     )
 
     # Convert dataclass edges to schema objects
