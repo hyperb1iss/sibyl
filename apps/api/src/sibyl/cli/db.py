@@ -651,6 +651,129 @@ def restore_db(
     _restore()
 
 
+async def _plane_schema_version(client: Any, *, name: str) -> int:
+    from sibyl_core.backends.surreal.schema_version import get_schema_version
+
+    try:
+        return await get_schema_version(client.execute_query, name=name)
+    except Exception:
+        return 0
+
+
+async def _init_plane(
+    *,
+    plane: str,
+    build_client: Any,
+    bootstrap: Any,
+    schema_name: str,
+    target_version: int,
+) -> dict[str, object]:
+    client = build_client()
+    try:
+        before = await _plane_schema_version(client, name=schema_name)
+        try:
+            await bootstrap(client)
+            error_text: str | None = None
+        except Exception as exc:
+            error_text = str(exc)
+        after = await _plane_schema_version(client, name=schema_name)
+    finally:
+        await client.close()
+    entry: dict[str, object] = {
+        "plane": plane,
+        "version_before": before,
+        "version_after": after,
+        "target_version": target_version,
+    }
+    if error_text:
+        entry["error"] = error_text
+    return entry
+
+
+@app.command("init")
+def db_init(
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Print the result as JSON"),
+    ] = False,
+) -> None:
+    """Apply pending auth and content schema migrations.
+
+    Safe to run repeatedly: it never drops tables or deletes rows, and migrations
+    already recorded in schema_version are skipped.
+    """
+    from sibyl.config import settings
+    from sibyl.persistence.surreal.auth import build_surreal_auth_client
+    from sibyl.persistence.surreal.content import build_surreal_content_client
+    from sibyl_core.backends.surreal import bootstrap_auth_schema, bootstrap_content_schema
+    from sibyl_core.backends.surreal.auth_schema import (
+        AUTH_SCHEMA_CURRENT_VERSION,
+        AUTH_SCHEMA_NAME,
+    )
+    from sibyl_core.backends.surreal.content_schema import (
+        CONTENT_SCHEMA_CURRENT_VERSION,
+        CONTENT_SCHEMA_NAME,
+    )
+
+    @run_async
+    async def _init() -> None:
+        results = [
+            await _init_plane(
+                plane="auth",
+                build_client=build_surreal_auth_client,
+                bootstrap=bootstrap_auth_schema,
+                schema_name=AUTH_SCHEMA_NAME,
+                target_version=AUTH_SCHEMA_CURRENT_VERSION,
+            )
+        ]
+        if settings.store == "surreal":
+            results.append(
+                await _init_plane(
+                    plane="content",
+                    build_client=build_surreal_content_client,
+                    bootstrap=bootstrap_content_schema,
+                    schema_name=CONTENT_SCHEMA_NAME,
+                    target_version=CONTENT_SCHEMA_CURRENT_VERSION,
+                )
+            )
+
+        failed = [entry for entry in results if entry.get("error")]
+        if json_output:
+            print_json({"planes": results, "ok": not failed})
+        else:
+            console.print(f"\n[{NEON_CYAN}]Schema init[/{NEON_CYAN}]\n")
+            for entry in results:
+                plane = entry["plane"]
+                before = entry["version_before"]
+                after = entry["version_after"]
+                target = entry["target_version"]
+                if entry.get("error"):
+                    console.print(
+                        f"  [{ERROR_RED}]{plane}[/{ERROR_RED}]: "
+                        f"v{before} -> v{after} (target v{target})"
+                    )
+                    console.print(f"    [{ERROR_RED}]{entry['error']}[/{ERROR_RED}]")
+                elif after == before:
+                    console.print(
+                        f"  [{ELECTRIC_PURPLE}]{plane}[/{ELECTRIC_PURPLE}]: already at v{after}"
+                    )
+                else:
+                    console.print(
+                        f"  [{SUCCESS_GREEN}]{plane}[/{SUCCESS_GREEN}]: v{before} -> v{after}"
+                    )
+
+        if failed:
+            planes = ", ".join(str(entry["plane"]) for entry in failed)
+            error(f"Schema init incomplete: {planes}")
+            print_db_hint()
+            raise typer.Exit(code=1)
+
+        if not json_output:
+            success("Schema up to date")
+
+    _init()
+
+
 @app.command("clear")
 def clear_db(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
