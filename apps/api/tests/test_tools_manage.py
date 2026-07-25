@@ -727,6 +727,8 @@ class TestAnalysisActions:
                 action="prioritize",
                 entity_id="proj_123",
                 organization_id=TEST_ORG_ID,
+                principal_id="reader-1",
+                accessible_projects={"proj_123"},
             )
 
             assert result.success is True
@@ -762,6 +764,8 @@ class TestAnalysisActions:
                 action="detect_cycles",
                 entity_id="proj_123",
                 organization_id=TEST_ORG_ID,
+                principal_id="reader-1",
+                accessible_projects={"proj_123"},
             )
 
             assert result.success is True
@@ -775,8 +779,9 @@ class TestAnalysisActions:
                 project_id="proj_123",
                 entity_manager=entity_manager_cls.return_value,
                 relationship_manager=relationship_manager_cls.return_value,
-                principal_id=None,
-                accessible_projects=None,
+                principal_id="reader-1",
+                accessible_projects={"proj_123"},
+                allowed_memory_scope_keys=None,
             )
 
 

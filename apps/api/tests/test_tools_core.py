@@ -444,7 +444,9 @@ class TestExploreWithHarness:
                 mode="list",
                 types=["task"],
                 project_ids=["proj_a", "proj_b"],
+                accessible_projects={"proj_a", "proj_b"},
                 organization_id=TEST_ORG_ID,
+                principal_id="reader-1",
             )
 
             assert isinstance(result, ExploreResponse)

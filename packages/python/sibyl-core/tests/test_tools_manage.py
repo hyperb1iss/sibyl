@@ -1645,6 +1645,8 @@ class TestAnalysisActions:
                 action="prioritize",
                 entity_id="project_123",
                 organization_id="org_123",
+                principal_id="reader-1",
+                accessible_projects={"project_123"},
             )
 
         assert response.success is True
@@ -1720,6 +1722,8 @@ class TestAnalysisActions:
                 action="prioritize",
                 entity_id="project_123",
                 organization_id="org_123",
+                principal_id="reader-1",
+                accessible_projects={"project_123"},
             )
 
         assert response.success is True
@@ -1776,6 +1780,8 @@ class TestAnalysisActions:
                 action="detect_cycles",
                 entity_id="project_123",
                 organization_id="org_123",
+                principal_id="reader-1",
+                accessible_projects={"project_123"},
             )
             assert response.success is True
             assert response.message == "Found 1 cycle(s)"
@@ -1788,8 +1794,9 @@ class TestAnalysisActions:
                 project_id="project_123",
                 entity_manager=mock_entity_manager,
                 relationship_manager=mock_rel_manager,
-                principal_id=None,
-                accessible_projects=None,
+                principal_id="reader-1",
+                accessible_projects={"project_123"},
+                allowed_memory_scope_keys=None,
             )
 
 
@@ -1949,6 +1956,8 @@ class TestDeprecation:
                 action="prioritize",
                 entity_id="project_123",
                 organization_id="org_123",
+                principal_id="reader-1",
+                accessible_projects={"project_123"},
             )
 
         assert response.success is True
@@ -2118,12 +2127,25 @@ class TestAddNoteAudienceChannel:
         ungated = {}
         gated = {"project_id": "proj-secret"}
 
-        # The scope rule alone cannot tell these apart: neither declares a scope.
+        # A row with no project and no scope is org-visible; one carrying a
+        # project is now gated by the shared rule itself.
         assert memory_metadata_read_allowed(
-            ungated, principal_id="outsider", accessible_projects=set()
+            ungated,
+            principal_id="outsider",
+            accessible_projects=set(),
+            private_scope_granted=True,
+        )
+        assert not memory_metadata_read_allowed(
+            gated,
+            principal_id="outsider",
+            accessible_projects=set(),
+            private_scope_granted=True,
         )
         assert memory_metadata_read_allowed(
-            gated, principal_id="outsider", accessible_projects=set()
+            gated,
+            principal_id="member",
+            accessible_projects={"proj-secret"},
+            private_scope_granted=True,
         )
         # The project screen can, which is the channel a note now carries.
         from sibyl.api.routes.entities import _entity_visible_to_projects
