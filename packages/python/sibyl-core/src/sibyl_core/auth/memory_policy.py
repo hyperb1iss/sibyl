@@ -567,26 +567,77 @@ def _optional_str(value: object) -> str | None:
     return str(value)
 
 
+def memory_row_project_id(
+    metadata: Mapping[str, Any] | None,
+    *,
+    entity_type: str | None = None,
+    entity_id: str | None = None,
+) -> str | None:
+    """The project a row is addressed by, if any.
+
+    A project row is addressed by its own id; everything else carries the id
+    in its metadata. Both shapes have to resolve, because an unstamped work
+    item's only audience channel is this value.
+    """
+    if entity_type is not None and str(entity_type).lower() == MemoryScope.PROJECT.value:
+        return _optional_str(entity_id)
+    fields = metadata if isinstance(metadata, Mapping) else {}
+    return _optional_str(fields.get("project_id"))
+
+
+def private_scope_granted_for(
+    allowed_memory_scope_keys: Iterable[str] | None,
+    *,
+    principal_id: str | None,
+) -> bool:
+    """Whether this caller's credential still carries a private memory grant.
+
+    An API key narrowed to a project must not read the principal's own private
+    rows just because the principal owns them. No narrowing in play means the
+    session is the principal and the grant stands.
+    """
+    if allowed_memory_scope_keys is None:
+        return True
+    if principal_id is None:
+        return False
+    granted = {str(key) for key in allowed_memory_scope_keys}
+    return memory_scope_policy_key(MemoryScope.PRIVATE, principal_id) in granted
+
+
 def memory_metadata_read_allowed(
     metadata: Mapping[str, Any] | None,
     *,
     principal_id: str | None,
+    private_scope_granted: bool,
+    accessible_projects: Iterable[str] | None,
+    row_project_id: str | None = None,
     project_id: str | None = None,
-    accessible_projects: Iterable[str] | None = None,
     agent_id: str | None = None,
     allowed_memory_scope_keys: Iterable[str] | None = None,
-    private_scope_granted: bool = True,
 ) -> bool:
     """Decide whether a reader may see a graph row carrying this metadata.
 
     Every surface that hands graph rows back to a caller runs this, so a
     private memory stays reachable only by its owner no matter which tool
     walked to it.
+
+    `private_scope_granted` and `accessible_projects` are required rather than
+    defaulted because both previously defaulted open, and a caller that forgot
+    either got a permissive answer that looked converged. An API key with no
+    private memory grant must pass False; a caller that cannot resolve
+    memberships must pass None, which denies rather than admits.
     """
     fields = metadata if isinstance(metadata, Mapping) else {}
     raw_scope = fields.get("memory_scope")
     if raw_scope is None:
-        return True
+        # Work items are deliberately unstamped, so an absent scope is not the
+        # same as an absent audience: the project is the channel, and skipping
+        # it here is what let callers read other projects' tasks by name.
+        effective_project = row_project_id or _optional_str(fields.get("project_id"))
+        if effective_project is None:
+            return True
+        projects = _string_set(accessible_projects)
+        return projects is not None and effective_project in projects
     memory_scope = _coerce_scope(raw_scope)
     if memory_scope is None:
         return False
@@ -663,6 +714,8 @@ __all__ = [
     "authorize_memory_share",
     "authorize_memory_write",
     "memory_metadata_read_allowed",
+    "memory_row_project_id",
     "memory_scope_policy_key",
+    "private_scope_granted_for",
     "stamp_memory_scope_metadata",
 ]
