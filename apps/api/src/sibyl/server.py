@@ -1114,15 +1114,25 @@ async def _add_mcp_entity(
     return payload
 
 
-async def _mcp_entity_project_id(*, organization_id: str, entity_id: str) -> str | None:
+async def _mcp_entity_write_target(
+    *, organization_id: str, entity_id: str
+) -> tuple[str | None, dict[str, Any]]:
+    """The project a manage target is addressed by, and its own scope metadata.
+
+    Resolving only the project made every entity-targeted action a project
+    write, so a contributor could mutate another principal's private row that
+    happened to live in a shared project. The scope travels with it so the
+    caller's authorization can answer to the row it is actually touching.
+    """
     from sibyl_core.services.graph import get_surreal_graph_runtime
     from sibyl_core.tools.helpers import _project_id_for_policy
 
     runtime = await get_surreal_graph_runtime(organization_id)
     entity = await runtime.entity_manager.get(entity_id)
     if entity is None:
-        return None
-    return _project_id_for_policy(entity)
+        return None, {}
+    metadata = getattr(entity, "metadata", None)
+    return _project_id_for_policy(entity), dict(metadata) if isinstance(metadata, dict) else {}
 
 
 async def _authorize_mcp_manage_action(
@@ -1174,10 +1184,34 @@ async def _authorize_mcp_manage_action(
     elif normalized_action in MCP_ENTITY_PROJECT_POLICY_ACTIONS:
         if not entity_id:
             return None
-        project_id = await _mcp_entity_project_id(
+        project_id, target_metadata = await _mcp_entity_write_target(
             organization_id=ctx.org_id,
             entity_id=entity_id,
         )
+        target_scope = str(target_metadata.get("memory_scope") or "").strip()
+        if target_scope == MemoryScope.PRIVATE.value:
+            # A private row answers to its owner, never to project membership.
+            # The write policy authorizes a principal for their own private
+            # space, so the owner comparison has to happen here: the target is
+            # someone else's space, not the caller's.
+            owner = str(
+                target_metadata.get("principal_id") or target_metadata.get("scope_key") or ""
+            )
+            if not owner or not ctx.user_id or owner != str(ctx.user_id):
+                return MemoryPolicyDecision(
+                    action=MemoryPolicyAction.WRITE,
+                    allowed=False,
+                    reason="private_target_not_owned",
+                    memory_scope=MemoryScope.PRIVATE,
+                    scope_key=owner or None,
+                )
+            return _authorize_mcp_memory_write(
+                ctx=ctx,
+                memory_scope=MemoryScope.PRIVATE.value,
+                scope_key=None,
+                accessible_projects=accessible_projects,
+                surface="mcp_manage",
+            )
     else:
         return None
 

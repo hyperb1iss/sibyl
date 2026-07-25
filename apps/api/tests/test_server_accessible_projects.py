@@ -1821,3 +1821,56 @@ async def test_mcp_explore_authorizes_graph_navigation_as_the_caller() -> None:
     kwargs = core_explore.await_args.kwargs
     assert kwargs["principal_id"] == ctx.user_id
     assert kwargs["allowed_memory_scope_keys"] == {api_key_memory_scope_key("project", "project-a")}
+
+
+@pytest.mark.asyncio
+async def test_manage_refuses_a_private_target_owned_by_another_principal() -> None:
+    """Project membership is not authorization to mutate a private row.
+
+    Entity-targeted manage actions resolved only the target's project id and
+    discarded its scope and owner, so every one of them authorized as a
+    project write. A contributor on a shared project could complete, block or
+    archive another principal's private task by id.
+    """
+    bob = str(uuid4())
+    ctx = McpContext(org_id=str(uuid4()), user_id=bob, scopes=["mcp"])
+
+    def _target(memory_scope: str | None, owner: str | None) -> SimpleNamespace:
+        metadata: dict[str, str] = {"project_id": "project-shared"}
+        if memory_scope:
+            metadata["memory_scope"] = memory_scope
+        if owner:
+            metadata["principal_id"] = owner
+        return SimpleNamespace(
+            id="task_target",
+            entity_type=SimpleNamespace(value="task"),
+            name="Target",
+            project_id="project-shared",
+            metadata=metadata,
+        )
+
+    async def _decide(entity: SimpleNamespace):
+        runtime = SimpleNamespace(
+            entity_manager=SimpleNamespace(get=AsyncMock(return_value=entity))
+        )
+        with patch(
+            "sibyl_core.services.graph.get_surreal_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ):
+            return await _authorize_mcp_manage_action(
+                ctx=ctx,
+                action="complete_task",
+                entity_id="task_target",
+                accessible_projects={"project-shared"},
+            )
+
+    others_private = await _decide(_target("private", "alice"))
+    assert others_private.allowed is False
+    assert others_private.reason == "private_target_not_owned"
+
+    own_private = await _decide(_target("private", bob))
+    assert own_private.allowed is True
+
+    # An ordinary work item is still addressed by its project.
+    unscoped = await _decide(_target(None, None))
+    assert unscoped.allowed is True
