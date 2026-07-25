@@ -5,7 +5,7 @@ Commands for backup, restore, and database management.
 
 import json
 from collections.abc import Mapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -58,6 +58,12 @@ def _normalize_rows(rows: object) -> list[dict[str, object]]:
     if not isinstance(rows, list):
         return []
     return [dict(row) for row in rows if isinstance(row, Mapping)]
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
 
 
 def _extract_definitions(value: object) -> list[dict[str, str]]:
@@ -652,12 +658,14 @@ def restore_db(
 
 
 async def _plane_schema_version(client: Any, *, name: str) -> int:
+    """Read the recorded version, letting a read failure surface.
+
+    Swallowing the failure and reporting version 0 makes an unreachable or broken
+    store look like a fresh one, which then reads as a successful migration.
+    """
     from sibyl_core.backends.surreal.schema_version import get_schema_version
 
-    try:
-        return await get_schema_version(client.execute_query, name=name)
-    except Exception:
-        return 0
+    return await get_schema_version(client.execute_query, name=name)
 
 
 async def _init_plane(
@@ -667,26 +675,33 @@ async def _init_plane(
     bootstrap: Any,
     schema_name: str,
     target_version: int,
+    invariant_plan: Any,
 ) -> dict[str, object]:
+    from sibyl_core.backends.surreal.schema_invariants import ensure_schema_invariants
+
+    entry: dict[str, object] = {"plane": plane, "target_version": target_version}
     client = build_client()
     try:
-        before = await _plane_schema_version(client, name=schema_name)
+        entry["version_before"] = await _plane_schema_version(client, name=schema_name)
         try:
             await bootstrap(client)
-            error_text: str | None = None
         except Exception as exc:
-            error_text = str(exc)
+            entry["error"] = str(exc)
+
         after = await _plane_schema_version(client, name=schema_name)
+        entry["version_after"] = after
+        if after != target_version and "error" not in entry:
+            entry["error"] = f"schema stopped at v{after}, expected v{target_version}"
+
+        report = await ensure_schema_invariants(client.execute_query, invariant_plan)
+        entry["repaired_indexes"] = list(report.repaired_indexes)
+        entry["violations"] = [violation.describe() for violation in report.violations]
+        if report.violations and "error" not in entry:
+            entry["error"] = f"{len(report.violations)} schema invariant(s) unmet"
+    except Exception as exc:
+        entry.setdefault("error", f"schema state could not be read: {exc}")
     finally:
         await client.close()
-    entry: dict[str, object] = {
-        "plane": plane,
-        "version_before": before,
-        "version_after": after,
-        "target_version": target_version,
-    }
-    if error_text:
-        entry["error"] = error_text
     return entry
 
 
@@ -709,10 +724,12 @@ def db_init(
     from sibyl_core.backends.surreal.auth_schema import (
         AUTH_SCHEMA_CURRENT_VERSION,
         AUTH_SCHEMA_NAME,
+        auth_schema_invariant_plan,
     )
     from sibyl_core.backends.surreal.content_schema import (
         CONTENT_SCHEMA_CURRENT_VERSION,
         CONTENT_SCHEMA_NAME,
+        content_schema_invariant_plan,
     )
 
     @run_async
@@ -724,6 +741,7 @@ def db_init(
                 bootstrap=bootstrap_auth_schema,
                 schema_name=AUTH_SCHEMA_NAME,
                 target_version=AUTH_SCHEMA_CURRENT_VERSION,
+                invariant_plan=auth_schema_invariant_plan(),
             )
         ]
         if settings.store == "surreal":
@@ -734,6 +752,7 @@ def db_init(
                     bootstrap=bootstrap_content_schema,
                     schema_name=CONTENT_SCHEMA_NAME,
                     target_version=CONTENT_SCHEMA_CURRENT_VERSION,
+                    invariant_plan=content_schema_invariant_plan(),
                 )
             )
 
@@ -744,8 +763,8 @@ def db_init(
             console.print(f"\n[{NEON_CYAN}]Schema init[/{NEON_CYAN}]\n")
             for entry in results:
                 plane = entry["plane"]
-                before = entry["version_before"]
-                after = entry["version_after"]
+                before = entry.get("version_before", "?")
+                after = entry.get("version_after", "?")
                 target = entry["target_version"]
                 if entry.get("error"):
                     console.print(
@@ -761,10 +780,23 @@ def db_init(
                     console.print(
                         f"  [{SUCCESS_GREEN}]{plane}[/{SUCCESS_GREEN}]: v{before} -> v{after}"
                     )
+                for repaired in _string_list(entry.get("repaired_indexes")):
+                    console.print(
+                        f"    [{SUCCESS_GREEN}]rebuilt index {repaired}[/{SUCCESS_GREEN}]"
+                    )
+                for violation in _string_list(entry.get("violations")):
+                    console.print(f"    [{ERROR_RED}]unmet: {violation}[/{ERROR_RED}]")
 
         if failed:
             planes = ", ".join(str(entry["plane"]) for entry in failed)
             error(f"Schema init incomplete: {planes}")
+            if any(_string_list(entry.get("violations")) for entry in results):
+                warn(
+                    "Unique indexes a migration skipped stay unenforced until the "
+                    "duplicate rows are removed. Run 'sibyld db duplicates' to inventory "
+                    "them, then 'sibyld db duplicates --collapse' to keep one row per "
+                    "group, then re-run 'sibyld db init'."
+                )
             print_db_hint()
             raise typer.Exit(code=1)
 
@@ -772,6 +804,194 @@ def db_init(
             success("Schema up to date")
 
     _init()
+
+
+@dataclass(frozen=True, slots=True)
+class _DuplicateGroup:
+    table: str
+    index_name: str
+    key: tuple[str, ...]
+    record_ids: tuple[object, ...]
+
+    @property
+    def excess(self) -> int:
+        return len(self.record_ids) - 1
+
+
+async def _duplicate_groups_for_plane(client: Any, invariant_plan: Any) -> list[_DuplicateGroup]:
+    """Group rows under every UNIQUE index the schema promises but the store lacks.
+
+    Deriving the scan from the missing indexes rather than a hardcoded table list means
+    the inventory always targets whatever is actually blocking the migration.
+    """
+    from sibyl_core.backends.surreal.records import normalize_records
+    from sibyl_core.backends.surreal.schema_invariants import (
+        fetch_table_definitions,
+        fetch_table_indexes,
+    )
+    from sibyl_core.backends.surreal.schema_version import validate_identifier
+
+    definitions = await fetch_table_definitions(client.execute_query)
+    groups: list[_DuplicateGroup] = []
+    for requirement in invariant_plan.unique_indexes:
+        if requirement.table not in definitions:
+            continue
+        if requirement.name in await fetch_table_indexes(client.execute_query, requirement.table):
+            continue
+
+        validate_identifier(requirement.table)
+        for field_name in requirement.fields:
+            validate_identifier(field_name)
+        projection = ", ".join(requirement.fields)
+        # normalize_records drops a bare `id`, so the record id has to ride an alias.
+        rows = normalize_records(
+            await client.execute_query(
+                f"SELECT id AS duplicate_record_id, {projection} FROM {requirement.table};"  # noqa: S608
+            )
+        )
+        buckets: dict[tuple[str, ...], list[object]] = {}
+        for row in rows:
+            record_id = row.get("duplicate_record_id")
+            if record_id is None:
+                continue
+            key = tuple(str(row.get(field)) for field in requirement.fields)
+            buckets.setdefault(key, []).append(record_id)
+        for key, record_ids in buckets.items():
+            if len(record_ids) > 1:
+                groups.append(
+                    _DuplicateGroup(
+                        table=requirement.table,
+                        index_name=requirement.name,
+                        key=key,
+                        # Sorted so the surviving row is the same on every run.
+                        record_ids=tuple(sorted(record_ids, key=str)),
+                    )
+                )
+    return groups
+
+
+@app.command("duplicates")
+def db_duplicates(
+    collapse: Annotated[
+        bool,
+        typer.Option("--collapse", help="Delete excess rows, keeping one per duplicate group"),
+    ] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Print the result as JSON")] = False,
+) -> None:
+    """Inventory rows that block a UNIQUE index the schema requires.
+
+    Without --collapse this only reads. Collapsing deletes rows, so it stays an
+    explicit operator decision and is never run as part of a migration.
+    """
+    from sibyl.config import settings
+    from sibyl.persistence.surreal.auth import build_surreal_auth_client
+    from sibyl.persistence.surreal.content import build_surreal_content_client
+    from sibyl_core.backends.surreal.auth_schema import auth_schema_invariant_plan
+    from sibyl_core.backends.surreal.content_schema import content_schema_invariant_plan
+
+    @run_async
+    async def _duplicates() -> None:
+        planes: list[tuple[str, Any, Any]] = [
+            ("auth", build_surreal_auth_client, auth_schema_invariant_plan())
+        ]
+        if settings.store == "surreal":
+            planes.append(
+                ("content", build_surreal_content_client, content_schema_invariant_plan())
+            )
+
+        found: list[tuple[str, _DuplicateGroup]] = []
+        for plane, build_client, plan in planes:
+            client = build_client()
+            try:
+                found.extend(
+                    (plane, group) for group in await _duplicate_groups_for_plane(client, plan)
+                )
+            finally:
+                await client.close()
+
+        if not found:
+            if json_output:
+                print_json({"groups": [], "excess_rows": 0, "collapsed": 0})
+            else:
+                success("No duplicate rows block any required unique index")
+            return
+
+        excess = sum(group.excess for _, group in found)
+        if not json_output:
+            console.print(f"\n[{NEON_CYAN}]Duplicate rows blocking unique indexes[/{NEON_CYAN}]\n")
+            by_index: dict[tuple[str, str, str], list[_DuplicateGroup]] = {}
+            for plane, group in found:
+                by_index.setdefault((plane, group.table, group.index_name), []).append(group)
+            for (plane, table, index_name), groups in by_index.items():
+                console.print(
+                    f"  [{ELECTRIC_PURPLE}]{plane}.{table}[/{ELECTRIC_PURPLE}] {index_name}: "
+                    f"{len(groups)} duplicated key(s), "
+                    f"{sum(item.excess for item in groups)} excess row(s)"
+                )
+                for group in groups[:5]:
+                    console.print(
+                        f"    [dim]{' / '.join(group.key)} x{len(group.record_ids)}[/dim]"
+                    )
+                if len(groups) > 5:
+                    console.print(f"    [dim]...and {len(groups) - 5} more[/dim]")
+
+        if not collapse:
+            if json_output:
+                print_json(
+                    {
+                        "groups": [
+                            {
+                                "plane": plane,
+                                "table": group.table,
+                                "index": group.index_name,
+                                "key": list(group.key),
+                                "copies": len(group.record_ids),
+                            }
+                            for plane, group in found
+                        ],
+                        "excess_rows": excess,
+                        "collapsed": 0,
+                    }
+                )
+            else:
+                warn(f"{excess} excess row(s) would be deleted by --collapse")
+            return
+
+        if not yes:
+            console.print(
+                f"\n[{ERROR_RED}]This deletes {excess} row(s), keeping one per group.[/{ERROR_RED}]"
+            )
+            if not typer.confirm("Continue?"):
+                info("Cancelled")
+                return
+
+        collapsed = 0
+        for plane, build_client, _ in planes:
+            doomed = [
+                record_id
+                for entry_plane, group in found
+                if entry_plane == plane
+                for record_id in group.record_ids[1:]
+            ]
+            if not doomed:
+                continue
+            client = build_client()
+            try:
+                for start in range(0, len(doomed), 200):
+                    batch = doomed[start : start + 200]
+                    await client.execute_query("DELETE $ids;", ids=batch)
+                    collapsed += len(batch)
+            finally:
+                await client.close()
+
+        if json_output:
+            print_json({"groups": [], "excess_rows": excess, "collapsed": collapsed})
+        else:
+            success(f"Deleted {collapsed} excess row(s)")
+            info("Run 'sibyld db init' to rebuild the unique indexes")
+
+    _duplicates()
 
 
 @app.command("clear")
