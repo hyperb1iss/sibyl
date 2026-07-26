@@ -3943,6 +3943,161 @@ def test_sibyl_memory_accurate_query_rejects_planner_fallback() -> None:
     }
 
 
+def _passage_query_memory(
+    module: ModuleType,
+    *,
+    results: list[dict[str, Any]],
+    request_payloads: list[dict[str, Any]],
+) -> Any:
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+
+    def fake_request(
+        _method: str,
+        path: str,
+        *,
+        json: dict[str, object] | None = None,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        assert path == "/context/pack"
+        assert json is not None
+        request_payloads.append(json)
+        return {
+            "sections": [],
+            "evidence": {
+                "results": results,
+                "filters": {"retrieval_mode": "native"},
+            },
+        }
+
+    memory.project_id = "project_lme"
+    memory.search_limit = 12
+    memory.max_context_items = 8
+    memory.max_context_chars_per_item = TEST_CONTEXT_MAX_CHARS
+    memory.retrieval_mode = "fast"
+    memory.retrieval_max_planned_queries = 3
+    memory._pending_embedding_job_ids = set()
+    memory._pending_projection_job_ids = set()
+    memory._ingest_finalized = True
+    memory._query_local = threading.local()
+    memory._request_json = fake_request
+    return memory
+
+
+def test_query_reaches_passage_evidence_when_the_type_is_requested() -> None:
+    """`types` is a hard node-type filter, so passages need naming to exist.
+
+    The composer never filtered by entity type, which is why passages looked
+    reachable. The search that feeds it does: the requested list becomes a
+    `node_types` filter, so a slice substrate that is not named here never
+    enters the candidate pool and a gate run would score an empty slice lane.
+    """
+    module = _load_memory_module()
+    passages = [
+        _passage_result("t1", observation_ordinal=2, passage_index=index, score=1.0 - index / 10)
+        for index in range(3)
+    ]
+    request_payloads: list[dict[str, Any]] = []
+    memory = _passage_query_memory(
+        module,
+        results=passages,
+        request_payloads=request_payloads,
+    )
+    memory.evidence_types = ("session", "passage")
+    memory.max_chunks_per_trajectory = len(passages)
+
+    context = memory.query("Which filter was selected?")
+
+    assert request_payloads[0]["evidence"]["types"] == ["session", "passage"]
+    assert len(context) == len(passages)
+    rendered = "\n".join(str(item["value"]) for item in context)
+    for index in range(len(passages)):
+        assert f"passage-body-2-{index}" in rendered
+
+
+def test_per_trajectory_chunk_cap_still_bounds_passages_from_one_trajectory() -> None:
+    """`max_chunks_per_trajectory` is load-bearing once the unit is a passage.
+
+    It defaults to two, which was a sane source-diversity floor when a chunk was
+    a whole state. At slice granularity it is a hard cap on how much of any one
+    trajectory the reader can ever see, so a passage arm has to raise it
+    deliberately. Pinned here so the cap is a stated configuration rather than a
+    surprise in a scored run.
+    """
+    module = _load_memory_module()
+    passages = [
+        _passage_result("t1", observation_ordinal=2, passage_index=index, score=1.0 - index / 10)
+        for index in range(5)
+    ]
+    request_payloads: list[dict[str, Any]] = []
+    memory = _passage_query_memory(
+        module,
+        results=passages,
+        request_payloads=request_payloads,
+    )
+    memory.evidence_types = ("session", "passage")
+
+    context = memory.query("Which filter was selected?")
+
+    assert module.DEFAULT_MAX_CHUNKS_PER_TRAJECTORY == EXPECTED_MAX_CHUNKS_PER_TRAJECTORY
+    assert len(context) == EXPECTED_MAX_CHUNKS_PER_TRAJECTORY
+
+
+def test_query_requests_the_whole_state_substrate_by_default() -> None:
+    """The shipped arm must still put exactly `["session"]` on the wire.
+
+    Every frozen campaign number came from the whole-state substrate, and the
+    gate is a paired comparison against it, so opting in to passages has to be
+    something a run states rather than something it inherits.
+    """
+    module = _load_memory_module()
+    request_payloads: list[dict[str, Any]] = []
+    memory = _passage_query_memory(
+        module,
+        results=[_search_result("t1", chunk_index=0, state_index=0, score=1.0)],
+        request_payloads=request_payloads,
+    )
+
+    memory.query("Which filter was selected?")
+
+    assert request_payloads[0]["evidence"]["types"] == ["session"]
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected"),
+    [
+        (None, ("session",)),
+        (["session", "passage"], ("session", "passage")),
+        ("session,passage", ("session", "passage")),
+        (["passage", "passage", "session"], ("passage", "session")),
+    ],
+)
+def test_evidence_types_param_accepts_explicit_substrates(
+    requested: object,
+    expected: tuple[str, ...],
+) -> None:
+    module = _load_memory_module()
+    params = {} if requested is None else {"evidence_types": requested}
+
+    assert (
+        module._param_evidence_types(params, "evidence_types", module.DEFAULT_EVIDENCE_TYPES)
+        == expected
+    )
+
+
+@pytest.mark.parametrize("requested", [["slice"], [""], 7])
+def test_evidence_types_param_rejects_types_the_substrate_cannot_serve(requested: object) -> None:
+    """A typo here costs a paid run and returns an empty lane, so it fails loudly."""
+    module = _load_memory_module()
+
+    with pytest.raises(ValueError, match=r"evidence type|at least one entity type|must be a list"):
+        module._param_evidence_types(
+            {"evidence_types": requested},
+            "evidence_types",
+            module.DEFAULT_EVIDENCE_TYPES,
+        )
+
+
 def test_operational_experience_payload_preserves_oversized_state_evidence() -> None:
     module = _load_memory_module()
     trajectory = _trajectory("t1", tree="Priority field\n" * 2_000)
@@ -6124,7 +6279,7 @@ def _passage_result(
         "id": f"entity:{trajectory_id}:state-{observation_ordinal}:passage-{passage_index}",
         "type": "passage",
         "name": f"Observation {observation_ordinal} passage {passage_index + 1}",
-        "content": "x" * content_chars,
+        "content": f"passage-body-{observation_ordinal}-{passage_index} ".ljust(content_chars, "x"),
         "score": score,
         "result_origin": "graph",
         "metadata": {
