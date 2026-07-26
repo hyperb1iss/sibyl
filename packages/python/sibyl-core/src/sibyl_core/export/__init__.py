@@ -1,5 +1,23 @@
 """Portable export projections."""
 
+from sibyl_core.export.memory_files import (
+    HANDBOOK_PATH,
+    INDEX_PATH,
+    MANIFEST_PATH,
+    MEMORY_FILES_OKF_VERSION,
+    MEMORY_FILES_SCHEMA_VERSION,
+    NOTES_DIR,
+    README_PATH,
+    RECENT_PATH,
+    TASKS_PATH,
+    MemoryFilesBundle,
+    MemoryRecord,
+    MemorySnapshot,
+    build_memory_files_bundle,
+    memory_record_from_entity,
+    validate_memory_files_bundle,
+    write_memory_files_bundle,
+)
 from sibyl_core.export.okf import (
     OKF_VERSION,
     OkfBundle,
@@ -11,11 +29,27 @@ from sibyl_core.export.okf import (
 )
 
 __all__ = [
+    "HANDBOOK_PATH",
+    "INDEX_PATH",
+    "MANIFEST_PATH",
+    "MEMORY_FILES_OKF_VERSION",
+    "MEMORY_FILES_SCHEMA_VERSION",
+    "NOTES_DIR",
     "OKF_VERSION",
+    "README_PATH",
+    "RECENT_PATH",
+    "TASKS_PATH",
+    "MemoryFilesBundle",
+    "MemoryRecord",
+    "MemorySnapshot",
     "OkfBundle",
+    "build_memory_files_bundle",
     "build_okf_bundle_from_archive",
     "build_okf_bundle_from_graph_payload",
+    "memory_record_from_entity",
     "reconstruct_graph_payload_from_okf_bundle",
+    "validate_memory_files_bundle",
     "validate_okf_bundle",
+    "write_memory_files_bundle",
     "write_okf_bundle",
 ]
