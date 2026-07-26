@@ -18,6 +18,14 @@ class ContextEvidenceRequest(BaseModel):
         description="Entity types to include in the evidence pool",
     )
     limit: int = Field(default=24, ge=1, le=50, description="Maximum evidence results")
+    char_budget: int | None = Field(
+        default=None,
+        ge=1,
+        le=500_000,
+        description=(
+            "Bound composed evidence by characters of returned content instead of item count"
+        ),
+    )
     max_results_per_source: int | None = Field(
         default=None,
         ge=1,
