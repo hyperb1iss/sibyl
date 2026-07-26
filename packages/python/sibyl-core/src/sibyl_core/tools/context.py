@@ -615,6 +615,20 @@ def _lean_item_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     return lean
 
 
+def _description_adds_nothing(description: str, content: str | None) -> bool:
+    """Report whether a description is wholly contained in the content already served.
+
+    Writers store description as a hard prefix of content, so equality only holds
+    while the reader is served that same prefix; once the full body is served the
+    description is still redundant, just no longer identical.
+    """
+    trimmed = description.strip()
+    body = (content or "").strip()
+    if not trimmed:
+        return not body
+    return body.startswith(trimmed)
+
+
 def _item_from_result(
     result: SearchResult,
     facet: ContextFacet,
@@ -633,7 +647,7 @@ def _item_from_result(
             content = learnings.strip()
     if not audit:
         description = metadata.get("description")
-        if isinstance(description, str) and description.strip() == (content or "").strip():
+        if isinstance(description, str) and _description_adds_nothing(description, content):
             metadata.pop("description", None)
     kwargs: dict[str, Any] = {
         "id": result.id,
@@ -1212,6 +1226,10 @@ def _item_from_active_entity(entity: Any) -> ContextItem:
         "status": status,
         "priority": _enum_value(getattr(entity, "priority", "") or ""),
     }
+    # Tasks invert the usual relationship: Task.set_entity_fields seeds content
+    # from description at creation and the update path never rewrites it, so
+    # content is a frozen create-time snapshot and description is the live text.
+    # Reading content first here would serve prose the author already replaced.
     content = str(getattr(entity, "description", "") or getattr(entity, "content", "") or "")
     reason = "task is currently in progress for this project"
     if status == "blocked":
