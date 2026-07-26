@@ -686,6 +686,7 @@ async def _compile_context_with_evidence(
     ctx: AuthContext,
     accessible_projects: set[str] | None,
     compile_pack: Callable[[], Awaitable[ContextPack]],
+    agent_id: str | None,
 ) -> tuple[ContextPack, SearchResponse]:
     assert request.evidence is not None
     try:
@@ -772,7 +773,7 @@ async def _compile_context_with_evidence(
                 principal_id=ctx.user_id,
                 project_id=request.project,
                 source_surface="context_pack_evidence",
-                request_metadata={"agent_id": request.agent_id} if request.agent_id else None,
+                request_metadata={"agent_id": agent_id} if agent_id else None,
             )
             evidence_response.filters["usage_exposure"] = exposure_summary
     evidence_response.filters["embedding_usage"] = dict(embedding_usage)
@@ -849,6 +850,7 @@ async def context_pack(
                 ctx=ctx,
                 accessible_projects=accessible_projects,
                 compile_pack=compile_pack,
+                agent_id=agent_id,
             )
         payload = context_pack_to_dict(pack)
         rendered = render_context_pack_markdown(

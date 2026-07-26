@@ -1327,6 +1327,46 @@ class TestContextPackRoute:
         compile_context.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_evidence_exposure_is_attributed_to_the_bound_agent(self) -> None:
+        # A credential-bound key that omits agent_id in the body must still
+        # stamp evidence exposure with the identity the key is bound to.
+        raw_response = _search_response("ship faster", ("raw-0", 0.9))
+        typed_response = _search_response("ship faster", ("note-0", 0.8))
+
+        async def retrieve(
+            search_request: SearchRequest,
+            **_kwargs: object,
+        ) -> SearchResponse:
+            return typed_response if search_request.types == ["note"] else raw_response
+
+        exposure = AsyncMock(return_value={"stamped_count": 2, "coverage_complete": True})
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
+            patch("sibyl.api.routes.search.execute_search_request", side_effect=retrieve),
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+            patch(
+                "sibyl_core.tools.usage_exposure.annotate_search_result_exposures",
+                exposure,
+            ),
+        ):
+            await context_pack(
+                request=ContextPackRequest(
+                    goal="ship faster",
+                    evidence={"types": ["session"], "limit": 8},
+                ),
+                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
+                ctx=_ctx(agent_id="hermes:hermes:default"),
+            )
+
+        assert exposure.await_args.kwargs["request_metadata"] == {
+            "agent_id": "hermes:hermes:default"
+        }
+
+    @pytest.mark.asyncio
     async def test_context_pack_can_defer_exposure_and_reports_rendered_ids(self) -> None:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
 
