@@ -1,0 +1,129 @@
+{
+  "enterprise": {
+    "domain": "enterprise",
+    "measurable": 44,
+    "counts": {
+      "window_1": 41,
+      "window_2": 41,
+      "window_3": 42,
+      "window_5": 42,
+      "all_slices_of_one_state": 42,
+      "fat_state": 42,
+      "any_two_slices_same_state": 31
+    },
+    "rates": {
+      "window_1": 0.9318,
+      "window_2": 0.9318,
+      "window_3": 0.9545,
+      "window_5": 0.9545,
+      "all_slices_of_one_state": 0.9545,
+      "fat_state": 0.9545,
+      "any_two_slices_same_state": 0.7045
+    },
+    "losers": {
+      "any_two_slices_same_state": [
+        "01307e07",
+        "2975030d",
+        "2d4e08b9",
+        "4c6d1eb7",
+        "634973c3",
+        "658fa827",
+        "82cdfcc3",
+        "87711b62",
+        "882965b7",
+        "901b7d17",
+        "b54161f8",
+        "d0d61088",
+        "dd53ab77"
+      ],
+      "window_1": [
+        "0cf979c4",
+        "2d4e08b9",
+        "882965b7"
+      ],
+      "window_2": [
+        "0cf979c4",
+        "2d4e08b9",
+        "882965b7"
+      ],
+      "window_3": [
+        "2d4e08b9",
+        "882965b7"
+      ],
+      "window_5": [
+        "2d4e08b9",
+        "882965b7"
+      ],
+      "all_slices_of_one_state": [
+        "2d4e08b9",
+        "882965b7"
+      ],
+      "fat_state": [
+        "2d4e08b9",
+        "882965b7"
+      ]
+    }
+  },
+  "web": {
+    "domain": "web",
+    "measurable": 48,
+    "counts": {
+      "window_1": 47,
+      "window_2": 48,
+      "window_3": 48,
+      "window_5": 48,
+      "all_slices_of_one_state": 48,
+      "fat_state": 48,
+      "any_two_slices_same_state": 15
+    },
+    "rates": {
+      "window_1": 0.9792,
+      "window_2": 1.0,
+      "window_3": 1.0,
+      "window_5": 1.0,
+      "all_slices_of_one_state": 1.0,
+      "fat_state": 1.0,
+      "any_two_slices_same_state": 0.3125
+    },
+    "losers": {
+      "any_two_slices_same_state": [
+        "05cce9b3",
+        "06a5a25f",
+        "0738c1ac",
+        "0c0fdcd7",
+        "0c6b0c60",
+        "10003186",
+        "10466872",
+        "11dac74b",
+        "17d63ad8",
+        "2c45ecbb",
+        "3f366e15",
+        "436c58d5",
+        "631667c9",
+        "6652c337",
+        "77db204d",
+        "820d56e2",
+        "86fa86eb",
+        "8955b988",
+        "896017e0",
+        "8c55d6bc",
+        "99ae54d1",
+        "a7da9ab3",
+        "c36b0d68",
+        "d3300354",
+        "d6da3938",
+        "e532c01e",
+        "e71f7c92",
+        "e77d1287",
+        "e83245c5",
+        "e9bb843a",
+        "f928c075",
+        "f93031d2",
+        "f9f9cd61"
+      ],
+      "window_1": [
+        "c6124506"
+      ]
+    }
+  }
+}
