@@ -2235,6 +2235,66 @@ def test_sibyl_memory_context_token_count_matches_official_processor_contract(
     }
 
 
+def test_passages_of_one_trajectory_are_distinct_assembly_candidates() -> None:
+    """Sub-state rows must not dedupe each other down to one row per trajectory.
+
+    Passages carry the trajectory id but neither a chunk index nor a state
+    index, so keying their fallback on the trajectory made every passage of a
+    trajectory the same candidate. Assembly then admitted the first and
+    discarded its siblings as duplicates, which is a slice substrate that
+    returns one slice per trajectory however many the search found.
+    """
+    module = _load_memory_module()
+    passages = [
+        _passage_result("t1", observation_ordinal=3, passage_index=index, score=1.0 - index / 10)
+        for index in range(4)
+    ]
+
+    chunk_keys = {module._result_chunk_key(passage) for passage in passages}
+    diversity_keys = {module._result_diversity_key(passage) for passage in passages}
+    assembled, _metadata = module.assemble_context_results(
+        passages,
+        chunk_catalog={},
+        max_items=len(passages),
+        max_chunks_per_trajectory=len(passages),
+        neighbor_stitch_items=0,
+        neighbor_stitch_span=0,
+    )
+
+    assert len(chunk_keys) == len(passages)
+    assert len(diversity_keys) == len(passages)
+    assert [result["id"] for result in assembled] == [passage["id"] for passage in passages]
+
+
+def test_chunk_indexed_rows_keep_their_existing_identity() -> None:
+    """The fat-state substrate keys exactly as it did; only the fallback moved.
+
+    Every frozen campaign number came from rows that carry an integer chunk
+    index and an integer state index, and both keys short-circuit on those
+    before reaching the new fallback.
+    """
+    module = _load_memory_module()
+    results = [
+        _search_result("t1", chunk_index=0, state_index=0, score=1.0),
+        _search_result("t1", chunk_index=1, state_index=1, score=0.9),
+        _search_result("t2", chunk_index=0, state_index=0, score=0.8),
+    ]
+
+    assert [module._result_chunk_key(result) for result in results] == [
+        ("t1", 0),
+        ("t1", 1),
+        ("t2", 0),
+    ]
+    assert [module._result_diversity_key(result) for result in results] == [
+        ("t1", 0),
+        ("t1", 1),
+        ("t2", 0),
+    ]
+
+    untagged = {"id": "entity:loose", "type": "session", "content": "no trajectory", "metadata": {}}
+    assert module._result_chunk_key(untagged) == ("entity:loose", "entity:loose")
+
+
 def test_sibyl_memory_assembles_diverse_seeds_with_neighbors() -> None:
     module = _load_memory_module()
     t1_seed = _search_result("t1", chunk_index=1, state_index=1, score=1.0)
@@ -6042,5 +6102,35 @@ def _search_result(
             "longmemeval_v2_chunk_index": chunk_index,
             "longmemeval_v2_state_index": state_index,
             "longmemeval_v2_state_indices": [state_index],
+        },
+    }
+
+
+def _passage_result(
+    trajectory_id: str,
+    *,
+    observation_ordinal: int,
+    passage_index: int,
+    score: float,
+    content_chars: int = 1_000,
+) -> dict[str, Any]:
+    """A passage row as the operational projection actually mints it.
+
+    The metadata bag is the projection's shared `common` block plus the
+    passage's own fields, so it carries the trajectory id but neither the
+    chunk index nor the state index the fat-state substrate keys on.
+    """
+    return {
+        "id": f"entity:{trajectory_id}:state-{observation_ordinal}:passage-{passage_index}",
+        "type": "passage",
+        "name": f"Observation {observation_ordinal} passage {passage_index + 1}",
+        "content": "x" * content_chars,
+        "score": score,
+        "result_origin": "graph",
+        "metadata": {
+            "longmemeval_v2_trajectory_id": trajectory_id,
+            "projection_kind": "passage",
+            "observation_ordinal": observation_ordinal,
+            "passage_index": passage_index,
         },
     }

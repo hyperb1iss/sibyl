@@ -2609,8 +2609,13 @@ def _result_diversity_key(result: dict[str, object]) -> tuple[str, int | str]:
     if not trajectory_id:
         trajectory_id = _stripped_str(result.get("id")) or f"unknown:{id(result)}"
     state_index = metadata.get("longmemeval_v2_state_index")
-    state_key: int | str = state_index if isinstance(state_index, int) else "unknown"
-    return trajectory_id, state_key
+    if isinstance(state_index, int):
+        return trajectory_id, state_index
+    # A row cut below state granularity carries no state index, so the state is
+    # not a unit it can be spread across; its own identity is. Collapsing every
+    # such row of a trajectory onto one shared key would admit exactly one of
+    # them and call the rest duplicates of each other.
+    return trajectory_id, _stripped_str(result.get("id")) or "unknown"
 
 
 def _result_chunk_key(result: dict[str, object]) -> tuple[str, int | str]:
@@ -2619,8 +2624,15 @@ def _result_chunk_key(result: dict[str, object]) -> tuple[str, int | str]:
     if not trajectory_id:
         trajectory_id = _stripped_str(result.get("id")) or f"unknown:{id(result)}"
     chunk_index = metadata.get("longmemeval_v2_chunk_index")
-    chunk_key: int | str = chunk_index if isinstance(chunk_index, int) else trajectory_id
-    return trajectory_id, chunk_key
+    if isinstance(chunk_index, int):
+        return trajectory_id, chunk_index
+    # Falling back to the trajectory says "this row is the whole trajectory",
+    # which was true while every trajectory-tagged row was a numbered chunk. A
+    # substrate cut finer than the chunk index breaks that: siblings would share
+    # one key and dedupe each other down to a single admitted row. The row's own
+    # id is the finest stable identity available, and the trajectory component
+    # above already falls back to it the same way.
+    return trajectory_id, _stripped_str(result.get("id")) or trajectory_id
 
 
 def _restore_catalog_content(
