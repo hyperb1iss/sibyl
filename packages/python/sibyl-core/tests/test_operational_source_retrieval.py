@@ -732,6 +732,40 @@ def test_mixed_source_keeps_an_unsliced_evidence_part_reachable() -> None:
     assert span.passage_count == 0
 
 
+def test_slicing_one_part_does_not_narrow_the_windows_of_the_parts_left_whole() -> None:
+    """Whole-part rows keep sliding across observations however the source was cut.
+
+    Only accessibility-tree parts are sliced, so one sliced observation is
+    normal. Confining the rest to their own part would collapse them to a
+    window of one and cost a mixed source most of its span for no measured
+    reason: the adjacency confinement protects belongs to passages.
+    """
+    sliced = tuple(
+        _passage(
+            f"passage-{index}",
+            ordinal=0,
+            passage_index=index,
+            passage_count=2,
+            body=body,
+        )
+        for index, body in enumerate(["dashboard summary panel", "catalog filter sidebar"])
+    )
+    whole = tuple(
+        _entity(f"whole-{ordinal}", ordinal=ordinal, evidence=f"carrier tracking detail {ordinal}")
+        for ordinal in range(1, 4)
+    )
+
+    span = select_operational_source_span(
+        "carrier tracking detail",
+        _passage_inventory(sliced + whole),
+        max_observations=4,
+        max_entities=4,
+    )
+
+    assert [entity.id for entity in span.entities] == ["whole-1", "whole-2", "whole-3"]
+    assert span.passage_count == 0
+
+
 @pytest.mark.asyncio
 async def test_fetch_inventory_prefers_passages_over_the_part_they_were_cut_from() -> None:
     """A passage and its parent carry the same text, so a span may not hold both.
