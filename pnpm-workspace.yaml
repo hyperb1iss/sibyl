@@ -12,7 +12,7 @@ allowBuilds:
   unrs-resolver: false # preserved from prior ignoredBuiltDependencies
 
 overrides:
-  postcss: ^8.5.15
+  postcss: ^8.5.18
   sharp: 0.35.0
 
 # Skip minimumReleaseAge re-verification of the committed lockfile. The
