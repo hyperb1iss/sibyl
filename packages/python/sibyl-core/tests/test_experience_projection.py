@@ -27,7 +27,9 @@ from sibyl_core.projection.experience import (
     MANIFEST_STATE_EMBEDDING_PENDING,
     MANIFEST_STATE_PENDING,
     MAX_RAW_OBSERVATION_DESCRIPTION_CHARS,
+    MAX_TYPED_ENTITY_CONTENT_CHARS,
 )
+from sibyl_core.projection.slicing import slice_body
 
 
 def _experience(*, outcome: str = "success") -> OperationalExperience:
@@ -940,3 +942,61 @@ def test_non_accessibility_evidence_mints_no_passages() -> None:
     assert [
         entity for entity in projection.entities if entity.entity_type is EntityType.PASSAGE
     ] == []
+
+
+def test_passage_names_stay_unique_across_evidence_parts() -> None:
+    body = _accessibility_tree_body()
+    experience = OperationalExperience(
+        source_id="capture-parts",
+        goal="Read both halves of the state",
+        observations=(
+            OperationalObservation(
+                id="state-0",
+                ordinal=0,
+                evidence=tuple(
+                    OperationalEvidencePart(
+                        id=f"tree-{index}",
+                        content=body,
+                        content_type="text/plain; profile=accessibility-tree",
+                    )
+                    for index in range(2)
+                ),
+            ),
+        ),
+    )
+    projection = project_operational_experience(experience)
+    names = [
+        entity.name for entity in projection.entities if entity.entity_type is EntityType.PASSAGE
+    ]
+
+    assert len(names) > 2
+    assert len(set(names)) == len(names)
+
+
+def test_deeply_nested_evidence_keeps_every_passage_by_trimming_the_trail() -> None:
+    depth = 400
+    body = "\n".join(f"{'\t' * level}group 'Level {level} {'x' * 40}'" for level in range(depth))
+    experience = OperationalExperience(
+        source_id="capture-deep",
+        goal="Walk a pathologically nested tree",
+        observations=(
+            OperationalObservation(
+                id="state-0",
+                ordinal=0,
+                evidence=(
+                    OperationalEvidencePart(
+                        id="tree-0",
+                        content=body,
+                        content_type="text/plain; profile=accessibility-tree",
+                    ),
+                ),
+            ),
+        ),
+    )
+    projection = project_operational_experience(experience)
+    passages = [
+        entity for entity in projection.entities if entity.entity_type is EntityType.PASSAGE
+    ]
+
+    assert len(passages) == len(slice_body(body)[0])
+    assert all(len(passage.content or "") <= MAX_TYPED_ENTITY_CONTENT_CHARS for passage in passages)

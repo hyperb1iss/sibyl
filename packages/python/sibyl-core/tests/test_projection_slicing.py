@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from sibyl_core.projection.slicing import (
@@ -150,3 +152,15 @@ def test_headers_stay_within_the_header_budget_and_drop_a_missing_uri() -> None:
 def test_rendering_omits_an_empty_breadcrumb_line() -> None:
     assert render_slice("head", "", "body") == "head\nbody"
     assert render_slice("head", "trail", "body") == "head\ntrail\nbody"
+
+
+def test_deep_nesting_does_not_exhaust_the_interpreter_stack() -> None:
+    depth = 2_000
+    lines = [f"{'\t' * level}group 'Level {level}'" for level in range(depth)]
+    body = "\n".join(lines)
+
+    slices, stats = slice_body(body)
+
+    assert stats.descend_events > sys.getrecursionlimit()
+    assert _partition(body) == list(range(depth))
+    assert len(slices) > 1
