@@ -526,7 +526,11 @@ jobs:
     name: "◆ Docker: Security ${{ matrix.image }} (${{ matrix.platform }})"
     needs: docker-build
     if: ${{ !inputs.dry_run }}
-    runs-on: ubuntu-latest
+    # Each digest is scanned on its own architecture, mirroring docker-build.
+    # A push-by-digest reference resolves to a single-platform index, so an
+    # amd64 runner asks for an amd64 child that an arm64 digest does not have
+    # and the scan fails before it reads a single package.
+    runs-on: ${{ matrix.platform == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     timeout-minutes: 15
     permissions:
       contents: read
