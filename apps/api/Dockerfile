@@ -29,6 +29,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Stage 2: Runtime
 FROM python:3.13-slim-bookworm AS runtime
 
+# Build provenance. Without these the running server cannot name itself:
+# _read_version() falls back to "0.0.0" and get_runtime_provenance()
+# reports "unknown", because the runtime stage has no VERSION file and no
+# git. Both are stamped on every response for client-drift detection, so
+# they have to survive into this stage.
+ARG SIBYL_VERSION=0.0.0
+ARG SIBYL_GIT_COMMIT=unknown
+ARG SIBYL_GIT_DIRTY=false
+
 # Create non-root user with a high service UID to avoid host user collisions.
 RUN groupadd --gid 10001 sibyl && \
     useradd --uid 10001 --gid 10001 --shell /bin/bash --create-home sibyl
@@ -37,6 +46,10 @@ WORKDIR /app
 
 # Copy virtual environment from builder
 COPY --from=builder --chown=sibyl:sibyl /app/.venv /app/.venv
+
+# Belt and braces: the env var is authoritative, the file is the fallback
+# _read_version() looks for at /app/VERSION.
+COPY --chown=sibyl:sibyl VERSION /app/VERSION
 
 # Install Playwright for crawl4ai (chromium headless)
 # Manual minimal deps instead of --with-deps (which pulls ~600MB of X11/GUI stuff)
@@ -57,7 +70,12 @@ ENV PATH="/app/.venv/bin:$PATH" \
     CRAWL4_AI_BASE_DIRECTORY=/tmp \
     # Sibyl defaults (override in compose/k8s)
     SIBYL_SERVER_HOST=0.0.0.0 \
-    SIBYL_SERVER_PORT=3334
+    SIBYL_SERVER_PORT=3334 \
+    # Build provenance, promoted from build args so the server can name
+    # itself to clients checking for drift.
+    SIBYL_VERSION=${SIBYL_VERSION} \
+    SIBYL_GIT_COMMIT=${SIBYL_GIT_COMMIT} \
+    SIBYL_GIT_DIRTY=${SIBYL_GIT_DIRTY}
 
 # Switch to non-root user
 USER sibyl

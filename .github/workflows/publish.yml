@@ -382,6 +382,18 @@ jobs:
         with:
           ref: ${{ inputs.tag }}
 
+      # The build args below need both. github.sha is the triggering commit,
+      # which is not necessarily the tag this job checked out, so read the
+      # commit back from the working tree instead of assuming.
+      - name: "△ Extract version and commit"
+        id: version
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: "◇ Setup Docker Buildx"
         uses: docker/setup-buildx-action@v4
 
@@ -408,6 +420,13 @@ jobs:
           context: .
           file: apps/${{ matrix.image }}/Dockerfile
           platforms: linux/${{ matrix.platform }}
+          # A published image must be able to name itself: clients compare
+          # their version against the server's to detect drift, and an image
+          # built without these reports 0.0.0/unknown.
+          build-args: |
+            SIBYL_VERSION=${{ steps.version.outputs.version }}
+            SIBYL_GIT_COMMIT=${{ steps.version.outputs.commit }}
+            SIBYL_GIT_DIRTY=false
           outputs: >-
             type=image,"name=${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/sibyl-${{
             matrix.image }},${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_NAMESPACE }}/sibyl-${{

@@ -173,6 +173,31 @@ def _dogfood_image_workflow() -> str:
     return (REPO_ROOT / ".github/workflows/publish-dogfood-images.yml").read_text(encoding="utf-8")
 
 
+def test_published_images_can_name_their_own_version() -> None:
+    # A published API image reported version 0.0.0 and commit "unknown" in
+    # production: the Dockerfile copied VERSION into the builder stage only,
+    # and the build passed no build-args at all. Clients compare their
+    # version against the server's to detect drift, so an image that cannot
+    # name itself makes that check meaningless.
+    workflow = _publish_workflow()
+    build_args = yaml.safe_load(workflow)["jobs"]["docker-build"]["steps"]
+    build_step = next(step for step in build_args if step.get("id") == "build")
+    declared = build_step["with"]["build-args"]
+
+    assert "SIBYL_VERSION=${{ steps.version.outputs.version }}" in declared
+    assert "SIBYL_GIT_COMMIT=${{ steps.version.outputs.commit }}" in declared
+    # github.sha is the triggering commit, not necessarily the checked-out
+    # tag, so it must not stand in for the built commit.
+    assert "SIBYL_GIT_COMMIT=${{ github.sha }}" not in declared
+
+    dockerfile = (REPO_ROOT / "apps/api/Dockerfile").read_text(encoding="utf-8")
+    runtime_stage = dockerfile.split("AS runtime", 1)[1]
+    assert "COPY --chown=sibyl:sibyl VERSION /app/VERSION" in runtime_stage
+    for arg in ("SIBYL_VERSION", "SIBYL_GIT_COMMIT", "SIBYL_GIT_DIRTY"):
+        assert f"ARG {arg}" in runtime_stage, f"{arg} must be declared in the runtime stage"
+        assert f"{arg}=${{{arg}}}" in runtime_stage, f"{arg} must be promoted to ENV"
+
+
 def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
     workflow = _publish_workflow()
 
