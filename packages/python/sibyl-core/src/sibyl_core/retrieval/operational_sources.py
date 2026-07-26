@@ -300,16 +300,13 @@ def select_operational_source_span(
             ranking_applied=False,
         )
 
-    sliced = bool(inventory.passage_count)
     observation_groups = _unit_groups(inventory.raw_observations)
     entity_terms, group_terms = _source_discriminative_terms(observation_groups)
     query_terms = frozenset(extract_keywords(query))
     query_term_weights = _query_term_weights(query_terms, group_terms)
-    window_size = PASSAGE_WINDOW_UNITS if sliced else max_observations
     candidate_windows = _candidate_windows(
         observation_groups,
-        window_size=window_size,
-        confine_to_evidence_part=sliced,
+        max_observations=max_observations,
     )
     selected_start, selected_size = max(
         candidate_windows,
@@ -326,7 +323,8 @@ def select_operational_source_span(
     # A partial window is the regression the window exists to avoid, so a
     # caller's item allowance may shrink the pack but never cut the window
     # itself below the adjacency that was measured.
-    entity_budget = max(max_entities, selected_size) if sliced else max_entities
+    selected_is_sliced = any(_is_passage(entity) for group in selected_window for entity in group)
+    entity_budget = max(max_entities, selected_size) if selected_is_sliced else max_entities
     selected_entities = _select_window_entities(
         selected_window,
         max_entities=entity_budget,
@@ -397,37 +395,46 @@ def _unit_groups(units: Sequence[Entity]) -> list[tuple[Entity, ...]]:
     return [tuple(group) for group in groups]
 
 
+def _run_key(entity: Entity) -> tuple[int, int] | None:
+    """Say which stretch of groups one window may slide within.
+
+    Passages key on the body they were cut from, so a window cannot cross into
+    another: three passages spanning two states are contiguous in source order
+    but are not the adjacency the exposure measurement is about. Whole-part rows
+    all key alike, because sliding across observations is the adjacency that
+    shape has always had, and a source that slices one part must not narrow the
+    windows of the parts it left whole.
+    """
+    return _required_observation_position(entity)[:2] if _is_passage(entity) else None
+
+
 def _candidate_windows(
     groups: Sequence[tuple[Entity, ...]],
     *,
-    window_size: int,
-    confine_to_evidence_part: bool,
+    max_observations: int,
 ) -> list[tuple[int, int]]:
     """Enumerate admissible (start, size) windows over the group list.
 
-    Passage windows may not cross an evidence part: three passages spanning two
-    states are contiguous in source order but are not the adjacency the
-    exposure measurement is about. A part with fewer passages than the window
-    size yields one short window rather than none, which is what keeps a short
-    body and an unsliced part in a mixed source reachable at all.
+    Each run is sized by what it holds: passages by the measured adjacency,
+    whole-part rows by what the caller asked for. A run shorter than its own
+    window yields one short window rather than none, which is what keeps a
+    two-passage body and a lone unsliced part reachable at all.
     """
-    runs = _evidence_part_runs(groups) if confine_to_evidence_part else [(0, len(groups))]
     windows: list[tuple[int, int]] = []
-    for run_start, run_stop in runs:
+    for run_start, run_stop in _window_runs(groups):
+        window_size = (
+            PASSAGE_WINDOW_UNITS if _is_passage(groups[run_start][0]) else max_observations
+        )
         size = min(window_size, run_stop - run_start)
         windows.extend((start, size) for start in range(run_start, run_stop - size + 1))
     return windows
 
 
-def _evidence_part_runs(groups: Sequence[tuple[Entity, ...]]) -> list[tuple[int, int]]:
+def _window_runs(groups: Sequence[tuple[Entity, ...]]) -> list[tuple[int, int]]:
     runs: list[tuple[int, int]] = []
     start = 0
     for index in range(1, len(groups) + 1):
-        if (
-            index == len(groups)
-            or _required_observation_position(groups[index][0])[:2]
-            != _required_observation_position(groups[start][0])[:2]
-        ):
+        if index == len(groups) or _run_key(groups[index][0]) != _run_key(groups[start][0]):
             runs.append((start, index))
             start = index
     return runs

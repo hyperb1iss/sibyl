@@ -161,12 +161,12 @@ class RetrievalWeights:
 @dataclass(frozen=True, slots=True)
 class CandidateLimits:
     raw_lexical: int = 4
-    node_fulltext: int = 8
-    episode_fulltext: int = 8
-    edge_fulltext: int = 8
-    node_vector: int = 8
-    edge_vector: int = 8
-    graph_expansion: int = 8
+    node_fulltext: int = MAX_CANDIDATES_PER_SIGNAL
+    episode_fulltext: int = MAX_CANDIDATES_PER_SIGNAL
+    edge_fulltext: int = MAX_CANDIDATES_PER_SIGNAL
+    node_vector: int = MAX_CANDIDATES_PER_SIGNAL
+    edge_vector: int = MAX_CANDIDATES_PER_SIGNAL
+    graph_expansion: int = MAX_CANDIDATES_PER_SIGNAL
 
 
 @dataclass(frozen=True, slots=True)

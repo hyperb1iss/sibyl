@@ -38,8 +38,8 @@ def compose_operational_evidence[ResultT: OperationalEvidenceResult](
     """Reserve a fixed count of output slots for independently ranked notes.
 
     The reservation is absolute rather than proportional; see
-    `TYPED_NOTE_RESERVATION_ITEMS`. Small packs still shrink it, because a
-    reservation may never consume the whole pack.
+    `TYPED_NOTE_RESERVATION_ITEMS`. Under an item budget a small pack still
+    shrinks it, because a reservation may never consume the whole pack.
 
     `char_budget` changes what bounds the pack. An item count only bounds
     payload while item size is stable, and a passage is roughly a twelfth of the
@@ -50,7 +50,9 @@ def compose_operational_evidence[ResultT: OperationalEvidenceResult](
     the ranking and never exceeds the budget. The note lane stays pinned at its
     absolute count within that budget, but the budget outranks the pin — a
     budget too small for three notes returns fewer, because a hard budget that
-    one lane can overrun is not a budget.
+    one lane can overrun is not a budget. By the same token a budget that only
+    the notes fit into returns an all-note pack: characters, not slot counts,
+    are what a budgeted pack holds back for the raw lane.
     """
     if char_budget is not None and char_budget < 1:
         raise ValueError("char_budget must be positive")
