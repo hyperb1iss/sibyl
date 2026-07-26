@@ -345,7 +345,8 @@ tasks:
       benchmarks/longmemeval_v2_live_retrieval.py
       benchmarks/longmemeval_v2_repair_project.py
       benchmarks/longmemeval_v2_live_smoke.py
-      benchmarks/longmemeval_v2_projection_audit.py && uv run ruff format --check tools
+      benchmarks/longmemeval_v2_projection_audit.py
+      benchmarks/longmemeval_v2_chunk_geometry && uv run ruff format --check tools
       benchmarks/provider_usage.py benchmarks/longmemeval_v2_diagnostics.py
       benchmarks/longmemeval_v2_ablations.py benchmarks/longmemeval_v2_reader_report.py
       benchmarks/longmemeval_v2_reader_replication.py
@@ -360,6 +361,7 @@ tasks:
       benchmarks/longmemeval_v2_live_retrieval.py
       benchmarks/longmemeval_v2_repair_project.py
       benchmarks/longmemeval_v2_memory
+      benchmarks/longmemeval_v2_chunk_geometry
       benchmarks/longmemeval_v2_live_smoke.py benchmarks/longmemeval_v2_projection_audit.py
     inputs:
       - tools/**/*.py
@@ -380,6 +382,7 @@ tasks:
       - benchmarks/longmemeval_v2_live_retrieval.py
       - benchmarks/longmemeval_v2_repair_project.py
       - benchmarks/longmemeval_v2_memory/**/*.py
+      - benchmarks/longmemeval_v2_chunk_geometry/**/*.py
       - benchmarks/longmemeval_v2_composition_validation.json
       - benchmarks/longmemeval_v2_composition_validation_v2.json
       - benchmarks/longmemeval_v2_live_smoke.py
