@@ -53,6 +53,7 @@ from sibyl_cli.entity import app as entity_app
 from sibyl_cli.entity import print_entity_details
 from sibyl_cli.epic import app as epic_app
 from sibyl_cli.explore import app as explore_app
+from sibyl_cli.export import app as export_app
 from sibyl_cli.host import serve as serve_cmd
 from sibyl_cli.host import service_app
 from sibyl_cli.host import start as start_cmd
@@ -124,6 +125,7 @@ app.add_typer(archive_app, name="archive")
 app.add_typer(session_app, name="session")
 app.add_typer(entity_app, name="entity")
 app.add_typer(explore_app, name="explore")
+app.add_typer(export_app, name="export")
 app.add_typer(crawl_app, name="crawl")
 app.add_typer(docs_app, name="docs")
 app.add_typer(debug_app, name="debug")
