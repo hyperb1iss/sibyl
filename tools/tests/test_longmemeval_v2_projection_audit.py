@@ -131,6 +131,49 @@ def test_a_runaway_slicer_trips_the_passage_byte_bound(
     assert report["bounds"]["aggregate_write_amplification"] <= EXPECTED_MAX_WRITE_AMPLIFICATION
 
 
+def test_passages_that_discard_the_body_they_name_are_caught_under_the_byte_bound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hollowed rows stay cheap in bytes, so the span check has to catch them."""
+
+    def hollow_slices(body: str) -> tuple[list[Any], Any]:
+        entries, stats = slicing.slice_body(body)
+        for entry in entries:
+            entry.content = entry.content[:1]
+        return entries, stats
+
+    monkeypatch.setattr("sibyl_core.projection.experience.slice_body", hollow_slices)
+
+    report = _report(tmp_path, _wide_trajectory(states=2), content_max_chars=18_000)
+
+    assert report["passed"] is False
+    assert "passage_not_byte_exact" in {issue["code"] for issue in report["issues"]}
+    # The byte bound alone would have called this thrift, which is the point.
+    assert (
+        report["bounds"]["aggregate_passage_byte_amplification"]
+        <= EXPECTED_MAX_PASSAGE_BYTE_AMPLIFICATION
+    )
+
+
+def test_passages_claiming_the_same_parent_lines_twice_are_caught(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A duplicating slicer re-carves nothing; it copies."""
+
+    def doubled_slices(body: str) -> tuple[list[Any], Any]:
+        entries, stats = slicing.slice_body(body)
+        return [entry for entry in entries for _ in range(2)], stats
+
+    monkeypatch.setattr("sibyl_core.projection.experience.slice_body", doubled_slices)
+
+    report = _report(tmp_path, _wide_trajectory(states=2), content_max_chars=18_000)
+
+    assert report["passed"] is False
+    assert "passage_span_overlaps_sibling" in {issue["code"] for issue in report["issues"]}
+
+
 def test_a_passage_cut_loose_from_its_parent_is_reported(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
