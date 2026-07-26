@@ -7,13 +7,14 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import ValidationError
 
-from sibyl_core.models import EntityType, RelationshipType
+from sibyl_core.models import Entity, EntityType, RelationshipType
 from sibyl_core.models.experience import (
     MAX_OPERATIONAL_AUXILIARY_JSON_CHARS,
     MAX_OPERATIONAL_EVIDENCE_PART_CHARS,
     MAX_OPERATIONAL_FIELD_CHARS,
     OperationalEvidencePart,
     OperationalExperience,
+    OperationalExperienceProjection,
     OperationalObservation,
 )
 from sibyl_core.projection import (
@@ -87,6 +88,19 @@ def _experience(*, outcome: str = "success") -> OperationalExperience:
     )
 
 
+def _raw_observations(
+    projection: OperationalExperienceProjection,
+    observation_id: str,
+) -> list[Entity]:
+    """Raw evidence rows only: passages carry the same source_observation_id."""
+    return [
+        entity
+        for entity in projection.entities
+        if entity.metadata.get("projection_kind") == "raw_observation"
+        and entity.metadata.get("source_observation_id") == observation_id
+    ]
+
+
 def test_projection_preserves_raw_evidence_and_action_boundaries() -> None:
     projection = project_operational_experience(_experience())
     raw = [entity for entity in projection.entities if entity.entity_type is EntityType.SESSION]
@@ -157,16 +171,8 @@ def test_projection_adds_bounded_state_local_retrieval_descriptions() -> None:
 
     projection = project_operational_experience(projected_experience)
     repeated_projection = project_operational_experience(projected_experience)
-    raw = [
-        entity
-        for entity in projection.entities
-        if entity.metadata.get("source_observation_id") == observation.id
-    ]
-    repeated_raw = [
-        entity
-        for entity in repeated_projection.entities
-        if entity.metadata.get("source_observation_id") == observation.id
-    ]
+    raw = _raw_observations(projection, observation.id)
+    repeated_raw = _raw_observations(repeated_projection, observation.id)
 
     assert [entity.description for entity in raw] == [entity.description for entity in repeated_raw]
     assert "button: Ship Order" in raw[0].description
@@ -832,3 +838,105 @@ async def test_persistence_deletes_only_stale_manifest_owned_records() -> None:
     entity_manager.delete.assert_awaited_once_with("session_stale")
     manifest_write = entity_manager.create_direct_bulk.await_args_list[-1].args[0]
     assert [entity.id for entity in manifest_write] == [projection.manifest.manifest_entity_id]
+
+
+def _accessibility_tree_body() -> str:
+    lines: list[str] = []
+    for section in range(4):
+        lines.append(f"section 'Section {section}'")
+        for group in range(5):
+            lines.append(f"\tgroup 'Group {section}.{group}'")
+            for row in range(5):
+                detail = "detail " * 8
+                lines.append(f"\t\tStaticText 'Row {section}.{group}.{row} {detail}'")
+    return "\n".join(lines)
+
+
+def _tree_experience() -> OperationalExperience:
+    return OperationalExperience(
+        source_id="capture-tree",
+        goal="Find the shipping address on the order",
+        outcome="success",
+        project_id="project-1",
+        observations=(
+            OperationalObservation(
+                id="state-0",
+                ordinal=0,
+                uri="https://shop.example.test/orders/42",
+                action="click('Orders')",
+                evidence=(
+                    OperationalEvidencePart(
+                        id="tree-0",
+                        content=_accessibility_tree_body(),
+                        content_type="text/plain; profile=accessibility-tree",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
+def test_accessibility_evidence_is_minted_as_passages_beside_the_raw_entity() -> None:
+    experience = _tree_experience()
+    projection = project_operational_experience(experience)
+    raw = [entity for entity in projection.entities if entity.entity_type is EntityType.SESSION]
+    passages = [
+        entity for entity in projection.entities if entity.entity_type is EntityType.PASSAGE
+    ]
+
+    assert len(raw) == 1
+    assert len(passages) > 1
+    assert all(len(entity.content or "") < len(raw[0].content or "") for entity in passages)
+
+    derived = {
+        relationship.source_id: relationship.target_id
+        for relationship in projection.relationships
+        if relationship.relationship_type is RelationshipType.DERIVED_FROM
+    }
+    assert {entity.id for entity in passages} <= derived.keys()
+    assert set(derived.values()) == {raw[0].id}
+
+    manifest_ids = set(projection.manifest.entity_ids)
+    assert {entity.id for entity in passages} <= manifest_ids
+    part_of_targets = {
+        relationship.source_id
+        for relationship in projection.relationships
+        if relationship.relationship_type is RelationshipType.PART_OF
+    }
+    assert {entity.id for entity in passages} <= part_of_targets
+
+
+def test_passages_partition_the_evidence_lines_and_carry_the_goal_out_of_band() -> None:
+    experience = _tree_experience()
+    projection = project_operational_experience(experience)
+    passages = sorted(
+        (entity for entity in projection.entities if entity.entity_type is EntityType.PASSAGE),
+        key=lambda entity: entity.metadata["passage_index"],
+    )
+    body_lines = _accessibility_tree_body().split("\n")
+
+    spans = [
+        (passage.metadata["passage_line_start"], passage.metadata["passage_line_end"])
+        for passage in passages
+    ]
+    covered: list[int] = []
+    for start, end in spans:
+        covered.extend(range(start, end + 1))
+    assert covered == list(range(len(body_lines)))
+    for (start, end), passage in zip(spans, passages, strict=True):
+        assert (passage.content or "").endswith("\n".join(body_lines[start : end + 1]))
+
+    goal = "Find the shipping address on the order"
+    assert all(goal in (passage.description or "") for passage in passages)
+    assert all(goal not in (passage.content or "") for passage in passages)
+    assert all(len(passage.description or "") <= 500 for passage in passages)
+    assert passages[0].metadata["passage_count"] == len(passages)
+    assert passages[0].metadata["parent_entity_id"].startswith("session_")
+
+
+def test_non_accessibility_evidence_mints_no_passages() -> None:
+    projection = project_operational_experience(_experience())
+
+    assert [
+        entity for entity in projection.entities if entity.entity_type is EntityType.PASSAGE
+    ] == []

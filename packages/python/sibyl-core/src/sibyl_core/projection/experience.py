@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import unicodedata
 from collections.abc import Iterable, Iterator
 from itertools import pairwise
@@ -20,9 +19,16 @@ from sibyl_core.models.experience import (
     OperationalExperienceWriteResult,
     OperationalObservation,
 )
+from sibyl_core.projection.slicing import (
+    ACCESSIBILITY_NODE_PATTERN,
+    render_slice,
+    slice_body,
+    slice_header,
+)
 
-OPERATIONAL_EXPERIENCE_SCHEMA_VERSION = 5
+OPERATIONAL_EXPERIENCE_SCHEMA_VERSION = 6
 MAX_TYPED_ENTITY_CONTENT_CHARS = 18_000
+MAX_PASSAGE_DESCRIPTION_CHARS = 500
 MAX_UI_INVENTORY_CHARS = 16_000
 MAX_UI_INVENTORY_ITEMS = 160
 MAX_RAW_OBSERVATION_DESCRIPTION_CHARS = 2_000
@@ -86,6 +92,22 @@ def _observation_entity_id(
         source_id,
         observation_id,
         evidence_id,
+    )
+
+
+def _passage_entity_id(
+    source_id: str,
+    observation_id: str,
+    evidence_id: str,
+    passage_index: int,
+) -> str:
+    return _stable_id(
+        "passage",
+        "operational-observation",
+        source_id,
+        observation_id,
+        evidence_id,
+        passage_index,
     )
 
 
@@ -158,10 +180,6 @@ def _support_span(observation: OperationalObservation) -> dict[str, Any]:
     }
 
 
-_ACCESSIBILITY_NODE_PATTERN = re.compile(
-    r"^(?:\[[^\]]+\]\s+)?(?P<role>[A-Za-z][\w-]*)\s+"
-    r"(?P<quote>['\"])(?P<name>.*?)(?P=quote)(?P<attributes>,.*)?$"
-)
 _UI_STATE_ATTRIBUTES = frozenset(
     {
         "autocomplete",
@@ -182,6 +200,10 @@ _UI_ROLE_NAMES = {
     "RootWebArea": "page",
     "StaticText": "text",
 }
+
+
+def _is_accessibility_tree(evidence: OperationalEvidencePart) -> bool:
+    return "profile=accessibility-tree" in evidence.content_type.casefold()
 
 
 def _clean_accessibility_name(value: str) -> str:
@@ -253,7 +275,7 @@ def _raw_observation_description(
         if observation.reasoning
         else None,
     ]
-    if "profile=accessibility-tree" in evidence.content_type.casefold():
+    if _is_accessibility_tree(evidence):
         for evidence_items, (role, name, attributes) in enumerate(
             _accessibility_entries((evidence,)),
             start=1,
@@ -270,6 +292,34 @@ def _raw_observation_description(
             if evidence_items >= MAX_RAW_OBSERVATION_DESCRIPTION_ITEMS:
                 break
     return _bounded_lines(lines, max_chars=MAX_RAW_OBSERVATION_DESCRIPTION_CHARS)
+
+
+def _passage_description(
+    experience: OperationalExperience,
+    observation: OperationalObservation,
+) -> str:
+    """Carry the trajectory's framing into every passage cut from it.
+
+    A passage on its own is a few hundred chars of tree with no statement of
+    what the session was trying to do, which is the vocabulary a query actually
+    shares. This lands in `description` because that field is BM25-indexed and
+    folded into the embedding text, so retrieval inherits the context without
+    the reader paying for it on the composed-evidence path. It is bounded hard:
+    the graph writer also mirrors `description[:500]` into the separately
+    indexed `summary`, so every character here is counted twice on the lexical
+    side, and lexical document length is the dilution mechanism Stage 1 named.
+    """
+    return _bounded_lines(
+        (
+            f"Goal: {experience.goal}",
+            f"Reported outcome: {experience.outcome}" if experience.outcome else None,
+            f"URI: {observation.uri}" if observation.uri else None,
+            f"Action producing this observation: {observation.action}"
+            if observation.action
+            else None,
+        ),
+        max_chars=MAX_PASSAGE_DESCRIPTION_CHARS,
+    )
 
 
 def _split_accessibility_attributes(value: str) -> list[str]:
@@ -302,10 +352,10 @@ def _accessibility_entries(
 ) -> Iterator[tuple[str, str, str]]:
     seen: set[tuple[str, str, str]] = set()
     for evidence in evidence_parts:
-        if "profile=accessibility-tree" not in evidence.content_type.casefold():
+        if not _is_accessibility_tree(evidence):
             continue
         for raw_line in evidence.content.splitlines():
-            match = _ACCESSIBILITY_NODE_PATTERN.fullmatch(raw_line.strip())
+            match = ACCESSIBILITY_NODE_PATTERN.fullmatch(raw_line.strip())
             if match is None:
                 continue
             name = _clean_accessibility_name(match.group("name"))
@@ -329,8 +379,7 @@ def _accessibility_inventory(
     effective_max_chars = min(max_chars, MAX_UI_INVENTORY_CHARS)
     if effective_max_chars <= len(prefix) + 1:
         has_accessibility_evidence = any(
-            "profile=accessibility-tree" in evidence.content_type.casefold()
-            for evidence in observation.evidence
+            _is_accessibility_tree(evidence) for evidence in observation.evidence
         )
         return None, 0, has_accessibility_evidence
     available_chars = effective_max_chars - len(prefix) - 1
@@ -384,6 +433,82 @@ def _relationship(
     )
 
 
+def _passage_projection(
+    experience: OperationalExperience,
+    observation: OperationalObservation,
+    evidence: OperationalEvidencePart,
+    *,
+    evidence_index: int,
+    parent_entity_id: str,
+    common: dict[str, Any],
+    organization_id: str | None,
+    created_by: str | None,
+) -> tuple[list[Entity], list[Relationship]]:
+    """Cut one accessibility-tree evidence part into passage entities."""
+    slices, _ = slice_body(evidence.content)
+    if not slices:
+        return [], []
+    description = _passage_description(experience, observation)
+    entities: list[Entity] = []
+    relationships: list[Relationship] = []
+    for passage_index, passage in enumerate(slices):
+        content = render_slice(
+            slice_header(observation.ordinal, observation.uri, passage_index + 1, len(slices)),
+            passage.breadcrumb,
+            passage.content,
+        )
+        if len(content) > MAX_TYPED_ENTITY_CONTENT_CHARS:
+            # An evidence part may carry a million chars on one unbroken line,
+            # and cutting mid-line would bisect a literal. The span stays
+            # reachable through its parent rather than failing the capture.
+            continue
+        entity_id = _passage_entity_id(
+            experience.source_id,
+            observation.id,
+            evidence.id,
+            passage_index,
+        )
+        entities.append(
+            Entity(
+                id=entity_id,
+                entity_type=EntityType.PASSAGE,
+                name=f"Observation {observation.ordinal} passage {passage_index + 1}",
+                description=description,
+                content=content,
+                organization_id=organization_id,
+                created_by=created_by,
+                modified_by=created_by,
+                metadata={
+                    **common,
+                    "projection_kind": "passage",
+                    "source_observation_id": observation.id,
+                    "observation_ordinal": observation.ordinal,
+                    "evidence_part_id": evidence.id,
+                    "evidence_part_index": evidence_index,
+                    "evidence_content_type": evidence.content_type,
+                    "parent_entity_id": parent_entity_id,
+                    "passage_index": passage_index,
+                    "passage_count": len(slices),
+                    "passage_cut_depth": passage.cut_depth,
+                    "passage_reason": passage.reason,
+                    "passage_line_start": passage.line_indices[0],
+                    "passage_line_end": passage.line_indices[-1],
+                    "uri": observation.uri,
+                },
+            )
+        )
+        relationships.append(
+            _relationship(
+                relationship_type=RelationshipType.DERIVED_FROM,
+                source_id=entity_id,
+                target_id=parent_entity_id,
+                source_key=experience.source_id,
+                metadata={**common, "source_observation_id": observation.id},
+            )
+        )
+    return entities, relationships
+
+
 def _procedure_segments(
     experience: OperationalExperience,
     observations: list[OperationalObservation],
@@ -424,7 +549,13 @@ def _validate_typed_entity_sizes(entities: Iterable[Entity]) -> None:
     oversized = [
         entity.id
         for entity in entities
-        if entity.entity_type in {EntityType.EVENT, EntityType.PROCEDURE, EntityType.ERROR_PATTERN}
+        if entity.entity_type
+        in {
+            EntityType.EVENT,
+            EntityType.PROCEDURE,
+            EntityType.ERROR_PATTERN,
+            EntityType.PASSAGE,
+        }
         and len(entity.content or "") > MAX_TYPED_ENTITY_CONTENT_CHARS
     ]
     if oversized:
@@ -500,6 +631,20 @@ def project_operational_experience(
                     },
                 )
             )
+            if not _is_accessibility_tree(evidence):
+                continue
+            passage_entities, passage_relationships = _passage_projection(
+                experience,
+                observation,
+                evidence,
+                evidence_index=evidence_index,
+                parent_entity_id=entity_id,
+                common=common,
+                organization_id=organization_id,
+                created_by=created_by,
+            )
+            entities.extend(passage_entities)
+            relationships.extend(passage_relationships)
 
     for previous, current in pairwise(observations):
         if not current.action:
