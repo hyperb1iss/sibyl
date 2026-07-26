@@ -71,6 +71,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "state_part_completion_items",
         "state_part_refinement",
         "context_expansion_max_ratio",
+        "evidence_types",
         "evidence_composition_mode",
         "source_evidence_bundling",
         "typed_stream_retrieval",
@@ -442,6 +443,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     )
     parser.add_argument("--context-expansion-max-ratio", type=float, default=0.0)
     parser.add_argument(
+        "--evidence-types",
+        nargs="+",
+        choices=["passage", "session"],
+        default=["session"],
+        help=(
+            "Entity types the raw evidence lane may retrieve. The list reaches the search "
+            "as a hard node-type filter, so a type left out never enters the candidate pool. "
+            "Defaults to the shipped whole-state substrate."
+        ),
+    )
+    parser.add_argument(
         "--evidence-composition-mode",
         choices=["reserved_support", "shared_relevance"],
         default="shared_relevance",
@@ -650,6 +662,7 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "state_part_completion_items": args.state_part_completion_items,
         "state_part_refinement": args.state_part_refinement,
         "context_expansion_max_ratio": args.context_expansion_max_ratio,
+        "evidence_types": list(args.evidence_types),
         "evidence_composition_mode": args.evidence_composition_mode,
         "source_evidence_bundling": args.source_evidence_bundling,
         "typed_stream_retrieval": args.typed_stream_retrieval,
@@ -794,6 +807,7 @@ def build_run_plan(
         "neighbor_stitch_span": args.neighbor_stitch_span,
         "context_expansion_max_ratio": args.context_expansion_max_ratio,
         "max_context_total_chars": args.max_context_total_chars,
+        "evidence_types": list(args.evidence_types),
         "evidence_composition_mode": args.evidence_composition_mode,
         "source_evidence_bundling": args.source_evidence_bundling,
         "typed_stream_retrieval": args.typed_stream_retrieval,

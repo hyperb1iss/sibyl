@@ -121,7 +121,16 @@ DEFAULT_RETRIEVAL_MODE = "fast"
 RETRIEVAL_MODES = frozenset({"accurate", "fast"})
 DEFAULT_TYPED_STREAM_RETRIEVAL = False
 DEFAULT_TYPED_STREAM_LIMIT = 8
+# The distilled-note lane, retrieved on its own request. It is not the raw
+# evidence lane below and the two must not be conflated: this tuple selects the
+# typed entities a note reservation is drawn from, and widening it changes the
+# one lever the campaign has measured a gain from.
 TYPED_STREAM_TYPES = ("note", "event", "procedure", "error_pattern")
+# The raw evidence lane. `types` reaches the search as a hard node-type filter,
+# so a type absent here never enters the candidate pool at all, however well it
+# would have ranked.
+DEFAULT_EVIDENCE_TYPES = ("session",)
+SUPPORTED_EVIDENCE_TYPES = frozenset({"passage", "session"})
 DEFAULT_RETRIEVAL_MAX_PLANNED_QUERIES = 3
 DEFAULT_API_TIMEOUT_SECONDS = 600.0
 DEFAULT_API_RETRY_ATTEMPTS = 3
@@ -173,6 +182,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "state_part_completion_items",
         "state_part_refinement",
         "context_expansion_max_ratio",
+        "evidence_types",
         "evidence_composition_mode",
         "source_evidence_bundling",
         "retrieval_mode",
@@ -2916,6 +2926,11 @@ class SibylLiveApiMemory(Memory):
             "state_part_refinement",
             DEFAULT_STATE_PART_REFINEMENT,
         )
+        self.evidence_types = _param_evidence_types(
+            memory_params,
+            "evidence_types",
+            DEFAULT_EVIDENCE_TYPES,
+        )
         self.evidence_composition_mode = _param_str(
             memory_params,
             "evidence_composition_mode",
@@ -3858,6 +3873,28 @@ class SibylLiveApiMemory(Memory):
         if getattr(self, "typed_stream_retrieval", DEFAULT_TYPED_STREAM_RETRIEVAL):
             stream_executor = ThreadPoolExecutor(max_workers=1)
             stream_future = stream_executor.submit(self._typed_stream_results, query)
+        evidence_limit = min(max(self.search_limit, self.max_context_items), 50)
+        evidence_request: dict[str, object] = {
+            "types": list(getattr(self, "evidence_types", DEFAULT_EVIDENCE_TYPES)),
+            "limit": evidence_limit,
+            "max_results_per_source": getattr(
+                self,
+                "max_chunks_per_trajectory",
+                DEFAULT_MAX_CHUNKS_PER_TRAJECTORY,
+            ),
+            "content_max_chars": self.max_context_chars_per_item,
+            "include_retrieval_diagnostics": True,
+            "retrieval_mode": getattr(
+                self,
+                "retrieval_mode",
+                DEFAULT_RETRIEVAL_MODE,
+            ),
+            "max_planned_queries": getattr(
+                self,
+                "retrieval_max_planned_queries",
+                DEFAULT_RETRIEVAL_MAX_PLANNED_QUERIES,
+            ),
+        }
         context_response = self._request_json(
             "POST",
             "/context/pack",
@@ -3866,32 +3903,12 @@ class SibylLiveApiMemory(Memory):
                 "intent": "learn",
                 "layer": "deep_search",
                 "project": self.project_id,
-                "limit": min(max(self.search_limit, self.max_context_items), 50),
+                "limit": evidence_limit,
                 "include_related": True,
                 "related_limit": 3,
                 "audit": True,
                 "record_exposure": False,
-                "evidence": {
-                    "types": ["session"],
-                    "limit": min(max(self.search_limit, self.max_context_items), 50),
-                    "max_results_per_source": getattr(
-                        self,
-                        "max_chunks_per_trajectory",
-                        DEFAULT_MAX_CHUNKS_PER_TRAJECTORY,
-                    ),
-                    "content_max_chars": self.max_context_chars_per_item,
-                    "include_retrieval_diagnostics": True,
-                    "retrieval_mode": getattr(
-                        self,
-                        "retrieval_mode",
-                        DEFAULT_RETRIEVAL_MODE,
-                    ),
-                    "max_planned_queries": getattr(
-                        self,
-                        "retrieval_max_planned_queries",
-                        DEFAULT_RETRIEVAL_MAX_PLANNED_QUERIES,
-                    ),
-                },
+                "evidence": evidence_request,
             },
         )
         typed_results = context_pack_to_search_results(
@@ -5342,6 +5359,36 @@ def _store_cli_auth(
 def _param_str(params: dict[str, object], key: str, default: str) -> str:
     value = params.get(key)
     return value.strip() if isinstance(value, str) and value.strip() else default
+
+
+def _param_evidence_types(
+    params: dict[str, object],
+    key: str,
+    default: tuple[str, ...],
+) -> tuple[str, ...]:
+    value = params.get(key)
+    if value is None:
+        return default
+    if isinstance(value, str):
+        requested = [item.strip() for item in value.split(",")]
+    elif isinstance(value, list | tuple):
+        requested = [str(item).strip() for item in value]
+    else:
+        raise ValueError(f"{key} must be a list of entity types or a comma-separated string")
+    ordered: list[str] = []
+    for entity_type in requested:
+        if not entity_type or entity_type in ordered:
+            continue
+        if entity_type not in SUPPORTED_EVIDENCE_TYPES:
+            msg = (
+                f"Unknown evidence type {entity_type!r}; "
+                f"expected one of {sorted(SUPPORTED_EVIDENCE_TYPES)}"
+            )
+            raise ValueError(msg)
+        ordered.append(entity_type)
+    if not ordered:
+        raise ValueError(f"{key} must name at least one entity type")
+    return tuple(ordered)
 
 
 def _param_bool(params: dict[str, object], key: str, default: bool) -> bool:
