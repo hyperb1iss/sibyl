@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol
@@ -14,6 +13,17 @@ from sibyl_core.auth.memory_policy import (
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.projection import MANIFEST_STATE_COMPLETE, operational_experience_manifest_id
 from sibyl_core.retrieval.query_ranking import extract_keywords
+
+PASSAGE_PROJECTION_KIND = "passage"
+RAW_OBSERVATION_PROJECTION_KIND = "raw_observation"
+_UNIT_PROJECTION_KINDS = frozenset({PASSAGE_PROJECTION_KIND, RAW_OBSERVATION_PROJECTION_KIND})
+
+# A passage is roughly a twelfth of the state it was cut from, so a single one
+# carries the gold less often than the whole state did. Three adjacent passages
+# close that gap exactly: the offline oracle scored 95.5% enterprise / 100% web
+# exposure for a 3-adjacent window against 95.5% / 100% for the whole state,
+# where a lone passage reached only 93.2% / 97.9%.
+PASSAGE_WINDOW_UNITS = 3
 
 OperationalSourceStatus = Literal[
     "complete",
@@ -35,6 +45,13 @@ class OperationalSourceEntityReader(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class OperationalSourceInventory:
+    """One source's ordered retrieval units.
+
+    `raw_observations` holds the finest unit each evidence part offers: the
+    passages cut from it when it was sliced, and the whole-part row when it was
+    not. `passage_count` says how many of those units are passages.
+    """
+
     source_id: str
     manifest_id: str
     status: OperationalSourceStatus
@@ -44,6 +61,7 @@ class OperationalSourceInventory:
     memory_scope: str | None = None
     project_id: str | None = None
     scope_key: str | None = None
+    passage_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +71,7 @@ class OperationalSourceSpan:
     observation_ordinals: tuple[int, ...]
     candidate_window_count: int
     ranking_applied: bool
+    passage_count: int = 0
 
 
 async def fetch_operational_source_inventory(
@@ -222,10 +241,12 @@ async def fetch_operational_source_inventory(
             scope_key=scope_key,
         )
 
-    raw_observations = [
-        entity for entity in entities if entity.metadata.get("projection_kind") == "raw_observation"
+    projected = [
+        entity
+        for entity in entities
+        if entity.metadata.get("projection_kind") in _UNIT_PROJECTION_KINDS
     ]
-    if any(_observation_position(entity) is None for entity in raw_observations):
+    if any(_observation_position(entity) is None for entity in projected):
         return _inventory(
             normalized_source_id,
             manifest_id,
@@ -236,17 +257,19 @@ async def fetch_operational_source_inventory(
             project_id=project_id,
             scope_key=scope_key,
         )
-    raw_observations.sort(key=lambda entity: (*_required_observation_position(entity), entity.id))
+    units = _finest_granularity_units(projected)
+    units.sort(key=lambda entity: (*_required_observation_position(entity), entity.id))
     return _inventory(
         normalized_source_id,
         manifest_id,
         "complete",
-        raw_observations=tuple(raw_observations),
+        raw_observations=tuple(units),
         expected_entity_count=len(expected_ids),
         loaded_entity_count=len(entities),
         memory_scope=memory_scope,
         project_id=project_id,
         scope_key=scope_key,
+        passage_count=sum(_is_passage(entity) for entity in units),
     )
 
 
@@ -257,7 +280,15 @@ def select_operational_source_span(
     max_observations: int = 4,
     max_entities: int = 6,
 ) -> OperationalSourceSpan:
-    """Select the strongest contiguous observation window and preserve source order."""
+    """Select the best-scoring contiguous window of units and preserve source order.
+
+    The guarantee here is *best-scoring*, not *containing the answer*: the
+    window is picked by query-term coverage over the source's own
+    discriminative vocabulary. The offline oracle that measured a 3-adjacent
+    passage window at the whole-state exposure ceiling measured window
+    **existence** — that some window carries the gold — which no ranked
+    selection inherits.
+    """
     if max_observations < 1 or max_entities < 1:
         raise ValueError("span limits must be positive")
     if inventory.status != "complete" or not inventory.raw_observations:
@@ -269,31 +300,36 @@ def select_operational_source_span(
             ranking_applied=False,
         )
 
-    grouped: dict[int, list[Entity]] = defaultdict(list)
-    for entity in inventory.raw_observations:
-        position = _required_observation_position(entity)
-        grouped[position[0]].append(entity)
-    observation_groups = [tuple(grouped[ordinal]) for ordinal in sorted(grouped)]
+    sliced = bool(inventory.passage_count)
+    observation_groups = _unit_groups(inventory.raw_observations)
     entity_terms, group_terms = _source_discriminative_terms(observation_groups)
     query_terms = frozenset(extract_keywords(query))
     query_term_weights = _query_term_weights(query_terms, group_terms)
-    window_size = min(max_observations, len(observation_groups))
-    candidate_window_count = len(observation_groups) - window_size + 1
-    selected_start = max(
-        range(candidate_window_count),
-        key=lambda start: (
+    window_size = PASSAGE_WINDOW_UNITS if sliced else max_observations
+    candidate_windows = _candidate_windows(
+        observation_groups,
+        window_size=window_size,
+        confine_to_evidence_part=sliced,
+    )
+    selected_start, selected_size = max(
+        candidate_windows,
+        key=lambda window: (
             *_window_coverage_score(
                 query_terms,
-                group_terms[start : start + window_size],
+                group_terms[window[0] : window[0] + window[1]],
                 query_term_weights,
             ),
-            -_required_observation_position(observation_groups[start][0])[0],
+            -_required_observation_position(observation_groups[window[0]][0])[0],
         ),
     )
-    selected_window = tuple(observation_groups[selected_start : selected_start + window_size])
+    selected_window = tuple(observation_groups[selected_start : selected_start + selected_size])
+    # A partial window is the regression the window exists to avoid, so a
+    # caller's item allowance may shrink the pack but never cut the window
+    # itself below the adjacency that was measured.
+    entity_budget = max(max_entities, selected_size) if sliced else max_entities
     selected_entities = _select_window_entities(
         selected_window,
-        max_entities=max_entities,
+        max_entities=entity_budget,
         entity_terms=entity_terms,
         query_terms=query_terms,
         query_term_weights=query_term_weights,
@@ -304,8 +340,11 @@ def select_operational_source_span(
         observation_ordinals=tuple(
             dict.fromkeys(_required_observation_position(entity)[0] for entity in selected_entities)
         ),
-        candidate_window_count=candidate_window_count,
-        ranking_applied=candidate_window_count > 1 and selected_start != 0,
+        candidate_window_count=len(candidate_windows),
+        ranking_applied=(
+            len(candidate_windows) > 1 and (selected_start, selected_size) != candidate_windows[0]
+        ),
+        passage_count=sum(_is_passage(entity) for entity in selected_entities),
     )
 
 
@@ -314,7 +353,106 @@ def operational_observation_signal_text(entity: Entity) -> str:
     return "\n".join(_operational_observation_signal_lines(entity))
 
 
+def _is_passage(entity: Entity) -> bool:
+    return entity.metadata.get("projection_kind") == PASSAGE_PROJECTION_KIND
+
+
+def _finest_granularity_units(entities: list[Entity]) -> list[Entity]:
+    """Keep the finest unit each evidence part offers.
+
+    A passage and the evidence part it was cut from carry the same text, so
+    admitting both would make one window pay twice for one state. Parts that
+    were never sliced have only their whole-part row to offer and keep it.
+    """
+    sliced_parts = {
+        _required_observation_position(entity)[:2] for entity in entities if _is_passage(entity)
+    }
+    return [
+        entity
+        for entity in entities
+        if _is_passage(entity) or _required_observation_position(entity)[:2] not in sliced_parts
+    ]
+
+
+def _group_key(entity: Entity) -> tuple[int, ...]:
+    position = _required_observation_position(entity)
+    return position if _is_passage(entity) else position[:1]
+
+
+def _unit_groups(units: Sequence[Entity]) -> list[tuple[Entity, ...]]:
+    """Group ordered units into the stops a window slides over.
+
+    Every evidence part of one unsliced observation shares a stop, which is the
+    whole-state granularity that shape has always been windowed at. A passage is
+    its own stop, so a window of three groups is three adjacent passages.
+    """
+    groups: list[list[Entity]] = []
+    previous_key: tuple[int, ...] | None = None
+    for entity in units:
+        key = _group_key(entity)
+        if key != previous_key:
+            groups.append([])
+            previous_key = key
+        groups[-1].append(entity)
+    return [tuple(group) for group in groups]
+
+
+def _candidate_windows(
+    groups: Sequence[tuple[Entity, ...]],
+    *,
+    window_size: int,
+    confine_to_evidence_part: bool,
+) -> list[tuple[int, int]]:
+    """Enumerate admissible (start, size) windows over the group list.
+
+    Passage windows may not cross an evidence part: three passages spanning two
+    states are contiguous in source order but are not the adjacency the
+    exposure measurement is about. A part with fewer passages than the window
+    size yields one short window rather than none, which is what keeps a short
+    body and an unsliced part in a mixed source reachable at all.
+    """
+    runs = _evidence_part_runs(groups) if confine_to_evidence_part else [(0, len(groups))]
+    windows: list[tuple[int, int]] = []
+    for run_start, run_stop in runs:
+        size = min(window_size, run_stop - run_start)
+        windows.extend((start, size) for start in range(run_start, run_stop - size + 1))
+    return windows
+
+
+def _evidence_part_runs(groups: Sequence[tuple[Entity, ...]]) -> list[tuple[int, int]]:
+    runs: list[tuple[int, int]] = []
+    start = 0
+    for index in range(1, len(groups) + 1):
+        if (
+            index == len(groups)
+            or _required_observation_position(groups[index][0])[:2]
+            != _required_observation_position(groups[start][0])[:2]
+        ):
+            runs.append((start, index))
+            start = index
+    return runs
+
+
+def _passage_signal_lines(entity: Entity) -> list[str]:
+    """Treat a passage's whole body as signal, minus its locator line.
+
+    A passage is already free of the source-wide preamble the whole-part rows
+    repeat, so nothing needs stripping from the body. The locator the renderer
+    prepends does need dropping: it restates the observation and the passage's
+    own position, which every passage of a body repeats with a different
+    number, so the shared-line filter would let it through as discriminative
+    vocabulary it is not. The URI comes from metadata instead, matching what
+    the whole-part shape contributes.
+    """
+    uri = entity.metadata.get("uri")
+    lines = [uri] if isinstance(uri, str) and uri else []
+    lines.extend(line.strip() for line in (entity.content or "").splitlines()[1:])
+    return [line for line in lines if line]
+
+
 def _operational_observation_signal_lines(entity: Entity) -> list[str]:
+    if _is_passage(entity):
+        return _passage_signal_lines(entity)
     lines: list[str] = []
     in_evidence = False
     for raw_line in (entity.content or entity.description).splitlines():
@@ -444,22 +582,32 @@ def _weighted_term_match(
     return sum(query_term_weights[term] for term in terms & query_terms)
 
 
-def _observation_position(entity: Entity) -> tuple[int, int] | None:
-    ordinal = entity.metadata.get("observation_ordinal")
-    part_index = entity.metadata.get("evidence_part_index")
-    if (
-        isinstance(ordinal, bool)
-        or not isinstance(ordinal, int)
-        or isinstance(part_index, bool)
-        or not isinstance(part_index, int)
-        or ordinal < 0
-        or part_index < 0
-    ):
+def _ordering_index(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         return None
-    return ordinal, part_index
+    return value
 
 
-def _required_observation_position(entity: Entity) -> tuple[int, int]:
+def _observation_position(entity: Entity) -> tuple[int, int, int] | None:
+    """Order a unit by observation, then evidence part, then position within it.
+
+    A whole evidence part and the passages cut from it never coexist as units
+    for the same part, so an unsliced part takes passage slot 0 without ever
+    colliding with a passage.
+    """
+    ordinal = _ordering_index(entity.metadata.get("observation_ordinal"))
+    part_index = _ordering_index(entity.metadata.get("evidence_part_index"))
+    if ordinal is None or part_index is None:
+        return None
+    if not _is_passage(entity):
+        return ordinal, part_index, 0
+    passage_index = _ordering_index(entity.metadata.get("passage_index"))
+    if passage_index is None:
+        return None
+    return ordinal, part_index, passage_index
+
+
+def _required_observation_position(entity: Entity) -> tuple[int, int, int]:
     position = _observation_position(entity)
     if position is None:
         raise ValueError(f"operational observation {entity.id} has invalid ordering metadata")
@@ -484,6 +632,7 @@ def _inventory(
     memory_scope: str | None = None,
     project_id: str | None = None,
     scope_key: str | None = None,
+    passage_count: int = 0,
 ) -> OperationalSourceInventory:
     return OperationalSourceInventory(
         source_id=source_id,
@@ -495,10 +644,14 @@ def _inventory(
         memory_scope=memory_scope,
         project_id=project_id,
         scope_key=scope_key,
+        passage_count=passage_count,
     )
 
 
 __all__ = [
+    "PASSAGE_PROJECTION_KIND",
+    "PASSAGE_WINDOW_UNITS",
+    "RAW_OBSERVATION_PROJECTION_KIND",
     "OperationalSourceEntityReader",
     "OperationalSourceInventory",
     "OperationalSourceSpan",
