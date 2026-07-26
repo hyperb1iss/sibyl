@@ -7,6 +7,7 @@ from shutil import which
 from typing import Any, cast
 
 import tomllib
+import yaml
 from packaging.requirements import Requirement
 from tools.release.aur_pkgbuild import render_pkgbuild as render_aur_pkgbuild
 from tools.release.homebrew_formula import PackageArtifact, pep440_version, render_formula
@@ -23,7 +24,11 @@ PYTHON_RELEASE_PACKAGES = {
     "uv build --package sibyl-dev --out-dir dist/",
     "uv build --package sibyld --out-dir dist/",
 }
-PUBLISH_ENTRYPOINTS_REQUIRING_RC_GATE = 2
+# Jobs that begin a publish path and must not start before the RC gate.
+# Checked structurally rather than by counting a literal, because a job may
+# legitimately depend on the gate plus something else, which a string count
+# reads as the gate having been removed.
+PUBLISH_ENTRYPOINTS_REQUIRING_RC_GATE = ("python", "docker-build")
 RELEASE_WORKFLOW_REQUIRED_FRAGMENTS = (
     "No version commit, tag, release, or publish was created.",
     "moon run :check",
@@ -32,8 +37,15 @@ RELEASE_WORKFLOW_REQUIRED_FRAGMENTS = (
     'gh run view "$NIGHTLY_RUN_ID"',
     'run.get("workflowName") != "Nightly Regression"',
     'run.get("headSha") != expected_sha',
-    "nightly_run_id is required for live releases.",
-    "Release candidates must have VERSION pre-committed",
+    "No successful Nightly Regression run found",
+    # The workflow cuts the version itself. What replaced the precommitted-RC
+    # rule is a proof rather than a refusal: the bump may only touch the pins
+    # sync_versions.py generates, so the code Nightly validated at the base
+    # SHA is the code being tagged. These fragments hold that proof in place.
+    "--list-targets",
+    "A version bump may only touch generated pins.",
+    "The committed bump differs from the base by non-pin files.",
+    "git status --porcelain",
     "rc-gate-receipt-${{ steps.candidate.outputs.sha }}",
     r"(-[a-zA-Z0-9.]+)?",
     "steps.version.outputs.needs_version_commit == 'true'",
@@ -169,7 +181,21 @@ def test_publish_workflow_gates_direct_dispatches_before_artifacts() -> None:
     assert "aur:" in workflow
     assert "moon run :check" in workflow
     assert "moon run python-package-build" in workflow
-    assert workflow.count("needs: rc-gate") == PUBLISH_ENTRYPOINTS_REQUIRING_RC_GATE
+    jobs = yaml.safe_load(workflow)["jobs"]
+    for job_name in PUBLISH_ENTRYPOINTS_REQUIRING_RC_GATE:
+        needs = jobs[job_name]["needs"]
+        needs = [needs] if isinstance(needs, str) else needs
+        assert "rc-gate" in needs, f"{job_name} must not start before the RC gate"
+
+    # Nothing may be published before it has been scanned. The scan used to
+    # run after the merge had already pushed a public, immutable tag, which
+    # is how a high-severity advisory reached two tagged releases while only
+    # withholding signing and the chart.
+    assert "docker-build" in jobs["docker-security"]["needs"]
+    assert "docker-security" in jobs["docker-merge"]["needs"]
+    assert "docker-merge" in jobs["docker-sign"]["needs"]
+    assert "docker-security" in jobs["python"]["needs"]
+
     assert workflow.index("rc-gate:") < workflow.index("moon run python-package-build")
     assert workflow.index("rc-gate:") < workflow.index("Docker: ${{ matrix.image }}")
     assert "id-token: write" in workflow
