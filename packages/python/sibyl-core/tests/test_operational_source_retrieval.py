@@ -82,6 +82,69 @@ def _manifest(
     )
 
 
+def _passage(
+    entity_id: str,
+    *,
+    source_id: str = "capture-1",
+    project_id: str = "project-1",
+    scope_key: str | None = None,
+    memory_scope: str | None = None,
+    principal_id: str | None = None,
+    ordinal: int,
+    part_index: int = 0,
+    passage_index: int,
+    passage_count: int = 3,
+    body: str,
+    uri: str | None = None,
+) -> Entity:
+    header = f"Observation {ordinal} · slice {passage_index + 1}/{passage_count}"
+    return Entity(
+        id=entity_id,
+        entity_type=EntityType.PASSAGE,
+        name=f"Observation {ordinal}.{part_index + 1} passage {passage_index + 1}/{passage_count}",
+        description="Goal: update an order",
+        content=f"{header}\n{body}",
+        metadata={
+            "operational_source_id": source_id,
+            "project_id": project_id,
+            "scope_key": scope_key,
+            "memory_scope": memory_scope,
+            "principal_id": principal_id,
+            "projection_kind": "passage",
+            "observation_ordinal": ordinal,
+            "evidence_part_index": part_index,
+            "passage_index": passage_index,
+            "passage_count": passage_count,
+            "uri": uri,
+        },
+    )
+
+
+def _passage_inventory(passages: tuple[Entity, ...]) -> OperationalSourceInventory:
+    return OperationalSourceInventory(
+        source_id="capture-1",
+        manifest_id=operational_experience_manifest_id("capture-1"),
+        status="complete",
+        raw_observations=passages,
+        passage_count=sum(
+            entity.metadata.get("projection_kind") == "passage" for entity in passages
+        ),
+    )
+
+
+def _numbered_passages(bodies: list[str], *, ordinal: int = 1) -> tuple[Entity, ...]:
+    return tuple(
+        _passage(
+            f"passage-{index}",
+            ordinal=ordinal,
+            passage_index=index,
+            passage_count=len(bodies),
+            body=body,
+        )
+        for index, body in enumerate(bodies)
+    )
+
+
 @pytest.mark.asyncio
 async def test_fetch_inventory_uses_manifest_and_orders_raw_observations() -> None:
     later_part = _entity("later-part", ordinal=4, part_index=1, evidence="Ship control")
@@ -452,3 +515,268 @@ def test_span_selection_keeps_one_relevant_part_per_observation_when_bounded() -
 
     assert [entity.id for entity in span.entities] == ["one-b", "two-b"]
     assert span.observation_ordinals == (1, 2)
+
+
+def test_unsliced_source_window_is_unchanged_by_passage_support() -> None:
+    """A source with no passages is windowed exactly as it always was.
+
+    Whole-state sources still window over observations at the size the caller
+    asks for, not the passage window, and report no passages.
+    """
+    observations = tuple(
+        _entity(f"observation-{ordinal}", ordinal=ordinal, evidence=f"navigation state {ordinal}")
+        for ordinal in range(6)
+    )
+    inventory = OperationalSourceInventory(
+        source_id="capture-1",
+        manifest_id=operational_experience_manifest_id("capture-1"),
+        status="complete",
+        raw_observations=observations,
+    )
+
+    span = select_operational_source_span(
+        "navigation state",
+        inventory,
+        max_observations=4,
+        max_entities=4,
+    )
+
+    assert len(span.entities) == 4
+    assert span.observation_ordinals == (0, 1, 2, 3)
+    assert span.candidate_window_count == 3
+    assert span.passage_count == 0
+
+
+def test_passage_window_returns_three_adjacent_passages_in_source_order() -> None:
+    inventory = _passage_inventory(
+        _numbered_passages(
+            [
+                "dashboard summary panel",
+                "catalog filter sidebar",
+                "order details header",
+                "shipment carrier selector",
+                "tracking number field",
+                "unrelated footer links",
+            ]
+        )
+    )
+
+    span = select_operational_source_span(
+        "order shipment carrier tracking",
+        inventory,
+        max_observations=4,
+        max_entities=4,
+    )
+
+    assert [entity.id for entity in span.entities] == ["passage-2", "passage-3", "passage-4"]
+    assert span.passage_count == 3
+    assert span.observation_ordinals == (1,)
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("dashboard summary", ["passage-0", "passage-1", "passage-2"]),
+        ("unrelated footer", ["passage-3", "passage-4", "passage-5"]),
+    ],
+)
+def test_passage_window_clamps_at_both_ends_of_a_body(query: str, expected: list[str]) -> None:
+    """A match in the first or last passage still yields a whole window.
+
+    There is no passage before the first or after the last, so the window
+    slides inward rather than returning short.
+    """
+    inventory = _passage_inventory(
+        _numbered_passages(
+            [
+                "dashboard summary panel",
+                "catalog filter sidebar",
+                "order details header",
+                "shipment carrier selector",
+                "tracking number field",
+                "unrelated footer links",
+            ]
+        )
+    )
+
+    span = select_operational_source_span(query, inventory, max_observations=4, max_entities=4)
+
+    assert [entity.id for entity in span.entities] == expected
+
+
+@pytest.mark.parametrize("body_count", [1, 2])
+def test_passage_window_returns_every_passage_of_a_short_body(body_count: int) -> None:
+    inventory = _passage_inventory(
+        _numbered_passages(["order details header", "tracking number field"][:body_count])
+    )
+
+    span = select_operational_source_span(
+        "tracking number",
+        inventory,
+        max_observations=4,
+        max_entities=4,
+    )
+
+    assert len(span.entities) == body_count
+    assert span.candidate_window_count == 1
+
+
+def test_passage_window_never_crosses_a_state_boundary() -> None:
+    """Adjacency is within one body, not across the whole source.
+
+    The query term sits in the last passage of the first state and the first
+    passage of the second, so a window free to cross would take both and score
+    twice as well as any confined window can.
+    """
+    first_state = tuple(
+        _passage(
+            f"first-{index}",
+            ordinal=1,
+            passage_index=index,
+            passage_count=4,
+            body=body,
+        )
+        for index, body in enumerate(
+            [
+                "dashboard summary panel",
+                "catalog filter sidebar",
+                "order details header",
+                "carrier tracking selector",
+            ]
+        )
+    )
+    second_state = tuple(
+        _passage(
+            f"second-{index}",
+            ordinal=2,
+            passage_index=index,
+            passage_count=4,
+            body=body,
+        )
+        for index, body in enumerate(
+            [
+                "carrier tracking confirmation",
+                "invoice totals table",
+                "customer address block",
+                "support contact footer",
+            ]
+        )
+    )
+
+    span = select_operational_source_span(
+        "carrier tracking",
+        _passage_inventory(first_state + second_state),
+        max_observations=4,
+        max_entities=4,
+    )
+
+    assert span.observation_ordinals == (1,)
+    assert [entity.id for entity in span.entities] == ["first-1", "first-2", "first-3"]
+
+
+def test_passage_window_survives_an_item_allowance_smaller_than_the_window() -> None:
+    """A caller's item allowance may shrink the pack but never cut the window.
+
+    A partial window is the exposure regression the window exists to close, so
+    a window is returned whole even when the allowance is one item.
+    """
+    inventory = _passage_inventory(
+        _numbered_passages(
+            [
+                "dashboard summary panel",
+                "order details header",
+                "unrelated footer links",
+                "carrier tracking selector",
+            ]
+        )
+    )
+
+    span = select_operational_source_span(
+        "carrier tracking",
+        inventory,
+        max_observations=1,
+        max_entities=1,
+    )
+
+    assert [entity.id for entity in span.entities] == ["passage-1", "passage-2", "passage-3"]
+
+
+def test_mixed_source_keeps_an_unsliced_evidence_part_reachable() -> None:
+    """Only accessibility-tree parts are sliced, so a source can hold both shapes.
+
+    The unsliced part is a run of one, which yields a one-group window rather
+    than dropping out of the candidate set for being shorter than the window.
+    """
+    passages = tuple(
+        _passage(
+            f"passage-{index}",
+            ordinal=1,
+            passage_index=index,
+            passage_count=3,
+            body=body,
+        )
+        for index, body in enumerate(
+            ["dashboard summary panel", "catalog filter sidebar", "order details header"]
+        )
+    )
+    screenshot = _entity("screenshot", ordinal=1, part_index=1, evidence="carrier tracking receipt")
+
+    span = select_operational_source_span(
+        "carrier tracking receipt",
+        _passage_inventory((*passages, screenshot)),
+        max_observations=4,
+        max_entities=4,
+    )
+
+    assert [entity.id for entity in span.entities] == ["screenshot"]
+    assert span.passage_count == 0
+
+
+@pytest.mark.asyncio
+async def test_fetch_inventory_prefers_passages_over_the_part_they_were_cut_from() -> None:
+    """A passage and its parent carry the same text, so a span may not hold both.
+
+    Parts that were never sliced still contribute their whole-part row, which
+    is what keeps non-accessibility evidence in the inventory at all.
+    """
+    sliced_parent = _entity("sliced-parent", ordinal=1, evidence="whole accessibility tree")
+    passages = [
+        _passage(
+            f"passage-{index}",
+            ordinal=1,
+            passage_index=index,
+            body=f"passage body {index}",
+        )
+        for index in range(3)
+    ]
+    screenshot = _entity("screenshot", ordinal=1, part_index=1, evidence="carrier tracking receipt")
+    members = [sliced_parent, *passages, screenshot]
+    manifest = _manifest([entity.id for entity in members])
+    reader = AsyncMock()
+    reader.get.return_value = manifest
+    reader.get_many.return_value = [manifest, *reversed(members)]
+
+    inventory = await fetch_operational_source_inventory(reader, "capture-1")
+
+    assert inventory.status == "complete"
+    assert [entity.id for entity in inventory.raw_observations] == [
+        "passage-0",
+        "passage-1",
+        "passage-2",
+        "screenshot",
+    ]
+    assert inventory.passage_count == 3
+
+
+@pytest.mark.asyncio
+async def test_fetch_inventory_rejects_a_passage_without_an_ordering_index() -> None:
+    passage = _passage("passage-0", ordinal=1, passage_index=0, body="passage body")
+    unordered = passage.model_copy(update={"metadata": {**passage.metadata, "passage_index": None}})
+    manifest = _manifest([unordered.id])
+    reader = AsyncMock()
+    reader.get.return_value = manifest
+    reader.get_many.return_value = [manifest, unordered]
+
+    inventory = await fetch_operational_source_inventory(reader, "capture-1")
+
+    assert inventory.status == "inventory_invalid"

@@ -85,6 +85,7 @@ async def expand_operational_source_evidence(
             "expected_entity_count": outcome.expected_entity_count,
             "loaded_entity_count": outcome.loaded_entity_count,
             "raw_observation_count": len(outcome.raw_observations),
+            "passage_count": outcome.passage_count,
             "memory_scope": outcome.memory_scope,
         }
         receipt["sources"].append(source_receipt)
@@ -104,6 +105,7 @@ async def expand_operational_source_evidence(
                 "ranking_applied": span.ranking_applied,
                 "selected_observation_ordinals": list(span.observation_ordinals),
                 "selected_entity_ids": [entity.id for entity in span.entities],
+                "selected_passage_count": span.passage_count,
             }
         )
         if not span.entities:
