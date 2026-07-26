@@ -156,6 +156,7 @@ export default defineConfig({
                         { text: 'show', link: '/cli/show' },
                         { text: 'brief', link: '/cli/brief' },
                         { text: 'session', link: '/cli/session' },
+                        { text: 'export', link: '/cli/export' },
                         { text: 'archive', link: '/cli/archive' },
                     ],
                 },
