@@ -153,6 +153,15 @@ class Settings(BaseSettings):
     server_name: str = Field(default="sibyl", description="MCP server name")
     server_host: str = Field(default="localhost", description="Server bind host")
     server_port: int = Field(default=3334, description="Server bind port")
+    minimum_client_version: str | None = Field(
+        default=None,
+        description=(
+            "Oldest CLI version this server accepts. Advertised to clients, which refuse "
+            "to run below it. Unset means no floor is enforced: drift is still reported, "
+            "but an old client is never blocked. Raise it deliberately when a breaking "
+            "change lands, never as a routine release step."
+        ),
+    )
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
         default="INFO",
         description="Logging level",

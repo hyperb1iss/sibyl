@@ -3371,6 +3371,7 @@ source = { editable = "packages/python/sibyl-core" }
 dependencies = [
     { name = "anyio" },
     { name = "httpx" },
+    { name = "packaging" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyjwt" },
@@ -3428,6 +3429,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "mistune", marker = "extra == 'crawler'", specifier = ">=3.3.4" },
     { name = "mistune", marker = "extra == 'runtime'", specifier = ">=3.3.4" },
+    { name = "packaging", specifier = ">=26.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], marker = "extra == 'llm'", specifier = ">=2.16.0,<3" },
     { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], marker = "extra == 'runtime'", specifier = ">=2.16.0,<3" },

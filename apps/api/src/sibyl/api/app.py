@@ -68,6 +68,7 @@ from sibyl.runtime_provenance import get_runtime_provenance
 from sibyl.runtime_services import RuntimeServices
 from sibyl.services.telemetry import schedule_runtime_rollup_persist
 from sibyl_core.observability import telemetry_registry
+from sibyl_core.version_contract import MIN_CLIENT_HEADER, SERVER_VERSION_HEADER
 
 log = structlog.get_logger()
 
@@ -99,6 +100,26 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
             duration_ms=duration_ms,
         )
         schedule_runtime_rollup_persist()
+        return response
+
+
+class VersionHeaderMiddleware(BaseHTTPMiddleware):
+    """Stamp the server's version on every response so clients can detect drift.
+
+    A client pointed at a remote Sibyl cannot learn this from PyPI — the
+    server may be pinned behind or ahead of the newest release — so the
+    only authority is the response it just received. Stamping every
+    response costs nothing and needs no extra round-trip.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        from sibyl import __version__
+
+        response = await call_next(request)
+        response.headers[SERVER_VERSION_HEADER] = __version__
+        # Absent header means "no floor"; clients must not infer one.
+        if minimum := (settings.minimum_client_version or "").strip():
+            response.headers[MIN_CLIENT_HEADER] = minimum
         return response
 
 
@@ -263,6 +284,9 @@ def create_api_app() -> FastAPI:  # noqa: PLR0915
     # Access logging
     app.add_middleware(AccessLogMiddleware)
     app.add_middleware(RequestIdMiddleware)
+    # Outermost, so the version reaches the client even when an inner layer
+    # rejects the request — a stale client learns why it is being refused.
+    app.add_middleware(VersionHeaderMiddleware)
 
     # Register routers
     app.include_router(backups_router)
