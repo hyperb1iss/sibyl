@@ -638,6 +638,13 @@ GRAPH_SCHEMA_MIGRATIONS = (
         name="entity_schema_drift_repair",
         statements=tuple(split_statements(ENTITY_SCHEMA_DRIFT_REPAIR_DEFINITIONS)),
     ),
+    # The enum allow-list renders from EntityType, so widening it only reaches an
+    # existing database when a new version replays the assertion.
+    SchemaMigration(
+        version=16,
+        name="graph_enum_assertions_passage",
+        statements=tuple(split_statements(GRAPH_ENUM_ASSERTION_DEFINITIONS)),
+    ),
 )
 
 
