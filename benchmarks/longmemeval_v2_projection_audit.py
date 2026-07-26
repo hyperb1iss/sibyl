@@ -21,6 +21,7 @@ from longmemeval_v2_memory.sibyl_memory import (  # noqa: E402
     build_operational_experience_payload,
 )
 
+from sibyl_core.embeddings import entity_embedding_text  # noqa: E402
 from sibyl_core.models import (  # noqa: E402
     Entity,
     EntityType,
@@ -30,8 +31,35 @@ from sibyl_core.models import (  # noqa: E402
 )
 from sibyl_core.projection import project_operational_experience  # noqa: E402
 
-AUDIT_SCHEMA_VERSION = "sibyl-longmemeval-v2-projection-audit-v1"
+AUDIT_SCHEMA_VERSION = "sibyl-longmemeval-v2-projection-audit-v2"
+
+# Inferred rows per byte-exact raw evidence row. The projector's structural
+# ceiling is exactly one inferred row per raw row: one transition event per
+# action, one procedure segment, and at most one error pattern, against one raw
+# row per evidence part. 2.0 is that ceiling, so anything above it is the
+# extractor minting rows no source row accounts for.
 MAX_WRITE_AMPLIFICATION = 2.0
+
+# Passage embedding bytes per byte of the raw evidence rows they were cut from.
+# Passages are not inference: the slicer partitions a state body's lines
+# exactly, so a passage re-carves bytes its parent already holds. Counting them
+# against MAX_WRITE_AMPLIFICATION would compare a re-carving to an invention and
+# reject the substrate by construction (measured fan-out is 11x to 14.5x rows).
+#
+# Bytes, not rows, because embedding spend is what this substrate buys (the
+# capture path makes no per-entity model call) and because every passage carries
+# a floor of non-content bytes: entity type, name, the 500-char-capped
+# description, the 120-char-capped header, and the breadcrumb, measured at 453
+# chars minimum. Bounding bytes therefore bounds rows too.
+#
+# 2.5 against a measured legitimate ceiling of 1.66x. The widest amplification
+# the real slicer reaches over production-shaped trees is 1.66x (24-deep
+# nesting, 60K-char states, descriptions saturated at their cap), and the A1
+# corpus measurement puts the real corpus at 1.65x enterprise / 1.55x web. A
+# slicer that splits every slice four ways measures 2.86x and one that emits a
+# passage per line measures 7.17x, so the bound clears every shape the slicer
+# legitimately produces and still catches a runaway.
+MAX_PASSAGE_BYTE_AMPLIFICATION = 2.5
 
 
 @dataclass
@@ -43,8 +71,22 @@ class AuditAccumulator:
     max_evidence_chars: int = 0
     max_entity_chars: int = 0
     max_embeddable_entity_chars: int = 0
-    max_total_write_amplification: float = 0.0
-    trajectories_above_2x: int = 0
+    max_write_amplification: float = 0.0
+    max_passage_byte_amplification: float = 0.0
+    max_passage_fanout: float = 0.0
+    trajectories_above_write_limit: int = 0
+    trajectories_above_passage_limit: int = 0
+
+
+@dataclass(frozen=True)
+class ProjectionIndex:
+    """The projected rows split by the account each one belongs to."""
+
+    raw_by_evidence: dict[tuple[str, str], Entity]
+    raw_by_id: dict[str, Entity]
+    derived: list[Entity]
+    passages: list[Entity]
+    raw_supported: set[str]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -93,17 +135,30 @@ def audit_trajectories(
             content_max_chars=content_max_chars,
         )
 
-    total_write_amplification = (
+    aggregate_write_amplification = (
         audit.counts["raw_entities"] + audit.counts["derived_entities"]
     ) / max(audit.counts["raw_entities"], 1)
-    if total_write_amplification > MAX_WRITE_AMPLIFICATION:
+    if aggregate_write_amplification > MAX_WRITE_AMPLIFICATION:
         _issue(
             audit.issues,
             "corpus",
-            "aggregate_write_amplification_above_2x",
-            observed=total_write_amplification,
+            "aggregate_write_amplification_above_limit",
+            observed=aggregate_write_amplification,
+            limit=MAX_WRITE_AMPLIFICATION,
         )
-    audit.counts["trajectories_above_2x"] = audit.trajectories_above_2x
+    aggregate_passage_byte_amplification = audit.counts["passage_embedding_chars"] / max(
+        audit.counts["passage_parent_embedding_chars"], 1
+    )
+    if aggregate_passage_byte_amplification > MAX_PASSAGE_BYTE_AMPLIFICATION:
+        _issue(
+            audit.issues,
+            "corpus",
+            "aggregate_passage_byte_amplification_above_limit",
+            observed=aggregate_passage_byte_amplification,
+            limit=MAX_PASSAGE_BYTE_AMPLIFICATION,
+        )
+    audit.counts["trajectories_above_write_limit"] = audit.trajectories_above_write_limit
+    audit.counts["trajectories_above_passage_limit"] = audit.trajectories_above_passage_limit
     audit.counts["issues"] = len(audit.issues)
     return {
         "schema_version": AUDIT_SCHEMA_VERSION,
@@ -121,8 +176,16 @@ def audit_trajectories(
             "max_evidence_part_chars": audit.max_evidence_chars,
             "max_projected_entity_chars": audit.max_entity_chars,
             "max_embeddable_entity_chars": audit.max_embeddable_entity_chars,
-            "max_total_write_amplification": audit.max_total_write_amplification,
-            "aggregate_write_amplification": total_write_amplification,
+            "max_write_amplification": audit.max_write_amplification,
+            "aggregate_write_amplification": aggregate_write_amplification,
+            "max_passage_byte_amplification": audit.max_passage_byte_amplification,
+            "aggregate_passage_byte_amplification": aggregate_passage_byte_amplification,
+            # Reported, not gated. Row fan-out swings with tree shape, and the
+            # per-passage byte floor already bounds it; this is the budget
+            # signal a corpus rebuild is priced against.
+            "max_passage_fanout": audit.max_passage_fanout,
+            "aggregate_passage_fanout": audit.counts["passage_entities"]
+            / max(audit.counts["raw_entities"], 1),
         },
         "issues": audit.issues,
     }
@@ -148,43 +211,41 @@ def _audit_trajectory(
     if projection_signature(projection) != projection_signature(replay):
         _issue(audit.issues, trajectory_id, "projection_not_deterministic")
 
-    raw_entities, derived_entities, derived_support = _projection_indexes(projection)
-    _record_projection_stats(audit, experience, projection, raw_entities, derived_entities)
+    index = _projection_indexes(projection)
+    _record_projection_stats(audit, experience, projection, index)
     _audit_observations(
         audit,
         trajectory_id,
         experience,
-        raw_entities,
-        derived_entities,
+        index,
         content_max_chars=content_max_chars,
     )
-    _audit_derived_support(
-        audit,
-        trajectory_id,
-        projection,
-        derived_entities,
-        derived_support,
-    )
+    _audit_derived_support(audit, trajectory_id, projection, index)
 
 
-def _projection_indexes(
-    projection: OperationalExperienceProjection,
-) -> tuple[dict[tuple[str, str], Entity], list[Entity], set[str]]:
+def _projection_indexes(projection: OperationalExperienceProjection) -> ProjectionIndex:
     entities_by_id = {entity.id: entity for entity in projection.entities}
-    raw_entities = {
+    raw_by_id = {
+        entity.id: entity
+        for entity in projection.entities
+        if entity.metadata.get("projection_kind") == "raw_observation"
+    }
+    raw_by_evidence = {
         (
             str(entity.metadata.get("source_observation_id")),
             str(entity.metadata.get("evidence_part_id")),
         ): entity
-        for entity in projection.entities
-        if entity.metadata.get("projection_kind") == "raw_observation"
+        for entity in raw_by_id.values()
     }
     derived_entities = [
         entity
         for entity in projection.entities
         if entity.entity_type in {EntityType.EVENT, EntityType.PROCEDURE, EntityType.ERROR_PATTERN}
     ]
-    derived_support = {
+    passages = [
+        entity for entity in projection.entities if entity.entity_type is EntityType.PASSAGE
+    ]
+    raw_supported = {
         relationship.source_id
         for relationship in projection.relationships
         if relationship.relationship_type is RelationshipType.DERIVED_FROM
@@ -192,15 +253,20 @@ def _projection_indexes(
         and entities_by_id[relationship.target_id].metadata.get("projection_kind")
         == "raw_observation"
     }
-    return raw_entities, derived_entities, derived_support
+    return ProjectionIndex(
+        raw_by_evidence=raw_by_evidence,
+        raw_by_id=raw_by_id,
+        derived=derived_entities,
+        passages=passages,
+        raw_supported=raw_supported,
+    )
 
 
 def _record_projection_stats(
     audit: AuditAccumulator,
     experience: OperationalExperience,
     projection: OperationalExperienceProjection,
-    raw_entities: dict[tuple[str, str], Entity],
-    derived_entities: list[Entity],
+    index: ProjectionIndex,
 ) -> None:
     audit.counts["trajectories"] += 1
     audit.counts["observations"] += len(experience.observations)
@@ -217,31 +283,54 @@ def _record_projection_stats(
     for relationship in projection.relationships:
         audit.relationship_types[relationship.relationship_type.value] += 1
 
-    raw_count = len(raw_entities)
-    amplification = (len(projection.entities) - 1) / max(raw_count, 1)
-    audit.max_total_write_amplification = max(
-        audit.max_total_write_amplification,
-        amplification,
-    )
+    raw_count = len(index.raw_by_evidence)
+    amplification = (raw_count + len(index.derived)) / max(raw_count, 1)
+    audit.max_write_amplification = max(audit.max_write_amplification, amplification)
     audit.counts["raw_entities"] += raw_count
-    audit.counts["derived_entities"] += len(derived_entities)
+    audit.counts["derived_entities"] += len(index.derived)
     audit.counts["manifest_entities"] += 1
     if amplification > MAX_WRITE_AMPLIFICATION:
-        audit.trajectories_above_2x += 1
+        audit.trajectories_above_write_limit += 1
+
+    _record_passage_stats(audit, index)
+
+
+def _record_passage_stats(audit: AuditAccumulator, index: ProjectionIndex) -> None:
+    """Account the re-carved rows against the raw rows they were cut from."""
+    if not index.passages:
+        return
+    parents = [
+        index.raw_by_id[parent_id]
+        for parent_id in {
+            str(passage.metadata.get("parent_entity_id")) for passage in index.passages
+        }
+        if parent_id in index.raw_by_id
+    ]
+    passage_chars = sum(len(entity_embedding_text(passage)) for passage in index.passages)
+    parent_chars = sum(len(entity_embedding_text(parent)) for parent in parents)
+    byte_amplification = passage_chars / max(parent_chars, 1)
+    fanout = len(index.passages) / max(len(parents), 1)
+    audit.max_passage_byte_amplification = max(
+        audit.max_passage_byte_amplification,
+        byte_amplification,
+    )
+    audit.max_passage_fanout = max(audit.max_passage_fanout, fanout)
+    audit.counts["passage_entities"] += len(index.passages)
+    audit.counts["passage_embedding_chars"] += passage_chars
+    audit.counts["passage_parent_embedding_chars"] += parent_chars
+    if byte_amplification > MAX_PASSAGE_BYTE_AMPLIFICATION:
+        audit.trajectories_above_passage_limit += 1
 
 
 def _audit_observations(
     audit: AuditAccumulator,
     trajectory_id: str,
     experience: OperationalExperience,
-    raw_entities: dict[tuple[str, str], Entity],
-    derived_entities: list[Entity],
+    index: ProjectionIndex,
     *,
     content_max_chars: int,
 ) -> None:
-    procedures = [
-        entity for entity in derived_entities if entity.entity_type is EntityType.PROCEDURE
-    ]
+    procedures = [entity for entity in index.derived if entity.entity_type is EntityType.PROCEDURE]
     for observation_index, observation in enumerate(experience.observations):
         for evidence in observation.evidence:
             audit.counts["evidence_parts"] += 1
@@ -249,7 +338,7 @@ def _audit_observations(
                 audit.max_evidence_chars,
                 len(evidence.content),
             )
-            raw_entity = raw_entities.get((observation.id, evidence.id))
+            raw_entity = index.raw_by_evidence.get((observation.id, evidence.id))
             _audit_raw_evidence(
                 audit.issues,
                 trajectory_id,
@@ -276,7 +365,7 @@ def _audit_observations(
                 trajectory_id,
                 observation.id,
                 observation.action,
-                derived_entities,
+                index.derived,
             )
 
 
@@ -331,16 +420,28 @@ def _audit_derived_support(
     audit: AuditAccumulator,
     trajectory_id: str,
     projection: OperationalExperienceProjection,
-    derived_entities: list[Entity],
-    derived_support: set[str],
+    index: ProjectionIndex,
 ) -> None:
-    unsupported = [entity.id for entity in derived_entities if entity.id not in derived_support]
+    unsupported = [entity.id for entity in index.derived if entity.id not in index.raw_supported]
     if unsupported:
         _issue(
             audit.issues,
             trajectory_id,
             "derived_entity_without_raw_support",
             entity_ids=unsupported,
+        )
+    orphan_passages = [
+        passage.id
+        for passage in index.passages
+        if passage.id not in index.raw_supported
+        or str(passage.metadata.get("parent_entity_id")) not in index.raw_by_id
+    ]
+    if orphan_passages:
+        _issue(
+            audit.issues,
+            trajectory_id,
+            "passage_without_raw_parent",
+            entity_ids=orphan_passages,
         )
     unsupported_claims = [
         entity.id for entity in projection.entities if entity.entity_type is EntityType.CLAIM
