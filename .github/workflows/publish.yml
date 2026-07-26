@@ -933,7 +933,10 @@ jobs:
           cp "$formula" "release-assets/sibyl-homebrew-${version}.rb"
           cp "$pkgbuild" "release-assets/sibyl-${version}-PKGBUILD"
 
-          test "$(find release-assets -maxdepth 1 -type f -name '*.cdx.json' | wc -l)" -eq 2
+          # One SBOM per image per architecture. This was two while a single
+          # scan covered the merged manifest, which silently meant only one
+          # architecture was ever examined.
+          test "$(find release-assets -maxdepth 1 -type f -name '*.cdx.json' | wc -l)" -eq 4
           test "$(find release-assets -maxdepth 1 -type f -name '*-cosign-receipt.json' | wc -l)" -eq 2
           test "$(find release-assets -maxdepth 1 -type f -name '*.whl' | wc -l)" -eq 3
           test "$(find release-assets -maxdepth 1 -type f -name '*.tar.gz' | wc -l)" -eq 3
