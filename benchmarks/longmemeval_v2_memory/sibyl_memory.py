@@ -37,6 +37,9 @@ from sibyl_core.evals.longmemeval_v2 import (  # noqa: E402
 )
 from sibyl_core.models import EntityType, OperationalExperience  # noqa: E402
 from sibyl_core.projection import project_operational_experience  # noqa: E402
+from sibyl_core.retrieval.operational_evidence import (  # noqa: E402
+    TYPED_NOTE_RESERVATION_ITEMS,
+)
 from sibyl_core.retrieval.query_ranking import (  # noqa: E402
     QueryCoverageCandidate,
     QueryCoverageRankedCandidate,
@@ -734,9 +737,15 @@ def compile_operational_evidence_set(
         raw_candidates,
         pool="raw",
     )
-    default_reservation = max(1, math.ceil(max_items * 3 / 8))
+    # Absolute, not proportional: the note lane was tuned at three items, and
+    # widening it to five lost the whole measured gain. A slice-granular pack
+    # raises `max_items` from 8 to ~28 for reasons unrelated to how many
+    # distilled notes are worth reading, so a ratio here would silently
+    # reserve eleven slots and argue against slicing.
     requested_reservation = (
-        typed_reservation_items if typed_reservation_items is not None else default_reservation
+        typed_reservation_items
+        if typed_reservation_items is not None
+        else TYPED_NOTE_RESERVATION_ITEMS
     )
     typed_reservation = min(len(ranked_typed), max(1, min(requested_reservation, max_items - 1)))
     raw_budget = min(len(ranked_raw), max_items - typed_reservation)

@@ -3093,6 +3093,63 @@ def test_compile_evidence_honors_typed_reservation_override() -> None:
     assert len(capped_set) == max_items
 
 
+@pytest.mark.parametrize("max_items", [8, 28])
+def test_eval_reserved_lane_is_an_absolute_count_a_wider_pack_cannot_widen(
+    max_items: int,
+) -> None:
+    """A slice-granular pack raises `max_items`; it must not raise the note lane.
+
+    Mirrors the production pin in `sibyl_core.retrieval.operational_evidence`.
+    The proportional law this replaced reserved eleven of twenty-eight slots
+    at slice granularity, and the tuning kill measured that widening as a
+    total loss of the note gain. Both the shipped pack size and the slice
+    pack size are pinned so neither can drift.
+    """
+    module = _load_memory_module()
+    pinned_reservation = 3
+    override_reservation = 5
+    typed = [
+        {
+            "id": f"note_{i}",
+            "type": "note",
+            "content": f"note {i} about the field",
+            "_selection_origin": "context_pack:typed_stream",
+            "metadata": {"longmemeval_v2_trajectory_id": f"t{i}"},
+        }
+        for i in range(12)
+    ]
+    raw = [
+        {"id": f"session_{i}", "type": "session", "content": f"raw slice {i} of the field"}
+        for i in range(40)
+    ]
+
+    selected, meta = module.compile_operational_evidence_set(
+        query="find the field",
+        typed_results=typed,
+        raw_results=raw,
+        max_items=max_items,
+        mode="shared_relevance",
+    )
+
+    assert meta["typed_reservation"] == pinned_reservation
+    assert meta["selected_typed_count"] == pinned_reservation
+    assert meta["selected_raw_count"] == max_items - pinned_reservation
+    assert len(selected) == max_items
+
+    override_selected, override_meta = module.compile_operational_evidence_set(
+        query="find the field",
+        typed_results=typed,
+        raw_results=raw,
+        max_items=max_items,
+        mode="shared_relevance",
+        typed_reservation_items=override_reservation,
+    )
+
+    assert override_meta["typed_reservation"] == override_reservation
+    assert override_meta["selected_typed_count"] == override_reservation
+    assert len(override_selected) == max_items
+
+
 def test_entity_overlap_downranks_mismatched_notes() -> None:
     module = _load_memory_module()
     query = "Find the warranty expiration for Chelsea-Cynthia Tran-Dyer's laptop"
