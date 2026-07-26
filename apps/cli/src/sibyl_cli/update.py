@@ -29,6 +29,7 @@ from sibyl_cli.common import (
     success,
     warn,
 )
+from sibyl_core.version_contract import server_is_ahead
 
 app = typer.Typer(help="Update Sibyl components")
 
@@ -127,6 +128,34 @@ def cli_update_available() -> tuple[str | None, str | None, bool]:
         update_available = False
 
     return current, latest, update_available
+
+
+def get_server_version() -> str | None:
+    """Ask the configured server what it is running.
+
+    PyPI is the wrong target on its own: against a remote server, matching
+    the newest release proves nothing if that server is pinned elsewhere.
+    Returns None when there is no configured server or it cannot be reached.
+    """
+    try:
+        from sibyl_cli import config_store
+
+        base_url = config_store.get_server_url()
+    except Exception:
+        return None
+    if not base_url:
+        return None
+
+    try:
+        import httpx
+
+        response = httpx.get(f"{base_url.rstrip('/')}/health", timeout=5.0)
+        if response.status_code != 200:
+            return None
+        version = response.json().get("version")
+    except Exception:
+        return None
+    return str(version) if version else None
 
 
 def get_local_image_digest(image: str) -> str | None:
@@ -391,6 +420,22 @@ def update(
             has_updates = True
         else:
             table.add_row("CLI", f"[{SUCCESS_GREEN}]{cli_current}[/{SUCCESS_GREEN}] (latest)")
+
+        # The server you are actually talking to is the version that
+        # matters; PyPI only says what is available to install.
+        server_version = get_server_version()
+        if server_version is None:
+            table.add_row("Server", "[dim]Not reachable[/dim]")
+        elif server_version == "0.0.0":
+            table.add_row("Server", f"[{ELECTRIC_YELLOW}]no version stamped[/{ELECTRIC_YELLOW}]")
+        elif server_is_ahead(client=cli_current, server=server_version):
+            table.add_row(
+                "Server",
+                f"[{ELECTRIC_YELLOW}]{server_version}[/{ELECTRIC_YELLOW}] (ahead of this CLI)",
+            )
+            has_updates = True
+        else:
+            table.add_row("Server", f"[{SUCCESS_GREEN}]{server_version}[/{SUCCESS_GREEN}]")
 
     if do_containers:
         if container_total == 0:

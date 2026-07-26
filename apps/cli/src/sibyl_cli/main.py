@@ -1379,6 +1379,30 @@ def show_reference(
     _show()
 
 
+def _print_version_lines(data: dict[str, object]) -> None:
+    """Show both versions, since `health` is where drift gets diagnosed."""
+    from sibyl_cli.version_drift import client_version
+    from sibyl_core.version_contract import server_is_ahead
+
+    server_version = data.get("version")
+    server_text = str(server_version) if server_version else "unknown"
+    current = client_version()
+
+    console.print(f"  [dim]Server:  {server_text}[/dim]")
+    console.print(f"  [dim]Client:  {current}[/dim]")
+
+    runtime = data.get("runtime")
+    if isinstance(runtime, dict):
+        commit = str(runtime.get("commit") or "unknown")
+        if commit != "unknown":
+            console.print(f"  [dim]Commit:  {commit[:12]}[/dim]")
+
+    if server_text == "0.0.0":
+        warn("Server reports no version — its image was built without provenance.")
+    elif server_is_ahead(client=current, server=server_text):
+        warn(f"Server is newer than this CLI ({server_text} > {current}) — run `sibyl update`.")
+
+
 @app.command()
 def health(
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
@@ -1399,6 +1423,7 @@ def health(
 
                 if status == "healthy":
                     success(f"{server} is healthy")
+                    _print_version_lines(data)
                     if counts := data.get("counts"):
                         console.print(f"  [dim]Entities: {counts.get('entities', 0)}[/dim]")
                         console.print(
