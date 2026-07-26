@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from shutil import rmtree
 from typing import Any
 
+from sibyl_core.export._slug import safe_slug
 from sibyl_core.migrate.archive import LoadedArchive, graph_payload_from_archive
 
 OKF_VERSION = "0.1"
@@ -200,7 +200,7 @@ def _concept_paths(graph_payload: dict[str, Any]) -> dict[tuple[str, int], str]:
     for kind, records in _iter_graph_records(graph_payload):
         for index, record in enumerate(records):
             record_id = _record_identifier(kind, record) or f"{kind}-{index + 1}"
-            slug = _safe_slug(record_id)
+            slug = safe_slug(record_id)
             path = f"{directories[kind]}/{slug}.md"
             if path in used:
                 path = f"{directories[kind]}/{slug}-{index + 1}.md"
@@ -391,11 +391,6 @@ def _relationship_type(record: dict[str, Any]) -> str:
         )
         or "related"
     )
-
-
-def _safe_slug(value: str) -> str:
-    slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", value.strip()).strip(".-").lower()
-    return slug or "concept"
 
 
 def _optional_str(value: object) -> str | None:
