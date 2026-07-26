@@ -61,6 +61,7 @@ Capture knowledge and recall it back into agent context.
 | [`sibyl explore`](./explore.md)        | Graph traversal and exploration                     |
 | [`sibyl archive`](./archive.md)        | Browse raw quick captures                           |
 | [`sibyl session`](./session.md)        | Package a wake-up context bundle                    |
+| [`sibyl export`](./export.md)          | Materialize memory into `.sibyl/memory/` files      |
 | [`sibyl config context`](./context.md) | Manage named server, org, and project contexts      |
 
 ### Work tracking
