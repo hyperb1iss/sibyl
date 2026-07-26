@@ -169,11 +169,24 @@ rules into production.
   name is not.
 - **URL path-extraction is already shipped, not a prospective fix.** The plan
   lists "path-extract and truncate header URLs" among "boundary rules the data
-  argues for," alongside genuinely v2-only changes (400-char prepend bound,
-  two-ancestor breadcrumb cap, tail-merge). But `uri_path()` already does host +
-  path extraction with 48-char truncation, and `slice_header` already hard-caps
-  at 120 — both active in the v1 run that produced these numbers. It cannot also
-  be an improvement still to be made.
+  argues for." But `uri_path()` already does host + path extraction with 48-char
+  truncation, and `slice_header` already hard-caps at 120 — both active in the v1
+  run that produced these numbers. It cannot also be an improvement still to be
+  made.
+- **Of the rules the plan lists beside it, only tail-merge is genuinely v2.**
+  The other two named there are not implemented at all. `MAX_PREPEND_CHARS = 400`
+  is declared at `slicer_v2.py:30` and never referenced by any code path; the
+  real bound is the combined-size check against `HARD_MAX` at `slicer_v2.py:72`,
+  which is what moved max slice 4,103 → 2,064. And `breadcrumb_for` joins every
+  ancestor uncapped in **both** versions, so the two-ancestor cap was never
+  implemented and never oracled — the 3.9% figure is `stage0f` arithmetic, not a
+  re-run of the exposure oracle. Treating either as a shipped v2 rule inverts
+  what the source says.
+- **Band-aware packing is absent from the plan's rule list**, though it is the
+  largest change to the size distribution. `slicer_v2.py:94-97` flushes once the
+  buffer is above `TARGET_LO` and the next sibling would cross `TARGET_HI`,
+  moving under-600-char slices from 29.5% to 23.8% and slices/state from 24.97
+  to 23.13. Anyone implementing the plan's list literally would omit it.
 
 Two more reading traps, in the measurements rather than the cutter:
 
