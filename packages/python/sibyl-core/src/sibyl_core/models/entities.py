@@ -56,6 +56,11 @@ class EntityType(StrEnum):
     EVENT = "event"  # Dated activity, milestone, purchase, or other temporal occurrence
     SESSION = "session"  # Work session or conversation checkpoint
 
+    # Retrieval substrate
+    # Design docs call these "slices"; the enum avoids that word because the
+    # benchmarks already use it for dataset subsets.
+    PASSAGE = "passage"  # Independently indexed span cut from a larger source
+
     @classmethod
     def _missing_(cls, value: object) -> "EntityType | None":
         if isinstance(value, str) and value.lower() == "guide":

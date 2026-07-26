@@ -81,6 +81,7 @@ from sibyl_core.backends.surreal.schema_version import (
     GRAPH_SCHEMA_CURRENT_VERSION,
     SCHEMA_VERSION_DEFINITIONS,
 )
+from sibyl_core.models.entities import EntityType
 
 
 class _RecordingSchemaClient:
@@ -1034,6 +1035,26 @@ def test_graph_enum_assertions_are_versioned() -> None:
     assert "ASSERT $value IN ['pattern'" in GRAPH_ENUM_ASSERTION_DEFINITIONS
     assert "graph_enum_assertions" in [migration.name for migration in GRAPH_SCHEMA_MIGRATIONS]
     assert GRAPH_ENUM_ASSERTION_DEFINITIONS.strip().splitlines()[0] in migration_sql
+
+
+def test_graph_enum_assertion_replay_admits_passage_entity_type() -> None:
+    migration = next(
+        item for item in GRAPH_SCHEMA_MIGRATIONS if item.name == "graph_enum_assertions_passage"
+    )
+    migration_sql = "\n".join(migration.statements)
+
+    assert GRAPH_SCHEMA_CURRENT_VERSION >= 16
+    assert migration.version == 16
+    assert "DEFINE FIELD OVERWRITE entity_type ON entity TYPE string" in migration_sql
+    assert f"'{EntityType.PASSAGE.value}'" in migration_sql
+    for entity_type in EntityType:
+        assert f"'{entity_type.value}'" in migration_sql
+
+
+def test_graph_schema_current_version_matches_latest_migration() -> None:
+    latest_migration_version = max(migration.version for migration in GRAPH_SCHEMA_MIGRATIONS)
+
+    assert latest_migration_version == GRAPH_SCHEMA_CURRENT_VERSION
 
 
 def test_graph_entity_actor_attribution_fields_are_versioned() -> None:
