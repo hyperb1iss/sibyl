@@ -1,0 +1,289 @@
+{
+  "enterprise": {
+    "domain": "enterprise",
+    "measurable": 44,
+    "states": 3358,
+    "multi_part_states": 1845,
+    "parts_total": 6387,
+    "parts_in_multi_part_states": 4874,
+    "whole_state_slices": 83850,
+    "production_slices": 84968,
+    "boundary_straddling_slices": 2828,
+    "longest_production_slice_chars": 4384,
+    "typed_entity_content_cap_chars": 18000,
+    "boundary_probe": {
+      "boundaries": 3029,
+      "usable_probes": 2555,
+      "window": 3,
+      "hits": {
+        "whole_state": 2555,
+        "part_confined": 0,
+        "production": 0
+      },
+      "rates": {
+        "whole_state": 1.0,
+        "part_confined": 0.0,
+        "production": 0.0
+      }
+    },
+    "counts": {
+      "fat_state": 42,
+      "one_part_carries_gold": 42,
+      "part_confined_w1": 41,
+      "part_confined_w2": 41,
+      "part_confined_w3": 42,
+      "part_confined_w5": 42,
+      "production_w1": 41,
+      "production_w2": 41,
+      "production_w3": 42,
+      "production_w5": 42,
+      "whole_state_all_slices": 42,
+      "whole_state_w1": 41,
+      "whole_state_w2": 41,
+      "whole_state_w3": 42,
+      "whole_state_w5": 42
+    },
+    "rates": {
+      "fat_state": 0.9545,
+      "one_part_carries_gold": 0.9545,
+      "part_confined_w1": 0.9318,
+      "part_confined_w2": 0.9318,
+      "part_confined_w3": 0.9545,
+      "part_confined_w5": 0.9545,
+      "production_w1": 0.9318,
+      "production_w2": 0.9318,
+      "production_w3": 0.9545,
+      "production_w5": 0.9545,
+      "whole_state_all_slices": 0.9545,
+      "whole_state_w1": 0.9318,
+      "whole_state_w2": 0.9318,
+      "whole_state_w3": 0.9545,
+      "whole_state_w5": 0.9545
+    },
+    "delta_production_minus_whole_state": {
+      "w1": 0.0,
+      "w2": 0.0,
+      "w3": 0.0,
+      "w5": 0.0
+    },
+    "phrase_count_distribution": {
+      "1": 30,
+      "2": 9,
+      "3": 4,
+      "4": 1
+    },
+    "width_gainers": {
+      "part_confined_w2": [],
+      "part_confined_w3": [
+        "0cf979c4"
+      ],
+      "part_confined_w5": [],
+      "production_w2": [],
+      "production_w3": [
+        "0cf979c4"
+      ],
+      "production_w5": [],
+      "whole_state_w2": [],
+      "whole_state_w3": [
+        "0cf979c4"
+      ],
+      "whole_state_w5": []
+    },
+    "loss_reasons": {
+      "part_confined_w1": {
+        "covered": 41,
+        "window_too_narrow_within_part": 1,
+        "no_single_state_carries_gold": 2
+      },
+      "part_confined_w2": {
+        "covered": 41,
+        "window_too_narrow_within_part": 1,
+        "no_single_state_carries_gold": 2
+      },
+      "part_confined_w3": {
+        "covered": 42,
+        "no_single_state_carries_gold": 2
+      },
+      "part_confined_w5": {
+        "covered": 42,
+        "no_single_state_carries_gold": 2
+      },
+      "production_w1": {
+        "covered": 41,
+        "window_too_narrow_within_part": 1,
+        "no_single_state_carries_gold": 2
+      },
+      "production_w2": {
+        "covered": 41,
+        "window_too_narrow_within_part": 1,
+        "no_single_state_carries_gold": 2
+      },
+      "production_w3": {
+        "covered": 42,
+        "no_single_state_carries_gold": 2
+      },
+      "production_w5": {
+        "covered": 42,
+        "no_single_state_carries_gold": 2
+      },
+      "whole_state_w1": {
+        "covered": 41,
+        "window_too_narrow_within_part": 1,
+        "no_single_state_carries_gold": 2
+      },
+      "whole_state_w2": {
+        "covered": 41,
+        "window_too_narrow_within_part": 1,
+        "no_single_state_carries_gold": 2
+      },
+      "whole_state_w3": {
+        "covered": 42,
+        "no_single_state_carries_gold": 2
+      },
+      "whole_state_w5": {
+        "covered": 42,
+        "no_single_state_carries_gold": 2
+      }
+    },
+    "parts_needed_to_cover_gold": {
+      "1": 42
+    },
+    "confinement_losses": []
+  },
+  "web": {
+    "domain": "web",
+    "measurable": 48,
+    "states": 1737,
+    "multi_part_states": 821,
+    "parts_total": 4609,
+    "parts_in_multi_part_states": 3693,
+    "whole_state_slices": 63804,
+    "production_slices": 65573,
+    "boundary_straddling_slices": 2816,
+    "longest_production_slice_chars": 2186,
+    "typed_entity_content_cap_chars": 18000,
+    "boundary_probe": {
+      "boundaries": 2872,
+      "usable_probes": 1623,
+      "window": 3,
+      "hits": {
+        "whole_state": 1623,
+        "part_confined": 0,
+        "production": 0
+      },
+      "rates": {
+        "whole_state": 1.0,
+        "part_confined": 0.0,
+        "production": 0.0
+      }
+    },
+    "counts": {
+      "fat_state": 48,
+      "one_part_carries_gold": 48,
+      "part_confined_w1": 47,
+      "part_confined_w2": 48,
+      "part_confined_w3": 48,
+      "part_confined_w5": 48,
+      "production_w1": 47,
+      "production_w2": 48,
+      "production_w3": 48,
+      "production_w5": 48,
+      "whole_state_all_slices": 48,
+      "whole_state_w1": 47,
+      "whole_state_w2": 48,
+      "whole_state_w3": 48,
+      "whole_state_w5": 48
+    },
+    "rates": {
+      "fat_state": 1.0,
+      "one_part_carries_gold": 1.0,
+      "part_confined_w1": 0.9792,
+      "part_confined_w2": 1.0,
+      "part_confined_w3": 1.0,
+      "part_confined_w5": 1.0,
+      "production_w1": 0.9792,
+      "production_w2": 1.0,
+      "production_w3": 1.0,
+      "production_w5": 1.0,
+      "whole_state_all_slices": 1.0,
+      "whole_state_w1": 0.9792,
+      "whole_state_w2": 1.0,
+      "whole_state_w3": 1.0,
+      "whole_state_w5": 1.0
+    },
+    "delta_production_minus_whole_state": {
+      "w1": 0.0,
+      "w2": 0.0,
+      "w3": 0.0,
+      "w5": 0.0
+    },
+    "phrase_count_distribution": {
+      "1": 35,
+      "2": 10,
+      "3": 2,
+      "5": 1
+    },
+    "width_gainers": {
+      "part_confined_w2": [
+        "c6124506"
+      ],
+      "part_confined_w3": [],
+      "part_confined_w5": [],
+      "production_w2": [
+        "c6124506"
+      ],
+      "production_w3": [],
+      "production_w5": [],
+      "whole_state_w2": [
+        "c6124506"
+      ],
+      "whole_state_w3": [],
+      "whole_state_w5": []
+    },
+    "loss_reasons": {
+      "part_confined_w1": {
+        "covered": 47,
+        "window_too_narrow_within_part": 1
+      },
+      "part_confined_w2": {
+        "covered": 48
+      },
+      "part_confined_w3": {
+        "covered": 48
+      },
+      "part_confined_w5": {
+        "covered": 48
+      },
+      "production_w1": {
+        "covered": 47,
+        "window_too_narrow_within_part": 1
+      },
+      "production_w2": {
+        "covered": 48
+      },
+      "production_w3": {
+        "covered": 48
+      },
+      "production_w5": {
+        "covered": 48
+      },
+      "whole_state_w1": {
+        "covered": 47,
+        "window_too_narrow_within_part": 1
+      },
+      "whole_state_w2": {
+        "covered": 48
+      },
+      "whole_state_w3": {
+        "covered": 48
+      },
+      "whole_state_w5": {
+        "covered": 48
+      }
+    },
+    "parts_needed_to_cover_gold": {
+      "1": 48
+    },
+    "confinement_losses": []
+  }
+}

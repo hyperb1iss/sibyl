@@ -62,7 +62,7 @@ up, and nothing in CI imports it — `root:inventory-lint` only lints statically
 
 | Tier | Needs | Scripts |
 | --- | --- | --- |
-| Cheap | standard library only, plus the in-repo `benchmarks/longmemeval_v2_diagnostics.py` | `stage0`, `stage0b`, `stage0c`, `stage0d`, `stage0e`, `stage0f`, `stage0g`, `summarize` |
+| Cheap | standard library only, plus the in-repo `benchmarks/longmemeval_v2_diagnostics.py` | `stage0`, `stage0b`, `stage0c`, `stage0d`, `stage0e`, `stage0f`, `stage0g`, `stage0h`, `summarize` |
 | Middle | `numpy`, `scipy`, `scikit-learn` | `stage1b` |
 | Heavy | the middle tier plus `sentence-transformers` and `torch` | `stage1` |
 
@@ -95,13 +95,15 @@ export SIBYL_A1_DATA_ROOT=/path/to/.moon/cache/benchmarks/longmemeval-v2-full
 
 python benchmarks/longmemeval_v2_chunk_geometry/stage0c.py   # cheapest, stdlib only
 python benchmarks/longmemeval_v2_chunk_geometry/stage0.py    # slowest Stage 0 pass
+python benchmarks/longmemeval_v2_chunk_geometry/stage0h.py   # part-confined arms, ~25s
 python benchmarks/longmemeval_v2_chunk_geometry/stage1.py    # needs the ML stack
 python benchmarks/longmemeval_v2_chunk_geometry/summarize.py # renders the Stage 1 verdict table
 ```
 
 Each stage rewrites its own `out/*_report.json`, so re-running in place produces
-**no git diff** when the corpus is unchanged — verified for `stage0c` and
-`stage0f`, which reproduce their committed receipts byte for byte. Any diff you
+**no git diff** when the corpus is unchanged — verified for `stage0c`,
+`stage0f`, `stage0e` and `stage0h`, which reproduce their committed receipts
+byte for byte. Any diff you
 do see is therefore signal: the corpus, the cutter, or a threshold moved. Set
 `SIBYL_A1_OUT` to a scratch directory when you want to compare without touching
 the receipts.
@@ -115,6 +117,7 @@ the receipts.
 | `stage0c.py` | Band adherence, hard-max overflow, and whether internal subtrees survive intact in one slice. | The boundary-rule evidence: 651 enterprise slices over the hard max, max 4,103 chars — the reason v2 bounds the ancestor prepend. |
 | `stage0d.py` | Oracle exposure ceiling over the **full 451**: fat-state vs fat-chunk vs single slice vs slice+neighbour, plus phrase-level straddle. | "**Straddle rate is zero** — 31,244 of 31,244 triples" (24,083 enterprise + 7,161 web) and the 92 measurable questions (44 + 48). |
 | `stage0e.py` | Exposure as a function of window width w ∈ {1,2,3,5}. | "A 3-adjacent-slice window reaches the fat-state ceiling exactly: 95.5% / 100%", single-slice "93.2% / 97.9%". |
+| `stage0h.py` | Re-runs the `stage0e` widths under the confinement shipped retrieval actually imposes: passages cut per evidence part, windows unable to leave one. Three arms, plus a straddle probe that proves the arms can diverge. | Tests whether "a 3-adjacent window reaches the fat-state ceiling" survives the port to production. It does — zero delta at every width in both domains. |
 | `stage0f.py` | Breadcrumb cost as a design knob: what capping to the last N ancestors saves. | "the breadcrumb is the expensive half (11.5%, mean 134 chars). Capping to the last two ancestors drops it to 3.9%." |
 | `stage0g.py` | v1 vs v2 boundary rules side by side, re-checking band, count, and exposure. | "Boundary rules the data argues for, all verified to preserve exposure and the zero straddle rate." |
 | `stage1.py` | Offline selection simulation. Arms FAT / SLICE / SLICE_GOAL against BM25, dense (local MiniLM), and RRF; recall at both item and character budgets. | The selection-dilution result, the goal-carry lift (RRF 0.727 / 0.812 vs fat 0.682 / 0.792), and the character-budget argument. |
@@ -125,6 +128,68 @@ Support modules: `slicer.py` (the v1 cutter and its constants), `slicer_v2.py`
 (the three candidate boundary fixes), `chunkparse.py` (catalog record →
 preamble / header / body), `corpus.py` (shared unit construction), `paths.py`
 (the roots above).
+
+## Does the whole-state oracle describe what ships? (`stage0h`)
+
+Every Stage 0 exposure number is measured on **reassembled whole states**.
+`stage0.load_states` joins each state's parts back together
+(`entry["tree"] = "".join(...)`), the slicer cuts that joined body, and
+`stage0e` slides its window across the whole state's slice list. Shipped
+retrieval does neither. `_passage_projection` calls `slice_body` on one
+`evidence.content` at a time, and `operational_sources._run_key` keys a passage
+window on `(observation_ordinal, evidence_part_index)`, so a window stops dead
+at a part boundary. Those are two different measurements, and the second is the
+one the design rests on.
+
+The split is not rare. **4,874 of 6,387 enterprise parts (76.3%) and 3,693 of
+4,609 web parts (80.1%) belong to a state that split into several.** Per *state*
+the rate is lower — 1,845/3,358 (54.9%) enterprise and 821/1,737 (47.3%) web —
+so quote whichever denominator you mean; the 76/80 figures are parts, not
+states.
+
+`stage0h` re-runs the `stage0e` widths in three arms over the identical
+question set and the identical `measurable` denominator (44 enterprise, 48 web):
+`whole_state` recomputes stage0e's arm from scratch, `part_confined` keeps the
+whole-state cut but forbids a window from spanning two parts, and `production`
+cuts each part on its own and windows inside it.
+
+**All three arms agree exactly, at every width, in both domains.** Enterprise
+0.9318 / 0.9318 / 0.9545 / 0.9545 and web 0.9792 / 1.0 / 1.0 / 1.0 for
+w ∈ {1,2,3,5}; the `whole_state` arm reproduces the committed `stage0e` receipt
+digit for digit. The delta from confinement is 0.0 everywhere and
+`confinement_losses` is empty. **The concern that motivated this stage was
+unfounded: the shipped ceiling is the measured ceiling.**
+
+The mechanism is in `parts_needed_to_cover_gold`: **42/42 enterprise and 48/48
+questions whose gold lives in one state have that gold inside one evidence
+part.** Not one measurable question needs two parts, so the boundary is never
+between a window and its answer. The two enterprise questions that no arm
+reaches fail as `no_single_state_carries_gold` — their gold was never in one
+state to begin with, which no window width or window scope can fix.
+
+Because a null result is only worth as much as the harness's ability to show a
+non-null one, the stage carries a **positive control**. `boundary_probe` mints
+synthetic gold pairs straddling a real part boundary — last eligible line
+before it, first eligible line after it, kept only when each occurs exactly once
+in the whole state — and scores them through the same three arms at w=3. The
+`whole_state` arm covers **2,555/2,555 enterprise and 1,623/1,623 web** probes;
+the two confined arms cover **0**. The apparatus registers confinement loss at
+full strength when confinement loss exists. It reported zero on the real gold
+because there is zero to report.
+
+Two caveats worth carrying forward. First, the margin is thin: the whole w1→w3
+gain is **one question per domain** (`0cf979c4` enterprise at w3, `c6124506`
+web at w2), and both are bought inside a part, not across a boundary. The
+equality of the 3-window and the fat state is real but rests on a single
+question either side. Second, 30/44 enterprise and 35/48 web measurable
+questions are single-phrase, where extra width can only help if the cutter
+splits a phrase — and `stage0d` already measured that straddle rate at zero.
+
+Incidentally the same run rules out the other shipped divergence in that code
+path: `_passage_projection` drops a rendered passage over
+`MAX_TYPED_ENTITY_CONTENT_CHARS = 18_000`, but the longest passage either
+corpus produces is 4,384 chars (enterprise) and 2,186 (web), so that drop is
+unreachable here.
 
 `out/STAGE1_PREREGISTRATION.md` was written **before** `stage1.py` first ran and
 fixes the decision rule, the falsifiers, and the underpowered-n caveat in
