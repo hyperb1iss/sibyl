@@ -183,6 +183,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "state_part_refinement",
         "context_expansion_max_ratio",
         "evidence_types",
+        "evidence_char_budget",
         "evidence_composition_mode",
         "source_evidence_bundling",
         "retrieval_mode",
@@ -682,10 +683,32 @@ def compile_operational_evidence_set(
     max_items: int,
     mode: str = DEFAULT_EVIDENCE_COMPOSITION_MODE,
     typed_reservation_items: int | None = None,
+    char_budget: int | None = None,
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
+    """Compose the reader's pack from the typed and raw evidence pools.
+
+    `char_budget` changes what bounds the pack, mirroring the server-side
+    `compose_operational_evidence` contract. Without one the pack is bounded by
+    `max_items` and composes exactly as it shipped. With one, item count stops
+    bounding the lanes: candidates are admitted in rank order while the running
+    total of rendered content fits, so the pack stays a prefix of its ranking
+    and never exceeds the budget.
+
+    The adapter has to bound in characters too rather than leaning on the
+    server's budget alone. It merges its own distilled-note stream into the
+    server's pack and it restores full catalog content over the transport-
+    truncated content the server counted, so the reader payload is not the one
+    the server bounded.
+    """
     if mode not in EVIDENCE_COMPOSITION_MODES:
         msg = f"Unknown evidence composition mode {mode!r}; expected {sorted(EVIDENCE_COMPOSITION_MODES)}"
         raise ValueError(msg)
+    if char_budget is not None:
+        if char_budget < 1:
+            raise ValueError("char_budget must be positive")
+        if mode != "shared_relevance":
+            msg = f"char_budget is only defined for shared_relevance composition, not {mode!r}"
+            raise ValueError(msg)
     max_items = max(1, max_items)
     typed_candidates: list[dict[str, object]] = []
     raw_candidates: list[dict[str, object]] = []
@@ -757,14 +780,42 @@ def compile_operational_evidence_set(
         if typed_reservation_items is not None
         else TYPED_NOTE_RESERVATION_ITEMS
     )
-    typed_reservation = min(len(ranked_typed), max(1, min(requested_reservation, max_items - 1)))
-    raw_budget = min(len(ranked_raw), max_items - typed_reservation)
-    selected_raw = _select_role_complete_raw_evidence(ranked_raw, budget=raw_budget)
-    selected = [*ranked_typed[:typed_reservation], *selected_raw]
-    if len(selected) < max_items:
-        selected.extend(
-            ranked_typed[typed_reservation : typed_reservation + max_items - len(selected)]
+    if char_budget is None:
+        typed_reservation = min(
+            len(ranked_typed),
+            max(1, min(requested_reservation, max_items - 1)),
         )
+        raw_budget = min(len(ranked_raw), max_items - typed_reservation)
+        selected_raw = _select_role_complete_raw_evidence(ranked_raw, budget=raw_budget)
+        selected = [*ranked_typed[:typed_reservation], *selected_raw]
+        if len(selected) < max_items:
+            selected.extend(
+                ranked_typed[typed_reservation : typed_reservation + max_items - len(selected)]
+            )
+        selected_chars = sum(len(_stripped_str(item.get("content"))) for item in selected)
+    else:
+        # The note lane keeps its absolute count inside the budget, but the
+        # budget outranks the pin when it cannot hold that many: a lane allowed
+        # to overrun the budget is not a budget.
+        reserved, spent = _admit_within_char_budget(
+            ranked_typed[: max(1, requested_reservation)],
+            budget=char_budget,
+            spent=0,
+        )
+        ordered_raw = _select_role_complete_raw_evidence(ranked_raw, budget=len(ranked_raw))
+        selected_raw, spent = _admit_within_char_budget(
+            ordered_raw,
+            budget=char_budget,
+            spent=spent,
+        )
+        overflow, spent = _admit_within_char_budget(
+            ranked_typed[len(reserved) :],
+            budget=char_budget,
+            spent=spent,
+        )
+        typed_reservation = len(reserved)
+        selected = [*reserved, *selected_raw, *overflow]
+        selected_chars = spent
     for selection_rank, candidate in enumerate(selected, start=1):
         candidate["_evidence_selection_rank"] = selection_rank
 
@@ -788,7 +839,33 @@ def compile_operational_evidence_set(
         ),
         "selected_typed_count": selected_typed,
         "selected_raw_count": len(selected) - selected_typed,
+        "budget_mode": "items" if char_budget is None else "characters",
+        "char_budget": char_budget,
+        "selected_chars": selected_chars,
     }
+
+
+def _admit_within_char_budget(
+    candidates: list[dict[str, object]],
+    *,
+    budget: int,
+    spent: int,
+) -> tuple[list[dict[str, object]], int]:
+    """Take the longest rank prefix of `candidates` that still fits.
+
+    Admission stops at the first candidate that does not fit rather than
+    skipping it for a smaller one further down. Packing by size would reorder
+    relevance against length and cost the guarantee that a pack is a prefix of
+    its ranking.
+    """
+    admitted: list[dict[str, object]] = []
+    for candidate in candidates:
+        candidate_chars = len(_stripped_str(candidate.get("content")))
+        if spent + candidate_chars > budget:
+            break
+        admitted.append(candidate)
+        spent += candidate_chars
+    return admitted, spent
 
 
 _ENTITY_TOKEN_RE = re.compile(r"\b[A-Z][a-zA-Z0-9]+(?:[-'][A-Z][a-zA-Z0-9]+)*\b")
@@ -2089,6 +2166,79 @@ def build_retrieval_trace(
     return trace
 
 
+def validate_evidence_char_budget(
+    *,
+    char_budget: int | None,
+    content_max_chars: int,
+    max_context_chars_per_item: int,
+    max_context_total_chars: int,
+) -> None:
+    """Reject the configurations in which a character budget stops measuring size.
+
+    A budget in characters only distinguishes substrates while items are allowed
+    to cost what they actually cost. Every evidence result is truncated to
+    `max_context_chars_per_item` on the way back, so once that cap is below the
+    size of a stored unit, a 1K passage and a 12K state both spend the cap and
+    the budget silently degenerates into an item budget with extra steps. The
+    coupling is checkable rather than a matter of taste: ingest already bounds
+    every stored unit at `content_max_chars`, so a per-item cap at least that
+    large means truncation can never be the binding constraint.
+
+    The render total is the other end of the same pack. A budget larger than
+    `max_context_total_chars` cannot reach the reader, because rendering would
+    compact the pack back down and the run would measure compaction while
+    reporting a substrate.
+
+    Both are hard errors rather than warnings. The failure mode is a paid run
+    that returns a plausible number arguing against the substrate, and a warning
+    in a CI log is not a thing anyone reads before paying for it. A run that
+    genuinely wants to measure compaction says so by lowering
+    `max_context_total_chars`, which is the knob that already means that.
+    """
+    if char_budget is None:
+        return
+    if char_budget < 1:
+        raise ValueError("evidence_char_budget must be positive")
+    if max_context_chars_per_item < content_max_chars:
+        msg = (
+            f"evidence_char_budget requires max_context_chars_per_item "
+            f"({max_context_chars_per_item}) to be at least content_max_chars "
+            f"({content_max_chars}); below that every result is truncated to the "
+            "same size and the character budget degenerates into an item budget"
+        )
+        raise ValueError(msg)
+    if char_budget > max_context_total_chars:
+        msg = (
+            f"evidence_char_budget ({char_budget}) exceeds max_context_total_chars "
+            f"({max_context_total_chars}); the pack would be composed to the budget "
+            "and then compacted back down at render, so the run would measure "
+            "compaction rather than the substrate"
+        )
+        raise ValueError(msg)
+
+
+def context_pack_item_ceiling(
+    *,
+    max_items: int,
+    char_budget: int | None,
+    candidate_count: int,
+) -> int:
+    """Item ceiling for the pack stages that run after the API answers.
+
+    An item count and a character budget are two bounds on the same pack and
+    only one of them can be the binding one. Without a budget the item count
+    binds, exactly as it shipped. With a budget in force the composer bounds the
+    pack in characters, so an item ceiling upstream or downstream of it would
+    silently clip a budgeted pack back to the old geometry and the budget would
+    never be measurable. The ceiling then rises to whatever the stage was handed
+    so it cannot bind, and the composer stays the one place the pack is bounded.
+    """
+    max_items = max(1, max_items)
+    if char_budget is None:
+        return max_items
+    return max(max_items, candidate_count)
+
+
 def context_assembly_candidate_limit(
     *,
     max_items: int,
@@ -3009,6 +3159,18 @@ class SibylLiveApiMemory(Memory):
                 DEFAULT_CONTEXT_TOTAL_CHARS,
             ),
         )
+        raw_char_budget = memory_params.get("evidence_char_budget")
+        self.evidence_char_budget = (
+            _param_int(memory_params, "evidence_char_budget", 0, minimum=1)
+            if raw_char_budget is not None
+            else None
+        )
+        validate_evidence_char_budget(
+            char_budget=self.evidence_char_budget,
+            content_max_chars=self.content_max_chars,
+            max_context_chars_per_item=self.max_context_chars_per_item,
+            max_context_total_chars=self.max_context_total_chars,
+        )
         self.context_expansion_max_ratio = _param_context_expansion_ratio(
             memory_params,
             "context_expansion_max_ratio",
@@ -3895,6 +4057,11 @@ class SibylLiveApiMemory(Memory):
                 DEFAULT_RETRIEVAL_MAX_PLANNED_QUERIES,
             ),
         }
+        char_budget = getattr(self, "evidence_char_budget", None)
+        if char_budget is not None:
+            # Omitted rather than sent as null when unset, so a run reproducing
+            # the old geometry puts a byte-identical request on the wire.
+            evidence_request["char_budget"] = char_budget
         context_response = self._request_json(
             "POST",
             "/context/pack",
@@ -3954,7 +4121,11 @@ class SibylLiveApiMemory(Memory):
             results,
             chunk_catalog=chunk_catalog,
             max_items=context_assembly_candidate_limit(
-                max_items=self.max_context_items,
+                max_items=context_pack_item_ceiling(
+                    max_items=self.max_context_items,
+                    char_budget=char_budget,
+                    candidate_count=len(results),
+                ),
                 neighbor_stitch_items=neighbor_stitch_items,
                 state_part_completion_items=state_part_completion_items,
                 has_chunk_catalog=bool(chunk_catalog),
@@ -3998,6 +4169,12 @@ class SibylLiveApiMemory(Memory):
                 DEFAULT_EVIDENCE_COMPOSITION_MODE,
             ),
             typed_reservation_items=getattr(self, "typed_reservation_items", None),
+            char_budget=char_budget,
+        )
+        rendered_item_ceiling = context_pack_item_ceiling(
+            max_items=self.max_context_items,
+            char_budget=char_budget,
+            candidate_count=len(evidence_set),
         )
         assembly_metadata["typed_context_candidate_count"] = len(typed_results)
         assembly_metadata["typed_context_selected_count"] = sum(
@@ -4009,7 +4186,7 @@ class SibylLiveApiMemory(Memory):
         memory_context, context_budget = render_memory_context(
             evidence_set,
             query=query,
-            max_items=self.max_context_items,
+            max_items=rendered_item_ceiling,
             max_chars_per_item=self.max_context_chars_per_item,
             max_total_chars=getattr(
                 self,
@@ -4020,7 +4197,7 @@ class SibylLiveApiMemory(Memory):
         assembly_metadata["context_budget"] = context_budget
         self._query_local.retrieval_trace = build_retrieval_trace(
             evidence_set,
-            max_items=self.max_context_items,
+            max_items=rendered_item_ceiling,
             max_chars_per_item=self.max_context_chars_per_item,
             context_budget=context_budget,
         )
@@ -4036,7 +4213,11 @@ class SibylLiveApiMemory(Memory):
             search_results_to_memory_context(
                 results,
                 query=query,
-                max_items=self.max_context_items,
+                max_items=context_pack_item_ceiling(
+                    max_items=self.max_context_items,
+                    char_budget=getattr(self, "evidence_char_budget", None),
+                    candidate_count=len(results),
+                ),
                 max_chars_per_item=self.max_context_chars_per_item,
                 max_total_chars=getattr(
                     self,

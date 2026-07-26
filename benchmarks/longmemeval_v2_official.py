@@ -72,6 +72,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "state_part_refinement",
         "context_expansion_max_ratio",
         "evidence_types",
+        "evidence_char_budget",
         "evidence_composition_mode",
         "source_evidence_bundling",
         "typed_stream_retrieval",
@@ -454,6 +455,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         ),
     )
     parser.add_argument(
+        "--evidence-char-budget",
+        type=int,
+        default=None,
+        help=(
+            "Bound the composed pack by characters of returned content instead of item "
+            "count. Item count only bounds reader payload while item size is stable, "
+            "which stops holding once passages and whole states share a pack. Leave "
+            "unset to reproduce the shipped item-bounded geometry."
+        ),
+    )
+    parser.add_argument(
         "--evidence-composition-mode",
         choices=["reserved_support", "shared_relevance"],
         default="shared_relevance",
@@ -663,6 +675,7 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "state_part_refinement": args.state_part_refinement,
         "context_expansion_max_ratio": args.context_expansion_max_ratio,
         "evidence_types": list(args.evidence_types),
+        "evidence_char_budget": args.evidence_char_budget,
         "evidence_composition_mode": args.evidence_composition_mode,
         "source_evidence_bundling": args.source_evidence_bundling,
         "typed_stream_retrieval": args.typed_stream_retrieval,
@@ -808,6 +821,7 @@ def build_run_plan(
         "context_expansion_max_ratio": args.context_expansion_max_ratio,
         "max_context_total_chars": args.max_context_total_chars,
         "evidence_types": list(args.evidence_types),
+        "evidence_char_budget": args.evidence_char_budget,
         "evidence_composition_mode": args.evidence_composition_mode,
         "source_evidence_bundling": args.source_evidence_bundling,
         "typed_stream_retrieval": args.typed_stream_retrieval,

@@ -55,6 +55,8 @@ EXPECTED_SAVED_USAGE_COST_USD = 0.25
 EXPECTED_USAGE_ATTEMPTS = 2
 EXPECTED_OPERATIONAL_CREATED_ENTITIES = 4
 EXPECTED_OPERATIONAL_EVIDENCE_ITEMS = 8
+EXPECTED_TYPED_NOTE_RESERVATION = 3
+EXPECTED_BUDGETED_RAW_ITEMS = 10
 EXPECTED_OPERATIONAL_RAW_ITEMS = 6
 EXPECTED_OPERATIONAL_TYPED_ITEMS = 2
 EXPECTED_OPERATIONAL_SUPPORT_ITEMS = 3
@@ -3210,6 +3212,175 @@ def test_eval_reserved_lane_is_an_absolute_count_a_wider_pack_cannot_widen(
     assert len(override_selected) == max_items
 
 
+def _budget_pools(
+    *,
+    note_chars: int,
+    raw_chars: int,
+    note_count: int = 12,
+    raw_count: int = 40,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    typed = [
+        {
+            "id": f"note_{index}",
+            "type": "note",
+            "content": f"note {index} about the field ".ljust(note_chars, "x"),
+            "_selection_origin": "context_pack:typed_stream",
+            "metadata": {"longmemeval_v2_trajectory_id": f"t{index}"},
+        }
+        for index in range(note_count)
+    ]
+    raw = [
+        {
+            "id": f"session_{index}",
+            "type": "session",
+            "content": f"raw slice {index} of the field ".ljust(raw_chars, "x"),
+            "metadata": {"longmemeval_v2_trajectory_id": f"t{index}"},
+        }
+        for index in range(raw_count)
+    ]
+    return typed, raw
+
+
+@pytest.mark.parametrize("max_items", [8, 28])
+def test_char_budget_bounds_the_pack_and_item_count_stops_binding(max_items: int) -> None:
+    """With a budget in force the pack is bounded by characters, not by `max_items`.
+
+    The same budget must produce the same pack at both pack sizes, otherwise
+    `max_items` is still the real bound and the budget is decoration.
+    """
+    module = _load_memory_module()
+    note_chars = 200
+    raw_chars = 1_000
+    budget = 3 * note_chars + 10 * raw_chars
+    typed, raw = _budget_pools(note_chars=note_chars, raw_chars=raw_chars)
+
+    selected, meta = module.compile_operational_evidence_set(
+        query="find the field",
+        typed_results=typed,
+        raw_results=raw,
+        max_items=max_items,
+        mode="shared_relevance",
+        char_budget=budget,
+    )
+
+    assert meta["budget_mode"] == "characters"
+    assert meta["char_budget"] == budget
+    assert meta["selected_chars"] <= budget
+    assert meta["selected_chars"] == sum(len(str(item["content"])) for item in selected)
+    assert meta["selected_chars"] == budget
+    assert len(selected) == EXPECTED_TYPED_NOTE_RESERVATION + EXPECTED_BUDGETED_RAW_ITEMS
+    assert meta["selected_typed_count"] == EXPECTED_TYPED_NOTE_RESERVATION
+    assert meta["selected_raw_count"] == EXPECTED_BUDGETED_RAW_ITEMS
+
+
+@pytest.mark.parametrize("max_items", [8, 28])
+def test_char_budget_keeps_the_note_lane_pinned_at_its_absolute_count(max_items: int) -> None:
+    """The parent branch's pin survives the budget at both pack sizes.
+
+    The note lane is the campaign's one proven lever and it was tuned as an
+    absolute count. A budget changes what bounds the pack, not how many
+    distilled notes are worth reading.
+    """
+    module = _load_memory_module()
+    typed, raw = _budget_pools(note_chars=200, raw_chars=1_000)
+
+    _selected, meta = module.compile_operational_evidence_set(
+        query="find the field",
+        typed_results=typed,
+        raw_results=raw,
+        max_items=max_items,
+        mode="shared_relevance",
+        char_budget=200 * 3 + 1_000 * 10,
+    )
+
+    assert meta["typed_reservation"] == EXPECTED_TYPED_NOTE_RESERVATION
+    assert meta["selected_typed_count"] == EXPECTED_TYPED_NOTE_RESERVATION
+
+
+def test_char_budget_outranks_the_note_pin_when_it_cannot_hold_three_notes() -> None:
+    """A lane allowed to overrun the budget is not a budget."""
+    module = _load_memory_module()
+    note_chars = 500
+    typed, raw = _budget_pools(note_chars=note_chars, raw_chars=1_000)
+
+    selected, meta = module.compile_operational_evidence_set(
+        query="find the field",
+        typed_results=typed,
+        raw_results=raw,
+        max_items=8,
+        mode="shared_relevance",
+        char_budget=note_chars,
+    )
+
+    assert meta["typed_reservation"] == 1
+    assert meta["selected_chars"] <= note_chars
+    assert len(selected) == 1
+
+
+def test_char_budget_admits_a_rank_prefix_rather_than_packing_by_size() -> None:
+    """Admission stops at the first candidate that does not fit.
+
+    Skipping a large candidate for a smaller one further down would reorder
+    relevance against length and cost the guarantee that a pack is a prefix of
+    its ranking.
+    """
+    module = _load_memory_module()
+    raw = [
+        {"id": "session_big", "type": "session", "content": "the field " * 400},
+        {"id": "session_small", "type": "session", "content": "the field again"},
+    ]
+
+    selected, meta = module.compile_operational_evidence_set(
+        query="find the field",
+        typed_results=[],
+        raw_results=raw,
+        max_items=8,
+        mode="shared_relevance",
+        char_budget=100,
+    )
+
+    assert selected == []
+    assert meta["raw_candidate_count"] == len(raw)
+    assert meta["selected_raw_count"] == 0
+
+
+def test_composition_without_a_char_budget_reproduces_the_item_bounded_pack() -> None:
+    """The frozen geometry is what a run gets when it does not ask for a budget."""
+    module = _load_memory_module()
+    typed, raw = _budget_pools(note_chars=200, raw_chars=1_000)
+
+    selected, meta = module.compile_operational_evidence_set(
+        query="find the field",
+        typed_results=typed,
+        raw_results=raw,
+        max_items=8,
+        mode="shared_relevance",
+    )
+
+    assert meta["budget_mode"] == "items"
+    assert meta["char_budget"] is None
+    assert len(selected) == EXPECTED_OPERATIONAL_EVIDENCE_ITEMS
+    assert meta["typed_reservation"] == EXPECTED_TYPED_NOTE_RESERVATION
+    assert meta["selected_raw_count"] == EXPECTED_OPERATIONAL_EVIDENCE_ITEMS - (
+        EXPECTED_TYPED_NOTE_RESERVATION
+    )
+
+
+def test_char_budget_is_rejected_for_composition_modes_that_cannot_honor_it() -> None:
+    module = _load_memory_module()
+    typed, raw = _budget_pools(note_chars=200, raw_chars=1_000)
+
+    with pytest.raises(ValueError, match="only defined for shared_relevance"):
+        module.compile_operational_evidence_set(
+            query="find the field",
+            typed_results=typed,
+            raw_results=raw,
+            max_items=8,
+            mode="reserved_support",
+            char_budget=5_000,
+        )
+
+
 def test_entity_overlap_downranks_mismatched_notes() -> None:
     module = _load_memory_module()
     query = "Find the warranty expiration for Chelsea-Cynthia Tran-Dyer's laptop"
@@ -3868,6 +4039,47 @@ def test_official_runner_checkpoint_restart_reuses_saved_project(tmp_path: Path)
     assert params["retrieval_max_planned_queries"] == EXPECTED_RETRIEVAL_MAX_PLANNED_QUERIES
 
 
+def test_official_runner_carries_substrate_and_budget_arms_into_memory_params(
+    tmp_path: Path,
+) -> None:
+    """A slice arm has to be expressible on the command line, and reproducibly absent.
+
+    Both knobs default to the shipped configuration, so a run that names
+    neither builds the same memory params the frozen baseline did.
+    """
+    module = _load_runner_module()
+    data_root = tmp_path / "data"
+    _write_dataset(data_root)
+    base_argv = [
+        "--data-root",
+        str(data_root),
+        "--domain",
+        "enterprise",
+        "--output-dir",
+        str(tmp_path / "output"),
+        "--plan-only",
+    ]
+
+    default_params = module.build_memory_config(module.parse_args(base_argv))["memory_params"]
+    slice_params = module.build_memory_config(
+        module.parse_args(
+            [
+                *base_argv,
+                "--evidence-types",
+                "session",
+                "passage",
+                "--evidence-char-budget",
+                "60000",
+            ]
+        )
+    )["memory_params"]
+
+    assert default_params["evidence_types"] == ["session"]
+    assert default_params["evidence_char_budget"] is None
+    assert slice_params["evidence_types"] == ["session", "passage"]
+    assert slice_params["evidence_char_budget"] == EXPECTED_CONTEXT_TOTAL_CHARS
+
+
 def test_sibyl_memory_query_context_exposes_only_question_and_image() -> None:
     module = _load_memory_module()
     memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
@@ -4015,6 +4227,65 @@ def test_query_reaches_passage_evidence_when_the_type_is_requested() -> None:
         assert f"passage-body-2-{index}" in rendered
 
 
+def _wide_passage_pool(count: int, *, content_chars: int) -> list[dict[str, Any]]:
+    return [
+        _passage_result(
+            f"t{index}",
+            observation_ordinal=1,
+            passage_index=0,
+            score=1.0 - index / 100,
+            content_chars=content_chars,
+        )
+        for index in range(count)
+    ]
+
+
+def test_query_with_a_char_budget_is_not_re_clipped_to_the_item_count() -> None:
+    """The adapter's own item budget must stop binding once a budget is in force.
+
+    A budget the server honors is defeated silently if the adapter then clips
+    the pack back to `max_context_items` on the way to the reader, which is
+    what every post-API stage did unconditionally.
+    """
+    module = _load_memory_module()
+    passage_chars = 1_000
+    passages = _wide_passage_pool(20, content_chars=passage_chars)
+    request_payloads: list[dict[str, Any]] = []
+    memory = _passage_query_memory(
+        module,
+        results=passages,
+        request_payloads=request_payloads,
+    )
+    memory.evidence_types = ("session", "passage")
+    memory.max_context_chars_per_item = passage_chars
+    memory.max_context_total_chars = 400_000
+    memory.evidence_char_budget = len(passages) * passage_chars
+
+    context = memory.query("Which filter was selected?")
+
+    assert request_payloads[0]["evidence"]["char_budget"] == len(passages) * passage_chars
+    assert memory.max_context_items == EXPECTED_OPERATIONAL_EVIDENCE_ITEMS
+    assert len(context) == len(passages)
+
+
+def test_query_without_a_char_budget_keeps_the_item_bounded_geometry() -> None:
+    """The frozen baseline arm still sends the same request and gets the same pack."""
+    module = _load_memory_module()
+    passages = _wide_passage_pool(20, content_chars=1_000)
+    request_payloads: list[dict[str, Any]] = []
+    memory = _passage_query_memory(
+        module,
+        results=passages,
+        request_payloads=request_payloads,
+    )
+    memory.evidence_types = ("session", "passage")
+
+    context = memory.query("Which filter was selected?")
+
+    assert "char_budget" not in request_payloads[0]["evidence"]
+    assert len(context) == EXPECTED_OPERATIONAL_EVIDENCE_ITEMS
+
+
 def test_per_trajectory_chunk_cap_still_bounds_passages_from_one_trajectory() -> None:
     """`max_chunks_per_trajectory` is load-bearing once the unit is a passage.
 
@@ -4083,6 +4354,59 @@ def test_evidence_types_param_accepts_explicit_substrates(
         module._param_evidence_types(params, "evidence_types", module.DEFAULT_EVIDENCE_TYPES)
         == expected
     )
+
+
+def test_char_budget_accepts_the_shipped_per_item_and_total_caps() -> None:
+    """The eval's own defaults must not trip the coupling check.
+
+    Ingest and retrieval both cap at 18,000 today, so nothing truncates before
+    the budget does and the budget spends what items actually cost.
+    """
+    module = _load_memory_module()
+
+    module.validate_evidence_char_budget(
+        char_budget=60_000,
+        content_max_chars=module.DEFAULT_CONTENT_MAX_CHARS,
+        max_context_chars_per_item=module.DEFAULT_CONTEXT_CHARS_PER_ITEM,
+        max_context_total_chars=module.DEFAULT_CONTEXT_TOTAL_CHARS,
+    )
+    module.validate_evidence_char_budget(
+        char_budget=None,
+        content_max_chars=module.DEFAULT_CONTENT_MAX_CHARS,
+        max_context_chars_per_item=500,
+        max_context_total_chars=module.DEFAULT_CONTEXT_TOTAL_CHARS,
+    )
+
+
+def test_char_budget_rejects_a_per_item_cap_that_flattens_every_item() -> None:
+    """A per-item cap below the stored unit size turns the budget into an item budget.
+
+    A 1K passage and a 12K state both spend the cap once truncation binds, so
+    the budget stops measuring size and starts counting items again. This is a
+    hard error because the failure mode is a paid run reporting a plausible
+    number that argues against the substrate.
+    """
+    module = _load_memory_module()
+
+    with pytest.raises(ValueError, match="degenerates into an item budget"):
+        module.validate_evidence_char_budget(
+            char_budget=60_000,
+            content_max_chars=18_000,
+            max_context_chars_per_item=500,
+            max_context_total_chars=module.DEFAULT_CONTEXT_TOTAL_CHARS,
+        )
+
+
+def test_char_budget_rejects_a_budget_the_render_total_cannot_carry() -> None:
+    module = _load_memory_module()
+
+    with pytest.raises(ValueError, match="exceeds max_context_total_chars"):
+        module.validate_evidence_char_budget(
+            char_budget=135_000,
+            content_max_chars=18_000,
+            max_context_chars_per_item=18_000,
+            max_context_total_chars=module.DEFAULT_CONTEXT_TOTAL_CHARS,
+        )
 
 
 @pytest.mark.parametrize("requested", [["slice"], [""], 7])
@@ -4331,6 +4655,9 @@ def test_operational_evidence_set_calibrates_typed_and_raw_score_pools() -> None
         "selected_raw_support_count": 0,
         "selected_typed_count": 3,
         "selected_raw_count": 5,
+        "budget_mode": "items",
+        "char_budget": None,
+        "selected_chars": sum(len(str(item["content"])) for item in selected),
     }
 
 
@@ -5459,6 +5786,9 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
                 "selected_raw_support_count": 0,
                 "selected_typed_count": 0,
                 "selected_raw_count": 0,
+                "budget_mode": "items",
+                "char_budget": None,
+                "selected_chars": 0,
             },
             "context_budget": {
                 "enabled": True,
