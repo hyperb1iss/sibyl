@@ -208,14 +208,11 @@ jobs:
 
       - name: Audit shipped Node dependencies
         env:
-          # Advisories already present when this gate was introduced. The gate
-          # blocks anything new from today; these are tracked debt, not an
-          # exemption, and the list may only shrink. Removing an entry is the
-          # last step of fixing it.
-          #
-          #   GHSA-r28c-9q8g-f849  postcss path traversal, fixed in 8.5.18.
-          #     Held by the pnpm override floor in pnpm-workspace.yaml.
-          KNOWN_ADVISORIES: GHSA-r28c-9q8g-f849
+          # Advisories accepted as tracked debt rather than fixed. The list may
+          # only shrink: removing an entry is the last step of fixing one, and
+          # it is empty because the advisory this gate was built around is now
+          # fixed rather than waived.
+          KNOWN_ADVISORIES: ""
         run: |
           set -uo pipefail
           pnpm audit --prod --audit-level=high --json > /tmp/audit.json || true
