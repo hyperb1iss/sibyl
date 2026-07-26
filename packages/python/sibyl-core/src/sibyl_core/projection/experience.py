@@ -452,11 +452,17 @@ def _passage_projection(
     entities: list[Entity] = []
     relationships: list[Relationship] = []
     for passage_index, passage in enumerate(slices):
-        content = render_slice(
-            slice_header(observation.ordinal, observation.uri, passage_index + 1, len(slices)),
-            passage.breadcrumb,
-            passage.content,
-        )
+        header = slice_header(observation.ordinal, observation.uri, passage_index + 1, len(slices))
+        content = render_slice(header, passage.breadcrumb, passage.content)
+        if len(content) > MAX_TYPED_ENTITY_CONTENT_CHARS:
+            # Deeply nested trees build a breadcrumb longer than the entity
+            # limit on their own. The trail restates ancestors the parent row
+            # still holds; the span's own bytes are the only copy, so trail
+            # characters go before any passage does. Keep the tail, which is
+            # the nearest ancestors.
+            budget = MAX_TYPED_ENTITY_CONTENT_CHARS - len(header) - len(passage.content) - 2
+            trail = passage.breadcrumb[-budget:] if budget > 0 else ""
+            content = render_slice(header, trail, passage.content)
         if len(content) > MAX_TYPED_ENTITY_CONTENT_CHARS:
             # An evidence part may carry a million chars on one unbroken line,
             # and cutting mid-line would bisect a literal. The span stays
@@ -472,7 +478,10 @@ def _passage_projection(
             Entity(
                 id=entity_id,
                 entity_type=EntityType.PASSAGE,
-                name=f"Observation {observation.ordinal} passage {passage_index + 1}",
+                name=(
+                    f"Observation {observation.ordinal}.{evidence_index + 1} "
+                    f"passage {passage_index + 1}/{len(slices)}"
+                ),
                 description=description,
                 content=content,
                 organization_id=organization_id,

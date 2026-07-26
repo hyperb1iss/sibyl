@@ -143,18 +143,33 @@ def build_forest(lines: Sequence[str]) -> list[Node]:
     return roots
 
 
-def _measure(nodes: Sequence[Node]) -> None:
-    for node in nodes:
-        _measure(node.children)
+def _measure(roots: Sequence[Node]) -> None:
+    """Size every subtree, bottom up.
+
+    Iterative rather than recursive throughout this module: nesting depth is
+    caller-controlled and an evidence part may legally carry a million chars, so
+    a thousand-deep tree would otherwise hit CPython's recursion limit and turn
+    a capture that ingests today into a 500.
+    """
+    order: list[Node] = []
+    stack = list(roots)
+    while stack:
+        node = stack.pop()
+        order.append(node)
+        stack.extend(node.children)
+    for node in reversed(order):
         node.subtree_chars = _line_cost(node.line) + sum(
             child.subtree_chars for child in node.children
         )
 
 
 def _flatten(node: Node) -> list[int]:
-    indices = [node.index]
-    for child in node.children:
-        indices.extend(_flatten(child))
+    indices: list[int] = []
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        indices.append(current.index)
+        stack.extend(reversed(current.children))
     return indices
 
 
@@ -184,91 +199,133 @@ def breadcrumb_for(ancestors: Sequence[Node]) -> str:
     return " > ".join(node_label(node.line) for node in ancestors)
 
 
-def _emit(
-    nodes: Sequence[Node],
-    ancestors: list[Node],
+@dataclass
+class _Frame:
+    """One level of the sibling walk, held on an explicit stack."""
+
+    nodes: Sequence[Node]
+    ancestors: list[Node]
+    out: list[Slice]
+    cursor: int = 0
+    buffer: list[Node] = field(default_factory=list)
+    buffer_chars: int = 0
+    descended: Node | None = None
+    descended_out: list[Slice] = field(default_factory=list)
+
+
+def _flush(frame: _Frame, lines: Sequence[str]) -> None:
+    if not frame.buffer:
+        return
+    indices: list[int] = []
+    for node in frame.buffer:
+        indices.extend(_flatten(node))
+    frame.out.append(
+        Slice(
+            line_indices=indices,
+            content="\n".join(lines[index] for index in indices),
+            cut_depth=frame.buffer[0].depth,
+            breadcrumb=breadcrumb_for(frame.ancestors),
+            reason="multi-subtree" if len(frame.buffer) > 1 else "single-subtree",
+        )
+    )
+    frame.buffer = []
+    frame.buffer_chars = 0
+
+
+def _absorb_descend(
+    frame: _Frame,
+    node: Node,
     lines: Sequence[str],
-    out: list[Slice],
     stats: SliceStats,
 ) -> None:
-    buffer: list[Node] = []
-    buffer_chars = 0
+    """Fold a finished child level back into its parent, prepending its line."""
+    child_slices = frame.descended_out
+    if not child_slices:
+        # Unreachable while every leaf emits, but the partition is the invariant
+        # everything downstream rests on, so it is guaranteed here structurally
+        # rather than argued.
+        child_slices.append(Slice([node.index], node.line, node.depth, "", "ancestor-line"))
+    elif len(node.line) + len(child_slices[0].content) <= HARD_MAX:
+        first = child_slices[0]
+        first.line_indices = [node.index, *first.line_indices]
+        first.content = "\n".join(lines[index] for index in first.line_indices)
+    else:
+        stats.prepend_deferred += 1
+        child_slices.insert(0, Slice([node.index], node.line, node.depth, "", "ancestor-line"))
+    child_slices[0].breadcrumb = breadcrumb_for(frame.ancestors)
+    frame.out.extend(child_slices)
+    frame.descended = None
+    frame.descended_out = []
 
-    def flush() -> None:
-        nonlocal buffer, buffer_chars
-        if not buffer:
-            return
-        indices: list[int] = []
-        for node in buffer:
-            indices.extend(_flatten(node))
-        out.append(
-            Slice(
-                line_indices=indices,
-                content="\n".join(lines[index] for index in indices),
-                cut_depth=buffer[0].depth,
-                breadcrumb=breadcrumb_for(ancestors),
-                reason="multi-subtree" if len(buffer) > 1 else "single-subtree",
-            )
-        )
-        buffer = []
-        buffer_chars = 0
 
-    for node in nodes:
-        size = node.subtree_chars
-        if size > HARD_MAX and node.children:
-            flush()
-            stats.descend_events += 1
-            child_slices: list[Slice] = []
-            _emit(node.children, [*ancestors, node], lines, child_slices, stats)
-            if not child_slices:
-                # Unreachable while every leaf emits, but the partition is the
-                # invariant everything downstream rests on, so it is guaranteed
-                # here structurally rather than argued.
-                child_slices.append(Slice([node.index], node.line, node.depth, "", "ancestor-line"))
-            elif len(node.line) + len(child_slices[0].content) <= HARD_MAX:
-                first = child_slices[0]
-                first.line_indices = [node.index, *first.line_indices]
-                first.content = "\n".join(lines[index] for index in first.line_indices)
-            else:
-                stats.prepend_deferred += 1
-                child_slices.insert(
-                    0,
-                    Slice([node.index], node.line, node.depth, "", "ancestor-line"),
-                )
-            child_slices[0].breadcrumb = breadcrumb_for(ancestors)
-            out.extend(child_slices)
+def _tail_merge(out: list[Slice], lines: Sequence[str], stats: SliceStats) -> None:
+    """Fold a stranded sub-floor tail back into the slice cut beside it."""
+    if len(out) < 2:
+        return
+    last, previous = out[-1], out[-2]
+    if (
+        len(last.content) < TARGET_LO
+        and last.cut_depth == previous.cut_depth
+        and len(previous.content) + len(last.content) + 1 <= HARD_MAX
+    ):
+        previous.line_indices = [*previous.line_indices, *last.line_indices]
+        previous.content = "\n".join(lines[index] for index in previous.line_indices)
+        out.pop()
+        stats.tail_merges += 1
+
+
+def _emit(roots: Sequence[Node], lines: Sequence[str], stats: SliceStats) -> list[Slice]:
+    out: list[Slice] = []
+    stack = [_Frame(nodes=roots, ancestors=[], out=out)]
+    while stack:
+        frame = stack[-1]
+        if frame.descended is not None:
+            _absorb_descend(frame, frame.descended, lines, stats)
             continue
-        if size > HARD_MAX:
-            flush()
-            stats.oversize_leaf += 1
-            out.append(
-                Slice(
-                    [node.index],
-                    node.line,
-                    node.depth,
-                    breadcrumb_for(ancestors),
-                    "oversize-leaf",
+        descending = False
+        while frame.cursor < len(frame.nodes):
+            node = frame.nodes[frame.cursor]
+            frame.cursor += 1
+            size = node.subtree_chars
+            if size > HARD_MAX and node.children:
+                _flush(frame, lines)
+                stats.descend_events += 1
+                frame.descended = node
+                frame.descended_out = []
+                stack.append(
+                    _Frame(
+                        nodes=node.children,
+                        ancestors=[*frame.ancestors, node],
+                        out=frame.descended_out,
+                    )
                 )
-            )
+                descending = True
+                break
+            if size > HARD_MAX:
+                _flush(frame, lines)
+                stats.oversize_leaf += 1
+                frame.out.append(
+                    Slice(
+                        [node.index],
+                        node.line,
+                        node.depth,
+                        breadcrumb_for(frame.ancestors),
+                        "oversize-leaf",
+                    )
+                )
+                continue
+            crosses_band = frame.buffer_chars >= TARGET_LO and frame.buffer_chars + size > TARGET_HI
+            crosses_ceiling = frame.buffer_chars > 0 and frame.buffer_chars + size > HARD_MAX
+            if crosses_band or crosses_ceiling:
+                _flush(frame, lines)
+            frame.buffer.append(node)
+            frame.buffer_chars += size
+        if descending:
             continue
-        crosses_band = buffer_chars >= TARGET_LO and buffer_chars + size > TARGET_HI
-        crosses_ceiling = buffer_chars > 0 and buffer_chars + size > HARD_MAX
-        if crosses_band or crosses_ceiling:
-            flush()
-        buffer.append(node)
-        buffer_chars += size
-    flush()
-    if len(out) >= 2:
-        last, previous = out[-1], out[-2]
-        if (
-            len(last.content) < TARGET_LO
-            and last.cut_depth == previous.cut_depth
-            and len(previous.content) + len(last.content) + 1 <= HARD_MAX
-        ):
-            previous.line_indices = [*previous.line_indices, *last.line_indices]
-            previous.content = "\n".join(lines[index] for index in previous.line_indices)
-            out.pop()
-            stats.tail_merges += 1
+        _flush(frame, lines)
+        _tail_merge(frame.out, lines, stats)
+        stack.pop()
+    return out
 
 
 def slice_body(body: str) -> tuple[list[Slice], SliceStats]:
@@ -277,9 +334,7 @@ def slice_body(body: str) -> tuple[list[Slice], SliceStats]:
     if not body.strip():
         return [], stats
     lines = body.split("\n")
-    out: list[Slice] = []
-    _emit(build_forest(lines), [], lines, out, stats)
-    return out, stats
+    return _emit(build_forest(lines), lines, stats), stats
 
 
 def uri_path(uri: str) -> str:
