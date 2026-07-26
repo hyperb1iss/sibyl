@@ -77,7 +77,9 @@ The surviving lever: LLM note distillation at ingest + a **reserved** typed-note
 +3.70pp; the v1 enterprise +6.67pp was inflated by a depressed fat baseline). Interaction vs the
 no-notes control is +8.15pp — matching the paper's ARB-R note-pool ablation (+8pp) almost exactly.
 Notes without a reserved lane measure **negative**: never let notes compete with raw evidence for
-slots. The ceil(3n/8) = 3-of-8 reservation is near-optimal (widening to 5 lost the entire gain).
+slots. The 3-of-8 reservation is near-optimal (widening to 5 lost the entire gain), and the tuned
+quantity is the **absolute** count 3, not the 3/8 ratio it happens to equal at this pack size — see
+the reservation trap in §4 A1.
 
 ### 2.3 Gap anatomy — where the missing ~11.5pp live
 
@@ -296,10 +298,17 @@ and preventing one strong domain from carrying a regression in the other.
 - **A 3-adjacent-slice window reaches the fat-state ceiling exactly**: 95.5% enterprise / 100% web,
   versus fat 95.5% / 100%. Single-slice is 93.2% / 97.9%. Retrieving a window, not a slice, is
   therefore load-bearing for the ceiling.
-- Slices per state ~25 (enterprise) / ~37 (web); slice chars mean ~950–1,030. The depth rule holds:
-  line-count fallback fires on 0.14% of enterprise slices and never on web.
+- Slices per state ~25 (enterprise) / ~37 (web); slice chars mean ~950–1,030. The depth rule holds,
+  but the fallback that catches it is character-based, not line-based: **the 0.14% enterprise / 0%
+  web rate is right, the mechanism previously named for it is not.** The counter is `oversize_leaf`
+  (114 of 83,850 enterprise slices, zero web), incremented in `slicer_v2.py:_emit_v2` when a
+  childless node exceeds `HARD_MAX` (2,000 chars) and is emitted whole because cutting mid-line is
+  forbidden. No line-count rule exists anywhere in the slicer: `Node.subtree_lines` is computed in
+  `slicer.py:_measure` and never read, and every threshold is in characters.
 - **Header tax 19% enterprise / 12% web**, and on enterprise the _breadcrumb_ is the expensive half
-  (11.5%, mean 134 chars). Capping to the last two ancestors drops it to 3.9%.
+  (11.5%, mean 134 chars). A two-ancestor cap would drop it to 3.9%, a figure computed
+  **arithmetically** by `stage0f.py` over uncapped slices rather than measured by re-rendering and
+  re-scoring. See the boundary-rule correction below.
 - **The selection-dilution risk is real but mis-attributed.** The pre-registered rule confirmed
   (slice recall@10 below fat recall@10 in every arm), but the mechanism is BM25 document length, not
   semantics — stripping the goal preamble from fat chunks barely moves them, falsifying "the goal
@@ -311,9 +320,45 @@ and preventing one strong domain from carrying a regression in the other.
   RRF to 0.727 enterprise / 0.812 web, beating fat's 0.682 / 0.792, at zero reader-token cost
   because it need not be rendered), and expressing the retrieval budget in **characters** rather
   than items, since k=10 is a payload knob that must move when unit size drops ~11×.
-- Boundary rules the data argues for, all verified to preserve exposure and the zero straddle rate:
-  3-slice window; bound the ancestor prepend to ~400 chars; cap the breadcrumb at two ancestors;
-  tail-merge sub-floor leftovers; path-extract and truncate header URLs.
+- **Boundary rules — corrected 2026-07-25 against the reference slicer**
+  (`benchmarks/longmemeval_v2_chunk_geometry/`, PR 280; three independent code reads). The earlier
+  list read "3-slice window; bound the ancestor prepend to ~400 chars; cap the breadcrumb at two
+  ancestors; tail-merge sub-floor leftovers; path-extract and truncate header URLs," all "verified
+  to preserve exposure and the zero straddle rate." Two of those rules are absent from the code that
+  produced this section's own numbers, one baseline behaviour was listed as prospective, and the
+  largest change to the size distribution was missing. Implementing that list literally reproduces
+  neither the numbers nor the guarantee.
+- Rules the v2 run **did** apply, at exposure identical to v1 (0.9318 / 0.9318 / 0.9545 enterprise
+  and 0.9792 / 1.0 / 1.0 web at windows 1/2/3) with `phrase_single_slice_rate` 1.0 in both
+  (`out/stage0g_report.json`): the 3-slice retrieval window, an ancestor prepend bounded by
+  `HARD_MAX`, band-aware packing, and tail-merge. Those four carry the verified-exposure claim.
+- **The ancestor prepend is bounded by `HARD_MAX` (2,000), not by ~400 chars.** `slicer_v2.py` keeps
+  the prepend only when `len(ancestor_line) + len(first_child_slice) <= HARD_MAX`, and otherwise
+  emits the ancestor line as its own `ancestor-line` slice. `MAX_PREPEND_CHARS = 400` is declared in
+  that module and never referenced: a dead constant whose module docstring describes a rule the code
+  does not implement. The measured improvement, enterprise max slice 4,103 → 2,064, belongs to the
+  `HARD_MAX` check.
+- **Band-aware packing is a boundary rule and was missing from the list**, and it is the largest
+  single change to the size distribution. `slicer_v2.py` flushes only once the buffer has cleared
+  `TARGET_LO` and the next sibling would cross `TARGET_HI`, growing under-full slices toward the
+  floor instead of closing them at the ceiling. Under-600-char slices 29.5% → 23.8%; slices per
+  state 24.97 → 23.13.
+- **Tail-merge is narrower than "sub-floor leftovers" implies.** It is not a sweep: per `_emit_v2`
+  invocation it fires at most once, folds only the final slice into its predecessor, and requires
+  equal `cut_depth` plus a combined size under `HARD_MAX` (3,927 enterprise / 822 web merges).
+- **Header URL path-extraction is already baseline, not prospective.** `uri_path` in `slicer.py`
+  does host extraction plus 48-char path truncation, and `slice_header` clips to 120; both were
+  active in every measurement here, the header-tax numbers included. `stage0f.py`'s finding that 91%
+  of enterprise _raw_ URLs would overflow a 120-char header is the motivation for that existing
+  code, not outstanding work, and emitted headers cannot exceed 120 by construction.
+- **The two-ancestor breadcrumb cap was never implemented and never measured.** It is an unmeasured
+  counterfactual, not a verified rule: `breadcrumb_for` in `slicer.py` joins every ancestor uncapped
+  in both versions, and the v2 exposure run carried uncapped breadcrumbs, mean 133.7 chars
+  enterprise against the ~42 a two-ancestor cap implies (`out/stage0g_report.json`). The 3.9% saving
+  is arithmetic over v1 slices in `stage0f.py`; the oracle was never re-run over capped slices.
+  Unlike the four rules above, truncating a breadcrumb removes ancestor text from the rendered
+  slice, so it can only lower per-slice coverage. **It requires a measured exposure arm before
+  adoption**, and the blanket verified-exposure claim never covered it.
 - **Labelled projection, not measurement:** the dense arm used local MiniLM (384-dim, mean-pooled)
   as a proxy for the production 1024-dim long-context embedder. Mean-pooling favours the fat arm, so
   the proxy is conservative toward the hypothesis; only the fat-vs-slice contrast transfers.
@@ -324,11 +369,25 @@ and preventing one strong domain from carrying a regression in the other.
   embedder. Headers stay regardless — they feed BM25 and the reader; this arm decides only the
   vector side.
 
-**The reservation trap.** Slices push `max_items` from 8 to ~28, and both the adapter and production
-compute the note lane as `ceil(max_items × 3/8)` — which would silently widen the reserved note lane
-from 3 slots to 11. The tuning kill established that the tuned quantity is the **absolute** note
-count, so notes must be pinned at 3. Missing this makes A1 measure as a notes regression and get
-misdiagnosed as a slice failure.
+**The reservation trap.** Slices push `max_items` from 8 to ~28. As written on 2026-07-24, both the
+adapter and production computed the note lane as `ceil(max_items × 3/8)`, which would silently widen
+the reserved note lane from 3 slots to 11. The tuning kill established that the tuned quantity is
+the **absolute** note count, so notes must be pinned at 3. Missing this makes A1 measure as a notes
+regression and get misdiagnosed as a slice failure.
+
+**Status corrected 2026-07-25: the ratio law is now gone from both sides.** Production
+`compose_operational_evidence` takes `typed_reservation_items: int = TYPED_NOTE_RESERVATION_ITEMS`
+and sets `reservation_target = max(1, typed_reservation_items)`, an absolute count, pinned by commit
+`56ecd032` in `packages/python/sibyl-core/src/sibyl_core/retrieval/operational_evidence.py`. The
+eval adapter still carries `max(1, math.ceil(max_items * 3 / 8))` on `main` and is pinned on branch
+`nova/a1-eval-reservation-pin` (commit `281e8372`), where a `None` reservation resolves to that same
+production constant (`benchmarks/longmemeval_v2_memory/sibyl_memory.py`).
+
+**The trap was invisible at the shipped pack size**, which is why the pin has to be enforced at both
+ends rather than spot-checked. At `max_items = 8` the ratio yields `ceil(8 × 3/8) = 3`, identical to
+the pin, so the defect surfaces only once the pack widens: restoring the ratio and re-running passes
+the `[8]` case and fails `[28]` with `assert 11 == 3`. Agreement at the current configuration is not
+evidence that the law underneath it is right.
 
 The requirement is **normative, not merely configurable**: exposing a `typed_reservation_items`
 parameter on production `compose_operational_evidence` is necessary but not sufficient, because a
@@ -337,7 +396,10 @@ absolute value **3** on the slice path — not a ratio, and not a new default th
 by raising `max_items`. Acceptance criterion, to be enforced by a regression test rather than
 review: **at `max_items = 28` the composed evidence set contains exactly 3 typed-note slots**, and
 the same assertion holds at the current `max_items = 8` so the pin cannot silently regress the
-already-shipped configuration.
+already-shipped configuration. That criterion is now test-locked on the production side by
+`test_reserved_lane_is_an_absolute_count_a_wider_pack_cannot_widen` in
+`packages/python/sibyl-core/tests/test_operational_evidence.py`, parametrized over `max_items`
+8/24/28, with a mirrored regression test at 8 and 28 riding the adapter branch.
 
 - Gate `slice-substrate-gate`: on the enterprise-45/web-45 replay cohort, evaluated **per domain**,
   gold-literal exposure ≥ 50% (from 32%/21%) AND state-level recall@10 ≥ 85% (from 68%) within ≤ 60K
@@ -606,8 +668,10 @@ v2 GO), `01e6ed6e4006` (enterprise v2 GO), `7a6a1d49b32c` (reservation tuning ki
 (typed-stream-alone kill), `109702d198fe` (abstention lever closed), `0f4ab0c8a0cc` (graph-backed
 agentic path). Plans: `17188e6e7820`. Runs: `.moon/cache/evals/nova-full-451-fast/`. Commits:
 `12ac2243` (note distillation), `430dea04` (content-aware digest v2), `1f086b22` (conjunctive-safe
-fulltext), `83c8dd7b` (defaults reverted after tuning kill). Production port: task `1e1caf57`
-(done). SOTA sweep 2026-07-25: [`SOTA_LANDSCAPE_2026-07-25.md`](SOTA_LANDSCAPE_2026-07-25.md) (six
+fulltext), `83c8dd7b` (defaults reverted after tuning kill), `56ecd032` (note lane pinned to an
+absolute slot count). Production port: task `1e1caf57` (done). A1 Stage 0/1 slicer, stage scripts,
+and reports, carrying every §4 A1 boundary-rule receipt: `benchmarks/longmemeval_v2_chunk_geometry/`
+(PR 280). SOTA sweep 2026-07-25: [`SOTA_LANDSCAPE_2026-07-25.md`](SOTA_LANDSCAPE_2026-07-25.md) (six
 lanes, primary-sourced; anchors: LME-V2 arXiv `2605.12493` + empty official leaderboard,
 Fidelity-Before-Structure `2601.00821`, Dissecting-Agentic-RAG `2606.21553`, Retain-or-Consolidate
 `2607.17545`, TriMem `2605.19952`, MemClaw `2606.24535`, OKF v0.1, Penfield LoCoMo audit).
