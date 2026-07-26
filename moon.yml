@@ -407,6 +407,7 @@ tasks:
       benchmarks/longmemeval_v2_repair_project.py
       benchmarks/longmemeval_v2_memory
       benchmarks/longmemeval_v2_live_smoke.py benchmarks/longmemeval_v2_projection_audit.py
+      benchmarks/longmemeval_v2_chunk_geometry
     inputs:
       - tools/**/*.py
       - benchmarks/provider_usage.py
@@ -424,6 +425,7 @@ tasks:
       - benchmarks/longmemeval_v2_validation_slice.py
       - benchmarks/longmemeval_v2_validation_slice_v2.py
       - benchmarks/longmemeval_v2_live_retrieval.py
+      - benchmarks/longmemeval_v2_chunk_geometry/**/*.py
       - benchmarks/longmemeval_v2_composition_validation.json
       - benchmarks/longmemeval_v2_composition_validation_v2.json
       - benchmarks/longmemeval_v2_live_smoke.py
