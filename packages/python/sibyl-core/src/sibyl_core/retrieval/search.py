@@ -59,6 +59,14 @@ type RawMemoryRecallFn = Callable[..., Awaitable[list[RawMemory] | RawMemoryReca
 DEFAULT_FILTER_SELECTIVITY_THRESHOLD = 0.1
 EDGE_FULLTEXT_MATCH_HEADROOM = 8
 EDGE_FULLTEXT_MIN_MATCH_LIMIT = 32
+# Ceiling on candidates any one lane contributes, however large the caller's
+# `limit` is. This is a seed-diversity budget rather than a payload budget: on a
+# whole-state substrate each candidate is a distinct state, while on a passage
+# substrate several candidates can be cuts of one state, so the distinct sources
+# a lane can reach shrinks as the retrieval unit shrinks. Raising it widens the
+# fulltext and HNSW read on every lane for every caller, so it belongs to a
+# measured arm rather than to whichever substrate landed most recently.
+MAX_CANDIDATES_PER_SIGNAL = 8
 _ACTIVE_TASK_STATUSES = {"doing", "in_progress", "review"}
 _RAW_MEMORY_CONTEXT_TYPES = {"raw_memory", "session", "episode", "note"}
 _EDGE_CONTEXT_TYPES = {"claim", "relationship"}
@@ -300,7 +308,7 @@ def build_context_retrieval_plan(
             )
         )
 
-    per_signal_limit = max(2, min(8, limit))
+    per_signal_limit = max(2, min(MAX_CANDIDATES_PER_SIGNAL, limit))
     facet_types_by_facet = {facet: tuple(facet_types.get(facet, ())) for facet in facets}
     return RetrievalPlan(
         query=query,
@@ -310,7 +318,7 @@ def build_context_retrieval_plan(
         scopes=tuple(scopes),
         denied_scopes=tuple(denied_scopes),
         candidate_limits=CandidateLimits(
-            raw_lexical=max(1, min(8, limit // 4 or 1)),
+            raw_lexical=max(1, min(MAX_CANDIDATES_PER_SIGNAL, limit // 4 or 1)),
             node_fulltext=per_signal_limit,
             episode_fulltext=per_signal_limit,
             edge_fulltext=per_signal_limit,

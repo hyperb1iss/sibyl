@@ -181,12 +181,14 @@ def _compose_context_evidence_response(
     *,
     limit: int,
     typed_error: str | None,
+    char_budget: int | None = None,
 ) -> SearchResponse:
     typed_results = typed_response.results if typed_response is not None else []
     selected, receipt = compose_operational_evidence(
         typed_results=typed_results,
         raw_results=raw_response.results,
         limit=limit,
+        char_budget=char_budget,
     )
     receipt.update(
         {
@@ -760,6 +762,7 @@ async def _compile_context_with_evidence(
             typed_response,
             limit=request.evidence.limit,
             typed_error=typed_error,
+            char_budget=request.evidence.char_budget,
         )
         if request.record_exposure:
             from sibyl_core.tools.usage_exposure import annotate_search_result_exposures

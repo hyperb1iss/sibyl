@@ -12,6 +12,7 @@ def _result(
     result_type: str = "session",
     source_id: str | None = None,
     distilled: bool = False,
+    content_chars: int | None = None,
 ) -> SearchResult:
     metadata = {"operational_source_id": source_id} if source_id else {}
     if distilled:
@@ -20,7 +21,7 @@ def _result(
         id=result_id,
         type=result_type,
         name=result_id,
-        content=result_id,
+        content=result_id if content_chars is None else "x" * content_chars,
         score=1.0,
         metadata=metadata,
     )
@@ -151,3 +152,112 @@ def test_reserved_lane_backfills_sparse_pools_without_cross_pool_score_compariso
         "note-e",
     ]
     assert raw_receipt["selected_typed_overflow_count"] == 2
+
+
+def _passage_pool(count: int, *, content_chars: int) -> list[SearchResult]:
+    return [_result(f"passage-{index}", content_chars=content_chars) for index in range(count)]
+
+
+def test_item_budget_stays_the_default_and_is_reported_as_such() -> None:
+    """Callers that never ask for a character budget keep the shipped law."""
+    selected, receipt = compose_operational_evidence(
+        typed_results=_note_pool(8),
+        raw_results=_passage_pool(40, content_chars=100),
+        limit=8,
+    )
+
+    assert len(selected) == 8
+    assert receipt["budget_mode"] == "items"
+    assert receipt["char_budget"] is None
+
+
+def test_char_budget_admits_units_an_item_budget_would_have_truncated() -> None:
+    """A passage is roughly a twelfth of a state, so `limit` stops meaning payload.
+
+    The same eight-item pack that used to be eight whole states is eight
+    passages of a state each: an order of magnitude less for the reader. Under a
+    character budget the pack grows to whatever fits instead.
+    """
+    selected, receipt = compose_operational_evidence(
+        typed_results=[],
+        raw_results=_passage_pool(40, content_chars=100),
+        limit=8,
+        char_budget=3_000,
+    )
+
+    assert len(selected) == 30
+    assert receipt["budget_mode"] == "characters"
+    assert receipt["selected_chars"] == 3_000
+    assert [item.id for item in selected[:3]] == ["passage-0", "passage-1", "passage-2"]
+
+
+def test_char_budget_refuses_a_payload_that_would_exceed_it() -> None:
+    """The budget is hard: the pack stops at the last unit that still fits."""
+    selected, receipt = compose_operational_evidence(
+        typed_results=[],
+        raw_results=_passage_pool(40, content_chars=100),
+        limit=40,
+        char_budget=250,
+    )
+
+    assert sum(len(item.content) for item in selected) <= 250
+    assert [item.id for item in selected] == ["passage-0", "passage-1"]
+    assert receipt["raw_candidate_count"] == 40
+    assert receipt["selected_raw_count"] == 2
+
+
+def test_char_budget_keeps_the_note_lane_pinned_to_its_absolute_count() -> None:
+    """A wider pack must not widen the reserved lane, whichever budget bounds it.
+
+    The character budget is the reason `limit` no longer describes the pack, so
+    it is exactly the knob that could smuggle the proportional reservation back
+    in through a larger pack.
+    """
+    selected, receipt = compose_operational_evidence(
+        typed_results=_note_pool(8),
+        raw_results=_passage_pool(60, content_chars=1_000),
+        limit=8,
+        char_budget=30_000,
+    )
+
+    assert receipt["reservation_target"] == 3
+    assert receipt["typed_reservation"] == 3
+    assert [item.id for item in selected[:3]] == ["note-0", "note-1", "note-2"]
+    assert len(selected) > 8
+
+
+def test_char_budget_outranks_the_note_pin_when_it_cannot_hold_three() -> None:
+    """A lane that may overrun the budget is not a budget.
+
+    The pin fixes how many notes a pack reserves, not whether the pack may be
+    larger than the caller asked for.
+    """
+    selected, receipt = compose_operational_evidence(
+        typed_results=[
+            _result(
+                f"note-{index}",
+                result_type="note",
+                source_id=f"capture-{index}",
+                distilled=True,
+                content_chars=400,
+            )
+            for index in range(8)
+        ],
+        raw_results=_passage_pool(8, content_chars=100),
+        limit=8,
+        char_budget=900,
+    )
+
+    assert [item.id for item in selected] == ["note-0", "note-1", "passage-0"]
+    assert receipt["typed_reservation"] == 2
+    assert receipt["selected_chars"] == 900
+
+
+def test_char_budget_must_be_positive() -> None:
+    with pytest.raises(ValueError, match="char_budget must be positive"):
+        compose_operational_evidence(
+            typed_results=[],
+            raw_results=_passage_pool(2, content_chars=10),
+            limit=8,
+            char_budget=0,
+        )
