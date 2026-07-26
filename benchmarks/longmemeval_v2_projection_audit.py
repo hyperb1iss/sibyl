@@ -46,19 +46,22 @@ MAX_WRITE_AMPLIFICATION = 2.0
 # against MAX_WRITE_AMPLIFICATION would compare a re-carving to an invention and
 # reject the substrate by construction (measured fan-out is 11x to 14.5x rows).
 #
-# Bytes, not rows, because embedding spend is what this substrate buys (the
-# capture path makes no per-entity model call) and because every passage carries
-# a floor of non-content bytes: entity type, name, the 500-char-capped
-# description, the 120-char-capped header, and the breadcrumb, measured at 453
-# chars minimum. Bounding bytes therefore bounds rows too.
+# Bytes, not rows, because embedding spend is what this substrate buys: the
+# capture path makes no per-entity model call, so the per-row cost is embedding
+# tokens. Each passage also carries non-content bytes (entity type, name, the
+# 500-char-capped description, the 120-char-capped header, the breadcrumb),
+# which is what makes a runaway show up here at all. That per-row floor is
+# framing-dependent rather than structural, measured between 101 and 622 chars,
+# so this bounds rows only loosely and _audit_passage_spans carries the rest.
 #
-# 2.5 against a measured legitimate ceiling of 1.66x. The widest amplification
-# the real slicer reaches over production-shaped trees is 1.66x (24-deep
-# nesting, 60K-char states, descriptions saturated at their cap), and the A1
-# corpus measurement puts the real corpus at 1.65x enterprise / 1.55x web. A
-# slicer that splits every slice four ways measures 2.86x and one that emits a
-# passage per line measures 7.17x, so the bound clears every shape the slicer
-# legitimately produces and still catches a runaway.
+# 2.5 against amplification that rises with nesting depth, since breadcrumbs are
+# uncapped: 1.22x at depth 10, 1.65x at depth 24, 2.20x at depth 48. The A1
+# corpus measures 1.65x enterprise / 1.55x web, and the deepest nesting in the
+# corpus artifacts is 10, so the real substrate sits at the bottom of that
+# curve. A slicer splitting every slice eight ways measures 5.70x and one
+# emitting a passage per line 7.17x. The bound therefore clears the corpus by
+# roughly 2x while still catching a runaway; a synthetic tree nested past ~48
+# would exceed it, which is five times anything the corpus contains.
 MAX_PASSAGE_BYTE_AMPLIFICATION = 2.5
 
 
@@ -86,6 +89,7 @@ class ProjectionIndex:
     raw_by_id: dict[str, Entity]
     derived: list[Entity]
     passages: list[Entity]
+    passages_by_evidence: dict[tuple[str, str], list[Entity]]
     raw_supported: set[str]
 
 
@@ -245,6 +249,13 @@ def _projection_indexes(projection: OperationalExperienceProjection) -> Projecti
     passages = [
         entity for entity in projection.entities if entity.entity_type is EntityType.PASSAGE
     ]
+    passages_by_evidence: dict[tuple[str, str], list[Entity]] = {}
+    for passage in passages:
+        key = (
+            str(passage.metadata.get("source_observation_id")),
+            str(passage.metadata.get("evidence_part_id")),
+        )
+        passages_by_evidence.setdefault(key, []).append(passage)
     raw_supported = {
         relationship.source_id
         for relationship in projection.relationships
@@ -258,6 +269,7 @@ def _projection_indexes(projection: OperationalExperienceProjection) -> Projecti
         raw_by_id=raw_by_id,
         derived=derived_entities,
         passages=passages,
+        passages_by_evidence=passages_by_evidence,
         raw_supported=raw_supported,
     )
 
@@ -348,6 +360,14 @@ def _audit_observations(
                 raw_entity,
                 content_max_chars=content_max_chars,
             )
+            _audit_passage_spans(
+                audit.issues,
+                trajectory_id,
+                observation.id,
+                evidence.id,
+                evidence.content,
+                index.passages_by_evidence.get((observation.id, evidence.id), []),
+            )
 
         if not observation.action:
             continue
@@ -367,6 +387,66 @@ def _audit_observations(
                 observation.action,
                 index.derived,
             )
+
+
+def _audit_passage_spans(
+    issues: list[dict[str, object]],
+    trajectory_id: str,
+    observation_id: str,
+    evidence_id: str,
+    evidence_content: str,
+    passages: list[Entity],
+) -> None:
+    """Hold passages to the partition the slicer promises.
+
+    Excluding passages from the invention bound is only sound while they really
+    are a re-carving of their parent, so the claim is checked rather than
+    assumed: every span lands inside the parent body, carries that body's own
+    bytes, and no line is claimed twice. Without this a slicer could mint
+    unbounded rows that discard the content they name, and the byte bound would
+    read it as thrift.
+    """
+    if not passages:
+        return
+    details = {"observation_id": observation_id, "evidence_id": evidence_id}
+    lines = evidence_content.split("\n")
+    claimed: set[int] = set()
+    for passage in passages:
+        start = passage.metadata.get("passage_line_start")
+        end = passage.metadata.get("passage_line_end")
+        if not isinstance(start, int) or not isinstance(end, int):
+            _issue(issues, trajectory_id, "passage_span_missing", **details, entity_id=passage.id)
+            continue
+        if not 0 <= start <= end < len(lines):
+            _issue(
+                issues,
+                trajectory_id,
+                "passage_span_outside_parent",
+                **details,
+                entity_id=passage.id,
+                observed=[start, end],
+            )
+            continue
+        content = passage.content or ""
+        if any(lines[edge] not in content for edge in (start, end)):
+            _issue(
+                issues,
+                trajectory_id,
+                "passage_not_byte_exact",
+                **details,
+                entity_id=passage.id,
+            )
+        overlap = claimed.intersection(range(start, end + 1))
+        if overlap:
+            _issue(
+                issues,
+                trajectory_id,
+                "passage_span_overlaps_sibling",
+                **details,
+                entity_id=passage.id,
+                observed=sorted(overlap)[:8],
+            )
+        claimed.update(range(start, end + 1))
 
 
 def _audit_raw_evidence(
