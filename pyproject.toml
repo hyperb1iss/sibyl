@@ -96,6 +96,15 @@ ignore = [
     "PLW2901", # for loop var reassign (idiomatic line.strip())
     "PLR2004", # magic numbers (sample/limit thresholds are clear in context)
 ]
+# Chunk-geometry measurement stages: offline research scripts, run by hand
+"benchmarks/longmemeval_v2_chunk_geometry/*.py" = [
+    "T20",     # print statements (the measurement tables are the output)
+    "PLC0415", # lazy torch/sentence-transformers import so stage0* need no ML deps
+    "PLR2004", # magic numbers (band edges and percentiles are the thing measured)
+    "PLR0912", # too many branches (single-pass probes fan over many arms)
+    "PLR0915", # too many statements (one function per measurement, kept linear)
+    "S311",    # non-crypto random (seeded corpus sampling)
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["sibyl", "sibyl_core", "sibyl_cli"]
