@@ -1,0 +1,1690 @@
+{
+  "enterprise": {
+    "domain": "enterprise",
+    "states": 3358,
+    "chunks_fat": 6387,
+    "body_chars_total": 79480225,
+    "slice_total": 83850,
+    "slice_content_chars": {
+      "count": 83850,
+      "mean": 946.9,
+      "p50": 1077,
+      "p90": 1585,
+      "p99": 1958,
+      "min": 11,
+      "max": 4103
+    },
+    "slices_per_state": {
+      "count": 3358,
+      "mean": 25.0,
+      "p50": 21,
+      "p90": 43,
+      "p99": 64,
+      "min": 1,
+      "max": 100
+    },
+    "header_chars": {
+      "count": 83850,
+      "mean": 88.3,
+      "p50": 90,
+      "p90": 95,
+      "p99": 95,
+      "min": 34,
+      "max": 96
+    },
+    "breadcrumb_chars": {
+      "count": 83850,
+      "mean": 134.5,
+      "p50": 144,
+      "p90": 189,
+      "p99": 256,
+      "min": 0,
+      "max": 535
+    },
+    "header_tax": {
+      "total_content_chars": 79399733,
+      "total_header_chars": 7402817,
+      "total_breadcrumb_chars": 11278229,
+      "total_rendered_chars": 98248479,
+      "header_fraction": 0.0753,
+      "breadcrumb_fraction": 0.1148,
+      "combined_overhead_fraction": 0.1901
+    },
+    "depth": {
+      "cut_depth_distribution": {
+        "0": 12,
+        "1": 6824,
+        "2": 2755,
+        "3": 1686,
+        "4": 14437,
+        "5": 15660,
+        "6": 6624,
+        "7": 25529,
+        "8": 5332,
+        "9": 790,
+        "10": 519,
+        "11": 221,
+        "12": 157,
+        "13": 72,
+        "14": 471,
+        "15": 78,
+        "16": 236,
+        "17": 20,
+        "18": 49,
+        "19": 2276,
+        "20": 2,
+        "21": 100
+      },
+      "slice_reason": {
+        "pack": 32700,
+        "descend-solo": 51036,
+        "oversize-leaf": 114
+      },
+      "descend_events": 39175,
+      "oversize_leaf_fallbacks": 114
+    },
+    "eligible_questions": 21,
+    "total_questions": 45,
+    "exposure": [
+      {
+        "question_id": "109b334c",
+        "question_type": "dynamic-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "there are no checkbox labels containing amortiz in that personalize form dialog"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "19935d2d",
+        "question_type": "static-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "no column header sits between class and delivery time in that list view"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "2d4e08b9",
+        "question_type": "dynamic-environment",
+        "phrase_count": 3,
+        "phrases": [
+          "warranty expiration",
+          "business phone",
+          "fulfillment automation level"
+        ],
+        "carrier_states": 801,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 1,
+        "best_pair_cover": 1,
+        "phrase_union_over_slices": [
+          0,
+          1,
+          2
+        ],
+        "detail": []
+      },
+      {
+        "question_id": "329742b1",
+        "question_type": "dynamic-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "there is no fifth button there after entering ip router 3 the field shows only the existing lookup button plus three additional right side controls"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "38726e61",
+        "question_type": "static-environment",
+        "phrase_count": 1,
+        "phrases": [
+          "catalog with hashtag"
+        ],
+        "carrier_states": 14,
+        "fat_state_hit": true,
+        "fat_chunk_hit": true,
+        "slice_single_hit": true,
+        "slice_pair_hit": true,
+        "best_single_cover": 1,
+        "best_pair_cover": 1,
+        "phrase_union_over_slices": [
+          0
+        ],
+        "detail": [
+          {
+            "state": "013696c4:28",
+            "slices": 8,
+            "per_slice_cover": [
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              7
+            ]
+          },
+          {
+            "state": "013696c4:29",
+            "slices": 4,
+            "per_slice_cover": [
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              1,
+              2,
+              3,
+              4
+            ]
+          },
+          {
+            "state": "013696c4:30",
+            "slices": 5,
+            "per_slice_cover": [
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          {
+            "state": "013696c4:31",
+            "slices": 8,
+            "per_slice_cover": [
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8
+            ]
+          }
+        ]
+      },
+      {
+        "question_id": "3a836b31",
+        "question_type": "static-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "none of those forms combines a direct email action with an outlook meeting action seeded from that same field value"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "3b375e30",
+        "question_type": "static-environment",
+        "phrase_count": 1,
+        "phrases": [
+          "incident"
+        ],
+        "carrier_states": 1197,
+        "fat_state_hit": true,
+        "fat_chunk_hit": true,
+        "slice_single_hit": true,
+        "slice_pair_hit": true,
+        "best_single_cover": 1,
+        "best_pair_cover": 1,
+        "phrase_union_over_slices": [
+          0
+        ],
+        "detail": [
+          {
+            "state": "013696c4:3",
+            "slices": 9,
+            "per_slice_cover": [
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              7
+            ]
+          },
+          {
+            "state": "013696c4:5",
+            "slices": 9,
+            "per_slice_cover": [
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              7
+            ]
+          },
+          {
+            "state": "013696c4:7",
+            "slices": 9,
+            "per_slice_cover": [
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              7
+            ]
+          },
+          {
+            "state": "013696c4:9",
+            "slices": 9,
+            "per_slice_cover": [
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              7
+            ]
+          }
+        ]
+      },
+      {
+        "question_id": "3daef058",
+        "question_type": "static-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "none of the three forms has dropdown lists dedicated to outage schedules"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "45d1e7f1",
+        "question_type": "static-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "there is no such single word non prepopulated mandatory field on the change request form"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "50bfa714",
+        "question_type": "dynamic-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "there is no second sort row shown by default in that sorting dialog"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "57cd3560",
+        "question_type": "dynamic-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "that duplicate marking popup does not include an extra free text explanation field"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "5849c18b",
+        "question_type": "static-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "none of those five forms shows a read only case number with the prefix task"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "7df9e2ff",
+        "question_type": "procedure-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "that workflow does not add any extra mandatory cooling off rule after high risk changes"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "8e21c6e5",
+        "question_type": "errors-gotchas",
+        "phrase_count": 1,
+        "phrases": [
+          "use the funnel icon to use the filter builder instead"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "9c32bca6",
+        "question_type": "static-environment",
+        "phrase_count": 2,
+        "phrases": [
+          "preview cascade",
+          "execute now"
+        ],
+        "carrier_states": 19,
+        "fat_state_hit": true,
+        "fat_chunk_hit": true,
+        "slice_single_hit": true,
+        "slice_pair_hit": true,
+        "best_single_cover": 2,
+        "best_pair_cover": 2,
+        "phrase_union_over_slices": [
+          0,
+          1
+        ],
+        "detail": [
+          {
+            "state": "3fafa5c3:54",
+            "slices": 14,
+            "per_slice_cover": [
+              [
+                1
+              ],
+              [
+                0,
+                1
+              ]
+            ],
+            "slice_indices_with_any": [
+              4,
+              10
+            ]
+          },
+          {
+            "state": "3fafa5c3:55",
+            "slices": 14,
+            "per_slice_cover": [
+              [
+                1
+              ],
+              [
+                0,
+                1
+              ]
+            ],
+            "slice_indices_with_any": [
+              4,
+              10
+            ]
+          },
+          {
+            "state": "3fafa5c3:56",
+            "slices": 14,
+            "per_slice_cover": [
+              [
+                1
+              ],
+              [
+                0,
+                1
+              ]
+            ],
+            "slice_indices_with_any": [
+              4,
+              10
+            ]
+          },
+          {
+            "state": "3fafa5c3:57",
+            "slices": 19,
+            "per_slice_cover": [
+              [
+                1
+              ],
+              [
+                0,
+                1
+              ]
+            ],
+            "slice_indices_with_any": [
+              4,
+              10
+            ]
+          }
+        ]
+      },
+      {
+        "question_id": "b54161f8",
+        "question_type": "dynamic-environment",
+        "phrase_count": 2,
+        "phrases": [
+          "microsoft powerpoint",
+          "siebel client"
+        ],
+        "carrier_states": 7,
+        "fat_state_hit": true,
+        "fat_chunk_hit": true,
+        "slice_single_hit": true,
+        "slice_pair_hit": true,
+        "best_single_cover": 2,
+        "best_pair_cover": 2,
+        "phrase_union_over_slices": [
+          0,
+          1
+        ],
+        "detail": [
+          {
+            "state": "4919aae9:69",
+            "slices": 10,
+            "per_slice_cover": [
+              [
+                0,
+                1
+              ]
+            ],
+            "slice_indices_with_any": [
+              7
+            ]
+          },
+          {
+            "state": "4919aae9:81",
+            "slices": 10,
+            "per_slice_cover": [
+              [
+                0,
+                1
+              ]
+            ],
+            "slice_indices_with_any": [
+              7
+            ]
+          },
+          {
+            "state": "4919aae9:83",
+            "slices": 23,
+            "per_slice_cover": [
+              [
+                0,
+                1
+              ]
+            ],
+            "slice_indices_with_any": [
+              12
+            ]
+          },
+          {
+            "state": "4919aae9:84",
+            "slices": 23,
+            "per_slice_cover": [
+              [
+                0,
+                1
+              ]
+            ],
+            "slice_indices_with_any": [
+              12
+            ]
+          }
+        ]
+      },
+      {
+        "question_id": "bf4f8b37",
+        "question_type": "static-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "there is no 1tb solid state drive option on that dell xps page"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "ce1cdb2d",
+        "question_type": "dynamic-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "that problem progress bar does not show approval stages in this workflow"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "e9fde9fe",
+        "question_type": "static-environment",
+        "phrase_count": 1,
+        "phrases": [
+          "consumable"
+        ],
+        "carrier_states": 256,
+        "fat_state_hit": true,
+        "fat_chunk_hit": true,
+        "slice_single_hit": true,
+        "slice_pair_hit": true,
+        "best_single_cover": 1,
+        "best_pair_cover": 1,
+        "phrase_union_over_slices": [
+          0
+        ],
+        "detail": [
+          {
+            "state": "02dad10c:12",
+            "slices": 36,
+            "per_slice_cover": [
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              34
+            ]
+          },
+          {
+            "state": "02dad10c:13",
+            "slices": 36,
+            "per_slice_cover": [
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              34
+            ]
+          },
+          {
+            "state": "02dad10c:14",
+            "slices": 36,
+            "per_slice_cover": [
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              34
+            ]
+          },
+          {
+            "state": "02dad10c:15",
+            "slices": 36,
+            "per_slice_cover": [
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              34
+            ]
+          }
+        ]
+      },
+      {
+        "question_id": "f02bec54",
+        "question_type": "procedure-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "that workflow does not specify an additional comparison field beyond amount task short description and date"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "fa504f5e",
+        "question_type": "errors-gotchas",
+        "phrase_count": 1,
+        "phrases": [
+          "the comparison criteria defaults to and therefore other employees are included in the search results"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      }
+    ]
+  },
+  "web": {
+    "domain": "web",
+    "states": 1737,
+    "chunks_fat": 4609,
+    "body_chars_total": 65792253,
+    "slice_total": 63804,
+    "slice_content_chars": {
+      "count": 63804,
+      "mean": 1030.2,
+      "p50": 1109,
+      "p90": 1294,
+      "p99": 1948,
+      "min": 23,
+      "max": 2024
+    },
+    "slices_per_state": {
+      "count": 1737,
+      "mean": 36.7,
+      "p50": 17,
+      "p90": 122,
+      "p99": 210,
+      "min": 1,
+      "max": 211
+    },
+    "header_chars": {
+      "count": 63804,
+      "mean": 70.3,
+      "p50": 66,
+      "p90": 84,
+      "p99": 92,
+      "min": 33,
+      "max": 93
+    },
+    "breadcrumb_chars": {
+      "count": 63804,
+      "mean": 70.0,
+      "p50": 80,
+      "p90": 80,
+      "p99": 107,
+      "min": 0,
+      "max": 172
+    },
+    "header_tax": {
+      "total_content_chars": 65730186,
+      "total_header_chars": 4487757,
+      "total_breadcrumb_chars": 4468512,
+      "total_rendered_chars": 74814063,
+      "header_fraction": 0.06,
+      "breadcrumb_fraction": 0.0597,
+      "combined_overhead_fraction": 0.1197
+    },
+    "depth": {
+      "cut_depth_distribution": {
+        "0": 17,
+        "1": 5782,
+        "2": 7744,
+        "3": 5713,
+        "4": 41943,
+        "5": 2132,
+        "6": 328,
+        "7": 138,
+        "8": 4,
+        "9": 3
+      },
+      "slice_reason": {
+        "descend-solo": 53448,
+        "pack": 10356
+      },
+      "descend_events": 7617,
+      "oversize_leaf_fallbacks": 0
+    },
+    "eligible_questions": 22,
+    "total_questions": 45,
+    "exposure": [
+      {
+        "question_id": "0ace674b",
+        "question_type": "static-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "there is no metric column between store and results in that grid"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "1e77eb4b",
+        "question_type": "errors-gotchas",
+        "phrase_count": 1,
+        "phrases": [
+          "correct answers must explicitly say that you cannot enter a tracking number for this order because its order status is canceled and canceled orders cannot be shipped answers that send the user to shipments or any shipment entry flow are wrong"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "2e67d04f",
+        "question_type": "static-environment",
+        "phrase_count": 3,
+        "phrases": [
+          "forum creator",
+          "subscriber only",
+          "viewer only"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "358c13ce",
+        "question_type": "dynamic-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "the premise is false there is no visual swatch preview dropdown there to inspect"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "3b8210a1",
+        "question_type": "procedure-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "that is impossible because this bulk workflow does not offer an archived final state for products"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "42d13006",
+        "question_type": "errors-gotchas",
+        "phrase_count": 1,
+        "phrases": [
+          "there is no such functionality or dedicated module for finding items on sale from this storefront"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "521b124f",
+        "question_type": "static-environment",
+        "phrase_count": 2,
+        "phrases": [
+          "advanced reporting",
+          "bi essentials"
+        ],
+        "carrier_states": 96,
+        "fat_state_hit": true,
+        "fat_chunk_hit": true,
+        "slice_single_hit": true,
+        "slice_pair_hit": true,
+        "best_single_cover": 2,
+        "best_pair_cover": 2,
+        "phrase_union_over_slices": [
+          0,
+          1
+        ],
+        "detail": [
+          {
+            "state": "01b7cff8:1",
+            "slices": 17,
+            "per_slice_cover": [
+              [
+                0,
+                1
+              ],
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              6,
+              9
+            ]
+          },
+          {
+            "state": "2a99f536:1",
+            "slices": 17,
+            "per_slice_cover": [
+              [
+                0,
+                1
+              ],
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              6,
+              9
+            ]
+          },
+          {
+            "state": "5110abd0:1",
+            "slices": 17,
+            "per_slice_cover": [
+              [
+                0,
+                1
+              ],
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              6,
+              9
+            ]
+          },
+          {
+            "state": "c605a94c:28",
+            "slices": 82,
+            "per_slice_cover": [
+              [
+                0,
+                1
+              ]
+            ],
+            "slice_indices_with_any": [
+              6
+            ]
+          }
+        ]
+      },
+      {
+        "question_id": "5cb7289b",
+        "question_type": "dynamic-environment",
+        "phrase_count": 1,
+        "phrases": [
+          "view details"
+        ],
+        "carrier_states": 34,
+        "fat_state_hit": true,
+        "fat_chunk_hit": true,
+        "slice_single_hit": true,
+        "slice_pair_hit": true,
+        "best_single_cover": 1,
+        "best_pair_cover": 1,
+        "phrase_union_over_slices": [
+          0
+        ],
+        "detail": [
+          {
+            "state": "576d210a:7",
+            "slices": 8,
+            "per_slice_cover": [
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              5,
+              6,
+              7
+            ]
+          },
+          {
+            "state": "576d210a:8",
+            "slices": 8,
+            "per_slice_cover": [
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              5,
+              6,
+              7
+            ]
+          },
+          {
+            "state": "639cb243:5",
+            "slices": 8,
+            "per_slice_cover": [
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              5,
+              6,
+              7
+            ]
+          },
+          {
+            "state": "639cb243:7",
+            "slices": 8,
+            "per_slice_cover": [
+              [
+                0
+              ],
+              [
+                0
+              ],
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              5,
+              6,
+              7
+            ]
+          }
+        ]
+      },
+      {
+        "question_id": "6feb33d4",
+        "question_type": "dynamic-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "there is no separate downvote count shown there"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "7195f494",
+        "question_type": "dynamic-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "there is no such tab the active tab is the second tab"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "7ebb0b95",
+        "question_type": "static-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "there is no such module hidden forums and trash are adjacent"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "83a77f9d",
+        "question_type": "dynamic-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "there is no such criterion most commented is the last one in that dropdown"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "866a0f2e",
+        "question_type": "procedure-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "there is no dedicated customer notification field for that workflow on the order detail page"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "86f00073",
+        "question_type": "static-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "there is no such number"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "8c55d6bc",
+        "question_type": "static-environment",
+        "phrase_count": 1,
+        "phrases": [
+          "top 5 most viewed products"
+        ],
+        "carrier_states": 4,
+        "fat_state_hit": true,
+        "fat_chunk_hit": true,
+        "slice_single_hit": true,
+        "slice_pair_hit": true,
+        "best_single_cover": 1,
+        "best_pair_cover": 1,
+        "phrase_union_over_slices": [
+          0
+        ],
+        "detail": [
+          {
+            "state": "2a99f536:2",
+            "slices": 7,
+            "per_slice_cover": [
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              4
+            ]
+          },
+          {
+            "state": "2a99f536:3",
+            "slices": 7,
+            "per_slice_cover": [
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              4
+            ]
+          },
+          {
+            "state": "2a99f536:4",
+            "slices": 7,
+            "per_slice_cover": [
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              4
+            ]
+          },
+          {
+            "state": "2a99f536:5",
+            "slices": 7,
+            "per_slice_cover": [
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              4
+            ]
+          }
+        ]
+      },
+      {
+        "question_id": "98e6d369",
+        "question_type": "static-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "there is no purchase verification field between the reviewer name and the review date"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "a2a71197",
+        "question_type": "procedure-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "this is impossible because our forum does not support sorting posts by best"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "b05cf470",
+        "question_type": "static-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "there is no direct toolbox link for the moderators list on that page"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "bb7ebd5c",
+        "question_type": "procedure-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "there is no such tab this profile page does not have a drafts tab"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "cdc46516",
+        "question_type": "static-environment-abs",
+        "phrase_count": 1,
+        "phrases": [
+          "there is no such tab comments is the last top tab on that profile page"
+        ],
+        "carrier_states": 0,
+        "fat_state_hit": false,
+        "fat_chunk_hit": false,
+        "slice_single_hit": false,
+        "slice_pair_hit": false,
+        "best_single_cover": 0,
+        "best_pair_cover": 0,
+        "phrase_union_over_slices": [],
+        "detail": []
+      },
+      {
+        "question_id": "d3300354",
+        "question_type": "dynamic-environment",
+        "phrase_count": 1,
+        "phrases": [
+          "front page"
+        ],
+        "carrier_states": 1,
+        "fat_state_hit": true,
+        "fat_chunk_hit": true,
+        "slice_single_hit": true,
+        "slice_pair_hit": true,
+        "best_single_cover": 1,
+        "best_pair_cover": 1,
+        "phrase_union_over_slices": [
+          0
+        ],
+        "detail": [
+          {
+            "state": "3331c568:2",
+            "slices": 31,
+            "per_slice_cover": [
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              24
+            ]
+          }
+        ]
+      },
+      {
+        "question_id": "f93031d2",
+        "question_type": "dynamic-environment",
+        "phrase_count": 1,
+        "phrases": [
+          "the order confirmation email was sent"
+        ],
+        "carrier_states": 47,
+        "fat_state_hit": true,
+        "fat_chunk_hit": true,
+        "slice_single_hit": true,
+        "slice_pair_hit": true,
+        "best_single_cover": 1,
+        "best_pair_cover": 1,
+        "phrase_union_over_slices": [
+          0
+        ],
+        "detail": [
+          {
+            "state": "02817e5d:5",
+            "slices": 13,
+            "per_slice_cover": [
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              5
+            ]
+          },
+          {
+            "state": "02817e5d:6",
+            "slices": 13,
+            "per_slice_cover": [
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              5
+            ]
+          },
+          {
+            "state": "02817e5d:7",
+            "slices": 13,
+            "per_slice_cover": [
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              5
+            ]
+          },
+          {
+            "state": "06c70de4:7",
+            "slices": 15,
+            "per_slice_cover": [
+              [
+                0
+              ]
+            ],
+            "slice_indices_with_any": [
+              5
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

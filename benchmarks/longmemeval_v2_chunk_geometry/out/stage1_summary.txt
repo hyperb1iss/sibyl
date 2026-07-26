@@ -1,0 +1,42 @@
+PRIMARY RULE (literal, k=10 items)  and  SECONDARY RULE (135,000-char budget)
+================================================================================================
+
+### enterprise  (measurable questions n=44)
+ranker  arm               @1      @5     @10     @20     @50    @100    @25k    @50k   @135k
+bm25    FAT            0.409   0.500   0.591   0.636   0.682   0.750   0.477   0.477   0.614
+bm25    SLICE          0.114   0.114   0.114   0.182   0.204   0.227   0.182   0.182   0.204
+bm25    SLICE_GOAL     0.182   0.227   0.250   0.273   0.432   0.523   0.273   0.409   0.545
+dense   FAT            0.386   0.523   0.545   0.682   0.818   0.864   0.500   0.545   0.591
+dense   SLICE          0.227   0.273   0.432   0.455   0.545   0.659   0.477   0.500   0.659
+dense   SLICE_GOAL     0.227   0.364   0.409   0.455   0.591   0.659   0.455   0.545   0.636
+rrf     FAT            0.523   0.636   0.659   0.750   0.818   0.864   0.591   0.636   0.682
+rrf     SLICE          0.204   0.318   0.341   0.477   0.500   0.568   0.432   0.432   0.523
+rrf     SLICE_GOAL     0.204   0.409   0.523   0.545   0.659   0.727   0.545   0.591   0.727
+
+  bm25   PRIMARY slice@10 0.114 vs fat@10 0.591 -> CONFIRMED | SECONDARY slice@135k 0.204 vs fat@10 0.591 -> CONFIRMED | budget-matched fat@135k 0.614 | goal-carry@135k 0.545
+  dense  PRIMARY slice@10 0.432 vs fat@10 0.545 -> CONFIRMED | SECONDARY slice@135k 0.659 vs fat@10 0.545 -> refuted | budget-matched fat@135k 0.591 | goal-carry@135k 0.636
+  rrf    PRIMARY slice@10 0.341 vs fat@10 0.659 -> CONFIRMED | SECONDARY slice@135k 0.523 vs fat@10 0.659 -> CONFIRMED | budget-matched fat@135k 0.682 | goal-carry@135k 0.727
+
+  median first-gold rank [bm25]: FAT=4 SLICE=282 SLICE_GOAL=46
+  median first-gold rank [dense]: FAT=1 SLICE=19 SLICE_GOAL=13
+  median first-gold rank [rrf]: FAT=1 SLICE=34 SLICE_GOAL=8
+
+### web  (measurable questions n=48)
+ranker  arm               @1      @5     @10     @20     @50    @100    @25k    @50k   @135k
+bm25    FAT            0.188   0.396   0.500   0.625   0.833   0.917   0.250   0.333   0.500
+bm25    SLICE          0.062   0.062   0.062   0.125   0.167   0.208   0.104   0.146   0.208
+bm25    SLICE_GOAL     0.062   0.167   0.208   0.292   0.500   0.562   0.250   0.479   0.646
+dense   FAT            0.271   0.438   0.521   0.729   0.812   0.854   0.521   0.583   0.708
+dense   SLICE          0.188   0.250   0.292   0.375   0.500   0.604   0.438   0.521   0.646
+dense   SLICE_GOAL     0.229   0.375   0.458   0.500   0.562   0.646   0.542   0.562   0.667
+rrf     FAT            0.500   0.688   0.750   0.812   0.896   0.938   0.688   0.708   0.792
+rrf     SLICE          0.229   0.271   0.292   0.333   0.500   0.583   0.375   0.417   0.604
+rrf     SLICE_GOAL     0.208   0.354   0.458   0.542   0.729   0.812   0.562   0.688   0.812
+
+  bm25   PRIMARY slice@10 0.062 vs fat@10 0.500 -> CONFIRMED | SECONDARY slice@135k 0.208 vs fat@10 0.500 -> CONFIRMED | budget-matched fat@135k 0.500 | goal-carry@135k 0.646
+  dense  PRIMARY slice@10 0.292 vs fat@10 0.521 -> CONFIRMED | SECONDARY slice@135k 0.646 vs fat@10 0.521 -> refuted | budget-matched fat@135k 0.708 | goal-carry@135k 0.667
+  rrf    PRIMARY slice@10 0.292 vs fat@10 0.750 -> CONFIRMED | SECONDARY slice@135k 0.604 vs fat@10 0.750 -> CONFIRMED | budget-matched fat@135k 0.792 | goal-carry@135k 0.812
+
+  median first-gold rank [bm25]: FAT=7 SLICE=302 SLICE_GOAL=32
+  median first-gold rank [dense]: FAT=6 SLICE=40 SLICE_GOAL=8
+  median first-gold rank [rrf]: FAT=1 SLICE=42 SLICE_GOAL=10

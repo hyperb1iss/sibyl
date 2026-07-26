@@ -1,0 +1,110 @@
+{
+  "enterprise": {
+    "domain": "enterprise",
+    "eligible_questions": 21,
+    "probe_d_phrase_home": {
+      "phrase_absent_from_corpus": 15,
+      "phrase_in_tree": 10
+    },
+    "probe_a": {
+      "question_phrase_state_triples": 2211,
+      "single_slice_hit": 2211,
+      "pair_slice_hit": 2211,
+      "single_slice_rate": 1.0,
+      "straddle_rate": 0.0,
+      "misses_sample": [],
+      "miss_total": 0
+    },
+    "probe_b_spans": {
+      "1": {
+        "samples": 3594,
+        "within_single_slice": 1.0,
+        "within_slice_plus_neighbour": 1.0
+      },
+      "2": {
+        "samples": 3594,
+        "within_single_slice": 0.9349,
+        "within_slice_plus_neighbour": 1.0
+      },
+      "3": {
+        "samples": 3594,
+        "within_single_slice": 0.8829,
+        "within_slice_plus_neighbour": 0.9986
+      },
+      "5": {
+        "samples": 3594,
+        "within_single_slice": 0.7827,
+        "within_slice_plus_neighbour": 0.9869
+      },
+      "8": {
+        "samples": 3594,
+        "within_single_slice": 0.6247,
+        "within_slice_plus_neighbour": 0.9524
+      }
+    },
+    "probe_c_parent_child": {
+      "adjacent_pairs": 95802,
+      "same_slice_rate": 1.0,
+      "adjacent_slice_rate": 0.0
+    },
+    "rendered_slice_chars": {
+      "mean": 1172.7,
+      "p90": 1818
+    },
+    "sampled_states": 600
+  },
+  "web": {
+    "domain": "web",
+    "eligible_questions": 22,
+    "probe_d_phrase_home": {
+      "phrase_absent_from_corpus": 19,
+      "phrase_in_tree": 6
+    },
+    "probe_a": {
+      "question_phrase_state_triples": 184,
+      "single_slice_hit": 184,
+      "pair_slice_hit": 184,
+      "single_slice_rate": 1.0,
+      "straddle_rate": 0.0,
+      "misses_sample": [],
+      "miss_total": 0
+    },
+    "probe_b_spans": {
+      "1": {
+        "samples": 3600,
+        "within_single_slice": 1.0,
+        "within_slice_plus_neighbour": 1.0
+      },
+      "2": {
+        "samples": 3594,
+        "within_single_slice": 0.9613,
+        "within_slice_plus_neighbour": 1.0
+      },
+      "3": {
+        "samples": 3594,
+        "within_single_slice": 0.9221,
+        "within_slice_plus_neighbour": 1.0
+      },
+      "5": {
+        "samples": 3594,
+        "within_single_slice": 0.8534,
+        "within_slice_plus_neighbour": 0.9964
+      },
+      "8": {
+        "samples": 3582,
+        "within_single_slice": 0.7231,
+        "within_slice_plus_neighbour": 0.9922
+      }
+    },
+    "probe_c_parent_child": {
+      "adjacent_pairs": 257471,
+      "same_slice_rate": 1.0,
+      "adjacent_slice_rate": 0.0
+    },
+    "rendered_slice_chars": {
+      "mean": 1164.8,
+      "p90": 1413
+    },
+    "sampled_states": 600
+  }
+}

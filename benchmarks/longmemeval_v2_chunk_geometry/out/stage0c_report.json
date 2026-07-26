@@ -1,0 +1,62 @@
+{
+  "enterprise": {
+    "domain": "enterprise",
+    "slices": 83850,
+    "band_adherence": {
+      "under_600": {
+        "n": 24712,
+        "pct": 29.47
+      },
+      "in_600_1200_band": {
+        "n": 35004,
+        "pct": 41.75
+      },
+      "1200_to_2000": {
+        "n": 23483,
+        "pct": 28.01
+      },
+      "over_hard_max": {
+        "n": 651,
+        "pct": 0.78
+      }
+    },
+    "hard_max_overflow": {
+      "n": 651,
+      "pct": 0.776,
+      "max": 4103,
+      "mean_overflow_chars": 840.3
+    },
+    "internal_subtrees_sampled": 95802,
+    "internal_subtree_intact_in_one_slice_pct": 92.74
+  },
+  "web": {
+    "domain": "web",
+    "slices": 63804,
+    "band_adherence": {
+      "in_600_1200_band": {
+        "n": 47784,
+        "pct": 74.89
+      },
+      "over_hard_max": {
+        "n": 543,
+        "pct": 0.85
+      },
+      "under_600": {
+        "n": 6873,
+        "pct": 10.77
+      },
+      "1200_to_2000": {
+        "n": 8604,
+        "pct": 13.49
+      }
+    },
+    "hard_max_overflow": {
+      "n": 543,
+      "pct": 0.851,
+      "max": 2024,
+      "mean_overflow_chars": 5.1
+    },
+    "internal_subtrees_sampled": 262662,
+    "internal_subtree_intact_in_one_slice_pct": 99.08
+  }
+}
