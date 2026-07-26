@@ -5,6 +5,12 @@ sibyl_dir: /opt/sibyl
 # ghcr.io/hyperb1iss/sibyl-api and sibyl-web image tag to run.
 sibyl_version: "1.1.5"
 
+# SurrealDB image to run. Stated here rather than left to the compose
+# fallback so the engine a host runs is a deliberate, reviewable value: an
+# unset variable would otherwise let a checkout's default silently upgrade
+# the database on the next restart, independently of sibyl_version.
+sibyl_surreal_image: "surrealdb/surrealdb:v3.2.3"
+
 # Public hostname Caddy serves and requests a certificate for.
 sibyl_domain: sibyl.hyperbliss.tech
 
