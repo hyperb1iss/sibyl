@@ -1913,10 +1913,15 @@ def _content_for_record(
     row: Mapping[str, object],
     attributes: Mapping[str, Any],
 ) -> str:
+    # For memory-shaped rows the description is a derived blurb: often
+    # content[:500], and for passages one shared summary across every span of an
+    # observation. Either way it cannot stand in for content, so the full-text
+    # carriers are exhausted first. Tasks invert this and are resolved by the
+    # active-work path in tools/context.py rather than here.
     for value in (
+        row.get("content"),
         attributes.get("content"),
         attributes.get("description"),
-        row.get("content"),
         row.get("description"),
         row.get("summary"),
     ):
@@ -2188,10 +2193,12 @@ def _labels_without_entity(node: Any) -> list[str]:
 
 
 def _content_for_node(node: Any, attributes: Mapping[str, Any]) -> str:
+    # Mirrors _content_for_record: full content outranks the truncated
+    # description/summary copies regardless of which carrier holds it.
     for value in (
+        getattr(node, "content", None),
         attributes.get("content"),
         attributes.get("description"),
-        getattr(node, "content", None),
         getattr(node, "description", None),
         getattr(node, "summary", None),
     ):

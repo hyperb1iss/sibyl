@@ -3214,3 +3214,129 @@ def test_query_coverage_refinement_reuses_candidate_text() -> None:
     )
 
     assert calls == ["weak", "strong"]
+
+
+def _truncated_description(content: str) -> str:
+    """Mirror how writers derive a description: a hard prefix of the content."""
+    return content[:500]
+
+
+def test_record_content_outranks_truncated_attribute_description() -> None:
+    """The stored description is a 500-char prefix and must not shadow the row.
+
+    Writers persist ``description`` as ``content[:500]`` while the full text
+    lives in the ``content`` column, so resolving the description first serves a
+    mid-word fragment and makes the rest of the record unreachable.
+    """
+    full_content = "Full decision body. " * 100
+    row = {
+        "uuid": "decision_1",
+        "name": "Decision",
+        "content": full_content,
+        "description": _truncated_description(full_content),
+        "summary": _truncated_description(full_content),
+        "attributes": {"description": _truncated_description(full_content)},
+    }
+
+    resolved = search_module._content_for_record(row, row["attributes"])
+
+    assert resolved == full_content
+    assert len(resolved) > 500
+
+
+def test_node_content_outranks_truncated_attribute_description() -> None:
+    full_content = "Full decision body. " * 100
+    attributes = {"description": _truncated_description(full_content)}
+    node = SimpleNamespace(
+        uuid="decision_1",
+        name="Decision",
+        content=full_content,
+        description=_truncated_description(full_content),
+        summary=_truncated_description(full_content),
+        attributes=attributes,
+    )
+
+    resolved = search_module._content_for_node(node, attributes)
+
+    assert resolved == full_content
+    assert len(resolved) > 500
+
+
+def test_node_record_candidate_serves_full_content_over_description() -> None:
+    """The reorder has to survive the projection, not just the helper."""
+    full_content = "Full decision body. " * 100
+    candidate = search_module._candidate_from_node_record(
+        {
+            "uuid": "decision_1",
+            "name": "Decision",
+            "entity_type": "decision",
+            "group_id": "org-123",
+            "content": full_content,
+            "description": _truncated_description(full_content),
+            "attributes": {"description": _truncated_description(full_content)},
+        },
+        signal=RetrievalSignal.NODE_FULLTEXT,
+        score=0.9,
+    )
+
+    assert candidate.content == full_content
+
+
+def test_record_content_resolution_falls_back_through_every_carrier() -> None:
+    """Preferring content must not break the rows that only have a fallback."""
+    cases: list[tuple[dict[str, object], dict[str, object], str]] = [
+        ({"content": "row content"}, {}, "row content"),
+        ({}, {"content": "attribute content"}, "attribute content"),
+        ({}, {"description": "attribute description"}, "attribute description"),
+        ({"description": "row description"}, {}, "row description"),
+        ({"summary": "row summary"}, {}, "row summary"),
+        ({}, {}, ""),
+    ]
+    for row, attributes, expected in cases:
+        assert search_module._content_for_record({**row, "attributes": attributes}, attributes) == (
+            expected
+        )
+
+
+def test_record_content_resolution_skips_empty_carriers() -> None:
+    """Empty strings are absent values, not a reason to stop resolving."""
+    row = {"content": "", "description": "", "summary": "row summary"}
+    attributes: dict[str, object] = {"content": "", "description": ""}
+
+    assert search_module._content_for_record({**row, "attributes": attributes}, attributes) == (
+        "row summary"
+    )
+
+
+def test_node_content_resolution_falls_back_through_every_carrier() -> None:
+    cases: list[tuple[dict[str, object], dict[str, object], str]] = [
+        ({"content": "node content"}, {}, "node content"),
+        ({}, {"content": "attribute content"}, "attribute content"),
+        ({}, {"description": "attribute description"}, "attribute description"),
+        ({"description": "node description"}, {}, "node description"),
+        ({"summary": "node summary"}, {}, "node summary"),
+        ({}, {}, ""),
+    ]
+    for fields, attributes, expected in cases:
+        node = SimpleNamespace(attributes=attributes, **fields)
+        assert search_module._content_for_node(node, attributes) == expected
+
+
+def test_record_content_column_outranks_attribute_content_copy() -> None:
+    """Pin which content carrier wins when a row and its attributes disagree.
+
+    Storage resolves this the same way: entity hydration coalesces the column
+    first and the schema maintenance pass writes content ?? attributes.content,
+    so free-form metadata must not override the canonical column.
+    """
+    attributes = {"content": "attribute copy"}
+    row = {"uuid": "entity_1", "content": "canonical column", "attributes": attributes}
+
+    assert search_module._content_for_record(row, attributes) == "canonical column"
+
+
+def test_node_content_resolution_skips_empty_carriers() -> None:
+    node = SimpleNamespace(content="", description="", summary="node summary")
+    attributes: dict[str, object] = {"content": "", "description": ""}
+
+    assert search_module._content_for_node(node, attributes) == "node summary"

@@ -1925,6 +1925,84 @@ async def test_lean_metadata_drops_description_equal_to_content(
 
 
 @pytest.mark.asyncio
+async def test_lean_metadata_drops_description_that_only_prefixes_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Serving the full body must not resurrect the truncated copy of it.
+
+    Writers store description as content[:500]. Once retrieval serves the whole
+    body the two stop being equal, so an equality-only check would ship the
+    prefix again as redundant metadata on every item.
+    """
+    full_content = "Full decision body. " * 100
+    responses = {
+        ContextFacet.DECISIONS: [
+            SearchResult(
+                id="decision-1",
+                type="decision",
+                name="Decision",
+                content=full_content,
+                score=0.8,
+                metadata={"entity_type": "decision", "description": full_content[:500]},
+            ),
+            SearchResult(
+                id="decision-2",
+                type="decision",
+                name="Other",
+                content=full_content,
+                score=0.7,
+                metadata={"entity_type": "decision", "description": "An unrelated summary"},
+            ),
+        ],
+    }
+    monkeypatch.setattr(context_module, "context_search", _facet_native_search(responses))
+
+    pack = await compile_context("ship", intent="decide", organization_id="org-123")
+
+    by_id = {item.id: item for item in pack.items}
+    assert by_id["decision-1"].content == full_content
+    assert "description" not in by_id["decision-1"].metadata
+    assert by_id["decision-2"].metadata["description"] == "An unrelated summary"
+
+
+def test_active_work_item_serves_live_description_over_stale_content() -> None:
+    """Tasks invert the usual content/description relationship.
+
+    Task.set_entity_fields (models/tasks.py:110-118) seeds content from
+    description at creation, and _build_update_data (routes/tasks.py:765-780)
+    carries no content key, so every description edit leaves content frozen at
+    the create-time text. Reading content first would serve the stale copy.
+    """
+    entity = SimpleNamespace(
+        id="task-1",
+        name="Ship the fix",
+        status="doing",
+        entity_type="task",
+        description="CORRECTED: the real cause is the error sanitizer.",
+        content="Original premise, frozen at create time and since retracted.",
+    )
+
+    item = context_module._item_from_active_entity(entity)
+
+    assert item.content == "CORRECTED: the real cause is the error sanitizer."
+    assert item.facet is ContextFacet.ACTIVE_WORK
+
+
+def test_active_work_item_falls_back_to_content_without_description() -> None:
+    """The create-time snapshot is still the only text when description is gone."""
+    entity = SimpleNamespace(
+        id="task-2",
+        name="Plan the work",
+        status="blocked",
+        entity_type="task",
+        description="",
+        content="Only a content snapshot",
+    )
+
+    assert context_module._item_from_active_entity(entity).content == "Only a content snapshot"
+
+
+@pytest.mark.asyncio
 async def test_completed_epics_route_to_prior_art(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
