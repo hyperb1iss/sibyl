@@ -381,10 +381,37 @@ class SibylClient:
         return False
 
     def _default_headers(self) -> dict[str, str]:
-        headers: dict[str, str] = {"Content-Type": "application/json"}
+        from sibyl_cli.version_drift import client_version
+        from sibyl_core.version_contract import CLIENT_VERSION_HEADER
+
+        version = client_version()
+        headers: dict[str, str] = {
+            "Content-Type": "application/json",
+            # Named so the server can log or refuse stale callers, and so
+            # access logs show which clients are in the field.
+            CLIENT_VERSION_HEADER: version,
+            "User-Agent": f"sibyl-dev/{version}",
+        }
         if self.auth_token:
             headers["Authorization"] = f"Bearer {self.auth_token}"
         return headers
+
+    def _check_version_drift(self, response: httpx.Response) -> None:
+        """Report client/server drift, and refuse to run below a declared floor."""
+        from sibyl_cli.version_drift import ClientTooOldError, check_response_headers
+
+        try:
+            check_response_headers(response.headers, base_url=self.base_url)
+        except ClientTooOldError as exc:
+            raise SibylClientError(
+                str(exc),
+                status_code=426,
+                error_code="client_too_old",
+                remediation=(
+                    "Run `sibyl update` to upgrade, or `git pull && moon run install-dev` "
+                    "for a source install."
+                ),
+            ) from exc
 
     async def _silent_local_relogin(self, creds: dict[str, Any]) -> tuple[bool, str | None]:
         email = str(creds.get("local_login_email") or "").strip()
@@ -643,6 +670,7 @@ class SibylClient:
                 params=params,
                 headers=headers,
             )
+            self._check_version_drift(response)
 
             # Handle 401 - try to refresh token and retry once
             if response.status_code == 401 and _retry_on_401:
