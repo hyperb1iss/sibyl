@@ -62,7 +62,7 @@ up, and nothing in CI imports it — `root:inventory-lint` only lints statically
 
 | Tier | Needs | Scripts |
 | --- | --- | --- |
-| Cheap | standard library only, plus the in-repo `benchmarks/longmemeval_v2_diagnostics.py` | `stage0`, `stage0b`, `stage0c`, `stage0d`, `stage0e`, `stage0f`, `stage0g`, `stage0h`, `summarize` |
+| Cheap | standard library only, plus the in-repo `benchmarks/longmemeval_v2_diagnostics.py` | `stage0`, `stage0b`, `stage0c`, `stage0d`, `stage0e`, `stage0f`, `stage0g`, `stage0h`, `stage2`, `summarize` |
 | Middle | `numpy`, `scipy`, `scikit-learn` | `stage1b` |
 | Heavy | the middle tier plus `sentence-transformers` and `torch` | `stage1` |
 
@@ -96,6 +96,7 @@ export SIBYL_A1_DATA_ROOT=/path/to/.moon/cache/benchmarks/longmemeval-v2-full
 python benchmarks/longmemeval_v2_chunk_geometry/stage0c.py   # cheapest, stdlib only
 python benchmarks/longmemeval_v2_chunk_geometry/stage0.py    # slowest Stage 0 pass
 python benchmarks/longmemeval_v2_chunk_geometry/stage0h.py   # part-confined arms, ~25s
+python benchmarks/longmemeval_v2_chunk_geometry/stage2.py    # pack-knob sweep, stdlib BM25
 python benchmarks/longmemeval_v2_chunk_geometry/stage1.py    # needs the ML stack
 python benchmarks/longmemeval_v2_chunk_geometry/summarize.py # renders the Stage 1 verdict table
 ```
@@ -122,6 +123,7 @@ the receipts.
 | `stage0g.py` | v1 vs v2 boundary rules side by side, re-checking band, count, and exposure. | "Boundary rules the data argues for, all verified to preserve exposure and the zero straddle rate." |
 | `stage1.py` | Offline selection simulation. Arms FAT / SLICE / SLICE_GOAL against BM25, dense (local MiniLM), and RRF; recall at both item and character budgets. | The selection-dilution result, the goal-carry lift (RRF 0.727 / 0.812 vs fat 0.682 / 0.792), and the character-budget argument. |
 | `stage1b.py` | Falsification: strip the trajectory preamble from the fat arm and see whether its BM25 lead collapses. | "the mechanism is BM25 document length, not semantics — stripping the goal preamble from fat chunks barely moves them." |
+| `stage2.py` | The two pack-composition knobs on the production passage substrate: `max_chunks_per_trajectory` x evidence-lane depth, at the staged gate geometry. Ranking-free cap ceiling, a stdlib BM25 grid, and the loss cause behind every miss. | Sets both knobs for the paid slice-substrate gate run, and records which enforcement paths a fast-mode run actually has. |
 | `summarize.py` | Renders the Stage 1 tables and evaluates the pre-registered rules. | Produces `out/stage1_summary.txt`. |
 
 Support modules: `slicer.py` (the v1 cutter and its constants), `slicer_v2.py`
@@ -194,6 +196,179 @@ unreachable here.
 `out/STAGE1_PREREGISTRATION.md` was written **before** `stage1.py` first ran and
 fixes the decision rule, the falsifiers, and the underpowered-n caveat in
 advance. Read it before reinterpreting any Stage 1 number.
+
+## What the pack knobs are worth (`stage2`)
+
+Every Stage 0 number is an oracle number. `stage2` is the first stage that
+composes a **pack**: the ranked, capped, budgeted set of passages a reader
+would actually receive, at the geometry the slice-substrate gate is staged to
+run (`max_context_items 28`, `evidence_char_budget 48000`). It exists because
+two caps were about to be set by guess, and both were tuned when one retrieval
+unit was one whole state.
+
+### Which caps a fast-mode run actually has
+
+The first result is a code reading, not a measurement, and it moved what the
+rest of the stage sweeps. Three of the four paths below are dead in the
+configuration the gate runs (`retrieval_mode` `fast`, the campaign's winning
+arm); the third is the one that actually binds.
+
+- **`max_results_per_source` is inert in fast mode.** The adapter puts
+  `max_chunks_per_trajectory` on the wire as `max_results_per_source`, but its
+  only consumer is `_fuse_context_evidence` (`apps/api/src/sibyl/api/routes/context.py`),
+  reached only from `_execute_accurate_context_evidence_search`. A fast-mode run
+  sends the field and nothing reads it. The knob's one live enforcement is the
+  eval adapter's `_select_diverse_results`, which **drops** over-cap rows where
+  the server would have deferred and backfilled them.
+- **`MAX_CANDIDATES_PER_SIGNAL` cannot reach a passage.** It bounds
+  `CandidateLimits` for `build_context_retrieval_plan` / `context_search`, whose
+  only non-test caller is `sibyl_core/tools/context.py` serving context-pack
+  *facet sections*. The evidence lane goes `execute_search_request` ->
+  `tools.search.search` -> `hybrid_search`, which constructs no `CandidateLimits`
+  and reads candidates at `limit * 3`. Sections cannot carry a passage either:
+  `_types_for_facets` unions `FACET_TYPES` into a hard type filter and no entry
+  there names a passage, and `context_pack_to_search_results` then admits only
+  note / procedure / error_pattern / event. **Sweeping it at {8, 16, 24} would
+  have bought nothing and widened every facet read for every caller.**
+- **The seed budget the passage lane really has** is the evidence request's own
+  `limit`, `min(max(search_limit, max_context_items), 50)`, applied in
+  `tools/search.py` as `all_results[offset : offset + limit]`. That is the axis
+  `stage2` sweeps in place of the signal cap, and `--search-limit` is the flag
+  that moves it.
+- **`PASSAGE_WINDOW_UNITS = 3` is accurate-mode only.** `select_operational_source_span`
+  is reached only through `expand_operational_source_evidence`, whose single
+  call site is inside the accurate path. A fast-mode pack holds individually
+  ranked passages, so the 3-adjacent window that `stage0e`/`stage0h` measured is
+  not what a fast gate run composes. The window's value has to come from the
+  ranker pulling neighbours in on their own merits.
+
+### Baseline first
+
+The stage rebuilds the production substrate from `stage0h.production_slices` and
+reproduces four committed numbers from its own structures before any new arm is
+read: **84,968 / 65,573 passages, 44 / 48 measurable questions, single-passage
+exposure 0.9318 / 0.9792 and 3-adjacent exposure 0.9545 / 1.0**, all identical
+to `out/stage0h_report.json`. The stdlib BM25 is checked separately against
+Stage 1's scikit-learn scorer: **0.2045 / 0.1667 at depth 50 against Stage 1's
+SLICE bm25 recall@50 of 0.204 / 0.167**, on a slightly different cut.
+
+### `max_chunks_per_trajectory`: the exposure curve flattens at 2
+
+The cap ceiling arm is ranking-free. For a cap it asks whether *any* selection
+holding at most that many passages per trajectory covers the gold, by exact
+search over per-trajectory coverage masks, so whatever it cannot reach no ranker
+can reach either.
+
+| cap | 1 | 2 | 4 | 8 | 16 | none |
+| --- | --- | --- | --- | --- | --- | --- |
+| enterprise | 0.9318 | 0.9545 | 0.9545 | 0.9545 | 0.9545 | 0.9545 |
+| web | 0.9792 | 1.0 | 1.0 | 1.0 | 1.0 | 1.0 |
+
+**Flat from 2 onward, and 2 is exactly the whole-state ceiling** — the same
+0.9545 / 1.0 `stage0h` measured for a 3-adjacent window. The mechanism is that
+gold is not spread out: **41 of 44 enterprise and 47 of 48 web questions need
+exactly one passage of one trajectory**, one question each needs two, and two
+enterprise questions have gold in no single trajectory at any cap — the same
+count `stage0h` records as `no_single_state_carries_gold`, though this stage
+does not check that they are the same two, because a whole state's evidence text
+includes action and thought lines that no passage carries. Under BM25 the cap
+excludes reachable gold in **one question, only at cap 1 or 2**, and never at cap
+4 or above in either domain.
+
+So the guessed 8 is not wrong on exposure. Nothing above 2 is. **The cap's real
+cost is payload**, and at the staged geometry it is severe (depth 28, mean chars
+of the composed pack against a 48,000 budget):
+
+| cap | 2 | 4 | 8 | 16 | none |
+| --- | --- | --- | --- | --- | --- |
+| enterprise | 7,487 | 14,456 | 27,683 | 40,676 | 45,630 |
+| web | 18,485 | 26,365 | 33,391 | 39,308 | 39,976 |
+
+At the shipped default of 2 an enterprise pack spends **16% of the budget the
+run was configured for**; at the guessed 8 it spends 58%. The cause is that BM25
+top-k over passages concentrates: the top 28 span **1.73 enterprise trajectories
+on average**.
+
+The source-diversity argument for keeping the cap low does not survive contact
+with `_select_diverse_results`. Its first pass admits at most one row per
+trajectory *before* the cap can bind, so every distinct trajectory in the pool is
+represented at any cap. Measured: **the mean number of distinct trajectories in
+the pack is identical at every cap** — 1.73 enterprise, 7.79 web at depth 28,
+unchanged from cap 1 to uncapped. The cap adds no diversity the first pass has
+not already delivered; it only truncates the second pass.
+
+**Recommendation: `--max-chunks-per-trajectory 50`.** Fifty is the
+`max_results_per_source` schema ceiling and is effectively uncapped at any legal
+depth, which makes the character budget the one thing bounding the pack — which
+is what the budget was added for. 16 is the conservative alternative and still
+leaves 5,000 enterprise characters unspent. Anything at or below 8 hands the
+substrate arm a payload handicap against a fat baseline that renders up to
+`max_context_total_chars`, and a paid run cannot tell that apart from slicing
+not working.
+
+### Evidence-lane depth: still climbing at the schema maximum
+
+Exposure over the depth axis, at cap 8 (identical at every cap above 4):
+
+| depth | 8 | 16 | 24 | 28 | 50 |
+| --- | --- | --- | --- | --- | --- |
+| enterprise | 0.1364 | 0.1591 | 0.1818 | 0.1818 | 0.2045 |
+| web | 0.0833 | 0.1042 | 0.1250 | 0.1458 | 0.1667 |
+
+Monotone, and **not flattening at 50** in either domain. Depth costs no money —
+it is a wider read on a corpus already on disk — so **recommendation:
+`--search-limit 50`**, which raises the evidence request's `limit` to the schema
+maximum independently of `max_context_items`.
+
+The caveat belongs to the ranker, not the knob. BM25 alone is the weakest arm
+Stage 1 measured on a sliced substrate (median first-gold rank 282 / 302 against
+19 / 40 dense), so these absolute numbers are a floor, and a hybrid lane would
+flatten this curve earlier than 50. That is why the cap recommendation is read
+off the ranking-free ceiling and only the depth recommendation is read off BM25,
+where being conservative means recommending *more* depth than needed rather than
+less.
+
+### Where the knobs collide with everything else
+
+- **Depth and the character budget trade.** Once the cap stops binding, depth 50
+  fills the budget: enterprise 46,498 of 48,000, web 46,956. At that point web
+  loses one question to `char_budget_excluded_reachable_gold` — the same question
+  cap 2 loses to the cap, so exposure is unchanged, but the crossover is real and
+  a larger budget would move it.
+- **48,000 is not the largest legal budget, and it is not payload-matched to the
+  comparator.** `validate_evidence_char_budget` rejects only a budget above
+  `max_context_total_chars`, which defaults to 60,000 — and 60,000 is what the
+  fat baseline's renderer already spends, since eight whole states compact down
+  to that cap. At 60,000 the passage pack reaches **58,596 enterprise / 57,257
+  web characters** against 46,498 / 46,956 at 48,000. Exposure does not move
+  under BM25 (24,000, 48,000 and 60,000 all score 0.2045 / 0.1667, the arm being
+  ranking-limited), but the gate is a paid comparison of reader payloads, and
+  budgeting the substrate arm 20% under its comparator is a handicap chosen by
+  default rather than by measurement.
+- **The pinned note lane spends the budget first.** `TYPED_NOTE_RESERVATION_ITEMS`
+  is three items, and those characters come off the top. Three notes of 4,000
+  characters leave the passage lane 36,000 of 48,000. Exposure does not move at
+  any probe size here because the BM25 arm is ranking-limited well before the
+  budget binds, so this is arithmetic to carry forward rather than a measured
+  loss: the distilled notes are not in the frozen catalogs and their size on this
+  corpus is unmeasured.
+- **Neighbour stitch is inert for passages.** `_neighbor_results` requires an
+  integer `longmemeval_v2_chunk_index`, which a passage does not carry, so
+  `--neighbor-stitch-items 2` silently does nothing on a passage arm.
+- **A metadata cleanup could tighten the cap to one passage per state.** The
+  second diversity pass refuses a row whose `(trajectory, state)` key is already
+  present, and it never fires today only because `_result_diversity_key` looks
+  for `longmemeval_v2_state_index`, which passages do not carry. They do carry
+  `observation_ordinal`, which the eval sets to the state index, and
+  `_source_support_state` already recovers a state index that way. Teaching the
+  diversity key the same trick would cap the pack at **one passage per state**,
+  far below any `max_chunks_per_trajectory`, while reading like tidying.
+- **The one server-side per-source cap in fast mode is not this knob.**
+  `reserve_distilled_notes` defaults true and the adapter never overrides it, so
+  a fast run also composes the note lane, and `compose_operational_evidence`
+  holds the typed lane to one result per `operational_source_id`. That cap is
+  hardwired, applies only to notes, and moves nothing measured here — but "fast
+  mode does no server-side source capping at all" is the wrong summary.
 
 ## What is committed, and what is not
 

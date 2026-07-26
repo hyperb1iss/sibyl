@@ -1,0 +1,1023 @@
+{
+  "enterprise": {
+    "domain": "enterprise",
+    "baseline": {
+      "source": "out/stage0h_report.json",
+      "measured": {
+        "production_slices": 84968,
+        "measurable": 44,
+        "production_w1": 0.9318,
+        "production_w3": 0.9545
+      },
+      "committed": {
+        "production_slices": 84968,
+        "measurable": 44,
+        "production_w1": 0.9318,
+        "production_w3": 0.9545
+      },
+      "reproduces": true,
+      "stage1_bm25_slice_at_50": {
+        "source": "out/stage1_summary.txt",
+        "measured": 0.2045,
+        "committed": 0.204
+      }
+    },
+    "shipped_enforcement": {
+      "max_chunks_per_trajectory": "wire value reaches `max_results_per_source`, whose only consumer is `_fuse_context_evidence` on the accurate path; a fast-mode run enforces it solely in the adapter's `_select_diverse_results`",
+      "max_candidates_per_signal": "bounds `build_context_retrieval_plan`, which serves context-pack facet sections; the evidence lane runs `execute_search_request` -> `tools.search.search` -> `hybrid_search` and never constructs a `CandidateLimits`, and no `FACET_TYPES` entry names a passage",
+      "evidence_lane_depth": "`min(max(search_limit, max_context_items), 50)`, applied as `all_results[offset : offset + limit]`; this is the seed budget the passage lane actually has",
+      "passage_window_units": "`select_operational_source_span` is reached only through `expand_operational_source_evidence`, whose single call site is the accurate path, so a fast-mode pack holds individually ranked passages rather than 3-adjacent windows"
+    },
+    "substrate": {
+      "passages": 84968,
+      "trajectories": 100,
+      "evidence_parts": 6387,
+      "mean_passage_chars": 1107.1,
+      "max_passage_chars": 4384,
+      "measurable": 44
+    },
+    "gate_geometry": {
+      "max_context_items": 28,
+      "char_budget": 48000,
+      "note_reservation_items": 3
+    },
+    "mechanism": {
+      "gold_carrying_trajectories": {
+        "1": 5,
+        "10": 1,
+        "12": 1,
+        "13": 1,
+        "14": 1,
+        "16": 2,
+        "2": 2,
+        "21": 1,
+        "26": 1,
+        "3": 3,
+        "30": 2,
+        "31": 1,
+        "32": 1,
+        "4": 1,
+        "43": 1,
+        "51": 1,
+        "52": 1,
+        "57": 1,
+        "58": 1,
+        "6": 1,
+        "67": 5,
+        "7": 2,
+        "70": 1,
+        "79": 1,
+        "8": 2,
+        "82": 4
+      },
+      "trajectories_covering_all_gold_alone": {
+        "0": 2,
+        "1": 5,
+        "11": 1,
+        "12": 1,
+        "13": 1,
+        "16": 1,
+        "18": 1,
+        "2": 2,
+        "21": 1,
+        "26": 1,
+        "3": 4,
+        "30": 2,
+        "32": 1,
+        "4": 1,
+        "43": 1,
+        "5": 2,
+        "51": 1,
+        "57": 1,
+        "58": 1,
+        "6": 1,
+        "67": 5,
+        "68": 1,
+        "7": 1,
+        "8": 1,
+        "82": 4,
+        "9": 1
+      },
+      "passages_of_one_trajectory_needed": {
+        "1": 41,
+        "2": 1,
+        "no_single_trajectory_covers": 2
+      },
+      "smallest_trajectory_cap_that_reaches_gold": {
+        "1": 44
+      },
+      "passages_the_cheapest_covering_selection_uses": {
+        "1": 38,
+        "2": 5,
+        "3": 1
+      }
+    },
+    "cap_ceiling": {
+      "cap=1": {
+        "exposure_any_source": 1.0,
+        "exposure_single_source": 0.9318,
+        "max_passages_a_covering_selection_needs": 3
+      },
+      "cap=2": {
+        "exposure_any_source": 1.0,
+        "exposure_single_source": 0.9545,
+        "max_passages_a_covering_selection_needs": 3
+      },
+      "cap=4": {
+        "exposure_any_source": 1.0,
+        "exposure_single_source": 0.9545,
+        "max_passages_a_covering_selection_needs": 3
+      },
+      "cap=8": {
+        "exposure_any_source": 1.0,
+        "exposure_single_source": 0.9545,
+        "max_passages_a_covering_selection_needs": 3
+      },
+      "cap=16": {
+        "exposure_any_source": 1.0,
+        "exposure_single_source": 0.9545,
+        "max_passages_a_covering_selection_needs": 3
+      },
+      "cap=none": {
+        "exposure_any_source": 1.0,
+        "exposure_single_source": 0.9545,
+        "max_passages_a_covering_selection_needs": 3
+      }
+    },
+    "bm25_grid": {
+      "cap=1|depth=8": {
+        "exposure": 0.1364,
+        "mean_pack_items": 1.2,
+        "mean_pack_trajectories": 1.2,
+        "mean_pack_chars": 2824.3,
+        "budget_headroom_chars": 45175.7,
+        "loss_reasons": {
+          "covered": 6,
+          "search_depth_never_reached_gold": 38
+        }
+      },
+      "cap=1|depth=16": {
+        "exposure": 0.1364,
+        "mean_pack_items": 1.48,
+        "mean_pack_trajectories": 1.48,
+        "mean_pack_chars": 3452.4,
+        "budget_headroom_chars": 44547.6,
+        "loss_reasons": {
+          "covered": 6,
+          "search_depth_never_reached_gold": 37,
+          "trajectory_cap_excluded_reachable_gold": 1
+        }
+      },
+      "cap=1|depth=24": {
+        "exposure": 0.1591,
+        "mean_pack_items": 1.68,
+        "mean_pack_trajectories": 1.68,
+        "mean_pack_chars": 3868.8,
+        "budget_headroom_chars": 44131.2,
+        "loss_reasons": {
+          "covered": 7,
+          "search_depth_never_reached_gold": 36,
+          "trajectory_cap_excluded_reachable_gold": 1
+        }
+      },
+      "cap=1|depth=28": {
+        "exposure": 0.1591,
+        "mean_pack_items": 1.73,
+        "mean_pack_trajectories": 1.73,
+        "mean_pack_chars": 3922.8,
+        "budget_headroom_chars": 44077.2,
+        "loss_reasons": {
+          "covered": 7,
+          "search_depth_never_reached_gold": 36,
+          "trajectory_cap_excluded_reachable_gold": 1
+        }
+      },
+      "cap=1|depth=50": {
+        "exposure": 0.1818,
+        "mean_pack_items": 2.2,
+        "mean_pack_trajectories": 2.2,
+        "mean_pack_chars": 4935.0,
+        "budget_headroom_chars": 43065.0,
+        "loss_reasons": {
+          "covered": 8,
+          "search_depth_never_reached_gold": 35,
+          "trajectory_cap_excluded_reachable_gold": 1
+        }
+      },
+      "cap=2|depth=8": {
+        "exposure": 0.1364,
+        "mean_pack_items": 2.23,
+        "mean_pack_trajectories": 1.2,
+        "mean_pack_chars": 5321.7,
+        "budget_headroom_chars": 42678.3,
+        "loss_reasons": {
+          "covered": 6,
+          "search_depth_never_reached_gold": 38
+        }
+      },
+      "cap=2|depth=16": {
+        "exposure": 0.1364,
+        "mean_pack_items": 2.75,
+        "mean_pack_trajectories": 1.48,
+        "mean_pack_chars": 6663.4,
+        "budget_headroom_chars": 41336.6,
+        "loss_reasons": {
+          "covered": 6,
+          "search_depth_never_reached_gold": 37,
+          "trajectory_cap_excluded_reachable_gold": 1
+        }
+      },
+      "cap=2|depth=24": {
+        "exposure": 0.1591,
+        "mean_pack_items": 3.09,
+        "mean_pack_trajectories": 1.68,
+        "mean_pack_chars": 7406.6,
+        "budget_headroom_chars": 40593.4,
+        "loss_reasons": {
+          "covered": 7,
+          "search_depth_never_reached_gold": 36,
+          "trajectory_cap_excluded_reachable_gold": 1
+        }
+      },
+      "cap=2|depth=28": {
+        "exposure": 0.1591,
+        "mean_pack_items": 3.16,
+        "mean_pack_trajectories": 1.73,
+        "mean_pack_chars": 7487.0,
+        "budget_headroom_chars": 40513.0,
+        "loss_reasons": {
+          "covered": 7,
+          "search_depth_never_reached_gold": 36,
+          "trajectory_cap_excluded_reachable_gold": 1
+        }
+      },
+      "cap=2|depth=50": {
+        "exposure": 0.1818,
+        "mean_pack_items": 4.07,
+        "mean_pack_trajectories": 2.2,
+        "mean_pack_chars": 9459.9,
+        "budget_headroom_chars": 38540.1,
+        "loss_reasons": {
+          "covered": 8,
+          "search_depth_never_reached_gold": 35,
+          "trajectory_cap_excluded_reachable_gold": 1
+        }
+      },
+      "cap=4|depth=8": {
+        "exposure": 0.1364,
+        "mean_pack_items": 4.25,
+        "mean_pack_trajectories": 1.2,
+        "mean_pack_chars": 10295.2,
+        "budget_headroom_chars": 37704.8,
+        "loss_reasons": {
+          "covered": 6,
+          "search_depth_never_reached_gold": 38
+        }
+      },
+      "cap=4|depth=16": {
+        "exposure": 0.1591,
+        "mean_pack_items": 5.2,
+        "mean_pack_trajectories": 1.48,
+        "mean_pack_chars": 13010.3,
+        "budget_headroom_chars": 34989.7,
+        "loss_reasons": {
+          "covered": 7,
+          "search_depth_never_reached_gold": 37
+        }
+      },
+      "cap=4|depth=24": {
+        "exposure": 0.1818,
+        "mean_pack_items": 5.77,
+        "mean_pack_trajectories": 1.68,
+        "mean_pack_chars": 14319.6,
+        "budget_headroom_chars": 33680.4,
+        "loss_reasons": {
+          "covered": 8,
+          "search_depth_never_reached_gold": 36
+        }
+      },
+      "cap=4|depth=28": {
+        "exposure": 0.1818,
+        "mean_pack_items": 5.86,
+        "mean_pack_trajectories": 1.73,
+        "mean_pack_chars": 14455.6,
+        "budget_headroom_chars": 33544.4,
+        "loss_reasons": {
+          "covered": 8,
+          "search_depth_never_reached_gold": 36
+        }
+      },
+      "cap=4|depth=50": {
+        "exposure": 0.2045,
+        "mean_pack_items": 7.3,
+        "mean_pack_trajectories": 2.2,
+        "mean_pack_chars": 17711.6,
+        "budget_headroom_chars": 30288.4,
+        "loss_reasons": {
+          "covered": 9,
+          "search_depth_never_reached_gold": 35
+        }
+      },
+      "cap=8|depth=8": {
+        "exposure": 0.1364,
+        "mean_pack_items": 8.0,
+        "mean_pack_trajectories": 1.2,
+        "mean_pack_chars": 19667.9,
+        "budget_headroom_chars": 28332.1,
+        "loss_reasons": {
+          "covered": 6,
+          "search_depth_never_reached_gold": 38
+        }
+      },
+      "cap=8|depth=16": {
+        "exposure": 0.1591,
+        "mean_pack_items": 9.64,
+        "mean_pack_trajectories": 1.48,
+        "mean_pack_chars": 24652.4,
+        "budget_headroom_chars": 23347.6,
+        "loss_reasons": {
+          "covered": 7,
+          "search_depth_never_reached_gold": 37
+        }
+      },
+      "cap=8|depth=24": {
+        "exposure": 0.1818,
+        "mean_pack_items": 10.5,
+        "mean_pack_trajectories": 1.68,
+        "mean_pack_chars": 26891.8,
+        "budget_headroom_chars": 21108.2,
+        "loss_reasons": {
+          "covered": 8,
+          "search_depth_never_reached_gold": 36
+        }
+      },
+      "cap=8|depth=28": {
+        "exposure": 0.1818,
+        "mean_pack_items": 10.86,
+        "mean_pack_trajectories": 1.73,
+        "mean_pack_chars": 27683.0,
+        "budget_headroom_chars": 20317.0,
+        "loss_reasons": {
+          "covered": 8,
+          "search_depth_never_reached_gold": 36
+        }
+      },
+      "cap=8|depth=50": {
+        "exposure": 0.2045,
+        "mean_pack_items": 12.75,
+        "mean_pack_trajectories": 2.2,
+        "mean_pack_chars": 32278.8,
+        "budget_headroom_chars": 15721.2,
+        "loss_reasons": {
+          "covered": 9,
+          "search_depth_never_reached_gold": 35
+        }
+      },
+      "cap=16|depth=8": {
+        "exposure": 0.1364,
+        "mean_pack_items": 8.0,
+        "mean_pack_trajectories": 1.2,
+        "mean_pack_chars": 19667.9,
+        "budget_headroom_chars": 28332.1,
+        "loss_reasons": {
+          "covered": 6,
+          "search_depth_never_reached_gold": 38
+        }
+      },
+      "cap=16|depth=16": {
+        "exposure": 0.1591,
+        "mean_pack_items": 14.57,
+        "mean_pack_trajectories": 1.48,
+        "mean_pack_chars": 36421.3,
+        "budget_headroom_chars": 11578.7,
+        "loss_reasons": {
+          "covered": 7,
+          "search_depth_never_reached_gold": 37
+        }
+      },
+      "cap=16|depth=24": {
+        "exposure": 0.1818,
+        "mean_pack_items": 16.09,
+        "mean_pack_trajectories": 1.68,
+        "mean_pack_chars": 39930.7,
+        "budget_headroom_chars": 8069.3,
+        "loss_reasons": {
+          "covered": 8,
+          "search_depth_never_reached_gold": 36
+        }
+      },
+      "cap=16|depth=28": {
+        "exposure": 0.1818,
+        "mean_pack_items": 16.48,
+        "mean_pack_trajectories": 1.73,
+        "mean_pack_chars": 40676.1,
+        "budget_headroom_chars": 7323.9,
+        "loss_reasons": {
+          "covered": 8,
+          "search_depth_never_reached_gold": 36
+        }
+      },
+      "cap=16|depth=50": {
+        "exposure": 0.2045,
+        "mean_pack_items": 17.91,
+        "mean_pack_trajectories": 2.2,
+        "mean_pack_chars": 43663.0,
+        "budget_headroom_chars": 4337.0,
+        "loss_reasons": {
+          "covered": 9,
+          "search_depth_never_reached_gold": 35
+        }
+      },
+      "cap=none|depth=8": {
+        "exposure": 0.1364,
+        "mean_pack_items": 8.0,
+        "mean_pack_trajectories": 1.2,
+        "mean_pack_chars": 19667.9,
+        "budget_headroom_chars": 28332.1,
+        "loss_reasons": {
+          "covered": 6,
+          "search_depth_never_reached_gold": 38
+        }
+      },
+      "cap=none|depth=16": {
+        "exposure": 0.1591,
+        "mean_pack_items": 14.57,
+        "mean_pack_trajectories": 1.48,
+        "mean_pack_chars": 36421.3,
+        "budget_headroom_chars": 11578.7,
+        "loss_reasons": {
+          "covered": 7,
+          "search_depth_never_reached_gold": 37
+        }
+      },
+      "cap=none|depth=24": {
+        "exposure": 0.1818,
+        "mean_pack_items": 18.25,
+        "mean_pack_trajectories": 1.68,
+        "mean_pack_chars": 44572.1,
+        "budget_headroom_chars": 3427.9,
+        "loss_reasons": {
+          "covered": 8,
+          "search_depth_never_reached_gold": 36
+        }
+      },
+      "cap=none|depth=28": {
+        "exposure": 0.1818,
+        "mean_pack_items": 18.84,
+        "mean_pack_trajectories": 1.73,
+        "mean_pack_chars": 45630.1,
+        "budget_headroom_chars": 2369.9,
+        "loss_reasons": {
+          "covered": 8,
+          "search_depth_never_reached_gold": 36
+        }
+      },
+      "cap=none|depth=50": {
+        "exposure": 0.2045,
+        "mean_pack_items": 19.41,
+        "mean_pack_trajectories": 2.2,
+        "mean_pack_chars": 46497.8,
+        "budget_headroom_chars": 1502.2,
+        "loss_reasons": {
+          "covered": 9,
+          "search_depth_never_reached_gold": 35
+        }
+      }
+    },
+    "char_budget_probe": {
+      "24000": {
+        "exposure": 0.2045,
+        "mean_pack_items": 10.55,
+        "mean_pack_chars": 22692.4
+      },
+      "48000": {
+        "exposure": 0.2045,
+        "mean_pack_items": 19.41,
+        "mean_pack_chars": 46497.8
+      },
+      "60000": {
+        "exposure": 0.2045,
+        "mean_pack_items": 23.82,
+        "mean_pack_chars": 58595.9
+      }
+    },
+    "note_lane_interaction": {
+      "0": {
+        "passage_budget_chars": 48000,
+        "exposure": 0.1818
+      },
+      "1000": {
+        "passage_budget_chars": 45000,
+        "exposure": 0.1818
+      },
+      "2000": {
+        "passage_budget_chars": 42000,
+        "exposure": 0.1818
+      },
+      "4000": {
+        "passage_budget_chars": 36000,
+        "exposure": 0.1818
+      }
+    }
+  },
+  "web": {
+    "domain": "web",
+    "baseline": {
+      "source": "out/stage0h_report.json",
+      "measured": {
+        "production_slices": 65573,
+        "measurable": 48,
+        "production_w1": 0.9792,
+        "production_w3": 1.0
+      },
+      "committed": {
+        "production_slices": 65573,
+        "measurable": 48,
+        "production_w1": 0.9792,
+        "production_w3": 1.0
+      },
+      "reproduces": true,
+      "stage1_bm25_slice_at_50": {
+        "source": "out/stage1_summary.txt",
+        "measured": 0.1667,
+        "committed": 0.167
+      }
+    },
+    "shipped_enforcement": {
+      "max_chunks_per_trajectory": "wire value reaches `max_results_per_source`, whose only consumer is `_fuse_context_evidence` on the accurate path; a fast-mode run enforces it solely in the adapter's `_select_diverse_results`",
+      "max_candidates_per_signal": "bounds `build_context_retrieval_plan`, which serves context-pack facet sections; the evidence lane runs `execute_search_request` -> `tools.search.search` -> `hybrid_search` and never constructs a `CandidateLimits`, and no `FACET_TYPES` entry names a passage",
+      "evidence_lane_depth": "`min(max(search_limit, max_context_items), 50)`, applied as `all_results[offset : offset + limit]`; this is the seed budget the passage lane actually has",
+      "passage_window_units": "`select_operational_source_span` is reached only through `expand_operational_source_evidence`, whose single call site is the accurate path, so a fast-mode pack holds individually ranked passages rather than 3-adjacent windows"
+    },
+    "substrate": {
+      "passages": 65573,
+      "trajectories": 100,
+      "evidence_parts": 4609,
+      "mean_passage_chars": 1095.8,
+      "max_passage_chars": 2186,
+      "measurable": 48
+    },
+    "gate_geometry": {
+      "max_context_items": 28,
+      "char_budget": 48000,
+      "note_reservation_items": 3
+    },
+    "mechanism": {
+      "gold_carrying_trajectories": {
+        "1": 14,
+        "10": 5,
+        "12": 2,
+        "19": 1,
+        "2": 3,
+        "21": 1,
+        "3": 4,
+        "37": 1,
+        "38": 2,
+        "4": 3,
+        "40": 1,
+        "48": 4,
+        "6": 2,
+        "7": 1,
+        "71": 1,
+        "8": 1,
+        "88": 1,
+        "9": 1
+      },
+      "trajectories_covering_all_gold_alone": {
+        "1": 15,
+        "10": 5,
+        "12": 3,
+        "15": 2,
+        "2": 2,
+        "3": 5,
+        "37": 1,
+        "4": 3,
+        "40": 1,
+        "48": 1,
+        "5": 1,
+        "6": 2,
+        "7": 1,
+        "8": 4,
+        "88": 1,
+        "9": 1
+      },
+      "passages_of_one_trajectory_needed": {
+        "1": 47,
+        "2": 1
+      },
+      "smallest_trajectory_cap_that_reaches_gold": {
+        "1": 48
+      },
+      "passages_the_cheapest_covering_selection_uses": {
+        "1": 45,
+        "2": 2,
+        "3": 1
+      }
+    },
+    "cap_ceiling": {
+      "cap=1": {
+        "exposure_any_source": 1.0,
+        "exposure_single_source": 0.9792,
+        "max_passages_a_covering_selection_needs": 3
+      },
+      "cap=2": {
+        "exposure_any_source": 1.0,
+        "exposure_single_source": 1.0,
+        "max_passages_a_covering_selection_needs": 3
+      },
+      "cap=4": {
+        "exposure_any_source": 1.0,
+        "exposure_single_source": 1.0,
+        "max_passages_a_covering_selection_needs": 3
+      },
+      "cap=8": {
+        "exposure_any_source": 1.0,
+        "exposure_single_source": 1.0,
+        "max_passages_a_covering_selection_needs": 3
+      },
+      "cap=16": {
+        "exposure_any_source": 1.0,
+        "exposure_single_source": 1.0,
+        "max_passages_a_covering_selection_needs": 3
+      },
+      "cap=none": {
+        "exposure_any_source": 1.0,
+        "exposure_single_source": 1.0,
+        "max_passages_a_covering_selection_needs": 3
+      }
+    },
+    "bm25_grid": {
+      "cap=1|depth=8": {
+        "exposure": 0.0833,
+        "mean_pack_items": 3.35,
+        "mean_pack_trajectories": 3.35,
+        "mean_pack_chars": 4691.9,
+        "budget_headroom_chars": 43308.1,
+        "loss_reasons": {
+          "covered": 4,
+          "search_depth_never_reached_gold": 44
+        }
+      },
+      "cap=1|depth=16": {
+        "exposure": 0.1042,
+        "mean_pack_items": 5.06,
+        "mean_pack_trajectories": 5.06,
+        "mean_pack_chars": 6906.9,
+        "budget_headroom_chars": 41093.1,
+        "loss_reasons": {
+          "covered": 5,
+          "search_depth_never_reached_gold": 43
+        }
+      },
+      "cap=1|depth=24": {
+        "exposure": 0.125,
+        "mean_pack_items": 6.88,
+        "mean_pack_trajectories": 6.88,
+        "mean_pack_chars": 9053.9,
+        "budget_headroom_chars": 38946.1,
+        "loss_reasons": {
+          "covered": 6,
+          "search_depth_never_reached_gold": 42
+        }
+      },
+      "cap=1|depth=28": {
+        "exposure": 0.1458,
+        "mean_pack_items": 7.79,
+        "mean_pack_trajectories": 7.79,
+        "mean_pack_chars": 10124.3,
+        "budget_headroom_chars": 37875.7,
+        "loss_reasons": {
+          "covered": 7,
+          "search_depth_never_reached_gold": 41
+        }
+      },
+      "cap=1|depth=50": {
+        "exposure": 0.1667,
+        "mean_pack_items": 13.54,
+        "mean_pack_trajectories": 13.54,
+        "mean_pack_chars": 16211.2,
+        "budget_headroom_chars": 31788.8,
+        "loss_reasons": {
+          "covered": 8,
+          "search_depth_never_reached_gold": 39,
+          "trajectory_cap_excluded_reachable_gold": 1
+        }
+      },
+      "cap=2|depth=8": {
+        "exposure": 0.0833,
+        "mean_pack_items": 6.02,
+        "mean_pack_trajectories": 3.35,
+        "mean_pack_chars": 8456.7,
+        "budget_headroom_chars": 39543.3,
+        "loss_reasons": {
+          "covered": 4,
+          "search_depth_never_reached_gold": 44
+        }
+      },
+      "cap=2|depth=16": {
+        "exposure": 0.1042,
+        "mean_pack_items": 9.21,
+        "mean_pack_trajectories": 5.06,
+        "mean_pack_chars": 12680.7,
+        "budget_headroom_chars": 35319.3,
+        "loss_reasons": {
+          "covered": 5,
+          "search_depth_never_reached_gold": 43
+        }
+      },
+      "cap=2|depth=24": {
+        "exposure": 0.125,
+        "mean_pack_items": 12.44,
+        "mean_pack_trajectories": 6.88,
+        "mean_pack_chars": 16535.5,
+        "budget_headroom_chars": 31464.5,
+        "loss_reasons": {
+          "covered": 6,
+          "search_depth_never_reached_gold": 42
+        }
+      },
+      "cap=2|depth=28": {
+        "exposure": 0.1458,
+        "mean_pack_items": 14.1,
+        "mean_pack_trajectories": 7.79,
+        "mean_pack_chars": 18485.2,
+        "budget_headroom_chars": 29514.8,
+        "loss_reasons": {
+          "covered": 7,
+          "search_depth_never_reached_gold": 41
+        }
+      },
+      "cap=2|depth=50": {
+        "exposure": 0.1667,
+        "mean_pack_items": 24.6,
+        "mean_pack_trajectories": 13.54,
+        "mean_pack_chars": 29577.6,
+        "budget_headroom_chars": 18422.4,
+        "loss_reasons": {
+          "covered": 8,
+          "search_depth_never_reached_gold": 39,
+          "trajectory_cap_excluded_reachable_gold": 1
+        }
+      },
+      "cap=4|depth=8": {
+        "exposure": 0.0833,
+        "mean_pack_items": 7.52,
+        "mean_pack_trajectories": 3.35,
+        "mean_pack_chars": 10890.6,
+        "budget_headroom_chars": 37109.4,
+        "loss_reasons": {
+          "covered": 4,
+          "search_depth_never_reached_gold": 44
+        }
+      },
+      "cap=4|depth=16": {
+        "exposure": 0.1042,
+        "mean_pack_items": 12.38,
+        "mean_pack_trajectories": 5.06,
+        "mean_pack_chars": 17703.8,
+        "budget_headroom_chars": 30296.2,
+        "loss_reasons": {
+          "covered": 5,
+          "search_depth_never_reached_gold": 43
+        }
+      },
+      "cap=4|depth=24": {
+        "exposure": 0.125,
+        "mean_pack_items": 16.85,
+        "mean_pack_trajectories": 6.88,
+        "mean_pack_chars": 23527.0,
+        "budget_headroom_chars": 24473.0,
+        "loss_reasons": {
+          "covered": 6,
+          "search_depth_never_reached_gold": 42
+        }
+      },
+      "cap=4|depth=28": {
+        "exposure": 0.1458,
+        "mean_pack_items": 19.1,
+        "mean_pack_trajectories": 7.79,
+        "mean_pack_chars": 26364.6,
+        "budget_headroom_chars": 21635.4,
+        "loss_reasons": {
+          "covered": 7,
+          "search_depth_never_reached_gold": 41
+        }
+      },
+      "cap=4|depth=50": {
+        "exposure": 0.1667,
+        "mean_pack_items": 30.69,
+        "mean_pack_trajectories": 13.54,
+        "mean_pack_chars": 39510.9,
+        "budget_headroom_chars": 8489.1,
+        "loss_reasons": {
+          "char_budget_excluded_reachable_gold": 1,
+          "covered": 8,
+          "search_depth_never_reached_gold": 39
+        }
+      },
+      "cap=8|depth=8": {
+        "exposure": 0.0833,
+        "mean_pack_items": 8.0,
+        "mean_pack_trajectories": 3.35,
+        "mean_pack_chars": 11710.1,
+        "budget_headroom_chars": 36289.9,
+        "loss_reasons": {
+          "covered": 4,
+          "search_depth_never_reached_gold": 44
+        }
+      },
+      "cap=8|depth=16": {
+        "exposure": 0.1042,
+        "mean_pack_items": 14.83,
+        "mean_pack_trajectories": 5.06,
+        "mean_pack_chars": 21725.2,
+        "budget_headroom_chars": 26274.8,
+        "loss_reasons": {
+          "covered": 5,
+          "search_depth_never_reached_gold": 43
+        }
+      },
+      "cap=8|depth=24": {
+        "exposure": 0.125,
+        "mean_pack_items": 20.88,
+        "mean_pack_trajectories": 6.88,
+        "mean_pack_chars": 29980.9,
+        "budget_headroom_chars": 18019.1,
+        "loss_reasons": {
+          "covered": 6,
+          "search_depth_never_reached_gold": 42
+        }
+      },
+      "cap=8|depth=28": {
+        "exposure": 0.1458,
+        "mean_pack_items": 23.54,
+        "mean_pack_trajectories": 7.79,
+        "mean_pack_chars": 33391.2,
+        "budget_headroom_chars": 14608.8,
+        "loss_reasons": {
+          "covered": 7,
+          "search_depth_never_reached_gold": 41
+        }
+      },
+      "cap=8|depth=50": {
+        "exposure": 0.1667,
+        "mean_pack_items": 34.25,
+        "mean_pack_trajectories": 13.54,
+        "mean_pack_chars": 45775.8,
+        "budget_headroom_chars": 2224.2,
+        "loss_reasons": {
+          "char_budget_excluded_reachable_gold": 1,
+          "covered": 8,
+          "search_depth_never_reached_gold": 39
+        }
+      },
+      "cap=16|depth=8": {
+        "exposure": 0.0833,
+        "mean_pack_items": 8.0,
+        "mean_pack_trajectories": 3.35,
+        "mean_pack_chars": 11710.1,
+        "budget_headroom_chars": 36289.9,
+        "loss_reasons": {
+          "covered": 4,
+          "search_depth_never_reached_gold": 44
+        }
+      },
+      "cap=16|depth=16": {
+        "exposure": 0.1042,
+        "mean_pack_items": 16.0,
+        "mean_pack_trajectories": 5.06,
+        "mean_pack_chars": 23684.4,
+        "budget_headroom_chars": 24315.6,
+        "loss_reasons": {
+          "covered": 5,
+          "search_depth_never_reached_gold": 43
+        }
+      },
+      "cap=16|depth=24": {
+        "exposure": 0.125,
+        "mean_pack_items": 23.77,
+        "mean_pack_trajectories": 6.88,
+        "mean_pack_chars": 34538.9,
+        "budget_headroom_chars": 13461.1,
+        "loss_reasons": {
+          "covered": 6,
+          "search_depth_never_reached_gold": 42
+        }
+      },
+      "cap=16|depth=28": {
+        "exposure": 0.1458,
+        "mean_pack_items": 27.4,
+        "mean_pack_trajectories": 7.79,
+        "mean_pack_chars": 39308.1,
+        "budget_headroom_chars": 8691.9,
+        "loss_reasons": {
+          "covered": 7,
+          "search_depth_never_reached_gold": 41
+        }
+      },
+      "cap=16|depth=50": {
+        "exposure": 0.1667,
+        "mean_pack_items": 34.9,
+        "mean_pack_trajectories": 13.54,
+        "mean_pack_chars": 46861.8,
+        "budget_headroom_chars": 1138.2,
+        "loss_reasons": {
+          "char_budget_excluded_reachable_gold": 1,
+          "covered": 8,
+          "search_depth_never_reached_gold": 39
+        }
+      },
+      "cap=none|depth=8": {
+        "exposure": 0.0833,
+        "mean_pack_items": 8.0,
+        "mean_pack_trajectories": 3.35,
+        "mean_pack_chars": 11710.1,
+        "budget_headroom_chars": 36289.9,
+        "loss_reasons": {
+          "covered": 4,
+          "search_depth_never_reached_gold": 44
+        }
+      },
+      "cap=none|depth=16": {
+        "exposure": 0.1042,
+        "mean_pack_items": 16.0,
+        "mean_pack_trajectories": 5.06,
+        "mean_pack_chars": 23684.4,
+        "budget_headroom_chars": 24315.6,
+        "loss_reasons": {
+          "covered": 5,
+          "search_depth_never_reached_gold": 43
+        }
+      },
+      "cap=none|depth=24": {
+        "exposure": 0.125,
+        "mean_pack_items": 24.0,
+        "mean_pack_trajectories": 6.88,
+        "mean_pack_chars": 34839.9,
+        "budget_headroom_chars": 13160.1,
+        "loss_reasons": {
+          "covered": 6,
+          "search_depth_never_reached_gold": 42
+        }
+      },
+      "cap=none|depth=28": {
+        "exposure": 0.1458,
+        "mean_pack_items": 27.94,
+        "mean_pack_trajectories": 7.79,
+        "mean_pack_chars": 39976.3,
+        "budget_headroom_chars": 8023.7,
+        "loss_reasons": {
+          "covered": 7,
+          "search_depth_never_reached_gold": 41
+        }
+      },
+      "cap=none|depth=50": {
+        "exposure": 0.1667,
+        "mean_pack_items": 35.12,
+        "mean_pack_trajectories": 13.54,
+        "mean_pack_chars": 46955.5,
+        "budget_headroom_chars": 1044.5,
+        "loss_reasons": {
+          "char_budget_excluded_reachable_gold": 1,
+          "covered": 8,
+          "search_depth_never_reached_gold": 39
+        }
+      }
+    },
+    "char_budget_probe": {
+      "24000": {
+        "exposure": 0.1667,
+        "mean_pack_items": 18.19,
+        "mean_pack_chars": 23324.3
+      },
+      "48000": {
+        "exposure": 0.1667,
+        "mean_pack_items": 35.12,
+        "mean_pack_chars": 46955.5
+      },
+      "60000": {
+        "exposure": 0.1667,
+        "mean_pack_items": 42.79,
+        "mean_pack_chars": 57256.9
+      }
+    },
+    "note_lane_interaction": {
+      "0": {
+        "passage_budget_chars": 48000,
+        "exposure": 0.1458
+      },
+      "1000": {
+        "passage_budget_chars": 45000,
+        "exposure": 0.1458
+      },
+      "2000": {
+        "passage_budget_chars": 42000,
+        "exposure": 0.1458
+      },
+      "4000": {
+        "passage_budget_chars": 36000,
+        "exposure": 0.1458
+      }
+    }
+  }
+}
