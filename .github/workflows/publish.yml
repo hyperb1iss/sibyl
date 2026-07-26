@@ -526,11 +526,9 @@ jobs:
     name: "◆ Docker: Security ${{ matrix.image }} (${{ matrix.platform }})"
     needs: docker-build
     if: ${{ !inputs.dry_run }}
-    # Each digest is scanned on its own architecture, mirroring docker-build.
-    # A push-by-digest reference resolves to a single-platform index, so an
-    # amd64 runner asks for an amd64 child that an arm64 digest does not have
-    # and the scan fails before it reads a single package.
-    runs-on: ${{ matrix.platform == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    # Analysing an image needs no matching host: the scan reads layers from
+    # the registry, and the platform is named explicitly per step below.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
@@ -573,6 +571,14 @@ jobs:
 
       - name: "◆ Generate Trivy SBOM"
         uses: aquasecurity/trivy-action@v0.36.0
+        env:
+          # Trivy resolves a remote index to linux/amd64 unless told otherwise,
+          # and it does not infer the platform from the host it runs on. A
+          # push-by-digest reference is a single-platform index, so scanning
+          # the arm64 digest without this asks for an amd64 child that is not
+          # there and fails before reading a package. The action exposes no
+          # platform input; trivy derives TRIVY_PLATFORM from its own flag.
+          TRIVY_PLATFORM: linux/${{ matrix.platform }}
         with:
           image-ref: >-
             ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}@${{
@@ -597,6 +603,8 @@ jobs:
 
       - name: "◆ Trivy CVE gate"
         uses: aquasecurity/trivy-action@v0.36.0
+        env:
+          TRIVY_PLATFORM: linux/${{ matrix.platform }}
         with:
           image-ref: >-
             ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}@${{
