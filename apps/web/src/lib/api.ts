@@ -481,6 +481,7 @@ export type SynthesisOutputType =
   | 'roadmap'
   | 'release_notes'
   | 'audit_packet'
+  | 'handbook'
   | 'custom';
 
 export type SynthesisDepth = 'brief' | 'standard' | 'deep';

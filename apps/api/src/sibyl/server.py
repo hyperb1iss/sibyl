@@ -78,6 +78,7 @@ SynthesisOutputKind = Literal[
     "roadmap",
     "release_notes",
     "audit_packet",
+    "handbook",
     "custom",
 ]
 SynthesisDepthKind = Literal["brief", "standard", "deep"]

@@ -68,6 +68,13 @@ SECTION_TEMPLATES: dict[SynthesisOutputType, list[tuple[str, str]]] = {
         ("Evidence", "Collect source IDs, tasks, decisions, and artifacts."),
         ("Gaps And Risks", "Identify missing evidence and unsupported sections."),
     ],
+    SynthesisOutputType.HANDBOOK: [
+        ("Orientation", "Describe what this project is, what it is for, and its shape."),
+        ("Decisions In Force", "Capture the decisions currently governing how work is done."),
+        ("Current Work", "Summarize what is active, blocked, or queued next."),
+        ("Gotchas", "Surface error patterns, traps, and hard-won caveats."),
+        ("Key Artifacts", "Point at the documents, procedures, and references worth opening."),
+    ],
     SynthesisOutputType.CUSTOM: [
         ("Overview", "Summarize the requested synthesis from available sources."),
         ("Evidence", "Organize source-backed details."),
@@ -76,14 +83,17 @@ SECTION_TEMPLATES: dict[SynthesisOutputType, list[tuple[str, str]]] = {
 }
 
 SECTION_SOURCE_HINTS: dict[str, tuple[str, ...]] = {
+    "artifact": ("artifact", "document", "procedure", "source"),
     "completed": ("task", "procedure", "artifact"),
     "current": ("task", "decision", "artifact", "raw_memory"),
     "decision": ("decision",),
     "evidence": ("artifact", "document", "source", "claim", "procedure"),
     "gap": ("task", "claim", "decision", "artifact"),
+    "gotcha": ("error_pattern", "claim", "rule", "procedure"),
     "highlight": ("artifact", "task", "decision"),
     "implementation": ("procedure", "task", "artifact", "document"),
     "milestone": ("task", "plan", "epic"),
+    "orientation": ("project", "domain", "plan"),
     "risk": ("claim", "task", "decision", "artifact"),
     "verification": ("claim", "rule", "procedure", "artifact"),
 }

@@ -14,6 +14,7 @@ class SynthesisOutputType(StrEnum):
     ROADMAP = "roadmap"
     RELEASE_NOTES = "release_notes"
     AUDIT_PACKET = "audit_packet"
+    HANDBOOK = "handbook"
     CUSTOM = "custom"
 
 

@@ -43,6 +43,7 @@ const OUTPUT_TYPES: Array<{ value: SynthesisOutputType; label: string }> = [
   { value: 'roadmap', label: 'Roadmap' },
   { value: 'release_notes', label: 'Release Notes' },
   { value: 'audit_packet', label: 'Audit Packet' },
+  { value: 'handbook', label: 'Handbook' },
   { value: 'custom', label: 'Custom' },
 ];
 
