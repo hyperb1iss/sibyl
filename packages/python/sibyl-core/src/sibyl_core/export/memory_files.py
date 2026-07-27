@@ -164,7 +164,7 @@ def write_memory_files_bundle(
     if not force and previous is None and root.is_dir() and any(root.iterdir()):
         msg = (
             f"Refusing to overwrite {root}: it is not empty and holds no Sibyl "
-            f"{MANIFEST_PATH}. Pass force=True to write anyway."
+            f"{MANIFEST_PATH}. Re-run with --force to write anyway."
         )
         raise FileExistsError(msg)
 
