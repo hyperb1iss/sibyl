@@ -14,15 +14,15 @@ sibyl export memory --project sibyl
 sibyl export memory --output docs/memory --notes 100
 ```
 
-With no `--project`, the command uses the project linked to the current directory
-(see [`sibyl project link`](./project.md)).
+With no `--project`, the command uses the project linked to the current directory (see
+[`sibyl project link`](./project.md)).
 
 ## Why Files
 
 Every major coding agent in 2026 reads Markdown from the repository it is working in. A repo-local
 `.sibyl/memory/` is legible to all of them with zero integration work, costs nothing per read, and
-keeps working when the server does not. Recording usage still goes over the API
-(`sibyl cite <id>`), so the citation signal stays honest.
+keeps working when the server does not. Recording usage still goes over the API (`sibyl cite <id>`),
+so the citation signal stays honest.
 
 ## Layout
 
@@ -47,9 +47,9 @@ project and is simply absent otherwise, so nothing downstream has to special-cas
 
 ## File Format
 
-Every Markdown file opens with YAML frontmatter carrying a `type`, which makes the projection
-OKF v0.1-compatible: Markdown with YAML frontmatter in a git-shippable directory. Sibyl-specific
-keys are namespaced under `sibyl_`.
+Every Markdown file opens with YAML frontmatter carrying a `type`, which makes the projection OKF
+v0.1-compatible: Markdown with YAML frontmatter in a git-shippable directory. Sibyl-specific keys
+are namespaced under `sibyl_`.
 
 ```markdown
 ---
@@ -77,8 +77,8 @@ sibyl_project_id: "project_05eb5c8c782a"
 ```
 
 This differs from `sibyld export okf`, which embeds a lossless JSON payload in frontmatter so an
-archive can round-trip back into a graph. That format is for backup and portability. This one is
-for reading, so it carries only the fields a reader needs.
+archive can round-trip back into a graph. That format is for backup and portability. This one is for
+reading, so it carries only the fields a reader needs.
 
 ## Determinism
 
@@ -90,7 +90,7 @@ Three rules make that hold:
 - **No wall-clock values.** Nothing samples `datetime.now()`. Timestamps in the output come from the
   data. `manifest.json` carries a content digest instead of an export time.
 - **Whitelisted fields.** Retrieval counters, last-recalled stamps, embedding metadata, and internal
-  record handles all change when memory is merely *read*. None of them reach the files.
+  record handles all change when memory is merely _read_. None of them reach the files.
 - **Total ordering.** Records sort by id for file placement and by recency (id as tiebreak) for
   reading order, so the order the server returned them in cannot leak into the bytes.
 
@@ -103,25 +103,25 @@ jq -r .content_digest .sibyl/memory/manifest.json
 
 ## Options
 
-| Option           | Short | Default          | Description                                            |
-| ---------------- | ----- | ---------------- | ------------------------------------------------------ |
-| `--project`      | `-p`  | linked project   | Project id or name to materialize                      |
-| `--output`       | `-o`  | `.sibyl/memory`  | Directory to write into                                |
-| `--notes`        | -     | `60`             | Maximum memories to include                            |
-| `--tasks`        | -     | `25`             | Maximum open tasks to include                          |
-| `--task-status`  | -     | `doing,blocked`  | Comma-separated task statuses to materialize           |
-| `--type`         | `-T`  | ten memory types | Memory entity type to include (repeatable)             |
-| `--hydrate`      | -     | true             | Refetch each entity for its full body                  |
-| `--writable`     | -     | false            | Leave files writable instead of read-only              |
-| `--force`        | -     | false            | Write into a populated directory that is not an export |
-| `--json`         | `-j`  | false            | Print the export receipt as JSON                       |
+| Option          | Short | Default          | Description                                            |
+| --------------- | ----- | ---------------- | ------------------------------------------------------ |
+| `--project`     | `-p`  | linked project   | Project id or name to materialize                      |
+| `--output`      | `-o`  | `.sibyl/memory`  | Directory to write into                                |
+| `--notes`       | -     | `60`             | Maximum memories to include                            |
+| `--tasks`       | -     | `25`             | Maximum open tasks to include                          |
+| `--task-status` | -     | `doing,blocked`  | Comma-separated task statuses to materialize           |
+| `--type`        | `-T`  | ten memory types | Memory entity type to include (repeatable)             |
+| `--hydrate`     | -     | true             | Refetch each entity for its full body                  |
+| `--writable`    | -     | false            | Leave files writable instead of read-only              |
+| `--force`       | -     | false            | Write into a populated directory that is not an export |
+| `--json`        | `-j`  | false            | Print the export receipt as JSON                       |
 
 The note budget is spread across the requested types in round-robin rather than spent on whichever
 type the backend happens to order first, so a 40-item export covers decisions, patterns, procedures,
 claims, and the rest instead of forty decisions.
 
-`--hydrate` costs one extra request per memory. Turning it off is faster and yields
-500-character previews, which defeats the point for anything but a smoke test.
+`--hydrate` costs one extra request per memory. Turning it off is faster and yields 500-character
+previews, which defeats the point for anything but a smoke test.
 
 ## Reading the Result
 
