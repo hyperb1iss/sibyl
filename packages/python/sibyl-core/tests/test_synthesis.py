@@ -225,6 +225,54 @@ async def test_plan_synthesis_returns_gap_for_unsupported_required_section() -> 
 
 
 @pytest.mark.asyncio
+async def test_plan_synthesis_can_cite_the_types_its_section_hints_name() -> None:
+    """SECTION_SOURCE_HINTS steered sections at types no search bucket fetched.
+
+    The hints have always named claim, rule, procedure, and error_pattern, but
+    the three buckets only queried decisions, work items, and artifacts, so a
+    gotcha or a rule could reach a section only by neighborhood expansion.
+    """
+    requested_types: list[str] = []
+
+    async def fake_search(**kwargs: Any) -> SearchResponse:
+        requested_types.extend(kwargs["types"])
+        results = [
+            _result(
+                "claim:single-writer",
+                "claim",
+                "Embedded SurrealKV is single-writer",
+                content="Concurrent writers serialize behind one embedded lock.",
+            )
+        ]
+        matched = [item for item in results if item.type in set(kwargs["types"])]
+        return SearchResponse(
+            results=matched,
+            total=len(matched),
+            query=kwargs["query"],
+            filters={"types": kwargs["types"]},
+        )
+
+    run = await plan_synthesis(
+        SynthesisRequest(
+            goal="Assemble the supporting evidence",
+            required_sections=[
+                SynthesisSectionRequest(
+                    title="Evidence",
+                    prompt="Organize the strongest supporting sources.",
+                )
+            ],
+        ),
+        organization_id="org-123",
+        search_fn=fake_search,
+        related_fn=_empty_related,
+    )
+
+    # "evidence" has always hinted at claim sources; nothing ever fetched one.
+    assert {"claim", "rule", "procedure", "error_pattern"} <= set(requested_types)
+    assert run.source_packs[0].source_ids == ["claim:single-writer"]
+
+
+@pytest.mark.asyncio
 async def test_plan_synthesis_reports_missing_required_sources_once() -> None:
     async def fake_search(**kwargs: Any) -> SearchResponse:
         return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})

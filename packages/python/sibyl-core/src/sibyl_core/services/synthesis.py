@@ -258,10 +258,14 @@ async def _search_sources(
     accessible_projects: set[str] | None,
     search_fn: SynthesisSearchFn,
 ) -> list[SynthesisSourceReference]:
+    # SECTION_SOURCE_HINTS steers sections toward claim, rule, procedure, and
+    # error_pattern sources, none of which any bucket fetched, so those hints
+    # could only ever fire on neighborhood expansion.
     specs: list[tuple[list[str], str, int]] = [
         (["decision"], "decision", 6),
         (["task", "epic", "plan"], "task", 8),
         (["artifact", "document", "source", "config_file"], "artifact", 8),
+        (["claim", "rule", "procedure", "error_pattern"], "claim", 6),
     ]
     sources: list[SynthesisSourceReference] = []
     for types, origin, limit in specs:
