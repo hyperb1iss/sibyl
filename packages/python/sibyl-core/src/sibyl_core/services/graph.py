@@ -98,6 +98,19 @@ _prepared_groups = _graph_client._prepared_groups
 
 type SurrealRecord = dict[str, object]
 
+# Work-item models invert the usual relationship between the two text columns:
+# their ``set_entity_fields`` validators seed ``content`` FROM ``description``
+# at construction, so ``description`` is the authored text and ``content`` is
+# its mirror. Everywhere else ``content`` is authored and ``description`` is a
+# derived blurb, which is why the mirror is type-scoped rather than universal.
+_CONTENT_MIRRORS_DESCRIPTION_TYPES = (
+    EntityType.TASK.value,
+    EntityType.PROJECT.value,
+    EntityType.EPIC.value,
+    EntityType.TEAM.value,
+    EntityType.MILESTONE.value,
+)
+
 _ENTITY_LIST_FIELDS = "* OMIT content, embedding, name_embedding, attributes.content"
 _RELATED_ENTITY_PROJECTION_FIELDS = (
     ("id", "record_id"),
@@ -497,6 +510,7 @@ class EntityManager:
             raise ValueError("expected_revision must be at least 1")
 
         patch = _entity_update_patch(updates, updated_at=datetime.now(UTC))
+        mirror_content = "description" in updates and "content" not in updates
         rows = await _execute_graph_transaction(
             self._client,
             """
@@ -514,6 +528,12 @@ class EntityManager:
                     ELSE
                         name
                     END,
+                    content = IF $mirror_content
+                        AND entity_type IN $content_mirror_types THEN
+                        description
+                    ELSE
+                        content
+                    END,
                     revision += 1
                 RETURN AFTER;
                 COMMIT TRANSACTION;
@@ -522,6 +542,8 @@ class EntityManager:
             uuid=entity_id,
             patch=patch,
             expected_revision=expected_revision,
+            mirror_content=mirror_content,
+            content_mirror_types=list(_CONTENT_MIRRORS_DESCRIPTION_TYPES),
         )
         if not rows and expected_revision is not None:
             try:

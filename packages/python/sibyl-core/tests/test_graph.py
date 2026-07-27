@@ -880,6 +880,120 @@ async def test_native_entity_upsert_preserves_creator_and_updates_modifier() -> 
 
 
 @pytest.mark.asyncio
+async def test_update_mirrors_description_into_content_for_work_items() -> None:
+    client = SurrealGraphClient(group_id="org-content-mirror", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        await manager.create_direct(
+            Entity(
+                id="mirror_task",
+                entity_type=EntityType.TASK,
+                name="Ship the mirror",
+                content="original description",
+                description="original description",
+                organization_id=client.group_id,
+            )
+        )
+
+        await manager.update("mirror_task", {"description": "rewritten description"})
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT content, description
+                FROM entity
+                WHERE group_id = $group_id AND uuid = "mirror_task"
+                LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+        assert rows[0]["description"] == "rewritten description"
+        assert rows[0]["content"] == "rewritten description"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_update_leaves_content_alone_for_non_work_item_types() -> None:
+    client = SurrealGraphClient(group_id="org-content-no-mirror", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        await manager.create_direct(
+            Entity(
+                id="mirror_decision",
+                entity_type=EntityType.DECISION,
+                name="A decision",
+                content="the full authored decision body",
+                description="a derived blurb",
+                organization_id=client.group_id,
+            )
+        )
+
+        await manager.update("mirror_decision", {"description": "a newer blurb"})
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT content, description
+                FROM entity
+                WHERE group_id = $group_id AND uuid = "mirror_decision"
+                LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+        assert rows[0]["description"] == "a newer blurb"
+        assert rows[0]["content"] == "the full authored decision body"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_update_prefers_explicit_content_over_the_mirror() -> None:
+    client = SurrealGraphClient(group_id="org-content-explicit", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        await manager.create_direct(
+            Entity(
+                id="mirror_explicit",
+                entity_type=EntityType.TASK,
+                name="Explicit wins",
+                content="original",
+                description="original",
+                organization_id=client.group_id,
+            )
+        )
+
+        await manager.update(
+            "mirror_explicit",
+            {"description": "new description", "content": "deliberate content"},
+        )
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT content, description
+                FROM entity
+                WHERE group_id = $group_id AND uuid = "mirror_explicit"
+                LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+        assert rows[0]["description"] == "new description"
+        assert rows[0]["content"] == "deliberate content"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_native_entity_manager_bulk_generates_embeddings_in_batches() -> None:
     client = _EmbeddingWriteClient()
     provider = _deterministic_provider()
