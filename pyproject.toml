@@ -205,5 +205,5 @@ filterwarnings = [
 
 [dependency-groups]
 dev = [
-    "ty>=0.0.59",
+    "ty>=0.0.63",
 ]
