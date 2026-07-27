@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -210,7 +210,7 @@ async def test_model_availability(
     raw_provider = entry.provider
     if raw_provider not in {"anthropic", "gemini", "openai"}:
         raise HTTPException(status_code=400, detail=f"Provider is not supported: {raw_provider}")
-    provider = cast("LLMProviderName", raw_provider)
+    provider = raw_provider
 
     key = await resolve_provider_api_key(get_settings_service(), provider)
     if key.value is None:

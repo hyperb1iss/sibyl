@@ -516,7 +516,7 @@ def list_backups() -> list[dict[str, Any]]:
     if not backup_dir.exists():
         return []
 
-    backups = []
+    backups: list[dict[str, Any]] = []
 
     for archive in backup_dir.glob("sibyl_backup_*.tar.gz"):
         try:

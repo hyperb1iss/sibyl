@@ -6,7 +6,7 @@ import os
 from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal, Protocol, cast
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, Field, SecretStr
 
@@ -98,7 +98,7 @@ class EnvConfigSource:
                 surface=surface.value,
             )
         return ConfigField[LLMProviderName](
-            value=cast(LLMProviderName, field.value),
+            value=field.value,
             source=field.source,
             locked_by_env=field.locked_by_env,
             env_var=field.env_var,
