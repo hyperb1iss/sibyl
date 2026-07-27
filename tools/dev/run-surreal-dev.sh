@@ -259,9 +259,18 @@ wait_for_api_ready() {
     ready_host="127.0.0.1"
   fi
   local url="http://${ready_host}:${SIBYL_SERVER_PORT}/api/health"
-  local deadline=$((SECONDS + ${SIBYL_DEV_API_READY_TIMEOUT:-30}))
+  local timeout="${SIBYL_DEV_API_READY_TIMEOUT:-}"
+  local deadline=""
+  if [[ -n "$timeout" ]]; then
+    deadline=$((SECONDS + timeout))
+  fi
 
-  while ((SECONDS < deadline)); do
+  while :; do
+    if [[ -n "$deadline" ]] && ((SECONDS >= deadline)); then
+      echo "Timed out waiting for API readiness at $url" >&2
+      return 1
+    fi
+
     if [[ -n "$pid" ]] && ! process_tree_alive "$pid"; then
       echo "API process exited before becoming ready" >&2
       return 1
@@ -273,9 +282,6 @@ wait_for_api_ready() {
 
     sleep 0.2
   done
-
-  echo "Timed out waiting for API readiness at $url" >&2
-  return 1
 }
 
 resolve_lan_host() {

@@ -212,6 +212,72 @@ main
     assert "extra_commands[@]: unbound variable" not in result.stderr
 
 
+def test_api_readiness_has_no_default_deadline_while_process_is_alive() -> None:
+    bash = which("bash")
+    assert bash is not None
+
+    script = """
+source tools/dev/run-surreal-dev.sh
+unset SIBYL_DEV_API_READY_TIMEOUT
+SIBYL_SERVER_HOST=127.0.0.1
+SIBYL_SERVER_PORT=3334
+attempts=0
+process_tree_alive() { return 0; }
+curl() {
+  attempts=$((attempts + 1))
+  if ((attempts >= 35)); then
+    return 0
+  fi
+  return 1
+}
+sleep() { SECONDS=$((SECONDS + 1)); }
+SECONDS=0
+wait_for_api_ready 123
+printf 'attempts=%s\\n' "$attempts"
+"""
+
+    result = subprocess.run(  # noqa: S603
+        [bash, "-c", script],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "attempts=35\n"
+
+
+def test_api_readiness_honors_explicit_deadline() -> None:
+    bash = which("bash")
+    assert bash is not None
+
+    script = """
+source tools/dev/run-surreal-dev.sh
+SIBYL_DEV_API_READY_TIMEOUT=2
+SIBYL_SERVER_HOST=127.0.0.1
+SIBYL_SERVER_PORT=3334
+process_tree_alive() { return 0; }
+curl() { return 1; }
+sleep() { SECONDS=$((SECONDS + 1)); }
+SECONDS=0
+wait_for_api_ready 123
+"""
+
+    result = subprocess.run(  # noqa: S603
+        [bash, "-c", script],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert (
+        result.stderr == "Timed out waiting for API readiness at http://127.0.0.1:3334/api/health\n"
+    )
+
+
 def test_stop_dev_disables_default_compose_env_file(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
