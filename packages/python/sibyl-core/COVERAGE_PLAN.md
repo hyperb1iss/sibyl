@@ -135,6 +135,7 @@ def mock_falkordb():
     """Mock FalkorDBClient for unit tests."""
     ...
 
+
 @pytest.fixture
 def entity_manager(mock_falkordb):
     """EntityManager with mocked graph."""

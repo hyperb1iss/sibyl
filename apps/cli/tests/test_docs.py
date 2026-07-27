@@ -227,9 +227,7 @@ def test_docs_add_drain_polls_until_completed(
     mock_get_client: MagicMock,
 ) -> None:
     mock_client = MagicMock()
-    mock_client.start_document_import = AsyncMock(
-        return_value=_import_status(status="running")
-    )
+    mock_client.start_document_import = AsyncMock(return_value=_import_status(status="running"))
     mock_client.ingestion_source_import_status = AsyncMock(
         return_value=_import_status(status="completed", imported_count=2)
     )
@@ -265,9 +263,7 @@ def test_docs_add_drain_failure_statuses_return_nonzero(
     terminal_status: str,
 ) -> None:
     mock_client = MagicMock()
-    mock_client.start_document_import = AsyncMock(
-        return_value=_import_status(status="running")
-    )
+    mock_client.start_document_import = AsyncMock(return_value=_import_status(status="running"))
     mock_client.ingestion_source_import_status = AsyncMock(
         return_value=_import_status(status=terminal_status)
     )
@@ -301,9 +297,7 @@ def test_docs_add_json_drain_failure_statuses_return_nonzero(
     terminal_status: str,
 ) -> None:
     mock_client = MagicMock()
-    mock_client.start_document_import = AsyncMock(
-        return_value=_import_status(status="running")
-    )
+    mock_client.start_document_import = AsyncMock(return_value=_import_status(status="running"))
     mock_client.ingestion_source_import_status = AsyncMock(
         return_value=_import_status(status=terminal_status)
     )

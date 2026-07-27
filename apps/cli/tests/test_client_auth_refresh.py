@@ -95,7 +95,9 @@ async def test_refresh_rotates_and_writes_tokens_under_lock(
             "access_token_expires_at": 1,
         },
     )
-    monkeypatch.setattr(client_module, "get_refresh_token", lambda _api_url, **_kwargs: "old-refresh")
+    monkeypatch.setattr(
+        client_module, "get_refresh_token", lambda _api_url, **_kwargs: "old-refresh"
+    )
     monkeypatch.setattr(client_module, "is_access_token_expired", lambda _api_url, **_kwargs: True)
 
     writes: list[dict[str, Any]] = []

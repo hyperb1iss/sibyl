@@ -910,11 +910,12 @@ When making API calls programmatically:
 import httpx
 import asyncio
 
+
 async def update_with_retry(task_id: str, updates: dict, max_retries: int = 3):
     for attempt in range(max_retries):
         response = await client.patch(f"/api/tasks/{task_id}", json=updates)
         if response.status_code == 409:  # Locked
-            await asyncio.sleep(2 ** attempt)  # Exponential backoff
+            await asyncio.sleep(2**attempt)  # Exponential backoff
             continue
         response.raise_for_status()
         return response.json()

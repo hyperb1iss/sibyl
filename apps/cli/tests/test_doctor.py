@@ -44,7 +44,7 @@ def test_doctor_fails_when_active_context_is_missing(
 
 def test_doctor_embedded_lock_detects_stale_pid(tmp_path: Path) -> None:
     lock_path = tmp_path / "embedded-surreal.lock"
-    lock_path.write_text('pid = 424242\n')
+    lock_path.write_text("pid = 424242\n")
 
     check = doctor_module._check_embedded_lock(
         lock_path=lock_path,
@@ -238,11 +238,7 @@ def test_check_no_legacy_hook_fails_when_settings_still_have_it(
 
 
 def test_agent_prompt_has_bridges_recognises_canonical_snippet() -> None:
-    text = (
-        "## Sibyl\n\n"
-        "### Intent → Verb Bridges\n\n"
-        "- recall, remember, reflect\n"
-    )
+    text = "## Sibyl\n\n### Intent → Verb Bridges\n\n- recall, remember, reflect\n"
     assert doctor_module._agent_prompt_has_bridges(text) is True
 
 

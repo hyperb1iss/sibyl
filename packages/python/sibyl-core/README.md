@@ -76,7 +76,12 @@ src/sibyl_core/
 
 ```python
 from sibyl_core.models import (
-    Entity, EntityType, Task, TaskStatus, Project, Epic,
+    Entity,
+    EntityType,
+    Task,
+    TaskStatus,
+    Project,
+    Epic,
 )
 
 task = Task(
@@ -233,7 +238,7 @@ SELECT * FROM entity WHERE entity_type = $type;
 
 ```python
 await manager.create_direct(entity)  # Native write path, no LLM
-await manager.create(entity)         # Compatibility extraction path
+await manager.create(entity)  # Compatibility extraction path
 ```
 
 ## Legacy Compatibility

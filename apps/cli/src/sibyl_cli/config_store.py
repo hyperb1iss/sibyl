@@ -249,7 +249,7 @@ def get_path_link(path: str) -> tuple[str | None, str | None]:
     return _path_entry_fields(config.get("paths", {}).get(normalized))
 
 
-def set_path_mapping(path: str, project_id: str, *, context: str | None | _Unset = _UNSET) -> None:
+def set_path_mapping(path: str, project_id: str, *, context: str | _Unset | None = _UNSET) -> None:
     """Pin a directory to a project (and optionally the context it lives on).
 
     Args:
@@ -641,8 +641,8 @@ def create_context(
 def update_context(
     name: str,
     server_url: str | None = None,
-    org_slug: str | None | _Unset = _UNSET,
-    default_project: str | None | _Unset = _UNSET,
+    org_slug: str | _Unset | None = _UNSET,
+    default_project: str | _Unset | None = _UNSET,
     insecure: bool | None = None,
 ) -> Context:
     """Update an existing context.

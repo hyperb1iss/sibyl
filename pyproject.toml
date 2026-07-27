@@ -68,6 +68,7 @@ ignore = [
     "S101",    # Assert (tests/contracts)
     "TRY003",  # Long exception messages
     "PLR0913", # Too many arguments
+    "PLR0917", # Too many positional arguments (same call as PLR0913, new in ruff 0.16)
 ]
 
 [tool.ruff.lint.per-file-ignores]
