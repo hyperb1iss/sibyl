@@ -60,7 +60,7 @@ llm = [
     "pydantic-ai-slim[anthropic,google,openai]>=2.18.0,<3",
 ]
 reranking = [
-    "sentence-transformers>=3.0",
+    "sentence-transformers>=5.6.1",
 ]
 runtime = [
     "crawl4ai>=0.9.2",
@@ -68,7 +68,7 @@ runtime = [
     "mistune>=3.3.4",
     "pydantic-ai-slim[anthropic,google,openai]>=2.18.0,<3",
     "python-louvain>=0.16",
-    "sentence-transformers>=3.0",
+    "sentence-transformers>=5.6.1",
     "surrealdb>=2.0.0,<3.0",
 ]
 
