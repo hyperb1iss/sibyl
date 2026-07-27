@@ -214,6 +214,10 @@ def export_memory(
         bool,
         typer.Option("--writable", help="Leave files writable instead of read-only"),
     ] = False,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Write into a populated directory that is not an export"),
+    ] = False,
     json_output: Annotated[
         bool,
         typer.Option("--json", "-j", help="Print the export receipt as JSON"),
@@ -246,7 +250,11 @@ def export_memory(
             raise typer.Exit(code=1) from exc
 
         bundle = build_memory_files_bundle(snapshot)
-        write_memory_files_bundle(bundle, output, read_only=not writable)
+        try:
+            write_memory_files_bundle(bundle, output, read_only=not writable, force=force)
+        except OSError as exc:
+            error(str(exc))
+            raise typer.Exit(code=1) from exc
 
         if validation_errors := validate_memory_files_bundle(output):
             error("Memory export validation failed")

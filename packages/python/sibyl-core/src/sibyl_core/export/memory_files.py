@@ -31,17 +31,9 @@ HANDBOOK_PATH = "handbook.md"
 MANIFEST_PATH = "manifest.json"
 NOTES_DIR = "notes"
 
-MANAGED_ROOT_FILES = (
-    README_PATH,
-    INDEX_PATH,
-    RECENT_PATH,
-    TASKS_PATH,
-    HANDBOOK_PATH,
-    MANIFEST_PATH,
-)
-MANAGED_DIRECTORIES = (NOTES_DIR,)
-
 RECENT_PREVIEW_CHARS = 320
+NOTE_STEM_MAX_CHARS = 100
+NOTE_ID_SUFFIX_MAX_CHARS = 64
 FRONTMATTER_TEXT_CHARS = 200
 
 # Usage counters, embedding bookkeeping, and Surreal record handles all mutate
@@ -154,20 +146,34 @@ def write_memory_files_bundle(
     root: Path,
     *,
     read_only: bool = True,
+    force: bool = False,
 ) -> tuple[str, ...]:
-    """Write the bundle to ``root``, pruning stale managed files.
+    """Write the bundle to ``root``, pruning what a previous export wrote.
 
-    Returns the written paths. Only Sibyl-managed names are ever removed, so a
-    user file that happens to live alongside the projection survives.
+    Returns the written paths. The previous manifest is the only authority on
+    what Sibyl owns, so a file this exporter never wrote is never removed even
+    when it sits inside ``notes/``. A populated directory that is not already an
+    export is refused rather than overwritten: ``--output .`` in a repo root
+    would otherwise eat that repo's README.
     """
     if root.exists() and not root.is_dir():
         msg = f"Memory files output path exists and is not a directory: {root}"
         raise FileExistsError(msg)
 
+    previous = _previously_written(root)
+    if not force and previous is None and root.is_dir() and any(root.iterdir()):
+        msg = (
+            f"Refusing to overwrite {root}: it is not empty and holds no Sibyl "
+            f"{MANIFEST_PATH}. Pass force=True to write anyway."
+        )
+        raise FileExistsError(msg)
+
     root.mkdir(parents=True, exist_ok=True)
-    for stale in _stale_managed_paths(root, bundle.files):
-        stale.chmod(0o644)
-        stale.unlink()
+    for relative in sorted((previous or set()) - set(bundle.files)):
+        stale = root / relative
+        if stale.is_file():
+            stale.chmod(0o644)
+            stale.unlink()
 
     for relative_path, content in bundle.files.items():
         target = root / relative_path
@@ -178,6 +184,27 @@ def write_memory_files_bundle(
         target.chmod(0o444 if read_only else 0o644)
 
     return tuple(bundle.files)
+
+
+def _previously_written(root: Path) -> set[str] | None:
+    """Paths a previous export of this layout wrote, or None if there was none."""
+    manifest_path = root / MANIFEST_PATH
+    if not manifest_path.is_file():
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != (
+        MEMORY_FILES_SCHEMA_VERSION
+    ):
+        return None
+    entries = manifest.get("files")
+    written = {MANIFEST_PATH}
+    for entry in entries if isinstance(entries, list) else []:
+        if isinstance(entry, dict) and (path := entry.get("path")):
+            written.add(str(path))
+    return written
 
 
 def validate_memory_files_bundle(root: Path) -> list[str]:
@@ -230,22 +257,6 @@ def validate_memory_files_bundle(root: Path) -> list[str]:
     return errors
 
 
-def _stale_managed_paths(root: Path, files: Mapping[str, str]) -> list[Path]:
-    stale: list[Path] = []
-    for name in MANAGED_ROOT_FILES:
-        path = root / name
-        if path.is_file() and name not in files:
-            stale.append(path)
-    for name in MANAGED_DIRECTORIES:
-        directory = root / name
-        if not directory.is_dir():
-            continue
-        for path in sorted(directory.rglob("*.md")):
-            if path.relative_to(root).as_posix() not in files:
-                stale.append(path)
-    return stale
-
-
 def _canonical_records(records: Iterable[MemoryRecord]) -> tuple[MemoryRecord, ...]:
     return tuple(sorted(records, key=lambda record: (record.id, record.title)))
 
@@ -260,15 +271,25 @@ def _note_paths(records: Sequence[MemoryRecord]) -> dict[str, str]:
     stems = {record.id: _note_stem(record) for record in records}
     collisions = {stem for stem in stems.values() if list(stems.values()).count(stem) > 1}
     return {
-        record_id: f"{NOTES_DIR}/{stem}-{safe_slug(record_id)}.md"
+        record_id: f"{NOTES_DIR}/{stem}-{_id_suffix(record_id)}.md"
         if stem in collisions
         else f"{NOTES_DIR}/{stem}.md"
         for record_id, stem in stems.items()
     }
 
 
+def _id_suffix(record_id: str) -> str:
+    return safe_slug(record_id)[:NOTE_ID_SUFFIX_MAX_CHARS]
+
+
 def _note_stem(record: MemoryRecord) -> str:
-    return f"{safe_slug(record.entity_type, fallback='entity')}-{safe_slug(record.title)}"
+    """Build the filename stem, capped so a long title cannot exceed NAME_MAX.
+
+    Memory titles are prose and run long; the id suffix and `.md` still have to
+    fit after the cap, or the write aborts partway through the tree.
+    """
+    stem = f"{safe_slug(record.entity_type, fallback='entity')}-{safe_slug(record.title)}"
+    return stem[:NOTE_STEM_MAX_CHARS].rstrip("-.") or safe_slug(record.id)
 
 
 def _by_recency(records: Iterable[MemoryRecord]) -> list[MemoryRecord]:
@@ -641,8 +662,6 @@ def _string_tuple(value: object) -> tuple[str, ...]:
 __all__ = [
     "HANDBOOK_PATH",
     "INDEX_PATH",
-    "MANAGED_DIRECTORIES",
-    "MANAGED_ROOT_FILES",
     "MANIFEST_PATH",
     "MEMORY_FILES_OKF_VERSION",
     "MEMORY_FILES_SCHEMA_VERSION",
