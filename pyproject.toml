@@ -194,6 +194,17 @@ include = ["**/graph/entities.py"]
 [tool.ty.overrides.rules]
 invalid-argument-type = "ignore"
 
+# Benchmark report scripts - metrics read out of loosely shaped report dicts,
+# where the value union carries nested dicts alongside the numbers, so passing
+# a member to sum/mean/stdev/max cannot be proven. ty 0.0.63 sees through these
+# where 0.0.59 did not; coercing at the call site only relocates the complaint
+# to the coercion's own argument.
+[[tool.ty.overrides]]
+include = ["benchmarks/**/*.py"]
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
+no-matching-overload = "ignore"
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
