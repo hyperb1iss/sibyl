@@ -47,9 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.validate_trajectories:
         trajectory_path = data_root / "trajectories.jsonl"
         trajectory_ids = {
-            trajectory_id
-            for ids in selected_haystack.values()
-            for trajectory_id in ids
+            trajectory_id for ids in selected_haystack.values() for trajectory_id in ids
         }
         trajectories = select_longmemeval_v2_trajectories(trajectory_path, trajectory_ids)
 

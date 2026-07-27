@@ -20,7 +20,10 @@ class TestNormalizeApiUrl:
     def test_strips_trailing_slash(self) -> None:
         """Strips trailing slashes from path."""
         assert auth_store.normalize_api_url("http://localhost:3334/") == "http://localhost:3334"
-        assert auth_store.normalize_api_url("http://localhost:3334/api/") == "http://localhost:3334/api"
+        assert (
+            auth_store.normalize_api_url("http://localhost:3334/api/")
+            == "http://localhost:3334/api"
+        )
 
     def test_handles_scheme_less_url(self) -> None:
         """Handles URLs without explicit scheme (uses parts as-is)."""
@@ -393,9 +396,19 @@ class TestTokenExpiry:
         )
 
         # With 60 second buffer, should be considered expired
-        assert auth_store.is_access_token_expired("http://localhost:3334", test_file, buffer_seconds=60) is True
+        assert (
+            auth_store.is_access_token_expired(
+                "http://localhost:3334", test_file, buffer_seconds=60
+            )
+            is True
+        )
         # With 10 second buffer, should not be expired
-        assert auth_store.is_access_token_expired("http://localhost:3334", test_file, buffer_seconds=10) is False
+        assert (
+            auth_store.is_access_token_expired(
+                "http://localhost:3334", test_file, buffer_seconds=10
+            )
+            is False
+        )
 
 
 class TestMigrateLegacyTokens:

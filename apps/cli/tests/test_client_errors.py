@@ -437,5 +437,7 @@ def test_read_pending_metrics_folds_retired_expired_into_discarded(
 
     assert metrics["discarded"] == 7
     assert "expired" not in metrics
-    outcomes = metrics["completed"] + metrics["replayed"] + metrics["dropped"] + metrics["discarded"]
+    outcomes = (
+        metrics["completed"] + metrics["replayed"] + metrics["dropped"] + metrics["discarded"]
+    )
     assert outcomes == metrics["attempted"]

@@ -94,7 +94,9 @@ def test_service_install_writes_launchd_plist(
     monkeypatch.setattr(host_module, "SIBYL_RUN_DIR", tmp_path / "run")
     monkeypatch.setattr(host_module.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(host_module.Path, "home", lambda: tmp_path)
-    monkeypatch.setattr(host_module, "resolve_sibyld_executable", lambda: "/opt/homebrew/bin/sibyld")
+    monkeypatch.setattr(
+        host_module, "resolve_sibyld_executable", lambda: "/opt/homebrew/bin/sibyld"
+    )
 
     result = CliRunner().invoke(app, ["service", "install"])
 

@@ -179,6 +179,7 @@ ignore = [
     "PLR0911", # too many returns
     "PLR0912", # too many branches
     "PLR0913", # too many arguments
+    "PLR0917", # too many positional arguments (same call as PLR0913, new in ruff 0.16)
     "PLR2004", # magic values
 
     # Intentional patterns

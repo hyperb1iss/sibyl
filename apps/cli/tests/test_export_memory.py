@@ -53,9 +53,7 @@ def _client() -> MagicMock:
         "decision": [_entity("decision_two", "decision", "Ship files-first memory")],
         "pattern": [_entity("pattern_one", "pattern", "Pool connections per org")],
     }
-    by_id = {
-        str(entity["id"]): entity for entities in pools.values() for entity in entities
-    }
+    by_id = {str(entity["id"]): entity for entities in pools.values() for entity in entities}
 
     async def explore(**kwargs: object) -> dict[str, object]:
         requested = kwargs.get("types")
@@ -83,9 +81,7 @@ def _written_bytes(root: Path) -> dict[str, bytes]:
 
 def _run(tmp_path: Path, *extra: str) -> tuple[int, str, Path]:
     output = tmp_path / ".sibyl" / "memory"
-    with patch(
-        "sibyl_cli.export.get_client", return_value=_FakeClientContext(_client())
-    ):
+    with patch("sibyl_cli.export.get_client", return_value=_FakeClientContext(_client())):
         result = runner.invoke(
             app,
             ["export", "memory", "--project", "project_demo", "--output", str(output), *extra],
@@ -244,8 +240,7 @@ def test_export_memory_spends_the_note_budget_across_every_type(tmp_path: Path) 
     client.explore = AsyncMock(
         side_effect=lambda **kwargs: {
             "entities": [
-                _entity(f"decision_{index}", "decision", f"Decision {index}")
-                for index in range(10)
+                _entity(f"decision_{index}", "decision", f"Decision {index}") for index in range(10)
             ]
             if kwargs.get("types") == ["decision"]
             else [_entity("pattern_one", "pattern", "Pool connections per org")]

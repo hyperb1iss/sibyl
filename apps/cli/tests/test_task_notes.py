@@ -11,7 +11,9 @@ class TestTaskNoteAuthorFlags:
     """Task note command should prefer assistant wording but keep compatibility."""
 
     @patch("sibyl_cli.task.get_client")
-    def test_note_uses_agent_wire_value_for_assistant_flag(self, mock_get_client: MagicMock) -> None:
+    def test_note_uses_agent_wire_value_for_assistant_flag(
+        self, mock_get_client: MagicMock
+    ) -> None:
         """The preferred --assistant flag should still send the legacy wire value."""
         mock_client = MagicMock()
         mock_client.create_note = AsyncMock(return_value={"id": "note_123"})

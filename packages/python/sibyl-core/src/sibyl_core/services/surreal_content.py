@@ -1871,7 +1871,7 @@ def _raw_memory_has_replacement_embedding(memory: RawMemory, existing: RawMemory
 
 async def _raw_memory_with_save_embedding(
     memory: RawMemory,
-    embedding_provider: EmbeddingProvider | None | object,
+    embedding_provider: EmbeddingProvider | object | None,
 ) -> RawMemory:
     provider = (
         _configured_raw_memory_embedding_provider()
@@ -1885,7 +1885,7 @@ async def _raw_memory_prepared_for_save(
     memory: RawMemory,
     *,
     existing: RawMemory | None,
-    embedding_provider: EmbeddingProvider | None | object,
+    embedding_provider: EmbeddingProvider | object | None,
 ) -> RawMemory:
     if not raw_memory_recallable(memory):
         return _raw_memory_without_embedding(memory)
@@ -2414,7 +2414,7 @@ async def remember_raw_memory(
     provenance: dict[str, object] | None = None,
     capture_surface: str | None = None,
     entity_type: str = "raw_memory",
-    embedding_provider: EmbeddingProvider | None | object = _RAW_MEMORY_EMBEDDING_AUTO,
+    embedding_provider: EmbeddingProvider | object | None = _RAW_MEMORY_EMBEDDING_AUTO,
 ) -> RawMemory:
     memory = _raw_memory_from_write(
         RawMemoryWrite(
@@ -2452,7 +2452,7 @@ async def remember_raw_memory(
 async def remember_raw_memories(
     writes: Sequence[RawMemoryWrite],
     *,
-    embedding_provider: EmbeddingProvider | None | object = _RAW_MEMORY_EMBEDDING_AUTO,
+    embedding_provider: EmbeddingProvider | object | None = _RAW_MEMORY_EMBEDDING_AUTO,
 ) -> list[RawMemory]:
     if not writes:
         return []
@@ -2775,7 +2775,7 @@ async def list_raw_memories_for_promotion(
 async def save_raw_memory(
     memory: RawMemory,
     *,
-    embedding_provider: EmbeddingProvider | None | object = _RAW_MEMORY_EMBEDDING_AUTO,
+    embedding_provider: EmbeddingProvider | object | None = _RAW_MEMORY_EMBEDDING_AUTO,
     expected_revision: int | None = None,
     superseded_by_memory_id: str | None = None,
 ) -> RawMemory:

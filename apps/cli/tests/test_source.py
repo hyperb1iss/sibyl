@@ -156,9 +156,7 @@ class TestCrawlCliSurface:
         mock_client.get_crawl_status.assert_called_once_with("src_123")
 
     @patch("sibyl_cli.crawl.get_client")
-    def test_crawl_link_graph_can_create_new_entities(
-        self, mock_get_client: MagicMock
-    ) -> None:
+    def test_crawl_link_graph_can_create_new_entities(self, mock_get_client: MagicMock) -> None:
         """crawl link-graph should forward the create-new flag to the API."""
         mock_client = MagicMock()
         mock_client.link_graph = AsyncMock(

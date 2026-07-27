@@ -178,14 +178,12 @@ def replay_composition(
     lost = [
         row["question_id"]
         for row in phrase_rows
-        if row["baseline_full_phrase_exposure"]
-        and not row["candidate_full_phrase_exposure"]
+        if row["baseline_full_phrase_exposure"] and not row["candidate_full_phrase_exposure"]
     ]
     gained = [
         row["question_id"]
         for row in phrase_rows
-        if row["candidate_full_phrase_exposure"]
-        and not row["baseline_full_phrase_exposure"]
+        if row["candidate_full_phrase_exposure"] and not row["baseline_full_phrase_exposure"]
     ]
     return {
         "schema_version": SCHEMA_VERSION,
@@ -388,9 +386,7 @@ def result_candidates(row: dict[str, Any]) -> list[dict[str, object]]:
                 "_selection_origin": trace_item.get("selection_origin"),
                 "_search_rank": trace_item.get("search_rank"),
                 "_state_part_of_search_rank": trace_item.get("state_part_of_search_rank"),
-                "_state_part_refined_from_chunk": trace_item.get(
-                    "state_part_refined_from_chunk"
-                ),
+                "_state_part_refined_from_chunk": trace_item.get("state_part_refined_from_chunk"),
                 "_neighbor_of_search_rank": trace_item.get("neighbor_of_search_rank"),
                 "_neighbor_distance": trace_item.get("neighbor_distance"),
                 "_entity_type_fallback": (
