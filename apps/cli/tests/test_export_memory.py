@@ -172,6 +172,26 @@ def test_export_memory_json_receipt_carries_the_content_digest(tmp_path: Path) -
     assert manifest["content_digest"] == receipt["content_digest"]
 
 
+def test_export_memory_refuses_to_clobber_a_populated_directory(tmp_path: Path) -> None:
+    output = tmp_path / "repo"
+    output.mkdir()
+    readme = output / "README.md"
+    readme.write_text("# Their project\n", encoding="utf-8")
+
+    with patch("sibyl_cli.export.get_client", return_value=_FakeClientContext(_client())):
+        refused = runner.invoke(
+            app,
+            ["export", "memory", "--project", "project_demo", "--output", str(output)],
+        )
+
+    assert refused.exit_code == 1
+    assert "Refusing to overwrite" in refused.stdout
+    assert readme.read_text(encoding="utf-8") == "# Their project\n"
+
+    exit_code, stdout, _ = _run(tmp_path, "--force")
+    assert exit_code == 0, stdout
+
+
 def test_export_memory_requires_a_project(tmp_path: Path) -> None:
     with (
         patch("sibyl_cli.export.get_client", return_value=_FakeClientContext(_client())),

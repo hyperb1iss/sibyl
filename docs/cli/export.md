@@ -113,6 +113,7 @@ jq -r .content_digest .sibyl/memory/manifest.json
 | `--type`         | `-T`  | ten memory types | Memory entity type to include (repeatable)             |
 | `--hydrate`      | -     | true             | Refetch each entity for its full body                  |
 | `--writable`     | -     | false            | Leave files writable instead of read-only              |
+| `--force`        | -     | false            | Write into a populated directory that is not an export |
 | `--json`         | `-j`  | false            | Print the export receipt as JSON                       |
 
 The note budget is spread across the requested types in round-robin rather than spent on whichever
@@ -136,7 +137,13 @@ cat .sibyl/memory/tasks.md
 ```
 
 Files are written read-only. Edit the graph, not the directory: the next export overwrites
-everything Sibyl manages. Files you add yourself are left alone.
+everything Sibyl manages.
+
+`manifest.json` is the only authority on what Sibyl owns, which makes the write path safe in two
+ways. A file this exporter never wrote is never deleted, wherever it sits, so your own notes under
+`notes/` survive a re-export. And a populated directory holding no `manifest.json` is refused rather
+than overwritten, so `--output .` in a repo root cannot eat that repo's `README.md`. Pass `--force`
+when you genuinely mean to write into one.
 
 ## Related Commands
 

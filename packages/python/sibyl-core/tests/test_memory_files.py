@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import stat
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from sibyl_core.export import (
     MemoryRecord,
     MemorySnapshot,
     build_memory_files_bundle,
+    memory_files,
     memory_record_from_entity,
     validate_memory_files_bundle,
     write_memory_files_bundle,
@@ -184,6 +186,25 @@ def test_no_wall_clock_value_leaks_into_the_projection() -> None:
     assert "exported_at" not in first.files[MANIFEST_PATH]
 
 
+def test_the_projection_module_cannot_reach_a_clock() -> None:
+    """Comparing two same-process builds misses a date-only leak.
+
+    `date.today()` returns the same value twice in a row, so the digest check
+    above passes while the files churn at midnight. The decisive property is
+    that the module has no clock to call in the first place.
+    """
+    source = Path(memory_files.__file__).read_text(encoding="utf-8")
+    imports = [
+        line
+        for line in source.splitlines()
+        if line.startswith(("import ", "from ")) and not line.startswith("from __future__")
+    ]
+
+    assert imports
+    for line in imports:
+        assert not re.search(r"\b(datetime|time|calendar|random|uuid|os)\b", line), line
+
+
 def test_manifest_digests_match_the_written_files(tmp_path: Path) -> None:
     bundle = build_memory_files_bundle(_snapshot())
     root = tmp_path / "memory"
@@ -226,8 +247,16 @@ def test_stale_notes_are_pruned_and_foreign_files_survive(tmp_path: Path) -> Non
     root = tmp_path / "memory"
     write_memory_files_bundle(build_memory_files_bundle(_snapshot()), root)
 
-    keeper = root / "OPERATOR_NOTES.md"
-    keeper.write_text("hand written, not ours\n", encoding="utf-8")
+    # A file this exporter never wrote is not ours to delete, wherever it sits.
+    keepers = {
+        root / "OPERATOR_NOTES.md": "hand written, not ours\n",
+        root / NOTES_DIR / "MY_OWN_NOTE.md": "also not ours\n",
+        root / NOTES_DIR / "sub" / "deep.md": "nested, still not ours\n",
+    }
+    for path, content in keepers.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
     dropped = root / NOTES_DIR / "decision-namespace-per-organization.md"
     assert dropped.is_file()
 
@@ -237,7 +266,66 @@ def test_stale_notes_are_pruned_and_foreign_files_survive(tmp_path: Path) -> Non
     write_memory_files_bundle(build_memory_files_bundle(trimmed), root)
 
     assert not dropped.exists()
-    assert keeper.read_text(encoding="utf-8") == "hand written, not ours\n"
+    for path, content in keepers.items():
+        assert path.read_text(encoding="utf-8") == content, path
+    assert validate_memory_files_bundle(root) == []
+
+
+def test_writing_into_a_populated_foreign_directory_is_refused(tmp_path: Path) -> None:
+    """`--output .` in a repo root would otherwise eat that repo's README."""
+    root = tmp_path / "someones-repo"
+    root.mkdir()
+    readme = root / "README.md"
+    readme.write_text("# Their project\n", encoding="utf-8")
+
+    with pytest.raises(FileExistsError, match="Refusing to overwrite"):
+        write_memory_files_bundle(build_memory_files_bundle(_snapshot()), root)
+    assert readme.read_text(encoding="utf-8") == "# Their project\n"
+
+    write_memory_files_bundle(build_memory_files_bundle(_snapshot()), root, force=True)
+    assert validate_memory_files_bundle(root) == []
+
+
+def test_an_empty_or_missing_directory_needs_no_force(tmp_path: Path) -> None:
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    write_memory_files_bundle(build_memory_files_bundle(_snapshot()), empty)
+    assert validate_memory_files_bundle(empty) == []
+
+    fresh = tmp_path / "nested" / "fresh"
+    write_memory_files_bundle(build_memory_files_bundle(_snapshot()), fresh)
+    assert validate_memory_files_bundle(fresh) == []
+
+
+def test_a_long_title_still_produces_a_writable_filename(tmp_path: Path) -> None:
+    long_title = "Materialize " + "extraordinarily verbose memory " * 20
+    bundle = build_memory_files_bundle(
+        _snapshot(
+            notes=(_note("decision_long", long_title), _note("decision_long_two", long_title))
+        )
+    )
+
+    note_paths = [path for path in bundle.files if path.startswith(f"{NOTES_DIR}/")]
+    assert len(note_paths) == 2
+    for path in note_paths:
+        assert len(Path(path).name) < 255, path
+
+    root = tmp_path / "memory"
+    write_memory_files_bundle(bundle, root)
+    assert validate_memory_files_bundle(root) == []
+
+
+def test_a_body_containing_a_frontmatter_delimiter_stays_parseable(tmp_path: Path) -> None:
+    body = "Intro paragraph.\n\n---\n\nSection after a horizontal rule."
+    root = tmp_path / "memory"
+    write_memory_files_bundle(
+        build_memory_files_bundle(_snapshot(notes=(_note("decision_rule", "Ruled", body=body),))),
+        root,
+    )
+
+    note = (root / NOTES_DIR / "decision-ruled.md").read_text(encoding="utf-8")
+    assert note.startswith('---\ntype: "Sibyl Decision"')
+    assert "Section after a horizontal rule." in note
     assert validate_memory_files_bundle(root) == []
 
 
@@ -274,6 +362,20 @@ def test_recent_orders_by_recency_then_id() -> None:
     recent = bundle.files[RECENT_PATH]
 
     assert recent.index("Newer A") < recent.index("Newer B") < recent.index("Older")
+    # Reached through the builder the input is already id-sorted, so drive the
+    # tiebreak directly: equal timestamps must resolve by id, not arrival order.
+    ordered = memory_files._by_recency([newer_b, older, newer_a])
+    assert [record.id for record in ordered] == ["decision_a", "decision_b", "decision_z"]
+
+
+def test_note_files_carry_the_whole_body_not_a_preview() -> None:
+    body = "\n\n".join(f"Paragraph {index} of a memory that runs long." for index in range(40))
+    bundle = build_memory_files_bundle(_snapshot(notes=(_note("decision_big", "Big", body=body),)))
+
+    note = bundle.files[f"{NOTES_DIR}/decision-big.md"]
+    assert len(body) > 1000
+    assert body in note
+    assert "Paragraph 39 of a memory that runs long." in note
 
 
 @pytest.mark.parametrize(
