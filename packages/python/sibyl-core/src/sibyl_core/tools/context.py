@@ -1246,7 +1246,7 @@ def _suppress_parents_of_passages(results: Sequence[SearchResult]) -> list[Searc
     Callers pass only results that survived filtering.
     """
     retrieved: dict[str, set[int]] = {}
-    expected: dict[str, int] = {}
+    totals: dict[str, set[int]] = {}
     for result in results:
         if (result.type or "").lower() != PASSAGE_ENTITY_TYPE:
             continue
@@ -1259,13 +1259,22 @@ def _suppress_parents_of_passages(results: Sequence[SearchResult]) -> list[Searc
         if not parent_id or not isinstance(total, int) or not isinstance(index, int):
             continue
         retrieved.setdefault(parent_id, set()).add(index)
-        expected[parent_id] = total
+        totals.setdefault(parent_id, set()).add(total)
 
-    covered = {
-        parent_id
-        for parent_id, indices in retrieved.items()
-        if len(indices) >= expected.get(parent_id, 0) > 0
-    }
+    # The set has to be exactly the spans the projection declared, not merely
+    # as many of them. Re-projecting an edited memory writes fewer spans while
+    # the old higher-index rows survive under their deterministic ids, so one
+    # parent can present spans from two generations: disagreeing totals, or a
+    # gap-with-a-straggler that counts to the right number while missing the
+    # middle of the body.
+    covered = set()
+    for parent_id, indices in retrieved.items():
+        declared = totals.get(parent_id) or set()
+        if len(declared) != 1:
+            continue
+        total = next(iter(declared))
+        if total > 0 and indices == set(range(total)):
+            covered.add(parent_id)
     if not covered:
         return list(results)
     return [result for result in results if result.id not in covered]

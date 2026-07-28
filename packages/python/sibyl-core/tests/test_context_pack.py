@@ -2494,3 +2494,63 @@ def test_a_span_missing_its_position_metadata_suppresses_nothing() -> None:
     kept = context_module._suppress_parents_of_passages([parent, span])
 
     assert [result.id for result in kept] == ["d1", "p1"]
+
+
+def test_spans_from_two_projections_of_one_memory_suppress_nothing() -> None:
+    """Re-projecting an edited memory leaves the old higher-index rows behind.
+
+    Passage ids are deterministic per index, so a shortened body rewrites the
+    first spans and strands the rest. A pack can then hold spans from two
+    generations, and their disagreeing totals must not read as a whole set.
+    """
+    parent = SearchResult(id="d1", type="decision", name="whole", content="body", score=0.95)
+    fresh = _passage_result(
+        "p0",
+        parent_id="d1",
+        source_entity_type="decision",
+        passage_index=0,
+        passage_total=2,
+    )
+    stale = _passage_result(
+        "p5",
+        parent_id="d1",
+        source_entity_type="decision",
+        passage_index=5,
+        passage_total=6,
+    )
+
+    kept = context_module._suppress_parents_of_passages([parent, fresh, stale])
+
+    assert "d1" in [result.id for result in kept]
+
+
+def test_a_gap_in_the_span_set_suppresses_nothing() -> None:
+    """Counting to the right number can still miss the middle of the body."""
+    parent = SearchResult(id="d1", type="decision", name="whole", content="body", score=0.95)
+    spans = [
+        _passage_result(
+            "p0",
+            parent_id="d1",
+            source_entity_type="decision",
+            passage_index=0,
+            passage_total=3,
+        ),
+        _passage_result(
+            "p2",
+            parent_id="d1",
+            source_entity_type="decision",
+            passage_index=2,
+            passage_total=3,
+        ),
+        _passage_result(
+            "p9",
+            parent_id="d1",
+            source_entity_type="decision",
+            passage_index=9,
+            passage_total=3,
+        ),
+    ]
+
+    kept = context_module._suppress_parents_of_passages([parent, *spans])
+
+    assert "d1" in [result.id for result in kept]
