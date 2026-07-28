@@ -3593,3 +3593,101 @@ async def test_native_derive_epic_from_task_projects_children() -> None:
         assert await entity_manager.derive_epic_from_task("does_not_exist") is None
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_an_oversized_body_is_refused_rather_than_stored() -> None:
+    """The 50,000-char cap was declared in three places and enforced in two.
+
+    Anything constructing an Entity directly reached the table without passing
+    EntityCreate or the add tool, which is how a 520KB pasted terminal
+    transcript came to live in the graph.
+    """
+    client = SurrealGraphClient(group_id="org-content-cap", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        with pytest.raises(ValueError, match="exceeds the 50,000 character limit"):
+            await manager.create_direct(
+                Entity(
+                    id="oversized",
+                    entity_type=EntityType.NOTE,
+                    name="A pasted terminal transcript",
+                    content="x" * (graph_module.MAX_ENTITY_CONTENT_CHARS + 1),
+                    organization_id=client.group_id,
+                )
+            )
+
+        rows = normalize_records(
+            await client.execute_query(
+                'SELECT uuid FROM entity WHERE group_id = $group_id AND uuid = "oversized";',
+                group_id=client.group_id,
+            )
+        )
+        assert rows == []
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_a_body_exactly_at_the_cap_is_stored() -> None:
+    """Rejecting at the boundary would make the declared limit off by one."""
+    client = SurrealGraphClient(group_id="org-content-cap-edge", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        await manager.create_direct(
+            Entity(
+                id="at_the_cap",
+                entity_type=EntityType.NOTE,
+                name="Exactly at the limit",
+                content="x" * graph_module.MAX_ENTITY_CONTENT_CHARS,
+                organization_id=client.group_id,
+            )
+        )
+
+        stored = await manager.get("at_the_cap")
+        assert len(stored.content) == graph_module.MAX_ENTITY_CONTENT_CHARS
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_one_oversized_entity_fails_the_whole_bulk_write() -> None:
+    """A partially applied batch would be worse than a refused one."""
+    client = SurrealGraphClient(group_id="org-content-cap-bulk", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        with pytest.raises(ValueError, match="oversized_member"):
+            await manager.create_direct_bulk(
+                [
+                    Entity(
+                        id="fine_member",
+                        entity_type=EntityType.NOTE,
+                        name="Fine",
+                        content="short",
+                        organization_id=client.group_id,
+                    ),
+                    Entity(
+                        id="oversized_member",
+                        entity_type=EntityType.NOTE,
+                        name="Too big",
+                        content="x" * (graph_module.MAX_ENTITY_CONTENT_CHARS + 1),
+                        organization_id=client.group_id,
+                    ),
+                ]
+            )
+
+        rows = normalize_records(
+            await client.execute_query(
+                'SELECT uuid FROM entity WHERE group_id = $group_id AND uuid = "fine_member";',
+                group_id=client.group_id,
+            )
+        )
+        assert rows == []
+    finally:
+        await client.close()

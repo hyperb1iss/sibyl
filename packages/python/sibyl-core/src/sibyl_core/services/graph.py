@@ -111,6 +111,10 @@ _CONTENT_MIRRORS_DESCRIPTION_TYPES = (
     EntityType.MILESTONE.value,
 )
 
+# Mirrors MAX_CONTENT_LENGTH in tools/helpers.py and EntityCreate.content in the
+# API schema. Declared in three places and, until now, enforced in two.
+MAX_ENTITY_CONTENT_CHARS = 50_000
+
 _ENTITY_LIST_FIELDS = "* OMIT content, embedding, name_embedding, attributes.content"
 _RELATED_ENTITY_PROJECTION_FIELDS = (
     ("id", "record_id"),
@@ -2640,12 +2644,46 @@ def _embedding_vector_from_batch(
     return embedding
 
 
+def _enforce_entity_content_limit(entities: Sequence[Entity]) -> None:
+    """Refuse to store a body past the cap every other layer already declares.
+
+    EntityCreate.content and the add tool both cap content at 50,000
+    characters, but anything constructing an Entity directly reached the table
+    without passing either, so the limit was advisory. The live graph holds a
+    520KB pasted terminal transcript as a result.
+
+    Rejecting rather than truncating is the point: a silently shortened body is
+    indistinguishable from a short one, and the cost of an outsized row is not
+    just storage. Its embedding is computed over text the embedder may itself
+    truncate without saying so, and BM25 length normalization is skewed by
+    outliers, which the A1 work identified as the mechanism behind selection
+    dilution -- one half-megabyte row can distort ranking corpus-wide.
+
+    Deliberately not enforced in ``_entity_record``: migrations reshape rows
+    that already exist, including legacy oversized ones, and must stay able to
+    move them.
+    """
+    oversized = [
+        f"{entity.id} ({len(entity.content or ''):,} chars)"
+        for entity in entities
+        if len(entity.content or "") > MAX_ENTITY_CONTENT_CHARS
+    ]
+    if oversized:
+        msg = (
+            f"entity content exceeds the {MAX_ENTITY_CONTENT_CHARS:,} character "
+            f"limit: {', '.join(oversized)}. Split the body or store it as a "
+            f"document rather than a single entity."
+        )
+        raise ValueError(msg)
+
+
 async def _replace_entity(
     client: SurrealGraphClient,
     entity: Entity,
     *,
     group_id: str,
 ) -> SurrealRecord:
+    _enforce_entity_content_limit([entity])
     record = _entity_record(entity, group_id=group_id)
     try:
         result = await _execute_replace_entities_with_schema_retry(client, [record])
@@ -2672,6 +2710,7 @@ async def _replace_entities_bulk(
     *,
     group_id: str,
 ) -> list[SurrealRecord]:
+    _enforce_entity_content_limit(entities)
     records = [_entity_record(entity, group_id=group_id) for entity in entities]
     if not records:
         return []
