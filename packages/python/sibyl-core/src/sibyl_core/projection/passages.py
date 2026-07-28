@@ -32,6 +32,10 @@ MAX_PASSAGE_CONTENT_CHARS = 18_000
 MAX_PASSAGES_PER_SOURCE = 64
 PASSAGE_PROJECTION_KIND = "passage"
 
+# Set only when the spans between them account for the whole parent body.
+# Retrieval reads it to decide whether the spans may stand in for the memory.
+PASSAGE_COVERS_PARENT_KEY = "passage_covers_parent"
+
 # Only bodies past the packer's own ceiling are worth cutting. Below it the
 # body already fits one slice, so passages would duplicate the parent and pay
 # an embedding for the privilege.
@@ -114,6 +118,16 @@ def plan_entity_passages(
     """
     if not should_project_passages(source):
         return [], []
+    if source.organization_id and str(source.organization_id) != str(group_id):
+        # Cheap guard at a tenant boundary. Both callers pass the org the parent
+        # was just written to, and namespace-per-org means a foreign row should
+        # not be fetchable here in the first place, so this is unreachable today
+        # and stays that way loudly rather than by assumption.
+        msg = (
+            f"refusing to project passages for {source.id}: parent belongs to "
+            f"{source.organization_id}, not {group_id}"
+        )
+        raise ValueError(msg)
 
     slices, _ = slice_prose(source.content or "")
     if len(slices) < 2:
@@ -123,6 +137,9 @@ def plan_entity_passages(
     stamped = now or datetime.now(UTC)
     scope = _inherited_scope_metadata(source)
     total = min(len(slices), MAX_PASSAGES_PER_SOURCE)
+    # A projection that drops spans must not let its survivors stand in for the
+    # whole memory, or the dropped text becomes unreachable at read time.
+    covers_parent = total == len(slices)
     entities: list[Entity] = []
     relationships: list[Relationship] = []
 
@@ -137,7 +154,9 @@ def plan_entity_passages(
             content = render_slice(header, trail, passage.content)
         if len(content) > MAX_PASSAGE_CONTENT_CHARS:
             # A single unbroken line past the ceiling. Cutting mid-line would
-            # bisect a literal, so the span stays reachable through its parent.
+            # bisect a literal, so the span stays reachable through its parent
+            # only, which means these passages no longer cover it.
+            covers_parent = False
             continue
 
         entity_id = passage_entity_id(source_id, passage_index)
@@ -168,6 +187,7 @@ def plan_entity_passages(
                     "passage_total": total,
                     "passage_breadcrumb": passage.breadcrumb,
                     "passage_cut_reason": passage.reason,
+                    PASSAGE_COVERS_PARENT_KEY: True,
                 },
                 created_at=stamped,
                 updated_at=stamped,
@@ -191,6 +211,17 @@ def plan_entity_passages(
                 created_at=stamped,
             )
         )
+
+    if not covers_parent:
+        # A skip can happen on the last slice, so coverage is only known once
+        # the whole body has been walked. Stamp it on every span rather than
+        # letting the early ones claim a completeness they do not have.
+        entities = [
+            entity.model_copy(
+                update={"metadata": {**entity.metadata, PASSAGE_COVERS_PARENT_KEY: False}}
+            )
+            for entity in entities
+        ]
 
     return entities, relationships
 
@@ -362,6 +393,7 @@ def _inherited_scope_metadata(source: Entity) -> dict[str, object]:
 __all__ = [
     "MAX_PASSAGES_PER_SOURCE",
     "MAX_PASSAGE_CONTENT_CHARS",
+    "PASSAGE_COVERS_PARENT_KEY",
     "PASSAGE_MIN_SOURCE_CHARS",
     "PASSAGE_PROJECTION_KIND",
     "PASSAGE_SOURCE_TYPES",

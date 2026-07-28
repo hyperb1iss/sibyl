@@ -6,7 +6,9 @@ import pytest
 
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.projection.passages import (
+    MAX_PASSAGE_CONTENT_CHARS,
     MAX_PASSAGES_PER_SOURCE,
+    PASSAGE_COVERS_PARENT_KEY,
     PASSAGE_MIN_SOURCE_CHARS,
     passage_entity_id,
     plan_entity_passages,
@@ -282,3 +284,77 @@ async def test_a_short_memory_skips_the_projection_entirely() -> None:
     assert result.reason == "below_threshold"
     assert entity_manager.calls == []
     assert relationship_manager.calls == []
+
+
+def test_passages_do_not_inflate_what_a_reader_is_served() -> None:
+    """Spans replace the parent in a pack, so together they must not cost more.
+
+    Each passage repeats a locator header and its breadcrumb trail, which is
+    real overhead. It has to stay small: if the projection served materially
+    more text than the body it replaced, slicing would be a regression dressed
+    as precision rather than the point of the substrate.
+    """
+    body = _prose(sections=8)
+    entities, _ = plan_entity_passages(_source(content=body), source_id=_SOURCE_ID, group_id=_GROUP)
+
+    served = sum(len(entity.content) for entity in entities)
+
+    assert len(entities) > 2
+    # The body itself is always fully covered; only framing is added.
+    assert served >= len(body.strip())
+    assert served <= len(body) * 1.35
+
+
+def test_every_line_of_the_body_survives_into_some_passage() -> None:
+    """The parent keeps the body, but a span reader must not silently lose lines."""
+    body = _prose(sections=8)
+    entities, _ = plan_entity_passages(_source(content=body), source_id=_SOURCE_ID, group_id=_GROUP)
+
+    joined = "\n".join(entity.content for entity in entities)
+    missing = [line for line in body.split("\n") if line.strip() and line.strip() not in joined]
+
+    assert missing == []
+
+
+def test_a_parent_from_another_tenant_is_refused() -> None:
+    """Namespace-per-org should make this unreachable; fail loudly if it is not."""
+    foreign = Entity(
+        id=_SOURCE_ID,
+        entity_type=EntityType.DECISION,
+        name="someone else's decision",
+        content=_prose(),
+        organization_id="org-somebody-else",
+    )
+
+    with pytest.raises(ValueError, match="not org-passages"):
+        plan_entity_passages(foreign, source_id=_SOURCE_ID, group_id=_GROUP)
+
+
+def test_a_complete_projection_may_stand_in_for_its_parent() -> None:
+    entities, _ = plan_entity_passages(_source(), source_id=_SOURCE_ID, group_id=_GROUP)
+
+    assert entities
+    assert all(entity.metadata[PASSAGE_COVERS_PARENT_KEY] is True for entity in entities)
+
+
+def test_a_capped_projection_is_marked_as_not_covering_its_parent() -> None:
+    """Above the cap some spans have no row, so the survivors cannot hide the body."""
+    entities, _ = plan_entity_passages(
+        _source(content=_prose(sections=400)),
+        source_id=_SOURCE_ID,
+        group_id=_GROUP,
+    )
+
+    assert len(entities) == MAX_PASSAGES_PER_SOURCE
+    assert all(entity.metadata[PASSAGE_COVERS_PARENT_KEY] is False for entity in entities)
+
+
+def test_a_skipped_oversize_span_marks_every_sibling_incomplete() -> None:
+    """Coverage is only known after the whole body is walked, including the tail."""
+    giant_line = "x" * (MAX_PASSAGE_CONTENT_CHARS + 500)
+    body = "\n".join(["# Doc", "", _prose(sections=4), "", "## Tail", "", giant_line])
+
+    entities, _ = plan_entity_passages(_source(content=body), source_id=_SOURCE_ID, group_id=_GROUP)
+
+    assert entities
+    assert all(entity.metadata[PASSAGE_COVERS_PARENT_KEY] is False for entity in entities)

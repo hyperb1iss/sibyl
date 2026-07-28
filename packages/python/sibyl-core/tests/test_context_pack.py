@@ -2267,6 +2267,7 @@ def _passage_result(
     parent_id: str,
     source_entity_type: str,
     name: str = "a passage",
+    covers_parent: bool = True,
 ) -> SearchResult:
     return SearchResult(
         id=result_id,
@@ -2278,6 +2279,7 @@ def _passage_result(
             "projection_kind": "passage",
             "parent_entity_id": parent_id,
             "source_entity_type": source_entity_type,
+            "passage_covers_parent": covers_parent,
         },
     )
 
@@ -2350,3 +2352,63 @@ def test_several_spans_of_one_memory_all_survive_their_parent() -> None:
     kept = context_module._suppress_parents_of_passages([parent, *spans])
 
     assert [result.id for result in kept] == ["p1", "p2"]
+
+
+def test_a_partial_projection_never_hides_the_memory_it_came_from() -> None:
+    """Spans that skipped part of the body cannot stand in for the whole thing.
+
+    A projection that hit the passage cap, or dropped a span too large to
+    store, leaves text that lives only on the parent. Suppressing the parent
+    would make that text unreachable in the pack.
+    """
+    parent = SearchResult(id="d1", type="decision", name="whole", content="body", score=0.95)
+    partial = _passage_result(
+        "p1", parent_id="d1", source_entity_type="decision", covers_parent=False
+    )
+
+    kept = context_module._suppress_parents_of_passages([parent, partial])
+
+    assert [result.id for result in kept] == ["d1", "p1"]
+
+
+def test_a_span_that_will_not_be_emitted_suppresses_nothing() -> None:
+    """Otherwise the reader loses the span and the memory it was cut from."""
+    parent = SearchResult(
+        id="t1",
+        type="task",
+        name="a finished task",
+        content="body",
+        score=0.9,
+        metadata={"status": "archived"},
+    )
+    dropped_span = SearchResult(
+        id="p1",
+        type="passage",
+        name="span of an archived task",
+        content="span",
+        score=0.95,
+        metadata={
+            "projection_kind": "passage",
+            "parent_entity_id": "t1",
+            "source_entity_type": "task",
+            "passage_covers_parent": True,
+        },
+    )
+
+    emitted = context_module._emittable_results(
+        [parent, dropped_span], [ContextFacet.ACTIVE_WORK, ContextFacet.RECENT_MEMORY]
+    )
+
+    # Both are archived work items and both are filtered; neither may be
+    # suppressed by the other on the way out.
+    assert all(result.id != "t1" or facet is not None for result, facet in emitted)
+
+
+def test_emittable_results_suppresses_only_among_survivors() -> None:
+    parent = SearchResult(id="d1", type="decision", name="whole", content="body", score=0.95)
+    span = _passage_result("p1", parent_id="d1", source_entity_type="decision")
+
+    emitted = context_module._emittable_results([parent, span], [ContextFacet.DECISIONS])
+
+    assert [result.id for result, _facet in emitted] == ["p1"]
+    assert all(facet is ContextFacet.DECISIONS for _result, facet in emitted)

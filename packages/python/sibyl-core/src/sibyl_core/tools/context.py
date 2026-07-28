@@ -170,6 +170,7 @@ LAYER_LIMITS = {
 
 
 PASSAGE_ENTITY_TYPE = "passage"
+PASSAGE_COVERS_PARENT_KEY = "passage_covers_parent"
 
 _WORK_ITEM_TYPES = {"task", "epic"}
 # Tasks finish as "done"; epic container status derives to "completed".
@@ -1167,12 +1168,7 @@ async def _compile_fallback_sections(
     response = await search_fn(**search_kwargs)
 
     grouped: dict[ContextFacet, list[ContextItem]] = {facet: [] for facet in facets}
-    for result in _suppress_parents_of_passages(response.results):
-        if _is_synthetic_relationship_result(result):
-            continue
-        facet = _facet_for_result(result, facets)
-        if facet is None:
-            continue
+    for result, facet in _emittable_results(response.results, facets):
         grouped[facet].append(_item_from_result(result, facet, audit=audit))
 
     return [
@@ -1203,19 +1199,53 @@ def _types_for_facets(facets: Sequence[ContextFacet]) -> list[str]:
     return ordered
 
 
+def _emittable_results(
+    results: Sequence[SearchResult],
+    facets: list[ContextFacet],
+) -> list[tuple[SearchResult, ContextFacet]]:
+    """Pair each result that will actually be rendered with the facet it lands in.
+
+    Eligibility is settled before parent suppression runs. A span that gets
+    filtered out here must not have suppressed anything on its way, or the
+    reader loses the span and the memory it was cut from.
+    """
+    eligible: list[tuple[SearchResult, ContextFacet]] = []
+    for result in results:
+        if _is_synthetic_relationship_result(result):
+            continue
+        facet = _facet_for_result(result, facets)
+        if facet is None:
+            continue
+        eligible.append((result, facet))
+
+    surviving = {
+        id(result) for result in _suppress_parents_of_passages([pair[0] for pair in eligible])
+    }
+    return [pair for pair in eligible if id(pair[0]) in surviving]
+
+
 def _suppress_parents_of_passages(results: Sequence[SearchResult]) -> list[SearchResult]:
-    """Drop a memory when a span cut from it is already in the same pack.
+    """Drop a memory when spans covering all of it are already in the same pack.
 
     Serving both spends the reader's budget twice on overlapping text, and the
     fat parent is the copy the slice substrate exists to stop sending. The
-    passage carries ``parent_entity_id``, so widening back to the whole memory
-    is still one lookup away.
+    passage carries ``parent_entity_id``, so widening back is one lookup away.
+
+    Two things make a span ineligible to stand in for its parent. A projection
+    that hit the passage cap, or skipped a span too large to store, does not
+    account for the whole body, and letting its survivors hide the parent would
+    make the missing text unreachable. And a span that will not itself be
+    emitted suppresses nothing, or the reader loses both copies; callers pass
+    only the results that survive filtering.
     """
     covered: set[str] = set()
     for result in results:
         if (result.type or "").lower() != PASSAGE_ENTITY_TYPE:
             continue
-        parent_id = str((result.metadata or {}).get("parent_entity_id") or "")
+        metadata = result.metadata or {}
+        if not metadata.get(PASSAGE_COVERS_PARENT_KEY):
+            continue
+        parent_id = str(metadata.get("parent_entity_id") or "")
         if parent_id:
             covered.add(parent_id)
     if not covered:
@@ -1230,12 +1260,7 @@ def _sections_from_response(
     audit: bool = False,
 ) -> list[ContextSection]:
     grouped: dict[ContextFacet, list[ContextItem]] = {facet: [] for facet in facets}
-    for result in _suppress_parents_of_passages(response.results):
-        if _is_synthetic_relationship_result(result):
-            continue
-        facet = _facet_for_result(result, list(facets))
-        if facet is None:
-            continue
+    for result, facet in _emittable_results(response.results, list(facets)):
         grouped[facet].append(_item_from_result(result, facet, audit=audit))
 
     return [
