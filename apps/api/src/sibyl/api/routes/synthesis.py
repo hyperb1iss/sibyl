@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sibyl.api.schemas import (
     SynthesisDraftRequest,
     SynthesisDraftResponse,
+    SynthesisHandbookResponse,
     SynthesisPlanRequest,
     SynthesisPlanResponse,
 )
@@ -18,6 +19,7 @@ from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
 from sibyl_core.auth.memory_policy import authorize_memory_write
 from sibyl_core.models.synthesis import SynthesisRequest, SynthesisRun, SynthesisSectionRequest
 from sibyl_core.services import synthesis as synthesis_service
+from sibyl_core.services.handbook import handbook_synthesis_request, render_handbook_markdown
 
 log = structlog.get_logger()
 _READ_ROLES = (
@@ -84,16 +86,15 @@ def _core_synthesis_request(request: SynthesisPlanRequest) -> SynthesisRequest:
 
 
 async def _planned_materialized_run(
-    request: SynthesisPlanRequest,
+    core_request: SynthesisRequest,
     *,
     org: AuthOrganization,
     ctx: AuthContext,
 ) -> tuple[SynthesisRun, set[str] | None]:
     accessible_projects = await _resolve_accessible_synthesis_projects(
         ctx=ctx,
-        project=request.project,
+        project=core_request.project,
     )
-    core_request = _core_synthesis_request(request)
     run = await synthesis_service.plan_synthesis(
         core_request,
         organization_id=str(org.id),
@@ -152,7 +153,7 @@ async def plan_synthesis_route(
 ) -> SynthesisPlanResponse:
     """Create a deterministic source-aware synthesis outline."""
     try:
-        run, _ = await _planned_materialized_run(request, org=org, ctx=ctx)
+        run, _ = await _planned_materialized_run(_core_synthesis_request(request), org=org, ctx=ctx)
         return SynthesisPlanResponse.model_validate(synthesis_service.synthesis_run_to_dict(run))
     except (ProjectAccessDeniedError, ProjectAuthorizationError):
         raise
@@ -168,6 +169,51 @@ async def plan_synthesis_route(
         ) from exc
 
 
+@router.get("/handbook", response_model=SynthesisHandbookResponse)
+async def handbook_synthesis_route(
+    project: str,
+    org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+) -> SynthesisHandbookResponse:
+    """Compose the distilled handbook for one project.
+
+    Composed per request rather than stored. The whole pipeline is
+    deterministic search and rendering with no model call, so recomputing is
+    cheap and the result cannot go stale against the graph it describes --
+    which removes the regeneration triggers and staleness bookkeeping a cached
+    copy would need.
+    """
+    try:
+        core_request = handbook_synthesis_request(project_id=project)
+        run, _ = await _planned_materialized_run(core_request, org=org, ctx=ctx)
+        verification = synthesis_service.verify_synthesis_run(run)
+        markdown = render_handbook_markdown(run, verification)
+        source_ids = list(
+            dict.fromkeys(source_id for pack in run.source_packs for source_id in pack.source_ids)
+        )
+        return SynthesisHandbookResponse.model_validate(
+            {
+                "project": project,
+                "run_id": run.run_id,
+                "markdown": markdown,
+                "source_ids": source_ids,
+                "verification": synthesis_service.synthesis_verification_to_dict(verification),
+            }
+        )
+    except (ProjectAccessDeniedError, ProjectAuthorizationError):
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("synthesis_handbook_failed", project=project, error=str(exc))
+        raise HTTPException(
+            status_code=500,
+            detail="Handbook composition failed. Please try again.",
+        ) from exc
+
+
 @router.post("/draft", response_model=SynthesisDraftResponse)
 async def draft_synthesis_route(
     request: SynthesisDraftRequest,
@@ -176,7 +222,7 @@ async def draft_synthesis_route(
 ) -> SynthesisDraftResponse:
     """Draft and verify a source-grounded synthesis artifact."""
     try:
-        run, _ = await _planned_materialized_run(request, org=org, ctx=ctx)
+        run, _ = await _planned_materialized_run(_core_synthesis_request(request), org=org, ctx=ctx)
         artifact = synthesis_service.draft_synthesis_artifact(
             run,
             output_format=request.output_format,

@@ -1090,6 +1090,10 @@ def synthesis_artifact_to_dict(artifact: SynthesisArtifact) -> dict[str, Any]:
     return asdict(artifact)
 
 
+def synthesis_verification_to_dict(verification: SynthesisVerification) -> dict[str, Any]:
+    return asdict(verification)
+
+
 __all__ = [
     "SynthesisContextFn",
     "SynthesisRelatedFn",
@@ -1107,5 +1111,6 @@ __all__ = [
     "render_synthesis_markdown",
     "synthesis_artifact_to_dict",
     "synthesis_run_to_dict",
+    "synthesis_verification_to_dict",
     "verify_synthesis_run",
 ]

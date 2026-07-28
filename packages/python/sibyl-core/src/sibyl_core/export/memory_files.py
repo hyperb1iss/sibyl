@@ -493,7 +493,7 @@ def _handbook_document(snapshot: MemorySnapshot, handbook: str) -> str:
         frontmatter=[
             ("type", "Sibyl Handbook"),
             ("title", f"Handbook for {_project_label(snapshot)}"),
-            ("description", "Distilled project handbook maintained by the Sibyl dream cycle."),
+            ("description", "Distilled project handbook, composed from cited memories."),
             ("okf_version", MEMORY_FILES_OKF_VERSION),
             ("sibyl_schema_version", MEMORY_FILES_SCHEMA_VERSION),
             ("sibyl_kind", "handbook"),

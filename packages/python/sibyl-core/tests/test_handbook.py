@@ -11,6 +11,7 @@ from sibyl_core.models.synthesis import (
 )
 from sibyl_core.services.handbook import (
     HANDBOOK_SECTIONS,
+    cite_each_source_once,
     handbook_synthesis_request,
     render_handbook_markdown,
 )
@@ -174,6 +175,46 @@ async def test_handbook_markdown_states_uncovered_sections_as_graph_gaps() -> No
     assert "## Not Covered" in markdown
     assert "gap in the graph" in markdown
     assert "Orientation" in markdown
+
+
+@pytest.mark.asyncio
+async def test_handbook_cites_each_source_under_one_heading_only() -> None:
+    """Against the live graph one campaign note landed in all five sections.
+
+    Sections select independently, so a broad memory renders under every
+    heading it scores for and the file grows several times longer than the
+    material in it.
+    """
+    run = await _plan(
+        _populated_search(
+            [
+                _result(
+                    "note:broad-campaign",
+                    "task",
+                    "Campaign handoff covering decisions, work, and gotchas",
+                    content=(
+                        "Decisions in force, current work, gotchas, key artifacts, "
+                        "and orientation for the whole project."
+                    ),
+                    score=0.99,
+                ),
+                _result(
+                    "decision:scope-law",
+                    "decision",
+                    "Scope every graph call",
+                    content="Every graph operation carries an explicit org scope.",
+                ),
+            ]
+        )
+    )
+
+    packs = cite_each_source_once(run)
+
+    placements = [pack.section_id for pack in packs if "note:broad-campaign" in pack.source_ids]
+    assert len(placements) == 1
+
+    rendered = render_handbook_markdown(run)
+    assert rendered.count("[note:broad-campaign]") == 1
 
 
 @pytest.mark.asyncio

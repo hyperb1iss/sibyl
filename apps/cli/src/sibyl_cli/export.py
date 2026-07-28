@@ -68,6 +68,23 @@ async def _fetch_project(client: Any, project_id: str) -> dict[str, Any]:
     return entity if isinstance(entity, dict) else {}
 
 
+async def _fetch_handbook(client: Any, project_id: str) -> str | None:
+    """Compose the project handbook, or leave the slot empty if it cannot be.
+
+    A server too old to know the route, or a composition that fails, must not
+    cost the caller the rest of the export: the notes and tasks are the bulk of
+    the projection and they are already in hand by this point.
+    """
+    try:
+        response = await client.synthesis_handbook(project_id)
+    except SibylClientError:
+        return None
+    markdown = response.get("markdown") if isinstance(response, dict) else None
+    if not isinstance(markdown, str) or not markdown.strip():
+        return None
+    return markdown
+
+
 async def _fetch_entities(client: Any, **filters: Any) -> list[dict[str, Any]]:
     response = await client.explore(mode="list", **filters)
     entities = response.get("entities") if isinstance(response, dict) else None
@@ -146,9 +163,11 @@ async def _build_snapshot(
     task_limit: int,
     task_status: str,
     hydrate: bool,
+    handbook: bool,
 ) -> MemorySnapshot:
     async with get_client() as client:
         project = await _fetch_project(client, project_id)
+        distilled = await _fetch_handbook(client, project_id) if handbook else None
         notes = await _fetch_notes(
             client,
             project_id=project_id,
@@ -174,6 +193,7 @@ async def _build_snapshot(
         project_description=str(project.get("description")) if project.get("description") else None,
         notes=tuple(memory_record_from_entity(entity) for entity in notes),
         tasks=tuple(memory_record_from_entity(entity) for entity in tasks),
+        handbook=distilled,
     )
 
 
@@ -210,6 +230,13 @@ def export_memory(
             help="Refetch each entity for its full body instead of the 500-character preview",
         ),
     ] = True,
+    handbook: Annotated[
+        bool,
+        typer.Option(
+            "--handbook/--no-handbook",
+            help="Compose the distilled handbook.md alongside the raw memories",
+        ),
+    ] = True,
     writable: Annotated[
         bool,
         typer.Option("--writable", help="Leave files writable instead of read-only"),
@@ -241,6 +268,7 @@ def export_memory(
                 task_limit=task_limit,
                 task_status=task_status,
                 hydrate=hydrate,
+                handbook=handbook,
             )
         except SibylClientError as exc:
             handle_client_error(exc)

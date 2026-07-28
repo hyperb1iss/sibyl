@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from typer.testing import CliRunner
 
+from sibyl_cli.client import SibylClientError
 from sibyl_cli.main import app
 
 runner = CliRunner()
@@ -46,7 +47,10 @@ def _entity(entity_id: str, entity_type: str, name: str, **metadata: object) -> 
 PROJECT = {"id": "project_demo", "name": "Demo Project", "description": "A demo."}
 
 
-def _client() -> MagicMock:
+HANDBOOK_MARKDOWN = "## Orientation\n\n- Demo Project: A demo. [project_demo]\n"
+
+
+def _client(*, handbook: str | None = HANDBOOK_MARKDOWN) -> MagicMock:
     client = MagicMock()
     pools: dict[str, list[dict[str, object]]] = {
         "task": [_entity("task_one", "task", "Materialize memory", status="doing")],
@@ -66,8 +70,12 @@ def _client() -> MagicMock:
         listed = by_id[entity_id]
         return {**listed, "content": f"Hydrated body for {listed['name']}."}
 
+    async def synthesis_handbook(project: str) -> dict[str, object]:
+        return {"project": project, "run_id": "synthesis:demo", "markdown": handbook or ""}
+
     client.explore = AsyncMock(side_effect=explore)
     client.get_entity = AsyncMock(side_effect=get_entity)
+    client.synthesis_handbook = AsyncMock(side_effect=synthesis_handbook)
     return client
 
 
@@ -79,14 +87,51 @@ def _written_bytes(root: Path) -> dict[str, bytes]:
     }
 
 
-def _run(tmp_path: Path, *extra: str) -> tuple[int, str, Path]:
+def _run(
+    tmp_path: Path,
+    *extra: str,
+    client: MagicMock | None = None,
+) -> tuple[int, str, Path]:
     output = tmp_path / ".sibyl" / "memory"
-    with patch("sibyl_cli.export.get_client", return_value=_FakeClientContext(_client())):
+    with patch(
+        "sibyl_cli.export.get_client",
+        return_value=_FakeClientContext(client or _client()),
+    ):
         result = runner.invoke(
             app,
             ["export", "memory", "--project", "project_demo", "--output", str(output), *extra],
         )
     return result.exit_code, result.stdout, output
+
+
+def test_export_memory_skips_the_handbook_when_asked(tmp_path: Path) -> None:
+    exit_code, stdout, output = _run(tmp_path, "--no-handbook")
+
+    assert exit_code == 0, stdout
+    assert not (output / "handbook.md").exists()
+    assert json.loads((output / "manifest.json").read_text())["handbook"] is False
+
+
+def test_export_memory_survives_a_handbook_the_server_cannot_compose(tmp_path: Path) -> None:
+    """The notes and tasks are the bulk of the projection and are already fetched.
+
+    A server too old to know the route, or one that fails composing, must cost
+    the caller the handbook and nothing else.
+    """
+    client = _client()
+    client.synthesis_handbook = AsyncMock(
+        side_effect=SibylClientError("not found", status_code=404)
+    )
+
+    exit_code, stdout, output = _run(tmp_path, client=client)
+
+    assert exit_code == 0, stdout
+    assert not (output / "handbook.md").exists()
+    assert (output / "recent.md").is_file()
+    assert sorted(path.name for path in (output / "notes").iterdir()) == [
+        "decision-ship-files-first-memory.md",
+        "pattern-pool-connections-per-org.md",
+    ]
 
 
 def test_export_memory_materializes_the_documented_layout(tmp_path: Path) -> None:
@@ -98,7 +143,7 @@ def test_export_memory_materializes_the_documented_layout(tmp_path: Path) -> Non
     assert (output / "recent.md").is_file()
     assert (output / "tasks.md").is_file()
     assert (output / "manifest.json").is_file()
-    assert not (output / "handbook.md").exists()
+    assert (output / "handbook.md").is_file()
     assert sorted(path.name for path in (output / "notes").iterdir()) == [
         "decision-ship-files-first-memory.md",
         "pattern-pool-connections-per-org.md",
@@ -161,7 +206,7 @@ def test_export_memory_json_receipt_carries_the_content_digest(tmp_path: Path) -
     assert receipt["project_name"] == "Demo Project"
     assert receipt["notes"] == 2
     assert receipt["tasks"] == 1
-    assert receipt["handbook"] is False
+    assert receipt["handbook"] is True
     assert receipt["read_only"] is True
 
     manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))

@@ -2000,6 +2000,10 @@ class SibylClient:
             data["scope_key"] = scope_key
         return await self._request("POST", "/synthesis/draft", json=data)
 
+    async def synthesis_handbook(self, project: str) -> dict[str, Any]:
+        """Compose the distilled handbook for one project."""
+        return await self._request("GET", "/synthesis/handbook", params={"project": project})
+
     async def context_pack(
         self,
         goal: str,

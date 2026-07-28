@@ -159,6 +159,16 @@ class SynthesisDraftResponse(SynthesisPlanResponse):
     artifact: SynthesisArtifactResponse
 
 
+class SynthesisHandbookResponse(BaseModel):
+    """The distilled per-project handbook, composed on demand."""
+
+    project: str
+    run_id: str
+    markdown: str
+    source_ids: list[str] = Field(default_factory=list)
+    verification: SynthesisVerificationResponse
+
+
 class ReflectionRequest(BaseModel):
     """Request for reflecting raw notes into durable memory candidates."""
 

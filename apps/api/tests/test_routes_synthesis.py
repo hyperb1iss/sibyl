@@ -8,7 +8,11 @@ from uuid import UUID
 import pytest
 
 from sibyl.api.app import create_api_app
-from sibyl.api.routes.synthesis import draft_synthesis_route, plan_synthesis_route
+from sibyl.api.routes.synthesis import (
+    draft_synthesis_route,
+    handbook_synthesis_route,
+    plan_synthesis_route,
+)
 from sibyl.api.schemas import (
     SynthesisDraftRequest,
     SynthesisPlanRequest,
@@ -49,6 +53,7 @@ def test_synthesis_plan_route_is_registered() -> None:
 
     assert "/synthesis/plan" in paths
     assert "/synthesis/draft" in paths
+    assert "/synthesis/handbook" in paths
 
 
 async def _empty_related(**kwargs: Any) -> list[Any]:
@@ -318,3 +323,50 @@ async def test_draft_synthesis_route_can_remember_artifact() -> None:
     assert remember_calls[0]["memory_scope"] == "private"
     assert remember_calls[0]["metadata"]["source_ids"] == ["source:context"]
     assert '"source:context"' in remember_calls[0]["raw_content"]
+
+
+@pytest.mark.asyncio
+async def test_handbook_route_composes_a_cited_body_for_one_project() -> None:
+    with (
+        patch(
+            "sibyl.api.routes.synthesis.verify_entity_project_access",
+            AsyncMock(),
+        ) as verify_project,
+        patch("sibyl_core.services.synthesis.default_search", _fake_search),
+        patch("sibyl_core.services.synthesis.default_related_sources", _empty_related),
+        patch("sibyl_core.services.synthesis.default_context_pack", _fake_context_pack),
+    ):
+        response = await handbook_synthesis_route(
+            project="project-sibyl",
+            org=_org(),
+            ctx=_ctx(),
+        )
+
+    verify_project.assert_awaited_once()
+    assert response.project == "project-sibyl"
+    assert response.source_ids == ["source:context"]
+    # Run bookkeeping belongs in the response envelope, never in the file body.
+    assert response.run_id not in response.markdown
+    assert "[source:context]" in response.markdown
+
+
+@pytest.mark.asyncio
+async def test_handbook_route_is_stable_across_identical_requests() -> None:
+    async def compose() -> Any:
+        with (
+            patch("sibyl.api.routes.synthesis.verify_entity_project_access", AsyncMock()),
+            patch("sibyl_core.services.synthesis.default_search", _fake_search),
+            patch("sibyl_core.services.synthesis.default_related_sources", _empty_related),
+            patch("sibyl_core.services.synthesis.default_context_pack", _fake_context_pack),
+        ):
+            return await handbook_synthesis_route(
+                project="project-sibyl",
+                org=_org(),
+                ctx=_ctx(),
+            )
+
+    first = await compose()
+    second = await compose()
+
+    assert first.run_id == second.run_id
+    assert first.markdown == second.markdown
