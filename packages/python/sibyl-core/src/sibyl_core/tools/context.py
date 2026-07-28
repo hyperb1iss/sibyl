@@ -1231,14 +1231,22 @@ def _suppress_parents_of_passages(results: Sequence[SearchResult]) -> list[Searc
     fat parent is the copy the slice substrate exists to stop sending. The
     passage carries ``parent_entity_id``, so widening back is one lookup away.
 
-    Two things make a span ineligible to stand in for its parent. A projection
-    that hit the passage cap, or skipped a span too large to store, does not
-    account for the whole body, and letting its survivors hide the parent would
-    make the missing text unreachable. And a span that will not itself be
-    emitted suppresses nothing, or the reader loses both copies; callers pass
-    only the results that survive filtering.
+    Three things must hold before a span may stand in for its parent.
+
+    The projection has to have covered the whole body: one that hit the passage
+    cap, or skipped a span too large to store, leaves text living only on the
+    parent.
+
+    This pack has to hold every span of that projection. Retrieval returns what
+    matched, not what exists, so one span of three says nothing about the other
+    two; dropping the parent on the strength of a partial set hides the text
+    those spans carry.
+
+    And the span has to be emitted itself, or the reader loses both copies.
+    Callers pass only results that survived filtering.
     """
-    covered: set[str] = set()
+    retrieved: dict[str, set[int]] = {}
+    expected: dict[str, int] = {}
     for result in results:
         if (result.type or "").lower() != PASSAGE_ENTITY_TYPE:
             continue
@@ -1246,8 +1254,18 @@ def _suppress_parents_of_passages(results: Sequence[SearchResult]) -> list[Searc
         if not metadata.get(PASSAGE_COVERS_PARENT_KEY):
             continue
         parent_id = str(metadata.get("parent_entity_id") or "")
-        if parent_id:
-            covered.add(parent_id)
+        total = metadata.get("passage_total")
+        index = metadata.get("passage_index")
+        if not parent_id or not isinstance(total, int) or not isinstance(index, int):
+            continue
+        retrieved.setdefault(parent_id, set()).add(index)
+        expected[parent_id] = total
+
+    covered = {
+        parent_id
+        for parent_id, indices in retrieved.items()
+        if len(indices) >= expected.get(parent_id, 0) > 0
+    }
     if not covered:
         return list(results)
     return [result for result in results if result.id not in covered]

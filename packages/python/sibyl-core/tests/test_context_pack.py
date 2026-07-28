@@ -2268,6 +2268,8 @@ def _passage_result(
     source_entity_type: str,
     name: str = "a passage",
     covers_parent: bool = True,
+    passage_index: int = 0,
+    passage_total: int = 1,
 ) -> SearchResult:
     return SearchResult(
         id=result_id,
@@ -2280,6 +2282,8 @@ def _passage_result(
             "parent_entity_id": parent_id,
             "source_entity_type": source_entity_type,
             "passage_covers_parent": covers_parent,
+            "passage_index": passage_index,
+            "passage_total": passage_total,
         },
     )
 
@@ -2345,8 +2349,20 @@ def test_nothing_is_dropped_when_no_passage_is_present() -> None:
 def test_several_spans_of_one_memory_all_survive_their_parent() -> None:
     parent = SearchResult(id="d1", type="decision", name="whole", content="body", score=0.95)
     spans = [
-        _passage_result("p1", parent_id="d1", source_entity_type="decision"),
-        _passage_result("p2", parent_id="d1", source_entity_type="decision"),
+        _passage_result(
+            "p1",
+            parent_id="d1",
+            source_entity_type="decision",
+            passage_index=0,
+            passage_total=2,
+        ),
+        _passage_result(
+            "p2",
+            parent_id="d1",
+            source_entity_type="decision",
+            passage_index=1,
+            passage_total=2,
+        ),
     ]
 
     kept = context_module._suppress_parents_of_passages([parent, *spans])
@@ -2412,3 +2428,69 @@ def test_emittable_results_suppresses_only_among_survivors() -> None:
 
     assert [result.id for result, _facet in emitted] == ["p1"]
     assert all(facet is ContextFacet.DECISIONS for _result, facet in emitted)
+
+
+def test_a_partial_set_of_spans_never_hides_the_memory() -> None:
+    """Retrieval returns what matched, not what exists.
+
+    One span of three says nothing about the other two, so dropping the parent
+    on the strength of a partial set hides the text those spans carry.
+    """
+    parent = SearchResult(id="d1", type="decision", name="whole", content="body", score=0.95)
+    one_of_three = _passage_result(
+        "p2",
+        parent_id="d1",
+        source_entity_type="decision",
+        passage_index=1,
+        passage_total=3,
+    )
+
+    kept = context_module._suppress_parents_of_passages([parent, one_of_three])
+
+    assert [result.id for result in kept] == ["d1", "p2"]
+
+
+def test_the_full_set_of_spans_does_hide_the_memory() -> None:
+    parent = SearchResult(id="d1", type="decision", name="whole", content="body", score=0.95)
+    spans = [
+        _passage_result(
+            "p1",
+            parent_id="d1",
+            source_entity_type="decision",
+            passage_index=0,
+            passage_total=2,
+        ),
+        _passage_result(
+            "p2",
+            parent_id="d1",
+            source_entity_type="decision",
+            passage_index=1,
+            passage_total=2,
+        ),
+    ]
+
+    kept = context_module._suppress_parents_of_passages([parent, *spans])
+
+    assert [result.id for result in kept] == ["p1", "p2"]
+
+
+def test_a_span_missing_its_position_metadata_suppresses_nothing() -> None:
+    """Without index and total there is no way to know the set is complete."""
+    parent = SearchResult(id="d1", type="decision", name="whole", content="body", score=0.95)
+    span = SearchResult(
+        id="p1",
+        type="passage",
+        name="span",
+        content="text",
+        score=0.9,
+        metadata={
+            "projection_kind": "passage",
+            "parent_entity_id": "d1",
+            "source_entity_type": "decision",
+            "passage_covers_parent": True,
+        },
+    )
+
+    kept = context_module._suppress_parents_of_passages([parent, span])
+
+    assert [result.id for result in kept] == ["d1", "p1"]
