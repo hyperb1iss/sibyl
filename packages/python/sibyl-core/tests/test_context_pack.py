@@ -2554,3 +2554,33 @@ def test_a_gap_in_the_span_set_suppresses_nothing() -> None:
     kept = context_module._suppress_parents_of_passages([parent, *spans])
 
     assert "d1" in [result.id for result in kept]
+
+
+@pytest.mark.asyncio
+async def test_the_fallback_path_serves_full_content_not_a_preview() -> None:
+    """Degradation may cost freshness or ranking, but never content fidelity.
+
+    Left unset, the fallback inherits search's 500-char preview default, so a
+    degraded pack silently served a fraction of the text a healthy one does and
+    the caller could not tell truncated content from short content.
+    """
+    calls: list[dict[str, Any]] = []
+
+    async def fake_search(**kwargs: Any) -> SearchResponse:
+        calls.append(kwargs)
+        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+
+    await context_module._compile_fallback_sections(
+        query="fallback context",
+        facets=[ContextFacet.DECISIONS],
+        domain=None,
+        project=None,
+        accessible_projects=None,
+        organization_id="org-123",
+        limit=1,
+        search_fn=fake_search,
+    )
+
+    assert calls[0]["include_content"] is True
+    assert calls[0]["content_max_chars"] == context_module.FALLBACK_SEARCH_CONTENT_MAX_CHARS
+    assert calls[0]["content_max_chars"] > 500

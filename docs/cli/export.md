@@ -42,10 +42,10 @@ Three tiers, deliberately: `README.md` and `handbook.md` orient, `index.md` / `r
 `tasks.md` are the greppable middle, and `notes/` holds the detail an agent opens once grep points
 at it.
 
-`handbook.md` is composed during the export from the project's own memories, one synthesis run
-over the graph. Every line in it cites the memory it came from, and a heading with nothing behind
-it says so rather than being padded. Pass `--no-handbook` to skip the composition; the file is then
-simply absent, so nothing downstream has to special-case a placeholder.
+`handbook.md` is composed during the export from the project's own memories, one synthesis run over
+the graph. Every line in it cites the memory it came from, and a heading with nothing behind it says
+so rather than being padded. Pass `--no-handbook` to skip the composition; the file is then simply
+absent, so nothing downstream has to special-case a placeholder.
 
 It is built per export rather than cached. The pipeline is deterministic search and rendering with
 no model call, so recomputing is cheap and the handbook cannot drift out of step with the graph it

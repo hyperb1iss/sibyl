@@ -50,6 +50,13 @@ RawMemoryRecallFn = Callable[..., Awaitable[list[RawMemory]]]
 ActiveWorkFn = Callable[..., Awaitable[list["ContextItem"]]]
 MAX_RELATED_SUPPORT_CHARS = 18_000
 
+# The fallback search path exists for when the native retrieval plan cannot
+# run. Left unset it inherits search's 500-char preview default, so a degraded
+# pack served a fraction of the text a healthy one does. Degradation is allowed
+# to cost freshness or ranking quality; it must not quietly cost fidelity,
+# because the caller cannot tell truncated content from short content.
+FALLBACK_SEARCH_CONTENT_MAX_CHARS = MAX_RELATED_SUPPORT_CHARS
+
 log = structlog.get_logger()
 
 FACET_TITLES = {
@@ -1159,6 +1166,7 @@ async def _compile_fallback_sections(
         "allowed_memory_scope_keys": allowed_memory_scope_keys,
         "limit": limit,
         "include_content": True,
+        "content_max_chars": FALLBACK_SEARCH_CONTENT_MAX_CHARS,
         "include_documents": True,
         "include_graph": True,
         "organization_id": organization_id,
