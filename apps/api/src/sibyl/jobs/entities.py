@@ -20,6 +20,7 @@ from sibyl_core.embeddings.providers import (
 )
 from sibyl_core.projection import (
     project_entity_passages,
+    reproject_entity_passages,
     project_memory_entities,
     project_memory_entity,
 )
@@ -1380,6 +1381,23 @@ async def update_entity(
 
         # Perform the update
         result = await entity_manager.update(entity_id, updates)
+
+        if result is not None and "content" in updates:
+            # A rewritten body invalidates every span cut from the old one, and
+            # those spans keep serving the previous revision until replaced.
+            passage_result = await reproject_entity_passages(
+                entity_manager=entity_manager,
+                relationship_manager=runtime.relationship_manager,
+                source=result,
+                group_id=group_id,
+                created_source_id=entity_id,
+            )
+            if passage_result.errors:
+                log.warning(
+                    "update_entity_passage_reprojection_failed",
+                    entity_id=entity_id,
+                    errors=passage_result.errors,
+                )
 
         if result:
             # Broadcast update event

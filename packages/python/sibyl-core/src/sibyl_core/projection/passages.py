@@ -311,6 +311,73 @@ async def project_entity_passages(
     )
 
 
+async def reproject_entity_passages(
+    *,
+    entity_manager: Any,
+    relationship_manager: Any,
+    source: Entity,
+    group_id: str,
+    created_source_id: str | None = None,
+    generate_embeddings: bool = True,
+) -> PassageProjectionResult:
+    """Re-cut a memory whose body changed, retiring spans the new cut does not use.
+
+    Passage ids are deterministic per index, so a shorter body rewrites the
+    leading spans in place and would strand the rest under their old ids. Those
+    strays are not merely orphans: they hold the previous revision's text and
+    would keep being served as if they were current. Minting first and retiring
+    after means a reader mid-update sees a stale span rather than a gap.
+    """
+    source_id = created_source_id or source.id
+    result = await project_entity_passages(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        source=source,
+        group_id=group_id,
+        created_source_id=source_id,
+        generate_embeddings=generate_embeddings,
+    )
+    retired = await _retire_passages_from(
+        entity_manager,
+        source_id=source_id,
+        first_stale_index=result.passages,
+    )
+    if retired:
+        log.info(
+            "passage_projection_retired_stale",
+            source_id=source_id,
+            retired=retired,
+            kept=result.passages,
+        )
+    return result
+
+
+async def _retire_passages_from(
+    entity_manager: Any,
+    *,
+    source_id: str,
+    first_stale_index: int,
+) -> int:
+    """Delete passages at or past an index, stopping at the first absence.
+
+    The projection always writes a contiguous run from zero, so the first index
+    with no row marks the end of any previous run.
+    """
+    delete = getattr(entity_manager, "delete", None)
+    if not callable(delete):
+        return 0
+    retired = 0
+    for index in range(first_stale_index, MAX_PASSAGES_PER_SOURCE):
+        try:
+            removed = await delete(passage_entity_id(source_id, index))
+        except Exception:
+            break
+        if not removed:
+            break
+        retired += 1
+    return retired
+
+
 async def _create_passages(
     entity_manager: Any,
     entities: Sequence[Entity],
@@ -401,5 +468,6 @@ __all__ = [
     "passage_entity_id",
     "plan_entity_passages",
     "project_entity_passages",
+    "reproject_entity_passages",
     "should_project_passages",
 ]

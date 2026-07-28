@@ -13,6 +13,7 @@ from sibyl_core.projection.passages import (
     passage_entity_id,
     plan_entity_passages,
     project_entity_passages,
+    reproject_entity_passages,
     should_project_passages,
 )
 
@@ -358,3 +359,76 @@ def test_a_skipped_oversize_span_marks_every_sibling_incomplete() -> None:
 
     assert entities
     assert all(entity.metadata[PASSAGE_COVERS_PARENT_KEY] is False for entity in entities)
+
+
+class _ReprojectEntityManager(_RecordingEntityManager):
+    """An entity manager that remembers a previous, longer projection."""
+
+    def __init__(self, existing_indices: set[int]) -> None:
+        super().__init__()
+        self.existing = set(existing_indices)
+        self.deleted: list[str] = []
+
+    async def delete(self, entity_id: str) -> bool:
+        for index in sorted(self.existing):
+            if passage_entity_id(_SOURCE_ID, index) == entity_id:
+                self.existing.discard(index)
+                self.deleted.append(entity_id)
+                return True
+        return False
+
+
+@pytest.mark.asyncio
+async def test_reprojection_retires_spans_the_new_cut_no_longer_uses() -> None:
+    """A shortened body would otherwise strand old spans still serving old text."""
+    entity_manager = _ReprojectEntityManager(existing_indices={0, 1, 2, 3, 4, 5})
+    relationship_manager = _RecordingRelationshipManager()
+
+    result = await reproject_entity_passages(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        source=_source(content=_prose(sections=6)),
+        group_id=_GROUP,
+        created_source_id=_SOURCE_ID,
+    )
+
+    assert 2 <= result.passages < 6
+    expected_retired = [passage_entity_id(_SOURCE_ID, index) for index in range(result.passages, 6)]
+    assert entity_manager.deleted == expected_retired
+
+
+@pytest.mark.asyncio
+async def test_reprojection_keeps_going_when_there_is_nothing_stale() -> None:
+    entity_manager = _ReprojectEntityManager(existing_indices=set())
+    relationship_manager = _RecordingRelationshipManager()
+
+    result = await reproject_entity_passages(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        source=_source(),
+        group_id=_GROUP,
+        created_source_id=_SOURCE_ID,
+    )
+
+    assert result.passages > 1
+    assert entity_manager.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_shrinking_a_memory_below_the_threshold_retires_all_its_spans() -> None:
+    """Otherwise a now-short memory keeps serving spans of the body it used to have."""
+    entity_manager = _ReprojectEntityManager(existing_indices={0, 1, 2})
+    relationship_manager = _RecordingRelationshipManager()
+
+    result = await reproject_entity_passages(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        source=_source(content="a short body now"),
+        group_id=_GROUP,
+        created_source_id=_SOURCE_ID,
+    )
+
+    assert result.passages == 0
+    assert result.skipped is True
+    assert entity_manager.deleted == [passage_entity_id(_SOURCE_ID, i) for i in range(3)]
+    assert entity_manager.existing == set()
