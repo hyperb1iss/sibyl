@@ -193,6 +193,49 @@ def test_a_passage_cut_loose_from_its_parent_is_reported(
     assert "passage_without_raw_parent" in {issue["code"] for issue in report["issues"]}
 
 
+def test_a_passage_re_parented_onto_a_real_but_wrong_row_is_reported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Existence of a parent is not identity of one.
+
+    The span-partition check validates every span against the DECLARED parent,
+    and that check is what earns passages their exclusion from the invention
+    bound. Pointing the DERIVED_FROM edge at a different real raw observation
+    proves the partition against one row while the graph links to another, and
+    used to pass the audit clean.
+    """
+    original = projection._passage_projection
+    seen_targets: list[str] = []
+
+    def re_parented(*args: Any, **kwargs: Any) -> tuple[list[Any], list[Any]]:
+        entities, relationships = original(*args, **kwargs)
+        for relationship in relationships:
+            seen_targets.append(relationship.target_id)
+        return entities, relationships
+
+    monkeypatch.setattr(projection, "_passage_projection", re_parented)
+    baseline = _report(tmp_path, _wide_trajectory(states=2), content_max_chars=18_000)
+    assert baseline["passed"] is True, "the unmodified projection should audit clean"
+
+    # Now swap each passage's declared parent for a different real raw row.
+    def mislabelled(*args: Any, **kwargs: Any) -> tuple[list[Any], list[Any]]:
+        entities, relationships = original(*args, **kwargs)
+        others = [target for target in seen_targets if target]
+        for entity in entities:
+            declared = str(entity.metadata.get("parent_entity_id"))
+            wrong = next((target for target in others if target != declared), None)
+            if wrong is not None:
+                entity.metadata["parent_entity_id"] = wrong
+        return entities, relationships
+
+    monkeypatch.setattr(projection, "_passage_projection", mislabelled)
+    report = _report(tmp_path, _wide_trajectory(states=2), content_max_chars=18_000)
+
+    assert report["passed"] is False
+    assert "passage_parent_edge_mismatch" in {issue["code"] for issue in report["issues"]}
+
+
 def _trajectory() -> dict[str, object]:
     return {
         "id": "trajectory-1",

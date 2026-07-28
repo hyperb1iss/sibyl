@@ -91,6 +91,10 @@ class ProjectionIndex:
     passages: list[Entity]
     passages_by_evidence: dict[tuple[str, str], list[Entity]]
     raw_supported: set[str]
+    # The raw observations each row actually points at, kept alongside the
+    # bare "is supported" set so a re-parented row can be told from a
+    # correctly parented one.
+    raw_parents_by_source: dict[str, set[str]]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -256,14 +260,18 @@ def _projection_indexes(projection: OperationalExperienceProjection) -> Projecti
             str(passage.metadata.get("evidence_part_id")),
         )
         passages_by_evidence.setdefault(key, []).append(passage)
-    raw_supported = {
-        relationship.source_id
-        for relationship in projection.relationships
-        if relationship.relationship_type is RelationshipType.DERIVED_FROM
-        and relationship.target_id in entities_by_id
-        and entities_by_id[relationship.target_id].metadata.get("projection_kind")
-        == "raw_observation"
-    }
+    raw_parents_by_source: dict[str, set[str]] = {}
+    for relationship in projection.relationships:
+        if (
+            relationship.relationship_type is RelationshipType.DERIVED_FROM
+            and relationship.target_id in entities_by_id
+            and entities_by_id[relationship.target_id].metadata.get("projection_kind")
+            == "raw_observation"
+        ):
+            raw_parents_by_source.setdefault(relationship.source_id, set()).add(
+                relationship.target_id
+            )
+    raw_supported = set(raw_parents_by_source)
     return ProjectionIndex(
         raw_by_evidence=raw_by_evidence,
         raw_by_id=raw_by_id,
@@ -271,6 +279,7 @@ def _projection_indexes(projection: OperationalExperienceProjection) -> Projecti
         passages=passages,
         passages_by_evidence=passages_by_evidence,
         raw_supported=raw_supported,
+        raw_parents_by_source=raw_parents_by_source,
     )
 
 
@@ -522,6 +531,25 @@ def _audit_derived_support(
             trajectory_id,
             "passage_without_raw_parent",
             entity_ids=orphan_passages,
+        )
+    # Passages are excluded from the invention bound because they re-carve
+    # their own parent, and that exclusion is earned by the span-partition
+    # check, which validates every span against the DECLARED parent. If the
+    # DERIVED_FROM edge points at a different raw observation, the partition
+    # was proven against one row while the graph links to another, and the
+    # exclusion no longer holds. Existence of a parent is not identity of one.
+    misparented_passages = [
+        passage.id
+        for passage in index.passages
+        if (declared := str(passage.metadata.get("parent_entity_id"))) in index.raw_by_id
+        and declared not in index.raw_parents_by_source.get(passage.id, set())
+    ]
+    if misparented_passages:
+        _issue(
+            audit.issues,
+            trajectory_id,
+            "passage_parent_edge_mismatch",
+            entity_ids=misparented_passages,
         )
     unsupported_claims = [
         entity.id for entity in projection.entities if entity.entity_type is EntityType.CLAIM
