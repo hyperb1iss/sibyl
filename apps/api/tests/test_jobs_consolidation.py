@@ -97,7 +97,7 @@ async def test_consolidate_org_wires_config_and_respects_merge_cap(
     )
     deduplicator.find_duplicates.assert_awaited_once_with(
         entity_types=[
-            entity_type.value for entity_type in EntityType if entity_type is not EntityType.SESSION
+            entity_type.value for entity_type in consolidation_module._CONSOLIDATION_ENTITY_TYPES
         ]
     )
     assert deduplicator.merge_entities.await_args_list == [
@@ -140,7 +140,7 @@ async def test_consolidate_org_returns_zeroes_when_no_duplicates(
     }
     deduplicator.find_duplicates.assert_awaited_once_with(
         entity_types=[
-            entity_type.value for entity_type in EntityType if entity_type is not EntityType.SESSION
+            entity_type.value for entity_type in consolidation_module._CONSOLIDATION_ENTITY_TYPES
         ]
     )
     deduplicator.merge_entities.assert_not_awaited()
@@ -182,7 +182,7 @@ async def test_consolidate_org_counts_merge_exceptions_as_failures(
     }
     deduplicator.find_duplicates.assert_awaited_once_with(
         entity_types=[
-            entity_type.value for entity_type in EntityType if entity_type is not EntityType.SESSION
+            entity_type.value for entity_type in consolidation_module._CONSOLIDATION_ENTITY_TYPES
         ]
     )
     deduplicator.merge_entities.assert_awaited_once_with(
@@ -777,3 +777,39 @@ async def test_consolidate_all_orgs_uses_surreal_org_discovery(
         "orgs_succeeded": 2,
         "orgs_failed": 0,
     }
+
+
+def test_passages_are_never_consolidated() -> None:
+    """Merging near-duplicate spans would corrupt the substrate that produces them.
+
+    Adjacent spans of one body share vocabulary and breadcrumb, so they are
+    precisely what a near-duplicate merge collapses. They are also regenerated
+    from their parent, so a merge is undone by the next re-projection, and
+    retrieval only lets spans stand in for their parent while it holds indices
+    exactly range(total) -- merging one away silently drops readers back to fat
+    parents.
+    """
+    consolidation_module = _load_consolidation_module()
+
+    assert EntityType.PASSAGE not in consolidation_module._CONSOLIDATION_ENTITY_TYPES
+    assert EntityType.SESSION not in consolidation_module._CONSOLIDATION_ENTITY_TYPES
+
+
+def test_passages_do_not_decay_on_their_own_schedule() -> None:
+    """A derived span is not earned through usage, so usage decay is the wrong lever.
+
+    Passages live and die with the memory they were cut from.
+    """
+    consolidation_module = _load_consolidation_module()
+
+    assert EntityType.PASSAGE not in consolidation_module._PRIORITY_DECAY_ENTITY_TYPES
+
+
+def test_every_other_entity_type_still_consolidates() -> None:
+    """The exclusion is two named types, not a creeping allowlist."""
+    consolidation_module = _load_consolidation_module()
+
+    covered = set(consolidation_module._CONSOLIDATION_ENTITY_TYPES)
+    excluded = set(EntityType) - covered
+
+    assert excluded == {EntityType.SESSION, EntityType.PASSAGE}

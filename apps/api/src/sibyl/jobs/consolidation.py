@@ -27,8 +27,21 @@ _PRIORITY_DECAY_ENTITY_TYPES = (
     EntityType.PLAN,
     EntityType.NOTE,
 )
+# Passages are a derived substrate, not authored memory, and consolidation is
+# actively wrong for them on three counts. Adjacent spans of one body are
+# near-duplicates by construction, since they share vocabulary and breadcrumb,
+# so they are exactly what a near-duplicate merge would collapse -- and the
+# exact span is the whole point of the slice substrate. They are regenerated
+# from their parent, so a merge is undone by the next re-projection and the two
+# jobs would churn against each other forever. And retrieval only lets spans
+# stand in for their parent when it holds the complete set, indices exactly
+# range(total); merging one away leaves a gap, suppression stops firing, and
+# the reader silently drops back to fat parents.
+_CONSOLIDATION_EXCLUDED_ENTITY_TYPES = frozenset({EntityType.SESSION, EntityType.PASSAGE})
 _CONSOLIDATION_ENTITY_TYPES = tuple(
-    entity_type for entity_type in EntityType if entity_type is not EntityType.SESSION
+    entity_type
+    for entity_type in EntityType
+    if entity_type not in _CONSOLIDATION_EXCLUDED_ENTITY_TYPES
 )
 
 
