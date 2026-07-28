@@ -20,9 +20,9 @@ from sibyl_core.embeddings.providers import (
 )
 from sibyl_core.projection import (
     project_entity_passages,
-    reproject_entity_passages,
     project_memory_entities,
     project_memory_entity,
+    reproject_entity_passages,
 )
 from sibyl_core.services.graph import get_surreal_graph_runtime
 from sibyl_core.services.surreal_content import MemoryScope

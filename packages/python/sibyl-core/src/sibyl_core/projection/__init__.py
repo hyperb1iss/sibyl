@@ -52,10 +52,10 @@ __all__ = [
     "persist_operational_experience",
     "plan_entity_passages",
     "project_entity_passages",
-    "reproject_entity_passages",
     "project_extracted_memory_entities",
     "project_memory_entities",
     "project_memory_entity",
     "project_operational_experience",
+    "reproject_entity_passages",
     "should_project_passages",
 ]
