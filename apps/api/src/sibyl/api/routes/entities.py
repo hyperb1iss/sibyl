@@ -70,7 +70,11 @@ from sibyl_core.auth.memory_policy import (
     stamp_memory_scope_metadata,
 )
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
-from sibyl_core.projection import MANIFEST_STATE_COMPLETE, extract_projected_memory_entities
+from sibyl_core.projection import (
+    MANIFEST_STATE_COMPLETE,
+    extract_projected_memory_entities,
+    retire_entity_passages,
+)
 from sibyl_core.services import KnowledgeReadService
 from sibyl_core.tools.helpers import _generate_id
 
@@ -2357,6 +2361,16 @@ async def delete_entity(
             success = await runtime.entity_manager.delete(entity_id)
             if not success:
                 raise HTTPException(status_code=500, detail="Delete failed")
+
+            # Spans are derived, so they outlive nothing. Left behind they would
+            # keep serving the text of a memory the caller deleted, which is the
+            # one outcome a delete must not produce.
+            retired = await retire_entity_passages(
+                entity_manager=runtime.entity_manager,
+                source_id=entity_id,
+            )
+            if retired:
+                log.info("entity_delete_retired_passages", entity_id=entity_id, retired=retired)
 
             if existing.entity_type == EntityType.PROJECT:
                 await delete_project_record(

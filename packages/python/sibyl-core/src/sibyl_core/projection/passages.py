@@ -352,6 +352,24 @@ async def reproject_entity_passages(
     return result
 
 
+async def retire_entity_passages(
+    *,
+    entity_manager: Any,
+    source_id: str,
+) -> int:
+    """Delete every span cut from one memory.
+
+    For use when the memory itself is gone. A span left behind keeps serving
+    the text of something the caller deleted, which is the one outcome a delete
+    must not produce.
+    """
+    return await _retire_passages_from(
+        entity_manager,
+        source_id=source_id,
+        first_stale_index=0,
+    )
+
+
 async def _retire_passages_from(
     entity_manager: Any,
     *,
@@ -469,5 +487,6 @@ __all__ = [
     "plan_entity_passages",
     "project_entity_passages",
     "reproject_entity_passages",
+    "retire_entity_passages",
     "should_project_passages",
 ]

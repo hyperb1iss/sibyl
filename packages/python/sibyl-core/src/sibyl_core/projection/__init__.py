@@ -29,6 +29,7 @@ from sibyl_core.projection.passages import (
     plan_entity_passages,
     project_entity_passages,
     reproject_entity_passages,
+    retire_entity_passages,
     should_project_passages,
 )
 
@@ -57,5 +58,6 @@ __all__ = [
     "project_memory_entity",
     "project_operational_experience",
     "reproject_entity_passages",
+    "retire_entity_passages",
     "should_project_passages",
 ]

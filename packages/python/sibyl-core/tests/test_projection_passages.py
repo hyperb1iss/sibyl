@@ -14,6 +14,7 @@ from sibyl_core.projection.passages import (
     plan_entity_passages,
     project_entity_passages,
     reproject_entity_passages,
+    retire_entity_passages,
     should_project_passages,
 )
 
@@ -432,3 +433,31 @@ async def test_shrinking_a_memory_below_the_threshold_retires_all_its_spans() ->
     assert result.skipped is True
     assert entity_manager.deleted == [passage_entity_id(_SOURCE_ID, i) for i in range(3)]
     assert entity_manager.existing == set()
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_memory_retires_every_span_cut_from_it() -> None:
+    """A span outliving its parent keeps serving text the caller deleted."""
+    entity_manager = _ReprojectEntityManager(existing_indices={0, 1, 2, 3})
+
+    retired = await retire_entity_passages(
+        entity_manager=entity_manager,
+        source_id=_SOURCE_ID,
+    )
+
+    assert retired == 4
+    assert entity_manager.existing == set()
+    assert entity_manager.deleted == [passage_entity_id(_SOURCE_ID, i) for i in range(4)]
+
+
+@pytest.mark.asyncio
+async def test_retiring_a_memory_that_never_had_spans_is_a_no_op() -> None:
+    entity_manager = _ReprojectEntityManager(existing_indices=set())
+
+    retired = await retire_entity_passages(
+        entity_manager=entity_manager,
+        source_id=_SOURCE_ID,
+    )
+
+    assert retired == 0
+    assert entity_manager.deleted == []
