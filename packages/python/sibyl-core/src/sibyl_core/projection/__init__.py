@@ -21,13 +21,25 @@ from sibyl_core.projection.memory import (
     project_memory_entities,
     project_memory_entity,
 )
+from sibyl_core.projection.passages import (
+    PASSAGE_MIN_SOURCE_CHARS,
+    PASSAGE_SOURCE_TYPES,
+    PassageProjectionResult,
+    passage_entity_id,
+    plan_entity_passages,
+    project_entity_passages,
+    should_project_passages,
+)
 
 __all__ = [
     "MANIFEST_STATE_COMPLETE",
     "MANIFEST_STATE_EMBEDDING_PENDING",
     "OPERATIONAL_EXPERIENCE_SCHEMA_VERSION",
+    "PASSAGE_MIN_SOURCE_CHARS",
+    "PASSAGE_SOURCE_TYPES",
     "MemoryProjectionBatchResult",
     "MemoryProjectionResult",
+    "PassageProjectionResult",
     "ProjectedEntitySourceLink",
     "ProjectedMemoryEntity",
     "ProjectedMemoryFact",
@@ -35,9 +47,13 @@ __all__ = [
     "extract_projected_memory_facts",
     "operational_experience_manifest_id",
     "operational_experience_manifest_with_state",
+    "passage_entity_id",
     "persist_operational_experience",
+    "plan_entity_passages",
+    "project_entity_passages",
     "project_extracted_memory_entities",
     "project_memory_entities",
     "project_memory_entity",
     "project_operational_experience",
+    "should_project_passages",
 ]

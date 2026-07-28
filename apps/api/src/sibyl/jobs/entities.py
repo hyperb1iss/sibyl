@@ -18,7 +18,11 @@ from sibyl_core.embeddings.providers import (
     capture_embedding_usage,
     configured_embedding_provider,
 )
-from sibyl_core.projection import project_memory_entities, project_memory_entity
+from sibyl_core.projection import (
+    project_entity_passages,
+    project_memory_entities,
+    project_memory_entity,
+)
 from sibyl_core.services.graph import get_surreal_graph_runtime
 from sibyl_core.services.surreal_content import MemoryScope
 from sibyl_core.tasks.distillation import build_learning_episode, build_learning_procedure
@@ -641,6 +645,32 @@ async def create_entity(  # noqa: PLR0915
                 errors=len(projection_result.errors),
             )
 
+        # Ordered after the parent write on purpose: a PART_OF edge whose
+        # target does not exist yet is silently dropped and never heals.
+        passage_result = await project_entity_passages(
+            entity_manager=entity_manager,
+            relationship_manager=relationship_manager,
+            source=entity,
+            group_id=group_id,
+            created_source_id=created_id,
+            generate_embeddings=generate_embeddings,
+        )
+        if passage_result.errors:
+            log.warning(
+                "create_entity_passage_projection_failed",
+                entity_id=created_id,
+                passages=passage_result.passages,
+                relationships=passage_result.relationships,
+                errors=passage_result.errors,
+            )
+        elif passage_result.passages:
+            log.info(
+                "create_entity_passage_projection_complete",
+                entity_id=created_id,
+                passages=passage_result.passages,
+                relationships=passage_result.relationships,
+            )
+
         embedding_backfill_job_id: str | None = None
         if not generate_embeddings:
             try:
@@ -655,11 +685,16 @@ async def create_entity(  # noqa: PLR0915
                 relationships_to_backfill = (
                     *relationships_for_embedding_backfill,
                     *projection_relationships,
+                    *passage_result.created_relationships,
                 )
                 embedding_backfill_job_id = await enqueue_entity_embedding_backfill(
                     [
                         backfill_entity.model_dump(mode="json")
-                        for backfill_entity in (entity, *projection_entities)
+                        for backfill_entity in (
+                            entity,
+                            *projection_entities,
+                            *passage_result.created_passages,
+                        )
                     ],
                     group_id,
                     relationships=[

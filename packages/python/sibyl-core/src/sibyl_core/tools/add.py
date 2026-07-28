@@ -28,7 +28,7 @@ from sibyl_core.models.tasks import (
     TaskPriority,
     TaskStatus,
 )
-from sibyl_core.projection import project_memory_entity
+from sibyl_core.projection import project_entity_passages, project_memory_entity
 from sibyl_core.runtime_ports import get_queue_port
 from sibyl_core.services.graph import get_surreal_graph_runtime
 from sibyl_core.tools.helpers import (
@@ -686,6 +686,32 @@ async def add(
                     errors=len(projection_result.errors),
                 )
 
+            # Ordered after the parent write on purpose: a PART_OF edge whose
+            # target does not exist yet is silently dropped and never heals.
+            passage_result = await project_entity_passages(
+                entity_manager=entity_manager,
+                relationship_manager=relationship_manager,
+                source=entity,
+                group_id=org_id,
+                created_source_id=created_id,
+                generate_embeddings=generate_embeddings,
+            )
+            if passage_result.errors:
+                log.warning(
+                    "add_passage_projection_failed",
+                    entity_id=created_id,
+                    passages=passage_result.passages,
+                    relationships=passage_result.relationships,
+                    errors=passage_result.errors,
+                )
+            elif passage_result.passages:
+                log.info(
+                    "add_passage_projection_complete",
+                    entity_id=created_id,
+                    passages=passage_result.passages,
+                    relationships=passage_result.relationships,
+                )
+
             message = f"Added: {title}"
             if relationships_to_create:
                 message += f" (linked: {len(relationships_to_create)})"
@@ -704,10 +730,17 @@ async def add(
                         (),
                     )
                 ]
+                passage_relationships = [
+                    relationship.model_dump(mode="json")
+                    for relationship in passage_result.created_relationships
+                ]
                 background_jobs = await _enqueue_embedding_backfill(
-                    [entity, *projection_entities],
+                    [entity, *projection_entities, *passage_result.created_passages],
                     org_id,
-                    relationships_to_create + auto_relationships + projection_relationships,
+                    relationships_to_create
+                    + auto_relationships
+                    + projection_relationships
+                    + passage_relationships,
                 )
 
             return AddResponse(

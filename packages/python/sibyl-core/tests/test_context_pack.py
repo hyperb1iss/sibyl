@@ -2259,3 +2259,94 @@ async def test_compile_context_hands_the_reader_identity_to_related_lookup(
 
     assert related_calls
     assert all(call["principal_id"] == "user-123" for call in related_calls)
+
+
+def _passage_result(
+    result_id: str,
+    *,
+    parent_id: str,
+    source_entity_type: str,
+    name: str = "a passage",
+) -> SearchResult:
+    return SearchResult(
+        id=result_id,
+        type="passage",
+        name=name,
+        content="span text",
+        score=0.9,
+        metadata={
+            "projection_kind": "passage",
+            "parent_entity_id": parent_id,
+            "source_entity_type": source_entity_type,
+        },
+    )
+
+
+def test_passages_are_always_requested_so_spans_can_surface() -> None:
+    """A passage belongs to its parent's facet, so it is asked for once."""
+    types = context_module._types_for_facets([ContextFacet.DECISIONS])
+
+    assert "passage" in types
+
+
+def test_a_passage_routes_to_the_facet_of_the_memory_it_was_cut_from() -> None:
+    facets = [ContextFacet.DECISIONS, ContextFacet.GOTCHAS, ContextFacet.RECENT_MEMORY]
+
+    decision_span = _passage_result("p1", parent_id="d1", source_entity_type="decision")
+    gotcha_span = _passage_result("p2", parent_id="e1", source_entity_type="error_pattern")
+
+    assert context_module._facet_for_result(decision_span, facets) == ContextFacet.DECISIONS
+    assert context_module._facet_for_result(gotcha_span, facets) == ContextFacet.GOTCHAS
+
+
+def test_a_passage_without_a_parent_type_still_lands_somewhere() -> None:
+    orphan = SearchResult(
+        id="p3",
+        type="passage",
+        name="orphan span",
+        content="span text",
+        score=0.5,
+        metadata={"projection_kind": "passage"},
+    )
+
+    assert context_module._facet_for_result(orphan, [ContextFacet.RECENT_MEMORY]) is not None
+
+
+def test_a_parent_is_dropped_when_one_of_its_spans_is_already_present() -> None:
+    """Serving both spends the reader's budget twice on overlapping text."""
+    parent = SearchResult(
+        id="d1",
+        type="decision",
+        name="the whole decision",
+        content="the entire fat body",
+        score=0.95,
+    )
+    span = _passage_result("p1", parent_id="d1", source_entity_type="decision")
+    unrelated = SearchResult(
+        id="d2", type="decision", name="another decision", content="body", score=0.8
+    )
+
+    kept = context_module._suppress_parents_of_passages([parent, span, unrelated])
+
+    assert [result.id for result in kept] == ["p1", "d2"]
+
+
+def test_nothing_is_dropped_when_no_passage_is_present() -> None:
+    results = [
+        SearchResult(id="d1", type="decision", name="a", content="b", score=0.9),
+        SearchResult(id="d2", type="decision", name="c", content="d", score=0.8),
+    ]
+
+    assert context_module._suppress_parents_of_passages(results) == results
+
+
+def test_several_spans_of_one_memory_all_survive_their_parent() -> None:
+    parent = SearchResult(id="d1", type="decision", name="whole", content="body", score=0.95)
+    spans = [
+        _passage_result("p1", parent_id="d1", source_entity_type="decision"),
+        _passage_result("p2", parent_id="d1", source_entity_type="decision"),
+    ]
+
+    kept = context_module._suppress_parents_of_passages([parent, *spans])
+
+    assert [result.id for result in kept] == ["p1", "p2"]

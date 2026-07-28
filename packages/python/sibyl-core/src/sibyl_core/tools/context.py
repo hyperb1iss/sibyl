@@ -169,11 +169,29 @@ LAYER_LIMITS = {
 }
 
 
+PASSAGE_ENTITY_TYPE = "passage"
+
 _WORK_ITEM_TYPES = {"task", "epic"}
 # Tasks finish as "done"; epic container status derives to "completed".
 _PRIOR_WORK_STATUSES = {"done", "completed"}
 _DROPPED_WORK_STATUSES = {"archived"}
 _IN_FLIGHT_WORK_STATUSES = {"doing", "in_progress", "blocked", "review"}
+
+
+def _effective_facet_type(result: SearchResult) -> str:
+    """Classify a passage by the memory it was cut from, not by being a passage.
+
+    A passage is a span, not a subject. A span of a decision is decision
+    material and a span of an error pattern is a gotcha, so routing on the
+    literal type would file every span under one heading no matter what it
+    says. Falls back to the literal type when the parent type is missing.
+    """
+    normalized_type = (result.type or "").lower()
+    if normalized_type != PASSAGE_ENTITY_TYPE:
+        return normalized_type
+    metadata = result.metadata or {}
+    source_type = str(metadata.get("source_entity_type") or "").lower()
+    return source_type or normalized_type
 
 
 def _facet_for_type(entity_type: str, facets: list[ContextFacet]) -> ContextFacet:
@@ -198,7 +216,7 @@ def _work_item_status(result: SearchResult) -> str | None:
 def _facet_for_result(result: SearchResult, facets: list[ContextFacet]) -> ContextFacet | None:
     """Route a result to a facet, keeping completed work out of Active Work."""
 
-    normalized_type = (result.type or "").lower()
+    normalized_type = _effective_facet_type(result)
     if normalized_type in _WORK_ITEM_TYPES:
         status = _work_item_status(result)
         if status in _DROPPED_WORK_STATUSES:
@@ -1149,7 +1167,7 @@ async def _compile_fallback_sections(
     response = await search_fn(**search_kwargs)
 
     grouped: dict[ContextFacet, list[ContextItem]] = {facet: [] for facet in facets}
-    for result in response.results:
+    for result in _suppress_parents_of_passages(response.results):
         if _is_synthetic_relationship_result(result):
             continue
         facet = _facet_for_result(result, facets)
@@ -1177,7 +1195,32 @@ def _types_for_facets(facets: Sequence[ContextFacet]) -> list[str]:
                 continue
             seen.add(normalized)
             ordered.append(entity_type)
+    # Requested once here rather than added to every facet's list: a passage
+    # belongs to whichever facet its parent type does, and _facet_for_result
+    # is what decides that after the rows come back.
+    if PASSAGE_ENTITY_TYPE not in seen:
+        ordered.append(PASSAGE_ENTITY_TYPE)
     return ordered
+
+
+def _suppress_parents_of_passages(results: Sequence[SearchResult]) -> list[SearchResult]:
+    """Drop a memory when a span cut from it is already in the same pack.
+
+    Serving both spends the reader's budget twice on overlapping text, and the
+    fat parent is the copy the slice substrate exists to stop sending. The
+    passage carries ``parent_entity_id``, so widening back to the whole memory
+    is still one lookup away.
+    """
+    covered: set[str] = set()
+    for result in results:
+        if (result.type or "").lower() != PASSAGE_ENTITY_TYPE:
+            continue
+        parent_id = str((result.metadata or {}).get("parent_entity_id") or "")
+        if parent_id:
+            covered.add(parent_id)
+    if not covered:
+        return list(results)
+    return [result for result in results if result.id not in covered]
 
 
 def _sections_from_response(
@@ -1187,7 +1230,7 @@ def _sections_from_response(
     audit: bool = False,
 ) -> list[ContextSection]:
     grouped: dict[ContextFacet, list[ContextItem]] = {facet: [] for facet in facets}
-    for result in response.results:
+    for result in _suppress_parents_of_passages(response.results):
         if _is_synthetic_relationship_result(result):
             continue
         facet = _facet_for_result(result, list(facets))
