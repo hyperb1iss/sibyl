@@ -1,13 +1,21 @@
-"""Cut an indented state body into reader-sized passages.
+"""Cut a body into reader-sized passages.
+
+Two nesting models, one set of boundary rules. ``slice_body`` reads an
+accessibility tree, where indentation is the hierarchy. ``slice_prose`` reads
+Markdown, where headings are. Both hand the same forest to the same packer, so
+the band, the descend rule, and the tail merge behave identically whatever the
+source; only depth and breadcrumb labelling differ.
 
 Ported from the A1 Stage 0/1 measurement harness, whose v2 boundary rules
 produced every number the slice-substrate design rests on: zero straddle over
 31,244 (question, phrase, carrier-state) triples, a 3-slice window reaching the
-fat-state exposure ceiling, and a ~950-1,030 char mean slice.
+fat-state exposure ceiling, and a ~950-1,030 char mean slice. Those numbers were
+measured on tree-shaped evidence; prose reuses the rules but has not been
+measured against a corpus of its own.
 
 Rules, in the order they fire:
 
-  * cut on the shallowest indent depth whose subtrees land in a 600-1200 char
+  * cut on the shallowest nesting depth whose subtrees land in a 600-1200 char
     band, packing siblings greedily
   * band-aware flush: a buffer under the floor keeps growing past TARGET_HI up
     to HARD_MAX rather than closing short
@@ -25,10 +33,12 @@ Rules, in the order they fire:
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from math import gcd
 from urllib.parse import urlsplit
+
+type LabelFn = Callable[[str], str]
 
 TARGET_LO = 600
 TARGET_HI = 1200
@@ -126,11 +136,15 @@ def line_depths(lines: Sequence[str]) -> list[int]:
     return depths
 
 
-def build_forest(lines: Sequence[str]) -> list[Node]:
-    """Build the indent forest over a body's lines."""
+def build_forest(lines: Sequence[str], depths: Sequence[int] | None = None) -> list[Node]:
+    """Build the nesting forest over a body's lines.
+
+    ``depths`` lets a caller supply its own nesting model. Indentation is the
+    right one for an accessibility tree; prose nests by heading level instead.
+    """
     roots: list[Node] = []
     stack: list[Node] = []
-    for index, depth in enumerate(line_depths(lines)):
+    for index, depth in enumerate(line_depths(lines) if depths is None else depths):
         node = Node(index=index, depth=depth, line=lines[index])
         while stack and stack[-1].depth >= depth:
             stack.pop()
@@ -189,14 +203,78 @@ def node_label(line: str) -> str:
     return stripped[:_UNPARSED_LABEL_MAX_CHARS]
 
 
-def breadcrumb_for(ancestors: Sequence[Node]) -> str:
+def breadcrumb_for(ancestors: Sequence[Node], label: LabelFn = node_label) -> str:
     """Join every ancestor above a slice into its context trail.
 
     Uncapped on purpose: the measured configuration prepends the full chain, and
     dropping ancestors can only lower per-slice coverage. Capping is a later arm
     that has to earn its exposure number.
     """
-    return " > ".join(node_label(node.line) for node in ancestors)
+    return " > ".join(label(node.line) for node in ancestors)
+
+
+_HEADING_PATTERN = re.compile(r"^(?P<hashes>#{1,6})\s+(?P<title>.*\S)\s*$")
+_FENCE_PATTERN = re.compile(r"^\s*(?:```|~~~)")
+_HEADING_LABEL_MAX_CHARS = 60
+
+
+def prose_line_depths(lines: Sequence[str]) -> list[int]:
+    """Nest prose by heading level, with each block held together beneath it.
+
+    Markdown carries its own hierarchy, so the tree the packer walks is the
+    heading outline rather than leading whitespace. Two rules beyond that:
+
+    A block's continuation lines sit one level below its opening line, so the
+    whole block is a single subtree and the greedy packer never closes a slice
+    halfway through a paragraph, a list item, or a fenced example. Above
+    HARD_MAX the descend rule still applies, so an oversize fence is re-packed
+    from its inner lines like any other large subtree; the alternative is
+    emitting a whole code listing as one slice and abandoning the band. The
+    pieces carry the fence's opening line, in content for the first and in the
+    breadcrumb for the rest.
+
+    Nothing inside a fence is interpreted. A ``#`` starting a line of shell or
+    Python is a comment, and reading it as a heading would restructure the
+    document around a line of sample code.
+    """
+    depths: list[int] = []
+    section_depth = 0
+    in_fence = False
+    continuing = False
+    for line in lines:
+        if _FENCE_PATTERN.match(line):
+            # The delimiters bracket the block they open and close, so both
+            # attach to it rather than starting a sibling.
+            depths.append(section_depth + 1 if not in_fence else section_depth + 2)
+            in_fence = not in_fence
+            continuing = in_fence
+            continue
+        if in_fence:
+            depths.append(section_depth + 2)
+            continue
+        heading = _HEADING_PATTERN.match(line)
+        if heading is not None:
+            section_depth = len(heading.group("hashes")) - 1
+            depths.append(section_depth)
+            continuing = False
+            continue
+        if not line.strip():
+            # Trailing blanks stay with the block above them so no slice opens
+            # on whitespace.
+            depths.append(section_depth + 2 if continuing else section_depth + 1)
+            continuing = False
+            continue
+        depths.append(section_depth + 2 if continuing else section_depth + 1)
+        continuing = True
+    return depths
+
+
+def prose_node_label(line: str) -> str:
+    """Render one prose line as a breadcrumb segment."""
+    heading = _HEADING_PATTERN.match(line)
+    if heading is not None:
+        return " ".join(heading.group("title").split())[:_HEADING_LABEL_MAX_CHARS]
+    return " ".join(line.split())[:_HEADING_LABEL_MAX_CHARS]
 
 
 @dataclass
@@ -213,7 +291,7 @@ class _Frame:
     descended_out: list[Slice] = field(default_factory=list)
 
 
-def _flush(frame: _Frame, lines: Sequence[str]) -> None:
+def _flush(frame: _Frame, lines: Sequence[str], label: LabelFn) -> None:
     if not frame.buffer:
         return
     indices: list[int] = []
@@ -224,7 +302,7 @@ def _flush(frame: _Frame, lines: Sequence[str]) -> None:
             line_indices=indices,
             content="\n".join(lines[index] for index in indices),
             cut_depth=frame.buffer[0].depth,
-            breadcrumb=breadcrumb_for(frame.ancestors),
+            breadcrumb=breadcrumb_for(frame.ancestors, label),
             reason="multi-subtree" if len(frame.buffer) > 1 else "single-subtree",
         )
     )
@@ -237,6 +315,7 @@ def _absorb_descend(
     node: Node,
     lines: Sequence[str],
     stats: SliceStats,
+    label: LabelFn,
 ) -> None:
     """Fold a finished child level back into its parent, prepending its line."""
     child_slices = frame.descended_out
@@ -252,7 +331,7 @@ def _absorb_descend(
     else:
         stats.prepend_deferred += 1
         child_slices.insert(0, Slice([node.index], node.line, node.depth, "", "ancestor-line"))
-    child_slices[0].breadcrumb = breadcrumb_for(frame.ancestors)
+    child_slices[0].breadcrumb = breadcrumb_for(frame.ancestors, label)
     frame.out.extend(child_slices)
     frame.descended = None
     frame.descended_out = []
@@ -274,13 +353,18 @@ def _tail_merge(out: list[Slice], lines: Sequence[str], stats: SliceStats) -> No
         stats.tail_merges += 1
 
 
-def _emit(roots: Sequence[Node], lines: Sequence[str], stats: SliceStats) -> list[Slice]:
+def _emit(
+    roots: Sequence[Node],
+    lines: Sequence[str],
+    stats: SliceStats,
+    label: LabelFn = node_label,
+) -> list[Slice]:
     out: list[Slice] = []
     stack = [_Frame(nodes=roots, ancestors=[], out=out)]
     while stack:
         frame = stack[-1]
         if frame.descended is not None:
-            _absorb_descend(frame, frame.descended, lines, stats)
+            _absorb_descend(frame, frame.descended, lines, stats, label)
             continue
         descending = False
         while frame.cursor < len(frame.nodes):
@@ -288,7 +372,7 @@ def _emit(roots: Sequence[Node], lines: Sequence[str], stats: SliceStats) -> lis
             frame.cursor += 1
             size = node.subtree_chars
             if size > HARD_MAX and node.children:
-                _flush(frame, lines)
+                _flush(frame, lines, label)
                 stats.descend_events += 1
                 frame.descended = node
                 frame.descended_out = []
@@ -302,14 +386,14 @@ def _emit(roots: Sequence[Node], lines: Sequence[str], stats: SliceStats) -> lis
                 descending = True
                 break
             if size > HARD_MAX:
-                _flush(frame, lines)
+                _flush(frame, lines, label)
                 stats.oversize_leaf += 1
                 frame.out.append(
                     Slice(
                         [node.index],
                         node.line,
                         node.depth,
-                        breadcrumb_for(frame.ancestors),
+                        breadcrumb_for(frame.ancestors, label),
                         "oversize-leaf",
                     )
                 )
@@ -317,12 +401,12 @@ def _emit(roots: Sequence[Node], lines: Sequence[str], stats: SliceStats) -> lis
             crosses_band = frame.buffer_chars >= TARGET_LO and frame.buffer_chars + size > TARGET_HI
             crosses_ceiling = frame.buffer_chars > 0 and frame.buffer_chars + size > HARD_MAX
             if crosses_band or crosses_ceiling:
-                _flush(frame, lines)
+                _flush(frame, lines, label)
             frame.buffer.append(node)
             frame.buffer_chars += size
         if descending:
             continue
-        _flush(frame, lines)
+        _flush(frame, lines, label)
         _tail_merge(frame.out, lines, stats)
         stack.pop()
     return out
@@ -335,6 +419,20 @@ def slice_body(body: str) -> tuple[list[Slice], SliceStats]:
         return [], stats
     lines = body.split("\n")
     return _emit(build_forest(lines), lines, stats), stats
+
+
+def slice_prose(body: str) -> tuple[list[Slice], SliceStats]:
+    """Cut a prose body into slices that partition its lines exactly.
+
+    Shares the band, the descend rule, and the tail merge with the tree cutter;
+    only the nesting model and the breadcrumb labels differ.
+    """
+    stats = SliceStats()
+    if not body.strip():
+        return [], stats
+    lines = body.split("\n")
+    roots = build_forest(lines, prose_line_depths(lines))
+    return _emit(roots, lines, stats, prose_node_label), stats
 
 
 def uri_path(uri: str) -> str:
