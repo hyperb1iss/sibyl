@@ -246,6 +246,7 @@ INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
     citation_count = $input.citation_count ?? citation_count ?? 0,
     misled_count = $input.misled_count ?? misled_count ?? 0,
     project_id = $input.project_id,
+    memory_scope = $input.memory_scope,
     epic_id = $input.epic_id,
     parent_task_id = $input.parent_task_id,
     task_id = $input.task_id,
