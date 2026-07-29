@@ -2847,6 +2847,10 @@ def _entity_record(
     updated_at = _metadata_datetime(metadata.get("updated_at")) or entity.updated_at or now
     created_at = entity.created_at or now
     project_id = _metadata_str(metadata, "project_id")
+    # Promoted from metadata like the other denormalized columns. The scope is
+    # already stamped into attributes at capture; the column is what lets a
+    # query filter on it and what makes its absence a fact rather than a guess.
+    memory_scope = _metadata_str(metadata, "memory_scope")
     epic_id = _metadata_str(metadata, "epic_id")
     parent_task_id = _metadata_str(metadata, "parent_task_id")
     if canonicalize_parent_task_id and not parent_task_id and entity.entity_type == EntityType.TASK:
@@ -2887,6 +2891,7 @@ def _entity_record(
         "modified_by": entity.modified_by,
         "revision": entity.revision,
         "project_id": project_id,
+        "memory_scope": memory_scope,
         "epic_id": epic_id,
         "parent_task_id": parent_task_id,
         "task_id": task_id,
@@ -2946,6 +2951,7 @@ def _entity_update_patch(updates: Mapping[str, Any], *, updated_at: datetime) ->
 
     for key in (
         "project_id",
+        "memory_scope",
         "epic_id",
         "parent_task_id",
         "task_id",

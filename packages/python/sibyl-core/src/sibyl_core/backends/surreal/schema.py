@@ -102,6 +102,7 @@ DEFINE FIELD IF NOT EXISTS priority ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS complexity ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS feature ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS tags ON entity TYPE option<array<string>>;
+DEFINE FIELD IF NOT EXISTS memory_scope ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS name_embedding ON entity TYPE option<array<float, {EMBEDDING_DIM}>>;
 
 DEFINE INDEX IF NOT EXISTS idx_entity_uuid ON entity FIELDS uuid UNIQUE;
@@ -111,6 +112,7 @@ DEFINE INDEX IF NOT EXISTS idx_entity_project ON entity FIELDS project_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_parent_task ON entity FIELDS parent_task_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_task ON entity FIELDS task_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_status ON entity FIELDS status;
+DEFINE INDEX IF NOT EXISTS idx_entity_memory_scope ON entity FIELDS memory_scope;
 DEFINE INDEX IF NOT EXISTS idx_entity_priority ON entity FIELDS priority;
 DEFINE INDEX IF NOT EXISTS idx_entity_updated ON entity FIELDS updated_at, created_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_entity_last_recalled ON entity FIELDS last_recalled_at, created_at, uuid;
@@ -501,6 +503,14 @@ WHERE misled_count = 0
     AND attributes.misled_count != NONE;
 """
 
+ENTITY_MEMORY_SCOPE_COLUMN_DEFINITIONS = """
+DEFINE FIELD OVERWRITE memory_scope ON entity TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_entity_memory_scope ON entity FIELDS memory_scope;
+UPDATE entity SET memory_scope = attributes.memory_scope
+WHERE memory_scope = NONE
+    AND attributes.memory_scope != NONE;
+"""
+
 ENTITY_REQUIRED_FIELD_REPAIR_DEFINITIONS = f"""
 {ENTITY_REQUIRED_FIELD_OPTIONAL_DEFINITIONS}
 UPDATE entity SET revision = 1 WHERE revision = NONE OR revision < 1;
@@ -644,6 +654,15 @@ GRAPH_SCHEMA_MIGRATIONS = (
         version=16,
         name="graph_enum_assertions_passage",
         statements=tuple(split_statements(GRAPH_ENUM_ASSERTION_DEFINITIONS)),
+    ),
+    # Promotes the scope every stamped row already carries in attributes into a
+    # column, so a query can filter on it and so its ABSENCE becomes a fact
+    # rather than an ambiguity. Backfills in-namespace only; rows that never
+    # carried an attributes stamp stay NONE and are handled separately.
+    SchemaMigration(
+        version=17,
+        name="entity_memory_scope_column",
+        statements=tuple(split_statements(ENTITY_MEMORY_SCOPE_COLUMN_DEFINITIONS)),
     ),
 )
 
@@ -1029,6 +1048,7 @@ __all__ = [
     "EMBEDDING_DIM",
     "EMBEDDING_VECTOR_FIELDS",
     "ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS",
+    "ENTITY_MEMORY_SCOPE_COLUMN_DEFINITIONS",
     "ENTITY_MISLED_USAGE_SIGNAL_DEFINITIONS",
     "ENTITY_REQUIRED_FIELD_OPTIONAL_DEFINITIONS",
     "ENTITY_REQUIRED_FIELD_REPAIR_DEFINITIONS",

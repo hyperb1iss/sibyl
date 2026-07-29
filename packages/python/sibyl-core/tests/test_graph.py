@@ -3691,3 +3691,168 @@ async def test_one_oversized_entity_fails_the_whole_bulk_write() -> None:
         assert rows == []
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_memory_scope_is_promoted_to_a_column_on_write() -> None:
+    """The scope lived only inside attributes, so no query could filter on it.
+
+    A column also turns absence into a fact: an unstamped row is now
+    distinguishable from one nobody has looked at, which is what the read-side
+    fail-open needs before it can safely close.
+    """
+    client = SurrealGraphClient(group_id="org-scope-column", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        await manager.create_direct(
+            Entity(
+                id="scoped_row",
+                entity_type=EntityType.DECISION,
+                name="A private decision",
+                content="body",
+                organization_id=client.group_id,
+                metadata={"memory_scope": "private", "principal_id": "user-1"},
+            )
+        )
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT memory_scope FROM entity
+                WHERE group_id = $group_id AND uuid = "scoped_row" LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+        assert rows[0]["memory_scope"] == "private"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_an_unstamped_row_leaves_the_scope_column_empty() -> None:
+    """Work items are deliberately unstamped; the column must not invent a scope."""
+    client = SurrealGraphClient(group_id="org-scope-unstamped", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        await manager.create_direct(
+            Entity(
+                id="unstamped_row",
+                entity_type=EntityType.TASK,
+                name="A task",
+                content="body",
+                organization_id=client.group_id,
+            )
+        )
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT memory_scope FROM entity
+                WHERE group_id = $group_id AND uuid = "unstamped_row" LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+        assert not rows[0].get("memory_scope")
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_the_scope_column_follows_an_update() -> None:
+    """A promotion that only ran at create would drift the moment scope changed."""
+    client = SurrealGraphClient(group_id="org-scope-update", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        await manager.create_direct(
+            Entity(
+                id="rescoped_row",
+                entity_type=EntityType.DECISION,
+                name="Was private",
+                content="body",
+                organization_id=client.group_id,
+                metadata={"memory_scope": "private", "principal_id": "user-1"},
+            )
+        )
+        await manager.update("rescoped_row", {"memory_scope": "project"})
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT memory_scope FROM entity
+                WHERE group_id = $group_id AND uuid = "rescoped_row" LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+        assert rows[0]["memory_scope"] == "project"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_the_v17_migration_backfills_scope_from_attributes() -> None:
+    """The read-side fail-open cannot close until existing rows carry the column.
+
+    Every row stamped at capture already holds its scope in attributes, so the
+    migration promotes those rather than leaving them indistinguishable from
+    rows that were never stamped at all.
+    """
+    client = SurrealGraphClient(group_id="org-scope-backfill", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+
+        # A row as it looked before the column existed: scope in attributes only.
+        await client.execute_query(
+            """
+            CREATE entity SET
+                uuid = "legacy_scoped",
+                name = "Legacy private row",
+                entity_type = "decision",
+                group_id = $group_id,
+                attributes = {{ memory_scope: "private" }};
+            """,
+            group_id=client.group_id,
+        )
+
+        # Pin the pre-state, or this test silently goes vacuous if the row ever
+        # starts arriving with the column already populated.
+        before = normalize_records(
+            await client.execute_query(
+                """
+                SELECT attributes, memory_scope FROM entity
+                WHERE group_id = $group_id AND uuid = "legacy_scoped" LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+        assert before[0]["attributes"]["memory_scope"] == "private"
+        assert not before[0].get("memory_scope")
+
+        from sibyl_core.backends.surreal.schema import (
+            ENTITY_MEMORY_SCOPE_COLUMN_DEFINITIONS,
+        )
+        from sibyl_core.backends.surreal.schema_helpers import split_statements
+
+        for statement in split_statements(ENTITY_MEMORY_SCOPE_COLUMN_DEFINITIONS):
+            await client.execute_query(statement)
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT memory_scope FROM entity
+                WHERE group_id = $group_id AND uuid = "legacy_scoped" LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+        assert rows[0]["memory_scope"] == "private"
+    finally:
+        await client.close()
