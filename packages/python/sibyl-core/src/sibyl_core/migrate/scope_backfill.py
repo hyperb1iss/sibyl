@@ -11,22 +11,32 @@ itself the safety property:
 
 1. **Recover the true scope** from ``raw_captures`` for any row whose
    ``attributes.raw_memory_id`` still resolves. A capture knows whether it was
-   private, so this is the only pass that can produce ``private``.
+   private, so this is the only pass that can produce ``private``. The capture's
+   values are authoritative and replace whatever the graph row carried.
 2. **Derive a scope** for whatever is left, preserving today's effective
    behavior rather than guessing at intent. A row carrying a ``project_id`` is
    already gated on project membership, so it becomes ``project`` keyed to that
-   project; defaulting it to ``org`` would *widen* access. A row with no project
-   is already readable by any org member under the fail-open, so it becomes
-   ``org``.
+   project.
 
 Recovery must precede derivation. Run the other way round and a genuinely
-private memory whose stamp was lost gets stamped ``org``, which converts a
-missing field into a real leak.
+private memory whose stamp was lost gets stamped for a wider audience, which
+converts a missing field into a real leak.
+
+**A row is left unstamped whenever no scope value would keep it readable.**
+Read authorization admits only ``private``, ``project``, ``team``, and
+``delegated``; ``organization``, ``shared``, and ``public`` reach
+``scope_not_enabled``, and the graph read path forwards neither team nor
+delegation memberships today. So a projectless row -- org-readable now purely
+because the absent scope fails open -- has no stampable equivalent, and stamping
+one anyway would revoke every reader it has. Those rows stay unstamped and are
+counted, which is what makes ``skipped`` the honest answer to whether the
+fail-open can close yet: while it is non-zero, closing it would hide real rows.
 
 Only rows with no scope are touched, so nothing can be downgraded: the pass has
 no path to lowering an existing stamp. Re-running is a no-op because the absent
-scope is the gate. Every row records why it got its scope, which makes the pass
-auditable and lets ``reverse`` undo exactly what it wrote and nothing else.
+scope is the gate. Every row records why it got its scope and what the pass
+overwrote to put it there, which makes the pass auditable and lets ``reverse``
+restore the prior values exactly rather than guessing which fields it created.
 """
 
 from __future__ import annotations
@@ -39,6 +49,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from sibyl_core.backends.surreal.records import normalize_records, raise_on_error
+from sibyl_core.models.memory_scope import MemoryScope
 from sibyl_core.services.graph import (
     _ENTITY_BULK_UPSERT_QUERY,
     _entity_from_row,
@@ -52,9 +63,20 @@ if TYPE_CHECKING:
 log = structlog.get_logger()
 
 SCOPE_BACKFILL_SOURCE_KEY = "scope_backfill_source"
+SCOPE_BACKFILL_PRIOR_KEY = "scope_backfill_prior"
 SOURCE_RAW_CAPTURE = "raw_capture"
 SOURCE_DERIVED_PROJECT = "derived_project"
-SOURCE_DERIVED_ORG = "derived_org"
+
+# Read authorization admits only these. organization, shared, and public all
+# reach scope_not_enabled, so there is no scope value that reproduces today's
+# fail-open org readability -- which is why a projectless row cannot be stamped
+# at all rather than being stamped "organization".
+_STAMPABLE_SCOPES = frozenset(
+    {
+        MemoryScope.PRIVATE,
+        MemoryScope.PROJECT,
+    }
+)
 
 _PAGE_SIZE = 500
 _WRITE_BATCH = 200
@@ -75,13 +97,24 @@ class ScopeBackfillResult:
     scanned: int = 0
     recovered: int = 0
     derived_project: int = 0
-    derived_org: int = 0
+    skipped_no_readable_scope: int = 0
+    skipped_unreadable: int = 0
     duration_seconds: float = 0.0
     errors: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def stamped(self) -> int:
-        return self.recovered + self.derived_project + self.derived_org
+        return self.recovered + self.derived_project
+
+    @property
+    def skipped(self) -> int:
+        """Rows left unstamped because no scope value would keep them readable.
+
+        Non-zero here is the honest answer to "can the fail-open close yet":
+        every one of these rows still reads as unscoped, so closing it would
+        hide them. Not an error, and not progress either.
+        """
+        return self.skipped_no_readable_scope + self.skipped_unreadable
 
 
 async def backfill_entity_scope_in_org(
@@ -138,7 +171,8 @@ async def backfill_entity_scope_in_org(
         scanned=result.scanned,
         recovered=result.recovered,
         derived_project=result.derived_project,
-        derived_org=result.derived_org,
+        skipped_no_readable_scope=result.skipped_no_readable_scope,
+        skipped_unreadable=result.skipped_unreadable,
         duration=duration,
     )
     return ScopeBackfillResult(
@@ -148,7 +182,8 @@ async def backfill_entity_scope_in_org(
         scanned=result.scanned,
         recovered=result.recovered,
         derived_project=result.derived_project,
-        derived_org=result.derived_org,
+        skipped_no_readable_scope=result.skipped_no_readable_scope,
+        skipped_unreadable=result.skipped_unreadable,
         duration_seconds=duration,
     )
 
@@ -158,7 +193,8 @@ class _Counts:
     scanned: int = 0
     recovered: int = 0
     derived_project: int = 0
-    derived_org: int = 0
+    skipped_no_readable_scope: int = 0
+    skipped_unreadable: int = 0
 
 
 async def _forward_in_org(
@@ -199,32 +235,109 @@ async def _stamped_entity(
         resolved = await raw_scope_lookup(raw_memory_id)
         if resolved is not None:
             scope, scope_key, principal_id = resolved
-            metadata["memory_scope"] = scope
-            if scope_key:
-                metadata["scope_key"] = scope_key
-            # A private row is only reachable by its owner, so the owner has to
-            # travel with the scope or the stamp denies everyone.
-            if principal_id and not _text(metadata.get("principal_id")):
-                metadata["principal_id"] = principal_id
-            metadata[SCOPE_BACKFILL_SOURCE_KEY] = SOURCE_RAW_CAPTURE
-            counts.recovered += 1
-            return _with_metadata(entity, metadata)
+            if (recovered := _recovered(metadata, scope, scope_key, principal_id)) is not None:
+                counts.recovered += 1
+                return _with_metadata(entity, recovered)
+            # A capture whose scope no reader can satisfy is left alone: see
+            # _readable_scope. Falling through to derivation would be worse,
+            # since it would widen a row the capture says is narrow.
+            counts.skipped_unreadable += 1
+            return None
 
     project_id = _text(metadata.get("project_id"))
     if project_id:
-        # Already gated on project membership today. Anything wider is a
-        # widening, not a default.
-        metadata["memory_scope"] = "project"
-        if not _text(metadata.get("scope_key")):
-            metadata["scope_key"] = project_id
+        # Already gated on project membership today, and the gate reads
+        # scope_key once a scope exists. Any other key names a different
+        # project, so it is replaced rather than preserved -- keeping it would
+        # hand the row to that project's members, which is a widening.
+        metadata.update(_overwritten(metadata, ("memory_scope", "scope_key")))
+        metadata["memory_scope"] = MemoryScope.PROJECT.value
+        metadata["scope_key"] = project_id
         metadata[SCOPE_BACKFILL_SOURCE_KEY] = SOURCE_DERIVED_PROJECT
         counts.derived_project += 1
         return _with_metadata(entity, metadata)
 
-    metadata["memory_scope"] = "org"
-    metadata[SCOPE_BACKFILL_SOURCE_KEY] = SOURCE_DERIVED_ORG
-    counts.derived_org += 1
-    return _with_metadata(entity, metadata)
+    # A projectless row is org-readable today only because the absent scope
+    # fails open. No scope value reproduces that: organization, shared, and
+    # public all reach scope_not_enabled, so stamping any of them would revoke
+    # every reader the row has. Leaving it unstamped keeps today's behavior and
+    # keeps the row visible in the remaining-work count, which is the honest
+    # signal that the fail-open cannot close on this population yet.
+    counts.skipped_no_readable_scope += 1
+    return None
+
+
+def _recovered(
+    metadata: dict[str, Any],
+    scope: str,
+    scope_key: str | None,
+    principal_id: str | None,
+) -> dict[str, Any] | None:
+    """Apply a capture's authoritative scope, or refuse if no reader could pass.
+
+    The capture owns these values, so they replace whatever the graph row
+    carried rather than deferring to it. A stale or forged ``principal_id``
+    winning over the capture's would both lock the real owner out and hand a
+    private row to whoever the stale value names, which is why the canonical
+    write path in ``stamp_memory_scope_metadata`` drops caller-supplied owner
+    fields unconditionally.
+    """
+    if (resolved := _readable_scope(scope)) is None:
+        return None
+    stamped = dict(metadata)
+    stamped.update(_overwritten(metadata, ("memory_scope", "scope_key", "principal_id")))
+    # Without this marker the reverse pass cannot see the row at all: it selects
+    # on the marker's presence, so an unmarked stamp is permanent.
+    stamped[SCOPE_BACKFILL_SOURCE_KEY] = SOURCE_RAW_CAPTURE
+    stamped["memory_scope"] = resolved.value
+    if resolved is MemoryScope.PRIVATE:
+        # Private resolves its owner from principal_id, so the owner has to
+        # travel with the scope or the stamp denies everyone including them.
+        if not (owner := _text(principal_id)):
+            return None
+        stamped["principal_id"] = owner
+        stamped.pop("scope_key", None)
+        return stamped
+    if not (key := _text(scope_key)):
+        return None
+    stamped["scope_key"] = key
+    if owner := _text(principal_id):
+        stamped["principal_id"] = owner
+    return stamped
+
+
+def _readable_scope(scope: str) -> MemoryScope | None:
+    """The scope to stamp, or None when no reader could satisfy it.
+
+    Read authorization admits exactly private, project, team, and delegated;
+    every other member reaches ``scope_not_enabled``. Team and delegated are
+    admitted by ``authorize_memory_read`` but ``memory_metadata_read_allowed``
+    forwards neither membership set today, so a row stamped with either is
+    unreadable by everyone through the graph surface. Stamping a scope nobody
+    can pass is data loss wearing a security fix's clothes, so those rows stay
+    unstamped and counted until the read path carries those memberships.
+    """
+    try:
+        resolved = MemoryScope(scope)
+    except ValueError:
+        return None
+    return resolved if resolved in _STAMPABLE_SCOPES else None
+
+
+def _overwritten(metadata: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
+    """Record what this pass is about to write, so reverse can undo exactly it.
+
+    Two facts are needed and neither implies the other: which fields the pass
+    touched, and what they held first. Reverse guessing either one corrupts a
+    row. Deleting a field the pass never wrote loses data -- a ``principal_id``
+    that was already correct on a project row. Deleting one it merely replaced
+    loses the original -- a pre-existing project ``scope_key``. ``touched`` is
+    stored explicitly rather than inferred from ``prior``, because "written
+    where nothing was" is precisely the case an absent prior value cannot
+    distinguish from "not written at all".
+    """
+    prior = {key: value for key in keys if (value := metadata.get(key)) is not None}
+    return {SCOPE_BACKFILL_PRIOR_KEY: {"touched": list(keys), "prior": prior}}
 
 
 async def _reverse_in_org(
@@ -239,14 +352,22 @@ async def _reverse_in_org(
     async for entity in _iter_backfilled_entities(client, group_id=group_id):
         counts.scanned += 1
         metadata = dict(entity.metadata or {})
-        source = _text(metadata.pop(SCOPE_BACKFILL_SOURCE_KEY, None))
-        # Only the fields this pass introduced come back off. A scope_key that
-        # was already present when we arrived is left alone.
-        metadata.pop("memory_scope", None)
-        if source in {SOURCE_DERIVED_PROJECT}:
-            metadata.pop("scope_key", None)
-        if source == SOURCE_RAW_CAPTURE:
-            metadata.pop("scope_key", None)
+        metadata.pop(SCOPE_BACKFILL_SOURCE_KEY, None)
+        # Restore from what the forward pass recorded rather than guessing which
+        # fields it introduced. Anything it overwrote comes back with its
+        # original value; anything it created is removed. Guessing is how a
+        # pre-existing scope_key gets deleted by a rollback that was supposed to
+        # be a no-op for it.
+        raw_record = metadata.pop(SCOPE_BACKFILL_PRIOR_KEY, None)
+        record: dict[Any, Any] = raw_record if isinstance(raw_record, dict) else {}
+        raw_prior = record.get("prior")
+        prior: dict[Any, Any] = raw_prior if isinstance(raw_prior, dict) else {}
+        touched = record.get("touched")
+        for key in touched if isinstance(touched, list) else ():
+            if (value := prior.get(key)) is not None:
+                metadata[str(key)] = value
+            else:
+                metadata.pop(str(key), None)
         counts.recovered += 1
         pending.append(_with_metadata(entity, metadata))
         if not dry_run and len(pending) >= _WRITE_BATCH:
@@ -380,8 +501,8 @@ def _text(value: object | None) -> str | None:
 
 
 __all__ = [
+    "SCOPE_BACKFILL_PRIOR_KEY",
     "SCOPE_BACKFILL_SOURCE_KEY",
-    "SOURCE_DERIVED_ORG",
     "SOURCE_DERIVED_PROJECT",
     "SOURCE_RAW_CAPTURE",
     "RawScopeLookup",
