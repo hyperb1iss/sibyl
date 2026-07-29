@@ -81,10 +81,26 @@ _STAMPABLE_SCOPES = frozenset(
 _PAGE_SIZE = 500
 _WRITE_BATCH = 200
 
+# Shared by the walk and the post-run sweep so the two cannot disagree about
+# what "still needs a scope" means.
+_SCOPELESS_PREDICATE = "memory_scope = NONE AND attributes.memory_scope = NONE"
+
 # What a resolved raw capture contributes: its scope, its scope key, and the
 # principal that owns it. Returning None means the capture is gone, which is
 # not an error -- the row simply falls through to derivation.
 RawScopeLookup = Callable[[str], Awaitable[tuple[str, str | None, str | None] | None]]
+
+
+async def no_raw_scope_recovery(raw_memory_id: str) -> None:
+    """A lookup that recovers nothing, for callers with no captures to join.
+
+    Spelled as a named function so "recovery is unavailable here" is a stated
+    choice in the call rather than an omitted argument. Every row then reaches
+    derivation, which cannot produce ``private``: any row whose true scope was
+    private gets the wider project scope instead, permanently, because the
+    stamp removes it from the pass's own selection.
+    """
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,12 +115,26 @@ class ScopeBackfillResult:
     derived_project: int = 0
     skipped_no_readable_scope: int = 0
     skipped_unreadable: int = 0
+    remaining: int = 0
     duration_seconds: float = 0.0
     errors: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def stamped(self) -> int:
         return self.recovered + self.derived_project
+
+    @property
+    def stampable_remaining(self) -> int:
+        """Scopeless rows the pass could still stamp but did not reach.
+
+        Counted by a sweep after the run, because ``scanned`` only knows what
+        the cursor walked past. A row inserted behind the cursor, or made
+        scopeless again by a concurrent upsert, is invisible to the pass and
+        would otherwise leave it reporting a completion it did not achieve.
+        Non-zero means run again against a quiet graph, not that anything
+        broke.
+        """
+        return max(0, self.remaining - self.skipped)
 
     @property
     def skipped(self) -> int:
@@ -121,7 +151,7 @@ async def backfill_entity_scope_in_org(
     client: SurrealGraphClient,
     *,
     group_id: str,
-    raw_scope_lookup: RawScopeLookup | None = None,
+    raw_scope_lookup: RawScopeLookup,
     dry_run: bool = True,
     reverse: bool = False,
 ) -> ScopeBackfillResult:
@@ -130,6 +160,14 @@ async def backfill_entity_scope_in_org(
     ``dry_run`` counts what would change and writes nothing. ``reverse`` clears
     only the rows this pass stamped, identified by the marker it wrote, so an
     unrelated stamp is never disturbed.
+
+    ``raw_scope_lookup`` is required, and required with no default, because
+    idempotence does not undo a wrong answer. Running without it stamps a
+    genuinely private row as ``project`` from its own ``project_id``; the row is
+    then scoped, so a corrected re-run does not select it and the mis-stamp is
+    permanent. Pass ``no_raw_scope_recovery`` to state that recovery is
+    deliberately unavailable. ``reverse`` ignores it and takes it only so a
+    caller cannot mistake the reverse path for one that needs no decision.
     """
     started = time.time()
     log.info(
@@ -138,30 +176,46 @@ async def backfill_entity_scope_in_org(
         dry_run=dry_run,
         reverse=reverse,
     )
+    # Owned out here so a failure can still report the batches that landed.
+    # Writes commit per batch, so an abort mid-run leaves the org partially
+    # migrated; a result that zeroed those counts would describe the run as
+    # having done nothing when it did not.
+    result = _Counts()
     try:
         if reverse:
-            result = await _reverse_in_org(client, group_id=group_id, dry_run=dry_run)
+            await _reverse_in_org(client, group_id=group_id, dry_run=dry_run, counts=result)
         else:
-            result = await _forward_in_org(
+            await _forward_in_org(
                 client,
                 group_id=group_id,
                 raw_scope_lookup=raw_scope_lookup,
                 dry_run=dry_run,
+                counts=result,
             )
     except Exception as exc:
         log.exception(
             "scope_backfill_failed",
             organization_id=group_id,
             error_type=type(exc).__name__,
+            scanned=result.scanned,
+            stamped=result.recovered + result.derived_project,
         )
         return ScopeBackfillResult(
             success=False,
             organization_id=group_id,
             dry_run=dry_run,
+            scanned=result.scanned,
+            recovered=result.recovered,
+            derived_project=result.derived_project,
+            skipped_no_readable_scope=result.skipped_no_readable_scope,
+            skipped_unreadable=result.skipped_unreadable,
             duration_seconds=time.time() - started,
             errors=(str(exc),),
         )
 
+    # Counted after the walk rather than inferred from it: the cursor cannot
+    # see a row that became scopeless behind it.
+    remaining = 0 if reverse else await _scopeless_count(client, group_id=group_id)
     duration = time.time() - started
     log.info(
         "scope_backfill_complete",
@@ -173,6 +227,7 @@ async def backfill_entity_scope_in_org(
         derived_project=result.derived_project,
         skipped_no_readable_scope=result.skipped_no_readable_scope,
         skipped_unreadable=result.skipped_unreadable,
+        remaining=remaining,
         duration=duration,
     )
     return ScopeBackfillResult(
@@ -184,6 +239,7 @@ async def backfill_entity_scope_in_org(
         derived_project=result.derived_project,
         skipped_no_readable_scope=result.skipped_no_readable_scope,
         skipped_unreadable=result.skipped_unreadable,
+        remaining=remaining,
         duration_seconds=duration,
     )
 
@@ -197,14 +253,31 @@ class _Counts:
     skipped_unreadable: int = 0
 
 
+async def _scopeless_count(client: SurrealGraphClient, *, group_id: str) -> int:
+    rows = normalize_records(
+        await client.execute_query(
+            f"""
+            SELECT count() FROM entity
+            WHERE group_id = $group_id AND {_SCOPELESS_PREDICATE}
+            GROUP ALL;
+            """,
+            group_id=group_id,
+        )
+    )
+    if not rows:
+        return 0
+    counted = rows[0].get("count")
+    return int(counted) if isinstance(counted, int | float | str) else 0
+
+
 async def _forward_in_org(
     client: SurrealGraphClient,
     *,
     group_id: str,
-    raw_scope_lookup: RawScopeLookup | None,
+    raw_scope_lookup: RawScopeLookup,
     dry_run: bool,
-) -> _Counts:
-    counts = _Counts()
+    counts: _Counts,
+) -> None:
     pending: list[Entity] = []
 
     async for entity in _iter_scopeless_entities(client, group_id=group_id):
@@ -219,19 +292,24 @@ async def _forward_in_org(
 
     if not dry_run and pending:
         await _apply(client, pending, group_id=group_id, operation="forward")
-    return counts
 
 
 async def _stamped_entity(
     entity: Entity,
     *,
-    raw_scope_lookup: RawScopeLookup | None,
+    raw_scope_lookup: RawScopeLookup,
     counts: _Counts,
 ) -> Entity | None:
     metadata = dict(entity.metadata or {})
+    # A scopeless row cannot legitimately carry this pass's provenance: the
+    # forward pass only ever writes it alongside a scope, and the reverse pass
+    # removes both together. Finding one here means it arrived on a write
+    # payload, so it is dropped rather than trusted or restored from.
+    metadata.pop(SCOPE_BACKFILL_PRIOR_KEY, None)
+    metadata.pop(SCOPE_BACKFILL_SOURCE_KEY, None)
 
     raw_memory_id = _text(metadata.get("raw_memory_id"))
-    if raw_memory_id and raw_scope_lookup is not None:
+    if raw_memory_id:
         resolved = await raw_scope_lookup(raw_memory_id)
         if resolved is not None:
             scope, scope_key, principal_id = resolved
@@ -345,8 +423,8 @@ async def _reverse_in_org(
     *,
     group_id: str,
     dry_run: bool,
-) -> _Counts:
-    counts = _Counts()
+    counts: _Counts,
+) -> None:
     pending: list[Entity] = []
 
     async for entity in _iter_backfilled_entities(client, group_id=group_id):
@@ -376,7 +454,6 @@ async def _reverse_in_org(
 
     if not dry_run and pending:
         await _apply(client, pending, group_id=group_id, operation="reverse")
-    return counts
 
 
 async def _iter_entities_matching(
@@ -436,7 +513,7 @@ def _iter_scopeless_entities(
     return _iter_entities_matching(
         client,
         group_id=group_id,
-        predicate="memory_scope = NONE AND attributes.memory_scope = NONE",
+        predicate=_SCOPELESS_PREDICATE,
     )
 
 
@@ -508,4 +585,5 @@ __all__ = [
     "RawScopeLookup",
     "ScopeBackfillResult",
     "backfill_entity_scope_in_org",
+    "no_raw_scope_recovery",
 ]

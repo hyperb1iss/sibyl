@@ -14,7 +14,19 @@ from sibyl_core.models.memory_scope import MemoryScope
 # three metadata fields alone. A private row's owner resolves as principal_id
 # or scope_key, and a project row is served to every member named by scope_key,
 # so all three are authorization inputs and none may come from a request body.
-MEMORY_OWNER_METADATA_KEYS = frozenset({"memory_scope", "principal_id", "scope_key"})
+MEMORY_OWNER_METADATA_KEYS = frozenset(
+    {
+        "memory_scope",
+        "principal_id",
+        "scope_key",
+        # Migration provenance. A write may not supply these: they tell the
+        # scope backfill's reverse pass which rows it owns and what to restore
+        # them to, so a payload that forges them can nominate itself for a
+        # rollback that strips its scope back to the fail-open.
+        "scope_backfill_source",
+        "scope_backfill_prior",
+    }
+)
 
 
 class MemoryPolicyAction(StrEnum):

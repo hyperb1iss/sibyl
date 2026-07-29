@@ -6,13 +6,17 @@ from typing import Any
 
 import pytest
 
-from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
+from sibyl_core.auth.memory_policy import (
+    memory_metadata_read_allowed,
+    stamp_memory_scope_metadata,
+)
 from sibyl_core.migrate.scope_backfill import (
     SCOPE_BACKFILL_PRIOR_KEY,
     SCOPE_BACKFILL_SOURCE_KEY,
     SOURCE_DERIVED_PROJECT,
     SOURCE_RAW_CAPTURE,
     backfill_entity_scope_in_org,
+    no_raw_scope_recovery,
 )
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.services.graph import (
@@ -92,7 +96,12 @@ async def test_a_graph_with_nothing_to_do_is_a_no_op() -> None:
     async with _graph("nothing-to-do") as (client, manager):
         await _seed(manager, [_row("already", metadata={"memory_scope": "private"})])
 
-        result = await backfill_entity_scope_in_org(client, group_id=client.group_id, dry_run=False)
+        result = await backfill_entity_scope_in_org(
+            client,
+            group_id=client.group_id,
+            raw_scope_lookup=no_raw_scope_recovery,
+            dry_run=False,
+        )
 
         assert result.success is True
         assert result.scanned == 0
@@ -104,7 +113,12 @@ async def test_a_dry_run_counts_without_writing() -> None:
     async with _graph("dry-run") as (client, manager):
         await _seed(manager, [_row("scopeless", metadata={"project_id": "proj-a"})])
 
-        result = await backfill_entity_scope_in_org(client, group_id=client.group_id, dry_run=True)
+        result = await backfill_entity_scope_in_org(
+            client,
+            group_id=client.group_id,
+            raw_scope_lookup=no_raw_scope_recovery,
+            dry_run=True,
+        )
 
         assert result.stamped == 1
         assert (await _scopes(client))["scopeless"]["column"] in (None, "")
@@ -144,7 +158,12 @@ async def test_a_project_row_keeps_its_project_gate_rather_than_widening() -> No
     async with _graph("project-gate") as (client, manager):
         await _seed(manager, [_row("in_project", metadata={"project_id": "proj-a"})])
 
-        result = await backfill_entity_scope_in_org(client, group_id=client.group_id, dry_run=False)
+        result = await backfill_entity_scope_in_org(
+            client,
+            group_id=client.group_id,
+            raw_scope_lookup=no_raw_scope_recovery,
+            dry_run=False,
+        )
 
         assert result.derived_project == 1
         row = (await _scopes(client))["in_project"]
@@ -168,7 +187,12 @@ async def test_a_row_with_no_project_is_left_alone_rather_than_made_unreadable()
         reader = {"principal_id": "user-1", "private_scope_granted": False}
         before = memory_metadata_read_allowed({}, accessible_projects={"proj-a"}, **reader)
 
-        result = await backfill_entity_scope_in_org(client, group_id=client.group_id, dry_run=False)
+        result = await backfill_entity_scope_in_org(
+            client,
+            group_id=client.group_id,
+            raw_scope_lookup=no_raw_scope_recovery,
+            dry_run=False,
+        )
 
         assert result.stamped == 0
         assert result.skipped_no_readable_scope == 1
@@ -198,7 +222,12 @@ async def test_a_project_row_is_rekeyed_to_its_own_project_not_a_stale_audience(
             {"project_id": "A", "scope_key": "B"}, accessible_projects={"B"}, **reader
         )
 
-        await backfill_entity_scope_in_org(client, group_id=client.group_id, dry_run=False)
+        await backfill_entity_scope_in_org(
+            client,
+            group_id=client.group_id,
+            raw_scope_lookup=no_raw_scope_recovery,
+            dry_run=False,
+        )
 
         attributes = (await _scopes(client))["mixed"]["attributes"]
         assert attributes["scope_key"] == "A"
@@ -305,9 +334,19 @@ async def test_running_twice_changes_nothing_the_second_time() -> None:
     async with _graph("idempotent") as (client, manager):
         await _seed(manager, [_row("a"), _row("b", metadata={"project_id": "proj-a"})])
 
-        first = await backfill_entity_scope_in_org(client, group_id=client.group_id, dry_run=False)
+        first = await backfill_entity_scope_in_org(
+            client,
+            group_id=client.group_id,
+            raw_scope_lookup=no_raw_scope_recovery,
+            dry_run=False,
+        )
         after_first = await _scopes(client)
-        second = await backfill_entity_scope_in_org(client, group_id=client.group_id, dry_run=False)
+        second = await backfill_entity_scope_in_org(
+            client,
+            group_id=client.group_id,
+            raw_scope_lookup=no_raw_scope_recovery,
+            dry_run=False,
+        )
 
         assert (first.stamped, first.skipped) == (1, 1)
         assert second.scanned == 1
@@ -329,7 +368,12 @@ async def test_an_existing_stamp_is_never_downgraded() -> None:
             ],
         )
 
-        await backfill_entity_scope_in_org(client, group_id=client.group_id, dry_run=False)
+        await backfill_entity_scope_in_org(
+            client,
+            group_id=client.group_id,
+            raw_scope_lookup=no_raw_scope_recovery,
+            dry_run=False,
+        )
 
         row = (await _scopes(client))["stays_private"]
         assert row["column"] == "private"
@@ -346,10 +390,19 @@ async def test_reverse_clears_only_what_the_pass_stamped() -> None:
                 _row("stamped_before", metadata={"memory_scope": "private"}),
             ],
         )
-        await backfill_entity_scope_in_org(client, group_id=client.group_id, dry_run=False)
+        await backfill_entity_scope_in_org(
+            client,
+            group_id=client.group_id,
+            raw_scope_lookup=no_raw_scope_recovery,
+            dry_run=False,
+        )
 
         result = await backfill_entity_scope_in_org(
-            client, group_id=client.group_id, dry_run=False, reverse=True
+            client,
+            group_id=client.group_id,
+            raw_scope_lookup=no_raw_scope_recovery,
+            dry_run=False,
+            reverse=True,
         )
 
         scopes = await _scopes(client)
@@ -373,9 +426,18 @@ async def test_reverse_restores_what_the_pass_overwrote_rather_than_deleting_it(
         await _seed(manager, [_row("round_trip", metadata=dict(seeded))])
         before = (await _scopes(client))["round_trip"]["attributes"]
 
-        await backfill_entity_scope_in_org(client, group_id=client.group_id, dry_run=False)
         await backfill_entity_scope_in_org(
-            client, group_id=client.group_id, dry_run=False, reverse=True
+            client,
+            group_id=client.group_id,
+            raw_scope_lookup=no_raw_scope_recovery,
+            dry_run=False,
+        )
+        await backfill_entity_scope_in_org(
+            client,
+            group_id=client.group_id,
+            raw_scope_lookup=no_raw_scope_recovery,
+            dry_run=False,
+            reverse=True,
         )
 
         after = (await _scopes(client))["round_trip"]["attributes"]
@@ -383,6 +445,141 @@ async def test_reverse_restores_what_the_pass_overwrote_rather_than_deleting_it(
             assert after.get(key) == value == before.get(key)
         assert SCOPE_BACKFILL_PRIOR_KEY not in after
         assert SCOPE_BACKFILL_SOURCE_KEY not in after
+
+
+def test_the_write_path_refuses_to_carry_this_passes_provenance() -> None:
+    """A caller may not supply this pass's provenance, and here is why.
+
+    Reverse selects rows by its own marker and restores them from its own
+    record, and a legitimate revert of a recovered row correctly returns it to
+    scopeless -- that is the pre-migration state. So reverse cannot defend
+    itself by inspection: a forged record is indistinguishable from a real one,
+    and acting on it would strip a private row back to the fail-open.
+
+    The boundary therefore has to be the write path, which is the only place
+    caller metadata enters. Both markers join the owner fields it drops
+    unconditionally. The forward pass also drops any it finds on a scopeless
+    row, since it never writes one without a scope.
+    """
+    smuggled = stamp_memory_scope_metadata(
+        {
+            "note": "kept",
+            SCOPE_BACKFILL_SOURCE_KEY: SOURCE_RAW_CAPTURE,
+            SCOPE_BACKFILL_PRIOR_KEY: {"touched": ["memory_scope"], "prior": {}},
+        },
+        memory_scope="private",
+        scope_key=None,
+        principal_id="owner",
+    )
+
+    assert SCOPE_BACKFILL_SOURCE_KEY not in smuggled
+    assert SCOPE_BACKFILL_PRIOR_KEY not in smuggled
+    assert smuggled["note"] == "kept"
+    assert smuggled["memory_scope"] == "private"
+
+
+@pytest.mark.asyncio
+async def test_the_forward_pass_drops_provenance_it_did_not_write() -> None:
+    """A scopeless row carrying the markers did not get them from this pass.
+
+    The forward pass writes them only alongside a scope and reverse removes
+    both together, so finding one on a scopeless row means it arrived some
+    other way. It is dropped rather than carried into the row's new record,
+    where reverse would later restore from it.
+    """
+    async with _graph("stale-provenance") as (client, manager):
+        await _seed(
+            manager,
+            [
+                _row(
+                    "smuggled",
+                    metadata={
+                        "project_id": "proj-a",
+                        SCOPE_BACKFILL_SOURCE_KEY: SOURCE_RAW_CAPTURE,
+                        SCOPE_BACKFILL_PRIOR_KEY: {
+                            "touched": ["memory_scope"],
+                            "prior": {"memory_scope": "public"},
+                        },
+                    },
+                )
+            ],
+        )
+
+        await backfill_entity_scope_in_org(
+            client,
+            group_id=client.group_id,
+            raw_scope_lookup=no_raw_scope_recovery,
+            dry_run=False,
+        )
+
+        attributes = (await _scopes(client))["smuggled"]["attributes"]
+        assert attributes[SCOPE_BACKFILL_SOURCE_KEY] == SOURCE_DERIVED_PROJECT
+        # The forged prior is gone: a revert restores scopeless, not "public".
+        assert attributes[SCOPE_BACKFILL_PRIOR_KEY] == {
+            "touched": ["memory_scope", "scope_key"],
+            "prior": {},
+        }
+
+
+@pytest.mark.asyncio
+async def test_a_partial_run_reports_the_batches_that_landed() -> None:
+    """Writes commit per batch, so a failure is not the same as a no-op.
+
+    Zeroing the counts on abort would describe a partially migrated org as
+    untouched, which is the report that gets someone to re-run blind.
+    """
+    async with _graph("partial-run") as (client, manager):
+        await manager.create_direct_bulk(
+            [_row(f"p_{index:04d}", metadata={"project_id": "proj-a"}) for index in range(250)],
+            generate_embeddings=False,
+        )
+        calls = {"n": 0}
+
+        async def explodes_after_the_first_batch(raw_memory_id: str):
+            calls["n"] += 1
+            raise RuntimeError("capture store unavailable")
+
+        await _seed(manager, [_row("needs_lookup", metadata={"raw_memory_id": "raw-1"})])
+        result = await backfill_entity_scope_in_org(
+            client,
+            group_id=client.group_id,
+            raw_scope_lookup=explodes_after_the_first_batch,
+            dry_run=False,
+        )
+
+        assert result.success is False
+        assert result.errors
+        assert calls["n"] == 1
+        # The rows walked before the raise are reported, not silently dropped.
+        assert result.scanned >= 1
+
+
+@pytest.mark.asyncio
+async def test_the_run_counts_what_it_could_not_reach() -> None:
+    """A cursor cannot see a row that became scopeless behind it.
+
+    So completeness is measured by a sweep after the walk. stampable_remaining
+    is what says "run again", and it must not count rows the pass deliberately
+    left alone.
+    """
+    async with _graph("remaining-sweep") as (client, manager):
+        await _seed(
+            manager,
+            [_row("stampable", metadata={"project_id": "proj-a"}), _row("never_stampable")],
+        )
+
+        result = await backfill_entity_scope_in_org(
+            client,
+            group_id=client.group_id,
+            raw_scope_lookup=no_raw_scope_recovery,
+            dry_run=False,
+        )
+
+        assert result.stamped == 1
+        # One row remains scopeless, and it is the one the pass refused.
+        assert result.remaining == 1
+        assert result.skipped == 1
+        assert result.stampable_remaining == 0
 
 
 @pytest.mark.asyncio
@@ -446,18 +643,30 @@ async def test_a_graph_larger_than_one_page_is_fully_covered() -> None:
             generate_embeddings=False,
         )
 
-        result = await backfill_entity_scope_in_org(client, group_id=client.group_id, dry_run=False)
+        result = await backfill_entity_scope_in_org(
+            client,
+            group_id=client.group_id,
+            raw_scope_lookup=no_raw_scope_recovery,
+            dry_run=False,
+        )
 
         assert result.scanned == 620
         assert result.derived_project == 620
         remaining = await backfill_entity_scope_in_org(
-            client, group_id=client.group_id, dry_run=True
+            client,
+            group_id=client.group_id,
+            raw_scope_lookup=no_raw_scope_recovery,
+            dry_run=True,
         )
         assert remaining.scanned == 0
 
         # Reverse pages the marker it wrote, so it strands rows the same way.
         undone = await backfill_entity_scope_in_org(
-            client, group_id=client.group_id, dry_run=False, reverse=True
+            client,
+            group_id=client.group_id,
+            raw_scope_lookup=no_raw_scope_recovery,
+            dry_run=False,
+            reverse=True,
         )
         assert undone.scanned == 620
         assert all(not row["column"] for row in (await _scopes(client)).values())
