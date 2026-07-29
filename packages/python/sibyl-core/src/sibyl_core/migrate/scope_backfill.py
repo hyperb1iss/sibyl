@@ -52,6 +52,7 @@ from sibyl_core.backends.surreal.records import normalize_records, raise_on_erro
 from sibyl_core.models.memory_scope import MemoryScope
 from sibyl_core.services.graph import (
     _ENTITY_BULK_UPSERT_QUERY,
+    CLEAR_MEMORY_SCOPE,
     _entity_from_row,
     _entity_record,
 )
@@ -446,6 +447,11 @@ async def _reverse_in_org(
                 metadata[str(key)] = value
             else:
                 metadata.pop(str(key), None)
+        # Removing the key would only mean "this write does not speak to scope",
+        # and the upsert would preserve the stamp this pass is trying to undo.
+        # Returning a row to scopeless has to be said out loud.
+        if "memory_scope" not in metadata:
+            metadata["memory_scope"] = CLEAR_MEMORY_SCOPE
         counts.recovered += 1
         pending.append(_with_metadata(entity, metadata))
         if not dry_run and len(pending) >= _WRITE_BATCH:

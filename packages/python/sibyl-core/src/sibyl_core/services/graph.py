@@ -219,7 +219,12 @@ def _rescue_explicit_anchor_candidate(
     return selected
 
 
-_ENTITY_BULK_UPSERT_QUERY = """
+# The value a write sends to mean "this row has no scope", as distinct from
+# saying nothing about scope at all. Interpolated into the upsert rather than
+# bound, so no execution site can forget to pass it.
+CLEAR_MEMORY_SCOPE = "__clear_memory_scope__"
+
+_ENTITY_BULK_UPSERT_QUERY = f"""
 INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
     uuid = $input.uuid,
     name = $input.name,
@@ -229,6 +234,8 @@ INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
     content = $input.content,
     labels = $input.labels,
     attributes = $input.attributes,
+    attributes.memory_scope = IF $input.memory_scope = '{CLEAR_MEMORY_SCOPE}' {{ NONE }}
+        ELSE {{ $input.memory_scope ?? memory_scope }},
     attributes.last_recalled_at = $input.last_recalled_at ?? last_recalled_at,
     attributes.last_used_at = $input.last_used_at ?? last_used_at,
     attributes.retrieval_count = $input.retrieval_count ?? retrieval_count ?? 0,
@@ -246,7 +253,13 @@ INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
     citation_count = $input.citation_count ?? citation_count ?? 0,
     misled_count = $input.misled_count ?? misled_count ?? 0,
     project_id = $input.project_id,
-    memory_scope = $input.memory_scope,
+    -- Absent means "this write does not speak to scope", which is the common
+    -- case: a write is a full replace and most callers rebuild an Entity
+    -- without carrying the scope forward. Overwriting on absence let any
+    -- reprojection or restore silently unscope a row into the read path's
+    -- fail-open. A caller that means "no scope" sends CLEAR_MEMORY_SCOPE.
+    memory_scope = IF $input.memory_scope = '{CLEAR_MEMORY_SCOPE}' {{ NONE }}
+        ELSE {{ $input.memory_scope ?? memory_scope }},
     epic_id = $input.epic_id,
     parent_task_id = $input.parent_task_id,
     task_id = $input.task_id,
@@ -2851,6 +2864,13 @@ def _entity_record(
     # Promoted from metadata like the other denormalized columns. The scope is
     # already stamped into attributes at capture; the column is what lets a
     # query filter on it and what makes its absence a fact rather than a guess.
+    #
+    # The upsert preserves the stored scope when this is None, because a write
+    # is a full replace and most callers rebuild an Entity without carrying the
+    # scope forward -- a reprojection or restore would otherwise silently
+    # unscope a row and hand it to the read path's fail-open. A caller that
+    # genuinely means "no scope" says so with CLEAR_MEMORY_SCOPE, which reaches
+    # the query as a value and overwrites rather than being skipped.
     memory_scope = _metadata_str(metadata, "memory_scope")
     epic_id = _metadata_str(metadata, "epic_id")
     parent_task_id = _metadata_str(metadata, "parent_task_id")

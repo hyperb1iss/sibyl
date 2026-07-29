@@ -34,6 +34,7 @@ from sibyl_core.models.entities import Entity, EntityType, Procedure, Relationsh
 from sibyl_core.models.tasks import EpicStatus, TaskPriority
 from sibyl_core.retrieval.dedup import EntityDeduplicator
 from sibyl_core.services.graph import (
+    CLEAR_MEMORY_SCOPE,
     EntityManager,
     RelationshipManager,
     SurrealGraphClient,
@@ -3759,6 +3760,70 @@ async def test_an_unstamped_row_leaves_the_scope_column_empty() -> None:
             )
         )
         assert not rows[0].get("memory_scope")
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_a_write_that_says_nothing_about_scope_leaves_the_scope_alone() -> None:
+    """A full upsert must not unscope a row by omission.
+
+    Every write is a full replace, and most callers rebuild an ``Entity``
+    without carrying the scope forward, so overwriting on absence let any
+    reprojection or restore silently drop a row into the read path's fail-open
+    and undo the scope backfill. Absence now means "this write does not speak
+    to scope"; the column and its attributes copy have to stay in step, since
+    the read path consults the attributes and queries filter on the column.
+    """
+    client = SurrealGraphClient(group_id="org-scope-durable", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        def row(metadata: dict[str, object]) -> Entity:
+            return Entity(
+                id="durable",
+                entity_type=EntityType.DECISION,
+                name="A private decision",
+                content="body",
+                organization_id=client.group_id,
+                metadata=metadata,
+            )
+
+        async def scope() -> dict[str, object]:
+            rows = normalize_records(
+                await client.execute_query(
+                    """
+                    SELECT memory_scope, attributes.memory_scope AS attribute
+                    FROM entity
+                    WHERE group_id = $group_id AND uuid = "durable" LIMIT 1;
+                    """,
+                    group_id=client.group_id,
+                )
+            )
+            return rows[0]
+
+        await manager.create_direct(row({"memory_scope": "private", "principal_id": "user-1"}))
+        await manager.create_direct_bulk([row({})], generate_embeddings=False)
+        preserved = await scope()
+
+        await manager.create_direct_bulk(
+            [row({"memory_scope": "project", "scope_key": "proj-a"})],
+            generate_embeddings=False,
+        )
+        changed = await scope()
+
+        await manager.create_direct_bulk(
+            [row({"memory_scope": CLEAR_MEMORY_SCOPE})], generate_embeddings=False
+        )
+        cleared = await scope()
+
+        assert preserved == {"memory_scope": "private", "attribute": "private"}
+        # An explicit scope still wins, or the column could never change.
+        assert changed == {"memory_scope": "project", "attribute": "project"}
+        # And a caller that means "no scope" can still say so.
+        assert not cleared["memory_scope"]
+        assert not cleared["attribute"]
     finally:
         await client.close()
 

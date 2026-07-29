@@ -577,6 +577,7 @@ def test_search_scope_policy_denies_bands_it_cannot_verify() -> None:
 _SCOPE_READERS_THAT_DO_NOT_AUTHORIZE = {
     "audit/filters.py::audit_event_matches_resource": "filters an audit log by a recorded value",
     "migrate/scope_backfill.py::_recovered": "write stamp: applies a capture's authoritative scope",
+    "migrate/scope_backfill.py::_reverse_in_org": "write stamp: names the clear the upsert requires",
     "migrate/scope_backfill.py::_stamped_entity": "write stamp: derives a scope for a row that has none",
     "models/reflection.py::ClaimRecord.from_dict": "deserializes a stored field",
     "projection/memory.py::_projected_entity": "write stamp: mirrors an inherited scope",
