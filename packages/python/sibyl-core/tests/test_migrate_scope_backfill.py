@@ -122,6 +122,11 @@ async def test_a_dry_run_counts_without_writing() -> None:
 
         assert result.stamped == 1
         assert (await _scopes(client))["scopeless"]["column"] in (None, "")
+        # A dry run writes nothing, so the row it would stamp is still scopeless
+        # and the sweep sees it. That is not outstanding work: reporting it as
+        # unreached told an operator to re-run a pass that had nothing to finish.
+        assert result.remaining == 1
+        assert result.stampable_remaining == 0
 
 
 @pytest.mark.asyncio

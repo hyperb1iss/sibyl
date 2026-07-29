@@ -126,15 +126,20 @@ class ScopeBackfillResult:
 
     @property
     def stampable_remaining(self) -> int:
-        """Scopeless rows the pass could still stamp but did not reach.
+        """Scopeless rows this pass could stamp but did not reach.
 
-        Counted by a sweep after the run, because ``scanned`` only knows what
+        Counted from a sweep after the run, because ``scanned`` only knows what
         the cursor walked past. A row inserted behind the cursor, or made
         scopeless again by a concurrent upsert, is invisible to the pass and
         would otherwise leave it reporting a completion it did not achieve.
-        Non-zero means run again against a quiet graph, not that anything
-        broke.
+        Non-zero means run again against a quiet graph, not that anything broke.
+
+        A dry run writes nothing, so every row it would have stamped is still
+        scopeless afterwards and none of it is outstanding work -- subtracting
+        only ``skipped`` there would report the whole run as unreached.
         """
+        if self.dry_run:
+            return 0
         return max(0, self.remaining - self.skipped)
 
     @property

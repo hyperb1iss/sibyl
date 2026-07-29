@@ -2418,3 +2418,131 @@ def collapse_epics(
 
     if not _collapse():
         raise typer.Exit(code=1)
+
+
+@app.command("scope-backfill")
+def scope_backfill(
+    org_id: Annotated[
+        str,
+        typer.Option("--org-id", help="Organization UUID; omit to sweep every org"),
+    ] = "",
+    reverse: Annotated[
+        bool,
+        typer.Option("--reverse", help="Undo the stamps this migration wrote"),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run/--apply",
+            help="Report counts without writing (default); --apply performs the migration",
+        ),
+    ] = True,
+) -> None:
+    """Stamp a memory scope onto graph rows that predate scope stamping.
+
+    The read path treats a missing scope as permission to return the row, which
+    is the fail-open behind private memories reaching org co-members. This gives
+    those rows something to check: a row's true scope is recovered from its raw
+    capture where one still resolves, and otherwise a row carrying a project is
+    stamped ``project`` keyed to that project, which is the gate it already
+    passes today.
+
+    Rows that no scope value would keep readable are deliberately left alone and
+    reported as skipped. A projectless row is org-readable today only because
+    the absence fails open, and ``organization`` is not an enabled read scope, so
+    stamping one would revoke every reader it has. While skipped is non-zero the
+    fail-open cannot close without hiding those rows.
+
+    Runs as a dry run by default; pass ``--apply`` to write changes.
+    """
+    from sibyl_core.migrate.scope_backfill import backfill_entity_scope_in_org
+    from sibyl_core.services.graph import get_surreal_graph_runtime
+    from sibyl_core.services.surreal_content import get_raw_memory
+
+    org_ids = _resolve_collapse_org_ids(org_id)
+
+    if dry_run:
+        warn("DRY RUN - no changes will be made (pass --apply to write)")
+    else:
+        warn("APPLYING - this rewrites the access-control field on real rows")
+    info(f"Scope backfill direction: {'reverse (unstamp)' if reverse else 'forward (stamp)'}")
+
+    def _lookup_for(group_id: str):
+        async def raw_scope_lookup(raw_memory_id: str):
+            # The capture is authoritative for scope, key, and owner. Returning
+            # None means it is gone, and the row falls through to derivation.
+            capture = await get_raw_memory(organization_id=group_id, memory_id=raw_memory_id)
+            if capture is None:
+                return None
+            return (
+                str(capture.memory_scope),
+                capture.scope_key,
+                capture.principal_id,
+            )
+
+        return raw_scope_lookup
+
+    @run_async
+    async def _backfill() -> bool:
+        totals = {"stamped": 0, "skipped": 0, "outstanding": 0}
+        any_error = False
+        for group_id in org_ids:
+            runtime = await get_surreal_graph_runtime(group_id, ensure_schema=True)
+            result = await backfill_entity_scope_in_org(
+                runtime.client,
+                group_id=group_id,
+                raw_scope_lookup=_lookup_for(group_id),
+                dry_run=dry_run,
+                reverse=reverse,
+            )
+            if not result.success:
+                any_error = True
+                warn(f"  {group_id}: failed after {result.scanned} row(s)")
+                for issue in result.errors[:5]:
+                    console.print(f"    [dim]{issue}[/dim]")
+                # Writes commit per batch, so a failure is not a no-op.
+                if result.stamped:
+                    warn(f"    {result.stamped} row(s) were already written before the failure")
+                continue
+            verb = "would stamp" if dry_run else "stamped"
+            if reverse:
+                info(f"  {group_id}: {'would revert' if dry_run else 'reverted'} {result.scanned}")
+            else:
+                # After an --apply the sweep is the useful number; on a dry run
+                # nothing was written, so it just restates the scan.
+                tail = (
+                    f"scanned {result.scanned}"
+                    if dry_run
+                    else f"still scopeless {result.remaining}"
+                )
+                info(
+                    f"  {group_id}: {verb} {result.stamped} "
+                    f"({result.recovered} recovered, {result.derived_project} derived), "
+                    f"skipped {result.skipped}, {tail}"
+                )
+                if result.stampable_remaining:
+                    warn(
+                        f"    {result.stampable_remaining} stampable row(s) were not reached; "
+                        "re-run against a quiet graph"
+                    )
+            totals["stamped"] += result.scanned if reverse else result.stamped
+            totals["skipped"] += result.skipped
+            totals["outstanding"] += result.stampable_remaining
+
+        if reverse:
+            info(f"{'Would revert' if dry_run else 'Reverted'} {totals['stamped']} row(s)")
+        elif dry_run:
+            info(f"Would stamp {totals['stamped']}; leave {totals['skipped']} unstampable")
+        else:
+            success(f"Stamped {totals['stamped']}; left {totals['skipped']} unstampable")
+        if totals["skipped"]:
+            warn(
+                f"{totals['skipped']} row(s) have no readable scope to stamp, so the read "
+                "fail-open cannot close yet without hiding them"
+            )
+        if totals["outstanding"]:
+            warn(f"{totals['outstanding']} stampable row(s) outstanding; re-run when quiet")
+        return not any_error
+
+    if not _backfill():
+        raise typer.Exit(code=1)
