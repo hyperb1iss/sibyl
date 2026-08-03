@@ -24,6 +24,7 @@ from sibyl.persistence.content_common import (
 )
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.fulltext import build_fulltext_query
+from sibyl_core.backends.surreal.knn import knn_search_effort
 from sibyl_core.backends.surreal.records import (
     coerce_datetime as _coerce_datetime,
     coerce_uuid as _coerce_uuid,
@@ -669,6 +670,9 @@ def _combined_hybrid_score(vector_rank: int | None, lexical_rank: int | None) ->
     if lexical_rank is not None:
         score += _rrf_score(lexical_rank)
     return score
+
+
+_CONTENT_KNN_EF_FLOOR = 40
 
 
 def _search_candidate_limit(limit: int) -> int:
@@ -2311,6 +2315,7 @@ async def search_rag_chunks(
         return []
 
     candidate_limit = _search_candidate_limit(match_count)
+    knn_effort = knn_search_effort(candidate_limit, _CONTENT_KNN_EF_FLOOR)
     async with surreal_content_client() as client:
         sources = await _load_sources_for_search_scope(
             client,
@@ -2331,7 +2336,7 @@ async def search_rag_chunks(
             "(1 - vector::distance::knn()) AS score "
             "FROM document_chunks WHERE organization_id = $organization_id "
             "AND source_id INSIDE $source_ids "
-            f"AND embedding <|{candidate_limit}, 40|> $query_embedding"
+            f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
             ") WHERE score >= $similarity_threshold "
             "ORDER BY score DESC LIMIT $candidate_limit;",
             organization_id=str(organization_id),
@@ -2365,6 +2370,7 @@ async def search_code_example_chunks(
         return []
 
     candidate_limit = _search_candidate_limit(match_count)
+    knn_effort = knn_search_effort(candidate_limit, _CONTENT_KNN_EF_FLOOR)
     language_clause, language_params = _code_chunk_clause(language)
     async with surreal_content_client() as client:
         sources = await _load_sources_for_search_scope(
@@ -2387,7 +2393,7 @@ async def search_code_example_chunks(
             "FROM document_chunks WHERE organization_id = $organization_id "
             "AND source_id INSIDE $source_ids"
             f"{language_clause} "
-            f"AND embedding <|{candidate_limit}, 40|> $query_embedding "
+            f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding "
             ") "
             "ORDER BY score DESC LIMIT $candidate_limit;",
             organization_id=str(organization_id),
@@ -2426,6 +2432,7 @@ async def hybrid_search_chunks(
         return []
 
     candidate_limit = _search_candidate_limit(match_count)
+    knn_effort = knn_search_effort(candidate_limit, _CONTENT_KNN_EF_FLOOR)
     async with surreal_content_client() as client:
         sources = await _load_sources_for_search_scope(
             client,
@@ -2446,7 +2453,7 @@ async def hybrid_search_chunks(
             "(1 - vector::distance::knn()) AS score "
             "FROM document_chunks WHERE organization_id = $organization_id "
             "AND source_id INSIDE $source_ids "
-            f"AND embedding <|{candidate_limit}, 40|> $query_embedding"
+            f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
             ") WHERE score >= $similarity_threshold "
             "ORDER BY score DESC LIMIT $candidate_limit;",
             organization_id=str(organization_id),

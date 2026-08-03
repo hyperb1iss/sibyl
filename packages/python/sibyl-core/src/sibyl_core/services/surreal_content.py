@@ -21,6 +21,7 @@ from sibyl_core.backends.surreal.fulltext import (
     build_fulltext_terms,
     build_match_disjunction,
 )
+from sibyl_core.backends.surreal.knn import knn_search_effort
 from sibyl_core.config import settings
 from sibyl_core.embeddings.providers import (
     DeterministicEmbeddingProvider,
@@ -45,6 +46,7 @@ from sibyl_core.models.reflection import (
 )
 from sibyl_core.utils.resilience import with_timeout
 
+_CONTENT_KNN_EF_FLOOR = 40
 _DEFAULT_BATCH_SIZE = 128
 _DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS = 3.0
 _LIFECYCLE_FILTER_OVERFETCH_FACTOR = 4
@@ -2226,6 +2228,7 @@ async def _recall_raw_memory_vector(
     limit: int,
 ) -> list[RawMemory]:
     candidate_limit = max(limit * _LIFECYCLE_FILTER_OVERFETCH_FACTOR, limit)
+    knn_effort = knn_search_effort(candidate_limit, _CONTENT_KNN_EF_FLOOR)
     rows = await with_timeout(
         _select_many_raw(
             client,
@@ -2233,7 +2236,7 @@ async def _recall_raw_memory_vector(
             f"SELECT {_RAW_MEMORY_RECALL_FIELDS}, "
             "(1 - vector::distance::knn()) AS score "
             f"FROM raw_captures WHERE {where_clause} "
-            f"AND embedding <|{candidate_limit}, 40|> $query_embedding"
+            f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
             ") ORDER BY score DESC, captured_at DESC LIMIT $candidate_limit;",
             **params,
             query_embedding=query_embedding,
@@ -3442,6 +3445,7 @@ async def search_document_chunks(
         return [], []
 
     candidate_limit = _document_search_candidate_limit(limit)
+    knn_effort = knn_search_effort(candidate_limit, _CONTENT_KNN_EF_FLOOR)
     language_clause, language_params = _document_language_clause(language)
     lexical_query_text = build_fulltext_query(query_text)
     errors: list[str] = []
@@ -3482,7 +3486,7 @@ async def search_document_chunks(
                         "FROM document_chunks WHERE organization_id = $organization_id "
                         "AND source_id INSIDE $source_ids"
                         f"{language_clause} "
-                        f"AND embedding <|{candidate_limit}, 40|> $query_embedding"
+                        f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
                         ") WHERE score >= $similarity_threshold "
                         "ORDER BY score DESC LIMIT $candidate_limit;",
                         **vector_params,

@@ -616,3 +616,73 @@ async def test_surreal_hybrid_search_uses_direct_vector_and_fulltext_queries(
     assert "search::highlight('<mark>', '</mark>', 0) AS snippet" in lexical_query
     assert vector_params["source_ids"] == [str(source_id)]
     assert lexical_params["search_query"] == "auth"
+
+
+@pytest.mark.asyncio
+async def test_surreal_chunk_searches_raise_knn_effort_to_the_candidate_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A Surreal HNSW read returns at most `ef` rows, so the 100-candidate pool
+    # these lanes overfetch would silently come back at 40.
+    source_id = uuid4()
+    org_id = uuid4()
+
+    def fake_client_for_sources() -> FakeSurrealClient:
+        return FakeSurrealClient(
+            [
+                _query_result(
+                    [
+                        {
+                            "uuid": str(source_id),
+                            "organization_id": str(org_id),
+                            "name": "Docs",
+                            "url": "https://docs.example.com",
+                        }
+                    ]
+                ),
+                _raw_query_result([]),
+                _raw_query_result([]),
+                _query_result([]),
+            ]
+        )
+
+    clients: list[FakeSurrealClient] = []
+
+    @asynccontextmanager
+    async def fake_session():
+        client = fake_client_for_sources()
+        clients.append(client)
+        yield client
+
+    monkeypatch.setattr(surreal_content, "surreal_content_client", fake_session)
+
+    await surreal_content.search_rag_chunks(
+        None,
+        query_embedding=[0.1] * 1536,
+        organization_id=org_id,
+        similarity_threshold=0.5,
+        match_count=20,
+        source_name="Docs",
+    )
+    await surreal_content.search_code_example_chunks(
+        None,
+        query_embedding=[0.1] * 1536,
+        organization_id=org_id,
+        match_count=20,
+        source_id=source_id,
+    )
+    await surreal_content.hybrid_search_chunks(
+        None,
+        query_text="auth",
+        query_embedding=[0.1] * 1536,
+        organization_id=org_id,
+        similarity_threshold=0.5,
+        match_count=20,
+        source_name="Docs",
+    )
+
+    vector_queries = [
+        query for client in clients for query, _ in client.calls if "embedding <|" in query
+    ]
+    assert len(vector_queries) == 3
+    assert all("embedding <|100, 100|> $query_embedding" in query for query in vector_queries)
