@@ -90,6 +90,11 @@ class ExposureSession:
     items: tuple[ExposedItem, ...]
 
     @property
+    def ref(self) -> tuple[str, str]:
+        """Tenant-qualified session identity, safe to use as a join key."""
+        return (self.organization_id, self.session_key)
+
+    @property
     def item_count(self) -> int:
         return len(self.items)
 
@@ -124,6 +129,7 @@ class ExposureSession:
 class FeedbackAttribution:
     """The outcome of attributing one feedback event to an exposure session."""
 
+    organization_id: str
     signal_type: str
     item_kind: str
     item_id: str
@@ -265,10 +271,14 @@ def attribute_feedback(
     latest qualifying session so that a repeatedly-exposed item is credited to
     the exposure that actually preceded the citation.
     """
-    sessions_by_item: dict[tuple[str, str], list[ExposureSession]] = defaultdict(list)
+    # Keyed by organization as well as item. An item id is only unique inside its
+    # tenant, so an org-blind key would let one tenant's citation attach to
+    # another tenant's exposure of a same-named item. Dormant at a single org and
+    # silent if it ever stopped being one.
+    sessions_by_item: dict[tuple[str, str, str], list[ExposureSession]] = defaultdict(list)
     for session in sessions:
         for item in session.items:
-            sessions_by_item[item.key].append(session)
+            sessions_by_item[(session.organization_id, *item.key)].append(session)
     for candidates in sessions_by_item.values():
         candidates.sort(key=lambda session: session.started_at)
 
@@ -277,7 +287,7 @@ def attribute_feedback(
     for row in sorted(rows, key=lambda row: row.event_at):
         if row.signal_type not in FEEDBACK_SIGNALS:
             continue
-        key = (row.item_kind, row.item_id)
+        key = (row.organization_id, row.item_kind, row.item_id)
         candidates = sessions_by_item.get(key)
         if not candidates:
             attributions.append(_unattributed(row, ITEM_NEVER_EXPOSED))
@@ -296,6 +306,7 @@ def attribute_feedback(
             continue
         attributions.append(
             FeedbackAttribution(
+                organization_id=row.organization_id,
                 signal_type=row.signal_type,
                 item_kind=row.item_kind,
                 item_id=row.item_id,
@@ -315,7 +326,7 @@ def flag_eval_suspect_sessions(
     eval_surfaces: frozenset[str] = DEFAULT_EVAL_SURFACES,
     burst_threshold: int = DEFAULT_BURST_THRESHOLD,
     burst_window_seconds: float = DEFAULT_BURST_WINDOW_SECONDS,
-) -> dict[str, str]:
+) -> dict[tuple[str, str], str]:
     """Classify each session as interactive or eval-suspect.
 
     No column marks an event as benchmark-origin, so exact separation is
@@ -325,46 +336,49 @@ def flag_eval_suspect_sessions(
     programmatic sweep. Interactive agent work can also burst, so a
     burst_suspect count is a ceiling on contamination, not an estimate of it.
     """
-    buckets: dict[tuple[str, int, int], list[str]] = defaultdict(list)
-    origins: dict[str, str] = {}
+    buckets: dict[tuple[str, str, int, int], list[tuple[str, str]]] = defaultdict(list)
+    origins: dict[tuple[str, str], str] = {}
     for session in sessions:
         if session.source_surface in eval_surfaces:
-            origins[session.session_key] = ORIGIN_EVAL_SURFACE
+            origins[session.ref] = ORIGIN_EVAL_SURFACE
             continue
-        origins[session.session_key] = ORIGIN_INTERACTIVE
+        origins[session.ref] = ORIGIN_INTERACTIVE
         bucket = int(session.started_at.timestamp() // burst_window_seconds)
-        buckets[(session.source_surface, session.item_count, bucket)].append(session.session_key)
+        buckets[
+            (session.organization_id, session.source_surface, session.item_count, bucket)
+        ].append(session.ref)
 
-    for session_keys in buckets.values():
-        if len(session_keys) >= burst_threshold:
-            for session_key in session_keys:
-                origins[session_key] = ORIGIN_BURST_SUSPECT
+    for session_refs in buckets.values():
+        if len(session_refs) >= burst_threshold:
+            for session_ref in session_refs:
+                origins[session_ref] = ORIGIN_BURST_SUSPECT
     return origins
 
 
 def build_labeled_sessions(
     sessions: Sequence[ExposureSession],
     attributions: Sequence[FeedbackAttribution],
-    origins: Mapping[str, str],
+    origins: Mapping[tuple[str, str], str],
 ) -> tuple[LabeledSession, ...]:
     """Attach attributed labels and an origin classification to each session."""
-    cited: dict[str, set[tuple[str, str]]] = defaultdict(set)
-    misled: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    cited: dict[tuple[str, str], set[tuple[str, str]]] = defaultdict(set)
+    misled: dict[tuple[str, str], set[tuple[str, str]]] = defaultdict(set)
     for attribution in attributions:
         if not attribution.attributed or attribution.session_key is None:
             continue
+        session_ref = (attribution.organization_id, attribution.session_key)
         key = (attribution.item_kind, attribution.item_id)
         if attribution.signal_type == CITATION:
-            cited[attribution.session_key].add(key)
+            cited[session_ref].add(key)
         elif attribution.signal_type == MISLED:
-            misled[attribution.session_key].add(key)
+            misled[session_ref].add(key)
 
     return tuple(
         LabeledSession(
             session=session,
-            cited_keys=frozenset(cited.get(session.session_key, frozenset())),
-            misled_keys=frozenset(misled.get(session.session_key, frozenset())),
-            origin=origins.get(session.session_key, ORIGIN_INTERACTIVE),
+            cited_keys=frozenset(cited.get(session.ref, frozenset())),
+            misled_keys=frozenset(misled.get(session.ref, frozenset())),
+            origin=origins.get(session.ref, ORIGIN_INTERACTIVE),
         )
         for session in sessions
     )
@@ -474,6 +488,7 @@ def _unattributed(
     gap_seconds: float | None = None,
 ) -> FeedbackAttribution:
     return FeedbackAttribution(
+        organization_id=row.organization_id,
         signal_type=row.signal_type,
         item_kind=row.item_kind,
         item_id=row.item_id,

@@ -11374,6 +11374,7 @@
       "cited_exposures_mean": 8.011,
       "cited_resolved": 185,
       "cited_true_age_days_median": 1.237,
+      "cited_usable_sample": 185,
       "raw_ratio": 2.428,
       "resolved": true,
       "uncited_exposures_mean_age_standardized": 17.432,
@@ -11429,7 +11430,7 @@
   "events": 14740,
   "events_path": "/Users/bliss/dev/worktrees/sibyl/nova/p5-usage-rerank-harness/benchmarks/usage_rerank/out/usage_events.jsonl",
   "exposure_sessions": 923,
-  "generated_at": "2026-08-03T19:16:26.987793+00:00",
+  "generated_at": "2026-08-03T19:43:57.262697+00:00",
   "method": {
     "baseline_score": "rrf_score(recovered rank within item kind), k=60",
     "leakage_guard": "counts use only events strictly before the session start",
@@ -11446,6 +11447,14 @@
     "seed": 20260803,
     "stdev": 0.017876,
     "trials": 200
+  },
+  "population": {
+    "after_interleaved_exclusion": 123,
+    "contrastive_sessions": 124,
+    "dropped_interleaved_kinds": 1,
+    "dropped_no_single_kind_contrastive": 4,
+    "ranked_lists": 133,
+    "ranked_sessions": 119
   },
   "verdicts": [
     {

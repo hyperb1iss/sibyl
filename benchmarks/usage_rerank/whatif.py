@@ -45,6 +45,7 @@ from prior import (
     RerankOutcome,
     bootstrap_ci_vs_zero,
     describe_candidate_priors,
+    describe_population,
     permutation_null,
     run_whatif,
     summarize_outcomes,
@@ -64,7 +65,17 @@ def print_report(report: dict[str, Any]) -> None:
     print("\n=== P5 usage-prior rerank what-if ===")
     print(f"events                {report['events']}")
     print(f"sessions              {report['exposure_sessions']}")
-    print(f"contrastive sessions  {report['contrastive_sessions']}")
+    population = report["population"]
+    print(f"contrastive sessions  {population['contrastive_sessions']}")
+    print(
+        f"  drop interleaved     -{population['dropped_interleaved_kinds']}"
+        f"  -> {population['after_interleaved_exclusion']}"
+    )
+    print(
+        f"  drop no-single-kind  -{population['dropped_no_single_kind_contrastive']}"
+        f"  -> {population['ranked_sessions']} sessions"
+        f" / {population['ranked_lists']} ranked lists"
+    )
     print(f"origin filter         {report['origin_filter']}")
     print()
     header = f"{'arm':<28}{'cited':>7}{'up':>6}{'flat':>6}{'down':>6}{'mean_d':>9}{'mrr_d':>10}"
@@ -316,6 +327,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "events": len(rows),
         "exposure_sessions": len(sessions),
         "contrastive_sessions": sum(1 for labeled in labeled_sessions if labeled.is_contrastive()),
+        "population": describe_population(labeled_sessions),
         "origin_filter": ORIGIN_INTERACTIVE if args.interactive_only else "all",
         "attribution_window_seconds": args.window_seconds,
         "method": {

@@ -385,6 +385,150 @@ def test_gap_summary_reports_nothing_without_attributions() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Tenant isolation
+# ---------------------------------------------------------------------------
+
+OTHER_ORG = "11111111-2222-3333-4444-555555555555"
+
+
+def _other_org_event(
+    *,
+    signal: str,
+    session_key: str,
+    seconds: float,
+    item_id: str = "shared_item",
+    surface: str = "search",
+) -> Any:
+    return events.normalize_event_row(
+        {
+            "organization_id": OTHER_ORG,
+            "session_key": session_key,
+            "message_key": f"{surface}:{signal}:{session_key}",
+            "source_surface": surface,
+            "item_kind": events.GRAPH_ENTITY,
+            "item_id": item_id,
+            "signal_type": signal,
+            "event_at": (BASE + timedelta(seconds=seconds)).isoformat(),
+            "metadata": {},
+        }
+    )
+
+
+def _cross_tenant_rows() -> list[Any]:
+    """Two tenants serve an item with the same id, and only tenant B cites it.
+
+    Item ids are only unique inside a tenant, so an org-blind join key would let
+    tenant B's citation label tenant A's exposure of a same-named item. The
+    ordering is what makes that visible: tenant A's exposure is the LATEST one
+    before the citation, so an org-blind "latest preceding exposure" rule picks
+    the wrong tenant. With tenant B served last instead, both the correct and the
+    broken key would agree and the fixture would prove nothing.
+    """
+    return [
+        _other_org_event(signal=events.EXPOSURE, session_key="search:orgB", seconds=0),
+        *[
+            _event(
+                signal=events.EXPOSURE,
+                item_id=item_id,
+                offset_us=5_000_000 + index * 2,
+                session_key="search:orgA",
+            )
+            for index, item_id in enumerate(["shared_item", "other"])
+        ],
+        _other_org_event(
+            signal=events.CITATION,
+            session_key="cli_cite:orgB",
+            seconds=10,
+            surface="cli_cite",
+        ),
+    ]
+
+
+def test_attribution_does_not_cross_tenants() -> None:
+    rows = _cross_tenant_rows()
+    sessions = join.group_exposure_sessions(rows)
+    attributions = join.attribute_feedback(sessions, rows)
+    assert len(attributions) == 1
+    assert attributions[0].organization_id == OTHER_ORG
+    assert attributions[0].session_key == "search:orgB"
+
+
+def test_labels_do_not_cross_tenants() -> None:
+    """Tenant A served the same item id and must come back unlabeled."""
+    rows = _cross_tenant_rows()
+    sessions = join.group_exposure_sessions(rows)
+    attributions = join.attribute_feedback(sessions, rows)
+    labeled = join.build_labeled_sessions(
+        sessions, attributions, join.flag_eval_suspect_sessions(sessions)
+    )
+    by_ref = {entry.session.ref: entry for entry in labeled}
+    assert by_ref[(ORG, "search:orgA")].cited_keys == frozenset()
+    assert by_ref[(OTHER_ORG, "search:orgB")].cited_keys == frozenset(
+        {(events.GRAPH_ENTITY, "shared_item")}
+    )
+
+
+def test_labels_do_not_cross_tenants_sharing_a_session_key() -> None:
+    """The label map must key on the tenant, not the session key alone.
+
+    Production digests happen to include the org, so two tenants are unlikely to
+    collide on a session_key today. The harness must not depend on that: a
+    truncated digest, a restored archive, or a synthetic key would collide, and
+    the failure is silent because the wrong tenant simply gains a positive label.
+    """
+    shared_key = "search:same"
+    rows = [
+        *[
+            _event(
+                signal=events.EXPOSURE,
+                item_id=item_id,
+                offset_us=index * 2,
+                session_key=shared_key,
+            )
+            for index, item_id in enumerate(["shared_item", "other"])
+        ],
+        _other_org_event(signal=events.EXPOSURE, session_key=shared_key, seconds=5),
+        _other_org_event(
+            signal=events.CITATION,
+            session_key="cli_cite:orgB",
+            seconds=10,
+            surface="cli_cite",
+        ),
+    ]
+    sessions = join.group_exposure_sessions(rows)
+    assert len(sessions) == TWO_SESSIONS
+
+    attributions = join.attribute_feedback(sessions, rows)
+    labeled = join.build_labeled_sessions(
+        sessions, attributions, join.flag_eval_suspect_sessions(sessions)
+    )
+    by_ref = {entry.session.ref: entry for entry in labeled}
+    assert by_ref[(OTHER_ORG, shared_key)].cited_keys == frozenset(
+        {(events.GRAPH_ENTITY, "shared_item")}
+    )
+    # Same session key, same item id, different tenant: must stay unlabeled.
+    assert by_ref[(ORG, shared_key)].cited_keys == frozenset()
+
+
+def test_burst_detection_buckets_per_tenant() -> None:
+    """Two tenants each running three sessions is not one six-session burst."""
+    rows: list[Any] = []
+    for index in range(3):
+        rows.extend(_exposure_page([f"a{index}"], session_key=f"search:A{index}"))
+        rows.append(
+            _other_org_event(
+                signal=events.EXPOSURE,
+                session_key=f"search:B{index}",
+                seconds=0,
+                item_id=f"b{index}",
+            )
+        )
+    sessions = join.group_exposure_sessions(rows)
+    origins = join.flag_eval_suspect_sessions(sessions, burst_threshold=6)
+    assert set(origins.values()) == {join.ORIGIN_INTERACTIVE}
+
+
+# ---------------------------------------------------------------------------
 # Labels and contamination
 # ---------------------------------------------------------------------------
 
@@ -1190,3 +1334,114 @@ def test_age_source_integrity_flags_a_rewritten_created_at() -> None:
     dirty = prior.describe_candidate_priors([labeled], counts, drifted)["age_source_integrity"]
     assert dirty["created_at_after_first_exposure"] == 1
     assert dirty["trustworthy"] is False
+
+
+# ---------------------------------------------------------------------------
+# The standardization estimator itself
+# ---------------------------------------------------------------------------
+
+BAND_A_AGE_DAYS = 0.25
+BAND_B_AGE_DAYS = 5.0
+EXPECTED_RAW_RATIO = 4.0
+EXPECTED_STANDARDIZED_RATIO = 2.0
+FIXTURE_CITED_ITEMS = 4
+POPULATED_BANDS = 2
+
+
+def _weighting_fixture() -> tuple[Any, prior.PointInTimeCounts, dict[tuple[str, str], Any]]:
+    """Two groups differing in age mix AND in within-band means.
+
+    Within every age band the uncited mean is exactly twice the cited mean, so a
+    correct age adjustment has to report 2.0. The age mixes are deliberately
+    opposite (cited concentrated young, uncited concentrated old), which drives
+    the unadjusted ratio to 4.0. Those two numbers differing is the whole point:
+    a fixture where both groups share an age mix cannot tell a real adjustment
+    apart from one that silently reproduces the raw ratio.
+    """
+    plan = {
+        "cA1": (1, BAND_A_AGE_DAYS, True),
+        "cA2": (1, BAND_A_AGE_DAYS, True),
+        "cA3": (1, BAND_A_AGE_DAYS, True),
+        "cB1": (5, BAND_B_AGE_DAYS, True),
+        "uA1": (2, BAND_A_AGE_DAYS, False),
+        "uB1": (10, BAND_B_AGE_DAYS, False),
+        "uB2": (10, BAND_B_AGE_DAYS, False),
+        "uB3": (10, BAND_B_AGE_DAYS, False),
+    }
+    item_ids = list(plan)
+
+    history: list[Any] = []
+    for item_id, (count, _, _) in plan.items():
+        for repeat in range(count):
+            history.append(
+                _event(
+                    signal=events.EXPOSURE,
+                    item_id=item_id,
+                    offset_us=-60_000_000 + repeat,
+                    session_key=f"search:prior{repeat}",
+                )
+            )
+
+    served = _exposure_page(item_ids, session_key="search:measured")
+    citations = [
+        _event(
+            signal=events.CITATION,
+            item_id=item_id,
+            offset_us=5_000_000,
+            surface="cli_cite",
+            session_key=f"cli_cite:{item_id}",
+        )
+        for item_id, (_, _, cited) in plan.items()
+        if cited
+    ]
+    rows = [*history, *served, *citations]
+    sessions = [
+        session
+        for session in join.group_exposure_sessions(rows)
+        if session.session_key == "search:measured"
+    ]
+    attributions = join.attribute_feedback(sessions, rows)
+    labeled = join.build_labeled_sessions(
+        sessions, attributions, join.flag_eval_suspect_sessions(sessions)
+    )[0]
+    created = {
+        (events.GRAPH_ENTITY, item_id): BASE - timedelta(days=age)
+        for item_id, (_, age, _) in plan.items()
+    }
+    return labeled, prior.PointInTimeCounts(rows), created
+
+
+def test_age_standardization_weights_by_the_cited_age_distribution() -> None:
+    """Pins the estimator, not just its plumbing.
+
+    Weighting the band means by the uncited counts instead of the cited ones
+    reproduces the raw ratio exactly, which is a silent no-op of the entire age
+    adjustment. Asserting both numbers is what makes that mutation fail.
+    """
+    labeled, counts, created = _weighting_fixture()
+    assert labeled.positive_count == FIXTURE_CITED_ITEMS
+    standardized = prior.describe_candidate_priors([labeled], counts, created)["age_standardized"]
+
+    assert standardized["resolved"] is True
+    assert standardized["cited_exposures_mean"] == pytest.approx(2.0)
+    assert standardized["uncited_exposures_mean_raw"] == pytest.approx(8.0)
+    assert standardized["raw_ratio"] == pytest.approx(EXPECTED_RAW_RATIO)
+    # The adjustment must land here and must not collapse onto raw_ratio.
+    assert standardized["age_standardized_ratio"] == pytest.approx(EXPECTED_STANDARDIZED_RATIO)
+    assert standardized["age_standardized_ratio"] != pytest.approx(standardized["raw_ratio"])
+
+
+def test_age_standardization_holds_the_within_band_ratio_in_every_band() -> None:
+    labeled, counts, created = _weighting_fixture()
+    standardized = prior.describe_candidate_priors([labeled], counts, created)["age_standardized"]
+    populated = [band for band in standardized["bands"] if band.get("ratio") is not None]
+    assert len(populated) == POPULATED_BANDS
+    for band in populated:
+        assert band["ratio"] == pytest.approx(2.0)
+
+
+def test_age_standardization_denominator_uses_only_usable_bands() -> None:
+    """A cited candidate in a band with no uncited peer must not skew the ratio."""
+    labeled, counts, created = _weighting_fixture()
+    standardized = prior.describe_candidate_priors([labeled], counts, created)["age_standardized"]
+    assert standardized["cited_usable_sample"] == FIXTURE_CITED_ITEMS

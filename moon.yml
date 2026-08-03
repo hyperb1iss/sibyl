@@ -449,6 +449,14 @@ tasks:
       benchmarks/longmemeval_v2_validation_slice.py
       benchmarks/longmemeval_v2_validation_slice_v2.py
       benchmarks/longmemeval_v2_live_retrieval.py
+      benchmarks/usage_rerank/age.py
+      benchmarks/usage_rerank/events.py
+      benchmarks/usage_rerank/extract.py
+      benchmarks/usage_rerank/join.py
+      benchmarks/usage_rerank/paths.py
+      benchmarks/usage_rerank/prior.py
+      benchmarks/usage_rerank/store.py
+      benchmarks/usage_rerank/whatif.py
     inputs:
       - tools/**/*.py
       - benchmarks/git_provenance.py
@@ -462,6 +470,7 @@ tasks:
       - benchmarks/longmemeval_v2_validation_slice.py
       - benchmarks/longmemeval_v2_validation_slice_v2.py
       - benchmarks/longmemeval_v2_live_retrieval.py
+      - benchmarks/usage_rerank/**/*.py
       - benchmarks/longmemeval_v2_composition_validation.json
       - benchmarks/longmemeval_v2_composition_validation_v2.json
       - pyproject.toml

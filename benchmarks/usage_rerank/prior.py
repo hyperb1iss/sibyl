@@ -276,6 +276,8 @@ def describe_candidate_priors(
     labeled_sessions: Sequence[LabeledSession],
     counts: PointInTimeCounts,
     created_at_by_item: Mapping[tuple[str, str], datetime] | None = None,
+    *,
+    require_contiguous_kinds: bool = True,
 ) -> dict[str, Any]:
     """Compare the prior signal on cited candidates against uncited ones.
 
@@ -293,7 +295,7 @@ def describe_candidate_priors(
     age_checked = 0
     age_violations = 0
     for labeled in labeled_sessions:
-        if not labeled.session.has_contiguous_kind_blocks:
+        if require_contiguous_kinds and not labeled.session.has_contiguous_kind_blocks:
             continue
         for item_kind in labeled.session.item_kinds:
             if not labeled.is_contrastive(item_kind):
@@ -379,6 +381,7 @@ def _standardize_by_age(
     bands: list[dict[str, Any]] = []
     weighted_uncited = 0.0
     weight_total = 0
+    usable_cited: list[int] = []
     for low, high in AGE_BANDS_DAYS:
         cited_band = [
             record.counts.retrieval_count
@@ -404,9 +407,14 @@ def _standardize_by_age(
             band["ratio"] = round(uncited_mean / cited_mean, 3) if cited_mean else None
             weighted_uncited += uncited_mean * len(cited_band)
             weight_total += len(cited_band)
+            # The comparison denominator has to come from the same bands that
+            # contribute to the standardized numerator. Averaging over every
+            # resolved cited candidate instead would mix a population the
+            # standardization never touched into the ratio.
+            usable_cited.extend(cited_band)
         bands.append(band)
 
-    cited_overall = statistics.fmean([record.counts.retrieval_count for record in cited_aged])
+    cited_overall = statistics.fmean(usable_cited) if usable_cited else None
     raw_uncited = statistics.fmean([record.counts.retrieval_count for record in uncited_aged])
     standardized = weighted_uncited / weight_total if weight_total else None
     return {
@@ -419,7 +427,8 @@ def _standardize_by_age(
         "uncited_true_age_days_median": round(
             statistics.median([record.true_age_days or 0.0 for record in uncited_aged]), 3
         ),
-        "cited_exposures_mean": round(cited_overall, 3),
+        "cited_exposures_mean": round(cited_overall, 3) if cited_overall is not None else None,
+        "cited_usable_sample": len(usable_cited),
         "uncited_exposures_mean_raw": round(raw_uncited, 3),
         "uncited_exposures_mean_age_standardized": (
             round(standardized, 3) if standardized is not None else None
@@ -506,6 +515,42 @@ def _describe_group(records: Sequence[_CandidateRecord]) -> dict[str, Any]:
     }
 
 
+def describe_population(
+    labeled_sessions: Sequence[LabeledSession],
+    *,
+    require_contiguous_kinds: bool = True,
+) -> dict[str, Any]:
+    """Account for every session between "contrastive" and "actually ranked".
+
+    Two independent exclusions sit between those two counts and reporting only
+    the endpoints hides one of them. A session is dropped when its kinds
+    interleave, because its recovered ranks are not a served order, and
+    separately when no single item kind is contrastive on its own, because a
+    positive in one kind and the negatives in another cannot be compared.
+    """
+    contrastive = [labeled for labeled in labeled_sessions if labeled.is_contrastive()]
+    contiguous = [
+        labeled
+        for labeled in contrastive
+        if not require_contiguous_kinds or labeled.session.has_contiguous_kind_blocks
+    ]
+    ranked_lists = [
+        (labeled, item_kind)
+        for labeled in contiguous
+        for item_kind in labeled.session.item_kinds
+        if labeled.is_contrastive(item_kind)
+    ]
+    ranked_sessions = {labeled.session.ref for labeled, _ in ranked_lists}
+    return {
+        "contrastive_sessions": len(contrastive),
+        "dropped_interleaved_kinds": len(contrastive) - len(contiguous),
+        "after_interleaved_exclusion": len(contiguous),
+        "dropped_no_single_kind_contrastive": len(contiguous) - len(ranked_sessions),
+        "ranked_sessions": len(ranked_sessions),
+        "ranked_lists": len(ranked_lists),
+    }
+
+
 def permutation_null(
     labeled_sessions: Sequence[LabeledSession],
     counts: PointInTimeCounts,
@@ -559,16 +604,24 @@ def permutation_null(
                 arms.append((tuple(scored), tuple(cited_indexes)))
 
     if not arms:
-        return {"trials": 0, "mean": None, "stdev": None, "p95_abs": None}
+        return {
+            "trials": 0,
+            "mean": None,
+            "stdev": None,
+            "p95_abs": None,
+            "interpretation": "no contrastive population to build a null from",
+        }
 
-    baseline_rr = [1.0 / scored[index].baseline_rank for scored, cited in arms for index in cited]
+    baseline_rr = [
+        1.0 / arm_scores[index].baseline_rank for arm_scores, cited in arms for index in cited
+    ]
     baseline_mrr = statistics.fmean(baseline_rr)
 
     deltas: list[float] = []
     for _ in range(trials):
         trial_rr: list[float] = []
-        for scored, cited in arms:
-            multipliers = [entry.multiplier for entry in scored]
+        for arm_scores, cited in arms:
+            multipliers = [entry.multiplier for entry in arm_scores]
             rng.shuffle(multipliers)
             shuffled = [
                 ExposedItemScore(
@@ -576,7 +629,7 @@ def permutation_null(
                     baseline_rank=entry.baseline_rank,
                     multiplier=multipliers[index],
                 )
-                for index, entry in enumerate(scored)
+                for index, entry in enumerate(arm_scores)
             ]
             ordered = sorted(
                 shuffled,
@@ -586,7 +639,7 @@ def permutation_null(
                 ),
             )
             new_rank = {entry.item_id: index + 1 for index, entry in enumerate(ordered)}
-            trial_rr.extend(1.0 / new_rank[scored[index].item_id] for index in cited)
+            trial_rr.extend(1.0 / new_rank[arm_scores[index].item_id] for index in cited)
         deltas.append(statistics.fmean(trial_rr) - baseline_mrr)
 
     return {
@@ -717,6 +770,7 @@ __all__ = [
     "UsageCounts",
     "bootstrap_ci_vs_zero",
     "describe_candidate_priors",
+    "describe_population",
     "permutation_null",
     "rerank_session_kind",
     "rrf_score",
