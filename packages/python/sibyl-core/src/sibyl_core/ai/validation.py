@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Literal, cast
+from typing import Literal
 
 from pydantic import BaseModel, Field, SecretStr
 from pydantic_ai import Agent
@@ -181,7 +181,7 @@ async def test_surface_config(
     config = resolved.to_llm_config()
     started_at = time.perf_counter()
     try:
-        agent = Agent(
+        agent = Agent[object, _SurfaceProbe](
             build_model(config),
             output_type=_SurfaceProbe,
             retries=output_retry_budget(1),
@@ -206,7 +206,7 @@ async def test_surface_config(
             status="valid",
             valid=True,
             latency_ms=latency_ms,
-            parsed_output=cast(_SurfaceProbe, result.output).model_dump(),
+            parsed_output=result.output.model_dump(),
             input_tokens=_input_tokens(result),
             output_tokens=_output_tokens(result),
         )
