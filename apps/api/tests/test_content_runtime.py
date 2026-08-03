@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import re
 from contextlib import asynccontextmanager
+from pathlib import Path
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 
+import sibyl
 from sibyl.persistence import content_archive, content_common, content_runtime, settings_runtime
 from sibyl.persistence.surreal import content as surreal_content
 
@@ -686,3 +689,19 @@ async def test_surreal_chunk_searches_raise_knn_effort_to_the_candidate_pool(
     ]
     assert len(vector_queries) == 3
     assert all("embedding <|100, 100|> $query_embedding" in query for query in vector_queries)
+
+
+def test_every_api_knn_clause_takes_its_effort_from_the_helper() -> None:
+    # An HNSW read returns at most `ef` rows, so a literal effort in a
+    # `<|k, ef|>` clause silently truncates any pool deeper than the literal.
+    # Every clause in the app has to take its effort from knn_search_effort.
+    pattern = re.compile(r"<\|[^,|]+,\s*([^|]+)\|>")
+    offenders: list[tuple[str, str]] = []
+    for path in sorted(Path(sibyl.__file__).parent.rglob("*.py")):
+        # Whole-file scan rather than per-line: a clause wrapped across lines
+        # has to be caught too.
+        for match in pattern.finditer(path.read_text(encoding="utf-8")):
+            effort = " ".join(match.group(1).split())
+            if not effort.startswith("{") or not effort.rstrip("}").endswith("knn_effort"):
+                offenders.append((path.name, effort))
+    assert offenders == []

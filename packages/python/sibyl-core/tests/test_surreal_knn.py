@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import random
+import re
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+import sibyl_core
 from sibyl_core.backends.surreal.knn import knn_search_effort
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
 from sibyl_core.config import settings
@@ -46,6 +49,32 @@ def test_default_configuration_leaves_deep_pools_short_without_the_floor() -> No
     assert settings.graph_knn_ef == 40
     assert knn_search_effort(100, settings.graph_knn_ef) == 100
     assert knn_search_effort(8, settings.graph_knn_ef) == 40
+
+
+KNN_CLAUSE_PATTERN = re.compile(r"<\|[^,|]+,\s*([^|]+)\|>")
+
+
+def knn_clause_offenders(root: Path, allowed_files: set[str]) -> list[tuple[str, str]]:
+    """Return (file, effort) for `<|k, ef|>` clauses whose effort skips the helper."""
+    offenders: list[tuple[str, str]] = []
+    for path in sorted(root.rglob("*.py")):
+        if path.name in allowed_files:
+            continue
+        # Whole-file scan rather than per-line: a clause wrapped across lines
+        # has to be caught too.
+        for match in KNN_CLAUSE_PATTERN.finditer(path.read_text(encoding="utf-8")):
+            effort = " ".join(match.group(1).split())
+            if not effort.startswith("{") or not effort.rstrip("}").endswith("knn_effort"):
+                offenders.append((path.name, effort))
+    return offenders
+
+
+def test_every_core_knn_clause_takes_its_effort_from_the_helper() -> None:
+    # The defect this module guards is a literal or unfloored effort reaching a
+    # `<|k, ef|>` clause. knn.py documents the shape and query_plan_probes.py
+    # measures explicit efforts on purpose, so both are exempt.
+    root = Path(sibyl_core.__file__).parent
+    assert knn_clause_offenders(root, {"knn.py", "query_plan_probes.py"}) == []
 
 
 async def _seed_entities(client: SurrealGraphClient, count: int) -> None:
