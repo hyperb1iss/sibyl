@@ -290,7 +290,11 @@ class CoreConfig(BaseSettings):
         default=40,
         ge=1,
         le=10_000,
-        description="Surreal KNN query effort for graph vector retrieval.",
+        description=(
+            "Floor on the Surreal KNN query effort for graph vector retrieval. An HNSW "
+            "read returns at most `ef` rows, so the effective effort is the larger of "
+            "this value and the candidate count the lane requested."
+        ),
     )
 
     # Retrieval: cross-encoder reranking (optional).
