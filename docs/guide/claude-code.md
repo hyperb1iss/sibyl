@@ -28,6 +28,8 @@ tools and data sources. Sibyl exposes 11 MCP tools:
 | `synthesis_draft`  | Draft, verify, and optionally remember a synthesis artifact    |
 | `synthesis_verify` | Verify citation, freshness, redaction, and gap coverage        |
 | `explore`          | Navigate the graph: list, related, traverse, dependencies      |
+| `expand_neighbors` | Widen known memories into their bounded neighborhood           |
+| `fetch_slice`      | Read one memory at span granularity, citing its parent         |
 | `add`              | Create knowledge entries (episodes, patterns, tasks, projects) |
 | `remember`         | Capture durable memory (decision, plan, idea, claim, ...)      |
 | `reflect`          | Reflect raw notes into reviewable memory candidates            |
@@ -36,7 +38,9 @@ tools and data sources. Sibyl exposes 11 MCP tools:
 
 The four memory-loop tools (`context`, `remember`, `reflect`, and the `synthesis_*` family)
 implement the [memory loop](./memory-loop.md) for agents. `search`, `explore`, `add`, and `manage`
-cover retrieval and workflow.
+cover retrieval and workflow. `expand_neighbors` and `fetch_slice` are the bounded traversal verbs
+for an agent that wants to steer its own retrieval over at most three rounds; see
+[the traversal verbs](../api/mcp-traverse.md) for the contract they answer to.
 
 ## Connecting an Agent
 

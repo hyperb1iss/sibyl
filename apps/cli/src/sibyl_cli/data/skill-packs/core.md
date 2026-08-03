@@ -1066,7 +1066,7 @@ sibyl auth status    # Check authentication
 
 ## MCP Tools (Programmatic Access)
 
-When used as an MCP server, Sibyl exposes 11 tools. These are different from CLI commands.
+When used as an MCP server, Sibyl exposes 13 tools. These are different from CLI commands.
 
 | MCP Tool           | Purpose                                                           |
 | ------------------ | ----------------------------------------------------------------- |
@@ -1076,6 +1076,8 @@ When used as an MCP server, Sibyl exposes 11 tools. These are different from CLI
 | `synthesis_draft`  | Draft + verify + optionally remember a synthesis artifact         |
 | `synthesis_verify` | Verify citation/freshness/hidden-context/gap coverage             |
 | `explore`          | Browse graph: list, related, traverse, deps                       |
+| `expand_neighbors` | Widen known memories into their bounded neighborhood              |
+| `fetch_slice`      | Read one memory at span granularity, citing its parent            |
 | `add`              | Add knowledge, tasks, or projects                                 |
 | `remember`         | Capture durable memory: decision/plan/idea/claim/artifact/session |
 | `reflect`          | Convert raw notes into reviewable memory candidates               |

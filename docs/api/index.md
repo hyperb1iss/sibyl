@@ -1,6 +1,6 @@
 # Sibyl API Reference
 
-Sibyl provides a dual-interface API: an eleven-tool MCP interface for assistant clients and
+Sibyl provides a dual-interface API: a thirteen-tool MCP interface for assistant clients and
 automation, plus a full REST API for applications and integrations. Both surfaces are served by the
 same daemon (`sibyld`) and share one SurrealDB-native runtime for graph, content, and auth.
 
@@ -9,7 +9,7 @@ same daemon (`sibyld`) and share one SurrealDB-native runtime for graph, content
 ```
 Sibyl Combined App (Starlette, port 3334)
 |-- /api/*    --> FastAPI REST endpoints (31 routers)
-|-- /mcp      --> MCP streamable-http transport (11 tools, 2 resources)
+|-- /mcp      --> MCP streamable-http transport (13 tools, 2 resources)
 |-- /ws       --> WebSocket for real-time updates
 '-- Lifespan  --> Coordination runtime + session management
 ```
@@ -28,8 +28,9 @@ multi-process or distributed worker deployments.
 
 ### MCP Tools (for Assistant Clients)
 
-The MCP interface exposes eleven tools that cover discovery, context, capture, synthesis, lifecycle
-operations, and introspection. Tools are registered in `apps/api/src/sibyl/server.py`.
+The MCP interface exposes thirteen tools that cover discovery, context, bounded traversal, capture,
+synthesis, lifecycle operations, and introspection. Tools are registered in
+`apps/api/src/sibyl/server.py`.
 
 | Tool               | Purpose                                                      | Documentation                          |
 | ------------------ | ------------------------------------------------------------ | -------------------------------------- |
@@ -39,6 +40,8 @@ operations, and introspection. Tools are registered in `apps/api/src/sibyl/serve
 | `synthesis_draft`  | Draft, verify, and optionally remember a synthesis artifact  | [mcp-synthesis.md](./mcp-synthesis.md) |
 | `synthesis_verify` | Verify citation, freshness, hidden-context, and gap coverage | [mcp-synthesis.md](./mcp-synthesis.md) |
 | `explore`          | Navigate and browse graph structure                          | [mcp-explore.md](./mcp-explore.md)     |
+| `expand_neighbors` | Widen known memories into their bounded graph neighborhood   | [mcp-traverse.md](./mcp-traverse.md)   |
+| `fetch_slice`      | Read one memory at span granularity, with parent citation    | [mcp-traverse.md](./mcp-traverse.md)   |
 | `add`              | Create new knowledge entities                                | [mcp-add.md](./mcp-add.md)             |
 | `remember`         | Capture durable memory with verbatim raw provenance          | [mcp-remember.md](./mcp-remember.md)   |
 | `reflect`          | Reflect raw notes into reviewable memory candidates          | [mcp-reflect.md](./mcp-reflect.md)     |
@@ -55,14 +58,14 @@ The MCP server also exposes two resources: `sibyl://health` (connectivity and en
 The REST API spans 31 routers. The pages below cover the most commonly used surfaces; the full
 contract is in the OpenAPI schema.
 
-| Category  | Endpoints                            | Documentation                            |
-| --------- | ------------------------------------ | ---------------------------------------- |
-| Entities  | `/api/entities/*`                    | [rest-entities.md](./rest-entities.md)   |
-| Tasks     | `/api/tasks/*`                       | [rest-tasks.md](./rest-tasks.md)         |
-| Projects  | `/api/entities?entity_type=project`  | [rest-projects.md](./rest-projects.md)   |
-| Search    | `/api/search`, `/api/search/explore` | [rest-search.md](./rest-search.md)       |
-| Memory    | `/api/memory/*`, `/api/context/*`    | [rest-memory.md](./rest-memory.md)       |
-| Synthesis | `/api/synthesis/*`                   | [rest-synthesis.md](./rest-synthesis.md) |
+| Category  | Endpoints                                                                       | Documentation                            |
+| --------- | ------------------------------------------------------------------------------- | ---------------------------------------- |
+| Entities  | `/api/entities/*`                                                               | [rest-entities.md](./rest-entities.md)   |
+| Tasks     | `/api/tasks/*`                                                                  | [rest-tasks.md](./rest-tasks.md)         |
+| Projects  | `/api/entities?entity_type=project`                                             | [rest-projects.md](./rest-projects.md)   |
+| Search    | `/api/search`, `/api/search/explore`, `/api/search/expand`, `/api/search/slice` | [rest-search.md](./rest-search.md)       |
+| Memory    | `/api/memory/*`, `/api/context/*`                                               | [rest-memory.md](./rest-memory.md)       |
+| Synthesis | `/api/synthesis/*`                                                              | [rest-synthesis.md](./rest-synthesis.md) |
 
 Additional routers not covered by dedicated pages include `auth`, `users`, `epics`, `experience`,
 `graph`, `crawler`, `ingestion`, `rag`, `resolve`, `jobs`, `backups`, `settings`, `ai_settings`,

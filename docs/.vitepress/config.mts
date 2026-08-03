@@ -213,6 +213,7 @@ export default defineConfig({
                         { text: 'search', link: '/api/mcp-search' },
                         { text: 'context', link: '/api/mcp-context' },
                         { text: 'explore', link: '/api/mcp-explore' },
+                        { text: 'traversal verbs', link: '/api/mcp-traverse' },
                         { text: 'add', link: '/api/mcp-add' },
                         { text: 'remember', link: '/api/mcp-remember' },
                         { text: 'reflect', link: '/api/mcp-reflect' },

@@ -195,9 +195,10 @@ and is rejected by the production config validator.
 
 ### Tool Registration
 
-The MCP server is constructed in `server.py` and registers 11 tools: `search`, `context`,
-`synthesis_plan`, `synthesis_draft`, `synthesis_verify`, `explore`, `add`, `remember`, `reflect`,
-`manage`, and `logs`. See [Agents & MCP](./claude-code.md) for what each one does.
+The MCP server is constructed in `server.py` and registers 13 tools: `search`, `context`,
+`synthesis_plan`, `synthesis_draft`, `synthesis_verify`, `explore`, `expand_neighbors`,
+`fetch_slice`, `add`, `remember`, `reflect`, `manage`, and `logs`. See
+[Agents & MCP](./claude-code.md) for what each one does.
 
 ```python
 mcp = FastMCP(

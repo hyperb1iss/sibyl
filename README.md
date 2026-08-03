@@ -249,13 +249,15 @@ Connect Claude Code, Cursor, or any MCP client to Sibyl:
 }
 ```
 
-Sibyl exposes eleven MCP tools, organized by what they do:
+Sibyl exposes thirteen MCP tools, organized by what they do:
 
 | Tool               | Purpose                                                   |
 | ------------------ | --------------------------------------------------------- |
 | `search`           | Unified semantic search across graph and crawled docs     |
 | `context`          | Compile an agent context pack for a goal (intent + depth) |
 | `explore`          | Navigate the graph: list, related, traverse, dependencies |
+| `expand_neighbors` | Widen known memories into their bounded neighborhood      |
+| `fetch_slice`      | Read one memory at span granularity, citing its parent    |
 | `add`              | Create knowledge: episodes, patterns, tasks, projects     |
 | `remember`         | Capture durable memory: decisions, plans, ideas, claims   |
 | `reflect`          | Distill raw notes into reviewable memory candidates       |
