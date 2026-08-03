@@ -474,16 +474,33 @@ async def context_search(
     vector_candidate_lists = [vector_fetch.node_candidates, vector_fetch.edge_candidates]
     stage_timings_ms["vector_candidates"] = _elapsed_ms(stage_started_at)
 
+    def candidate_authorized(candidate: RetrievalCandidate) -> bool:
+        return _candidate_allowed(
+            candidate,
+            plan=search_plan,
+            requested_types=requested_types,
+            facet=facet,
+        )
+
     stage_started_at = time.perf_counter()
     graph_expansion_source = await _gather_graph_expansion_source(
         _graph_expansion_candidates(
             client=client,
             plan=search_plan,
             search_filter=search_filter,
+            # Seeds are authorized before they are walked, not only after. A
+            # denied row's own content never reached the caller, but seeding the
+            # walk from it exported its edges: the neighbour passes its own check
+            # and comes back, so the seed's existence became observable through
+            # somebody else's row. That is an oracle whenever the caller chooses
+            # the seed, which an exact-key probe does by construction, and the
+            # walk should not start from a row this reader cannot see regardless
+            # of which lane proposed it.
             seed_candidates=[
                 candidate
                 for source in [*graph_candidate_lists, *vector_candidate_lists]
                 for candidate in source
+                if candidate_authorized(candidate)
             ],
             limit=search_plan.candidate_limits.graph_expansion,
         )
@@ -508,19 +525,7 @@ async def context_search(
         (RetrievalSignal.GRAPH_EXPANSION, graph_expansion_candidates),
     ]
     filtered_lists = [
-        (
-            signal,
-            [
-                candidate
-                for candidate in candidates
-                if _candidate_allowed(
-                    candidate,
-                    plan=search_plan,
-                    requested_types=requested_types,
-                    facet=facet,
-                )
-            ],
-        )
+        (signal, [candidate for candidate in candidates if candidate_authorized(candidate)])
         for signal, candidates in source_lists
     ]
     # Counted after the scope filter, never before. A pre-filter count answers
@@ -1056,6 +1061,7 @@ async def _exact_key_candidates(
 
     if not probe_tokens:
         return []
+    row_limit = max(int(limit), 1)
     filter_clauses, filter_params = _node_filter_clause(search_filter)
     # CONTAINSANY against the index defined on `retrieval_keys_normalized.*`.
     # The element index is what makes this both correct and index-served: on
@@ -1078,7 +1084,12 @@ async def _exact_key_candidates(
         """,
         group_id=plan.organization_id,
         probe_keys=list(probe_tokens),
-        limit=max(int(limit), 1),
+        # Read one lane's worth of rows per probe, not one in total. The database
+        # truncates by recency, and overlap is only computed here, so a single
+        # lane-sized read lets newer single-match rows crowd out the older row
+        # that answers every identifier in the query. Probes are capped, so this
+        # is the same bounded breadth a read per probe would have had.
+        limit=row_limit * len(probe_tokens),
         **filter_params,
     )
 
@@ -1094,7 +1105,9 @@ async def _exact_key_candidates(
     # read to one index lookup and no array functions.
     scored.sort(key=lambda item: (-item[0], item[1]))
     candidates: list[RetrievalCandidate] = []
-    for _count, _uuid, matched, row in scored:
+    # Truncated after the overlap sort, so the lane hands fusion its best rows
+    # rather than its newest ones.
+    for _count, _uuid, matched, row in scored[:row_limit]:
         candidate = _candidate_from_node_record(
             row,
             signal=RetrievalSignal.EXACT_KEY,

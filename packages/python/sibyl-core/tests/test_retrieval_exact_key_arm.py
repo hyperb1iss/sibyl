@@ -250,6 +250,38 @@ async def test_arm_issues_no_read_without_a_probe() -> None:
 
 
 @pytest.mark.asyncio
+async def test_best_overlap_row_survives_a_lane_limit_smaller_than_the_match_count() -> None:
+    """The database truncates by recency, and overlap is only known here.
+
+    Regression: reading one lane's worth of rows in total let newer single-match
+    rows crowd out the older row that answers every identifier in the query, so
+    the lane advertised an overlap ranking it could not deliver. The read is now
+    sized per probe and the truncation happens after the sort.
+    """
+
+    metadata = await _captured_metadata()
+    both = _row(metadata, normalized_keys=["key_a", "key_b"]) | {"uuid": "both"}
+    newer_one = _row(metadata, normalized_keys=["key_a"]) | {"uuid": "newer_a"}
+    newer_two = _row(metadata, normalized_keys=["key_b"]) | {"uuid": "newer_b"}
+    # Ordered the way the database would hand them back: newest first, so the
+    # best-overlap row arrives last.
+    client = _RecordingClient([newer_one, newer_two, both])
+    plan = _plan()
+
+    candidates = await search_module._exact_key_candidates(
+        client=client,
+        plan=plan,
+        search_filter=search_module._search_filter_for_plan(plan),
+        limit=2,
+        probe_tokens=("key_a", "key_b"),
+    )
+
+    assert [candidate.id for candidate in candidates] == ["both", "newer_a"]
+    _query, params = client.queries[0]
+    assert params["limit"] == 4
+
+
+@pytest.mark.asyncio
 async def test_arm_drops_a_row_whose_stored_keys_do_not_actually_match() -> None:
     """The index is a filter, not the decision: overlap is confirmed in Python."""
 
@@ -370,6 +402,106 @@ async def test_project_scoped_exact_key_hit_is_denied_outside_the_project() -> N
         requested_types=set(),
         facet=None,
     )
+
+
+# ---------------------------------------------------------------------------
+# Graph expansion must not walk from a row the reader cannot see
+# ---------------------------------------------------------------------------
+
+
+class _EmptyClient:
+    async def execute_query(self, _query: str, **_params: object) -> list[dict[str, object]]:
+        return []
+
+
+async def _seeds_for(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    reader: str,
+    probe_key: str,
+) -> list[str]:
+    """Run a real context_search and report which uuids seeded graph expansion."""
+
+    metadata = await _captured_metadata(principal_id="user-alice")
+    victim = _row(metadata, normalized_keys=[PROBE_KEY.casefold()])
+    seeds: list[str] = []
+
+    async def fake_exact_key_candidates(**kwargs: Any) -> list[RetrievalCandidate]:
+        probes = set(kwargs["probe_tokens"])
+        if PROBE_KEY.casefold() not in probes:
+            return []
+        return [
+            search_module._candidate_from_node_record(
+                victim,
+                signal=RetrievalSignal.EXACT_KEY,
+                score=1.0,
+            )
+        ]
+
+    async def fake_graph_expansion(**kwargs: Any) -> list[RetrievalCandidate]:
+        seeds.extend(candidate.id for candidate in kwargs["seed_candidates"])
+        return []
+
+    class Runtime:
+        client = _EmptyClient()
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> Runtime:
+        return Runtime()
+
+    async def no_raw_recall(**_kwargs: object) -> list[Any]:
+        return []
+
+    monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(search_module, "_exact_key_candidates", fake_exact_key_candidates)
+    monkeypatch.setattr(search_module, "_graph_expansion_candidates", fake_graph_expansion)
+
+    await search_module.context_search(
+        plan=_plan(principal_id=reader, query=f"why does {probe_key} fire"),
+        limit=10,
+        raw_memory_recall_fn=no_raw_recall,
+    )
+    return seeds
+
+
+@pytest.mark.asyncio
+async def test_expansion_seeds_from_a_denied_exact_key_hit_are_withheld(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A denied row must not seed the walk, or its edges export its existence.
+
+    The row's own content was already withheld, but seeding graph expansion from
+    it returns a neighbour the reader IS allowed to see, so a caller who guesses
+    another principal's declared key gets a different result set than one who
+    guesses wrong. That is an oracle over somebody else's keys, and auto-linking
+    supplies the neighbour.
+    """
+
+    seeds = await _seeds_for(monkeypatch, reader="user-bob", probe_key=PROBE_KEY)
+
+    assert seeds == []
+
+
+@pytest.mark.asyncio
+async def test_expansion_still_seeds_from_an_authorized_exact_key_hit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fix withholds denied seeds without disarming expansion for the owner."""
+
+    seeds = await _seeds_for(monkeypatch, reader="user-alice", probe_key=PROBE_KEY)
+
+    assert seeds == ["note_1"]
+
+
+@pytest.mark.asyncio
+async def test_a_wrong_key_and_a_right_key_look_identical_to_a_denied_reader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The property the oracle violated, stated directly."""
+
+    correct = await _seeds_for(monkeypatch, reader="user-bob", probe_key=PROBE_KEY)
+    wrong = await _seeds_for(monkeypatch, reader="user-bob", probe_key="ERR_NOT_A_REAL_KEY_0x00")
+
+    assert correct == wrong == []
 
 
 # ---------------------------------------------------------------------------
