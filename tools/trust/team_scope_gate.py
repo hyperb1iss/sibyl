@@ -75,8 +75,8 @@ TEAM_SCOPE_BUDGETS: dict[str, float] = {
     # A gate that probes nothing reports zero leaks. These floors are what stop a
     # vacuous receipt from reading as a clean one, so they are budgets rather
     # than commentary: dropping a probe class fails the gate.
-    "deny_probe_count": 31,
-    "allow_probe_count": 13,
+    "deny_probe_count": 29,
+    "allow_probe_count": 16,
     "surface_count": 6,
     # Five forged owner fields, and the two backfill-provenance keys matter most:
     # nothing downstream rewrites them, so they are the pair that proves the
@@ -90,6 +90,11 @@ TEAM_SCOPE_BUDGETS: dict[str, float] = {
     # over-broad resolver could move them together and stay green. The rows this
     # gate provisions are the independent ground truth that check sits against.
     "membership_resolution_mismatch_count": 0,
+    # A row stamped with the wrong scope can still be served and refused to
+    # exactly the right readers, so no read outcome moves and every counter
+    # above stays zero. Only comparing the stamp against the captured scope
+    # catches it, which makes this the one check with no probe behind it.
+    "stamped_scope_mismatch_count": 0,
 }
 LOWER_IS_BETTER_METRICS = frozenset(
     (
@@ -99,6 +104,7 @@ LOWER_IS_BETTER_METRICS = frozenset(
         "owner_forgery_surviving_count",
         "surface_disagreement_count",
         "membership_resolution_mismatch_count",
+        "stamped_scope_mismatch_count",
     )
 )
 
@@ -156,6 +162,10 @@ PROVISIONED_TEAMS: Mapping[str, frozenset[str]] = {
 PROVISIONED_PROJECTS: Mapping[str, frozenset[str]] = {
     "member": frozenset({PROJECT_ID}),
     "outsider": frozenset({OTHER_PROJECT_ID}),
+}
+PROVISIONED_DELEGATIONS: Mapping[str, frozenset[str]] = {
+    "member": frozenset({DELEGATION_ID}),
+    "outsider": frozenset(),
 }
 
 ALLOW = "allow"
@@ -220,6 +230,28 @@ class SeededMemory:
     raw_memory_id: str
     graph_metadata: Mapping[str, Any]
     requested_metadata: Mapping[str, Any]
+
+    @property
+    def stamp_mismatches(self) -> tuple[str, ...]:
+        """Where the stamped audience differs from the one capture was asked for.
+
+        A private row deliberately carries no scope key, since its owner resolves
+        from principal_id; every other scope must carry the key it was captured
+        with or it is addressed to the wrong audience.
+        """
+        stamped_scope = self.graph_metadata.get("memory_scope")
+        stamped_key = self.graph_metadata.get("scope_key")
+        expected_key = None if self.memory_scope == MemoryScope.PRIVATE.value else self.scope_key
+        mismatches: list[str] = []
+        if stamped_scope != self.memory_scope:
+            mismatches.append(
+                f"{self.label} captured as {self.memory_scope} but stamped {stamped_scope}"
+            )
+        if stamped_key != expected_key:
+            mismatches.append(
+                f"{self.label} captured for key {expected_key} but stamped {stamped_key}"
+            )
+        return tuple(mismatches)
 
     @property
     def offered_owner_forgeries(self) -> tuple[str, ...]:
@@ -332,16 +364,18 @@ GATE_CHECKS: tuple[GateCheck, ...] = (
             "share_memory or share_preview",
         ),
     ),
+    # One command, one row. Naming it twice made promotion coverage read as two
+    # executions when the second was a cache hit of the first, so the surfaces
+    # both rows claimed are carried by the single run that actually proves them.
     GateCheck(
         name="team-scope-rest-policy",
-        description="REST recall serves a verified team and denies an unverified one",
-        surfaces=("team scope REST recall", "unverified team denial"),
-        command=("moon", "run", "api:memory-trust-rest-test"),
-    ),
-    GateCheck(
-        name="share-promotion-apply",
-        description="promotion to a team target records attribution and an audit receipt",
+        description=(
+            "REST recall serves a verified team, denies an unverified one, and "
+            "records promotion attribution with an audit receipt"
+        ),
         surfaces=(
+            "team scope REST recall",
+            "unverified team denial",
             "promotion attribution",
             "promotion preview",
             "audit receipt",
@@ -483,12 +517,25 @@ async def _provision_principals(client: SurrealAuthClient) -> dict[str, Principa
             uuid: $other_project_membership, organization_id: $organization,
             project_id: $other_project, user_id: $outsider
         };
+        CREATE memory_spaces CONTENT {
+            uuid: $delegation_space, organization_id: $organization,
+            memory_scope: 'delegated', scope_key: $delegation, name: 'Oncall',
+            state: 'active', created_by_user_id: $member
+        };
+        CREATE memory_space_members CONTENT {
+            uuid: $delegation_membership, organization_id: $organization,
+            space_id: $delegation_space, principal_type: 'user',
+            principal_id: $member, created_by_user_id: $member
+        };
         """,
         organization=ORGANIZATION_ID,
         team=TEAM_ID,
         other_team=OTHER_TEAM_ID,
         project=PROJECT_ID,
         other_project=OTHER_PROJECT_ID,
+        delegation=DELEGATION_ID,
+        delegation_space=_fixture_id("memory-space-oncall"),
+        delegation_membership=_fixture_id("membership-member-oncall"),
         member=PRINCIPAL_IDS["member"],
         outsider=PRINCIPAL_IDS["outsider"],
         membership=_fixture_id("membership-member-alpha"),
@@ -509,14 +556,13 @@ async def _provision_principals(client: SurrealAuthClient) -> dict[str, Principa
             context = _auth_context(user_id)
             teams = await projects_runtime.list_accessible_team_scope_keys(context)
             projects = await projects_runtime.list_accessible_project_graph_ids(context)
+            delegations = await projects_runtime.list_accessible_delegated_scope_keys(context)
             principals[label] = Principal(
                 label=label,
                 user_id=user_id,
                 teams=frozenset(str(value) for value in teams),
                 projects=frozenset(str(value) for value in projects),
-                # No delegation is granted to anyone, so the delegated row's
-                # isolation is observed rather than assumed away.
-                delegations=frozenset(),
+                delegations=frozenset(str(value) for value in delegations),
             )
     finally:
         projects_runtime._auth_client_scope = previous_scope
@@ -665,7 +711,6 @@ _GRAPH_SERVABLE_SCOPES = frozenset(
     (MemoryScope.PRIVATE.value, MemoryScope.PROJECT.value),
 )
 GRAPH_MEMBERSHIP_BOUNDARY = "graph read helper forwards no team or delegation membership"
-DELEGATION_RESOLVER_BOUNDARY = "no resolver grants a delegation, so no principal can hold one"
 
 
 def _expected_probes(
@@ -684,9 +729,6 @@ def _expected_probes(
         for label in sorted(principals):
             principal = principals[label]
             entitled = _reader_grants(principal, memory)
-            delegated_unreachable = (
-                memory.memory_scope == MemoryScope.DELEGATED.value and not principal.delegations
-            )
 
             # Reaching for the row's own audience: the membership check answers.
             probes.append(
@@ -696,7 +738,6 @@ def _expected_probes(
                     memory_label=memory.label,
                     expectation=ALLOW if entitled else DENY,
                     requested_scope_key=memory.scope_key,
-                    boundary=DELEGATION_RESOLVER_BOUNDARY if delegated_unreachable else None,
                 )
             )
             if memory.memory_scope != MemoryScope.PRIVATE.value:
@@ -707,7 +748,6 @@ def _expected_probes(
                         memory_label=memory.label,
                         expectation=ALLOW if entitled else DENY,
                         requested_scope_key=memory.scope_key,
-                        boundary=DELEGATION_RESOLVER_BOUNDARY if delegated_unreachable else None,
                     )
                 )
 
@@ -776,6 +816,11 @@ def membership_resolution_mismatches(
         for kind, resolved, provisioned in (
             ("teams", principal.teams, PROVISIONED_TEAMS.get(label, frozenset())),
             ("projects", principal.projects, PROVISIONED_PROJECTS.get(label, frozenset())),
+            (
+                "delegations",
+                principal.delegations,
+                PROVISIONED_DELEGATIONS.get(label, frozenset()),
+            ),
         ):
             if resolved != provisioned:
                 mismatches.append(
@@ -1069,6 +1114,7 @@ def build_team_scope_receipt(
         "owner_forgery_offered_count": sum(
             len(memory.offered_owner_forgeries) for memory in memories
         ),
+        "stamped_scope_mismatch_count": sum(len(memory.stamp_mismatches) for memory in memories),
         "owner_forgery_surviving_count": sum(
             len(memory.surviving_owner_forgeries) for memory in memories
         ),
@@ -1091,6 +1137,9 @@ def build_team_scope_receipt(
         "metrics": metrics,
         "boundaries": boundaries,
         "membership_mismatches": mismatches,
+        "stamp_mismatches": [
+            mismatch for memory in memories for mismatch in memory.stamp_mismatches
+        ],
         "principals": [_principal_entry(principals[label]) for label in sorted(principals)],
         "memories": [_memory_entry(memory) for memory in memories],
         "probes": [observation.as_receipt_entry() for observation in ordered],
@@ -1103,6 +1152,7 @@ OBSERVED_RECEIPT_FIELDS: tuple[str, ...] = (
     "fixture",
     "boundaries",
     "membership_mismatches",
+    "stamp_mismatches",
     "principals",
     "memories",
     "probes",
@@ -1231,6 +1281,16 @@ def _validate_receipt_metrics(
                 failures.append(f"metric {metric!r} exceeds budget {budget}: {value}")
         elif float(value) < float(budget):
             failures.append(f"metric {metric!r} below budget {budget}: {value}")
+    stamp_mismatch = metrics.get("stamped_scope_mismatch_count")
+    if (
+        isinstance(stamp_mismatch, int | float)
+        and not isinstance(stamp_mismatch, bool)
+        and stamp_mismatch
+    ):
+        failures.append(
+            "a captured row was stamped with an audience it was not captured for, "
+            "which every read probe can still agree with"
+        )
     mismatch = metrics.get("membership_resolution_mismatch_count")
     if isinstance(mismatch, int | float) and not isinstance(mismatch, bool) and mismatch:
         failures.append(
@@ -1371,6 +1431,8 @@ def _print_observations(receipt: Mapping[str, Any], *, echo: Echo) -> None:
     echo(f"leak_count: {metrics['leak_count']}")
     echo(f"allow_failure_count: {metrics['allow_failure_count']}")
     echo(f"surface_disagreement_count: {metrics['surface_disagreement_count']}")
+    for mismatch in receipt.get("stamp_mismatches", []):
+        echo(f"stamp mismatch: {mismatch}")
     for mismatch in receipt.get("membership_mismatches", []):
         echo(f"membership mismatch: {mismatch}")
     for boundary in receipt.get("boundaries", []):

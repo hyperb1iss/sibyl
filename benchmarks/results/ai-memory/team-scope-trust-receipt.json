@@ -1,18 +1,18 @@
 {
   "boundaries": [
-    "graph read helper forwards no team or delegation membership",
-    "no resolver grants a delegation, so no principal can hold one"
+    "graph read helper forwards no team or delegation membership"
   ],
   "budgets": {
     "allow_failure_count": 0,
-    "allow_probe_count": 13,
-    "deny_probe_count": 31,
+    "allow_probe_count": 16,
+    "deny_probe_count": 29,
     "leak_count": 0,
     "membership_resolution_mismatch_count": 0,
     "owner_forgery_offered_count": 5,
     "owner_forgery_surviving_count": 0,
     "promotion_attribution_coverage": 1,
     "promotion_preview_coverage": 1,
+    "stamped_scope_mismatch_count": 0,
     "surface_count": 6,
     "surface_disagreement_count": 0
   },
@@ -50,15 +50,7 @@
       "status": "PASS",
       "surfaces": [
         "team scope REST recall",
-        "unverified team denial"
-      ]
-    },
-    {
-      "command": "moon run api:memory-trust-rest-test",
-      "exit_code": 0,
-      "name": "share-promotion-apply",
-      "status": "PASS",
-      "surfaces": [
+        "unverified team denial",
         "promotion attribution",
         "promotion preview",
         "audit receipt",
@@ -172,23 +164,26 @@
   ],
   "metrics": {
     "allow_failure_count": 0,
-    "allow_probe_count": 13,
-    "deny_probe_count": 31,
+    "allow_probe_count": 16,
+    "deny_probe_count": 29,
     "graph_team_membership_forwarded": 0,
     "leak_count": 0,
     "membership_resolution_mismatch_count": 0,
     "owner_forgery_offered_count": 5,
     "owner_forgery_surviving_count": 0,
-    "probe_count": 44,
+    "probe_count": 45,
     "promotion_attribution_coverage": 1.0,
     "promotion_preview_coverage": 1.0,
+    "stamped_scope_mismatch_count": 0,
     "surface_count": 6,
     "surface_disagreement_count": 0
   },
   "principals": [
     {
       "label": "member",
-      "resolved_delegations": [],
+      "resolved_delegations": [
+        "02fa694a-f5d1-5213-9166-34a434e6323c"
+      ],
       "resolved_projects": [
         "3b1965c7-246a-5b6b-b32a-ce747c41cdc8"
       ],
@@ -215,6 +210,7 @@
   ],
   "probes": [
     {
+      "boundary": "graph read helper forwards no team or delegation membership",
       "detail": "stamped_scope=delegated owner_is_reader=True",
       "expected": "deny",
       "memory": "delegated-oncall",
@@ -304,6 +300,7 @@
       "surface_disagreement": false
     },
     {
+      "boundary": "graph read helper forwards no team or delegation membership",
       "detail": "granted_spaces=1 row_space=delegated\u001f02fa694a-f5d1-5213-9166-34a434e6323c",
       "expected": "deny",
       "memory": "delegated-oncall",
@@ -390,6 +387,17 @@
       "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
       "status": "PASS",
       "surface": "graph_metadata_read_narrowed",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "reason=delegated_access_verified listed=True recalled=True rows_listed=1 rows_recalled=1",
+      "expected": "allow",
+      "memory": "delegated-oncall",
+      "observed": "allow",
+      "reader": "member",
+      "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
+      "status": "PASS",
+      "surface": "raw_own_scope_read",
       "surface_disagreement": false
     },
     {
@@ -459,11 +467,10 @@
       "surface_disagreement": false
     },
     {
-      "boundary": "no resolver grants a delegation, so no principal can hold one",
-      "detail": "denied_at=authorization reason=unverified_membership",
-      "expected": "deny",
+      "detail": "reason=delegated_access_verified listed=True recalled=True rows_listed=1 rows_recalled=1",
+      "expected": "allow",
       "memory": "delegated-oncall",
-      "observed": "deny",
+      "observed": "allow",
       "reader": "member",
       "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
       "status": "PASS",
@@ -471,7 +478,6 @@
       "surface_disagreement": false
     },
     {
-      "boundary": "no resolver grants a delegation, so no principal can hold one",
       "detail": "denied_at=authorization reason=unverified_membership",
       "expected": "deny",
       "memory": "delegated-oncall",
@@ -549,6 +555,7 @@
       "surface_disagreement": false
     },
     {
+      "boundary": "graph read helper forwards no team or delegation membership",
       "detail": "plan_scopes=private,project",
       "expected": "deny",
       "memory": "delegated-oncall",
@@ -638,11 +645,10 @@
       "surface_disagreement": false
     },
     {
-      "boundary": "no resolver grants a delegation, so no principal can hold one",
-      "detail": "reason=unverified_membership",
-      "expected": "deny",
+      "detail": "reason=delegated_access_verified",
+      "expected": "allow",
       "memory": "delegated-oncall",
-      "observed": "deny",
+      "observed": "allow",
       "reader": "member",
       "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
       "status": "PASS",
@@ -650,7 +656,6 @@
       "surface_disagreement": false
     },
     {
-      "boundary": "no resolver grants a delegation, so no principal can hold one",
       "detail": "reason=unverified_membership",
       "expected": "deny",
       "memory": "delegated-oncall",
@@ -708,6 +713,7 @@
   ],
   "release_scope": "v1.2 Track C team-scope trust receipt",
   "schema_version": "sibyl-team-scope-trust-receipt-v1",
+  "stamp_mismatches": [],
   "surfaces": [
     "graph_metadata_read",
     "graph_metadata_read_narrowed",

@@ -108,6 +108,10 @@ class TestObservedReceipt:
         # The outsider holds a different project so the row-selection clause gets
         # probed on the project surface too, not just the membership check.
         assert by_label["outsider"]["resolved_projects"] == [team_scope_gate.OTHER_PROJECT_ID]
+        # The delegation resolver reads memory_spaces and memory_space_members, so
+        # the delegated scope has a real serving direction rather than a boundary.
+        assert by_label["member"]["resolved_delegations"] == [team_scope_gate.DELEGATION_ID]
+        assert by_label["outsider"]["resolved_delegations"] == []
 
     def test_write_path_drops_every_forged_owner_field(
         self,
@@ -317,6 +321,31 @@ class TestValidationCatchesRegressions:
 
         assert "receipt probes must be a non-empty list" in failures
 
+    def test_rejects_a_read_neutral_mis_stamp(self, observed_receipt: dict[str, Any]) -> None:
+        """A row stamped for the wrong audience moves no read outcome at all."""
+        receipt = _full_receipt(observed_receipt)
+        receipt["metrics"]["stamped_scope_mismatch_count"] = 1
+
+        failures = team_scope_gate.validate_team_scope_receipt(receipt)
+
+        assert any("stamped_scope_mismatch_count" in failure for failure in failures)
+        assert any("not captured for" in failure for failure in failures)
+
+    def test_stamp_mismatch_is_detected_from_the_stamped_metadata(self) -> None:
+        memory = team_scope_gate.SeededMemory(
+            label="team-alpha",
+            memory_scope="team",
+            scope_key="team-1",
+            owner_label="member",
+            title="t",
+            content="c",
+            raw_memory_id="r",
+            graph_metadata={"memory_scope": "project", "scope_key": "team-1"},
+            requested_metadata={},
+        )
+
+        assert memory.stamp_mismatches == ("team-alpha captured as team but stamped project",)
+
     def test_rejects_a_surviving_owner_forgery(self, observed_receipt: dict[str, Any]) -> None:
         receipt = _full_receipt(observed_receipt)
         receipt["metrics"]["owner_forgery_surviving_count"] = 1
@@ -382,11 +411,24 @@ class TestBoundaryProbe:
             assert probe["expected"] == team_scope_gate.DENY
             assert probe["boundary"] == team_scope_gate.GRAPH_MEMBERSHIP_BOUNDARY
 
-    def test_records_both_boundaries(self, observed_receipt: dict[str, Any]) -> None:
-        assert observed_receipt["boundaries"] == [
-            team_scope_gate.GRAPH_MEMBERSHIP_BOUNDARY,
-            team_scope_gate.DELEGATION_RESOLVER_BOUNDARY,
-        ]
+    def test_records_only_the_graph_membership_boundary(
+        self,
+        observed_receipt: dict[str, Any],
+    ) -> None:
+        assert observed_receipt["boundaries"] == [team_scope_gate.GRAPH_MEMBERSHIP_BOUNDARY]
+
+    def test_delegated_scope_is_probed_in_both_directions(
+        self,
+        observed_receipt: dict[str, Any],
+    ) -> None:
+        """A boundary asserting nobody can hold a delegation would be unfalsifiable."""
+        directions = {
+            probe["expected"]
+            for probe in observed_receipt["probes"]
+            if probe["memory"] == "delegated-oncall"
+        }
+
+        assert directions == {team_scope_gate.ALLOW, team_scope_gate.DENY}
 
 
 class TestPromotionCoverage:
@@ -406,7 +448,7 @@ class TestPromotionCoverage:
         results = [
             team_scope_gate.GateResult(
                 check=check,
-                exit_code=1 if check.name == "share-promotion-apply" else 0,
+                exit_code=1 if check.name == "team-scope-rest-policy" else 0,
                 elapsed_seconds=0.0,
             )
             for check in team_scope_gate.GATE_CHECKS
