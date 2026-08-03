@@ -1,0 +1,5 @@
+# The row-level dumps are machine-local: they are megabytes of one dev store's
+# event and session rows, regenerable in seconds by extract.py against any store.
+# The summary and what-if reports are the committed receipts.
+usage_events.jsonl
+exposure_sessions.jsonl

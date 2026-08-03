@@ -1,0 +1,152 @@
+{
+  "attribution": {
+    "feedback_events": 217,
+    "gap_seconds": {
+      "count": 200,
+      "max": 65539.062,
+      "mean": 1533.945,
+      "median": 424.858,
+      "min": 3.154
+    },
+    "outcomes": {
+      "attributed": 200,
+      "item_never_exposed": 5,
+      "outside_window": 12
+    },
+    "window_sweep_attributed": {
+      "21600s": 197,
+      "300s": 81,
+      "3600s": 182,
+      "604800s": 201,
+      "86400s": 200
+    }
+  },
+  "attribution_window_seconds": 86400.0,
+  "burst_threshold": 6,
+  "burst_window_seconds": 60.0,
+  "contamination": {
+    "burst_suspect_sessions": 32,
+    "clean_lower_bound_sessions": 891,
+    "eval_surface_sessions": 0,
+    "note": "No column marks an event as benchmark-origin, so eval and interactive rows are not exactly separable. burst_suspect is a generous upper bound on contamination, not an estimate."
+  },
+  "events": {
+    "by_item_kind_and_signal": {
+      "graph_entity/citation": 166,
+      "graph_entity/exposure": 12568,
+      "graph_entity/misled": 4,
+      "raw_capture/citation": 45,
+      "raw_capture/exposure": 1955,
+      "raw_capture/misled": 2
+    },
+    "by_signal": {
+      "citation": 211,
+      "exposure": 14523,
+      "misled": 6
+    },
+    "by_signal_and_surface": {
+      "citation/cli_cite": 199,
+      "citation/task_complete": 12,
+      "exposure/context_pack": 7560,
+      "exposure/search": 6963,
+      "misled/cli_cite_misled": 6
+    },
+    "organizations": 1,
+    "principals": 1,
+    "projects": 20,
+    "total": 14740
+  },
+  "generated_at": "2026-08-03T18:27:00.002253+00:00",
+  "items": {
+    "cited_and_exposed": 151,
+    "cited_never_exposed": 3,
+    "distinct_cited": 154,
+    "distinct_exposed": 2470,
+    "distinct_misled": 6,
+    "positive_item_share_of_exposed": 0.061134
+  },
+  "labels": {
+    "misled_labels": 4,
+    "negative_labels_in_contrastive_sessions": 1325,
+    "positive_labels": 193,
+    "sessions_with_positive": 124
+  },
+  "query_recoverability": {
+    "all_events": {
+      "events": 14740,
+      "share": 0.0,
+      "with_value": 0
+    },
+    "checked_metadata_keys": [
+      "query",
+      "goal",
+      "request_query",
+      "search_query",
+      "prompt"
+    ],
+    "exposure": {
+      "events": 14523,
+      "share": 0.0,
+      "with_value": 0
+    },
+    "observed_exposure_metadata_keys": {
+      "response_id": 14523,
+      "source_surface": 14523
+    },
+    "observed_feedback_metadata_keys": {
+      "cited_id": 217,
+      "signal_type": 211,
+      "source_surface": 217
+    }
+  },
+  "rank_recoverability": {
+    "checked_metadata_keys": [
+      "rank",
+      "position",
+      "result_rank",
+      "ordinal"
+    ],
+    "global_rank_recoverable": false,
+    "mixed_kind_sessions": 631,
+    "mixed_kind_sessions_with_contiguous_kind_blocks": 628,
+    "recorded_rank": {
+      "events": 14523,
+      "share": 0.0,
+      "with_value": 0
+    },
+    "recorded_score": {
+      "events": 14523,
+      "share": 0.0,
+      "with_value": 0
+    },
+    "sessions_audited": 923,
+    "sessions_reported": 923,
+    "sessions_strictly_ordered": 923,
+    "sessions_with_tied_timestamps": 0
+  },
+  "session_key_join": {
+    "exposure_session_keys": 923,
+    "feedback_session_keys": 118,
+    "overlapping_message_keys": 0,
+    "overlapping_session_keys": 0,
+    "session_key_join_viable": false
+  },
+  "sessions": {
+    "by_origin": {
+      "burst_suspect": 32,
+      "interactive": 891
+    },
+    "contrastive_sessions": 124,
+    "contrastive_sessions_interactive_only": 123,
+    "exposure_sessions": 923,
+    "items_per_session_max": 50,
+    "items_per_session_mean": 15.735,
+    "mixed_kind_sessions": 631
+  },
+  "store_target": "http://127.0.0.1:8000 ns=sibyl_content db=content",
+  "time_span": {
+    "first_event_at": "2026-07-07T06:17:17.865920+00:00",
+    "last_event_at": "2026-08-03T18:08:38.168347+00:00",
+    "span_days": 27.494
+  }
+}
