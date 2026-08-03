@@ -99,6 +99,14 @@ def test_single_span_is_refused_because_it_duplicates_the_parent() -> None:
         build_memory_structure(_BODY, spans=_spans((0, len(_BODY))))
 
 
+def test_an_explicitly_empty_plan_is_refused_rather_than_read_as_absent() -> None:
+    """Sending the field and handing over nothing is a claim, not an omission."""
+    with pytest.raises(MemoryStructureError, match="at least one span"):
+        build_memory_structure(_BODY, spans=[])
+
+    assert build_memory_structure(_BODY, spans=None).spans == ()
+
+
 def test_too_many_spans_is_refused_at_the_passage_cap() -> None:
     body = "x" * (MAX_AGENT_SPANS + 1)
     pairs = [(index, index + 1) for index in range(MAX_AGENT_SPANS + 1)]

@@ -133,7 +133,11 @@ def build_memory_structure(
         raise MemoryStructureError(msg, field="atomic")
     if atomic:
         validate_atomic_content(content)
-    validated_spans = validate_agent_spans(content, coerced_spans) if coerced_spans else ()
+    # Keyed on whether the field was sent, not on whether it holds anything. An
+    # empty list is a caller declaring a cut plan and handing over none of it,
+    # and treating that as absence would accept the write and quietly cut the
+    # body some other way.
+    validated_spans = validate_agent_spans(content, coerced_spans) if spans is not None else ()
     return MemoryStructure(spans=validated_spans, atomic=atomic, probes=coerced_probes)
 
 
