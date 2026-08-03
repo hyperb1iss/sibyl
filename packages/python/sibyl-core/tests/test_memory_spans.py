@@ -56,3 +56,17 @@ def test_the_projection_still_reads_its_caps_from_the_contract() -> None:
 
     assert passages.MAX_PASSAGE_CONTENT_CHARS == MAX_PASSAGE_CONTENT_CHARS
     assert passages.MAX_PASSAGES_PER_SOURCE == MAX_PASSAGES_PER_SOURCE
+
+
+def test_snapshot_shadowed_keys_are_exactly_the_server_owned_ones() -> None:
+    """The storage layer restates the key set, so it has to stay in step.
+
+    A row keeps its metadata twice, and the graph reader refuses to read these
+    keys from the stale JSON snapshot because their absence is what carries the
+    meaning. A key added to the contract without being added there would come
+    back from the snapshot after being withdrawn.
+    """
+    from sibyl_core.memory_pipeline.structure import STRUCTURE_METADATA_KEYS
+    from sibyl_core.services.graph import _SNAPSHOT_SHADOWED_METADATA_KEYS
+
+    assert _SNAPSHOT_SHADOWED_METADATA_KEYS == STRUCTURE_METADATA_KEYS

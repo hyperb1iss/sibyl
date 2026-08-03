@@ -1900,6 +1900,33 @@ async def get_surreal_graph_runtime(
     )
 
 
+# A row stores its metadata twice: flattened into ``attributes``, and again as a
+# JSON snapshot under ``attributes.metadata``. The flattened copy wins for any key
+# present in both, but an update writes only the flattened copy, so a key the
+# update deliberately removed comes back from the stale snapshot. For most keys
+# that is merely old data; for these the absence is the meaning. A withdrawn span
+# plan resurrected here would cut a rewritten body on seams the agent authored for
+# the previous revision, and a resurrected rehearsal receipt would report a verdict
+# about text that is gone. The flattened copy is the only place they are read from.
+_SNAPSHOT_SHADOWED_METADATA_KEYS = frozenset(
+    {
+        "agent_atomic",
+        "agent_spans",
+        "memory_probes",
+        "probe_last_replay",
+        "probe_rehearsal",
+    }
+)
+
+
+def _snapshot_without_owned_keys(snapshot: Mapping[str, object]) -> dict[str, object]:
+    return {
+        str(key): value
+        for key, value in snapshot.items()
+        if str(key) not in _SNAPSHOT_SHADOWED_METADATA_KEYS
+    }
+
+
 def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
     normalized_row = {str(key): value for key, value in row.items()}
     attributes = _row_attributes(normalized_row)
@@ -1912,10 +1939,10 @@ def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
             parsed = None
         if isinstance(parsed, dict):
             metadata.pop("metadata", None)
-            metadata = {str(key): value for key, value in parsed.items()} | metadata
+            metadata = _snapshot_without_owned_keys(parsed) | metadata
     elif isinstance(raw_metadata, dict):
         metadata.pop("metadata", None)
-        metadata = {str(key): value for key, value in raw_metadata.items()} | metadata
+        metadata = _snapshot_without_owned_keys(raw_metadata) | metadata
 
     if metadata.get("category") is None:
         metadata.pop("category", None)

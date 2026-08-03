@@ -651,3 +651,44 @@ async def test_reprojection_keeps_a_span_written_past_a_skipped_index() -> None:
         not in entity_manager.deleted
     }
     assert survivors == set(written)
+
+
+def test_a_withdrawn_plan_in_a_stale_snapshot_is_not_read_back() -> None:
+    """A row keeps its metadata twice; only the flattened copy may speak here."""
+    import json
+
+    from sibyl_core.services.graph import entity_from_surreal_row
+
+    body = _prose()
+    stale_plan = [{"start": 0, "end": 40, "label": "Old"}, {"start": 40, "end": len(body)}]
+    row = {
+        "uuid": _SOURCE_ID,
+        "name": "A long decision",
+        "entity_type": "decision",
+        "description": "short blurb",
+        "content": body,
+        "group_id": _GROUP,
+        "attributes": {
+            # The flattened copy no longer carries the plan; the snapshot still does.
+            "memory_scope": "private",
+            "metadata": json.dumps(
+                {
+                    "memory_scope": "private",
+                    "agent_spans": stale_plan,
+                    "probe_rehearsal": {"retrievable": 1},
+                    "keep_me": "kept",
+                }
+            ),
+        },
+    }
+
+    entity = entity_from_surreal_row(row)
+
+    assert entity.metadata["keep_me"] == "kept"
+    assert "agent_spans" not in entity.metadata
+    assert "probe_rehearsal" not in entity.metadata
+    entities, _ = plan_entity_passages(entity, source_id=_SOURCE_ID, group_id=_GROUP)
+    assert entities
+    assert all(
+        passage.metadata[PASSAGE_PLAN_KEY] == PASSAGE_PLAN_MECHANICAL for passage in entities
+    )
