@@ -336,7 +336,7 @@ stringData:
             '--create-namespace',
             '--wait',
             '--timeout=5m',
-            '--version=0.4.0',
+            '--version=0.5.0',
             '--values=infra/local/surrealdb-values.yaml',
         ],
         resource_deps=['tikv-ready', 'sibyl-secrets']

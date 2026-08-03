@@ -69,7 +69,7 @@ below use the same aliases.
 
 ```bash
 helm template surrealdb surrealdb-helm/surrealdb \
-  --version 0.4.0 \
+  --version 0.5.0 \
   -n sibyl \
   -f surrealdb-values.yaml
 

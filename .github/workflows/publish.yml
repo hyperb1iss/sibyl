@@ -786,7 +786,7 @@ jobs:
             helm lint "$chart"
           done
           helm dependency list charts/surrealdb | tee /tmp/surrealdb-dependencies.txt
-          grep -Eq '^surrealdb[[:space:]]+0\.4\.0.*[[:space:]]ok[[:space:]]*$' /tmp/surrealdb-dependencies.txt
+          grep -Eq '^surrealdb[[:space:]]+0\.5\.0.*[[:space:]]ok[[:space:]]*$' /tmp/surrealdb-dependencies.txt
           helm package charts/sibyl --destination dist/charts
           helm package charts/surrealdb --destination dist/charts
           test -f "dist/charts/sibyl-${version}.tgz"
