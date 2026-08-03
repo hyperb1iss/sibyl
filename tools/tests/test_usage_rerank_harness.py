@@ -1168,3 +1168,25 @@ def test_attribution_distinguishes_a_later_exposure_from_a_stale_one() -> None:
         join.attribute_feedback(sessions, stale, window_seconds=60.0)[0].outcome
         == join.OUTSIDE_WINDOW
     )
+
+
+def test_age_source_integrity_flags_a_rewritten_created_at() -> None:
+    """A created_at later than first exposure means the timestamp drifted forward.
+
+    The entity upsert assigns created_at unconditionally, so this check is what
+    licenses using it as an age source at all.
+    """
+    labeled, rows = _labeled_fixture(cited="b")
+    counts = prior.PointInTimeCounts(rows)
+
+    sane = {(events.GRAPH_ENTITY, item): BASE - timedelta(days=1) for item in ("a", "b", "c")}
+    clean = prior.describe_candidate_priors([labeled], counts, sane)["age_source_integrity"]
+    assert clean["items_checked"] == PAGE_ITEMS
+    assert clean["created_at_after_first_exposure"] == 0
+    assert clean["trustworthy"] is True
+
+    drifted = dict(sane)
+    drifted[(events.GRAPH_ENTITY, "a")] = BASE + timedelta(days=1)
+    dirty = prior.describe_candidate_priors([labeled], counts, drifted)["age_source_integrity"]
+    assert dirty["created_at_after_first_exposure"] == 1
+    assert dirty["trustworthy"] is False

@@ -11299,6 +11299,11 @@
   ],
   "attribution_window_seconds": 86400.0,
   "candidate_prior_contrast": {
+    "age_source_integrity": {
+      "created_at_after_first_exposure": 0,
+      "items_checked": 1197,
+      "trustworthy": true
+    },
     "age_standardized": {
       "age_standardized_ratio": 2.176,
       "bands": [
@@ -11424,7 +11429,7 @@
   "events": 14740,
   "events_path": "/Users/bliss/dev/worktrees/sibyl/nova/p5-usage-rerank-harness/benchmarks/usage_rerank/out/usage_events.jsonl",
   "exposure_sessions": 923,
-  "generated_at": "2026-08-03T19:04:50.105443+00:00",
+  "generated_at": "2026-08-03T19:16:26.987793+00:00",
   "method": {
     "baseline_score": "rrf_score(recovered rank within item kind), k=60",
     "leakage_guard": "counts use only events strictly before the session start",

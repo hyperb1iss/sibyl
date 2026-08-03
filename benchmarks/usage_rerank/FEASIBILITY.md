@@ -190,6 +190,16 @@ is not fit for this comparison: it understates age for 9.5% of uncited candidate
 `created_at` is used wherever it resolves, which covers 185 of 186 cited and 1,012 of
 1,013 uncited candidates.
 
+Using `created_at` as an age source needs its own justification, because the entity upsert
+assigns it unconditionally (`services/graph.py:245`) rather than preserving an existing
+value the way the adjacent `created_by` does, and 7,561 of 10,926 entities in this store
+carry a revision above 1, so most rows have been rewritten at least once. The check that
+licenses it is that an item cannot be served before it exists: a `created_at` later than
+the item's first usage event would prove the timestamp had drifted forward. Across all
+1,197 resolved candidates there are zero such violations, so rewrites are preserving the
+original value in practice. `age_source_integrity` in the what-if receipt reports this on
+every run, and a nonzero count there invalidates every age number above.
+
 The citation term points the correct way but is thin. 27.8% of cited candidates carry a
 prior citation against 17.7% of uncited ones, a real signal (the citation-only arm sits
 3.5 standard deviations above the random-prior null) that is nonetheless far too weak to

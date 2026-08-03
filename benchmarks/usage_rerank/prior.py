@@ -290,6 +290,8 @@ def describe_candidate_priors(
     cited: list[_CandidateRecord] = []
     uncited: list[_CandidateRecord] = []
     window_start = counts.earliest_event_at
+    age_checked = 0
+    age_violations = 0
     for labeled in labeled_sessions:
         if not labeled.session.has_contiguous_kind_blocks:
             continue
@@ -308,6 +310,11 @@ def describe_candidate_priors(
                 created_at = (
                     None if created_at_by_item is None else created_at_by_item.get(item.key)
                 )
+                if created_at is not None:
+                    first_seen = counts.first_seen_at(item.item_kind, item.item_id)
+                    age_checked += 1
+                    if first_seen is not None and created_at > first_seen:
+                        age_violations += 1
                 true_age_days = (
                     None
                     if created_at is None or created_at >= cutoff
@@ -336,6 +343,16 @@ def describe_candidate_priors(
         "fresh_history_days": FRESH_HISTORY_DAYS,
         "cited": _describe_group(cited),
         "uncited": _describe_group(uncited),
+        # An item cannot be served before it exists, so a created_at later than
+        # the item's first usage event would mean the timestamp was rewritten.
+        # The entity upsert assigns created_at unconditionally
+        # (services/graph.py:245), unlike created_by which preserves the existing
+        # value, so this is the check that licenses using it as an age source.
+        "age_source_integrity": {
+            "items_checked": age_checked,
+            "created_at_after_first_exposure": age_violations,
+            "trustworthy": age_violations == 0,
+        },
         "age_standardized": _standardize_by_age(cited, uncited),
     }
 
