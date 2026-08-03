@@ -1063,7 +1063,7 @@ async def _exact_key_candidates(
     # a full table scan, and turns a bare equality into zero rows unless the
     # WHERE clause happens to carry a second predicate. Verified live on 3.2.3
     # (UnionIndexScan across one branch per probe), so the `.*` in the index
-    # definition is load-bearing rather than stylistic.
+    # definition is what this read depends on, not a stylistic choice.
     rows = await _execute_query_records(
         client,
         """
