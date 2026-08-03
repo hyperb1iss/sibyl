@@ -62,6 +62,13 @@ const nextConfig: NextConfig = {
   },
 
   experimental: {
+    // TypeScript 7 is the native port and ships no JS compiler API, so Next's
+    // default in-process typecheck throws before it ever reads tsconfig. The
+    // CLI path shells out to tsc instead. Storybook inherits this via
+    // @storybook/nextjs-vite, which loads this config through Next's
+    // loadJsConfig. Drop once Next typechecks TS 7 without the flag.
+    useTypeScriptCli: true,
+
     // Keep client-side route segments cached between navigations so flipping
     // between pages feels SPA-like instead of re-streaming the loading.tsx
     // fallback every time. React Query handles data freshness; the shell
