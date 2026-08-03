@@ -1,8 +1,8 @@
 # MCP Tools: expand_neighbors and fetch_slice
 
 Bounded traversal verbs for an agent that steers its own retrieval. `expand_neighbors` widens a set
-of known memories into their graph neighborhood; `fetch_slice` widens one memory into the span window
-it was cut into.
+of known memories into their graph neighborhood; `fetch_slice` widens one memory into the span
+window it was cut into.
 
 ## The traversal contract
 
@@ -140,8 +140,8 @@ interface FetchSliceOutput {
 ```
 
 **Cite `parent_id`, not a span id.** Spans are re-minted whenever their memory is edited, so a
-citation pointing at one goes stale silently. `covers_parent` says whether the returned spans account
-for the whole body; when it is false, text lives only on the parent.
+citation pointing at one goes stale silently. `covers_parent` says whether the returned spans
+account for the whole body; when it is false, text lives only on the parent.
 
 A memory short enough never to have been cut comes back whole with `sliced: false`. That is the
 answer, not an error to retry.
@@ -155,8 +155,8 @@ fetch_slice("decision_abc", window=5)    # first five spans of this memory
 
 ## REST equivalents
 
-| Verb               | Endpoint               |
-| ------------------ | ---------------------- |
+| Verb               | Endpoint                  |
+| ------------------ | ------------------------- |
 | `expand_neighbors` | `POST /api/search/expand` |
 | `fetch_slice`      | `POST /api/search/slice`  |
 
