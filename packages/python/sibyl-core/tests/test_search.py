@@ -2555,6 +2555,49 @@ async def test_vector_candidate_sources_use_configured_knn_effort(
     assert f"fact_embedding <|{edge_knn}, 96|> $query_embedding" in edge_query
 
 
+@pytest.mark.asyncio
+async def test_vector_lanes_raise_knn_effort_to_the_seed_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An HNSW read returns at most `ef` rows, so a deep-search plan whose seed
+    # budget outruns the configured effort would silently come back short.
+    monkeypatch.setattr(search_module.core_config, "graph_knn_ef", 40)
+    plan = build_context_retrieval_plan(
+        query="deep search vectors",
+        organization_id="org-123",
+        facets=[ContextFacet.ACTIVE_WORK],
+        facet_types={ContextFacet.ACTIVE_WORK: ["task"]},
+        principal_id="user-123",
+        project="project_123",
+        accessible_projects={"project_123"},
+        limit=MAX_RETRIEVAL_LIMIT,
+    )
+    provider = DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
+            provider="deterministic",
+            model="unit-test",
+            dimensions=4,
+            cache_namespace="retrieval-test",
+            tokenizer_estimate_method="utf8-byte-length",
+        )
+    )
+    client = _VectorClient()
+
+    await search_module._vector_candidate_sources(
+        client=client,
+        plan=plan,
+        search_filter=search_module.SearchFilter(project_ids=("project_123",)),
+        embedding_provider=provider,
+    )
+
+    node_query = next(call for call in client.calls if "name_embedding" in call[0])[0]
+    edge_query = next(call for call in client.calls if "fact_embedding" in call[0])[0]
+    assert plan.candidate_limits.node_vector == MAX_RETRIEVAL_LIMIT
+    assert f"name_embedding <|{MAX_RETRIEVAL_LIMIT}, {MAX_RETRIEVAL_LIMIT}|>" in node_query
+    assert f"fact_embedding <|{MAX_RETRIEVAL_LIMIT}, {MAX_RETRIEVAL_LIMIT}|>" in edge_query
+    assert search_module._graph_knn_effort(8) == 40
+
+
 def test_node_record_candidates_keep_top_level_provenance_metadata() -> None:
     candidate = search_module._candidate_from_node_record(
         {

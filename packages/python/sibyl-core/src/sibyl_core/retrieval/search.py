@@ -70,8 +70,9 @@ EDGE_FULLTEXT_MIN_MATCH_LIMIT = 32
 # the same lane depth as an 8-item one.
 MIN_CANDIDATES_PER_SIGNAL = 2
 MAX_RETRIEVAL_LIMIT = 50
-# Lane depth for a plan built without a limit, equal to what the rule above
-# yields at the narrowest layer a pack can ask for (`ContextLayer.WAKE`).
+# Lane depth for a bare `CandidateLimits()`, which is the fallback for a plan
+# assembled without lane budgets rather than for a plan without a limit: the
+# builder has its own default `limit` and derives every field from it.
 DEFAULT_CANDIDATES_PER_SIGNAL = 8
 # The raw-memory lane reads whole memories rather than passages, so it takes a
 # share of the seed budget instead of the whole of it.
@@ -853,8 +854,13 @@ def _project_filter_selectivity(
     return 1.0 / len(accessible_projects)
 
 
-def _graph_knn_effort() -> int:
-    return max(1, int(core_config.graph_knn_ef))
+def _graph_knn_effort(candidate_limit: int) -> int:
+    # An HNSW search keeps at most `ef` nodes in flight, so an effort below the
+    # requested `k` truncates the read to `ef` rows and no error is raised. The
+    # configured effort is a floor on search quality, never a ceiling on the
+    # candidates a lane was budgeted, so `k` raises it when the seed budget runs
+    # deeper than the configuration.
+    return max(1, int(core_config.graph_knn_ef), int(candidate_limit))
 
 
 def _explicit_project_denied(plan: RetrievalPlan) -> bool:
@@ -1221,7 +1227,7 @@ async def _node_vector_candidates(
         return []
     filter_clauses, filter_params = _node_filter_clause(search_filter)
     candidate_limit = max(int(limit), 1)
-    knn_effort = _graph_knn_effort()
+    knn_effort = _graph_knn_effort(candidate_limit)
     rows = await _execute_query_records(
         client,
         """
@@ -1269,7 +1275,7 @@ async def _edge_vector_candidates(
         return []
     filter_clauses, filter_params = _edge_filter_clause(search_filter)
     candidate_limit = max(int(limit), 1)
-    knn_effort = _graph_knn_effort()
+    knn_effort = _graph_knn_effort(candidate_limit)
     rows = await _execute_query_records(
         client,
         "SELECT * FROM ("
