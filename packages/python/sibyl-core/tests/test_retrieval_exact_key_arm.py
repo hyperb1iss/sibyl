@@ -500,6 +500,45 @@ def test_a_candidate_found_only_by_the_key_is_not_demoted_as_vector_only() -> No
     assert "graph_expansion_only_demoted" not in ranked[0][2]
 
 
+def test_an_inert_lane_changes_no_score_and_no_metadata() -> None:
+    """Inertness is a structural claim, not an observation about one query.
+
+    rrf_merge drops empty lists before it assigns weights, so an unfired
+    exact-key lane cannot shift another candidate's fused score. Pinned here
+    because the alternative failure is silent: a query with no identifier would
+    rank differently than it did before keys existed.
+    """
+
+    plan = _plan()
+    lexical = _candidate("lexical")
+    vector = _candidate("vector")
+
+    without_lane = search_module._fuse_candidates(
+        [
+            (RetrievalSignal.NODE_FULLTEXT, [lexical]),
+            (RetrievalSignal.NODE_VECTOR, [vector]),
+        ],
+        plan=plan,
+        limit=10,
+    )
+    with_inert_lane = search_module._fuse_candidates(
+        [
+            (RetrievalSignal.NODE_FULLTEXT, [lexical]),
+            (RetrievalSignal.EXACT_KEY, []),
+            (RetrievalSignal.NODE_VECTOR, [vector]),
+        ],
+        plan=plan,
+        limit=10,
+    )
+
+    assert [(candidate.id, score) for candidate, score, _meta in without_lane] == [
+        (candidate.id, score) for candidate, score, _meta in with_inert_lane
+    ]
+    assert [meta for _candidate, _score, meta in without_lane] == [
+        meta for _candidate, _score, meta in with_inert_lane
+    ]
+
+
 def test_declared_keys_join_the_coverage_text() -> None:
     """Without this the coverage re-rank buries a hit whose body lacks the token."""
 
