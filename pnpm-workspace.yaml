@@ -6,9 +6,9 @@ packages:
 # a single allowBuilds map. Each entry explicitly opts in (true) or out
 # (false) of running that package's install lifecycle scripts.
 allowBuilds:
-  esbuild: true        # vite bundler needs the platform-specific binary
-  msw: true            # service worker tooling for apps/web tests
-  sharp: false         # preserved from prior ignoredBuiltDependencies
+  esbuild: true # vite bundler needs the platform-specific binary
+  msw: true # service worker tooling for apps/web tests
+  sharp: false # preserved from prior ignoredBuiltDependencies
   unrs-resolver: false # preserved from prior ignoredBuiltDependencies
 
 overrides:
