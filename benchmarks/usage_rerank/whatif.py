@@ -42,6 +42,7 @@ from prior import (
     RETRIEVAL_WEIGHT,
     PointInTimeCounts,
     RerankOutcome,
+    describe_candidate_priors,
     permutation_null,
     run_whatif,
     summarize_outcomes,
@@ -90,6 +91,25 @@ def print_report(report: dict[str, Any]) -> None:
     print(f"trials {null['trials']}  mean {_fmt(null['mean'])}  stdev {null['stdev']}")
     print(f"95th pct |MRR delta|     {null['p95_abs']}")
     print("  an observed |MRR delta| below that is indistinguishable from a meaningless prior")
+    contrast = report["candidate_prior_contrast"]
+    cited_group = contrast["cited"]
+    uncited_group = contrast["uncited"]
+    print("\n-- prior signal on cited vs uncited candidates --")
+    row = "{:<10}{:>7}{:>12}{:>12}{:>14}{:>13}"
+    print(row.format("group", "n", "expos_mean", "hist_days", "expos_per_day", "mature_mean"))
+    for name, group in (("cited", cited_group), ("uncited", uncited_group)):
+        print(
+            row.format(
+                name,
+                group["candidates"],
+                group["prior_exposures_mean"],
+                group["history_days_median"],
+                group["exposures_per_day_median"],
+                group["mature_prior_exposures_mean"],
+            )
+        )
+    print("  read the count gap and the per-day rate together: retrieval_count grows with age")
+
     print("\n-- verdict per arm --")
     for verdict in report["verdicts"]:
         if verdict.get("verdict") == "no_data":
@@ -270,6 +290,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         seed=args.null_seed,
     )
     report["verdicts"] = adjudicate(arms, report["permutation_null"])
+    report["candidate_prior_contrast"] = describe_candidate_priors(labeled_sessions, counts)
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -6,8 +6,9 @@ The usage loop has produced real labeled data, and the volume is enough to measu
 It is not enough to ship a ranking change on, and the single most useful arm of the
 obvious usage prior is statistically indistinguishable from a meaningless prior of the
 same strength. Worse, the curve Sibyl already ships for retention is measurably harmful
-when applied to ranking, for a reason this lane was able to isolate. The blocker is
-instrumentation, not patience: the query that produced an exposure is not recoverable
+when applied to ranking, because its retrieval-count term acts mainly as an item-age
+proxy and so demotes exactly the freshly written memories that agents cite. The blocker
+is instrumentation, not patience: the query that produced an exposure is not recoverable
 from any stored field, so no query-conditioned reranker can be trained or even evaluated
 offline against this data.
 
@@ -102,18 +103,39 @@ The permutation null over 200 trials has mean -0.0602, standard deviation 0.0200
 moves nothing of consequence (185 cited items, MRR delta +0.0036 on the citation-only
 arm), so contamination is not driving any of this.
 
-## Why the production curve hurts, measured rather than guessed
+## Why the production curve hurts: retrieval_count is mostly an age proxy
 
-Applying the retention curve to ranking is not merely unhelpful, it is 4.1 standard
-deviations worse than a random prior of the same strength. The cause is the
-retrieval-count term, and the direct measurement confirms it: among candidates in
-contrastive sessions, the items nobody cited carry a mean of 19.5 prior exposures
-(median 8) while the cited items carry 7.9 (median 2). Frequently retrieved items are
-about 2.5 times more exposed and *less* likely to be the one that answers the question,
-which is what a generic hub memory looks like. Retention and ranking want opposite things
-from the same counter: retention asks whether a memory is still alive, and heavy traffic
-says yes, while ranking asks whether it is right for this query, and heavy traffic says
-probably not.
+Applying the retention curve to ranking is not merely unhelpful, it lands 4.1 standard
+deviations below a random prior of the same strength. The retrieval-count term is the
+cause, and the reason it is harmful turns out to be age rather than genericness.
+
+The raw gap looks dramatic. Among candidates in contrastive sessions, items nobody cited
+carry a mean of 19.5 prior exposures against 7.9 for the cited ones, so a bonus on
+retrieval count systematically promotes the wrong candidates. Reading that as "heavily
+retrieved memories are generic hubs" would be over-reading it, and the age columns are
+what settle the question, because retrieval count also grows simply with how long an item
+has existed.
+
+| Candidate group | n | prior exposures (mean) | history days (median) | exposures/day (median) | prior exposures if history > 5d |
+| --- | --- | --- | --- | --- | --- |
+| cited | 187 | 7.93 | 0.84 | 2.85 | 23.76 (n=25) |
+| uncited | 1,020 | 19.50 | 3.34 | 2.93 | 31.11 (n=353) |
+
+Cited candidates are dramatically younger: their median observable history is 0.84 days
+against 3.34, and 55.1% of them had half a day of history or less against 24.4% of
+uncited candidates. Once age is divided out the difference nearly vanishes, with median
+exposure rates of 2.85 and 2.93 per day, and restricting to items with more than five
+days of history shrinks the count gap from 2.5x to 1.3x. So the honest reading is that a
+raw retrieval-count bonus works as an age penalty, and it demotes exactly the freshly
+written memories that agents are citing. What the citation signal mostly tracks in this
+window is recency.
+
+That has a direct consequence for phase 2: an age-normalized exposure rate is the term
+worth testing, not the raw count, and the recency effect should be modelled explicitly
+rather than arriving as a side effect of a counter. Note also that `first_seen_at` uses
+the earliest usage event as its age proxy, since creation time lives in the graph rather
+than the event table, so items predating usage recording are censored and their history
+is understated.
 
 The citation term points the correct way but is thin. 27.8% of cited candidates carry a
 prior citation against 17.7% of uncited ones, a real signal (the citation-only arm sits
@@ -177,6 +199,11 @@ true; eval-origin events exactly excludable rather than burst-bounded; at least 
 attributed positive labels (roughly 4x today) with at least 250 of them carrying a prior
 citation, and citations arriving from at least two distinct surfaces.
 
+**Arms to test.** Carry the four arms here for comparability, and add two the age finding
+argues for: an exposure-rate arm using exposures per observable day in place of the raw
+count, and a recency arm that models item age directly instead of letting a counter smuggle
+it in. `describe_candidate_priors` is what checks whether the age gap has closed.
+
 **GO** requires the best arm to beat the served baseline by an MRR delta of at least
 +0.05 *and* to exceed the permutation null's 95th percentile absolute delta on the same
 run, evaluated on interactive-only sessions with a point-in-time prior, and to hold on a
@@ -186,12 +213,11 @@ held-out time split (train on the first 70% of the window, evaluate on the last 
 fails to reproduce on the held-out split. A sub-noise delta is NO-GO by default, and this
 lane's +0.0035 against a 0.0914 floor is exactly that.
 
-**Kill the usage-prior direction entirely** if, with 750 or more positives, the
-retrieval-count anti-correlation reported above persists and the citation-only arm still
-cannot clear +0.02. That would say the usage loop's value is retention and forgetting,
-where it already demonstrably works, and not ranking. A query-conditioned reranker
-trained on the recovered labels would then be the direction to test instead, which is
-precisely what instrumentation gap 1 unblocks.
+**Kill the usage-prior direction entirely** if, with 750 or more positives, neither the
+citation-only arm nor the age-normalized arms clear +0.02. That would say the usage loop's
+value is retention and forgetting, where it already demonstrably works, and not ranking. A
+query-conditioned reranker trained on the recovered labels would then be the direction to
+test instead, which is precisely what instrumentation gap 1 unblocks.
 
 ## Reproducing
 
@@ -199,5 +225,5 @@ precisely what instrumentation gap 1 unblocks.
 uv run python benchmarks/usage_rerank/extract.py          # read-only, writes out/
 uv run python benchmarks/usage_rerank/whatif.py           # all sessions
 uv run python benchmarks/usage_rerank/whatif.py --interactive-only
-uv run pytest tools/tests/test_usage_rerank_harness.py -q # 62 tests, no live store
+uv run pytest tools/tests/test_usage_rerank_harness.py -q # 63 tests, no live store
 ```

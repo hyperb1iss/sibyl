@@ -693,6 +693,56 @@ def test_summarize_outcomes_splits_the_delta_distribution() -> None:
     assert summary["mrr_delta"] == pytest.approx(0.0)
 
 
+def test_history_days_before_measures_observable_age() -> None:
+    rows = [
+        _event(signal=events.EXPOSURE, item_id="a", offset_us=0, session_key="search:old"),
+        _event(
+            signal=events.EXPOSURE,
+            item_id="a",
+            offset_us=86_400_000_000,
+            session_key="search:new",
+        ),
+    ]
+    counts = prior.PointInTimeCounts(rows)
+    cutoff = BASE + timedelta(days=1)
+    assert counts.first_seen_at(events.GRAPH_ENTITY, "a") == BASE
+    assert counts.history_days_before(events.GRAPH_ENTITY, "a", cutoff) == pytest.approx(1.0)
+
+
+def test_history_days_before_is_none_before_the_item_was_ever_seen() -> None:
+    counts = prior.PointInTimeCounts(_exposure_page(["a"]))
+    assert counts.first_seen_at(events.GRAPH_ENTITY, "unknown") is None
+    assert counts.history_days_before(events.GRAPH_ENTITY, "unknown", BASE) is None
+    assert counts.history_days_before(events.GRAPH_ENTITY, "a", BASE) is None
+
+
+def test_describe_candidate_priors_splits_cited_from_uncited() -> None:
+    """The age columns are what keep a raw count gap from being over-read."""
+    history = [
+        _event(
+            signal=events.EXPOSURE,
+            item_id="a",
+            offset_us=-864_000_000_000,
+            session_key="search:ancient",
+        ),
+    ]
+    labeled, rows = _labeled_fixture(cited="b")
+    counts = prior.PointInTimeCounts([*history, *rows])
+    contrast = prior.describe_candidate_priors([labeled], counts)
+    assert contrast["cited"]["candidates"] == 1
+    assert contrast["uncited"]["candidates"] == UNCITED_IN_PAGE
+    # Item "a" was exposed ten days earlier, so only the uncited group has history.
+    assert contrast["uncited"]["prior_exposures_mean"] > 0
+    assert contrast["cited"]["prior_exposures_mean"] == 0
+    assert contrast["uncited"]["history_days_median"] is not None
+
+
+def test_describe_candidate_priors_handles_an_empty_population() -> None:
+    contrast = prior.describe_candidate_priors([], prior.PointInTimeCounts([]))
+    assert contrast["cited"]["candidates"] == 0
+    assert contrast["uncited"]["candidates"] == 0
+
+
 def test_permutation_null_is_reproducible_for_a_fixed_seed() -> None:
     labeled, rows = _labeled_fixture()
     counts = prior.PointInTimeCounts(rows)

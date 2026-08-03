@@ -89,9 +89,15 @@ class PointInTimeCounts:
 
     def __init__(self, rows: Iterable[UsageEventRow]) -> None:
         buckets: dict[tuple[str, str, str], list[datetime]] = defaultdict(list)
+        first_seen: dict[tuple[str, str], datetime] = {}
         for row in rows:
             buckets[(row.item_kind, row.item_id, row.signal_type)].append(row.event_at)
+            key = (row.item_kind, row.item_id)
+            known = first_seen.get(key)
+            if known is None or row.event_at < known:
+                first_seen[key] = row.event_at
         self._buckets = {key: sorted(values) for key, values in buckets.items()}
+        self._first_seen = first_seen
 
     def _count_before(self, item_kind: str, item_id: str, signal: str, cutoff: datetime) -> int:
         timestamps = self._buckets.get((item_kind, item_id, signal))
@@ -105,6 +111,22 @@ class PointInTimeCounts:
             citation_count=self._count_before(item_kind, item_id, CITATION, cutoff),
             misled_count=self._count_before(item_kind, item_id, MISLED, cutoff),
         )
+
+    def first_seen_at(self, item_kind: str, item_id: str) -> datetime | None:
+        """Earliest event of any signal for this item, the harness's age proxy.
+
+        True creation time lives in the graph, not in the event table, so this is
+        the best age estimate available from usage events alone. It censors any
+        item that already existed when event recording began.
+        """
+        return self._first_seen.get((item_kind, item_id))
+
+    def history_days_before(self, item_kind: str, item_id: str, cutoff: datetime) -> float | None:
+        """How long this item had been observable before `cutoff`."""
+        first = self.first_seen_at(item_kind, item_id)
+        if first is None or first >= cutoff:
+            return None
+        return (cutoff - first).total_seconds() / 86_400.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,6 +251,89 @@ def run_whatif(
                 )
             )
     return tuple(outcomes)
+
+
+MATURE_HISTORY_DAYS = 5.0
+FRESH_HISTORY_DAYS = 0.5
+
+
+def describe_candidate_priors(
+    labeled_sessions: Sequence[LabeledSession],
+    counts: PointInTimeCounts,
+) -> dict[str, Any]:
+    """Compare the prior signal on cited candidates against uncited ones.
+
+    This is what explains, or fails to explain, a what-if result. A raw count
+    gap between the two groups is not on its own evidence that the counter
+    carries ranking information, because retrieval_count also grows with how
+    long an item has been around. The comparison therefore reports the raw
+    counts, the observable history length, the age-normalized exposure rate, and
+    a maturity-matched subset, so a count gap that is really an age gap is
+    visible rather than inferred.
+    """
+    cited: list[tuple[UsageCounts, float | None]] = []
+    uncited: list[tuple[UsageCounts, float | None]] = []
+    for labeled in labeled_sessions:
+        for item_kind in labeled.session.item_kinds:
+            if not labeled.is_contrastive(item_kind):
+                continue
+            cutoff = labeled.session.started_at
+            for item in labeled.session.items_of_kind(item_kind):
+                record = (
+                    counts.counts_before(item.item_kind, item.item_id, cutoff),
+                    counts.history_days_before(item.item_kind, item.item_id, cutoff),
+                )
+                if item.key in labeled.cited_keys:
+                    cited.append(record)
+                elif item.key not in labeled.misled_keys:
+                    uncited.append(record)
+
+    return {
+        "note": (
+            "retrieval_count grows with item age, so the raw count gap and the "
+            "age-normalized rate must be read together."
+        ),
+        "mature_history_days": MATURE_HISTORY_DAYS,
+        "fresh_history_days": FRESH_HISTORY_DAYS,
+        "cited": _describe_group(cited),
+        "uncited": _describe_group(uncited),
+    }
+
+
+def _describe_group(records: Sequence[tuple[UsageCounts, float | None]]) -> dict[str, Any]:
+    if not records:
+        return {"candidates": 0}
+    exposures = [record[0].retrieval_count for record in records]
+    citations = [record[0].citation_count for record in records]
+    histories = [record[1] for record in records if record[1] is not None]
+    rates = [
+        record[0].retrieval_count / record[1]
+        for record in records
+        if record[1] is not None and record[1] >= FRESH_HISTORY_DAYS
+    ]
+    mature = [
+        record[0].retrieval_count
+        for record in records
+        if record[1] is not None and record[1] > MATURE_HISTORY_DAYS
+    ]
+    fresh = sum(1 for record in records if record[1] is None or record[1] <= FRESH_HISTORY_DAYS)
+    return {
+        "candidates": len(records),
+        "prior_exposures_mean": round(statistics.fmean(exposures), 3),
+        "prior_exposures_median": statistics.median(exposures),
+        "prior_citations_mean": round(statistics.fmean(citations), 4),
+        "with_prior_citation_share": round(
+            sum(1 for value in citations if value > 0) / len(citations), 4
+        ),
+        "history_days_mean": round(statistics.fmean(histories), 3) if histories else None,
+        "history_days_median": round(statistics.median(histories), 3) if histories else None,
+        "fresh_share": round(fresh / len(records), 4),
+        "exposures_per_day_mean": round(statistics.fmean(rates), 3) if rates else None,
+        "exposures_per_day_median": round(statistics.median(rates), 3) if rates else None,
+        "exposures_per_day_sample": len(rates),
+        "mature_prior_exposures_mean": round(statistics.fmean(mature), 3) if mature else None,
+        "mature_sample": len(mature),
+    }
 
 
 def permutation_null(
@@ -380,6 +485,7 @@ __all__ = [
     "PointInTimeCounts",
     "RerankOutcome",
     "UsageCounts",
+    "describe_candidate_priors",
     "permutation_null",
     "rerank_session_kind",
     "rrf_score",

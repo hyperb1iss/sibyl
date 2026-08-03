@@ -11318,11 +11318,46 @@
     }
   ],
   "attribution_window_seconds": 86400.0,
+  "candidate_prior_contrast": {
+    "cited": {
+      "candidates": 187,
+      "exposures_per_day_mean": 6.264,
+      "exposures_per_day_median": 2.853,
+      "exposures_per_day_sample": 84,
+      "fresh_share": 0.5508,
+      "history_days_mean": 2.557,
+      "history_days_median": 0.842,
+      "mature_prior_exposures_mean": 23.76,
+      "mature_sample": 25,
+      "prior_citations_mean": 0.3904,
+      "prior_exposures_mean": 7.93,
+      "prior_exposures_median": 2,
+      "with_prior_citation_share": 0.2781
+    },
+    "fresh_history_days": 0.5,
+    "mature_history_days": 5.0,
+    "note": "retrieval_count grows with item age, so the raw count gap and the age-normalized rate must be read together.",
+    "uncited": {
+      "candidates": 1020,
+      "exposures_per_day_mean": 9.32,
+      "exposures_per_day_median": 2.933,
+      "exposures_per_day_sample": 771,
+      "fresh_share": 0.2441,
+      "history_days_mean": 4.403,
+      "history_days_median": 3.336,
+      "mature_prior_exposures_mean": 31.108,
+      "mature_sample": 353,
+      "prior_citations_mean": 0.2422,
+      "prior_exposures_mean": 19.495,
+      "prior_exposures_median": 8.0,
+      "with_prior_citation_share": 0.1775
+    }
+  },
   "contrastive_sessions": 124,
   "events": 14740,
   "events_path": "/Users/bliss/dev/worktrees/sibyl/nova/p5-usage-rerank-harness/benchmarks/usage_rerank/out/usage_events.jsonl",
   "exposure_sessions": 923,
-  "generated_at": "2026-08-03T18:27:00.361590+00:00",
+  "generated_at": "2026-08-03T18:41:18.954709+00:00",
   "method": {
     "baseline_score": "rrf_score(recovered rank within item kind), k=60",
     "leakage_guard": "counts use only events strictly before the session start",
