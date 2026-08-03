@@ -15,6 +15,12 @@ query-conditioned reranker can be trained or even evaluated offline against this
 All numbers below come from a read-only extraction against the local dev store on
 2026-08-03, reproduced by `extract.py` and `whatif.py`. Receipts are committed in `out/`.
 
+They describe a snapshot, not the current store. The dev store is shared and other sessions
+keep writing to it, so a re-run will report different totals: this snapshot ends at
+`last_event_at` 2026-08-03T18:08:38Z with 14,740 events, and both values are recorded in
+`extract_summary.json` so any later run can be compared against the right baseline rather
+than assumed to disagree.
+
 ## What exists
 
 | Measure | Value |
