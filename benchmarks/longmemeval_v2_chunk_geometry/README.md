@@ -220,7 +220,7 @@ arm); the third is the one that actually binds.
   sends the field and nothing reads it. The knob's one live enforcement is the
   eval adapter's `_select_diverse_results`, which **drops** over-cap rows where
   the server would have deferred and backfilled them.
-- **`MAX_CANDIDATES_PER_SIGNAL` cannot reach a passage.** It bounds
+- **The plan's per-lane seed budget cannot reach a passage.** It bounds
   `CandidateLimits` for `build_context_retrieval_plan` / `context_search`, whose
   only non-test caller is `sibyl_core/tools/context.py` serving context-pack
   *facet sections*. The evidence lane goes `execute_search_request` ->
