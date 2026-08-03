@@ -101,6 +101,8 @@ class AddResponse:
     timestamp: datetime
     conflicts: list[ConflictWarning] = field(default_factory=list)
     background_jobs: dict[str, Any] = field(default_factory=dict)
+    # Per-probe rank-or-absent, present only when the write carried probes.
+    probe_rehearsal: dict[str, Any] | None = None
 
 
 @dataclass
