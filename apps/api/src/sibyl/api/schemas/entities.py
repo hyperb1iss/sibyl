@@ -106,11 +106,17 @@ class EntityCreate(EntityBase, MemoryStructureFields):
         The key contract raises on control characters at the write boundary, and
         that exception has no handler on this route, so the one input class the
         length and count bounds do not cover would surface as a server error.
+
+        Whitespace is exempt, and the exemption matters: the key contract
+        collapses internal whitespace runs by design, so a newline or a tab in a
+        key is a documented, accepted input. Rejecting those here would make the
+        wire stricter than the contract on exactly the case the contract
+        advertises, refusing a key pasted out of wrapped text.
         """
         if value is None:
             return None
         for key in value:
-            if any(unicodedata.category(char) == "Cc" for char in key):
+            if any(unicodedata.category(char) == "Cc" and not char.isspace() for char in key):
                 raise ValueError("retrieval keys must not contain control characters")
         return value
 

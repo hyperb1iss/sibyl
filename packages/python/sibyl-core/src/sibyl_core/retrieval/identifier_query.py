@@ -14,8 +14,8 @@ predicate below so the matrix test can target it:
   (double quotes or backticks only; a bare apostrophe is English possessive
   far more often than it is a quote)
 * letters and digits mixed in one token (``0x7f31``, ``sha256``, ``v2beta``),
-  excluding digits with an English suffix (``3rd``, ``10am``, ``1990s``), which
-  mix the two characters classes while being plainly prose
+  excluding ordinals and clock times (``3rd``, ``21st``, ``10am``,
+  ``10am-11am``), which mix the two character classes while being plainly prose
 * an underscore (``ERR_CONN_RESET``, ``snake_case``)
 * a ``::`` path separator (``std::vector``)
 * dotted segments of two or more characters each (``search.py``,
@@ -63,7 +63,7 @@ _QUOTED_SPAN = re.compile(r"\"([^\"]+)\"|`([^`]+)`")
 _LEADING_PUNCTUATION = "([{\"'"
 _TRAILING_PUNCTUATION = ")]},;:!?.\"'"
 _HEX_RUN = re.compile(r"[0-9a-fA-F]{8,}")
-_ENGLISH_NUMBER_WORD = re.compile(r"\d+(?:st|nd|rd|th|s|am|pm)", re.IGNORECASE)
+_ENGLISH_NUMBER_WORD = re.compile(r"\d+(?:(?:st|nd|rd|th)s?|am|pm)", re.IGNORECASE)
 _WORD_CHARACTER = re.compile(r"[^\W_]", re.UNICODE)
 
 __all__ = [
@@ -76,14 +76,28 @@ __all__ = [
 
 
 def _is_english_number_word(token: str) -> bool:
-    """Digits carrying an English suffix: an ordinal, a clock time, a decade.
+    """Digits carrying an English suffix: an ordinal or a clock time.
 
-    These mix letters and digits, so the shape rule admits them, and they are
-    plainly prose rather than identifiers. The suffix list is closed and short
-    on purpose: `2fa` and `v2beta` are identifiers and stay admitted.
+    These mix letters and digits, so the shape rule would admit them, and they
+    are plainly prose. Tested per hyphen-separated segment, because a token is
+    still prose when the number word is only part of it (`10am-11am`), and a
+    trailing plural is allowed so `3rds` reads the same as `3rd`.
+
+    A bare `<digits>s` is deliberately NOT here. A decade (`1990s`) and a
+    duration (`30s`, `300s`, `443s`) are indistinguishable by their characters,
+    durations appear verbatim in the error strings this arm exists to match, and
+    the costs are asymmetric: a false positive is one indexed read returning
+    nothing, a false negative loses the hit. So the duration wins and the decade
+    fires.
     """
 
-    return bool(_ENGLISH_NUMBER_WORD.fullmatch(token))
+    segments = [segment for segment in token.split("-") if segment]
+    if not segments:
+        return False
+    digit_segments = [segment for segment in segments if any(c.isdigit() for c in segment)]
+    if not digit_segments:
+        return False
+    return all(_ENGLISH_NUMBER_WORD.fullmatch(segment) for segment in digit_segments)
 
 
 def _has_letter_and_digit(token: str) -> bool:
