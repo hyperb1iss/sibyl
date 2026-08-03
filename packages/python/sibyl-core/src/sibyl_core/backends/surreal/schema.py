@@ -103,6 +103,8 @@ DEFINE FIELD IF NOT EXISTS complexity ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS feature ON entity TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS tags ON entity TYPE option<array<string>>;
 DEFINE FIELD IF NOT EXISTS memory_scope ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS retrieval_keys ON entity TYPE option<array<string>>;
+DEFINE FIELD IF NOT EXISTS retrieval_keys_normalized ON entity TYPE option<array<string>>;
 DEFINE FIELD IF NOT EXISTS name_embedding ON entity TYPE option<array<float, {EMBEDDING_DIM}>>;
 
 DEFINE INDEX IF NOT EXISTS idx_entity_uuid ON entity FIELDS uuid UNIQUE;
@@ -113,6 +115,7 @@ DEFINE INDEX IF NOT EXISTS idx_entity_parent_task ON entity FIELDS parent_task_i
 DEFINE INDEX IF NOT EXISTS idx_entity_task ON entity FIELDS task_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_status ON entity FIELDS status;
 DEFINE INDEX IF NOT EXISTS idx_entity_memory_scope ON entity FIELDS memory_scope;
+DEFINE INDEX IF NOT EXISTS idx_entity_retrieval_keys ON entity FIELDS retrieval_keys_normalized;
 DEFINE INDEX IF NOT EXISTS idx_entity_priority ON entity FIELDS priority;
 DEFINE INDEX IF NOT EXISTS idx_entity_updated ON entity FIELDS updated_at, created_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_entity_last_recalled ON entity FIELDS last_recalled_at, created_at, uuid;
@@ -511,6 +514,12 @@ WHERE memory_scope = NONE
     AND attributes.memory_scope != NONE;
 """
 
+ENTITY_RETRIEVAL_KEYS_COLUMN_DEFINITIONS = """
+DEFINE FIELD OVERWRITE retrieval_keys ON entity TYPE option<array<string>>;
+DEFINE FIELD OVERWRITE retrieval_keys_normalized ON entity TYPE option<array<string>>;
+DEFINE INDEX IF NOT EXISTS idx_entity_retrieval_keys ON entity FIELDS retrieval_keys_normalized;
+"""
+
 ENTITY_REQUIRED_FIELD_REPAIR_DEFINITIONS = f"""
 {ENTITY_REQUIRED_FIELD_OPTIONAL_DEFINITIONS}
 UPDATE entity SET revision = 1 WHERE revision = NONE OR revision < 1;
@@ -663,6 +672,16 @@ GRAPH_SCHEMA_MIGRATIONS = (
         version=17,
         name="entity_memory_scope_column",
         statements=tuple(split_statements(ENTITY_MEMORY_SCOPE_COLUMN_DEFINITIONS)),
+    ),
+    # Writer-declared exact-match keys. The column carries the writer's casing
+    # for display and its normalized twin carries the indexed match form; the
+    # exact-match retrieval arm reads the index, which a metadata bag could
+    # never offer. No backfill: no row predates the field, because the write
+    # path that can declare a key ships with this version.
+    SchemaMigration(
+        version=18,
+        name="entity_retrieval_keys_column",
+        statements=tuple(split_statements(ENTITY_RETRIEVAL_KEYS_COLUMN_DEFINITIONS)),
     ),
 )
 
@@ -1052,6 +1071,7 @@ __all__ = [
     "ENTITY_MISLED_USAGE_SIGNAL_DEFINITIONS",
     "ENTITY_REQUIRED_FIELD_OPTIONAL_DEFINITIONS",
     "ENTITY_REQUIRED_FIELD_REPAIR_DEFINITIONS",
+    "ENTITY_RETRIEVAL_KEYS_COLUMN_DEFINITIONS",
     "ENTITY_REVISION_MIGRATION_DEFINITIONS",
     "ENTITY_SCHEMA_DRIFT_REPAIR_DEFINITIONS",
     "ENTITY_UPDATED_AT_DATETIME_FIELD_REPAIR_DEFINITIONS",
