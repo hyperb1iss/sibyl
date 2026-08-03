@@ -1919,7 +1919,7 @@ _SNAPSHOT_SHADOWED_METADATA_KEYS = frozenset(
 )
 
 
-def _snapshot_without_owned_keys(snapshot: Mapping[str, object]) -> dict[str, object]:
+def _snapshot_without_owned_keys(snapshot: Mapping[Any, Any]) -> dict[str, object]:
     return {
         str(key): value
         for key, value in snapshot.items()
