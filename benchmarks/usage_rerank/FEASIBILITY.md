@@ -3,14 +3,14 @@
 **Verdict: NO-GO on a production scoring change now. Instrument better, then accumulate, then re-gate.**
 
 The usage loop has produced real labeled data, and the volume is enough to measure with.
-It is not enough to ship a ranking change on, and the single most useful arm of the
-obvious usage prior is statistically indistinguishable from a meaningless prior of the
-same strength. Worse, the curve Sibyl already ships for retention is measurably harmful
-when applied to ranking, because its retrieval-count term acts mainly as an item-age
-proxy and so demotes exactly the freshly written memories that agents cite. The blocker
-is instrumentation, not patience: the query that produced an exposure is not recoverable
-from any stored field, so no query-conditioned reranker can be trained or even evaluated
-offline against this data.
+It is not enough to ship a ranking change on: the single most useful arm of the obvious
+usage prior cannot be distinguished from no change at all, with a paired-bootstrap
+interval on its MRR delta of [-0.037, +0.043] straddling zero. Worse, the curve Sibyl
+already ships for retention is measurably harmful when applied to ranking, because its
+retrieval-count term both penalizes freshly written memories and rewards a signal that is
+genuinely anti-correlated with citation. The blocker is instrumentation, not patience: the
+query that produced an exposure is not recoverable from any stored field, so no
+query-conditioned reranker can be trained or even evaluated offline against this data.
 
 All numbers below come from a read-only extraction against the local dev store on
 2026-08-03, reproduced by `extract.py` and `whatif.py`. Receipts are committed in `out/`.
@@ -28,6 +28,17 @@ All numbers below come from a read-only extraction against the local dev store o
 | Distinct cited items | 154, of which 151 were also exposed |
 | Exposure sessions (one served page each) | 923 |
 | Organizations / principals | 1 / 1 |
+
+One caveat on every count in that table: an exposure event is deduplicated on
+`(organization_id, session_key, message_key, source_surface, item_kind, item_id,
+signal_type)` by a unique index (`content_schema.py:425-427`) written through
+`INSERT ... ON DUPLICATE KEY UPDATE` (`services/usage.py:66-81`), and the session key is a
+digest with no timestamp in it (`tools/usage_exposure.py:468-486`). A byte-identical
+request returning a byte-identical id list therefore writes no new row. So 923 counts
+distinct served pages rather than serve events, and 14,523 counts distinct item exposures
+rather than times an item was shown. This is not a harness artifact: production's own
+`retrieval_count` is `array::len($exposure_events)` over the same table
+(`services/usage.py:129`), so the harness and the shipped counters agree by construction.
 
 The citation rate is 1.45% of exposures, and 6.1% of exposed items were cited at least
 once. That is sparse but not empty, and it is genuinely labeled: 193 positive labels
@@ -48,7 +59,9 @@ this join match.
 Attribution therefore walks item identity and time instead: each feedback event is
 credited to the most recent exposure session that served that item. It works well. At a
 24 hour window, 200 of 217 feedback events attribute, 5 name an item that was never
-exposed, and 12 fall outside the window. The median exposure-to-citation gap is 425
+exposed, 8 name an item first served only after the feedback, and 4 sit beyond the window.
+Splitting the last two matters, because a missing earlier exposure and a stale one are
+different failures with different fixes. The median exposure-to-citation gap is 425
 seconds, about seven minutes, which is a very plausible agent turnaround. The window is
 not doing the work either: the sweep runs 81 attributed at five minutes, 182 at one hour,
 197 at six hours, 200 at 24 hours, and 201 at seven days, so it saturates well before the
@@ -66,82 +79,123 @@ no ties.
 
 The recovery stops at the kind boundary. The emitter records raw_capture targets and
 graph_entity targets in two separate `record_memory_usage` calls
-(`tools/usage_exposure.py:174` and `:207`), so every raw event in a session precedes every
-graph event no matter how the two were actually interleaved on the page. 631 of 923
-sessions are mixed-kind, and in every one of them the kinds form contiguous timestamp
-blocks, which is the fingerprint of the two-call batching. Global rank is not
-reconstructable for those sessions, so all ranking analysis here is scoped within a kind.
-This is an implementation artifact rather than a contract, which is why the harness
-audits it on every run instead of assuming it.
+(`tools/usage_exposure.py:174` and `:207`), so a raw event in a session normally precedes
+every graph event no matter how the two were interleaved on the page. 631 of 923 sessions
+are mixed-kind, and in 628 of them the kinds form contiguous timestamp blocks, which is
+the fingerprint of the two-call batching. Global rank is not reconstructable for those
+sessions, so all ranking analysis here is scoped within a kind.
+
+The remaining 3 sessions matter more than their count suggests, because they are the
+counterexample to the assumption the whole rank recovery rests on.
+`context_pack:a8ec3ad1e742c79e9979f705`, `context_pack:c73de246a5b9c688dd2741c5`, and
+`context_pack:d11cb242c2766405eccb63de` show kinds alternating rather than blocked, so
+their writes interleaved and their timestamp order is not a served order. One of the three
+is contrastive and would otherwise contribute a cited item, so `run_whatif` drops any
+session without contiguous kind blocks and the population is 186 cited items rather than
+187. Rank recovery is an implementation artifact rather than a contract, which is exactly
+why the harness audits it on every run and names the exceptions instead of assuming
+uniformity.
 
 ## The offline what-if
 
 124 sessions are contrastive, meaning they served both an eventually cited item and at
-least one item nobody cited. Those yield 187 cited items to study against 1,020 uncited
-candidates, averaging about ten candidates per session. Baseline MRR of the cited item
-under the served order is 0.447, and the cited item is already at rank 1 in 45 of 187
-cases, so roughly a quarter of the population has no headroom to buy at all.
+least one item nobody cited. Dropping the interleaved sessions leaves 119 of them, and
+because ranks are only comparable inside one item kind, those 119 sessions decompose into
+133 independently ranked candidate lists. Together they carry 186 cited items against
+1,013 uncited candidates, averaging about ten candidates per list. Baseline MRR of the
+cited item under the served order is 0.448, and the cited item already sits at rank 1 in
+45 of 186 cases, so roughly a quarter of the population has no headroom to buy at all.
 
 The what-if multiplies a proxy fused score, `rrf_score` of the recovered rank, by a
 point-in-time usage prior shaped after the shipped `usage_retention_multiplier`
 (`retrieval/temporal.py:196-205`). Counts are strictly causal: every count for an item at
 session S comes only from events before S began, so the citation being predicted can
-never feed the score that promotes it. A permutation null shuffles the multipliers a
-session actually earned among that session's own candidates, which preserves the strength
-of the reweighting and destroys only its association with the item, giving a noise floor
-for the MRR delta.
+never feed the score that promotes it. Sessions whose item kinds interleave are dropped,
+since their recovered ranks are not a served order.
 
-| Arm | retrieval w | citation w | mean rank delta | MRR delta | verdict |
-| --- | --- | --- | --- | --- | --- |
-| citation_only | 0.00 | 0.12 | +0.027 | +0.0035 | indistinguishable from noise |
-| production_retention_shape | 0.02 | 0.12 | -1.027 | -0.1432 | harms above noise |
-| retrieval_heavy | 0.06 | 0.12 | -1.171 | -0.1551 | harms above noise |
-| citation_heavy | 0.02 | 0.36 | -0.861 | -0.1280 | harms above noise |
+| Arm | retrieval w | citation w | mean rank delta | MRR delta | 95% CI vs zero | verdict |
+| --- | --- | --- | --- | --- | --- | --- |
+| citation_only | 0.00 | 0.12 | +0.032 | +0.0037 | [-0.0372, +0.0435] | indistinguishable from zero |
+| production_retention_shape | 0.02 | 0.12 | -1.032 | -0.1439 | [-0.1908, -0.0980] | harms the baseline |
+| retrieval_heavy | 0.06 | 0.12 | -1.177 | -0.1559 | [-0.2039, -0.1097] | harms the baseline |
+| citation_heavy | 0.02 | 0.36 | -0.866 | -0.1287 | [-0.1781, -0.0809] | harms the baseline |
 
-The permutation null over 200 trials has mean -0.0602, standard deviation 0.0200, and a
-95th percentile absolute MRR delta of 0.0914. Restricting to interactive-only sessions
-moves nothing of consequence (185 cited items, MRR delta +0.0036 on the citation-only
-arm), so contamination is not driving any of this.
+Two different questions are at stake here and they need two different tests. "Did this
+beat the served baseline" is a claim about zero, so each arm carries a paired bootstrap
+over its per-item reciprocal-rank changes: `citation_only` lands at +0.0037 with a 95%
+interval of [-0.0372, +0.0435], and 44.1% of resamples fall at or below zero, so it is
+indistinguishable from no change. The three harmful arms have intervals entirely below
+zero, so their harm is real.
 
-## Why the production curve hurts: retrieval_count is mostly an age proxy
+"Did the prior beat a coin flip of the same strength" is a different question, answered by
+the permutation null: mean -0.0592, standard deviation 0.0179, 95th percentile absolute
+delta 0.0873. That distribution sits well below zero because any reordering degrades an
+already-good baseline, so it must not be read as a two-sided floor around zero. Against
+it, `citation_only` sits 3.5 standard deviations high, which means the citation signal
+does carry real information, and it still fails to beat current fusion. Both statements
+hold at once, and only the first one bears on whether to ship anything.
 
-Applying the retention curve to ranking is not merely unhelpful, it lands 4.1 standard
+Restricting to interactive-only sessions moves nothing of consequence, so contamination is
+not driving any of this.
+
+## Why the production curve hurts: two effects, not one
+
+Applying the retention curve to ranking is not merely unhelpful, it lands 4.7 standard
 deviations below a random prior of the same strength. The retrieval-count term is the
-cause, and the reason it is harmful turns out to be age rather than genericness.
+cause, and it is harmful for two separate reasons that a single statistic cannot
+separate. Both need stating, because each implies a different fix.
 
-The raw gap looks dramatic. Among candidates in contrastive sessions, items nobody cited
-carry a mean of 19.5 prior exposures against 7.9 for the cited ones, so a bonus on
-retrieval count systematically promotes the wrong candidates. Reading that as "heavily
-retrieved memories are generic hubs" would be over-reading it, and the age columns are
-what settle the question, because retrieval count also grows simply with how long an item
-has existed.
+Among candidates in contrastive sessions, items nobody cited carry a mean of 19.4 prior
+exposures against 8.0 for the cited ones, a raw ratio of 2.43. Two things drive that gap.
 
-| Candidate group | n | prior exposures (mean) | history days (median) | exposures/day (median) | prior exposures if history > 5d |
-| --- | --- | --- | --- | --- | --- |
-| cited | 187 | 7.93 | 0.84 | 2.85 | 23.76 (n=25) |
-| uncited | 1,020 | 19.50 | 3.34 | 2.93 | 31.11 (n=353) |
+**Age is the larger part, and it is large.** True creation timestamps, read from
+`entity.created_at` in the org graph namespace and `raw_captures.created_at` in the
+content namespace, put the median cited candidate at 1.24 days old against 7.75 days for
+uncited ones. So a raw exposure count is substantially a measure of how long an item has
+been available to be exposed, and a bonus on it penalizes new memories.
 
-Cited candidates are dramatically younger: their median observable history is 0.84 days
-against 3.34, and 55.1% of them had half a day of history or less against 24.4% of
-uncited candidates. Once age is divided out the difference nearly vanishes, with median
-exposure rates of 2.85 and 2.93 per day, and restricting to items with more than five
-days of history shrinks the count gap from 2.5x to 1.3x. So the honest reading is that a
-raw retrieval-count bonus works as an age penalty, and it demotes exactly the freshly
-written memories that agents are citing. What the citation signal mostly tracks in this
-window is recency.
+**A roughly 2x anti-correlation survives once age is held fixed.** Standardizing the
+uncited group onto the cited group's true-age distribution, band by band, brings its mean
+exposure count from 19.45 down to 17.43 against 8.01 for cited candidates, a residual
+ratio of 2.18. The gap narrows from 2.43 to 2.18 and does not vanish. It is present in
+every age band:
 
-That has a direct consequence for phase 2: an age-normalized exposure rate is the term
-worth testing, not the raw count, and the recency effect should be modelled explicitly
-rather than arriving as a side effect of a counter.
+| True age at serve | cited mean (n) | uncited mean (n) | ratio |
+| --- | --- | --- | --- |
+| 0 to 0.5 days | 2.86 (62) | 7.53 (92) | 2.64x |
+| 0.5 to 1 day | 8.16 (25) | 28.11 (71) | 3.45x |
+| 1 to 3 days | 7.23 (31) | 23.36 (148) | 3.23x |
+| 3 to 7 days | 12.96 (23) | 26.63 (174) | 2.06x |
+| 7 to 14 days | 16.52 (21) | 18.88 (121) | 1.14x |
+| 14 to 30 days | 8.63 (8) | 8.69 (26) | 1.01x |
+| over 30 days | 10.87 (15) | 16.83 (380) | 1.55x |
 
-The age proxy has a known limitation, and its direction is measured rather than left open.
-`first_seen_at` uses an item's earliest usage event, because creation time lives in the
-graph rather than the event table, so any item already present when recording began has
-an understated history. That censoring reaches 9.4% of uncited candidates against 4.3% of
-cited ones, and since it can only truncate long histories, the group whose history is
-already longer is the one losing more of it. The measured age gap is therefore a floor on
-the real one, which makes the age explanation conservative rather than inflated.
-`censored_share` on both groups is part of the committed receipt.
+So heavily exposed items really are less likely to be the cited one, independently of
+age, and the effect is strongest in the first three days. Both readings hold: a raw
+retrieval-count bonus acts as an age penalty on new memories *and* rewards a genuinely
+anti-correlated signal.
+
+Phase 2 follows from that. An age-normalized rate is worth testing but is not sufficient
+on its own, since standardization shows a residual the rate would miss, and recency
+should be modelled explicitly rather than smuggled in through a counter.
+
+Two measurement cautions belong with these numbers. The `exposures_per_day` columns in
+the receipt are the weakest statistic here and should not be read alone: the rate is
+undefined for a candidate with almost no history, so it retains 44.6% of cited candidates
+against 75.5% of uncited ones, discarding exactly the fresh candidates where the effect
+concentrates. Direct standardization is reported because it controls for age without
+dropping anybody. Separately, the `first_seen_at` age proxy is asymmetrically censored and
+is not fit for this comparison: it understates age for 9.5% of uncited candidates against
+4.3% of cited ones, compressing exactly the long histories a control has to see. True
+`created_at` is used wherever it resolves, which covers 185 of 186 cited and 1,012 of
+1,013 uncited candidates.
+
+The citation term points the correct way but is thin. 27.8% of cited candidates carry a
+prior citation against 17.7% of uncited ones, a real signal (the citation-only arm sits
+3.5 standard deviations above the random-prior null) that is nonetheless far too weak to
+improve on current fusion. This is the crux: only 136 of 186 cited items had any prior
+usage signal at all, so 50 had none whatsoever. A usage prior cannot help an item it has
+never seen used.
 
 The citation term points the correct way but is thin. 27.8% of cited candidates carry a
 prior citation against 17.7% of uncited ones, a real signal (the citation-only arm sits
@@ -160,10 +214,18 @@ default is `True` (`apps/api/src/sibyl/api/schemas/context.py:82`).
 Exact separation is impossible, because no column marks an event as benchmark-origin and
 the eval reuses the `context_pack` surface with the same organization and principal as
 real work. `project_id` cannot rescue it either, since the event carries the *item's*
-project rather than the request's (`tools/usage_exposure.py:489-494`). The harness
-therefore reports a two-sided bound from burst detection: 891 sessions are the clean
-lower bound and 32 are burst-suspect, so contamination is at most 3.5% of sessions.
-Interactive agent work can also burst, so treat 32 as a ceiling rather than an estimate.
+project rather than the request's (`tools/usage_exposure.py:489-494`).
+
+Burst detection flags 32 of 923 sessions, and that number is a detection count rather than
+a bound in either direction. It can over-count, because interactive agent work also
+bursts. It can equally under-count: `flag_eval_suspect_sessions` buckets on
+`(source_surface, item_count, minute)` and needs six members, so a sweep that varies pack
+size, runs slower than six a minute, or straddles a bucket edge is invisible. Dropping
+`item_count` from the key alone lifts the count from 32 to 38, and 135 further sessions sit
+in sub-threshold buckets of two to five. No honest ceiling is available from this schema,
+which is the strongest argument for the provenance flag in gap 3 below. What can be said
+is that the what-if result is unchanged when the flagged sessions are excluded, so
+whatever the true contamination is, it is not carrying the verdict.
 
 ## Instrumentation gaps that block better labels
 
@@ -173,7 +235,7 @@ lane's no-production-edits constraint.
 1. **Query text is not persisted, and this is the blocking gap.** Both emitters already
    receive the query: `search` passes `"query": query` and `context_pack` passes
    `"goal": goal` into `request_metadata` (`tools/search.py:1315`,
-   `tools/context.py:1608`). It is consumed only to build a digest and then dropped. The
+   `tools/context.py:1609`). It is consumed only to build a digest and then dropped. The
    fix site is the metadata dict at
    `packages/python/sibyl-core/src/sibyl_core/tools/usage_exposure.py:377-380`, where
    `request_metadata` is already in scope one frame up (`:102`). Until this lands, 0% of
@@ -210,14 +272,24 @@ argues for: an exposure-rate arm using exposures per observable day in place of 
 count, and a recency arm that models item age directly instead of letting a counter smuggle
 it in. `describe_candidate_priors` is what checks whether the age gap has closed.
 
-**GO** requires the best arm to beat the served baseline by an MRR delta of at least
-+0.05 *and* to exceed the permutation null's 95th percentile absolute delta on the same
-run, evaluated on interactive-only sessions with a point-in-time prior, and to hold on a
-held-out time split (train on the first 70% of the window, evaluate on the last 30%).
+**GO** requires the best arm to beat the served baseline by an MRR delta of at least +0.05
+whose 95% paired-bootstrap interval excludes zero, evaluated on interactive-only sessions
+with a point-in-time prior, holding on a held-out time split (train on the first 70% of the
+window, evaluate on the last 30%).
 
-**NO-GO** if the best arm's MRR delta is below +0.02, or falls inside the noise floor, or
-fails to reproduce on the held-out split. A sub-noise delta is NO-GO by default, and this
-lane's +0.0035 against a 0.0914 floor is exactly that.
+The against-zero interval is the gate, not the permutation null's 95th percentile. That
+percentile measures distance from a same-strength random prior and stays near 0.06 to 0.09
+regardless of sample size, because it reflects how much reordering perturbs a good baseline
+rather than how much data there is. Requiring an arm to clear it would silently raise the
+real bar to roughly +0.09 and could reject a genuine +0.05 win, which is the outcome phase
+2 exists to detect. The null stays in the report as a secondary diagnostic: an arm that
+beats zero but not the random prior is suspicious, and an arm that beats the random prior
+but not zero, which is where `citation_only` sits today, carries information without being
+worth shipping.
+
+**NO-GO** if the best arm's MRR delta is below +0.02, or its interval includes zero, or it
+fails to reproduce on the held-out split. An interval straddling zero is NO-GO by default,
+and this lane's +0.0037 at [-0.0372, +0.0435] is exactly that.
 
 **Kill the usage-prior direction entirely** if, with 750 or more positives, neither the
 citation-only arm nor the age-normalized arms clear +0.02. That would say the usage loop's
@@ -230,6 +302,7 @@ test instead, which is precisely what instrumentation gap 1 unblocks.
 ```bash
 uv run python benchmarks/usage_rerank/extract.py          # read-only, writes out/
 uv run python benchmarks/usage_rerank/whatif.py           # all sessions
+uv run python benchmarks/usage_rerank/whatif.py --no-true-age  # skip the created_at lookup
 uv run python benchmarks/usage_rerank/whatif.py --interactive-only
 uv run pytest tools/tests/test_usage_rerank_harness.py -q # 63 tests, no live store
 ```

@@ -50,6 +50,7 @@ DEFAULT_BURST_THRESHOLD = 6
 
 ATTRIBUTED = "attributed"
 ITEM_NEVER_EXPOSED = "item_never_exposed"
+NO_PRECEDING_EXPOSURE = "no_preceding_exposure"
 OUTSIDE_WINDOW = "outside_window"
 
 ORIGIN_INTERACTIVE = "interactive"
@@ -102,6 +103,21 @@ class ExposureSession:
 
     def items_of_kind(self, item_kind: str) -> tuple[ExposedItem, ...]:
         return tuple(item for item in self.items if item.item_kind == item_kind)
+
+    @property
+    def has_contiguous_kind_blocks(self) -> bool:
+        """Whether each item kind occupies one unbroken run of timestamps.
+
+        Rank recovery assumes a session's events were written by one batched call
+        per kind. A kind that appears in two separate runs means the writes
+        interleaved, so the timestamp order is not the served order and the
+        recovered ranks for that session are not trustworthy.
+        """
+        sequence = [item.item_kind for item in self.items]
+        blocks = [
+            kind for index, kind in enumerate(sequence) if index == 0 or sequence[index - 1] != kind
+        ]
+        return len(blocks) == len(set(blocks))
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,7 +284,10 @@ def attribute_feedback(
             continue
         preceding = [session for session in candidates if session.started_at <= row.event_at]
         if not preceding:
-            attributions.append(_unattributed(row, OUTSIDE_WINDOW))
+            # The item was served, but only after this feedback. Distinct from a
+            # gap that is merely too large, and conflating the two hides which
+            # kind of attribution failure a store actually has.
+            attributions.append(_unattributed(row, NO_PRECEDING_EXPOSURE))
             continue
         chosen = preceding[-1]
         gap = row.event_at - chosen.started_at
@@ -409,7 +428,8 @@ def rank_recovery_audit(
     duplicate_timestamps = 0
     contiguous_kind_blocks = 0
     mixed_kind = 0
-    for session_rows in by_session.values():
+    non_contiguous_sessions: list[str] = []
+    for session_key, session_rows in by_session.items():
         ordered = sorted(session_rows, key=lambda row: (row.event_at, row.item_id))
         per_kind: dict[str, list[datetime]] = defaultdict(list)
         for row in ordered:
@@ -431,6 +451,8 @@ def rank_recovery_audit(
             ]
             if len(blocks) == len(set(blocks)):
                 contiguous_kind_blocks += 1
+            else:
+                non_contiguous_sessions.append(session_key)
 
     return {
         "sessions_audited": len(by_session),
@@ -438,6 +460,8 @@ def rank_recovery_audit(
         "sessions_with_tied_timestamps": duplicate_timestamps,
         "mixed_kind_sessions": mixed_kind,
         "mixed_kind_sessions_with_contiguous_kind_blocks": contiguous_kind_blocks,
+        "mixed_kind_sessions_with_interleaved_kinds": len(non_contiguous_sessions),
+        "interleaved_session_keys": sorted(non_contiguous_sessions),
         "global_rank_recoverable": mixed_kind == 0,
         "sessions_reported": len(sessions),
     }
@@ -467,6 +491,7 @@ __all__ = [
     "DEFAULT_BURST_WINDOW_SECONDS",
     "DEFAULT_EVAL_SURFACES",
     "ITEM_NEVER_EXPOSED",
+    "NO_PRECEDING_EXPOSURE",
     "ORIGIN_BURST_SUSPECT",
     "ORIGIN_EVAL_SURFACE",
     "ORIGIN_INTERACTIVE",

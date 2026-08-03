@@ -14,22 +14,33 @@ from typing import Any
 import httpx
 import paths
 
-# SurrealQL verbs that change state. Checked as whole words so a column named
-# "created_at" or a value containing "update" cannot trip the guard.
+# SurrealQL verbs that change state or reach outside the pinned namespace.
+# Checked as whole words so a column named "created_at" or a value containing
+# "update" cannot trip the guard. REBUILD mutates index state, KILL and LIVE
+# touch live-query registrations, and USE would silently retarget the statement
+# at a namespace the caller did not pin.
 _MUTATING_KEYWORDS = (
     "ALTER",
     "CREATE",
     "DEFINE",
     "DELETE",
     "INSERT",
+    "KILL",
+    "LIVE",
     "MERGE",
     "PATCH",
+    "REBUILD",
     "RELATE",
     "REMOVE",
     "SET",
     "UPDATE",
     "UPSERT",
+    "USE",
 )
+
+# A user-defined function can do anything, including write, so a call to one is
+# refused rather than parsed.
+_FUNCTION_CALL_PATTERN = re.compile(r"\bfn::", re.IGNORECASE)
 
 _MUTATION_PATTERN = re.compile(
     r"\b(?:" + "|".join(_MUTATING_KEYWORDS) + r")\b",
@@ -58,7 +69,7 @@ def assert_read_only(statement: str) -> None:
     stripped = _BLOCK_COMMENT_PATTERN.sub(" ", statement)
     stripped = _COMMENT_PATTERN.sub(" ", stripped)
     stripped = _STRING_PATTERN.sub(" ", stripped)
-    match = _MUTATION_PATTERN.search(stripped)
+    match = _MUTATION_PATTERN.search(stripped) or _FUNCTION_CALL_PATTERN.search(stripped)
     if match is not None:
         raise MutatingStatementError(
             f"refusing to send a mutating statement to the store: found {match.group(0)!r}"

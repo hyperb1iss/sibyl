@@ -40,16 +40,22 @@ events = _load("events")
 join = _load("join")
 prior = _load("prior")
 store = _load("store")
+age = _load("age")
+extract = _load("extract")
+whatif = _load("whatif")
 
 BASE = datetime(2026, 7, 15, 16, 52, 42, tzinfo=UTC)
 ORG = "e7b94a25-dd4c-4fb8-b300-0c75e83998e2"
 
 # The default fixture page serves three items and cites the middle one.
+PAGE_ITEMS = 3
 TWO_SESSIONS = 2
 UNCITED_IN_PAGE = 2
 RANK_OF_SECOND = 2
 RANK_OF_THIRD = 3
 NULL_TRIALS = 25
+P95_OF_200 = 190
+LONE_VALUE = 5.0
 
 
 def _event(
@@ -328,7 +334,7 @@ def test_attribute_feedback_ignores_exposure_that_postdates_the_citation() -> No
     ]
     sessions = join.group_exposure_sessions(rows)
     attributions = join.attribute_feedback(sessions, rows)
-    assert attributions[0].outcome == join.OUTSIDE_WINDOW
+    assert attributions[0].outcome == join.NO_PRECEDING_EXPOSURE
 
 
 def test_attribution_window_sweep_is_monotone() -> None:
@@ -634,7 +640,7 @@ def test_rerank_keeps_baseline_order_when_no_item_has_history() -> None:
     assert outcomes[0].rank_delta == 0
 
 
-def test_rerank_demotes_an_item_carrying_misled_history() -> None:
+def test_rerank_promotes_past_an_item_carrying_misled_history() -> None:
     history = [
         _event(
             signal=events.MISLED,
@@ -647,6 +653,8 @@ def test_rerank_demotes_an_item_carrying_misled_history() -> None:
     labeled, rows = _labeled_fixture(cited="b")
     counts = prior.PointInTimeCounts([*history, *rows])
     outcomes = prior.rerank_session_kind(labeled, events.GRAPH_ENTITY, counts)
+    # "a" carries the misled history and is demoted, which lifts the cited "b" past it.
+    assert outcomes[0].item_id == "b"
     assert outcomes[0].reweighted_rank < outcomes[0].baseline_rank
 
 
@@ -835,3 +843,328 @@ def test_extract_result_treats_a_null_result_as_empty() -> None:
 def test_extract_result_rejects_a_malformed_envelope() -> None:
     with pytest.raises(RuntimeError, match="unexpected SurrealDB response shape"):
         store.extract_result({"status": "OK"})
+
+
+# ---------------------------------------------------------------------------
+# Verdict adjudication (whatif.py)
+# ---------------------------------------------------------------------------
+
+
+def _arm(name: str, mrr: float, ci: tuple[float, float]) -> dict[str, Any]:
+    return {
+        "name": name,
+        "summary": {"mrr_delta": mrr},
+        "bootstrap_ci_vs_zero": {"ci_low": ci[0], "ci_high": ci[1]},
+    }
+
+
+NULL_FIXTURE = {"mean": -0.06, "stdev": 0.02, "p95_abs": 0.09}
+
+
+def test_adjudicate_calls_a_straddling_interval_indistinguishable_from_zero() -> None:
+    """The observed win here is far above the null mean yet still not a win vs zero.
+
+    This is the exact pair of facts that a one-sided permutation null misreads:
+    the arm beats a same-strength random prior by 3+ sigma while its own interval
+    contains zero, so it carries information and is not worth shipping.
+    """
+    verdicts = whatif.adjudicate([_arm("citation_only", 0.0037, (-0.037, 0.043))], NULL_FIXTURE)
+    assert verdicts[0]["verdict"] == "indistinguishable_from_zero"
+    assert verdicts[0]["beats_random_prior_of_equal_strength"] is True
+
+
+def test_adjudicate_reports_harm_when_the_interval_sits_below_zero() -> None:
+    verdicts = whatif.adjudicate(
+        [_arm("production_retention_shape", -0.1439, (-0.19, -0.098))], NULL_FIXTURE
+    )
+    assert verdicts[0]["verdict"] == "harms_baseline"
+    assert verdicts[0]["beats_random_prior_of_equal_strength"] is False
+
+
+def test_adjudicate_reports_improvement_only_when_the_interval_clears_zero() -> None:
+    verdicts = whatif.adjudicate([_arm("hypothetical", 0.08, (0.02, 0.14))], NULL_FIXTURE)
+    assert verdicts[0]["verdict"] == "improves_on_baseline"
+
+
+def test_adjudicate_marks_an_arm_without_an_interval_as_no_data() -> None:
+    arm = {"name": "empty", "summary": {"mrr_delta": None}, "bootstrap_ci_vs_zero": {}}
+    assert whatif.adjudicate([arm], NULL_FIXTURE)[0]["verdict"] == "no_data"
+
+
+# ---------------------------------------------------------------------------
+# Summary assembly (extract.py)
+# ---------------------------------------------------------------------------
+
+
+def _summary_fixture() -> dict[str, Any]:
+    rows = [
+        *_exposure_page(["a", "b", "c"]),
+        _event(
+            signal=events.CITATION,
+            item_id="b",
+            offset_us=1_000_000,
+            surface="cli_cite",
+            session_key="cli_cite:x",
+        ),
+    ]
+    sessions = join.group_exposure_sessions(rows)
+    attributions = join.attribute_feedback(sessions, rows)
+    origins = join.flag_eval_suspect_sessions(sessions)
+    labeled = join.build_labeled_sessions(sessions, attributions, origins)
+    return extract.build_summary(
+        rows,
+        sessions,
+        attributions,
+        labeled,
+        target="fixture",
+        window_seconds=join.DEFAULT_ATTRIBUTION_WINDOW_SECONDS,
+        burst_threshold=join.DEFAULT_BURST_THRESHOLD,
+        burst_window_seconds=join.DEFAULT_BURST_WINDOW_SECONDS,
+    )
+
+
+def test_build_summary_reports_the_headline_query_recoverability() -> None:
+    """The "0 of N exposures carry a query" headline comes from here, so pin it."""
+    summary = _summary_fixture()
+    assert summary["query_recoverability"]["exposure"]["with_value"] == 0
+    assert summary["query_recoverability"]["exposure"]["events"] == PAGE_ITEMS
+    assert summary["query_recoverability"]["exposure"]["share"] == pytest.approx(0.0)
+    assert summary["query_recoverability"]["observed_exposure_metadata_keys"] == {}
+
+
+def test_build_summary_counts_labels_and_the_dead_join() -> None:
+    summary = _summary_fixture()
+    assert summary["events"]["total"] == PAGE_ITEMS + 1
+    assert summary["session_key_join"]["session_key_join_viable"] is False
+    assert summary["labels"]["positive_labels"] == 1
+    assert summary["sessions"]["contrastive_sessions"] == 1
+    assert summary["attribution"]["outcomes"]["attributed"] == 1
+
+
+def test_metadata_key_coverage_finds_a_present_key() -> None:
+    rows = [
+        _event(signal=events.EXPOSURE, item_id="a", metadata={"query": "hello"}),
+        _event(signal=events.EXPOSURE, item_id="b", offset_us=2),
+    ]
+    coverage = extract.metadata_key_coverage(rows, events.QUERY_METADATA_KEYS)
+    assert coverage == {"events": 2, "with_value": 1, "share": 0.5}
+
+
+def test_observed_metadata_keys_counts_every_key() -> None:
+    rows = [
+        _event(signal=events.EXPOSURE, item_id="a", metadata={"response_id": "a"}),
+        _event(
+            signal=events.EXPOSURE,
+            item_id="b",
+            offset_us=2,
+            metadata={"response_id": "b", "source_surface": "search"},
+        ),
+    ]
+    assert extract.observed_metadata_keys(rows) == {"response_id": 2, "source_surface": 1}
+
+
+# ---------------------------------------------------------------------------
+# True-age lookup (age.py)
+# ---------------------------------------------------------------------------
+
+
+def test_graph_namespace_strips_dashes_and_lowercases() -> None:
+    assert (
+        age.graph_namespace("E7B94A25-DD4C-4FB8-B300-0C75E83998E2")
+        == "org_e7b94a25dd4c4fb8b3000c75e83998e2"
+    )
+
+
+def test_fetch_created_at_routes_each_kind_to_its_own_table() -> None:
+    """Graph entities live in the org namespace, raw captures in content."""
+
+    class _Recorder:
+        def __init__(self, rows: list[dict[str, Any]]) -> None:
+            self.rows = rows
+            self.statements: list[str] = []
+
+        def query(self, statement: str) -> list[dict[str, Any]]:
+            self.statements.append(statement)
+            return self.rows
+
+    graph = _Recorder([{"uuid": "g1", "created_at": "2026-07-01T00:00:00Z"}])
+    content = _Recorder([{"uuid": "r1", "created_at": "2026-07-02T00:00:00Z"}])
+    resolved = age.fetch_created_at(
+        "e7b94a25-dd4c-4fb8-b300-0c75e83998e2",
+        [(events.GRAPH_ENTITY, "g1"), (events.RAW_CAPTURE, "r1")],
+        graph_store=graph,
+        content_store=content,
+    )
+    assert resolved[(events.GRAPH_ENTITY, "g1")] == datetime(2026, 7, 1, tzinfo=UTC)
+    assert resolved[(events.RAW_CAPTURE, "r1")] == datetime(2026, 7, 2, tzinfo=UTC)
+    assert "FROM entity" in graph.statements[0]
+    assert "FROM raw_captures" in content.statements[0]
+
+
+def test_fetch_created_at_omits_items_it_cannot_resolve() -> None:
+    class _Empty:
+        def query(self, statement: str) -> list[dict[str, Any]]:
+            return []
+
+    resolved = age.fetch_created_at(
+        "e7b94a25-dd4c-4fb8-b300-0c75e83998e2",
+        [(events.GRAPH_ENTITY, "missing")],
+        graph_store=_Empty(),
+        content_store=_Empty(),
+    )
+    assert resolved == {}
+
+
+def test_fetch_created_at_refuses_a_quoted_item_id() -> None:
+    """An id carrying a quote is rejected rather than interpolated."""
+
+    class _Unused:
+        def query(self, statement: str) -> list[dict[str, Any]]:
+            raise AssertionError("should not be reached")
+
+    with pytest.raises(ValueError, match="refusing to interpolate"):
+        age.fetch_created_at(
+            "e7b94a25-dd4c-4fb8-b300-0c75e83998e2",
+            [(events.GRAPH_ENTITY, "a' OR true --")],
+            graph_store=_Unused(),
+            content_store=_Unused(),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Age standardization and the against-zero interval
+# ---------------------------------------------------------------------------
+
+
+def test_age_standardization_separates_an_age_gap_from_a_residual_gap() -> None:
+    """A pure age effect must standardize away; a within-band gap must survive.
+
+    Both candidates carry the same exposure count per age here, and the uncited
+    one is simply older, so holding age fixed has to collapse the ratio to 1.
+    """
+    history = [
+        _event(
+            signal=events.EXPOSURE,
+            item_id=item_id,
+            offset_us=-1_000_000 + index,
+            session_key="search:earlier",
+        )
+        for index, item_id in enumerate(["a", "b", "c"])
+    ]
+    labeled, rows = _labeled_fixture(cited="b")
+    counts = prior.PointInTimeCounts([*history, *rows])
+    created = {
+        (events.GRAPH_ENTITY, item_id): BASE - timedelta(days=20) for item_id in ("a", "b", "c")
+    }
+    contrast = prior.describe_candidate_priors([labeled], counts, created)
+    standardized = contrast["age_standardized"]
+    assert standardized["resolved"] is True
+    assert standardized["cited_exposures_mean"] == pytest.approx(1.0)
+    # One shared age band and one prior exposure each, so no gap survives.
+    assert standardized["age_standardized_ratio"] == pytest.approx(1.0)
+
+
+def test_age_standardization_reports_unresolved_without_timestamps() -> None:
+    labeled, rows = _labeled_fixture()
+    contrast = prior.describe_candidate_priors([labeled], prior.PointInTimeCounts(rows))
+    assert contrast["age_standardized"]["resolved"] is False
+
+
+def test_bootstrap_interval_brackets_a_zero_effect() -> None:
+    labeled, rows = _labeled_fixture(cited="c")
+    outcomes = prior.rerank_session_kind(
+        labeled, events.GRAPH_ENTITY, prior.PointInTimeCounts(rows)
+    )
+    interval = prior.bootstrap_ci_vs_zero(outcomes, resamples=200, seed=3)
+    assert interval["observed"] == pytest.approx(0.0)
+    assert interval["excludes_zero"] is False
+
+
+def test_bootstrap_interval_is_empty_without_outcomes() -> None:
+    assert prior.bootstrap_ci_vs_zero(())["resamples"] == 0
+
+
+def test_nearest_rank_percentile_uses_the_nearest_rank() -> None:
+    values = list(range(1, 201))
+    assert prior._nearest_rank_percentile(values, 0.95) == P95_OF_200
+    assert prior._nearest_rank_percentile([LONE_VALUE], 0.95) == LONE_VALUE
+
+
+# ---------------------------------------------------------------------------
+# Interleaved sessions
+# ---------------------------------------------------------------------------
+
+
+def _interleaved_session() -> Any:
+    """A session whose kinds alternate, so timestamp order is not served order."""
+    rows = [
+        _event(signal=events.EXPOSURE, item_id="g1", offset_us=0),
+        _event(signal=events.EXPOSURE, item_id="r1", item_kind=events.RAW_CAPTURE, offset_us=2),
+        _event(signal=events.EXPOSURE, item_id="g2", offset_us=4),
+        _event(
+            signal=events.CITATION,
+            item_id="g1",
+            offset_us=1_000_000,
+            surface="cli_cite",
+            session_key="cli_cite:x",
+        ),
+    ]
+    sessions = join.group_exposure_sessions(rows)
+    attributions = join.attribute_feedback(sessions, rows)
+    labeled = join.build_labeled_sessions(
+        sessions, attributions, join.flag_eval_suspect_sessions(sessions)
+    )
+    return labeled[0], rows
+
+
+def test_interleaved_kinds_are_detected() -> None:
+    labeled, _ = _interleaved_session()
+    assert labeled.session.is_mixed_kind
+    assert labeled.session.has_contiguous_kind_blocks is False
+
+
+def test_run_whatif_drops_interleaved_sessions_by_default() -> None:
+    """Their recovered rank is not a served order, so their delta is meaningless."""
+    labeled, rows = _interleaved_session()
+    counts = prior.PointInTimeCounts(rows)
+    assert prior.run_whatif([labeled], counts) == ()
+    assert prior.run_whatif([labeled], counts, require_contiguous_kinds=False) != ()
+
+
+def test_rank_recovery_audit_names_the_interleaved_sessions() -> None:
+    _, rows = _interleaved_session()
+    exposures = [row for row in rows if row.signal_type == events.EXPOSURE]
+    audit = join.rank_recovery_audit(exposures, join.group_exposure_sessions(rows))
+    assert audit["mixed_kind_sessions_with_interleaved_kinds"] == 1
+    assert audit["interleaved_session_keys"] == ["search:abc"]
+
+
+def test_attribution_distinguishes_a_later_exposure_from_a_stale_one() -> None:
+    later = [
+        _event(
+            signal=events.CITATION,
+            item_id="a",
+            offset_us=0,
+            surface="cli_cite",
+            session_key="cli_cite:x",
+        ),
+        _event(signal=events.EXPOSURE, item_id="a", offset_us=5_000_000),
+    ]
+    sessions = join.group_exposure_sessions(later)
+    assert join.attribute_feedback(sessions, later)[0].outcome == join.NO_PRECEDING_EXPOSURE
+
+    stale = [
+        *_exposure_page(["a"]),
+        _event(
+            signal=events.CITATION,
+            item_id="a",
+            offset_us=200_000_000,
+            surface="cli_cite",
+            session_key="cli_cite:y",
+        ),
+    ]
+    sessions = join.group_exposure_sessions(stale)
+    assert (
+        join.attribute_feedback(sessions, stale, window_seconds=60.0)[0].outcome
+        == join.OUTSIDE_WINDOW
+    )

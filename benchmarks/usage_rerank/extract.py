@@ -347,6 +347,10 @@ def print_report(summary: dict[str, Any]) -> None:
     print(
         f"mixed-kind sessions              {rank['mixed_kind_sessions']} (global rank unrecoverable)"
     )
+    print(
+        f"  of those, kinds interleave in  {rank['mixed_kind_sessions_with_interleaved_kinds']}"
+        " (recovered rank untrustworthy, dropped from the what-if)"
+    )
 
     sessions = summary["sessions"]
     attribution = summary["attribution"]

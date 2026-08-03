@@ -25,6 +25,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import paths
+from age import fetch_created_at
 from extract import load_events
 from join import (
     DEFAULT_ATTRIBUTION_WINDOW_SECONDS,
@@ -42,6 +43,7 @@ from prior import (
     RETRIEVAL_WEIGHT,
     PointInTimeCounts,
     RerankOutcome,
+    bootstrap_ci_vs_zero,
     describe_candidate_priors,
     permutation_null,
     run_whatif,
@@ -90,7 +92,8 @@ def print_report(report: dict[str, Any]) -> None:
     print("\n-- permutation null (shuffled prior, same strength) --")
     print(f"trials {null['trials']}  mean {_fmt(null['mean'])}  stdev {null['stdev']}")
     print(f"95th pct |MRR delta|     {null['p95_abs']}")
-    print("  an observed |MRR delta| below that is indistinguishable from a meaningless prior")
+    print("  this measures distance from a same-strength random prior, not from zero:")
+    print("  the null sits below zero because any reordering degrades a good baseline")
     contrast = report["candidate_prior_contrast"]
     cited_group = contrast["cited"]
     uncited_group = contrast["uncited"]
@@ -108,14 +111,35 @@ def print_report(report: dict[str, Any]) -> None:
                 group["mature_prior_exposures_mean"],
             )
         )
-    print("  read the count gap and the per-day rate together: retrieval_count grows with age")
+    standardized = contrast.get("age_standardized") or {}
+    if standardized.get("resolved"):
+        print(
+            "  true age (median days): cited {} vs uncited {}".format(
+                standardized["cited_true_age_days_median"],
+                standardized["uncited_true_age_days_median"],
+            )
+        )
+        print(
+            "  exposures, age-standardized: cited {} vs uncited {} (raw {}) => {}x residual".format(
+                standardized["cited_exposures_mean"],
+                standardized["uncited_exposures_mean_age_standardized"],
+                standardized["uncited_exposures_mean_raw"],
+                standardized["age_standardized_ratio"],
+            )
+        )
+    else:
+        print("  true-age standardization unavailable: {}".format(standardized.get("reason")))
 
-    print("\n-- verdict per arm --")
+    print("\n-- verdict per arm (vs the served baseline, paired bootstrap) --")
     for verdict in report["verdicts"]:
         if verdict.get("verdict") == "no_data":
             print(f"{verdict['name']:<28} no_data")
             continue
-        print(f"{verdict['name']:<28}{verdict['verdict']:<32}z_vs_null={verdict['z_vs_null_mean']}")
+        print(
+            f"{verdict['name']:<28}{verdict['verdict']:<30}"
+            f"CI [{verdict['ci_low']:+.4f}, {verdict['ci_high']:+.4f}]  "
+            f"beats_random_prior={verdict['beats_random_prior_of_equal_strength']}"
+        )
     print()
 
 
@@ -124,44 +148,49 @@ def _fmt(value: float | None) -> str:
 
 
 def adjudicate(arms: Sequence[dict[str, Any]], null: dict[str, Any]) -> list[dict[str, Any]]:
-    """Score each arm against the noise floor.
+    """Score each arm on the question the verdict actually asks.
 
-    Two comparisons matter and they answer different questions. Against the
-    served baseline: did the reweighting help at all, and by more than a
-    meaningless prior of the same strength would have moved things. Against the
-    null mean: does the prior carry information, even if it is not enough to
-    beat the current ranker. An arm can pass the second and fail the first,
-    which is the difference between "the signal is real" and "ship it".
+    "Did this beat the served baseline" is a claim about zero, so it is settled by
+    the arm's own paired bootstrap confidence interval. The permutation null
+    answers a different and weaker question, whether the prior beat a random
+    prior of the same strength, and its distribution sits far below zero because
+    any reordering degrades a good baseline. Treating that one-sided null as a
+    two-sided floor around zero is what makes an arm look "indistinguishable from
+    noise" while simultaneously sitting three standard deviations above the null,
+    which is a contradiction rather than a finding.
     """
-    p95 = null.get("p95_abs")
     null_mean = null.get("mean")
     null_stdev = null.get("stdev") or 0.0
     verdicts: list[dict[str, Any]] = []
     for arm in arms:
-        observed = arm["summary"]["mrr_delta"]
-        if observed is None or p95 is None:
+        summary = arm["summary"]
+        observed = summary["mrr_delta"]
+        interval = arm.get("bootstrap_ci_vs_zero") or {}
+        ci_low = interval.get("ci_low")
+        ci_high = interval.get("ci_high")
+        if observed is None or ci_low is None or ci_high is None:
             verdicts.append({"name": arm["name"], "verdict": "no_data"})
             continue
-        above_floor = abs(observed) > p95
+        if ci_low > 0.0:
+            verdict = "improves_on_baseline"
+        elif ci_high < 0.0:
+            verdict = "harms_baseline"
+        else:
+            verdict = "indistinguishable_from_zero"
         z_vs_null = (
             round((observed - null_mean) / null_stdev, 3)
             if null_mean is not None and null_stdev
             else None
         )
-        if observed > 0 and above_floor:
-            verdict = "improves_above_noise"
-        elif observed < 0 and above_floor:
-            verdict = "harms_above_noise"
-        else:
-            verdict = "indistinguishable_from_noise"
         verdicts.append(
             {
                 "name": arm["name"],
                 "mrr_delta": observed,
-                "null_p95_abs": p95,
-                "exceeds_noise_floor": above_floor,
-                "z_vs_null_mean": z_vs_null,
+                "ci_low": ci_low,
+                "ci_high": ci_high,
                 "verdict": verdict,
+                "beats_random_prior_of_equal_strength": (z_vs_null is not None and z_vs_null > 2.0),
+                "z_vs_null_mean": z_vs_null,
             }
         )
     return verdicts
@@ -215,6 +244,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Permutation trials used to build the MRR-delta noise floor.",
     )
     parser.add_argument(
+        "--bootstrap-resamples",
+        type=int,
+        default=5000,
+        help="Paired-bootstrap resamples used for the against-zero interval.",
+    )
+    parser.add_argument(
+        "--no-true-age",
+        action="store_true",
+        help="Skip the graph/content lookup of creation timestamps.",
+    )
+    parser.add_argument(
         "--null-seed",
         type=int,
         default=20260803,
@@ -263,6 +303,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "misled": misled_weight,
                 },
                 "summary": summarize_outcomes(outcomes),
+                "bootstrap_ci_vs_zero": bootstrap_ci_vs_zero(
+                    outcomes, resamples=args.bootstrap_resamples, seed=args.null_seed
+                ),
                 "outcomes": outcome_records(outcomes),
             }
         )
@@ -290,7 +333,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         seed=args.null_seed,
     )
     report["verdicts"] = adjudicate(arms, report["permutation_null"])
-    report["candidate_prior_contrast"] = describe_candidate_priors(labeled_sessions, counts)
+    created_at_by_item: dict[tuple[str, str], Any] = {}
+    if not args.no_true_age:
+        candidate_keys = {
+            item.key
+            for labeled in labeled_sessions
+            for item in labeled.session.items
+            if labeled.is_contrastive(item.item_kind)
+        }
+        try:
+            created_at_by_item = fetch_created_at(rows[0].organization_id, candidate_keys)
+        except Exception as exc:
+            print(f"true-age lookup skipped ({type(exc).__name__}: {exc})")
+    report["candidate_prior_contrast"] = describe_candidate_priors(
+        labeled_sessions, counts, created_at_by_item or None
+    )
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)

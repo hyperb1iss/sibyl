@@ -11,7 +11,8 @@
     "outcomes": {
       "attributed": 200,
       "item_never_exposed": 5,
-      "outside_window": 12
+      "no_preceding_exposure": 8,
+      "outside_window": 4
     },
     "window_sweep_attributed": {
       "21600s": 197,
@@ -56,7 +57,7 @@
     "projects": 20,
     "total": 14740
   },
-  "generated_at": "2026-08-03T18:41:15.331950+00:00",
+  "generated_at": "2026-08-03T19:04:47.492677+00:00",
   "items": {
     "cited_and_exposed": 151,
     "cited_never_exposed": 3,
@@ -107,8 +108,14 @@
       "ordinal"
     ],
     "global_rank_recoverable": false,
+    "interleaved_session_keys": [
+      "context_pack:a8ec3ad1e742c79e9979f705",
+      "context_pack:c73de246a5b9c688dd2741c5",
+      "context_pack:d11cb242c2766405eccb63de"
+    ],
     "mixed_kind_sessions": 631,
     "mixed_kind_sessions_with_contiguous_kind_blocks": 628,
+    "mixed_kind_sessions_with_interleaved_kinds": 3,
     "recorded_rank": {
       "events": 14523,
       "share": 0.0,

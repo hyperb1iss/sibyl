@@ -1,6 +1,16 @@
 {
   "arms": [
     {
+      "bootstrap_ci_vs_zero": {
+        "ci_high": 0.043486,
+        "ci_low": -0.037235,
+        "confidence": 0.95,
+        "excludes_zero": false,
+        "observed": 0.003658,
+        "resamples": 5000,
+        "seed": 20260803,
+        "share_at_or_below_zero": 0.4412
+      },
       "name": "citation_only",
       "outcomes": [
         {
@@ -2359,21 +2369,6 @@
           "source_surface": "context_pack"
         },
         {
-          "baseline_rank": 7,
-          "candidate_count": 8,
-          "item_id": "error_pattern_4a4bbc7cb899",
-          "item_kind": "graph_entity",
-          "origin": "interactive",
-          "prior_citation_count": 0,
-          "prior_misled_count": 0,
-          "prior_multiplier": 1.0,
-          "prior_retrieval_count": 1,
-          "rank_delta": -1,
-          "reweighted_rank": 8,
-          "session_key": "context_pack:a8ec3ad1e742c79e9979f705",
-          "source_surface": "context_pack"
-        },
-        {
           "baseline_rank": 3,
           "candidate_count": 8,
           "item_id": "decision_024f09dbeb0f",
@@ -2810,18 +2805,18 @@
         }
       ],
       "summary": {
-        "baseline_mrr": 0.446783,
-        "cited_items_evaluated": 187,
+        "baseline_mrr": 0.448417,
+        "cited_items_evaluated": 186,
         "improved": 37,
-        "informative_prior_share": 0.73262,
+        "informative_prior_share": 0.731183,
         "max_rank_delta": 7,
-        "mean_rank_delta": 0.0267,
-        "median_rank_delta": 0,
+        "mean_rank_delta": 0.0323,
+        "median_rank_delta": 0.0,
         "min_rank_delta": -4,
-        "mrr_delta": 0.003543,
-        "reweighted_mrr": 0.450326,
+        "mrr_delta": 0.003658,
+        "reweighted_mrr": 0.452075,
         "unchanged": 87,
-        "worsened": 63
+        "worsened": 62
       },
       "weights": {
         "citation": 0.12,
@@ -2830,6 +2825,16 @@
       }
     },
     {
+      "bootstrap_ci_vs_zero": {
+        "ci_high": -0.098007,
+        "ci_low": -0.190835,
+        "confidence": 0.95,
+        "excludes_zero": true,
+        "observed": -0.143949,
+        "resamples": 5000,
+        "seed": 20260803,
+        "share_at_or_below_zero": 1.0
+      },
       "name": "production_retention_shape",
       "outcomes": [
         {
@@ -5188,21 +5193,6 @@
           "source_surface": "context_pack"
         },
         {
-          "baseline_rank": 7,
-          "candidate_count": 8,
-          "item_id": "error_pattern_4a4bbc7cb899",
-          "item_kind": "graph_entity",
-          "origin": "interactive",
-          "prior_citation_count": 0,
-          "prior_misled_count": 0,
-          "prior_multiplier": 1.02,
-          "prior_retrieval_count": 1,
-          "rank_delta": 0,
-          "reweighted_rank": 7,
-          "session_key": "context_pack:a8ec3ad1e742c79e9979f705",
-          "source_surface": "context_pack"
-        },
-        {
           "baseline_rank": 3,
           "candidate_count": 8,
           "item_id": "decision_024f09dbeb0f",
@@ -5639,17 +5629,17 @@
         }
       ],
       "summary": {
-        "baseline_mrr": 0.446783,
-        "cited_items_evaluated": 187,
+        "baseline_mrr": 0.448417,
+        "cited_items_evaluated": 186,
         "improved": 37,
-        "informative_prior_share": 0.73262,
+        "informative_prior_share": 0.731183,
         "max_rank_delta": 16,
-        "mean_rank_delta": -1.0267,
-        "median_rank_delta": -1,
+        "mean_rank_delta": -1.0323,
+        "median_rank_delta": -1.0,
         "min_rank_delta": -7,
-        "mrr_delta": -0.143179,
-        "reweighted_mrr": 0.303604,
-        "unchanged": 31,
+        "mrr_delta": -0.143949,
+        "reweighted_mrr": 0.304468,
+        "unchanged": 30,
         "worsened": 119
       },
       "weights": {
@@ -5659,6 +5649,16 @@
       }
     },
     {
+      "bootstrap_ci_vs_zero": {
+        "ci_high": -0.109749,
+        "ci_low": -0.203875,
+        "confidence": 0.95,
+        "excludes_zero": true,
+        "observed": -0.155935,
+        "resamples": 5000,
+        "seed": 20260803,
+        "share_at_or_below_zero": 1.0
+      },
       "name": "retrieval_heavy",
       "outcomes": [
         {
@@ -8017,21 +8017,6 @@
           "source_surface": "context_pack"
         },
         {
-          "baseline_rank": 7,
-          "candidate_count": 8,
-          "item_id": "error_pattern_4a4bbc7cb899",
-          "item_kind": "graph_entity",
-          "origin": "interactive",
-          "prior_citation_count": 0,
-          "prior_misled_count": 0,
-          "prior_multiplier": 1.06,
-          "prior_retrieval_count": 1,
-          "rank_delta": 0,
-          "reweighted_rank": 7,
-          "session_key": "context_pack:a8ec3ad1e742c79e9979f705",
-          "source_surface": "context_pack"
-        },
-        {
           "baseline_rank": 3,
           "candidate_count": 8,
           "item_id": "decision_024f09dbeb0f",
@@ -8468,17 +8453,17 @@
         }
       ],
       "summary": {
-        "baseline_mrr": 0.446783,
-        "cited_items_evaluated": 187,
+        "baseline_mrr": 0.448417,
+        "cited_items_evaluated": 186,
         "improved": 36,
-        "informative_prior_share": 0.73262,
+        "informative_prior_share": 0.731183,
         "max_rank_delta": 17,
-        "mean_rank_delta": -1.1711,
-        "median_rank_delta": -1,
+        "mean_rank_delta": -1.1774,
+        "median_rank_delta": -1.0,
         "min_rank_delta": -8,
-        "mrr_delta": -0.155101,
-        "reweighted_mrr": 0.291682,
-        "unchanged": 29,
+        "mrr_delta": -0.155935,
+        "reweighted_mrr": 0.292482,
+        "unchanged": 28,
         "worsened": 122
       },
       "weights": {
@@ -8488,6 +8473,16 @@
       }
     },
     {
+      "bootstrap_ci_vs_zero": {
+        "ci_high": -0.080868,
+        "ci_low": -0.178081,
+        "confidence": 0.95,
+        "excludes_zero": true,
+        "observed": -0.128712,
+        "resamples": 5000,
+        "seed": 20260803,
+        "share_at_or_below_zero": 1.0
+      },
       "name": "citation_heavy",
       "outcomes": [
         {
@@ -10846,21 +10841,6 @@
           "source_surface": "context_pack"
         },
         {
-          "baseline_rank": 7,
-          "candidate_count": 8,
-          "item_id": "error_pattern_4a4bbc7cb899",
-          "item_kind": "graph_entity",
-          "origin": "interactive",
-          "prior_citation_count": 0,
-          "prior_misled_count": 0,
-          "prior_multiplier": 1.02,
-          "prior_retrieval_count": 1,
-          "rank_delta": 0,
-          "reweighted_rank": 7,
-          "session_key": "context_pack:a8ec3ad1e742c79e9979f705",
-          "source_surface": "context_pack"
-        },
-        {
           "baseline_rank": 3,
           "candidate_count": 8,
           "item_id": "decision_024f09dbeb0f",
@@ -11297,17 +11277,17 @@
         }
       ],
       "summary": {
-        "baseline_mrr": 0.446783,
-        "cited_items_evaluated": 187,
+        "baseline_mrr": 0.448417,
+        "cited_items_evaluated": 186,
         "improved": 40,
-        "informative_prior_share": 0.73262,
+        "informative_prior_share": 0.731183,
         "max_rank_delta": 16,
-        "mean_rank_delta": -0.861,
-        "median_rank_delta": -1,
+        "mean_rank_delta": -0.8656,
+        "median_rank_delta": -1.0,
         "min_rank_delta": -7,
-        "mrr_delta": -0.128024,
-        "reweighted_mrr": 0.318759,
-        "unchanged": 32,
+        "mrr_delta": -0.128712,
+        "reweighted_mrr": 0.319705,
+        "unchanged": 31,
         "worsened": 115
       },
       "weights": {
@@ -11319,47 +11299,132 @@
   ],
   "attribution_window_seconds": 86400.0,
   "candidate_prior_contrast": {
+    "age_standardized": {
+      "age_standardized_ratio": 2.176,
+      "bands": [
+        {
+          "cited_mean": 2.855,
+          "cited_n": 62,
+          "from_days": 0.0,
+          "ratio": 2.639,
+          "to_days": 0.5,
+          "uncited_mean": 7.533,
+          "uncited_n": 92
+        },
+        {
+          "cited_mean": 8.16,
+          "cited_n": 25,
+          "from_days": 0.5,
+          "ratio": 3.445,
+          "to_days": 1.0,
+          "uncited_mean": 28.113,
+          "uncited_n": 71
+        },
+        {
+          "cited_mean": 7.226,
+          "cited_n": 31,
+          "from_days": 1.0,
+          "ratio": 3.233,
+          "to_days": 3.0,
+          "uncited_mean": 23.358,
+          "uncited_n": 148
+        },
+        {
+          "cited_mean": 12.957,
+          "cited_n": 23,
+          "from_days": 3.0,
+          "ratio": 2.055,
+          "to_days": 7.0,
+          "uncited_mean": 26.626,
+          "uncited_n": 174
+        },
+        {
+          "cited_mean": 16.524,
+          "cited_n": 21,
+          "from_days": 7.0,
+          "ratio": 1.143,
+          "to_days": 14.0,
+          "uncited_mean": 18.884,
+          "uncited_n": 121
+        },
+        {
+          "cited_mean": 8.625,
+          "cited_n": 8,
+          "from_days": 14.0,
+          "ratio": 1.008,
+          "to_days": 30.0,
+          "uncited_mean": 8.692,
+          "uncited_n": 26
+        },
+        {
+          "cited_mean": 10.867,
+          "cited_n": 15,
+          "from_days": 30.0,
+          "ratio": 1.549,
+          "to_days": null,
+          "uncited_mean": 16.829,
+          "uncited_n": 380
+        }
+      ],
+      "cited_exposures_mean": 8.011,
+      "cited_resolved": 185,
+      "cited_true_age_days_median": 1.237,
+      "raw_ratio": 2.428,
+      "resolved": true,
+      "uncited_exposures_mean_age_standardized": 17.432,
+      "uncited_exposures_mean_raw": 19.452,
+      "uncited_resolved": 1012,
+      "uncited_true_age_days_median": 7.746
+    },
     "cited": {
-      "candidates": 187,
-      "censored_share": 0.0428,
-      "exposures_per_day_mean": 6.264,
-      "exposures_per_day_median": 2.853,
-      "exposures_per_day_sample": 84,
-      "fresh_share": 0.5508,
-      "history_days_mean": 2.557,
-      "history_days_median": 0.842,
+      "candidates": 186,
+      "censored_share": 0.043,
+      "exposures_per_day_mean": 6.337,
+      "exposures_per_day_median": 2.969,
+      "exposures_per_day_retained_share": 0.4462,
+      "exposures_per_day_sample": 83,
+      "fresh_share": 0.5538,
+      "history_days_mean": 2.539,
+      "history_days_median": 0.832,
       "mature_prior_exposures_mean": 23.76,
       "mature_sample": 25,
-      "prior_citations_mean": 0.3904,
-      "prior_exposures_mean": 7.93,
-      "prior_exposures_median": 2,
-      "with_prior_citation_share": 0.2781
+      "prior_citations_mean": 0.3925,
+      "prior_exposures_mean": 7.968,
+      "prior_exposures_median": 2.0,
+      "true_age_days_mean": 7.305,
+      "true_age_days_median": 1.237,
+      "true_age_resolved": 185,
+      "with_prior_citation_share": 0.2796
     },
     "fresh_history_days": 0.5,
     "mature_history_days": 5.0,
     "note": "retrieval_count grows with item age, so the raw count gap and the age-normalized rate must be read together. censored_share is the fraction whose history is understated because the item was already present when event recording began; a higher censored_share on the uncited group means the measured age gap is conservative.",
     "uncited": {
-      "candidates": 1020,
-      "censored_share": 0.0941,
-      "exposures_per_day_mean": 9.32,
-      "exposures_per_day_median": 2.933,
-      "exposures_per_day_sample": 771,
-      "fresh_share": 0.2441,
-      "history_days_mean": 4.403,
-      "history_days_median": 3.336,
-      "mature_prior_exposures_mean": 31.108,
-      "mature_sample": 353,
-      "prior_citations_mean": 0.2422,
-      "prior_exposures_mean": 19.495,
-      "prior_exposures_median": 8.0,
-      "with_prior_citation_share": 0.1775
+      "candidates": 1013,
+      "censored_share": 0.0948,
+      "exposures_per_day_mean": 9.303,
+      "exposures_per_day_median": 2.954,
+      "exposures_per_day_retained_share": 0.7552,
+      "exposures_per_day_sample": 765,
+      "fresh_share": 0.2448,
+      "history_days_mean": 4.386,
+      "history_days_median": 3.319,
+      "mature_prior_exposures_mean": 30.983,
+      "mature_sample": 349,
+      "prior_citations_mean": 0.2419,
+      "prior_exposures_mean": 19.435,
+      "prior_exposures_median": 8,
+      "true_age_days_mean": 40.802,
+      "true_age_days_median": 7.746,
+      "true_age_resolved": 1012,
+      "with_prior_citation_share": 0.1767
     }
   },
   "contrastive_sessions": 124,
   "events": 14740,
   "events_path": "/Users/bliss/dev/worktrees/sibyl/nova/p5-usage-rerank-harness/benchmarks/usage_rerank/out/usage_events.jsonl",
   "exposure_sessions": 923,
-  "generated_at": "2026-08-03T18:49:41.184766+00:00",
+  "generated_at": "2026-08-03T19:04:50.105443+00:00",
   "method": {
     "baseline_score": "rrf_score(recovered rank within item kind), k=60",
     "leakage_guard": "counts use only events strictly before the session start",
@@ -11368,46 +11433,51 @@
   },
   "origin_filter": "all",
   "permutation_null": {
-    "max": -0.0017,
-    "mean": -0.060231,
-    "min": -0.11092,
-    "p95_abs": 0.091411,
+    "interpretation": "distance from a same-strength random prior, not a two-sided floor around zero: the null is centred well below zero because any reordering degrades an already-good baseline. Use bootstrap_ci_vs_zero to ask whether an arm beat the baseline.",
+    "max": -0.012504,
+    "mean": -0.059187,
+    "min": -0.103051,
+    "p95_abs": 0.087291,
     "seed": 20260803,
-    "stdev": 0.02003,
+    "stdev": 0.017876,
     "trials": 200
   },
   "verdicts": [
     {
-      "exceeds_noise_floor": false,
-      "mrr_delta": 0.003543,
+      "beats_random_prior_of_equal_strength": true,
+      "ci_high": 0.043486,
+      "ci_low": -0.037235,
+      "mrr_delta": 0.003658,
       "name": "citation_only",
-      "null_p95_abs": 0.091411,
-      "verdict": "indistinguishable_from_noise",
-      "z_vs_null_mean": 3.184
+      "verdict": "indistinguishable_from_zero",
+      "z_vs_null_mean": 3.516
     },
     {
-      "exceeds_noise_floor": true,
-      "mrr_delta": -0.143179,
+      "beats_random_prior_of_equal_strength": false,
+      "ci_high": -0.098007,
+      "ci_low": -0.190835,
+      "mrr_delta": -0.143949,
       "name": "production_retention_shape",
-      "null_p95_abs": 0.091411,
-      "verdict": "harms_above_noise",
-      "z_vs_null_mean": -4.141
+      "verdict": "harms_baseline",
+      "z_vs_null_mean": -4.742
     },
     {
-      "exceeds_noise_floor": true,
-      "mrr_delta": -0.155101,
+      "beats_random_prior_of_equal_strength": false,
+      "ci_high": -0.109749,
+      "ci_low": -0.203875,
+      "mrr_delta": -0.155935,
       "name": "retrieval_heavy",
-      "null_p95_abs": 0.091411,
-      "verdict": "harms_above_noise",
-      "z_vs_null_mean": -4.736
+      "verdict": "harms_baseline",
+      "z_vs_null_mean": -5.412
     },
     {
-      "exceeds_noise_floor": true,
-      "mrr_delta": -0.128024,
+      "beats_random_prior_of_equal_strength": false,
+      "ci_high": -0.080868,
+      "ci_low": -0.178081,
+      "mrr_delta": -0.128712,
       "name": "citation_heavy",
-      "null_p95_abs": 0.091411,
-      "verdict": "harms_above_noise",
-      "z_vs_null_mean": -3.385
+      "verdict": "harms_baseline",
+      "z_vs_null_mean": -3.889
     }
   ]
 }

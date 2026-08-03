@@ -22,11 +22,12 @@ Two properties make the measurement trustworthy:
 
 from __future__ import annotations
 
+import math
 import random
 import statistics
 from bisect import bisect_left
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -238,10 +239,18 @@ def run_whatif(
     retrieval_weight: float = RETRIEVAL_WEIGHT,
     citation_weight: float = CITATION_WEIGHT,
     misled_weight: float = MISLED_WEIGHT,
+    require_contiguous_kinds: bool = True,
 ) -> tuple[RerankOutcome, ...]:
-    """Run the what-if over every contrastive (session, item_kind) pair."""
+    """Run the what-if over every contrastive (session, item_kind) pair.
+
+    Sessions whose item kinds interleave are dropped by default, because their
+    recovered ranks are not a served order and a wrong baseline rank makes the
+    measured delta meaningless for that session.
+    """
     outcomes: list[RerankOutcome] = []
     for labeled in labeled_sessions:
+        if require_contiguous_kinds and not labeled.session.has_contiguous_kind_blocks:
+            continue
         for item_kind in labeled.session.item_kinds:
             if not labeled.is_contrastive(item_kind):
                 continue
@@ -266,6 +275,7 @@ FRESH_HISTORY_DAYS = 0.5
 def describe_candidate_priors(
     labeled_sessions: Sequence[LabeledSession],
     counts: PointInTimeCounts,
+    created_at_by_item: Mapping[tuple[str, str], datetime] | None = None,
 ) -> dict[str, Any]:
     """Compare the prior signal on cited candidates against uncited ones.
 
@@ -281,6 +291,8 @@ def describe_candidate_priors(
     uncited: list[_CandidateRecord] = []
     window_start = counts.earliest_event_at
     for labeled in labeled_sessions:
+        if not labeled.session.has_contiguous_kind_blocks:
+            continue
         for item_kind in labeled.session.item_kinds:
             if not labeled.is_contrastive(item_kind):
                 continue
@@ -293,10 +305,19 @@ def describe_candidate_priors(
                     and (first_seen - window_start).total_seconds()
                     < CENSORED_WINDOW_DAYS * 86_400.0
                 )
+                created_at = (
+                    None if created_at_by_item is None else created_at_by_item.get(item.key)
+                )
+                true_age_days = (
+                    None
+                    if created_at is None or created_at >= cutoff
+                    else (cutoff - created_at).total_seconds() / 86_400.0
+                )
                 record = _CandidateRecord(
                     counts=counts.counts_before(item.item_kind, item.item_id, cutoff),
                     history_days=counts.history_days_before(item.item_kind, item.item_id, cutoff),
                     censored=censored,
+                    true_age_days=true_age_days,
                 )
                 if item.key in labeled.cited_keys:
                     cited.append(record)
@@ -315,7 +336,96 @@ def describe_candidate_priors(
         "fresh_history_days": FRESH_HISTORY_DAYS,
         "cited": _describe_group(cited),
         "uncited": _describe_group(uncited),
+        "age_standardized": _standardize_by_age(cited, uncited),
     }
+
+
+def _standardize_by_age(
+    cited: Sequence[_CandidateRecord],
+    uncited: Sequence[_CandidateRecord],
+) -> dict[str, Any]:
+    """Compare prior exposures with the age difference held fixed.
+
+    Direct standardization: within each true-age band, take the uncited group's
+    mean exposure count, then reweight those band means by how the cited group is
+    distributed across bands. The result is what the uncited group would average
+    if it had the cited group's ages, so the remaining ratio is the part of the
+    exposure gap that age does not explain. An age-normalized rate cannot do this
+    job, because dividing by age discards the candidates with the least history
+    and those are exactly where the effect concentrates.
+    """
+    cited_aged = [record for record in cited if record.true_age_days is not None]
+    uncited_aged = [record for record in uncited if record.true_age_days is not None]
+    if not cited_aged or not uncited_aged:
+        return {"resolved": False, "reason": "no true creation timestamps supplied"}
+
+    bands: list[dict[str, Any]] = []
+    weighted_uncited = 0.0
+    weight_total = 0
+    for low, high in AGE_BANDS_DAYS:
+        cited_band = [
+            record.counts.retrieval_count
+            for record in cited_aged
+            if low <= (record.true_age_days or 0.0) < high
+        ]
+        uncited_band = [
+            record.counts.retrieval_count
+            for record in uncited_aged
+            if low <= (record.true_age_days or 0.0) < high
+        ]
+        band: dict[str, Any] = {
+            "from_days": low,
+            "to_days": None if high == float("inf") else high,
+            "cited_n": len(cited_band),
+            "uncited_n": len(uncited_band),
+        }
+        if cited_band and uncited_band:
+            cited_mean = statistics.fmean(cited_band)
+            uncited_mean = statistics.fmean(uncited_band)
+            band["cited_mean"] = round(cited_mean, 3)
+            band["uncited_mean"] = round(uncited_mean, 3)
+            band["ratio"] = round(uncited_mean / cited_mean, 3) if cited_mean else None
+            weighted_uncited += uncited_mean * len(cited_band)
+            weight_total += len(cited_band)
+        bands.append(band)
+
+    cited_overall = statistics.fmean([record.counts.retrieval_count for record in cited_aged])
+    raw_uncited = statistics.fmean([record.counts.retrieval_count for record in uncited_aged])
+    standardized = weighted_uncited / weight_total if weight_total else None
+    return {
+        "resolved": True,
+        "cited_resolved": len(cited_aged),
+        "uncited_resolved": len(uncited_aged),
+        "cited_true_age_days_median": round(
+            statistics.median([record.true_age_days or 0.0 for record in cited_aged]), 3
+        ),
+        "uncited_true_age_days_median": round(
+            statistics.median([record.true_age_days or 0.0 for record in uncited_aged]), 3
+        ),
+        "cited_exposures_mean": round(cited_overall, 3),
+        "uncited_exposures_mean_raw": round(raw_uncited, 3),
+        "uncited_exposures_mean_age_standardized": (
+            round(standardized, 3) if standardized is not None else None
+        ),
+        "raw_ratio": round(raw_uncited / cited_overall, 3) if cited_overall else None,
+        "age_standardized_ratio": (
+            round(standardized / cited_overall, 3)
+            if standardized is not None and cited_overall
+            else None
+        ),
+        "bands": bands,
+    }
+
+
+AGE_BANDS_DAYS: tuple[tuple[float, float], ...] = (
+    (0.0, 0.5),
+    (0.5, 1.0),
+    (1.0, 3.0),
+    (3.0, 7.0),
+    (7.0, 14.0),
+    (14.0, 30.0),
+    (30.0, float("inf")),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,6 +435,7 @@ class _CandidateRecord:
     counts: UsageCounts
     history_days: float | None
     censored: bool
+    true_age_days: float | None = None
 
 
 def _describe_group(records: Sequence[_CandidateRecord]) -> dict[str, Any]:
@@ -348,6 +459,7 @@ def _describe_group(records: Sequence[_CandidateRecord]) -> dict[str, Any]:
         for record in records
         if record.history_days is None or record.history_days <= FRESH_HISTORY_DAYS
     )
+    true_ages = [record.true_age_days for record in records if record.true_age_days is not None]
     return {
         "candidates": len(records),
         "prior_exposures_mean": round(statistics.fmean(exposures), 3),
@@ -359,12 +471,21 @@ def _describe_group(records: Sequence[_CandidateRecord]) -> dict[str, Any]:
         "history_days_mean": round(statistics.fmean(histories), 3) if histories else None,
         "history_days_median": round(statistics.median(histories), 3) if histories else None,
         "fresh_share": round(fresh / len(records), 4),
+        # Read exposures_per_day only alongside its sample size. The rate is
+        # undefined for a candidate with almost no history, so this drops the
+        # freshest candidates, and it drops far more of the cited group than the
+        # uncited one. age_standardized is the comparison that controls for age
+        # without discarding anybody.
         "exposures_per_day_mean": round(statistics.fmean(rates), 3) if rates else None,
         "exposures_per_day_median": round(statistics.median(rates), 3) if rates else None,
         "exposures_per_day_sample": len(rates),
+        "exposures_per_day_retained_share": round(len(rates) / len(records), 4),
         "mature_prior_exposures_mean": round(statistics.fmean(mature), 3) if mature else None,
         "mature_sample": len(mature),
         "censored_share": round(sum(1 for record in records if record.censored) / len(records), 4),
+        "true_age_days_median": round(statistics.median(true_ages), 3) if true_ages else None,
+        "true_age_days_mean": round(statistics.fmean(true_ages), 3) if true_ages else None,
+        "true_age_resolved": len(true_ages),
     }
 
 
@@ -377,6 +498,7 @@ def permutation_null(
     retrieval_weight: float = RETRIEVAL_WEIGHT,
     citation_weight: float = CITATION_WEIGHT,
     misled_weight: float = MISLED_WEIGHT,
+    require_contiguous_kinds: bool = True,
 ) -> dict[str, Any]:
     """Build a null distribution for the MRR delta by shuffling the prior.
 
@@ -390,6 +512,8 @@ def permutation_null(
     rng = random.Random(seed)
     arms: list[tuple[tuple[ExposedItemScore, ...], tuple[int, ...]]] = []
     for labeled in labeled_sessions:
+        if require_contiguous_kinds and not labeled.session.has_contiguous_kind_blocks:
+            continue
         for item_kind in labeled.session.item_kinds:
             if not labeled.is_contrastive(item_kind):
                 continue
@@ -455,9 +579,65 @@ def permutation_null(
         "stdev": round(statistics.stdev(deltas), 6) if len(deltas) > 1 else 0.0,
         "min": round(min(deltas), 6),
         "max": round(max(deltas), 6),
-        "p95_abs": round(sorted(abs(delta) for delta in deltas)[int(0.95 * len(deltas))], 6)
-        if deltas
-        else None,
+        "p95_abs": round(_nearest_rank_percentile([abs(delta) for delta in deltas], 0.95), 6),
+        "interpretation": (
+            "distance from a same-strength random prior, not a two-sided floor "
+            "around zero: the null is centred well below zero because any "
+            "reordering degrades an already-good baseline. Use "
+            "bootstrap_ci_vs_zero to ask whether an arm beat the baseline."
+        ),
+    }
+
+
+def _nearest_rank_percentile(values: Sequence[float], fraction: float) -> float:
+    """Nearest-rank percentile, so p95 of 200 samples is the 190th smallest."""
+    ordered = sorted(values)
+    index = max(0, min(len(ordered) - 1, math.ceil(fraction * len(ordered)) - 1))
+    return ordered[index]
+
+
+def bootstrap_ci_vs_zero(
+    outcomes: Sequence[RerankOutcome],
+    *,
+    resamples: int = 5000,
+    seed: int = 20260803,
+    confidence: float = 0.95,
+) -> dict[str, Any]:
+    """Paired bootstrap on the per-item reciprocal-rank change.
+
+    This is the test that answers the question the verdict actually asks, which
+    is whether an arm beat the served baseline. The permutation null answers a
+    different question, whether the prior beat a random prior of equal strength,
+    and its distribution is centred far below zero because any reordering hurts a
+    good baseline. Reading a one-sided null as a two-sided floor around zero
+    conflates the two.
+    """
+    if not outcomes:
+        return {"resamples": 0, "observed": None, "ci_low": None, "ci_high": None}
+    deltas = [
+        (1.0 / outcome.reweighted_rank) - (1.0 / outcome.baseline_rank) for outcome in outcomes
+    ]
+    observed = statistics.fmean(deltas)
+    rng = random.Random(seed)
+    size = len(deltas)
+    means: list[float] = []
+    for _ in range(resamples):
+        sample = [deltas[rng.randrange(size)] for _ in range(size)]
+        means.append(statistics.fmean(sample))
+    means.sort()
+    tail = (1.0 - confidence) / 2.0
+    low = _nearest_rank_percentile(means, tail)
+    high = _nearest_rank_percentile(means, 1.0 - tail)
+    at_or_below_zero = sum(1 for value in means if value <= 0.0) / resamples
+    return {
+        "resamples": resamples,
+        "seed": seed,
+        "confidence": confidence,
+        "observed": round(observed, 6),
+        "ci_low": round(low, 6),
+        "ci_high": round(high, 6),
+        "share_at_or_below_zero": round(at_or_below_zero, 4),
+        "excludes_zero": low > 0.0 or high < 0.0,
     }
 
 
@@ -509,6 +689,7 @@ def summarize_outcomes(outcomes: Sequence[RerankOutcome]) -> dict[str, Any]:
 
 
 __all__ = [
+    "AGE_BANDS_DAYS",
     "CITATION_WEIGHT",
     "MISLED_WEIGHT",
     "RETRIEVAL_WEIGHT",
@@ -517,6 +698,7 @@ __all__ = [
     "PointInTimeCounts",
     "RerankOutcome",
     "UsageCounts",
+    "bootstrap_ci_vs_zero",
     "describe_candidate_priors",
     "permutation_null",
     "rerank_session_kind",
