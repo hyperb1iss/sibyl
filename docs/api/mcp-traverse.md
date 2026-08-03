@@ -31,6 +31,11 @@ Every row either verb returns is authorized for the calling reader individually,
 Project membership does not authorize a private memory that happens to sit in that project, so a
 neighbor missing from a result may exist and belong to someone else.
 
+The check gates the walk, not only its output. Only authorized rows join the next frontier, so an
+unreadable memory is not a route either: you will not receive a two-hop neighbor that is reachable
+only through someone else's private memory, because receiving it would tell you something sits
+between you and it.
+
 A seed that is absent and a seed the reader may not see are reported identically, and `fetch_slice`
 raises the same 404 for a denied entity as for one that does not exist. Distinguishing them would
 confirm the existence of a row the caller has no right to know about.

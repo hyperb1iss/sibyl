@@ -14,7 +14,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from sibyl_core.auth.memory_policy import memory_scope_policy_key
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
+from sibyl_core.models.memory_scope import MemoryScope
 from sibyl_core.projection.passages import PASSAGE_COVERS_PARENT_KEY
 from sibyl_core.retrieval.search import SearchFilter, expand_neighbor_records
 from sibyl_core.tools.traverse import (
@@ -29,6 +31,11 @@ from sibyl_core.tools.traverse import (
 ORG = "org_traverse"
 OWNER = "owner-principal"
 OTHER = "other-principal"
+
+# A real grant, built the way the API mints one. Spelling this as "project:proj_a"
+# denies every scope instead of just the private ones, which makes a deny test
+# pass without exercising the rule it names.
+PROJECT_GRANT = memory_scope_policy_key(MemoryScope.PROJECT, "proj_a")
 
 
 def _entity_row(
@@ -125,6 +132,48 @@ class _FakeClient:
         if "FROM entity" in query:
             wanted = params.get("uuids") or []
             return [self.rows[uuid] for uuid in wanted if uuid in self.rows]
+        return []
+
+
+class _GraphClient:
+    """A client backed by real adjacency, so multi-hop walks can be observed.
+
+    ``_FakeClient`` answers every frontier with one canned edge list, which is
+    enough for shape assertions and useless for anything about distance or about
+    which rows a walk routes through.
+    """
+
+    def __init__(
+        self,
+        *,
+        edges: list[tuple[str, str, str]],
+        rows: list[dict[str, Any]],
+    ) -> None:
+        self.edges = edges
+        self.rows = {row["uuid"]: row for row in rows}
+        self.queries: list[tuple[str, dict[str, Any]]] = []
+
+    async def execute_query(self, query: str, **params: Any) -> list[dict[str, Any]]:
+        self.queries.append((query, params))
+        if "FROM mentions" in query or "BELONGS_TO" in query:
+            return []
+        if "FROM relates_to" in query:
+            if "target_id IN $target_uuids" in query:
+                wanted = set(params.get("target_uuids") or [])
+                return [
+                    {"uuid": source, "relationship": name}
+                    for source, target, name in self.edges
+                    if target in wanted
+                ]
+            wanted = set(params.get("source_uuids") or [])
+            return [
+                {"uuid": target, "relationship": name}
+                for source, target, name in self.edges
+                if source in wanted
+            ]
+        if "FROM entity" in query:
+            requested = params.get("uuids") or []
+            return [self.rows[uuid] for uuid in requested if uuid in self.rows]
         return []
 
 
@@ -897,10 +946,288 @@ class TestFetchSliceAuthorization:
                 organization_id=ORG,
                 principal_id=OWNER,
                 accessible_projects={"proj_a"},
-                allowed_memory_scope_keys={"project:proj_a"},
+                allowed_memory_scope_keys={PROJECT_GRANT},
             )
 
     @pytest.mark.asyncio
     async def test_entity_id_is_required(self) -> None:
         with pytest.raises(ValueError, match="entity_id"):
             await fetch_slice("  ", organization_id=ORG)
+
+
+class TestWalkAuthorizationGatesRoutes:
+    """A row the reader may not see must not be a route, only a non-result."""
+
+    @pytest.mark.asyncio
+    async def test_a_denied_row_is_not_a_route_to_its_own_neighbors(self) -> None:
+        """seed -> secret -> leaf, where secret belongs to another principal.
+
+        Withholding `secret` while still returning `leaf` would disclose that
+        something sits between them: a depth-2 row with no depth-1 parent in the
+        response is an admission of a hidden intermediate.
+        """
+        client = _GraphClient(
+            edges=[
+                ("seed", "secret", "RELATED_TO"),
+                ("secret", "leaf", "RELATED_TO"),
+            ],
+            rows=[
+                _entity_row("secret", memory_scope="private", principal_id=OTHER),
+                _entity_row("leaf"),
+            ],
+        )
+        runtime = _FakeRuntime(
+            client=client,
+            entity_manager=_FakeEntityManager({"seed": _entity("seed")}),
+        )
+
+        with _runtime_patch(runtime):
+            response = await expand_neighbors(
+                ["seed"],
+                organization_id=ORG,
+                depth=2,
+                limit=8,
+                principal_id=OWNER,
+                accessible_projects=set(),
+            )
+
+        assert [neighbor.id for neighbor in response.neighbors] == []
+
+    @pytest.mark.asyncio
+    async def test_the_same_route_is_walked_when_the_middle_row_is_readable(self) -> None:
+        """The allow direction of the same graph, so the deny is not vacuous."""
+        client = _GraphClient(
+            edges=[
+                ("seed", "middle", "RELATED_TO"),
+                ("middle", "leaf", "RELATED_TO"),
+            ],
+            rows=[_entity_row("middle"), _entity_row("leaf")],
+        )
+        runtime = _FakeRuntime(
+            client=client,
+            entity_manager=_FakeEntityManager({"seed": _entity("seed")}),
+        )
+
+        with _runtime_patch(runtime):
+            response = await expand_neighbors(
+                ["seed"],
+                organization_id=ORG,
+                depth=2,
+                limit=8,
+                principal_id=OWNER,
+                accessible_projects=set(),
+            )
+
+        by_id = {neighbor.id: neighbor for neighbor in response.neighbors}
+        assert set(by_id) == {"middle", "leaf"}
+        assert by_id["middle"].distance == 1
+        assert by_id["leaf"].distance == 2
+
+    @pytest.mark.asyncio
+    async def test_a_seed_is_never_returned_as_its_own_neighbor(self) -> None:
+        """Every inbound edge is a 2-cycle, so depth 2 rediscovers the seed."""
+        client = _GraphClient(
+            edges=[("seed", "neighbor", "RELATED_TO")],
+            rows=[_entity_row("seed"), _entity_row("neighbor")],
+        )
+        runtime = _FakeRuntime(
+            client=client,
+            entity_manager=_FakeEntityManager({"seed": _entity("seed")}),
+        )
+
+        with _runtime_patch(runtime):
+            response = await expand_neighbors(
+                ["seed"],
+                organization_id=ORG,
+                depth=2,
+                limit=8,
+                principal_id=OWNER,
+                accessible_projects=set(),
+            )
+
+        assert [neighbor.id for neighbor in response.neighbors] == ["neighbor"]
+        assert "seed" not in {neighbor.id for neighbor in response.neighbors}
+
+    @pytest.mark.asyncio
+    async def test_deeper_hops_score_below_adjacent_ones(self) -> None:
+        client = _GraphClient(
+            edges=[
+                ("seed", "near", "RELATED_TO"),
+                ("near", "far", "RELATED_TO"),
+            ],
+            rows=[_entity_row("near"), _entity_row("far")],
+        )
+        runtime = _FakeRuntime(
+            client=client,
+            entity_manager=_FakeEntityManager({"seed": _entity("seed")}),
+        )
+
+        with _runtime_patch(runtime):
+            response = await expand_neighbors(
+                ["seed"],
+                organization_id=ORG,
+                depth=2,
+                limit=8,
+                principal_id=OWNER,
+                accessible_projects=set(),
+            )
+
+        by_id = {neighbor.id: neighbor for neighbor in response.neighbors}
+        assert by_id["far"].score < by_id["near"].score
+
+    @pytest.mark.asyncio
+    async def test_api_key_without_a_private_grant_sees_no_private_neighbor(self) -> None:
+        """A key narrowed to a project does not inherit the principal's privates."""
+        rows = [
+            _entity_row("own_private", memory_scope="private", principal_id=OWNER),
+            _entity_row(
+                "project_row",
+                memory_scope="project",
+                scope_key="proj_a",
+                project_id="proj_a",
+            ),
+        ]
+        runtime = _FakeRuntime(
+            client=_FakeClient(
+                outgoing=[{"uuid": row["uuid"], "relationship": "RELATED_TO"} for row in rows],
+                rows=rows,
+            ),
+            entity_manager=_FakeEntityManager({"seed": _entity("seed")}),
+        )
+
+        with _runtime_patch(runtime):
+            response = await expand_neighbors(
+                ["seed"],
+                organization_id=ORG,
+                principal_id=OWNER,
+                accessible_projects={"proj_a"},
+                allowed_memory_scope_keys={PROJECT_GRANT},
+            )
+
+        assert [neighbor.id for neighbor in response.neighbors] == ["project_row"]
+
+
+class TestFetchSliceCoversParent:
+    """`covers_parent` is a claim a reader acts on by dropping the parent."""
+
+    @pytest.mark.asyncio
+    async def test_a_partial_window_does_not_claim_to_cover_the_parent(self) -> None:
+        """The bug this pins: 3 spans of 4 all carry the flag, but miss a quarter."""
+        parent = _entity("decision_parent")
+        spans = [_span("decision_parent", index, 4) for index in range(4)]
+        runtime = TestFetchSliceWindow._sliced_runtime(parent, spans)
+
+        with _runtime_patch(runtime):
+            response = await fetch_slice(
+                "decision_parent",
+                organization_id=ORG,
+                window=3,
+                principal_id=OWNER,
+            )
+
+        assert [passage.passage_index for passage in response.passages] == [0, 1, 2]
+        assert response.passage_total == 4
+        assert response.covers_parent is False
+
+    @pytest.mark.asyncio
+    async def test_a_complete_window_does_claim_to_cover_the_parent(self) -> None:
+        parent = _entity("decision_parent")
+        spans = [_span("decision_parent", index, 3) for index in range(3)]
+        runtime = TestFetchSliceWindow._sliced_runtime(parent, spans)
+
+        with _runtime_patch(runtime):
+            response = await fetch_slice(
+                "decision_parent",
+                organization_id=ORG,
+                window=3,
+                principal_id=OWNER,
+            )
+
+        assert [passage.passage_index for passage in response.passages] == [0, 1, 2]
+        assert response.covers_parent is True
+
+    @pytest.mark.asyncio
+    async def test_spans_from_two_generations_do_not_claim_coverage(self) -> None:
+        """A stale higher-index span can count to the right number and still lie."""
+        parent = _entity("decision_parent")
+        spans = [
+            _span("decision_parent", 0, 2),
+            _span("decision_parent", 1, 2),
+            _span("decision_parent", 2, 3),
+        ]
+        runtime = TestFetchSliceWindow._sliced_runtime(parent, spans)
+
+        with _runtime_patch(runtime):
+            response = await fetch_slice(
+                "decision_parent",
+                organization_id=ORG,
+                window=3,
+                principal_id=OWNER,
+            )
+
+        assert response.covers_parent is False
+
+    @pytest.mark.asyncio
+    async def test_a_denied_sibling_costs_the_window_its_coverage_claim(self) -> None:
+        parent = _entity(
+            "decision_parent",
+            metadata={"memory_scope": "project", "scope_key": "proj_a", "project_id": "proj_a"},
+        )
+        spans = [
+            _span("decision_parent", 0, 3),
+            _span("decision_parent", 1, 3, memory_scope="private", principal_id=OTHER),
+            _span("decision_parent", 2, 3),
+        ]
+        runtime = TestFetchSliceWindow._sliced_runtime(parent, spans)
+
+        with _runtime_patch(runtime):
+            response = await fetch_slice(
+                "decision_parent",
+                organization_id=ORG,
+                principal_id=OWNER,
+                accessible_projects={"proj_a"},
+            )
+
+        assert [passage.passage_index for passage in response.passages] == [0, 2]
+        assert response.covers_parent is False
+
+    @pytest.mark.asyncio
+    async def test_an_unsliced_memory_covers_itself(self) -> None:
+        parent = _entity("decision_short", content="served whole")
+        runtime = _FakeRuntime(
+            entity_manager=_FakeEntityManager({parent.id: parent}),
+            relationship_manager=_FakeRelationshipManager([]),
+        )
+
+        with _runtime_patch(runtime):
+            response = await fetch_slice("decision_short", organization_id=ORG, principal_id=OWNER)
+
+        assert response.sliced is False
+        assert response.covers_parent is True
+
+
+class TestFetchSliceAnchorNotInSpanSet:
+    @pytest.mark.asyncio
+    async def test_a_window_never_silently_omits_the_span_it_was_asked_for(self) -> None:
+        """The anchor is authorized but absent from its parent's discovered set."""
+        parent = _entity("decision_parent")
+        siblings = [_span("decision_parent", index, 9) for index in range(3)]
+        anchor = _span("decision_parent", 7, 9)
+        entities = {
+            parent.id: parent,
+            anchor.id: anchor,
+            **{span.id: span for span in siblings},
+        }
+        runtime = _FakeRuntime(
+            entity_manager=_FakeEntityManager(entities),
+            relationship_manager=_FakeRelationshipManager(
+                [(span, _part_of(span, parent.id)) for span in siblings]
+            ),
+        )
+
+        with _runtime_patch(runtime):
+            response = await fetch_slice(anchor.id, organization_id=ORG, principal_id=OWNER)
+
+        assert [passage.id for passage in response.passages] == [anchor.id]
+        assert response.passages[0].passage_index == 7
+        assert response.covers_parent is False

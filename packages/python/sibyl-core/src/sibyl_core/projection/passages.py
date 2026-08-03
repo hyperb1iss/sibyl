@@ -97,6 +97,37 @@ def passage_entity_id(source_id: str, passage_index: int) -> str:
     return _generate_id("passage", "memory", source_id, str(passage_index))
 
 
+def spans_cover_parent(spans: Sequence[tuple[int | None, int | None, bool]]) -> bool:
+    """Whether this exact set of spans accounts for a whole parent body.
+
+    Takes ``(passage_index, passage_total, covers_parent_flag)`` per span.
+
+    Three things must hold, and the per-span flag is only the first of them. The
+    flag is a property of the projection, not of a subset of it, so a caller
+    holding two spans of four reads three trues and would wrongly conclude the
+    body is covered. That is the difference between a reader dropping a fat
+    parent safely and dropping half its text.
+
+    The projection has to have covered the whole body, the spans have to agree on
+    a single declared total, and their indices have to be exactly that total's
+    range. The middle condition matters because re-projecting a shortened memory
+    rewrites the leading spans in place while higher-index rows survive under
+    their old ids, so one parent can present spans from two generations that
+    count to the right number while missing the middle of the body.
+    """
+    if not spans:
+        return False
+    totals = {total for _index, total, _covers in spans}
+    if len(totals) != 1:
+        return False
+    total = next(iter(totals))
+    if not isinstance(total, int) or total <= 0:
+        return False
+    if not all(covers for _index, _total, covers in spans):
+        return False
+    return {index for index, _total, _covers in spans} == set(range(total))
+
+
 def should_project_passages(source: Entity) -> bool:
     """Whether this memory is the kind, and the size, worth cutting."""
     if source.entity_type not in PASSAGE_SOURCE_TYPES:
@@ -489,4 +520,5 @@ __all__ = [
     "reproject_entity_passages",
     "retire_entity_passages",
     "should_project_passages",
+    "spans_cover_parent",
 ]

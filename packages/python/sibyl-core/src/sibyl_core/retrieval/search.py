@@ -1453,7 +1453,13 @@ async def _node_bfs_records(
 
     wanted = {str(name).upper() for name in relationship_names if str(name).strip()}
     discovered: list[_GraphExpansionHop] = []
-    seen_discovered: set[str] = set()
+    # Origins are already in the caller's hand, so they are pre-marked as
+    # discovered rather than only as visited. Visiting stops an origin being
+    # walked from twice; it does not stop one being reported as its own
+    # neighbor, which is what a round trip does: with inbound hops enabled every
+    # A->B edge is a 2-cycle, so at depth 2 any seed with an edge finds itself and
+    # spends a result slot on a row the caller supplied.
+    seen_discovered = set(origin_uuids)
     visited_entities = set(origin_uuids)
     entity_frontier = _dedupe_strings(origin_uuids)
     episode_frontier = _dedupe_strings(episode_origin_uuids)
@@ -1821,24 +1827,67 @@ async def expand_neighbor_records(
 
     Hop-tagged entity rows, highest path score first, capped at ``limit``.
 
-    ``row_allowed`` is the reader's authorization check and runs before the cap,
-    so the walk is widened by the same headroom the scored lanes read with. A
-    filter applied after the cap would let a handful of unreadable rows consume
-    the caller's whole budget and report a neighborhood as empty when it is not.
+    ``row_allowed`` is the reader's authorization check, and it gates the walk
+    rather than only its output. The walk advances one hop at a time and only
+    authorized rows join the next frontier, so a row the reader may not see is
+    not merely withheld: it is not a route. Filtering only the final result would
+    still return a depth-two neighbor reachable exclusively through another
+    principal's private memory, which discloses that something sits between them.
+
+    The check runs before the cap, and each hop is widened by the same headroom
+    the scored lanes read with, because a handful of unreadable rows outranking
+    the readable ones would otherwise consume the whole budget and report a
+    neighborhood as empty when it is not.
     """
-    rows = await _node_bfs_records(
-        client=client,
-        origin_uuids=origin_uuids,
-        search_filter=search_filter if search_filter is not None else SearchFilter(),
-        group_id=group_id,
-        max_depth=max(int(max_depth), 1),
-        limit=_graph_expansion_fetch_limit(limit),
-        relationship_names=relationship_names,
-        include_incoming=include_incoming,
-    )
-    if row_allowed is not None:
-        rows = [row for row in rows if row_allowed(row)]
-    return rows[: max(int(limit), 0)]
+    limit = max(int(limit), 0)
+    depth_budget = max(int(max_depth), 1)
+    effective_filter = search_filter if search_filter is not None else SearchFilter()
+    if not limit:
+        return []
+
+    collected: dict[str, dict[str, object]] = {}
+    # Origins are the caller's own rows. Excluding them from results as well as
+    # from re-expansion is what stops a seed being returned as its own neighbor,
+    # which every inbound edge makes reachable at depth two.
+    seen = {str(uuid) for uuid in origin_uuids if str(uuid)}
+    frontier = _dedupe_strings(origin_uuids)
+
+    for depth in range(1, depth_budget + 1):
+        if not frontier or len(collected) >= limit:
+            break
+        hop_rows = await _node_bfs_records(
+            client=client,
+            origin_uuids=frontier,
+            search_filter=effective_filter,
+            group_id=group_id,
+            max_depth=1,
+            limit=_graph_expansion_fetch_limit(limit),
+            relationship_names=relationship_names,
+            include_incoming=include_incoming,
+        )
+        next_frontier: list[str] = []
+        for row in hop_rows:
+            uuid = _string_value(row.get("uuid"))
+            if not uuid or uuid in seen:
+                continue
+            seen.add(uuid)
+            if row_allowed is not None and not row_allowed(row):
+                # Unauthorized, so not a result and not a route either.
+                continue
+            # Each round walks one hop, so restate the true distance and re-apply
+            # the decay that distance earns rather than reporting every row as
+            # adjacent to the seed.
+            relationship = _string_value(row.get("graph_expansion_relationship")) or "RELATED_TO"
+            score = _graph_expansion_path_score(relationship, depth=depth)
+            row["graph_expansion_depth"] = depth
+            row["graph_expansion_score"] = score
+            row["score"] = score
+            collected[uuid] = row
+            next_frontier.append(uuid)
+        frontier = next_frontier
+
+    ordered = sorted(collected.values(), key=_record_score, reverse=True)
+    return ordered[:limit]
 
 
 async def _hydrate_entity_records(

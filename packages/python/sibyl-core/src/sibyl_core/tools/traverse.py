@@ -11,10 +11,14 @@ tool docstrings the agent reads, because there is no session to enforce it in
 and a limit an agent cannot see is not a limit.
 
 Every row either verb returns passes the same reader authorization the scored
-lanes apply. The walk is deliberately authorized per row rather than per seed:
-project membership is not permission to read a private memory that happens to
-sit in that project, and a traversal that skipped the row check would be a way
-to reach one by walking to it.
+lanes apply, per row rather than once per seed: project membership is not
+permission to read a private memory that happens to sit in that project, and a
+traversal that skipped the row check would be a way to reach one by walking to
+it.
+
+The check gates the walk and not merely its output. Only authorized rows join
+the next frontier, so an unreadable memory is not a route either, and a reader
+cannot infer that something sits between two rows by receiving the far one.
 """
 
 from __future__ import annotations
@@ -28,10 +32,11 @@ from sibyl_core.projection.passages import (
     MAX_PASSAGE_CONTENT_CHARS,
     MAX_PASSAGES_PER_SOURCE,
     PASSAGE_COVERS_PARENT_KEY,
+    spans_cover_parent,
 )
 from sibyl_core.retrieval.operational_sources import PASSAGE_WINDOW_UNITS
 from sibyl_core.retrieval.search import (
-    MAX_CANDIDATES_PER_SIGNAL,
+    DEFAULT_CANDIDATES_PER_SIGNAL,
     SearchFilter,
     expand_neighbor_records,
 )
@@ -41,6 +46,10 @@ from sibyl_core.tools.responses import (
     FetchSliceResponse,
     NeighborEntity,
     SlicePassage,
+)
+from sibyl_core.tools.search import (
+    DEFAULT_SEARCH_CONTENT_MAX_CHARS,
+    MAX_SEARCH_CONTENT_MAX_CHARS,
 )
 
 if TYPE_CHECKING:
@@ -60,16 +69,17 @@ DEFAULT_TRAVERSAL_DEPTH = 1
 # what a lane contributes and yields at most one lane's worth per hop it may
 # take. Both numbers are the scored budget rather than a new one, which is what
 # keeps an agent-steered walk from outspending the pass it is refining.
-MAX_EXPAND_ORIGINS = MAX_CANDIDATES_PER_SIGNAL
-DEFAULT_EXPAND_LIMIT = MAX_CANDIDATES_PER_SIGNAL
-MAX_EXPAND_LIMIT = MAX_CANDIDATES_PER_SIGNAL * MAX_TRAVERSAL_DEPTH
+MAX_EXPAND_ORIGINS = DEFAULT_CANDIDATES_PER_SIGNAL
+DEFAULT_EXPAND_LIMIT = DEFAULT_CANDIDATES_PER_SIGNAL
+MAX_EXPAND_LIMIT = DEFAULT_CANDIDATES_PER_SIGNAL * MAX_TRAVERSAL_DEPTH
 
 # Neighbors are a scan surface: the caller reads names and relationships to
-# decide where to widen, so previews are sized like search previews. Spans are
-# the read surface, and their budget is a whole window's worth of one span's
-# ceiling.
-DEFAULT_NEIGHBOR_CONTENT_MAX_CHARS = 500
-MAX_TRAVERSAL_CONTENT_MAX_CHARS = 50_000
+# decide where to widen, so previews are sized exactly like search previews and
+# share their ceiling.
+DEFAULT_NEIGHBOR_CONTENT_MAX_CHARS = DEFAULT_SEARCH_CONTENT_MAX_CHARS
+MAX_TRAVERSAL_CONTENT_MAX_CHARS = MAX_SEARCH_CONTENT_MAX_CHARS
+# Spans are the read surface rather than a scan surface, so a window's whole
+# budget is one worst-case span's ceiling.
 DEFAULT_SLICE_CONTENT_MAX_CHARS = MAX_PASSAGE_CONTENT_CHARS
 
 DEFAULT_SLICE_WINDOW = PASSAGE_WINDOW_UNITS
@@ -472,9 +482,32 @@ async def fetch_slice(
         )
 
     start = _window_start(spans, anchor_index=anchor_index, window=window)
+    if start is None:
+        # The named span exists and was authorized, but its parent's span set does
+        # not contain it: the discovery read hit its own ceiling, or the span
+        # belongs to a retired generation. Serve the span alone rather than a
+        # window that quietly omits it.
+        return _single_span_response(
+            requested,
+            window=window,
+            content_max_chars=content_max_chars,
+            anchor_index=anchor_index,
+        )
     selected = spans[start : start + window]
     passage_total = _passage_total(spans[0].metadata) or len(spans)
-    covers_parent = all(bool(span.metadata.get(PASSAGE_COVERS_PARENT_KEY)) for span in selected)
+    # A window is a subset by design, so the per-span flag alone would report a
+    # 3-of-4 window as covering the parent and invite the reader to drop a quarter
+    # of the body. Coverage is a property of the exact set returned.
+    covers_parent = spans_cover_parent(
+        [
+            (
+                _int_metadata(span.metadata, "passage_index"),
+                _passage_total(span.metadata),
+                bool(span.metadata.get(PASSAGE_COVERS_PARENT_KEY)),
+            )
+            for span in selected
+        ]
+    )
 
     passages: list[SlicePassage] = []
     remaining = content_max_chars
@@ -575,15 +608,20 @@ async def _authorized_spans(
     return authorized
 
 
-def _window_start(spans: Sequence[Entity], *, anchor_index: int | None, window: int) -> int:
-    """Center the window on the anchor, sliding it inside the available spans."""
+def _window_start(spans: Sequence[Entity], *, anchor_index: int | None, window: int) -> int | None:
+    """Center the window on the anchor, sliding it inside the available spans.
+
+    Returns None when the anchor is not among the spans, which the caller turns
+    into a single-span response rather than a window. Falling back to index zero
+    would serve a window that silently excludes the very span the caller named,
+    and a caller reading a coherent-looking window has no way to notice.
+    """
     if anchor_index is None:
         return 0
     positions = [_int_metadata(span.metadata, "passage_index") for span in spans]
-    try:
-        anchor_position = positions.index(anchor_index)
-    except ValueError:
-        return 0
+    if anchor_index not in positions:
+        return None
+    anchor_position = positions.index(anchor_index)
     start = anchor_position - (window - 1) // 2
     return max(0, min(start, max(len(spans) - window, 0)))
 
