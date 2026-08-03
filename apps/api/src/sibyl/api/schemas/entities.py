@@ -1,10 +1,15 @@
 """Entity and raw-capture request/response models."""
 
+import unicodedata
 from datetime import datetime
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, Field, StringConstraints, model_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
+from sibyl_core.memory_pipeline.retrieval_keys import (
+    MAX_RETRIEVAL_KEY_LENGTH,
+    MAX_RETRIEVAL_KEYS,
+)
 from sibyl_core.memory_pipeline.spans import MAX_AGENT_SPANS, MAX_SPAN_LABEL_CHARS
 from sibyl_core.memory_pipeline.structure import MAX_PROBE_CHARS, MAX_PROBES_PER_MEMORY
 from sibyl_core.models.entities import EntityType
@@ -82,6 +87,38 @@ class EntityCreate(EntityBase, MemoryStructureFields):
         default=False,
         description="Persist lexical graph records first and queue embedding backfill",
     )
+    retrieval_keys: list[Annotated[str, Field(max_length=MAX_RETRIEVAL_KEY_LENGTH)]] | None = Field(
+        default=None,
+        max_length=MAX_RETRIEVAL_KEYS,
+        description=(
+            "Exact-match identifiers this entity answers to (error strings, symbols, "
+            "config flags, aliases). Matched case-insensitively against "
+            "identifier-shaped queries, so a key may name something the content "
+            "never spells out."
+        ),
+    )
+
+    @field_validator("retrieval_keys")
+    @classmethod
+    def _reject_unprintable_retrieval_keys(cls, value: list[str] | None) -> list[str] | None:
+        """Refuse a control character here so the caller gets a 422, not a 500.
+
+        The key contract raises on control characters at the write boundary, and
+        that exception has no handler on this route, so the one input class the
+        length and count bounds do not cover would surface as a server error.
+
+        Whitespace is exempt, and the exemption matters: the key contract
+        collapses internal whitespace runs by design, so a newline or a tab in a
+        key is a documented, accepted input. Rejecting those here would make the
+        wire stricter than the contract on exactly the case the contract
+        advertises, refusing a key pasted out of wrapped text.
+        """
+        if value is None:
+            return None
+        for key in value:
+            if any(unicodedata.category(char) == "Cc" and not char.isspace() for char in key):
+                raise ValueError("retrieval keys must not contain control characters")
+        return value
 
 
 class EntityBulkCreateRequest(BaseModel):

@@ -69,6 +69,7 @@ from sibyl_core.auth.memory_policy import (
     private_scope_granted_for,
     stamp_memory_scope_metadata,
 )
+from sibyl_core.memory_pipeline.retrieval_keys import normalize_retrieval_keys
 from sibyl_core.memory_pipeline.structure import strip_structure_metadata
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.projection import (
@@ -381,7 +382,7 @@ def _bulk_create_metadata(
 ) -> dict[str, Any]:
     request_metadata = strip_structure_metadata(entity.metadata)
     project_id = str(request_metadata.get("project_id") or "").strip()
-    return {
+    metadata: dict[str, Any] = {
         "category": entity.category,
         "languages": entity.languages or [],
         "tags": entity.tags or [],
@@ -393,6 +394,15 @@ def _bulk_create_metadata(
             verified_project_id=project_id or None,
         ),
     }
+    # The bulk path builds its Entity rows directly rather than through add(),
+    # so it has to normalize the declaration itself or the field would be
+    # accepted on the wire and silently dropped before the row is written.
+    declared_keys, _match_forms = normalize_retrieval_keys(entity.retrieval_keys)
+    if declared_keys:
+        metadata["retrieval_keys"] = declared_keys
+    else:
+        metadata.pop("retrieval_keys", None)
+    return metadata
 
 
 def _reject_unsupported_bulk_entry(entity: EntityCreate) -> None:
@@ -2167,6 +2177,7 @@ async def create_entity(
         memory_scope=str(declared_memory_scope) if declared_memory_scope is not None else None,
         scope_key=authorized_scope_key,
         principal_id=authorized_principal_id,
+        retrieval_keys=entity.retrieval_keys,
         spans=[span.model_dump(exclude_none=True) for span in entity.spans]
         if entity.spans is not None
         else None,

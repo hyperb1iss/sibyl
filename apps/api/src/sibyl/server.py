@@ -583,6 +583,7 @@ async def _remember_mcp_memory(
     task_ids: list[str] | None = None,
     active_task: bool = True,
     metadata: dict[str, Any] | None = None,
+    retrieval_keys: list[str] | None = None,
     idempotency_key: str | None = None,
     spans: list[dict[str, Any]] | None = None,
     atomic: bool = False,
@@ -620,6 +621,7 @@ async def _remember_mcp_memory(
         "task_ids": task_ids,
         "active_task": active_task,
         "metadata": metadata,
+        "retrieval_keys": retrieval_keys,
         "spans": spans,
         "atomic": atomic,
         "probes": probes,
@@ -685,6 +687,7 @@ async def _remember_mcp_memory(
         tags=tags,
         related_to=resolved_links,
         metadata=full_metadata,
+        retrieval_keys=retrieval_keys,
         provenance={"remember_kind": kind, "related_to": resolved_links or []},
         source_id=f"mcp:remember:{kind}",
         memory_scope=memory_scope,
@@ -733,6 +736,9 @@ async def _remember_mcp_memory(
             memory_scope=request.memory_scope,
             scope_key=request.scope_key,
             principal_id=request.principal_id,
+            retrieval_keys=list(request.retrieval_keys)
+            if request.retrieval_keys is not None
+            else None,
             spans=list(request.spans) if request.spans is not None else None,
             atomic=request.atomic,
             probes=list(request.probes) if request.probes is not None else None,
@@ -2535,6 +2541,7 @@ def _register_tools(mcp: FastMCP) -> None:
         task_ids: list[str] | None = None,
         active_task: bool = True,
         metadata: dict[str, Any] | None = None,
+        retrieval_keys: list[str] | None = None,
         idempotency_key: str | None = None,
         spans: list[dict[str, Any]] | None = None,
         atomic: bool = False,
@@ -2548,6 +2555,14 @@ def _register_tools(mcp: FastMCP) -> None:
         matters, remember stores what future agents should not have to relearn.
         Provide task_ids for exact task context. With a project, active_task
         links the memory to the single active doing task when one exists.
+
+        Use retrieval_keys for the exact strings a future agent will search by
+        and that similarity cannot reach: an error code, an env var, a symbol,
+        a commit SHA, a config flag, an alias. You know them now and the reader
+        will not, so declare them even when the body already mentions them, and
+        especially when it does not. A query containing one of these strings
+        matches this memory exactly, case-insensitively. Up to 16 keys, 200
+        characters each. Skip keys for a memory nobody would look up by name.
 
         You can describe the shape of what you are storing, and you know it
         better than any cutter reading it afterwards.
@@ -2587,6 +2602,7 @@ def _register_tools(mcp: FastMCP) -> None:
             task_ids=task_ids,
             active_task=active_task,
             metadata=metadata,
+            retrieval_keys=retrieval_keys,
             idempotency_key=idempotency_key,
             spans=spans,
             atomic=atomic,

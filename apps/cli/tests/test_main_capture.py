@@ -841,6 +841,7 @@ def test_remember_command_records_domain_memory_with_links(
         },
         sync=False,
         skip_conflicts=False,
+        retrieval_keys=None,
         spans=None,
         atomic=False,
         probes=None,
@@ -998,12 +999,53 @@ def test_remember_command_reads_body_from_stdin(
         },
         sync=False,
         skip_conflicts=False,
+        retrieval_keys=None,
         spans=None,
         atomic=False,
         probes=None,
     )
     mock_client.explore.assert_not_called()
     mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.main.get_client")
+def test_remember_command_forwards_repeated_retrieval_keys(
+    mock_get_client: MagicMock,
+    mock_resolve_project_from_cwd: MagicMock,
+) -> None:
+    """--key is repeatable because a key can legitimately contain a comma."""
+
+    mock_client = MagicMock()
+    mock_client.remember_raw_memory = AsyncMock(
+        return_value={"id": "raw_123", "source_id": "cli:manual"}
+    )
+    mock_client.create_entity = AsyncMock(return_value={"id": "note_123"})
+    mock_client.explore = AsyncMock()
+    mock_get_client.return_value = _FakeClientContext(mock_client)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "remember",
+            "Connection resets on startup",
+            "--key",
+            "ERR_CONN_RESET_0x7f31",
+            "--key",
+            "connection reset, by peer",
+        ],
+        input="The socket dropped mid-handshake.",
+    )
+
+    assert result.exit_code == 0
+    awaited = mock_client.create_entity.await_args
+    assert awaited is not None
+    assert awaited.kwargs["retrieval_keys"] == [
+        "ERR_CONN_RESET_0x7f31",
+        "connection reset, by peer",
+    ]
+    assert mock_resolve_project_from_cwd.called
 
 
 @patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)

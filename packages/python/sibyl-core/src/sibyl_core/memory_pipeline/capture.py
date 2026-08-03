@@ -8,6 +8,7 @@ from typing import Any
 
 from sibyl_core.auth.memory_policy import stamp_memory_scope_metadata
 from sibyl_core.memory_pipeline.quality import normalize_memory_quality_metadata
+from sibyl_core.memory_pipeline.retrieval_keys import normalize_retrieval_keys
 from sibyl_core.memory_pipeline.structure import MemoryStructure, build_memory_structure
 
 
@@ -20,6 +21,10 @@ class MemoryCaptureRequest:
     tags: Sequence[str] | None = None
     related_to: Sequence[str] | None = None
     languages: Sequence[str] | None = None
+    # Exact-match keys the writing agent declares for this memory: an error
+    # string, a symbol, an alias. Not derived from the content, so a key may
+    # name something the body never spells out.
+    retrieval_keys: Sequence[str] | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
     provenance: Mapping[str, Any] = field(default_factory=dict)
     source_id: str | None = None
@@ -97,11 +102,16 @@ class MemoryCaptureService:
         self._create_graph_entity = create_graph_entity
 
     async def capture(self, request: MemoryCaptureRequest) -> MemoryCaptureResult:
-        # Before the raw write, not after. The raw capture lands first and the
-        # graph write validates the same plan again, so validating late would
-        # leave a verbatim record behind for a write that then fails, and the
-        # caller would retry into a duplicate.
+        # Everything the writer declared is validated before the raw write, not
+        # after. The raw capture lands first and the graph write validates the
+        # same declarations again, so validating late would leave a verbatim
+        # record behind for a write that then fails, and the caller would retry
+        # into a duplicate. Validating here rather than at the storage edge is
+        # also what lets the caller be told its declaration was refused, instead
+        # of finding out by never retrieving the memory again.
         request.structure()
+        declared_keys, _match_forms = normalize_retrieval_keys(request.retrieval_keys)
+
         raw_memory = await self._remember_raw_memory(request)
         raw_memory_id = _optional_str(raw_memory.get("id"))
         raw_source_id = _optional_str(raw_memory.get("source_id"))
@@ -122,6 +132,8 @@ class MemoryCaptureService:
                 principal_id=request.principal_id,
             )
         )
+        if declared_keys:
+            graph_metadata["retrieval_keys"] = declared_keys
         if raw_memory_id:
             graph_metadata["raw_memory_id"] = raw_memory_id
         if raw_source_id:

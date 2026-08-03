@@ -37,6 +37,7 @@ from sibyl_core.retrieval.candidates import (
     VectorCandidateFetch,
 )
 from sibyl_core.retrieval.fusion import rrf_merge
+from sibyl_core.retrieval.identifier_query import identifier_probe_tokens
 from sibyl_core.retrieval.query_ranking import rank_items_by_query_coverage
 from sibyl_core.retrieval.temporal import (
     get_entity_timestamp,
@@ -156,6 +157,7 @@ class RetrievalSignal(StrEnum):
     NODE_VECTOR = "node_vector"
     EDGE_VECTOR = "edge_vector"
     GRAPH_EXPANSION = "graph_expansion"
+    EXACT_KEY = "exact_key"
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +166,11 @@ class RetrievalWeights:
     active_task_state_boost: float = 1.3
     project_match_boost: float = 1.2
     direct_raw_source_boost: float = 1.4
+    # Deliberately equal to direct_raw_source_boost: both express the same thing,
+    # a candidate reached through a channel somebody declared outright rather
+    # than one inferred by similarity. A writer stamping an exact key is the
+    # write-side twin of a caller naming a raw source, so the magnitudes match.
+    exact_key_boost: float = 1.4
     graph_expansion_only_boost: float = 0.45
     graph_native_signal_boost_cap: float = 1.2
     freshness_boost_cap: float = 1.5
@@ -178,6 +185,7 @@ class CandidateLimits:
     node_vector: int = DEFAULT_CANDIDATES_PER_SIGNAL
     edge_vector: int = DEFAULT_CANDIDATES_PER_SIGNAL
     graph_expansion: int = DEFAULT_CANDIDATES_PER_SIGNAL
+    exact_key: int = DEFAULT_CANDIDATES_PER_SIGNAL
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,6 +216,7 @@ class RetrievalPlan:
         RetrievalSignal.NODE_VECTOR,
         RetrievalSignal.EDGE_VECTOR,
         RetrievalSignal.GRAPH_EXPANSION,
+        RetrievalSignal.EXACT_KEY,
     )
     project: str | None = None
     accessible_projects: frozenset[str] | None = None
@@ -343,6 +352,7 @@ def build_context_retrieval_plan(
             node_vector=per_signal_limit,
             edge_vector=per_signal_limit,
             graph_expansion=per_signal_limit,
+            exact_key=per_signal_limit,
         ),
         project=project,
         accessible_projects=scoped_accessible_projects,
@@ -389,6 +399,11 @@ async def context_search(
     node_sources_allowed = _node_sources_allowed(requested_types)
     episode_sources_allowed = _episode_sources_allowed(requested_types)
     edge_sources_allowed = _edge_sources_allowed(requested_types)
+    probe_tokens = (
+        identifier_probe_tokens(search_plan.query)
+        if RetrievalSignal.EXACT_KEY in search_plan.signals
+        else ()
+    )
     graph_tasks = [
         (
             RetrievalSignal.NODE_FULLTEXT,
@@ -423,6 +438,18 @@ async def context_search(
             if edge_sources_allowed
             else _empty_candidate_source(),
         ),
+        (
+            RetrievalSignal.EXACT_KEY,
+            _exact_key_candidates(
+                client=client,
+                plan=search_plan,
+                search_filter=search_filter,
+                limit=search_plan.candidate_limits.exact_key,
+                probe_tokens=probe_tokens,
+            )
+            if node_sources_allowed and probe_tokens
+            else _empty_candidate_source(),
+        ),
     ]
     raw_source, graph_sources, raw_failures, raw_recall_metadata = await _gather_candidate_sources(
         raw_task,
@@ -447,16 +474,33 @@ async def context_search(
     vector_candidate_lists = [vector_fetch.node_candidates, vector_fetch.edge_candidates]
     stage_timings_ms["vector_candidates"] = _elapsed_ms(stage_started_at)
 
+    def candidate_authorized(candidate: RetrievalCandidate) -> bool:
+        return _candidate_allowed(
+            candidate,
+            plan=search_plan,
+            requested_types=requested_types,
+            facet=facet,
+        )
+
     stage_started_at = time.perf_counter()
     graph_expansion_source = await _gather_graph_expansion_source(
         _graph_expansion_candidates(
             client=client,
             plan=search_plan,
             search_filter=search_filter,
+            # Seeds are authorized before they are walked, not only after. A
+            # denied row's own content never reached the caller, but seeding the
+            # walk from it exported its edges: the neighbour passes its own check
+            # and comes back, so the seed's existence became observable through
+            # somebody else's row. That is an oracle whenever the caller chooses
+            # the seed, which an exact-key probe does by construction, and the
+            # walk should not start from a row this reader cannot see regardless
+            # of which lane proposed it.
             seed_candidates=[
                 candidate
                 for source in [*graph_candidate_lists, *vector_candidate_lists]
                 for candidate in source
+                if candidate_authorized(candidate)
             ],
             limit=search_plan.candidate_limits.graph_expansion,
         )
@@ -475,26 +519,28 @@ async def context_search(
         (RetrievalSignal.NODE_FULLTEXT, graph_candidate_lists[0]),
         (RetrievalSignal.EPISODE_FULLTEXT, graph_candidate_lists[1]),
         (RetrievalSignal.EDGE_FULLTEXT, graph_candidate_lists[2]),
+        (RetrievalSignal.EXACT_KEY, graph_candidate_lists[3]),
         (RetrievalSignal.NODE_VECTOR, vector_candidate_lists[0]),
         (RetrievalSignal.EDGE_VECTOR, vector_candidate_lists[1]),
         (RetrievalSignal.GRAPH_EXPANSION, graph_expansion_candidates),
     ]
     filtered_lists = [
-        (
-            signal,
-            [
-                candidate
-                for candidate in candidates
-                if _candidate_allowed(
-                    candidate,
-                    plan=search_plan,
-                    requested_types=requested_types,
-                    facet=facet,
-                )
-            ],
-        )
+        (signal, [candidate for candidate in candidates if candidate_authorized(candidate)])
         for signal, candidates in source_lists
     ]
+    # Counted after the scope filter, never before. A pre-filter count answers
+    # "does any memory in this organization declare the string I just sent",
+    # which is a question an unauthorized caller must not be able to ask: the
+    # rows are withheld but their existence would leak, one guessed key at a
+    # time.
+    authorized_exact_key_candidates = next(
+        (
+            candidates
+            for signal, candidates in filtered_lists
+            if signal is RetrievalSignal.EXACT_KEY
+        ),
+        [],
+    )
     temporal_target = resolve_temporal_reference(search_plan.query, datetime.now(UTC))
     fusion_backend = fusion_backend_from_env()
     fusion_failures: list[CandidateSourceFailure] = []
@@ -551,6 +597,10 @@ async def context_search(
             **candidate_source_metadata,
             **raw_recall_metadata,
             **vector_fetch.as_metadata(),
+            **_exact_key_receipt_metadata(
+                probe_tokens=probe_tokens,
+                candidates=authorized_exact_key_candidates,
+            ),
             "stage_timings_ms": stage_timings_ms,
         },
         graph_count=len([result for result in results if result.result_origin == "graph"]),
@@ -747,6 +797,21 @@ def _fusion_receipt_metadata(
     return metadata
 
 
+def _exact_key_receipt_metadata(
+    *,
+    probe_tokens: Sequence[str],
+    candidates: Sequence[RetrievalCandidate],
+) -> dict[str, object]:
+    """Say whether the exact-match arm fired, so "inert" is a checkable claim."""
+
+    metadata: dict[str, object] = {"exact_key_probe_fired": bool(probe_tokens)}
+    if not probe_tokens:
+        return metadata
+    metadata["exact_key_probe_tokens"] = list(probe_tokens)
+    metadata["exact_key_hit_count"] = len(candidates)
+    return metadata
+
+
 def _candidate_list_or_empty(result: object) -> list[RetrievalCandidate]:
     if isinstance(result, BaseException) or not isinstance(result, list):
         return []
@@ -785,6 +850,7 @@ def _candidate_limits_for_limit(
         node_vector=max(1, min(candidate_limits.node_vector, source_limit)),
         edge_vector=max(1, min(candidate_limits.edge_vector, source_limit)),
         graph_expansion=max(1, min(candidate_limits.graph_expansion, source_limit)),
+        exact_key=max(1, min(candidate_limits.exact_key, source_limit)),
     )
 
 
@@ -972,6 +1038,94 @@ async def _node_fulltext_candidates(
         )
         for row in rows
     ]
+
+
+async def _exact_key_candidates(
+    *,
+    client: Any,
+    plan: RetrievalPlan,
+    search_filter: SearchFilter,
+    limit: int,
+    probe_tokens: Sequence[str],
+) -> list[RetrievalCandidate]:
+    """Rows whose writer declared one of the query's identifier-shaped tokens.
+
+    This is the one lane that can find a memory whose text never contains the
+    query: the key is an assertion layered onto the content, not extracted from
+    it. Everything is exact, so the lane cannot return a weakly relevant row and
+    the precision problem that keeps BM25 out of fusion does not arise here.
+
+    Inert by construction when the query carries no identifier: no probe tokens
+    means no read at all, and the fused pool is exactly what it was before.
+    """
+
+    if not probe_tokens:
+        return []
+    row_limit = max(int(limit), 1)
+    filter_clauses, filter_params = _node_filter_clause(search_filter)
+    # CONTAINSANY against the index defined on `retrieval_keys_normalized.*`.
+    # The element index is what makes this both correct and index-served: on
+    # SurrealDB 3.2.3 an index on the bare array field turns this same read into
+    # a full table scan, and turns a bare equality into zero rows unless the
+    # WHERE clause happens to carry a second predicate. Verified live on 3.2.3
+    # (UnionIndexScan across one branch per probe), so the `.*` in the index
+    # definition is what this read depends on, not a stylistic choice.
+    rows = await _execute_query_records(
+        client,
+        """
+        SELECT *
+        FROM entity
+        WHERE """
+        + _where_clause(["group_id = $group_id", *filter_clauses])
+        + """
+          AND retrieval_keys_normalized CONTAINSANY $probe_keys
+        ORDER BY created_at DESC, uuid DESC
+        LIMIT $limit;
+        """,
+        group_id=plan.organization_id,
+        probe_keys=list(probe_tokens),
+        # Read one lane's worth of rows per probe, not one in total. The database
+        # truncates by recency, and overlap is only computed here, so a single
+        # lane-sized read lets newer single-match rows crowd out the older row
+        # that answers every identifier in the query. Probes are capped, so this
+        # is the same bounded breadth a read per probe would have had.
+        limit=row_limit * len(probe_tokens),
+        **filter_params,
+    )
+
+    probes = set(probe_tokens)
+    scored: list[tuple[int, str, list[str], Mapping[str, object]]] = []
+    for row in rows:
+        matched = _matched_retrieval_keys(row, probes)
+        if not matched:
+            continue
+        scored.append((len(matched), str(row.get("uuid") or ""), matched, row))
+    # A row answering more of the query's identifiers is the better answer, so
+    # overlap orders the lane. Counted here rather than in SurrealQL to keep the
+    # read to one index lookup and no array functions.
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    candidates: list[RetrievalCandidate] = []
+    # Truncated after the overlap sort, so the lane hands fusion its best rows
+    # rather than its newest ones.
+    for _count, _uuid, matched, row in scored[:row_limit]:
+        candidate = _candidate_from_node_record(
+            row,
+            signal=RetrievalSignal.EXACT_KEY,
+            score=len(matched) / len(probes),
+        )
+        candidate.metadata["matched_retrieval_keys"] = matched
+        candidates.append(candidate)
+    return candidates
+
+
+def _matched_retrieval_keys(
+    row: Mapping[str, object],
+    probes: set[str],
+) -> list[str]:
+    stored = row.get("retrieval_keys_normalized")
+    if not isinstance(stored, list | tuple):
+        return []
+    return [str(key) for key in stored if str(key) in probes]
 
 
 async def _episode_fulltext_candidates(
@@ -2142,6 +2296,7 @@ def _selected_record_metadata(row: Mapping[str, object]) -> dict[str, object]:
         "complexity",
         "feature",
         "tags",
+        "retrieval_keys",
         "project_id",
         "epic_id",
         "task_id",
@@ -2654,6 +2809,12 @@ def _rank_fused_candidates(
             fusion_metadata["original_scores"][signal.value] = candidate.score
             if signal is RetrievalSignal.GRAPH_EXPANSION:
                 _merge_graph_expansion_metadata(fusion_metadata, candidate)
+            if signal is RetrievalSignal.EXACT_KEY:
+                # Merged here, from the lane's own candidate instance, because
+                # candidates_by_id keeps whichever lane saw the row first: a row
+                # found by both full-text and the key would otherwise report an
+                # empty match list off the full-text instance.
+                _merge_exact_key_metadata(fusion_metadata, candidate)
 
     ranked: list[tuple[RetrievalCandidate, float, dict[str, Any]]] = []
     for candidate_id, score in score_by_id.items():
@@ -2684,6 +2845,10 @@ def _rank_fused_candidates(
         if graph_signal_multiplier > 1.0:
             score *= graph_signal_multiplier
             fusion_metadata["graph_native_signal_boost"] = graph_signal_multiplier
+        exact_key_multiplier = _exact_key_multiplier(plan, signals=fusion_metadata["sources"])
+        if exact_key_multiplier > 1.0:
+            score *= exact_key_multiplier
+            fusion_metadata["exact_key_boost"] = exact_key_multiplier
         boosted, temporal_multiplier = _boost_score(
             candidate,
             score,
@@ -2708,8 +2873,28 @@ def _merge_graph_expansion_metadata(
             fusion_metadata[key] = value
 
 
-def _candidate_query_text(candidate: RetrievalCandidate) -> str:
-    parts = [part for part in (candidate.name, candidate.content) if part]
+def _merge_exact_key_metadata(
+    fusion_metadata: dict[str, Any],
+    candidate: RetrievalCandidate,
+) -> None:
+    metadata = candidate.metadata if isinstance(candidate.metadata, Mapping) else {}
+    matched = metadata.get("matched_retrieval_keys")
+    if isinstance(matched, list | tuple):
+        fusion_metadata["matched_retrieval_keys"] = [str(key) for key in matched]
+
+
+def _candidate_query_text(
+    candidate: RetrievalCandidate,
+    *,
+    matched_keys: Sequence[str] = (),
+) -> str:
+    # Only the keys this query actually matched, never the row's whole declared
+    # list. The keys are here so the coverage re-rank cannot bury an exact-key
+    # hit whose body never spells the token out, which needs the matched key and
+    # nothing more. Folding in every declared key would move scores on queries
+    # the arm never fired for, and would hand a writer an ungated ranking lever:
+    # sixteen keys of prose keywords buying a permanent coverage lift.
+    parts = [part for part in (candidate.name, candidate.content, *matched_keys) if part]
     return " ".join(parts).lower()
 
 
@@ -2729,10 +2914,22 @@ def _apply_query_coverage_to_fused(
     metadata_by_id = {
         id(candidate): fusion_metadata for candidate, _score, fusion_metadata in fused
     }
+    # Fusion holds the matched keys, not the candidate, because a row reached by
+    # two lanes keeps whichever instance arrived first. The coverage text is
+    # therefore resolved through the fused metadata rather than off the row.
+    matched_keys_by_id = {
+        id(candidate): tuple(
+            str(key) for key in (fusion_metadata.get("matched_retrieval_keys") or ())
+        )
+        for candidate, _score, fusion_metadata in fused
+    }
     reranked, _applied, _refined = rank_items_by_query_coverage(
         query,
         [(candidate, score) for candidate, score, _fusion_metadata in fused],
-        text_fn=_candidate_query_text,
+        text_fn=lambda candidate: _candidate_query_text(
+            candidate,
+            matched_keys=matched_keys_by_id.get(id(candidate), ()),
+        ),
         id_fn=lambda candidate: candidate.id,
         timestamp_fn=lambda candidate: get_entity_timestamp(candidate) or candidate.created_at,
         temporal_target=temporal_target,
@@ -2771,6 +2968,25 @@ def _graph_expansion_only_multiplier(
     if set(signals) != {RetrievalSignal.GRAPH_EXPANSION.value}:
         return 1.0
     return max(min(plan.weights.graph_expansion_only_boost, 1.0), 0.0)
+
+
+def _exact_key_multiplier(
+    plan: RetrievalPlan,
+    *,
+    signals: Sequence[str],
+) -> float:
+    """Lift a candidate whose writer declared one of the query's exact keys.
+
+    Rank-only RRF would score this candidate like the top of any other lane,
+    which is the failure that keeps a weak lexical arm out of fusion: an equal
+    vote for an unequal signal. The boost is what makes the arm high-precision
+    rather than merely present, and it applies to the candidate, not the lane,
+    so a row found by both the key and the vector index is lifted once.
+    """
+
+    if RetrievalSignal.EXACT_KEY.value not in signals:
+        return 1.0
+    return max(plan.weights.exact_key_boost, 1.0)
 
 
 def _graph_native_signal_multiplier(
@@ -2868,6 +3084,11 @@ def _search_result_from_candidate(
         )
     if fusion_metadata.get("graph_native_signal_boost"):
         metadata["graph_native_signal_boost"] = fusion_metadata.get("graph_native_signal_boost")
+    if fusion_metadata.get("exact_key_boost"):
+        metadata["exact_key_boost"] = fusion_metadata.get("exact_key_boost")
+        metadata["matched_retrieval_keys"] = list(
+            fusion_metadata.get("matched_retrieval_keys") or ()
+        )
     if fusion_metadata.get("temporal_decay_multiplier") is not None:
         metadata["temporal_decay_multiplier"] = round(
             float(fusion_metadata["temporal_decay_multiplier"]),

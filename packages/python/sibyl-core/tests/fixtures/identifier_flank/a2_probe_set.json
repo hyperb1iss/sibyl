@@ -1,0 +1,165 @@
+{
+  "fixture_id": "sibyl-a2-identifier-flank-probe-set",
+  "version": "2026-08-03.1",
+  "purpose": "Standing regression probe for the A2 identifier flank: writer-declared retrieval keys plus the exact-match retrieval arm. Each firing case names a memory whose body does NOT contain the queried token, so a pass cannot be explained by full-text or dense similarity. Each inert case is prose that must leave the arm unfired, which is what keeps the arm from becoming a general lexical lane.",
+  "cases": [
+    {
+      "id": "error-code-hex",
+      "query": "why does ERR_CONN_RESET_0x7f31 keep firing on startup",
+      "expect_fire": true,
+      "expected_probe_tokens": ["err_conn_reset_0x7f31"],
+      "memory": {
+        "title": "Connection resets during handshake",
+        "body": "The socket drops mid-handshake and the retry loop gives up after three attempts.",
+        "retrieval_keys": ["ERR_CONN_RESET_0x7f31"]
+      }
+    },
+    {
+      "id": "env-var",
+      "query": "what does SIBYL_FUSION_BACKEND change",
+      "expect_fire": true,
+      "expected_probe_tokens": ["sibyl_fusion_backend"],
+      "memory": {
+        "title": "Choosing where fusion runs",
+        "body": "Fusion can execute in process or inside the database; the default is the in-process path.",
+        "retrieval_keys": ["SIBYL_FUSION_BACKEND"]
+      }
+    },
+    {
+      "id": "module-path",
+      "query": "who owns sibyl_core.retrieval.search",
+      "expect_fire": true,
+      "expected_probe_tokens": ["sibyl_core.retrieval.search"],
+      "memory": {
+        "title": "Retrieval planning lives in one module",
+        "body": "Plan construction, lane orchestration and fusion all sit together so a lane cannot be added without touching the plan.",
+        "retrieval_keys": ["sibyl_core.retrieval.search"]
+      }
+    },
+    {
+      "id": "file-name",
+      "query": "is proxy.ts the middleware file",
+      "expect_fire": true,
+      "expected_probe_tokens": ["proxy.ts"],
+      "memory": {
+        "title": "Next.js renamed the middleware entry point",
+        "body": "The framework now looks for the request interceptor under a different filename than it used to.",
+        "retrieval_keys": ["proxy.ts", "middleware.ts"]
+      }
+    },
+    {
+      "id": "commit-sha",
+      "query": "what landed in 89684d05a1b2c3d4",
+      "expect_fire": true,
+      "expected_probe_tokens": ["89684d05a1b2c3d4"],
+      "memory": {
+        "title": "Per-lane seed budget now scales with the request",
+        "body": "A lane may propose no more rows than the whole answer holds, so a wider ask pays for a wider read.",
+        "retrieval_keys": ["89684d05a1b2c3d4"]
+      }
+    },
+    {
+      "id": "scoped-symbol",
+      "query": "why did std::vector<int> blow up here",
+      "expect_fire": true,
+      "expected_probe_tokens": ["std::vector<int>"],
+      "memory": {
+        "title": "Reserve before pushing in the hot loop",
+        "body": "Repeated growth reallocates the buffer and invalidates every outstanding iterator.",
+        "retrieval_keys": ["std::vector<int>"]
+      }
+    },
+    {
+      "id": "camel-case-symbol",
+      "query": "when should I call getSurrealGraphClient",
+      "expect_fire": true,
+      "expected_probe_tokens": ["getsurrealgraphclient"],
+      "memory": {
+        "title": "One pooled client per organization namespace",
+        "body": "Each tenant gets a dedicated pooled handle; sharing one across tenants routes queries into the wrong namespace.",
+        "retrieval_keys": ["getSurrealGraphClient"]
+      }
+    },
+    {
+      "id": "quoted-error-string",
+      "query": "the log said \"connection reset by peer\" again",
+      "expect_fire": true,
+      "expected_probe_tokens": ["connection reset by peer"],
+      "memory": {
+        "title": "Upstream closes idle sockets at sixty seconds",
+        "body": "The load balancer drops an idle connection well before the client's own timeout fires.",
+        "retrieval_keys": ["connection reset by peer"]
+      }
+    },
+    {
+      "id": "command-flag",
+      "query": "does --wait-searchable slow the capture down",
+      "expect_fire": true,
+      "expected_probe_tokens": ["--wait-searchable"],
+      "memory": {
+        "title": "Capture can block until the row is retrievable",
+        "body": "By default a capture returns as soon as the verbatim record is durable and finishes projecting in the background.",
+        "retrieval_keys": ["--wait-searchable"]
+      }
+    },
+    {
+      "id": "two-identifiers-one-query",
+      "query": "does search.py still gate on SIBYL_FUSION_BACKEND",
+      "expect_fire": true,
+      "expected_probe_tokens": ["search.py", "sibyl_fusion_backend"],
+      "memory": {
+        "title": "The backend choice is read from the environment per query",
+        "body": "Nothing caches the selection, so flipping it takes effect on the next request without a restart.",
+        "retrieval_keys": ["search.py", "SIBYL_FUSION_BACKEND"]
+      }
+    },
+    {
+      "id": "case-insensitive-declaration",
+      "query": "anything on err_conn_reset_0x7f31",
+      "expect_fire": true,
+      "expected_probe_tokens": ["err_conn_reset_0x7f31"],
+      "memory": {
+        "title": "Retry budget exhausted on the second hop",
+        "body": "The inner call gives up first, so the outer error is a symptom rather than the cause.",
+        "retrieval_keys": ["ERR_CONN_RESET_0X7F31"]
+      }
+    },
+    {
+      "id": "prose-topic-question",
+      "query": "how do we handle authentication",
+      "expect_fire": false,
+      "expected_probe_tokens": []
+    },
+    {
+      "id": "prose-decision-question",
+      "query": "what did we decide about connection pooling",
+      "expect_fire": false,
+      "expected_probe_tokens": []
+    },
+    {
+      "id": "prose-dotted-abbreviation",
+      "query": "e.g. the retrieval plan we shipped",
+      "expect_fire": false,
+      "expected_probe_tokens": []
+    },
+    {
+      "id": "prose-bare-year",
+      "query": "what changed in 2026",
+      "expect_fire": false,
+      "expected_probe_tokens": []
+    },
+    {
+      "id": "prose-hex-spelling-word",
+      "query": "the facade pattern we accede to",
+      "expect_fire": false,
+      "expected_probe_tokens": []
+    },
+    {
+      "id": "prose-bare-acronym",
+      "query": "why does Redis expire the TTL early",
+      "expect_fire": false,
+      "expected_probe_tokens": [],
+      "note": "A bare all-caps acronym deliberately does not fire: English writes acronyms identically, so admitting them would fire the arm on ordinary emphasis. A caller who needs one matched quotes it."
+    }
+  ]
+}

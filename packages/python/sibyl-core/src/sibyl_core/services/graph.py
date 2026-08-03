@@ -35,6 +35,7 @@ from sibyl_core.memory_pipeline.quality import (
     expand_memory_quality_storage_metadata,
     normalize_memory_quality_metadata,
 )
+from sibyl_core.memory_pipeline.retrieval_keys import coerce_retrieval_keys
 from sibyl_core.models.entities import (
     Entity,
     EntityType,
@@ -261,6 +262,11 @@ INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
     -- fail-open. A caller that means "no scope" sends CLEAR_MEMORY_SCOPE.
     memory_scope = IF $input.memory_scope = '{CLEAR_MEMORY_SCOPE}' {{ NONE }}
         ELSE {{ $input.memory_scope ?? memory_scope }},
+    -- Same absence rule as memory_scope, for the same reason: a write is a full
+    -- replace, and a reprojection or restore that rebuilds an Entity without
+    -- the keys must not strip the writer's exact-match declaration off the row.
+    retrieval_keys = $input.retrieval_keys ?? retrieval_keys,
+    retrieval_keys_normalized = $input.retrieval_keys_normalized ?? retrieval_keys_normalized,
     epic_id = $input.epic_id,
     parent_task_id = $input.parent_task_id,
     task_id = $input.task_id,
@@ -1978,6 +1984,9 @@ def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
     row_tags = normalized_row.get("tags")
     if row_tags is not None and metadata.get("tags") is None:
         metadata["tags"] = row_tags
+    row_retrieval_keys = normalized_row.get("retrieval_keys")
+    if row_retrieval_keys is not None and metadata.get("retrieval_keys") is None:
+        metadata["retrieval_keys"] = row_retrieval_keys
 
     entity_id = _entity_id_from_row(normalized_row)
     record_id = _row_record_id(normalized_row)
@@ -2900,6 +2909,12 @@ def _entity_record(
     # genuinely means "no scope" says so with CLEAR_MEMORY_SCOPE, which reaches
     # the query as a value and overwrites rather than being skipped.
     memory_scope = _metadata_str(metadata, "memory_scope")
+    # The writer's exact-match declaration, promoted for the same reason the
+    # scope is: only a column can carry the index the exact-match arm reads.
+    # Coerced rather than validated here because this is the storage edge and a
+    # single malformed key must not fail an otherwise valid write; the surfaces
+    # that accept keys from a caller validate strictly instead.
+    retrieval_keys = coerce_retrieval_keys(metadata.get("retrieval_keys"))
     epic_id = _metadata_str(metadata, "epic_id")
     parent_task_id = _metadata_str(metadata, "parent_task_id")
     if canonicalize_parent_task_id and not parent_task_id and entity.entity_type == EntityType.TASK:
@@ -2951,6 +2966,11 @@ def _entity_record(
         "tags": tags,
         "name_embedding": entity.embedding,
     }
+    # Absent rather than NONE when the entity declares no keys, so a namespace
+    # that has not reached graph schema v18 still accepts an ordinary write.
+    if retrieval_keys is not None:
+        record["retrieval_keys"] = retrieval_keys[0]
+        record["retrieval_keys_normalized"] = retrieval_keys[1]
     if last_recalled_at is not None:
         record["last_recalled_at"] = last_recalled_at
     if last_used_at is not None:
@@ -3034,6 +3054,13 @@ def _entity_update_patch(updates: Mapping[str, Any], *, updated_at: datetime) ->
         tags = _metadata_str_list(metadata_patch.get("tags")) or []
         patch["tags"] = tags
         attributes_patch["tags"] = tags
+    if "retrieval_keys" in metadata_patch:
+        # Naming the field in an update IS the explicit statement the bulk
+        # upsert's absence rule refuses to infer, so an empty list clears.
+        display, match = coerce_retrieval_keys(metadata_patch.get("retrieval_keys")) or ([], [])
+        patch["retrieval_keys"] = display
+        patch["retrieval_keys_normalized"] = match
+        attributes_patch["retrieval_keys"] = display
     return patch
 
 

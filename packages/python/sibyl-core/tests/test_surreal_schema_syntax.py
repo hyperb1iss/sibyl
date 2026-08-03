@@ -1051,6 +1051,42 @@ def test_graph_enum_assertion_replay_admits_passage_entity_type() -> None:
         assert f"'{entity_type.value}'" in migration_sql
 
 
+def test_graph_retrieval_key_columns_are_versioned_and_indexed() -> None:
+    """The exact-match arm reads an index, so the migration must define one.
+
+    Bootstrap DDL and the migration have to agree, because a fresh namespace
+    takes the first path and an existing one takes the second; a field defined
+    in only one of them is a column that exists on some tenants and not others.
+    """
+    migration = next(
+        item for item in GRAPH_SCHEMA_MIGRATIONS if item.name == "entity_retrieval_keys_column"
+    )
+    migration_sql = "\n".join(migration.statements)
+
+    assert GRAPH_SCHEMA_CURRENT_VERSION >= 18
+    assert migration.version == 18
+    for field in ("retrieval_keys", "retrieval_keys_normalized"):
+        assert f"DEFINE FIELD OVERWRITE {field} ON entity TYPE option<array<string>>" in (
+            migration_sql
+        )
+        assert f"DEFINE FIELD IF NOT EXISTS {field} ON entity TYPE option<array<string>>" in (
+            NODE_DEFINITIONS
+        )
+    # The `.*` is the contract, not a detail. On SurrealDB 3.2.3 an index on the
+    # bare array field turns the arm's CONTAINSANY into a full table scan, and
+    # turns a bare equality into zero rows unless the WHERE clause happens to
+    # carry a second predicate. Dropping the suffix would leave every test green
+    # while the lane scanned the table.
+    assert (
+        "DEFINE INDEX OVERWRITE idx_entity_retrieval_keys "
+        "ON entity FIELDS retrieval_keys_normalized.*" in migration_sql
+    )
+    assert (
+        "DEFINE INDEX IF NOT EXISTS idx_entity_retrieval_keys "
+        "ON entity FIELDS retrieval_keys_normalized.*" in NODE_DEFINITIONS
+    )
+
+
 def test_graph_schema_current_version_matches_latest_migration() -> None:
     latest_migration_version = max(migration.version for migration in GRAPH_SCHEMA_MIGRATIONS)
 

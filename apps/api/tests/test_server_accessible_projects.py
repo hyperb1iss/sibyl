@@ -483,6 +483,9 @@ async def test_remember_mcp_memory_scopes_project_metadata() -> None:
         memory_scope="project",
         scope_key="project-a",
         principal_id=ctx.user_id,
+        # This capture declares no exact-match keys, and None says exactly that,
+        # so the write preserves whatever keys the row already carries.
+        retrieval_keys=None,
         spans=None,
         atomic=False,
         probes=None,
