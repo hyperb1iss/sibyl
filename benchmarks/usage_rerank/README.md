@@ -54,7 +54,7 @@ Environment overrides: `SIBYL_P5_SURREAL_HTTP_URL`, `SIBYL_P5_SURREAL_USERNAME`,
 uv run pytest tools/tests/test_usage_rerank_harness.py -q
 ```
 
-91 tests, all on fixture events, no live store required. The fixtures reproduce the real
+98 tests, all on fixture events, no live store required. The fixtures reproduce the real
 emitter's key shapes and microsecond timestamp behaviour on purpose, because the harness's
 conclusions depend on those details.
 

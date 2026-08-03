@@ -99,10 +99,15 @@ uniformity.
 ## The offline what-if
 
 124 sessions are contrastive, meaning they served both an eventually cited item and at
-least one item nobody cited. Dropping the interleaved sessions leaves 119 of them, and
-because ranks are only comparable inside one item kind, those 119 sessions decompose into
-133 independently ranked candidate lists. Together they carry 186 cited items against
-1,013 uncited candidates, averaging about ten candidates per list. Baseline MRR of the
+least one item nobody cited. Two separate exclusions then reduce that to the population
+actually ranked, and they are worth keeping apart because they say different things. One
+contrastive session has interleaved kinds, so its recovered ranks are not a served order,
+leaving 123. A further 4 are contrastive only across kinds rather than inside any single
+one, meaning the cited item sits in one kind while the uncited candidates sit in another,
+and ranks do not compare across kinds, leaving 119. Those 119 decompose into 133
+independently ranked candidate lists carrying 186 cited items against 1,013 uncited
+candidates, averaging about ten candidates per list. `population` in the what-if receipt
+reports the whole chain so it can be audited. Baseline MRR of the
 cited item under the served order is 0.448, and the cited item already sits at rank 1 in
 45 of 186 cases, so roughly a quarter of the population has no headroom to buy at all.
 
@@ -157,8 +162,9 @@ been available to be exposed, and a bonus on it penalizes new memories.
 **A roughly 2x anti-correlation survives once age is held fixed.** Standardizing the
 uncited group onto the cited group's true-age distribution, band by band, brings its mean
 exposure count from 19.45 down to 17.43 against 8.01 for cited candidates, a residual
-ratio of 2.18. The gap narrows from 2.43 to 2.18 and does not vanish. It is present in
-every age band:
+ratio of 2.18. The gap narrows from 2.43 to 2.18 and does not vanish. It shows up in five
+of the seven age bands, strongest inside the first three days, and flattens to parity in
+the 7 to 14 and 14 to 30 day bands:
 
 | True age at serve | cited mean (n) | uncited mean (n) | ratio |
 | --- | --- | --- | --- |
@@ -170,10 +176,11 @@ every age band:
 | 14 to 30 days | 8.63 (8) | 8.69 (26) | 1.01x |
 | over 30 days | 10.87 (15) | 16.83 (380) | 1.55x |
 
-So heavily exposed items really are less likely to be the cited one, independently of
-age, and the effect is strongest in the first three days. Both readings hold: a raw
-retrieval-count bonus acts as an age penalty on new memories *and* rewards a genuinely
-anti-correlated signal.
+So heavily exposed items are less likely to be the cited one independently of age, with the
+effect concentrated in the first three days and flat across 7 to 30 days, a range holding
+only 29 of the 185 resolved cited candidates. Both readings hold: a raw retrieval-count bonus acts
+as an age penalty on new memories *and* rewards a signal that is genuinely
+anti-correlated over the age range where most citations happen.
 
 Phase 2 follows from that. An age-normalized rate is worth testing but is not sufficient
 on its own, since standardization shows a residual the rate would miss, and recency
@@ -207,19 +214,22 @@ improve on current fusion. This is the crux: only 136 of 186 cited items had any
 usage signal at all, so 50 had none whatsoever. A usage prior cannot help an item it has
 never seen used.
 
-The citation term points the correct way but is thin. 27.8% of cited candidates carry a
-prior citation against 17.7% of uncited ones, a real signal (the citation-only arm sits
-3.2 standard deviations above the random-prior null) that is nonetheless far too weak to
-improve on current fusion. This is the crux: only 52 of 187 cited items had any prior
-citation at all, and 49 had no prior usage signal whatsoever. A usage prior cannot help
-an item it has never seen used.
-
 ## Contamination
 
 `context_pack_eval` writes exposure rows into the store it measures (Sibyl task
 1592d234), and the mechanism is confirmed: the eval posts to `/context/pack` without
 `record_exposure: false` (`sibyl_core/evals/runtime.py:302`) against a schema whose
 default is `True` (`apps/api/src/sibyl/api/schemas/context.py:82`).
+
+The same runner also drives `/search` (`evals/runtime.py:193`), and that schema defaults
+`record_exposure` to `True` as well (`apps/api/src/sibyl/api/schemas/search.py:92`) with
+the eval payload omitting the field, so eval traffic can land on the `search` surface too,
+not only `context_pack`. Both exposure surfaces in this store are therefore reachable by a
+benchmark run. The other endpoints the runner drives (`/rag/search`,
+`/rag/code-examples`, `/rag/hybrid-search`) record nothing, because the `/rag` router never
+annotates exposures. None of this changes the burst estimate, which keys on surface without
+privileging either one, and it is the reason the estimate cannot be narrowed by excluding a
+single surface.
 
 Exact separation is impossible, because no column marks an event as benchmark-origin and
 the eval reuses the `context_pack` surface with the same organization and principal as
@@ -268,8 +278,9 @@ lane's no-production-edits constraint.
 ## Proposed next gate, pre-registered
 
 Phase 2 should be instrumentation plus accumulation, not tuning. The gate below is
-written before the data exists, per campaign protocol law, and the harness in this
-directory computes every number in it.
+written before the data exists, per campaign protocol law. The harness in this directory
+already computes every quantity the gate names except the held-out time split, which phase
+2 has to add before the gate can be evaluated.
 
 **Preconditions before the gate may be evaluated at all.** Query text recoverable on at
 least 95% of exposure events; rank persisted as a column, so `global_rank_recoverable` is
@@ -296,6 +307,14 @@ real bar to roughly +0.09 and could reject a genuine +0.05 win, which is the out
 beats zero but not the random prior is suspicious, and an arm that beats the random prior
 but not zero, which is where `citation_only` sits today, carries information without being
 worth shipping.
+
+**Resample sessions, not items, when the gate is rerun.** The interval reported here is a
+per-item bootstrap over 186 cited items drawn from about 123 sessions, and items inside one
+session reorder together rather than independently, so that interval is mildly
+anti-conservative. A cluster bootstrap that resamples whole sessions is the correct
+estimator at gate time. It is not worth rerunning here, because the current interval
+already straddles zero and a wider one can only straddle it further, but a phase-2 arm
+landing near the +0.05 threshold would need the clustered version to be believed.
 
 **NO-GO** if the best arm's MRR delta is below +0.02, or its interval includes zero, or it
 fails to reproduce on the held-out split. An interval straddling zero is NO-GO by default,
