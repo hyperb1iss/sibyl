@@ -476,6 +476,20 @@
           ]
         },
         {
+          "metric": "allow_failure_count",
+          "mode": "receipt",
+          "required_receipt": "team-scope-trust-receipt.json",
+          "receipt_schema": "sibyl-team-scope-trust-receipt-v1",
+          "direction": "lower",
+          "threshold": 0,
+          "require_receipt_checks": true,
+          "required_surfaces": [
+            "team scope service recall",
+            "graph metadata read filter",
+            "retrieval candidate filter"
+          ]
+        },
+        {
           "metric": "promotion_attribution_coverage",
           "mode": "receipt",
           "required_receipt": "team-scope-trust-receipt.json",
