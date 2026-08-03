@@ -368,7 +368,9 @@ def _bulk_create_metadata(
     now: datetime,
     principal_id: str | None,
 ) -> dict[str, Any]:
-    request_metadata = dict(entity.metadata or {})
+    from sibyl_core.memory_pipeline.structure import structure_metadata
+
+    request_metadata = strip_structure_metadata(entity.metadata)
     project_id = str(request_metadata.get("project_id") or "").strip()
     return {
         "category": entity.category,
@@ -381,7 +383,60 @@ def _bulk_create_metadata(
             principal_id=principal_id,
             verified_project_id=project_id or None,
         ),
+        # Declared through the typed fields and validated, never carried over from
+        # the payload bag: this batch path writes rows directly rather than
+        # through the graph writer that owns those keys everywhere else.
+        **structure_metadata(_bulk_create_structure(entity)),
     }
+
+
+def _reject_unsupported_bulk_entry(entity: EntityCreate) -> None:
+    """Fault a batch entry the direct-write path cannot honor."""
+    if entity.entity_type in BULK_UNSUPPORTED_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{entity.entity_type.value} entities are not supported by bulk create",
+        )
+    if not entity.skip_conflicts:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "bulk create requires skip_conflicts=true; "
+                "use POST /entities for conflict detection"
+            ),
+        )
+    if entity.probes:
+        # Rehearsal has to observe the row it asks about, and this path writes a
+        # whole batch without waiting on a searchable write per entry. Accepting
+        # the field and never rehearsing would ship a receipt-shaped promise
+        # nothing keeps.
+        raise unprocessable_entity(
+            "probes are not supported on bulk create; write the memory through "
+            "POST /entities to get a rehearsal receipt",
+            field="probes",
+        )
+
+
+def _bulk_create_structure(entity: EntityCreate) -> Any:
+    """Validate one batch entry's declared structure against its own body."""
+    from sibyl_core.memory_pipeline.spans import MemoryStructureError
+    from sibyl_core.memory_pipeline.structure import build_memory_structure
+
+    content = (entity.content or entity.description or entity.name).strip()
+    try:
+        return build_memory_structure(
+            content,
+            spans=[span.model_dump(exclude_none=True) for span in entity.spans]
+            if entity.spans is not None
+            else None,
+            atomic=entity.atomic,
+        )
+    except MemoryStructureError as exc:
+        raise unprocessable_entity(
+            str(exc),
+            field=exc.field,
+            remediation="Recompute the declared structure against the entry's own content.",
+        ) from exc
 
 
 def _entity_from_bulk_create(
@@ -1601,16 +1656,7 @@ async def create_entities_bulk(
     verified_project_ids: set[str] = set()
 
     for entity in batch.entities:
-        if entity.entity_type in BULK_UNSUPPORTED_TYPES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"{entity.entity_type.value} entities are not supported by bulk create",
-            )
-        if not entity.skip_conflicts:
-            raise HTTPException(
-                status_code=400,
-                detail="bulk create requires skip_conflicts=true; use POST /entities for conflict detection",
-            )
+        _reject_unsupported_bulk_entry(entity)
         project = entity.metadata.get("project_id") if entity.metadata else None
         project_id = str(project) if project else None
         if project_id and project_id not in verified_project_ids:

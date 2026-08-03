@@ -2102,3 +2102,67 @@ async def test_update_entity_cannot_have_a_plan_planted_through_metadata() -> No
     written = runtime.entity_manager.update.await_args.args[1]["metadata"]
     assert written["note"] == "kept"
     assert "probe_rehearsal" not in written
+
+
+def test_bulk_create_validates_a_declared_plan_against_its_own_entry() -> None:
+    """The batch path writes rows directly, bypassing the graph writer's gate."""
+    now = datetime.now(UTC)
+
+    built = _entity_from_bulk_create(
+        EntityCreate(
+            name="Batch memory",
+            content=_SPANNED_BODY,
+            entity_type=EntityType.EPISODE,
+            skip_conflicts=True,
+            spans=[{"start": 0, "end": 20}, {"start": 20, "end": len(_SPANNED_BODY)}],
+        ),
+        group_id="org-1",
+        now=now,
+    )
+
+    assert built.metadata["agent_spans"] == [
+        {"start": 0, "end": 20},
+        {"start": 20, "end": len(_SPANNED_BODY)},
+    ]
+
+    with pytest.raises(HTTPException) as excinfo:
+        _entity_from_bulk_create(
+            EntityCreate(
+                name="Batch memory",
+                content=_SPANNED_BODY,
+                entity_type=EntityType.EPISODE,
+                skip_conflicts=True,
+                spans=[{"start": 0, "end": 10}, {"start": 12, "end": len(_SPANNED_BODY)}],
+            ),
+            group_id="org-1",
+            now=now,
+        )
+
+    assert excinfo.value.status_code == 422
+    assert "must leave no gap" in excinfo.value.detail["message"]
+
+
+def test_bulk_create_cannot_have_structure_planted_through_metadata() -> None:
+    built = _entity_from_bulk_create(
+        EntityCreate(
+            name="Batch memory",
+            content=_SPANNED_BODY,
+            entity_type=EntityType.EPISODE,
+            skip_conflicts=True,
+            metadata={
+                "agent_spans": [{"start": 0, "end": 1}],
+                "agent_atomic": True,
+                "memory_probes": ["forged"],
+                "probe_rehearsal": {"retrievable": 99},
+                "note": "kept",
+            },
+        ),
+        group_id="org-1",
+        now=datetime.now(UTC),
+    )
+
+    assert built.metadata["note"] == "kept"
+    assert "agent_spans" not in built.metadata
+    assert "agent_atomic" not in built.metadata
+    assert "memory_probes" not in built.metadata
+    assert "probe_rehearsal" not in built.metadata
