@@ -315,12 +315,15 @@ but not zero, which is where `citation_only` sits today, carries information wit
 worth shipping.
 
 **Resample sessions, not items, when the gate is rerun.** The interval reported here is a
-per-item bootstrap over 186 cited items drawn from about 123 sessions, and items inside one
-session reorder together rather than independently, so that interval is mildly
-anti-conservative. A cluster bootstrap that resamples whole sessions is the correct
-estimator at gate time. It is not worth rerunning here, because the current interval
-already straddles zero and a wider one can only straddle it further, but a phase-2 arm
-landing near the +0.05 threshold would need the clustered version to be believed.
+per-item bootstrap over 186 cited items drawn from the 119 ranked sessions, and items
+inside one session reorder together rather than independently, so the item-level interval
+misstates the dependence structure. Measured on this data the session-clustered interval
+comes out narrower (0.0733 vs 0.0807 width; within-session deltas are negatively
+correlated because candidates compete in one reordering), so the item-level interval errs
+conservative here, and every verdict is unchanged either way. A cluster bootstrap that
+resamples whole sessions is still the correct estimator at gate time: a phase-2 arm
+landing near the +0.05 threshold needs the clustered version to be believed, whichever
+direction the clustering moves it.
 
 **NO-GO** if the best arm's MRR delta is below +0.02, or its interval includes zero, or it
 fails to reproduce on the held-out split. An interval straddling zero is NO-GO by default,
