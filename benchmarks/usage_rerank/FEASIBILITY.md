@@ -132,10 +132,16 @@ window is recency.
 
 That has a direct consequence for phase 2: an age-normalized exposure rate is the term
 worth testing, not the raw count, and the recency effect should be modelled explicitly
-rather than arriving as a side effect of a counter. Note also that `first_seen_at` uses
-the earliest usage event as its age proxy, since creation time lives in the graph rather
-than the event table, so items predating usage recording are censored and their history
-is understated.
+rather than arriving as a side effect of a counter.
+
+The age proxy has a known limitation, and its direction is measured rather than left open.
+`first_seen_at` uses an item's earliest usage event, because creation time lives in the
+graph rather than the event table, so any item already present when recording began has
+an understated history. That censoring reaches 9.4% of uncited candidates against 4.3% of
+cited ones, and since it can only truncate long histories, the group whose history is
+already longer is the one losing more of it. The measured age gap is therefore a floor on
+the real one, which makes the age explanation conservative rather than inflated.
+`censored_share` on both groups is part of the committed receipt.
 
 The citation term points the correct way but is thin. 27.8% of cited candidates carry a
 prior citation against 17.7% of uncited ones, a real signal (the citation-only arm sits

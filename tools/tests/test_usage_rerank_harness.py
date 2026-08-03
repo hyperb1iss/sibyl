@@ -737,6 +737,30 @@ def test_describe_candidate_priors_splits_cited_from_uncited() -> None:
     assert contrast["uncited"]["history_days_median"] is not None
 
 
+def test_describe_candidate_priors_flags_censored_history() -> None:
+    """An item present at the window start has understated history, so it is flagged.
+
+    Direction matters more than the count: censoring can only truncate long
+    histories, so a higher censored share on one group means that group's age is
+    understated rather than overstated.
+    """
+    labeled, rows = _labeled_fixture(cited="b")
+    counts = prior.PointInTimeCounts(rows)
+    contrast = prior.describe_candidate_priors([labeled], counts)
+    # Every fixture item first appears at the window start, so all are censored.
+    assert contrast["cited"]["censored_share"] == pytest.approx(1.0)
+    assert contrast["uncited"]["censored_share"] == pytest.approx(1.0)
+
+
+def test_earliest_event_at_marks_the_observation_window_start() -> None:
+    rows = [
+        _event(signal=events.EXPOSURE, item_id="a", offset_us=5_000),
+        _event(signal=events.EXPOSURE, item_id="b", offset_us=0),
+    ]
+    assert prior.PointInTimeCounts(rows).earliest_event_at == BASE
+    assert prior.PointInTimeCounts([]).earliest_event_at is None
+
+
 def test_describe_candidate_priors_handles_an_empty_population() -> None:
     contrast = prior.describe_candidate_priors([], prior.PointInTimeCounts([]))
     assert contrast["cited"]["candidates"] == 0

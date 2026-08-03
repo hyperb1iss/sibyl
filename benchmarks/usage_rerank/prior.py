@@ -112,6 +112,11 @@ class PointInTimeCounts:
             misled_count=self._count_before(item_kind, item_id, MISLED, cutoff),
         )
 
+    @property
+    def earliest_event_at(self) -> datetime | None:
+        """Start of the observation window, used to flag censored history."""
+        return min(self._first_seen.values()) if self._first_seen else None
+
     def first_seen_at(self, item_kind: str, item_id: str) -> datetime | None:
         """Earliest event of any signal for this item, the harness's age proxy.
 
@@ -253,6 +258,7 @@ def run_whatif(
     return tuple(outcomes)
 
 
+CENSORED_WINDOW_DAYS = 1.0
 MATURE_HISTORY_DAYS = 5.0
 FRESH_HISTORY_DAYS = 0.5
 
@@ -271,17 +277,26 @@ def describe_candidate_priors(
     a maturity-matched subset, so a count gap that is really an age gap is
     visible rather than inferred.
     """
-    cited: list[tuple[UsageCounts, float | None]] = []
-    uncited: list[tuple[UsageCounts, float | None]] = []
+    cited: list[_CandidateRecord] = []
+    uncited: list[_CandidateRecord] = []
+    window_start = counts.earliest_event_at
     for labeled in labeled_sessions:
         for item_kind in labeled.session.item_kinds:
             if not labeled.is_contrastive(item_kind):
                 continue
             cutoff = labeled.session.started_at
             for item in labeled.session.items_of_kind(item_kind):
-                record = (
-                    counts.counts_before(item.item_kind, item.item_id, cutoff),
-                    counts.history_days_before(item.item_kind, item.item_id, cutoff),
+                first_seen = counts.first_seen_at(item.item_kind, item.item_id)
+                censored = (
+                    window_start is not None
+                    and first_seen is not None
+                    and (first_seen - window_start).total_seconds()
+                    < CENSORED_WINDOW_DAYS * 86_400.0
+                )
+                record = _CandidateRecord(
+                    counts=counts.counts_before(item.item_kind, item.item_id, cutoff),
+                    history_days=counts.history_days_before(item.item_kind, item.item_id, cutoff),
+                    censored=censored,
                 )
                 if item.key in labeled.cited_keys:
                     cited.append(record)
@@ -291,7 +306,10 @@ def describe_candidate_priors(
     return {
         "note": (
             "retrieval_count grows with item age, so the raw count gap and the "
-            "age-normalized rate must be read together."
+            "age-normalized rate must be read together. censored_share is the "
+            "fraction whose history is understated because the item was already "
+            "present when event recording began; a higher censored_share on the "
+            "uncited group means the measured age gap is conservative."
         ),
         "mature_history_days": MATURE_HISTORY_DAYS,
         "fresh_history_days": FRESH_HISTORY_DAYS,
@@ -300,23 +318,36 @@ def describe_candidate_priors(
     }
 
 
-def _describe_group(records: Sequence[tuple[UsageCounts, float | None]]) -> dict[str, Any]:
+@dataclass(frozen=True, slots=True)
+class _CandidateRecord:
+    """One candidate's prior signal, age, and censoring status."""
+
+    counts: UsageCounts
+    history_days: float | None
+    censored: bool
+
+
+def _describe_group(records: Sequence[_CandidateRecord]) -> dict[str, Any]:
     if not records:
         return {"candidates": 0}
-    exposures = [record[0].retrieval_count for record in records]
-    citations = [record[0].citation_count for record in records]
-    histories = [record[1] for record in records if record[1] is not None]
+    exposures = [record.counts.retrieval_count for record in records]
+    citations = [record.counts.citation_count for record in records]
+    histories = [record.history_days for record in records if record.history_days is not None]
     rates = [
-        record[0].retrieval_count / record[1]
+        record.counts.retrieval_count / record.history_days
         for record in records
-        if record[1] is not None and record[1] >= FRESH_HISTORY_DAYS
+        if record.history_days is not None and record.history_days >= FRESH_HISTORY_DAYS
     ]
     mature = [
-        record[0].retrieval_count
+        record.counts.retrieval_count
         for record in records
-        if record[1] is not None and record[1] > MATURE_HISTORY_DAYS
+        if record.history_days is not None and record.history_days > MATURE_HISTORY_DAYS
     ]
-    fresh = sum(1 for record in records if record[1] is None or record[1] <= FRESH_HISTORY_DAYS)
+    fresh = sum(
+        1
+        for record in records
+        if record.history_days is None or record.history_days <= FRESH_HISTORY_DAYS
+    )
     return {
         "candidates": len(records),
         "prior_exposures_mean": round(statistics.fmean(exposures), 3),
@@ -333,6 +364,7 @@ def _describe_group(records: Sequence[tuple[UsageCounts, float | None]]) -> dict
         "exposures_per_day_sample": len(rates),
         "mature_prior_exposures_mean": round(statistics.fmean(mature), 3) if mature else None,
         "mature_sample": len(mature),
+        "censored_share": round(sum(1 for record in records if record.censored) / len(records), 4),
     }
 
 
