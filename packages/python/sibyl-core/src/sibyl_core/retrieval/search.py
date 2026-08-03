@@ -232,6 +232,7 @@ class _GraphExpansionHop:
     relationship: str
     score: float
     community_id: str | None = None
+    direction: str = "outgoing"
 
 
 def coerce_fusion_backend(
@@ -1444,10 +1445,13 @@ async def _node_bfs_records(
     group_id: str,
     max_depth: int,
     limit: int,
+    relationship_names: Sequence[str] = (),
+    include_incoming: bool = False,
 ) -> list[dict[str, object]]:
     if (not origin_uuids and not episode_origin_uuids) or max_depth < 1:
         return []
 
+    wanted = {str(name).upper() for name in relationship_names if str(name).strip()}
     discovered: list[_GraphExpansionHop] = []
     seen_discovered: set[str] = set()
     visited_entities = set(origin_uuids)
@@ -1461,7 +1465,7 @@ async def _node_bfs_records(
             break
         fetch_limit = _graph_expansion_fetch_limit(remaining)
         next_hops: list[_GraphExpansionHop] = []
-        if depth == 1:
+        if depth == 1 and _hop_relationship_wanted("MENTIONS", wanted):
             next_hops.extend(
                 await _mentioned_entity_hops(
                     client=client,
@@ -1478,9 +1482,21 @@ async def _node_bfs_records(
                 group_id=group_id,
                 depth=depth,
                 limit=fetch_limit,
+                relationship_names=sorted(wanted),
             )
         )
-        if depth == 1:
+        if include_incoming:
+            next_hops.extend(
+                await _relation_source_hops(
+                    client=client,
+                    target_uuids=entity_frontier,
+                    group_id=group_id,
+                    depth=depth,
+                    limit=fetch_limit,
+                    relationship_names=sorted(wanted),
+                )
+            )
+        if depth == 1 and _hop_relationship_wanted("SHARES_COMMUNITY", wanted):
             next_hops.extend(
                 await _community_member_hops(
                     client=client,
@@ -1561,6 +1577,16 @@ async def _mentioned_entity_hops(
     ]
 
 
+def _hop_relationship_wanted(relationship: str, wanted: set[str]) -> bool:
+    """Whether a synthesized hop label survives the caller's relationship filter.
+
+    ``MENTIONS`` and ``SHARES_COMMUNITY`` are labels the expanders mint rather
+    than edge names a query can filter on, so the filter is applied by skipping
+    the expander instead of narrowing its ``WHERE``.
+    """
+    return not wanted or relationship in wanted
+
+
 async def _relation_target_hops(
     *,
     client: Any,
@@ -1568,22 +1594,26 @@ async def _relation_target_hops(
     group_id: str,
     depth: int,
     limit: int,
+    relationship_names: Sequence[str] = (),
 ) -> list[_GraphExpansionHop]:
     if not source_uuids:
         return []
+    name_clause = "AND name IN $relationship_names" if relationship_names else ""
     rows = await _execute_query_records(
         client,
-        """
+        f"""
         SELECT target_id AS uuid, name AS relationship
         FROM relates_to
         WHERE source_id IN $source_uuids
           AND group_id = $group_id
           AND out.group_id = $group_id
+          {name_clause}
         LIMIT $limit;
         """,
         source_uuids=list(source_uuids),
         group_id=group_id,
         limit=max(int(limit), 1),
+        **({"relationship_names": list(relationship_names)} if relationship_names else {}),
     )
     hops: list[_GraphExpansionHop] = []
     for row in rows:
@@ -1597,6 +1627,60 @@ async def _relation_target_hops(
                 depth=depth,
                 relationship=relationship,
                 score=_graph_expansion_path_score(relationship, depth=depth),
+            )
+        )
+    return _dedupe_expansion_hops(hops)
+
+
+async def _relation_source_hops(
+    *,
+    client: Any,
+    target_uuids: Sequence[str],
+    group_id: str,
+    depth: int,
+    limit: int,
+    relationship_names: Sequence[str] = (),
+) -> list[_GraphExpansionHop]:
+    """Walk edges that point AT the frontier rather than away from it.
+
+    Retrieval's own expansion lane only follows outgoing edges, which is fine
+    when the seeds came from a scored search. A caller steering the walk itself
+    needs the other side too: the tasks that depend on this one and the passages
+    cut from this memory are all inbound, and an outgoing-only neighborhood
+    reports them as absent.
+    """
+    if not target_uuids:
+        return []
+    name_clause = "AND name IN $relationship_names" if relationship_names else ""
+    rows = await _execute_query_records(
+        client,
+        f"""
+        SELECT source_id AS uuid, name AS relationship
+        FROM relates_to
+        WHERE target_id IN $target_uuids
+          AND group_id = $group_id
+          AND in.group_id = $group_id
+          {name_clause}
+        LIMIT $limit;
+        """,
+        target_uuids=list(target_uuids),
+        group_id=group_id,
+        limit=max(int(limit), 1),
+        **({"relationship_names": list(relationship_names)} if relationship_names else {}),
+    )
+    hops: list[_GraphExpansionHop] = []
+    for row in rows:
+        uuid = _string_value(row.get("uuid"))
+        if not uuid:
+            continue
+        relationship = _string_value(row.get("relationship")) or "RELATED_TO"
+        hops.append(
+            _GraphExpansionHop(
+                uuid=uuid,
+                depth=depth,
+                relationship=relationship,
+                score=_graph_expansion_path_score(relationship, depth=depth),
+                direction="incoming",
             )
         )
     return _dedupe_expansion_hops(hops)
@@ -1710,11 +1794,51 @@ async def _hydrate_graph_expansion_records(
         record["graph_expansion_depth"] = hop.depth
         record["graph_expansion_relationship"] = hop.relationship
         record["graph_expansion_score"] = hop.score
+        # Not in _GRAPH_EXPANSION_METADATA_KEYS on purpose: the scored lanes copy
+        # only the listed keys onto a candidate, so direction reaches a caller
+        # that reads the record directly and stays out of search result metadata.
+        record["graph_expansion_direction"] = hop.direction
         if hop.community_id:
             record["graph_expansion_community_id"] = hop.community_id
         records.append(record)
     records.sort(key=_record_score, reverse=True)
     return records
+
+
+async def expand_neighbor_records(
+    *,
+    client: Any,
+    origin_uuids: Sequence[str],
+    group_id: str,
+    max_depth: int,
+    limit: int,
+    relationship_names: Sequence[str] = (),
+    include_incoming: bool = True,
+    search_filter: SearchFilter | None = None,
+    row_allowed: Callable[[Mapping[str, object]], bool] | None = None,
+) -> list[dict[str, object]]:
+    """Walk one bounded neighborhood for a caller that steers its own retrieval.
+
+    Hop-tagged entity rows, highest path score first, capped at ``limit``.
+
+    ``row_allowed`` is the reader's authorization check and runs before the cap,
+    so the walk is widened by the same headroom the scored lanes read with. A
+    filter applied after the cap would let a handful of unreadable rows consume
+    the caller's whole budget and report a neighborhood as empty when it is not.
+    """
+    rows = await _node_bfs_records(
+        client=client,
+        origin_uuids=origin_uuids,
+        search_filter=search_filter if search_filter is not None else SearchFilter(),
+        group_id=group_id,
+        max_depth=max(int(max_depth), 1),
+        limit=_graph_expansion_fetch_limit(limit),
+        relationship_names=relationship_names,
+        include_incoming=include_incoming,
+    )
+    if row_allowed is not None:
+        rows = [row for row in rows if row_allowed(row)]
+    return rows[: max(int(limit), 0)]
 
 
 async def _hydrate_entity_records(

@@ -4228,7 +4228,7 @@ class TestExploreMemoryScope:
                 "sibyl_core.tools.explore.get_graph_runtime",
                 AsyncMock(return_value=make_graph_runtime(entity_manager=entity_manager)),
             ),
-            patch.object(explore_module, "log", recorded_log),
+            patch("sibyl_core.tools.helpers.log", recorded_log),
         ):
             response = await explore_module.explore(
                 mode="list",
@@ -4253,7 +4253,7 @@ class TestExploreMemoryScope:
                 "sibyl_core.tools.explore.get_graph_runtime",
                 AsyncMock(return_value=make_graph_runtime(entity_manager=entity_manager)),
             ),
-            patch.object(explore_module, "log", recorded_log),
+            patch("sibyl_core.tools.helpers.log", recorded_log),
         ):
             await explore_module.explore(
                 mode="list",

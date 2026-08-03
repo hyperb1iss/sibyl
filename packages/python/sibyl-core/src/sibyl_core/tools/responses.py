@@ -76,6 +76,77 @@ class ExploreResponse:
 
 
 @dataclass
+class NeighborEntity:
+    """One entity reached by a bounded traversal step."""
+
+    id: str
+    type: str
+    name: str
+    relationship: str
+    direction: Literal["outgoing", "incoming"]
+    distance: int
+    score: float
+    content: str = ""
+    project_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ExpandNeighborsResponse:
+    """Response from one bounded neighbor expansion."""
+
+    origins: list[str]
+    neighbors: list[NeighborEntity]
+    total: int
+    depth: int
+    limit: int
+    unresolved: list[str] = field(default_factory=list)
+    truncated: bool = False
+    filters: dict[str, Any] = field(default_factory=dict)
+    usage_hint: str = (
+        "Bounded traversal step. Widen a hit with fetch_slice, then compose with context. "
+        "Stop after three rounds."
+    )
+
+
+@dataclass
+class SlicePassage:
+    """One span of a sliced memory, or the whole memory when it was never cut."""
+
+    id: str
+    name: str
+    content: str
+    passage_index: int | None = None
+    passage_total: int | None = None
+    breadcrumb: str | None = None
+    truncated: bool = False
+
+
+@dataclass
+class FetchSliceResponse:
+    """Response from one slice fetch, with the parent a citation resolves to."""
+
+    entity_id: str
+    parent_id: str
+    parent_name: str
+    parent_type: str
+    passages: list[SlicePassage]
+    window: int
+    sliced: bool
+    total: int = 0
+    window_start: int | None = None
+    passage_total: int | None = None
+    covers_parent: bool = False
+    project_id: str | None = None
+    content_chars: int = 0
+    filters: dict[str, Any] = field(default_factory=dict)
+    usage_hint: str = (
+        "Cite the parent memory, not the span. Compose the final answer with context. "
+        "Stop after three rounds."
+    )
+
+
+@dataclass
 class ConflictWarning:
     """A potential contradiction detected during ingest.
 
