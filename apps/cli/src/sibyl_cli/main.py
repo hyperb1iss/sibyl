@@ -7,6 +7,7 @@ Server commands (serve, dev, db, generate, etc.) are in sibyl-server.
 """
 
 import asyncio
+import json
 import re
 import sys
 from collections.abc import Mapping
@@ -472,6 +473,9 @@ async def _write_memory_capture(
     skip_conflicts: bool = False,
     languages: list[str] | None = None,
     capture_metadata: Mapping[str, Any] | None = None,
+    spans: list[dict[str, Any]] | None = None,
+    atomic: bool = False,
+    probes: list[str] | None = None,
 ) -> dict[str, Any]:
     metadata: dict[str, Any] = {
         "capture_mode": capture_mode,
@@ -520,6 +524,9 @@ async def _write_memory_capture(
         capture_surface=surface,
         wait_searchable=wait_searchable,
         skip_conflicts=skip_conflicts,
+        spans=spans,
+        atomic=atomic,
+        probes=probes,
     )
 
     async def remember_raw_memory(capture: MemoryCaptureRequest) -> dict[str, Any]:
@@ -553,6 +560,9 @@ async def _write_memory_capture(
             metadata=dict(graph_metadata),
             sync=capture.wait_searchable,
             skip_conflicts=capture.skip_conflicts,
+            spans=[dict(span) for span in capture.spans] if capture.spans is not None else None,
+            atomic=capture.atomic,
+            probes=list(capture.probes) if capture.probes is not None else None,
         )
 
     service = MemoryCaptureService(
@@ -561,6 +571,66 @@ async def _write_memory_capture(
     )
     result = await service.capture(request)
     return result.to_payload()
+
+
+# Repeatable, so its annotation is a container and the option object has to live
+# at module scope for the default to be a name rather than a call.
+_PROBE_OPTION = typer.Option(
+    None,
+    "--probe",
+    help="Question this memory must answer; repeatable, rehearsed against live search",
+)
+
+
+def _parse_spans_json(raw: str | None) -> list[dict[str, Any]] | None:
+    """Decode a --spans-json payload, faulting on anything that is not a plan.
+
+    Only the JSON shape is checked here. The tiling rules belong to the server,
+    which is the only place that knows the exact body the offsets address.
+    """
+    if raw is None:
+        return None
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        msg = f"--spans-json is not valid JSON: {exc.msg}"
+        raise ValueError(msg) from exc
+    if not isinstance(decoded, list) or not decoded:
+        msg = '--spans-json must be a non-empty JSON array of {"start":…,"end":…} objects'
+        raise ValueError(msg)
+    spans: list[dict[str, Any]] = []
+    for position, entry in enumerate(decoded):
+        if not isinstance(entry, dict) or "start" not in entry or "end" not in entry:
+            msg = f"--spans-json[{position}] must be an object with start and end"
+            raise ValueError(msg)
+        spans.append(cast("dict[str, Any]", entry))
+    return spans
+
+
+def _print_probe_rehearsal(data: Mapping[str, Any]) -> None:
+    """Show what each probe found, or that it found nothing."""
+    receipt = data.get("probe_rehearsal")
+    if not isinstance(receipt, Mapping):
+        return
+    entries = receipt.get("probes")
+    if not isinstance(entries, list) or not entries:
+        return
+    total = receipt.get("total", len(entries))
+    retrievable = receipt.get("retrievable", 0)
+    console.print(f"  [dim]Probes: {retrievable}/{total} retrievable[/dim]")
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+        status = str(entry.get("status", "unknown"))
+        text = str(entry.get("probe", ""))
+        if status == "retrievable":
+            console.print(f"    [green]✓[/green] rank {entry.get('rank')} · {text}")
+        elif status == "absent":
+            console.print(f"    [yellow]✗ not retrievable[/yellow] · {text}")
+        else:
+            console.print(f"    [dim]{status}[/dim] · {text}")
+    if receipt.get("truncated"):
+        console.print("  [dim]Rehearsal stopped early on its time budget[/dim]")
 
 
 def _print_memory_capture_result(
@@ -581,6 +651,7 @@ def _print_memory_capture_result(
         console.print(f"  [dim]Raw: {raw_memory_id}[/dim]")
     if raw_policy_reason := data.get("raw_policy_reason"):
         console.print(f"  [dim]Policy: {raw_policy_reason}[/dim]")
+    _print_probe_rehearsal(data)
 
 
 def _print_reflection_persistence_summary(
@@ -3525,6 +3596,20 @@ def remember_memory(
         callback=_normalize_memory_proposal_scope,
         help="Nominate this memory for audited promotion to team scope",
     ),
+    spans_json: str | None = typer.Option(
+        None,
+        "--spans-json",
+        help=(
+            'Cut plan as JSON: \'[{"start":0,"end":812,"label":"Root cause"},...]\'. '
+            "Half-open character offsets into the stored body, tiling it exactly."
+        ),
+    ),
+    atomic: bool = typer.Option(
+        False,
+        "--atomic",
+        help="Declare this memory one retrievable unit that must not be cut into passages",
+    ),
+    probe: list[str] | None = _PROBE_OPTION,
 ) -> None:
     """Remember a decision, plan, idea, claim, artifact, session, or learning."""
 
@@ -3553,6 +3638,16 @@ def remember_memory(
     parsed_tags = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
     related_ids = _parse_csv_ids(related_to)
     task_ids = _parse_csv_ids(task)
+    probes = [entry.strip() for entry in (probe or []) if entry.strip()]
+    parsed_spans = _parse_spans_json(spans_json)
+    if parsed_spans is not None and atomic:
+        error("--atomic and --spans-json describe opposite things; pick one.")
+        raise typer.Exit(code=1)
+    if (raw or diary) and (parsed_spans is not None or atomic or probes):
+        # A raw-only write stores the verbatim record and no graph row, so there
+        # is nothing for spans to cut and nothing for a probe to retrieve.
+        error("--spans-json, --atomic, and --probe need a graph memory; drop --raw/--diary.")
+        raise typer.Exit(code=1)
     metadata = {
         "capture_mode": "remember",
         "capture_surface": surface,
@@ -3632,6 +3727,9 @@ def remember_memory(
                     scope_key=scope_key,
                     source_id=source_id,
                     capture_metadata=capture_metadata,
+                    spans=parsed_spans,
+                    atomic=atomic,
+                    probes=probes or None,
                 )
 
                 if json_output:

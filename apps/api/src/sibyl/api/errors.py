@@ -182,6 +182,30 @@ def constraint_violation(
     )
 
 
+def unprocessable_entity(
+    message: str,
+    *,
+    field: str | None = None,
+    remediation: str | None = None,
+) -> HTTPException:
+    """Create a 422 for a well-formed request whose contents cannot be honored.
+
+    Unlike most factories here the message reaches the client verbatim, because
+    the caller is an agent that has to correct a specific payload and a generic
+    "invalid request" leaves it guessing which of its offsets was wrong.
+    Sanitization still applies, so the message must stay short and name no paths.
+    """
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=safe_error_payload(
+            error="validation_error",
+            message=message,
+            remediation=remediation,
+            details={"field": field} if field else None,
+        ),
+    )
+
+
 def internal_error(error_id: str | None = None) -> HTTPException:
     """Create a 500 exception with optional error reference.
 

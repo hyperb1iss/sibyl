@@ -984,18 +984,30 @@ class SibylClient:
         metadata: dict[str, Any] | None = None,
         sync: bool = False,
         skip_conflicts: bool = False,
+        spans: list[dict[str, Any]] | None = None,
+        atomic: bool = False,
+        probes: list[str] | None = None,
     ) -> dict[str, Any]:
         """Create a new entity.
 
         Args:
             sync: If True, wait for entity creation to complete (slower but
                   entity is immediately available for operations like task start).
+            spans: Agent-authored cut plan tiling the stored content exactly.
+            atomic: Declare the body one retrievable unit that must not be cut.
+            probes: Questions the memory must answer, rehearsed at write time.
         """
         data: dict[str, Any] = {
             "name": name,
             "content": content,
             "entity_type": entity_type,
         }
+        if spans is not None:
+            data["spans"] = spans
+        if atomic:
+            data["atomic"] = True
+        if probes is not None:
+            data["probes"] = probes
         if description:
             data["description"] = description
         if category:

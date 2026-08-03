@@ -577,7 +577,11 @@ async def _remember_mcp_memory(
     active_task: bool = True,
     metadata: dict[str, Any] | None = None,
     idempotency_key: str | None = None,
+    spans: list[dict[str, Any]] | None = None,
+    atomic: bool = False,
+    probes: list[str] | None = None,
 ) -> dict[str, Any]:
+    from sibyl_core.memory_pipeline.structure import build_memory_structure
     from sibyl_core.services.surreal_content import remember_raw_memory
     from sibyl_core.tools.core import add
 
@@ -594,6 +598,10 @@ async def _remember_mcp_memory(
         if not idempotency_key or len(idempotency_key) > 255:
             raise ValueError("idempotency_key must be a non-empty string up to 255 characters")
 
+    # Ahead of the idempotency claim: a refused plan must not consume the key,
+    # or the caller's corrected retry would replay the rejection.
+    build_memory_structure(content.strip(), spans=spans, atomic=atomic, probes=probes)
+
     idempotency_payload = {
         "title": title,
         "content": content,
@@ -605,6 +613,9 @@ async def _remember_mcp_memory(
         "task_ids": task_ids,
         "active_task": active_task,
         "metadata": metadata,
+        "spans": spans,
+        "atomic": atomic,
+        "probes": probes,
     }
     idempotency_path = "mcp/remember"
     idempotency_claim: ApiIdempotencyRecord | None = None
@@ -673,6 +684,9 @@ async def _remember_mcp_memory(
         scope_key=project,
         principal_id=ctx.user_id,
         capture_surface="mcp",
+        spans=spans,
+        atomic=atomic,
+        probes=probes,
     )
     raw_revision = 1
 
@@ -712,6 +726,9 @@ async def _remember_mcp_memory(
             memory_scope=request.memory_scope,
             scope_key=request.scope_key,
             principal_id=request.principal_id,
+            spans=list(request.spans) if request.spans is not None else None,
+            atomic=request.atomic,
+            probes=list(request.probes) if request.probes is not None else None,
         )
         return _to_dict(result)
 
@@ -2358,6 +2375,9 @@ def _register_tools(mcp: FastMCP) -> None:
         active_task: bool = True,
         metadata: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
+        spans: list[dict[str, Any]] | None = None,
+        atomic: bool = False,
+        probes: list[str] | None = None,
     ) -> dict[str, Any]:
         """Remember durable context from planning, ideation, building, or any domain.
 
@@ -2367,6 +2387,32 @@ def _register_tools(mcp: FastMCP) -> None:
         matters, remember stores what future agents should not have to relearn.
         Provide task_ids for exact task context. With a project, active_task
         links the memory to the single active doing task when one exists.
+
+        You can describe the shape of what you are storing, and you know it
+        better than any cutter reading it afterwards.
+
+        spans: where this memory's sections begin and end, as
+            [{"start": 0, "end": 812, "label": "Root cause"}, ...]. Offsets are
+            character positions into content after stripping leading and
+            trailing whitespace, half-open so one span's end is the next one's
+            start. They must cover the whole body with no gap and no overlap,
+            first starting at 0 and last ending at the final character. Each
+            span becomes an independently retrievable passage holding exactly
+            that text; labels are indexed with it, so name the section the way
+            someone would ask for it. Without spans, long memories are cut by a
+            mechanical prose cutter that guesses at the seams. An invalid plan is
+            rejected with the offset that broke it, never silently ignored.
+        atomic: true when the body is one thing that must not be cut, such as a
+            single fact, a short rule, or a snippet that only reads whole. Not
+            combinable with spans.
+        probes: up to 5 questions this memory has to answer later, for example
+            ["why did the JWT refresh fail silently"]. Each is run through the
+            live search path the moment the write lands, and the response reports
+            the rank it came back at or that it did not come back at all. Use
+            them when it matters that a memory is findable and not merely stored:
+            an absent probe is telling you to rewrite the memory now, while you
+            still have the context, rather than discovering months later that
+            nothing could reach it.
         """
 
         return await _remember_mcp_memory(
@@ -2381,6 +2427,9 @@ def _register_tools(mcp: FastMCP) -> None:
             active_task=active_task,
             metadata=metadata,
             idempotency_key=idempotency_key,
+            spans=spans,
+            atomic=atomic,
+            probes=probes,
         )
 
     # =========================================================================
