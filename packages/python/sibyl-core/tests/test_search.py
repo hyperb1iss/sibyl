@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -30,6 +30,9 @@ from sibyl_core.models.context import ContextFacet
 from sibyl_core.retrieval.candidates import CandidateKind, CandidateScope
 from sibyl_core.retrieval.search import (
     DEFAULT_FILTER_SELECTIVITY_THRESHOLD,
+    MAX_RETRIEVAL_LIMIT,
+    MIN_CANDIDATES_PER_SIGNAL,
+    CandidateLimits,
     FusionBackend,
     RetrievalCandidate,
     RetrievalSignal,
@@ -37,6 +40,7 @@ from sibyl_core.retrieval.search import (
     build_context_retrieval_plan,
     coerce_fusion_backend,
     fusion_backend_from_env,
+    seed_candidates_per_signal,
 )
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory, RawMemoryRecallResult
 
@@ -276,6 +280,106 @@ def test_build_context_retrieval_plan_records_scopes_and_weights() -> None:
     assert RetrievalSignal.RAW_LEXICAL in plan.signals
     assert RetrievalSignal.GRAPH_EXPANSION in plan.signals
     assert plan.filter_selectivity == 1.0
+
+
+def _plan_lane_limits(limit: int) -> dict[str, int]:
+    plan = build_context_retrieval_plan(
+        query="seed budget",
+        organization_id="org-123",
+        facets=[ContextFacet.RECENT_MEMORY],
+        facet_types={ContextFacet.RECENT_MEMORY: ["session", "episode", "note"]},
+        principal_id="user-123",
+        project=None,
+        accessible_projects=None,
+        limit=limit,
+    )
+    return asdict(plan.candidate_limits)
+
+
+def _flat_cap_lane_limits(limit: int) -> dict[str, int]:
+    """The flat-cap rule, restated so the derived rule cannot silently move it.
+
+    A literal copy rather than a call into the module: the point of the range
+    below is that the configuration Sibyl ships today survives the derivation,
+    and a check that reuses the derivation cannot show that.
+    """
+    per_signal = max(2, min(8, limit))
+    return {
+        "raw_lexical": max(1, min(8, limit // 4 or 1)),
+        "node_fulltext": per_signal,
+        "episode_fulltext": per_signal,
+        "edge_fulltext": per_signal,
+        "node_vector": per_signal,
+        "edge_vector": per_signal,
+        "graph_expansion": per_signal,
+    }
+
+
+@pytest.mark.parametrize("limit", range(1, 9))
+def test_seed_budget_keeps_narrow_limits_identical_to_the_flat_cap(limit: int) -> None:
+    assert _plan_lane_limits(limit) == _flat_cap_lane_limits(limit)
+
+
+@pytest.mark.parametrize(("limit", "per_signal", "raw_lexical"), [(24, 24, 6), (28, 28, 7)])
+def test_seed_budget_widens_lanes_at_slice_scale_limits(
+    limit: int,
+    per_signal: int,
+    raw_lexical: int,
+) -> None:
+    lane_limits = _plan_lane_limits(limit)
+
+    assert lane_limits == {
+        "raw_lexical": raw_lexical,
+        "node_fulltext": per_signal,
+        "episode_fulltext": per_signal,
+        "edge_fulltext": per_signal,
+        "node_vector": per_signal,
+        "edge_vector": per_signal,
+        "graph_expansion": per_signal,
+    }
+    assert lane_limits["node_fulltext"] > _flat_cap_lane_limits(limit)["node_fulltext"]
+
+
+def test_seed_budget_stops_at_the_deepest_read_context_search_accepts() -> None:
+    assert seed_candidates_per_signal(MAX_RETRIEVAL_LIMIT) == MAX_RETRIEVAL_LIMIT
+    assert seed_candidates_per_signal(MAX_RETRIEVAL_LIMIT * 4) == MAX_RETRIEVAL_LIMIT
+    assert _plan_lane_limits(MAX_RETRIEVAL_LIMIT * 4)["node_fulltext"] == MAX_RETRIEVAL_LIMIT
+
+
+def test_seed_budget_floors_every_lane_at_a_rankable_pair() -> None:
+    assert seed_candidates_per_signal(0) == MIN_CANDIDATES_PER_SIGNAL
+    assert seed_candidates_per_signal(1) == MIN_CANDIDATES_PER_SIGNAL
+    assert _plan_lane_limits(1)["node_fulltext"] == MIN_CANDIDATES_PER_SIGNAL
+
+
+def test_seed_budget_rises_monotonically_with_the_requested_limit() -> None:
+    widths = [seed_candidates_per_signal(limit) for limit in range(1, MAX_RETRIEVAL_LIMIT + 1)]
+
+    assert widths == sorted(widths)
+    assert widths[-1] > widths[0]
+
+
+def test_query_time_limits_narrow_lanes_but_never_widen_them() -> None:
+    limits = CandidateLimits(
+        raw_lexical=7,
+        node_fulltext=28,
+        episode_fulltext=28,
+        edge_fulltext=28,
+        node_vector=28,
+        edge_vector=28,
+        graph_expansion=28,
+    )
+
+    narrowed = search_module._candidate_limits_for_limit(limits, 4)
+    widened = search_module._candidate_limits_for_limit(limits, MAX_RETRIEVAL_LIMIT * 2)
+
+    assert narrowed.node_fulltext == 4
+    assert narrowed.raw_lexical == 4
+    assert widened == limits
+    # A plan built at the narrowest layer stays narrow however deep the pack
+    # composer's own search limit runs.
+    narrow_plan = CandidateLimits(**_flat_cap_lane_limits(8))
+    assert search_module._candidate_limits_for_limit(narrow_plan, 50) == narrow_plan
 
 
 def test_search_filter_for_plan_carries_requested_entity_types() -> None:
@@ -2272,8 +2376,10 @@ async def test_vector_candidate_sources_use_embedding_contract() -> None:
     assert edge_candidates[0].metadata["embedding_metadata"] == provider.metadata.to_dict()
     node_query, node_params = next(call for call in client.calls if "name_embedding" in call[0])
     edge_query, edge_params = next(call for call in client.calls if "fact_embedding" in call[0])
-    assert "name_embedding <|8, 40|> $query_embedding" in node_query
-    assert "fact_embedding <|8, 40|> $query_embedding" in edge_query
+    node_knn = plan.candidate_limits.node_vector
+    edge_knn = plan.candidate_limits.edge_vector
+    assert f"name_embedding <|{node_knn}, 40|> $query_embedding" in node_query
+    assert f"fact_embedding <|{edge_knn}, 40|> $query_embedding" in edge_query
     assert len(node_params["query_embedding"]) == 4
     assert len(edge_params["query_embedding"]) == 4
     assert node_params["project_ids"] == ["project_123"]
@@ -2443,8 +2549,53 @@ async def test_vector_candidate_sources_use_configured_knn_effort(
 
     node_query = next(call for call in client.calls if "name_embedding" in call[0])[0]
     edge_query = next(call for call in client.calls if "fact_embedding" in call[0])[0]
-    assert "name_embedding <|8, 96|> $query_embedding" in node_query
-    assert "fact_embedding <|8, 96|> $query_embedding" in edge_query
+    node_knn = plan.candidate_limits.node_vector
+    edge_knn = plan.candidate_limits.edge_vector
+    assert f"name_embedding <|{node_knn}, 96|> $query_embedding" in node_query
+    assert f"fact_embedding <|{edge_knn}, 96|> $query_embedding" in edge_query
+
+
+@pytest.mark.asyncio
+async def test_vector_lanes_raise_knn_effort_to_the_seed_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An HNSW read returns at most `ef` rows, so a deep-search plan whose seed
+    # budget outruns the configured effort would silently come back short.
+    monkeypatch.setattr(search_module.core_config, "graph_knn_ef", 40)
+    plan = build_context_retrieval_plan(
+        query="deep search vectors",
+        organization_id="org-123",
+        facets=[ContextFacet.ACTIVE_WORK],
+        facet_types={ContextFacet.ACTIVE_WORK: ["task"]},
+        principal_id="user-123",
+        project="project_123",
+        accessible_projects={"project_123"},
+        limit=MAX_RETRIEVAL_LIMIT,
+    )
+    provider = DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
+            provider="deterministic",
+            model="unit-test",
+            dimensions=4,
+            cache_namespace="retrieval-test",
+            tokenizer_estimate_method="utf8-byte-length",
+        )
+    )
+    client = _VectorClient()
+
+    await search_module._vector_candidate_sources(
+        client=client,
+        plan=plan,
+        search_filter=search_module.SearchFilter(project_ids=("project_123",)),
+        embedding_provider=provider,
+    )
+
+    node_query = next(call for call in client.calls if "name_embedding" in call[0])[0]
+    edge_query = next(call for call in client.calls if "fact_embedding" in call[0])[0]
+    assert plan.candidate_limits.node_vector == MAX_RETRIEVAL_LIMIT
+    assert f"name_embedding <|{MAX_RETRIEVAL_LIMIT}, {MAX_RETRIEVAL_LIMIT}|>" in node_query
+    assert f"fact_embedding <|{MAX_RETRIEVAL_LIMIT}, {MAX_RETRIEVAL_LIMIT}|>" in edge_query
+    assert search_module._graph_knn_effort(8) == 40
 
 
 def test_node_record_candidates_keep_top_level_provenance_metadata() -> None:

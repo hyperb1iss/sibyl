@@ -16,7 +16,7 @@ measurement.** Three code reads over the eight-PR A1 stack say:
     live enforcement is the eval adapter's `_select_diverse_results`, which
     drops over-cap rows outright with no backfill, unlike the server's
     defer-then-backfill.
-  * `MAX_CANDIDATES_PER_SIGNAL` bounds `build_context_retrieval_plan`, which
+  * `seed_candidates_per_signal` bounds `build_context_retrieval_plan`, which
     serves the **context-pack facet sections**. The evidence lane does not go
     that way: `/context/pack` builds a `SearchRequest` and runs
     `execute_search_request` -> `tools.search.search` -> `hybrid_search`, where
@@ -30,7 +30,7 @@ measurement.** Three code reads over the eight-PR A1 stack say:
     ceiling on how many passages exist to be capped, composed, or read.
 
 So the sweep is `max_chunks_per_trajectory` x **evidence-lane depth**, and the
-`MAX_CANDIDATES_PER_SIGNAL` result is a null one recorded against the code.
+per-lane seed-budget result is a null one recorded against the code.
 
 Two arms, because a cap and a ranker fail differently:
 
@@ -74,7 +74,7 @@ GATE_CHAR_BUDGET = 48_000
 TRAJECTORY_CAPS: tuple[int | None, ...] = (1, 2, 4, 8, 16, None)
 
 # Evidence-lane depth: the `limit` the pack request carries, which is what
-# `MAX_CANDIDATES_PER_SIGNAL` was believed to be. 28 is the staged geometry
+# the per-lane seed budget was believed to be. 28 is the staged geometry
 # (`max_context_items` beats the default `search_limit` of 12); 50 is the
 # schema maximum, reachable with `--search-limit 50`.
 POOL_DEPTHS = (8, 16, 24, 28, 50)
