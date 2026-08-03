@@ -29,7 +29,7 @@ error into retrieval.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -129,19 +129,22 @@ def coerce_agent_spans(value: object) -> tuple[AgentSpan, ...]:
         if not isinstance(entry, dict):
             msg = f"spans[{position}] must be an object with start and end"
             raise MemoryStructureError(msg)
-        try:
-            start = entry["start"]
-            end = entry["end"]
-        except KeyError as exc:
-            msg = f"spans[{position}] is missing {exc.args[0]!r}"
-            raise MemoryStructureError(msg) from exc
+        mapping = cast("Mapping[str, Any]", entry)
+        for key in ("start", "end"):
+            if key not in mapping:
+                msg = f"spans[{position}] is missing {key!r}"
+                raise MemoryStructureError(msg)
+        start = mapping["start"]
+        end = mapping["end"]
+        # bool is an int subclass, and True as an offset is a payload bug rather
+        # than a position, so it is refused before the range checks run.
         if isinstance(start, bool) or isinstance(end, bool):
             msg = f"spans[{position}] start and end must be integers"
             raise MemoryStructureError(msg)
         if not isinstance(start, int) or not isinstance(end, int):
             msg = f"spans[{position}] start and end must be integers"
             raise MemoryStructureError(msg)
-        label = entry.get("label")
+        label = mapping.get("label")
         if label is not None and not isinstance(label, str):
             msg = f"spans[{position}] label must be a string"
             raise MemoryStructureError(msg)

@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.dependencies import get_knowledge_read_service
-from sibyl.api.errors import constraint_violation, sanitize_error_text
+from sibyl.api.errors import constraint_violation, sanitize_error_text, unprocessable_entity
 from sibyl.api.event_types import WSEvent
 from sibyl.api.idempotency import (
     replay_idempotent_response,
@@ -69,10 +69,12 @@ from sibyl_core.auth.memory_policy import (
     private_scope_granted_for,
     stamp_memory_scope_metadata,
 )
+from sibyl_core.memory_pipeline.structure import strip_structure_metadata
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.projection import (
     MANIFEST_STATE_COMPLETE,
     extract_projected_memory_entities,
+    reproject_entity_passages,
     retire_entity_passages,
 )
 from sibyl_core.services import KnowledgeReadService
@@ -171,6 +173,93 @@ def _scoped_graph_metadata(
         scope_key=verified_project_id,
         principal_id=principal_id,
     )
+
+
+async def _add_with_structure(**kwargs: Any) -> Any:
+    """Call the graph writer, turning a refused cut plan into a 422.
+
+    The message reaches the caller intact on purpose. A writing agent that got
+    its offsets wrong has to know which span was out of bounds or where the gap
+    was, and a generic rejection would leave it re-guessing the whole plan.
+    """
+    from sibyl_core.memory_pipeline.structure import MemoryStructureError
+    from sibyl_core.tools.core import add
+
+    try:
+        return await add(**kwargs)
+    except MemoryStructureError as exc:
+        raise unprocessable_entity(
+            str(exc),
+            field=exc.field,
+            remediation="Recompute the declared structure against the stored content.",
+        ) from exc
+
+
+def _resolved_update_structure(
+    *,
+    existing: Any,
+    update: Any,
+    new_content: str | None,
+) -> dict[str, Any]:
+    """Work out what structure metadata an update leaves on the row.
+
+    Offsets belong to the text they were computed over, so a rewritten body
+    invalidates a stored plan outright: without fresh spans the plan is dropped
+    and the body goes back to the mechanical cutter. Refusing the update instead
+    would make a plain content edit impossible for any memory that was ever
+    spanned, and keeping the stale plan would cut the new body on the old seams.
+
+    The atomic claim is about the memory rather than about offsets, so it
+    survives a content change untouched unless the caller restates it. It is
+    re-validated against whatever body ends up stored, since a rewrite can push
+    a previously-atomic memory past the ceiling one passage row can hold.
+    """
+    from sibyl_core.memory_pipeline.spans import (
+        AGENT_ATOMIC_METADATA_KEY,
+        AGENT_SPANS_METADATA_KEY,
+        MemoryStructureError,
+        agent_atomic_from_metadata,
+    )
+    from sibyl_core.memory_pipeline.structure import build_memory_structure, structure_metadata
+
+    existing_metadata = getattr(existing, "metadata", {}) or {}
+    stored_content = (getattr(existing, "content", "") or "").strip()
+    content = new_content.strip() if new_content is not None else stored_content
+    content_changed = new_content is not None and content != stored_content
+
+    spans: list[dict[str, Any]] | None
+    if update.spans is not None:
+        # A fresh plan is the most specific instruction in the request, so it
+        # withdraws a stored atomic claim rather than colliding with it.
+        spans = [span.model_dump(exclude_none=True) for span in update.spans]
+        atomic = bool(update.atomic)
+    elif update.atomic:
+        spans = None
+        atomic = True
+    else:
+        spans = (
+            None
+            if content_changed
+            else list(existing_metadata.get(AGENT_SPANS_METADATA_KEY) or ()) or None
+        )
+        atomic = False if update.atomic is False else agent_atomic_from_metadata(existing_metadata)
+
+    try:
+        structure = build_memory_structure(content, spans=spans, atomic=atomic)
+    except MemoryStructureError as exc:
+        raise unprocessable_entity(
+            str(exc),
+            field=exc.field,
+            remediation="Recompute the declared structure against the updated content.",
+        ) from exc
+
+    resolved = {
+        key: value
+        for key, value in existing_metadata.items()
+        if key not in {AGENT_SPANS_METADATA_KEY, AGENT_ATOMIC_METADATA_KEY}
+    }
+    resolved.update(structure_metadata(structure))
+    return resolved
 
 
 # =============================================================================
@@ -1940,7 +2029,6 @@ async def create_entity(
     Set sync=true to wait for creation to complete (useful for tasks that need
     immediate workflow operations like start/complete).
     """
-    from sibyl_core.tools.core import add
 
     group_id = str(org.id)
 
@@ -2002,9 +2090,12 @@ async def create_entity(
 
     # Projects are always sync (foundational - tasks depend on them existing)
     # Other entities can be async unless caller explicitly requests sync
-    is_sync = entity.entity_type.value == "project" or sync
+    # Probes force a synchronous write in the writer too, but the route decides
+    # which response shape it returns, so both have to agree: a pending response
+    # would drop the rehearsal receipt the caller asked for.
+    is_sync = entity.entity_type.value == "project" or sync or bool(entity.probes)
 
-    result = await add(
+    result = await _add_with_structure(
         title=entity.name,
         content=content,
         entity_type=entity.entity_type.value,
@@ -2027,6 +2118,11 @@ async def create_entity(
         memory_scope=str(declared_memory_scope) if declared_memory_scope is not None else None,
         scope_key=authorized_scope_key,
         principal_id=authorized_principal_id,
+        spans=[span.model_dump(exclude_none=True) for span in entity.spans]
+        if entity.spans is not None
+        else None,
+        atomic=entity.atomic,
+        probes=list(entity.probes) if entity.probes is not None else None,
     )
 
     if not result.success or not result.id:
@@ -2109,6 +2205,7 @@ async def create_entity(
         languages=entity.languages or [],
         tags=entity.tags or [],
         metadata=merged_metadata,
+        probe_rehearsal=getattr(result, "probe_rehearsal", None),
         source_file=None,
         created_at=response_timestamp,
         updated_at=response_timestamp,
@@ -2224,14 +2321,30 @@ async def update_entity(
             if update.metadata is not None:
                 # Merge metadata, keeping the stored owner channels: reassigning
                 # them would hand the row to a different principal or project.
+                # The structure keys go the same way, so a forwarded body cannot
+                # plant a plan the server never validated.
                 existing_meta = getattr(existing, "metadata", {}) or {}
                 update_data["metadata"] = {
                     **existing_meta,
                     **{
                         key: value
-                        for key, value in update.metadata.items()
+                        for key, value in strip_structure_metadata(update.metadata).items()
                         if key not in MEMORY_OWNER_METADATA_KEYS
                     },
+                }
+
+            structure_metadata_changed = (
+                update.spans is not None or update.atomic is not None or update.content is not None
+            )
+            if structure_metadata_changed:
+                resolved_structure = _resolved_update_structure(
+                    existing=existing,
+                    update=update,
+                    new_content=update.content,
+                )
+                update_data["metadata"] = {
+                    **update_data.get("metadata", getattr(existing, "metadata", {}) or {}),
+                    **resolved_structure,
                 }
 
             # Update timestamp
@@ -2241,6 +2354,27 @@ async def update_entity(
             updated = await runtime.entity_manager.update(entity_id, update_data)
             if not updated:
                 raise HTTPException(status_code=500, detail="Update failed")
+
+            if update.content is not None or update.spans is not None or update.atomic is not None:
+                # A rewritten body invalidates every span cut from the old one,
+                # and a re-declared plan changes where the seams belong. Either
+                # way the stored spans keep serving the previous revision until
+                # they are replaced, so the re-cut happens on the request path:
+                # the only other caller of the reprojection is an arq job nothing
+                # enqueues, which is why this rule was inert before.
+                passage_result = await reproject_entity_passages(
+                    entity_manager=runtime.entity_manager,
+                    relationship_manager=runtime.relationship_manager,
+                    source=updated,
+                    group_id=group_id,
+                    created_source_id=entity_id,
+                )
+                if passage_result.errors:
+                    log.warning(
+                        "update_entity_passage_reprojection_failed",
+                        entity_id=entity_id,
+                        errors=passage_result.errors,
+                    )
 
             response = EntityResponse(
                 id=updated.id,
