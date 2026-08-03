@@ -368,10 +368,14 @@ async def reproject_entity_passages(
         created_source_id=source_id,
         generate_embeddings=generate_embeddings,
     )
-    retired = await _retire_passages_from(
+    retired = await _retire_passages_except(
         entity_manager,
         source_id=source_id,
-        first_stale_index=result.passages,
+        kept_indices=frozenset(
+            index
+            for passage in result.created_passages
+            if isinstance(index := passage.metadata.get("passage_index"), int)
+        ),
     )
     if retired:
         log.info(
@@ -394,36 +398,45 @@ async def retire_entity_passages(
     the text of something the caller deleted, which is the one outcome a delete
     must not produce.
     """
-    return await _retire_passages_from(
+    return await _retire_passages_except(
         entity_manager,
         source_id=source_id,
-        first_stale_index=0,
+        kept_indices=frozenset(),
     )
 
 
-async def _retire_passages_from(
+async def _retire_passages_except(
     entity_manager: Any,
     *,
     source_id: str,
-    first_stale_index: int,
+    kept_indices: frozenset[int],
 ) -> int:
-    """Delete passages at or past an index, stopping at the first absence.
+    """Delete every span of one memory that the current projection did not write.
 
-    The projection always writes a contiguous run from zero, so the first index
-    with no row marks the end of any previous run.
+    Keyed on the indices actually written rather than on how many were written.
+    The oversize-leaf branch can skip an index, so a projection that wrote
+    ``{0, 1, 3, 4}`` is not the same as one that wrote four contiguous spans, and
+    counting would delete index 4, the span that had just been minted.
+
+    The walk stops once it is past every kept index and has found an absence,
+    which is where any previous run must have ended.
     """
     delete = getattr(entity_manager, "delete", None)
     if not callable(delete):
         return 0
+    highest_kept = max(kept_indices, default=-1)
     retired = 0
-    for index in range(first_stale_index, MAX_PASSAGES_PER_SOURCE):
+    for index in range(MAX_PASSAGES_PER_SOURCE):
+        if index in kept_indices:
+            continue
         try:
             removed = await delete(passage_entity_id(source_id, index))
         except Exception:
             break
-        if not removed:
+        if removed:
+            retired += 1
+        elif index > highest_kept:
             break
-        retired += 1
     return retired
 
 

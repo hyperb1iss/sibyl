@@ -599,3 +599,55 @@ def test_passages_do_not_inherit_their_parents_plan_or_probes() -> None:
         assert AGENT_SPANS_METADATA_KEY not in entity.metadata
         assert "memory_probes" not in entity.metadata
         assert entity.metadata["memory_scope"] == "private"
+
+
+@pytest.mark.asyncio
+async def test_reprojection_keeps_a_span_written_past_a_skipped_index() -> None:
+    """A hole in the index run must not make the retire sweep eat a live span.
+
+    An unbroken line past the row ceiling is emitted as its own slice and then
+    skipped, so the written indices are not contiguous. Retiring by count would
+    treat the highest written index as stale and delete the span that had just
+    been minted, leaving that text reachable only through the parent.
+    """
+    giant_line = "x" * (MAX_PASSAGE_CONTENT_CHARS + 500)
+    body = "\n".join(
+        [
+            "# Root",
+            "",
+            "## First",
+            "",
+            " ".join(["alpha"] * 200),
+            "",
+            "## Huge",
+            "",
+            giant_line,
+            "",
+            "## Last",
+            "",
+            " ".join(["omega"] * 200),
+            "",
+        ]
+    )
+    source = _source(content=body)
+    entities, _ = plan_entity_passages(source, source_id=_SOURCE_ID, group_id=_GROUP)
+    written = [entity.metadata["passage_index"] for entity in entities]
+    assert written != list(range(len(written))), "probe needs a skipped index to be meaningful"
+
+    entity_manager = _ReprojectEntityManager(existing_indices=set(written))
+    result = await reproject_entity_passages(
+        entity_manager=entity_manager,
+        relationship_manager=_RecordingRelationshipManager(),
+        source=source,
+        group_id=_GROUP,
+        created_source_id=_SOURCE_ID,
+    )
+
+    assert result.passages == len(written)
+    survivors = {
+        entity.metadata["passage_index"]
+        for entity in entity_manager.created
+        if passage_entity_id(_SOURCE_ID, entity.metadata["passage_index"])
+        not in entity_manager.deleted
+    }
+    assert survivors == set(written)
