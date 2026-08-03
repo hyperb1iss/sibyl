@@ -1044,54 +1044,66 @@ async def _exact_key_candidates(
     if not probe_tokens:
         return []
     filter_clauses, filter_params = _node_filter_clause(search_filter)
-    rows = await _execute_query_records(
-        client,
+    # One indexed equality per probe rather than a single set-membership read.
+    # On SurrealDB 3.2.3 an array-element index answers `field = $value` with an
+    # IndexScan, while `CONTAINSANY` falls back to a full TableScan; a
+    # multi-value `IN` and an OR of equalities each return no rows at all
+    # despite matching data, verified live against 3.2.3 before this shape was
+    # chosen. Probe tokens are capped, so this is a bounded fan-out of point
+    # lookups rather than a scan that grows with the corpus.
+    row_query = (
         """
         SELECT *
         FROM entity
         WHERE """
         + _where_clause(["group_id = $group_id", *filter_clauses])
         + """
-          AND retrieval_keys_normalized CONTAINSANY $probe_keys
+          AND retrieval_keys_normalized = $probe_key
         ORDER BY created_at DESC, uuid DESC
         LIMIT $limit;
-        """,
-        group_id=plan.organization_id,
-        probe_keys=list(probe_tokens),
-        limit=max(int(limit), 1),
-        **filter_params,
+        """
     )
-    probes = set(probe_tokens)
-    scored: list[tuple[float, list[str], Mapping[str, object]]] = []
-    for row in rows:
-        matched = _matched_retrieval_keys(row, probes)
-        if not matched:
-            continue
-        scored.append((len(matched) / len(probes), matched, row))
-    # Overlap is counted here rather than in SurrealQL so the lane depends on one
-    # index lookup and no array functions, which keeps it identical across the
-    # embedded test engine and the deployed server.
-    scored.sort(key=lambda item: item[0], reverse=True)
-    candidates: list[RetrievalCandidate] = []
-    for score, matched, row in scored:
-        candidate = _candidate_from_node_record(
-            row,
-            signal=RetrievalSignal.EXACT_KEY,
-            score=score,
+    row_limit = max(int(limit), 1)
+    reads = await asyncio.gather(
+        *(
+            _execute_query_records(
+                client,
+                row_query,
+                group_id=plan.organization_id,
+                probe_key=probe_key,
+                limit=row_limit,
+                **filter_params,
+            )
+            for probe_key in probe_tokens
         )
-        candidate.metadata["matched_retrieval_keys"] = matched
+    )
+
+    matched_by_uuid: dict[str, list[str]] = defaultdict(list)
+    row_by_uuid: dict[str, Mapping[str, object]] = {}
+    for probe_key, rows in zip(probe_tokens, reads, strict=True):
+        for row in rows:
+            uuid = str(row.get("uuid") or "")
+            if not uuid:
+                continue
+            row_by_uuid.setdefault(uuid, row)
+            matched_by_uuid[uuid].append(probe_key)
+
+    # A row that answers more of the query's identifiers is the better answer, so
+    # overlap orders the lane. Counted here because the reads are per probe.
+    ordered = sorted(
+        matched_by_uuid.items(),
+        key=lambda item: (-len(item[1]), item[0]),
+    )
+    candidates: list[RetrievalCandidate] = []
+    for uuid, matched in ordered[:row_limit]:
+        candidate = _candidate_from_node_record(
+            row_by_uuid[uuid],
+            signal=RetrievalSignal.EXACT_KEY,
+            score=len(matched) / len(probe_tokens),
+        )
+        candidate.metadata["matched_retrieval_keys"] = list(matched)
         candidates.append(candidate)
     return candidates
-
-
-def _matched_retrieval_keys(
-    row: Mapping[str, object],
-    probes: set[str],
-) -> list[str]:
-    stored = row.get("retrieval_keys_normalized")
-    if not isinstance(stored, list | tuple):
-        return []
-    return [str(key) for key in stored if str(key) in probes]
 
 
 async def _episode_fulltext_candidates(
@@ -2775,6 +2787,12 @@ def _rank_fused_candidates(
             fusion_metadata["original_scores"][signal.value] = candidate.score
             if signal is RetrievalSignal.GRAPH_EXPANSION:
                 _merge_graph_expansion_metadata(fusion_metadata, candidate)
+            if signal is RetrievalSignal.EXACT_KEY:
+                # Merged here, from the lane's own candidate instance, because
+                # candidates_by_id keeps whichever lane saw the row first: a row
+                # found by both full-text and the key would otherwise report an
+                # empty match list off the full-text instance.
+                _merge_exact_key_metadata(fusion_metadata, candidate)
 
     ranked: list[tuple[RetrievalCandidate, float, dict[str, Any]]] = []
     for candidate_id, score in score_by_id.items():
@@ -2809,9 +2827,6 @@ def _rank_fused_candidates(
         if exact_key_multiplier > 1.0:
             score *= exact_key_multiplier
             fusion_metadata["exact_key_boost"] = exact_key_multiplier
-            fusion_metadata["matched_retrieval_keys"] = list(
-                candidate.metadata.get("matched_retrieval_keys") or ()
-            )
         boosted, temporal_multiplier = _boost_score(
             candidate,
             score,
@@ -2834,6 +2849,16 @@ def _merge_graph_expansion_metadata(
         value = metadata.get(key)
         if value is not None:
             fusion_metadata[key] = value
+
+
+def _merge_exact_key_metadata(
+    fusion_metadata: dict[str, Any],
+    candidate: RetrievalCandidate,
+) -> None:
+    metadata = candidate.metadata if isinstance(candidate.metadata, Mapping) else {}
+    matched = metadata.get("matched_retrieval_keys")
+    if isinstance(matched, list | tuple):
+        fusion_metadata["matched_retrieval_keys"] = [str(key) for key in matched]
 
 
 def _candidate_query_text(candidate: RetrievalCandidate) -> str:
