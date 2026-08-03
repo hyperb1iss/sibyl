@@ -12,7 +12,7 @@ import pytest
 from tools.trust import team_scope_gate
 
 MISSING_SURFACE_EXIT_CODE = 2
-GRAPH_TEAM_DENIAL_SURFACE_COUNT = 2
+GRAPH_TEAM_DENIAL_SURFACE_COUNT = 3
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMITTED_RECEIPT = team_scope_gate.DEFAULT_RECEIPT_PATH
 MANIFEST_PATH = REPO_ROOT / "benchmarks" / "results" / "ai-memory" / "manifest.json"
@@ -105,7 +105,9 @@ class TestObservedReceipt:
         assert by_label["member"]["resolved_teams"] == [team_scope_gate.TEAM_ID]
         assert by_label["member"]["resolved_projects"] == [team_scope_gate.PROJECT_ID]
         assert by_label["outsider"]["resolved_teams"] == [team_scope_gate.OTHER_TEAM_ID]
-        assert by_label["outsider"]["resolved_projects"] == []
+        # The outsider holds a different project so the row-selection clause gets
+        # probed on the project surface too, not just the membership check.
+        assert by_label["outsider"]["resolved_projects"] == [team_scope_gate.OTHER_PROJECT_ID]
 
     def test_write_path_drops_every_forged_owner_field(
         self,
@@ -120,7 +122,16 @@ class TestObservedReceipt:
             for entry in observed_receipt["memories"]
         }
 
-        assert offered["private-member"] == ["memory_scope", "principal_id"]
+        # The two backfill-provenance keys are the pair that matters: the
+        # authorized path never rewrites them, so they survive if the write
+        # path's drop filter is removed, while the scope and owner keys would be
+        # overwritten anyway and cannot prove the filter runs.
+        assert offered["private-member"] == [
+            "memory_scope",
+            "principal_id",
+            "scope_backfill_prior",
+            "scope_backfill_source",
+        ]
         assert offered["team-alpha"] == ["scope_key"]
         assert all(not fields for fields in surviving.values())
 
@@ -237,15 +248,66 @@ class TestValidationCatchesRegressions:
         receipt["probes"] = [
             probe for probe in receipt["probes"] if probe["surface"] != "graph_metadata_read"
         ]
+        receipt["surfaces"] = [
+            surface for surface in receipt["surfaces"] if surface != "graph_metadata_read"
+        ]
         receipt["metrics"]["deny_probe_count"] = 0
         receipt["metrics"]["allow_probe_count"] = 0
-        receipt["metrics"]["surface_count"] = 4
+        receipt["metrics"]["surface_count"] = 5
 
         failures = team_scope_gate.validate_team_scope_receipt(receipt)
 
         assert any("deny_probe_count" in failure for failure in failures)
         assert any("allow_probe_count" in failure for failure in failures)
         assert any("surface_count" in failure for failure in failures)
+        assert any("'graph_metadata_read' never ran" in failure for failure in failures)
+
+    def test_rejects_a_silent_read_surface(self, observed_receipt: dict[str, Any]) -> None:
+        """A recall surface that stops answering must not pass on the listing's word."""
+        receipt = _full_receipt(observed_receipt)
+        allowed = next(
+            index
+            for index, probe in enumerate(receipt["probes"])
+            if probe["expected"] == team_scope_gate.ALLOW
+        )
+        receipt["probes"][allowed] = {
+            **receipt["probes"][allowed],
+            "surface_disagreement": True,
+        }
+        receipt["metrics"]["surface_disagreement_count"] = 1
+
+        failures = team_scope_gate.validate_team_scope_receipt(receipt)
+
+        assert any("surface_disagreement_count" in failure for failure in failures)
+        assert any("stopped filtering" in failure for failure in failures)
+
+    def test_counts_a_disagreement_as_a_probe_failure(self) -> None:
+        probe = team_scope_gate.ScopeProbe(
+            surface="raw_targeted_read",
+            reader_label="member",
+            memory_label="team-alpha",
+            expectation=team_scope_gate.ALLOW,
+        )
+        observation = team_scope_gate.ProbeObservation(
+            probe=probe,
+            observed=team_scope_gate.ALLOW,
+            detail="listed=True recalled=False",
+            disagreement=True,
+        )
+
+        # The expectation matches, so only the disagreement can fail it.
+        assert observation.leaked is False
+        assert observation.allow_failed is False
+        assert observation.passed is False
+        assert observation.as_receipt_entry()["status"] == "FAIL"
+
+    def test_rejects_an_unknown_probe_surface(self, observed_receipt: dict[str, Any]) -> None:
+        receipt = _full_receipt(observed_receipt)
+        receipt["surfaces"] = [*receipt["surfaces"], "invented_surface"]
+
+        failures = team_scope_gate.validate_team_scope_receipt(receipt)
+
+        assert any("invented_surface" in failure for failure in failures)
 
     def test_rejects_an_empty_probe_list(self, observed_receipt: dict[str, Any]) -> None:
         receipt = _full_receipt(observed_receipt)
@@ -307,7 +369,12 @@ class TestBoundaryProbe:
             for probe in observed_receipt["probes"]
             if probe["memory"] == "team-alpha"
             and probe["reader"] == "member"
-            and probe["surface"] in {"graph_metadata_read", "retrieval_candidate_filter"}
+            and probe["surface"]
+            in {
+                "graph_metadata_read",
+                "graph_metadata_read_narrowed",
+                "retrieval_candidate_filter",
+            }
         ]
 
         assert len(entitled_team_denials) == GRAPH_TEAM_DENIAL_SURFACE_COUNT
@@ -444,6 +511,28 @@ class TestRunGate:
         assert exit_code == MISSING_SURFACE_EXIT_CODE
         assert "Team scope gate is missing required surfaces:" in messages
         assert "- team target redaction" in messages
+
+    def test_observe_only_enforces_the_anti_vacuity_floors(
+        self,
+        observed_receipt: dict[str, Any],
+    ) -> None:
+        """`--observe-only` is a gate, so a shrunken probe set has to fail it there too."""
+        starved = deepcopy(observed_receipt)
+        starved["probes"] = starved["probes"][:1]
+        starved["surfaces"] = [starved["probes"][0]["surface"]]
+        starved["metrics"]["deny_probe_count"] = 1
+        starved["metrics"]["allow_probe_count"] = 0
+        starved["metrics"]["surface_count"] = 1
+        messages: list[str] = []
+
+        exit_code = team_scope_gate.run_observations(
+            echo=messages.append,
+            receipt_path=None,
+            receipt_builder=lambda: starved,
+        )
+
+        assert exit_code == 1
+        assert any("allow_probe_count" in message for message in messages)
 
     def test_observe_only_never_writes_without_a_path(
         self,

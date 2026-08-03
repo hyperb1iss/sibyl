@@ -1029,6 +1029,10 @@ tasks:
       - packages/python/sibyl-core/src/sibyl_core/auth/memory_policy.py
       - packages/python/sibyl-core/src/sibyl_core/memory_pipeline/capture.py
       - packages/python/sibyl-core/src/sibyl_core/retrieval/search.py
+      - packages/python/sibyl-core/src/sibyl_core/services/surreal_content.py
+      - apps/api/src/sibyl/persistence/surreal/auth_runtime/projects.py
+      - benchmarks/results/ai-memory/manifest.json
+      - benchmarks/results/ai-memory/team-scope-trust-receipt.json
       - pyproject.toml
       - moon.yml
       - apps/api/moon.yml

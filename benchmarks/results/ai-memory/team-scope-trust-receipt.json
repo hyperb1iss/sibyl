@@ -5,14 +5,16 @@
   ],
   "budgets": {
     "allow_failure_count": 0,
-    "allow_probe_count": 12,
-    "deny_probe_count": 23,
+    "allow_probe_count": 13,
+    "deny_probe_count": 31,
     "leak_count": 0,
-    "owner_forgery_offered_count": 3,
+    "membership_resolution_mismatch_count": 0,
+    "owner_forgery_offered_count": 5,
     "owner_forgery_surviving_count": 0,
     "promotion_attribution_coverage": 1,
     "promotion_preview_coverage": 1,
-    "surface_count": 5
+    "surface_count": 6,
+    "surface_disagreement_count": 0
   },
   "checks": [
     {
@@ -86,6 +88,7 @@
   ],
   "claim_boundary": "Machine-generated from an ephemeral embedded auth and content store. Memberships are resolved by the real team and project lookups, scope metadata is stamped by the real capture path, and every probe reads through a real read surface in both the deny and the allow direction.",
   "fixture": "team-scope-isolation-v1",
+  "membership_mismatches": [],
   "memories": [
     {
       "label": "delegated-oncall",
@@ -109,7 +112,9 @@
       "label": "private-member",
       "offered_owner_forgeries": [
         "memory_scope",
-        "principal_id"
+        "principal_id",
+        "scope_backfill_prior",
+        "scope_backfill_source"
       ],
       "owner": "member",
       "requested_scope": "private",
@@ -167,16 +172,18 @@
   ],
   "metrics": {
     "allow_failure_count": 0,
-    "allow_probe_count": 12,
-    "deny_probe_count": 23,
+    "allow_probe_count": 13,
+    "deny_probe_count": 31,
     "graph_team_membership_forwarded": 0,
     "leak_count": 0,
-    "owner_forgery_offered_count": 3,
+    "membership_resolution_mismatch_count": 0,
+    "owner_forgery_offered_count": 5,
     "owner_forgery_surviving_count": 0,
-    "probe_count": 35,
+    "probe_count": 44,
     "promotion_attribution_coverage": 1.0,
     "promotion_preview_coverage": 1.0,
-    "surface_count": 5
+    "surface_count": 6,
+    "surface_disagreement_count": 0
   },
   "principals": [
     {
@@ -195,7 +202,9 @@
     {
       "label": "outsider",
       "resolved_delegations": [],
-      "resolved_projects": [],
+      "resolved_projects": [
+        "64f905d3-0b0b-50ca-83ab-95f541a79964"
+      ],
       "resolved_teams": [
         "cc7ec25b-56e3-51cc-b5e6-83e8564db96b"
       ],
@@ -213,7 +222,8 @@
       "reader": "member",
       "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
       "status": "PASS",
-      "surface": "graph_metadata_read"
+      "surface": "graph_metadata_read",
+      "surface_disagreement": false
     },
     {
       "detail": "stamped_scope=delegated owner_is_reader=False",
@@ -223,7 +233,8 @@
       "reader": "outsider",
       "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
       "status": "PASS",
-      "surface": "graph_metadata_read"
+      "surface": "graph_metadata_read",
+      "surface_disagreement": false
     },
     {
       "detail": "stamped_scope=private owner_is_reader=True",
@@ -233,7 +244,8 @@
       "reader": "member",
       "requested_scope_key": null,
       "status": "PASS",
-      "surface": "graph_metadata_read"
+      "surface": "graph_metadata_read",
+      "surface_disagreement": false
     },
     {
       "detail": "stamped_scope=private owner_is_reader=False",
@@ -243,7 +255,8 @@
       "reader": "outsider",
       "requested_scope_key": null,
       "status": "PASS",
-      "surface": "graph_metadata_read"
+      "surface": "graph_metadata_read",
+      "surface_disagreement": false
     },
     {
       "detail": "stamped_scope=project owner_is_reader=True",
@@ -253,7 +266,8 @@
       "reader": "member",
       "requested_scope_key": "3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
       "status": "PASS",
-      "surface": "graph_metadata_read"
+      "surface": "graph_metadata_read",
+      "surface_disagreement": false
     },
     {
       "detail": "stamped_scope=project owner_is_reader=False",
@@ -263,7 +277,8 @@
       "reader": "outsider",
       "requested_scope_key": "3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
       "status": "PASS",
-      "surface": "graph_metadata_read"
+      "surface": "graph_metadata_read",
+      "surface_disagreement": false
     },
     {
       "boundary": "graph read helper forwards no team or delegation membership",
@@ -274,7 +289,8 @@
       "reader": "member",
       "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
       "status": "PASS",
-      "surface": "graph_metadata_read"
+      "surface": "graph_metadata_read",
+      "surface_disagreement": false
     },
     {
       "detail": "stamped_scope=team owner_is_reader=False",
@@ -284,7 +300,97 @@
       "reader": "outsider",
       "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
       "status": "PASS",
-      "surface": "graph_metadata_read"
+      "surface": "graph_metadata_read",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "granted_spaces=1 row_space=delegated\u001f02fa694a-f5d1-5213-9166-34a434e6323c",
+      "expected": "deny",
+      "memory": "delegated-oncall",
+      "observed": "deny",
+      "reader": "member",
+      "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
+      "status": "PASS",
+      "surface": "graph_metadata_read_narrowed",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "granted_spaces=1 row_space=delegated\u001f02fa694a-f5d1-5213-9166-34a434e6323c",
+      "expected": "deny",
+      "memory": "delegated-oncall",
+      "observed": "deny",
+      "reader": "outsider",
+      "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
+      "status": "PASS",
+      "surface": "graph_metadata_read_narrowed",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "granted_spaces=1 row_space=private\u001f",
+      "expected": "deny",
+      "memory": "private-member",
+      "observed": "deny",
+      "reader": "member",
+      "requested_scope_key": null,
+      "status": "PASS",
+      "surface": "graph_metadata_read_narrowed",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "granted_spaces=1 row_space=private\u001f",
+      "expected": "deny",
+      "memory": "private-member",
+      "observed": "deny",
+      "reader": "outsider",
+      "requested_scope_key": null,
+      "status": "PASS",
+      "surface": "graph_metadata_read_narrowed",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "granted_spaces=1 row_space=project\u001f3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
+      "expected": "allow",
+      "memory": "project-lumen",
+      "observed": "allow",
+      "reader": "member",
+      "requested_scope_key": "3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
+      "status": "PASS",
+      "surface": "graph_metadata_read_narrowed",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "granted_spaces=1 row_space=project\u001f3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
+      "expected": "deny",
+      "memory": "project-lumen",
+      "observed": "deny",
+      "reader": "outsider",
+      "requested_scope_key": "3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
+      "status": "PASS",
+      "surface": "graph_metadata_read_narrowed",
+      "surface_disagreement": false
+    },
+    {
+      "boundary": "graph read helper forwards no team or delegation membership",
+      "detail": "granted_spaces=1 row_space=team\u001fb63cfc01-0255-597d-83b5-8fca205cbc64",
+      "expected": "deny",
+      "memory": "team-alpha",
+      "observed": "deny",
+      "reader": "member",
+      "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
+      "status": "PASS",
+      "surface": "graph_metadata_read_narrowed",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "granted_spaces=1 row_space=team\u001fb63cfc01-0255-597d-83b5-8fca205cbc64",
+      "expected": "deny",
+      "memory": "team-alpha",
+      "observed": "deny",
+      "reader": "outsider",
+      "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
+      "status": "PASS",
+      "surface": "graph_metadata_read_narrowed",
+      "surface_disagreement": false
     },
     {
       "detail": "reason=private_principal_bound listed=True recalled=True rows_listed=1 rows_recalled=1",
@@ -294,7 +400,8 @@
       "reader": "member",
       "requested_scope_key": null,
       "status": "PASS",
-      "surface": "raw_own_scope_read"
+      "surface": "raw_own_scope_read",
+      "surface_disagreement": false
     },
     {
       "detail": "reason=private_principal_bound listed=False recalled=False rows_listed=0 rows_recalled=0",
@@ -304,7 +411,8 @@
       "reader": "outsider",
       "requested_scope_key": null,
       "status": "PASS",
-      "surface": "raw_own_scope_read"
+      "surface": "raw_own_scope_read",
+      "surface_disagreement": false
     },
     {
       "detail": "reason=project_access_verified listed=True recalled=True rows_listed=1 rows_recalled=1",
@@ -314,7 +422,19 @@
       "reader": "member",
       "requested_scope_key": "3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
       "status": "PASS",
-      "surface": "raw_own_scope_read"
+      "surface": "raw_own_scope_read",
+      "surface_disagreement": false
+    },
+    {
+      "detail": "reason=project_access_verified listed=False recalled=False rows_listed=0 rows_recalled=0",
+      "expected": "deny",
+      "memory": "project-lumen",
+      "observed": "deny",
+      "reader": "outsider",
+      "requested_scope_key": "64f905d3-0b0b-50ca-83ab-95f541a79964",
+      "status": "PASS",
+      "surface": "raw_own_scope_read",
+      "surface_disagreement": false
     },
     {
       "detail": "reason=team_access_verified listed=True recalled=True rows_listed=1 rows_recalled=1",
@@ -324,7 +444,8 @@
       "reader": "member",
       "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
       "status": "PASS",
-      "surface": "raw_own_scope_read"
+      "surface": "raw_own_scope_read",
+      "surface_disagreement": false
     },
     {
       "detail": "reason=team_access_verified listed=False recalled=False rows_listed=0 rows_recalled=0",
@@ -334,7 +455,8 @@
       "reader": "outsider",
       "requested_scope_key": "cc7ec25b-56e3-51cc-b5e6-83e8564db96b",
       "status": "PASS",
-      "surface": "raw_own_scope_read"
+      "surface": "raw_own_scope_read",
+      "surface_disagreement": false
     },
     {
       "boundary": "no resolver grants a delegation, so no principal can hold one",
@@ -345,7 +467,8 @@
       "reader": "member",
       "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
       "status": "PASS",
-      "surface": "raw_targeted_read"
+      "surface": "raw_targeted_read",
+      "surface_disagreement": false
     },
     {
       "boundary": "no resolver grants a delegation, so no principal can hold one",
@@ -356,7 +479,8 @@
       "reader": "outsider",
       "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
       "status": "PASS",
-      "surface": "raw_targeted_read"
+      "surface": "raw_targeted_read",
+      "surface_disagreement": false
     },
     {
       "detail": "reason=private_principal_bound listed=True recalled=True rows_listed=1 rows_recalled=1",
@@ -366,7 +490,8 @@
       "reader": "member",
       "requested_scope_key": null,
       "status": "PASS",
-      "surface": "raw_targeted_read"
+      "surface": "raw_targeted_read",
+      "surface_disagreement": false
     },
     {
       "detail": "reason=private_principal_bound listed=False recalled=False rows_listed=0 rows_recalled=0",
@@ -376,7 +501,8 @@
       "reader": "outsider",
       "requested_scope_key": null,
       "status": "PASS",
-      "surface": "raw_targeted_read"
+      "surface": "raw_targeted_read",
+      "surface_disagreement": false
     },
     {
       "detail": "reason=project_access_verified listed=True recalled=True rows_listed=1 rows_recalled=1",
@@ -386,7 +512,8 @@
       "reader": "member",
       "requested_scope_key": "3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
       "status": "PASS",
-      "surface": "raw_targeted_read"
+      "surface": "raw_targeted_read",
+      "surface_disagreement": false
     },
     {
       "detail": "denied_at=authorization reason=unverified_membership",
@@ -396,7 +523,8 @@
       "reader": "outsider",
       "requested_scope_key": "3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
       "status": "PASS",
-      "surface": "raw_targeted_read"
+      "surface": "raw_targeted_read",
+      "surface_disagreement": false
     },
     {
       "detail": "reason=team_access_verified listed=True recalled=True rows_listed=1 rows_recalled=1",
@@ -406,7 +534,8 @@
       "reader": "member",
       "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
       "status": "PASS",
-      "surface": "raw_targeted_read"
+      "surface": "raw_targeted_read",
+      "surface_disagreement": false
     },
     {
       "detail": "denied_at=authorization reason=unverified_membership",
@@ -416,7 +545,8 @@
       "reader": "outsider",
       "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
       "status": "PASS",
-      "surface": "raw_targeted_read"
+      "surface": "raw_targeted_read",
+      "surface_disagreement": false
     },
     {
       "detail": "plan_scopes=private,project",
@@ -426,17 +556,19 @@
       "reader": "member",
       "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
       "status": "PASS",
-      "surface": "retrieval_candidate_filter"
+      "surface": "retrieval_candidate_filter",
+      "surface_disagreement": false
     },
     {
-      "detail": "plan_scopes=private",
+      "detail": "plan_scopes=private,project",
       "expected": "deny",
       "memory": "delegated-oncall",
       "observed": "deny",
       "reader": "outsider",
       "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
       "status": "PASS",
-      "surface": "retrieval_candidate_filter"
+      "surface": "retrieval_candidate_filter",
+      "surface_disagreement": false
     },
     {
       "detail": "plan_scopes=private,project",
@@ -446,17 +578,19 @@
       "reader": "member",
       "requested_scope_key": null,
       "status": "PASS",
-      "surface": "retrieval_candidate_filter"
+      "surface": "retrieval_candidate_filter",
+      "surface_disagreement": false
     },
     {
-      "detail": "plan_scopes=private",
+      "detail": "plan_scopes=private,project",
       "expected": "deny",
       "memory": "private-member",
       "observed": "deny",
       "reader": "outsider",
       "requested_scope_key": null,
       "status": "PASS",
-      "surface": "retrieval_candidate_filter"
+      "surface": "retrieval_candidate_filter",
+      "surface_disagreement": false
     },
     {
       "detail": "plan_scopes=private,project",
@@ -466,17 +600,19 @@
       "reader": "member",
       "requested_scope_key": "3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
       "status": "PASS",
-      "surface": "retrieval_candidate_filter"
+      "surface": "retrieval_candidate_filter",
+      "surface_disagreement": false
     },
     {
-      "detail": "plan_scopes=private",
+      "detail": "plan_scopes=private,project",
       "expected": "deny",
       "memory": "project-lumen",
       "observed": "deny",
       "reader": "outsider",
       "requested_scope_key": "3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
       "status": "PASS",
-      "surface": "retrieval_candidate_filter"
+      "surface": "retrieval_candidate_filter",
+      "surface_disagreement": false
     },
     {
       "boundary": "graph read helper forwards no team or delegation membership",
@@ -487,17 +623,19 @@
       "reader": "member",
       "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
       "status": "PASS",
-      "surface": "retrieval_candidate_filter"
+      "surface": "retrieval_candidate_filter",
+      "surface_disagreement": false
     },
     {
-      "detail": "plan_scopes=private",
+      "detail": "plan_scopes=private,project",
       "expected": "deny",
       "memory": "team-alpha",
       "observed": "deny",
       "reader": "outsider",
       "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
       "status": "PASS",
-      "surface": "retrieval_candidate_filter"
+      "surface": "retrieval_candidate_filter",
+      "surface_disagreement": false
     },
     {
       "boundary": "no resolver grants a delegation, so no principal can hold one",
@@ -508,7 +646,8 @@
       "reader": "member",
       "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
       "status": "PASS",
-      "surface": "scope_authorization"
+      "surface": "scope_authorization",
+      "surface_disagreement": false
     },
     {
       "boundary": "no resolver grants a delegation, so no principal can hold one",
@@ -519,7 +658,8 @@
       "reader": "outsider",
       "requested_scope_key": "02fa694a-f5d1-5213-9166-34a434e6323c",
       "status": "PASS",
-      "surface": "scope_authorization"
+      "surface": "scope_authorization",
+      "surface_disagreement": false
     },
     {
       "detail": "reason=project_access_verified",
@@ -529,7 +669,8 @@
       "reader": "member",
       "requested_scope_key": "3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
       "status": "PASS",
-      "surface": "scope_authorization"
+      "surface": "scope_authorization",
+      "surface_disagreement": false
     },
     {
       "detail": "reason=unverified_membership",
@@ -539,7 +680,8 @@
       "reader": "outsider",
       "requested_scope_key": "3b1965c7-246a-5b6b-b32a-ce747c41cdc8",
       "status": "PASS",
-      "surface": "scope_authorization"
+      "surface": "scope_authorization",
+      "surface_disagreement": false
     },
     {
       "detail": "reason=team_access_verified",
@@ -549,7 +691,8 @@
       "reader": "member",
       "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
       "status": "PASS",
-      "surface": "scope_authorization"
+      "surface": "scope_authorization",
+      "surface_disagreement": false
     },
     {
       "detail": "reason=unverified_membership",
@@ -559,13 +702,15 @@
       "reader": "outsider",
       "requested_scope_key": "b63cfc01-0255-597d-83b5-8fca205cbc64",
       "status": "PASS",
-      "surface": "scope_authorization"
+      "surface": "scope_authorization",
+      "surface_disagreement": false
     }
   ],
   "release_scope": "v1.2 Track C team-scope trust receipt",
   "schema_version": "sibyl-team-scope-trust-receipt-v1",
   "surfaces": [
     "graph_metadata_read",
+    "graph_metadata_read_narrowed",
     "raw_own_scope_read",
     "raw_targeted_read",
     "retrieval_candidate_filter",

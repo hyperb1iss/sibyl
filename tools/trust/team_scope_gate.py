@@ -41,6 +41,7 @@ from sibyl_core.auth.memory_policy import (
     authorize_memory_read,
     memory_metadata_read_allowed,
     memory_scope_policy_key,
+    private_scope_granted_for,
 )
 from sibyl_core.auth.models import AuthOrganization, AuthUser, OrganizationRole
 from sibyl_core.backends.surreal.auth_client import SurrealAuthClient
@@ -74,11 +75,21 @@ TEAM_SCOPE_BUDGETS: dict[str, float] = {
     # A gate that probes nothing reports zero leaks. These floors are what stop a
     # vacuous receipt from reading as a clean one, so they are budgets rather
     # than commentary: dropping a probe class fails the gate.
-    "deny_probe_count": 23,
-    "allow_probe_count": 12,
-    "surface_count": 5,
-    "owner_forgery_offered_count": 3,
+    "deny_probe_count": 31,
+    "allow_probe_count": 13,
+    "surface_count": 6,
+    # Five forged owner fields, and the two backfill-provenance keys matter most:
+    # nothing downstream rewrites them, so they are the pair that proves the
+    # write path's drop filter is load bearing rather than belt and braces.
+    "owner_forgery_offered_count": 5,
     "owner_forgery_surviving_count": 0,
+    # A read surface that stops answering agrees with every denial, so its
+    # silence has to be counted rather than inferred from a direction.
+    "surface_disagreement_count": 0,
+    # Probe expectations and probe observations both read the resolver, so an
+    # over-broad resolver could move them together and stay green. The rows this
+    # gate provisions are the independent ground truth that check sits against.
+    "membership_resolution_mismatch_count": 0,
 }
 LOWER_IS_BETTER_METRICS = frozenset(
     (
@@ -86,6 +97,20 @@ LOWER_IS_BETTER_METRICS = frozenset(
         "allow_failure_count",
         "graph_team_membership_forwarded",
         "owner_forgery_surviving_count",
+        "surface_disagreement_count",
+        "membership_resolution_mismatch_count",
+    )
+)
+
+
+EXPECTED_PROBE_SURFACES: frozenset[str] = frozenset(
+    (
+        "raw_targeted_read",
+        "raw_own_scope_read",
+        "scope_authorization",
+        "graph_metadata_read",
+        "graph_metadata_read_narrowed",
+        "retrieval_candidate_filter",
     )
 )
 
@@ -113,10 +138,24 @@ ORGANIZATION_ID = _fixture_id("organization")
 TEAM_ID = _fixture_id("team-alpha")
 OTHER_TEAM_ID = _fixture_id("team-beta")
 PROJECT_ID = _fixture_id("project-lumen")
+OTHER_PROJECT_ID = _fixture_id("project-mercury")
 DELEGATION_ID = _fixture_id("delegation-oncall")
 PRINCIPAL_IDS: Mapping[str, str] = {
     "member": _fixture_id("principal-member"),
     "outsider": _fixture_id("principal-outsider"),
+}
+
+# Ground truth for the membership resolvers: exactly the rows _provision_principals
+# writes. Comparing the resolvers against this is not the same as handing the
+# probes their memberships, which still come from the resolvers; it is the one
+# check that fails when a resolver stops agreeing with the store.
+PROVISIONED_TEAMS: Mapping[str, frozenset[str]] = {
+    "member": frozenset({TEAM_ID}),
+    "outsider": frozenset({OTHER_TEAM_ID}),
+}
+PROVISIONED_PROJECTS: Mapping[str, frozenset[str]] = {
+    "member": frozenset({PROJECT_ID}),
+    "outsider": frozenset({OTHER_PROJECT_ID}),
 }
 
 ALLOW = "allow"
@@ -158,6 +197,17 @@ class Principal:
     projects: frozenset[str]
     delegations: frozenset[str]
 
+    @property
+    def granted_memory_scope_keys(self) -> frozenset[str]:
+        """The memory spaces an API key narrowed to this reader's projects holds.
+
+        Derived from resolved project membership rather than declared, so the
+        narrowing under test is the same key format the API mints.
+        """
+        return frozenset(
+            memory_scope_policy_key(MemoryScope.PROJECT, project) for project in self.projects
+        )
+
 
 @dataclass(frozen=True)
 class SeededMemory:
@@ -189,6 +239,15 @@ class SeededMemory:
             for field in self.offered_owner_forgeries
             if self.graph_metadata.get(field) == self.requested_metadata.get(field)
         )
+
+
+@dataclass(frozen=True)
+class SurfaceReading:
+    """What one read surface answered, and whether it answered coherently."""
+
+    observed: str
+    detail: str
+    disagreement: bool = False
 
 
 @dataclass(frozen=True)
@@ -227,6 +286,7 @@ class ProbeObservation:
     probe: ScopeProbe
     observed: str
     detail: str
+    disagreement: bool = False
 
     @property
     def leaked(self) -> bool:
@@ -236,6 +296,10 @@ class ProbeObservation:
     def allow_failed(self) -> bool:
         return self.probe.expectation == ALLOW and self.observed == DENY
 
+    @property
+    def passed(self) -> bool:
+        return self.observed == self.probe.expectation and not self.disagreement
+
     def as_receipt_entry(self) -> dict[str, Any]:
         entry: dict[str, Any] = {
             "surface": self.probe.surface,
@@ -244,8 +308,9 @@ class ProbeObservation:
             "requested_scope_key": self.probe.requested_scope_key,
             "expected": self.probe.expectation,
             "observed": self.observed,
-            "status": "PASS" if self.observed == self.probe.expectation else "FAIL",
+            "status": "PASS" if self.passed else "FAIL",
             "detail": self.detail,
+            "surface_disagreement": self.disagreement,
         }
         if self.probe.boundary is not None:
             entry["boundary"] = self.probe.boundary
@@ -406,20 +471,30 @@ async def _provision_principals(client: SurrealAuthClient) -> dict[str, Principa
             uuid: $project, organization_id: $organization, name: 'Lumen', slug: 'lumen',
             graph_project_id: $project, visibility: 'private'
         };
+        CREATE projects CONTENT {
+            uuid: $other_project, organization_id: $organization, name: 'Mercury',
+            slug: 'mercury', graph_project_id: $other_project, visibility: 'private'
+        };
         CREATE project_members CONTENT {
             uuid: $project_membership, organization_id: $organization,
             project_id: $project, user_id: $member
+        };
+        CREATE project_members CONTENT {
+            uuid: $other_project_membership, organization_id: $organization,
+            project_id: $other_project, user_id: $outsider
         };
         """,
         organization=ORGANIZATION_ID,
         team=TEAM_ID,
         other_team=OTHER_TEAM_ID,
         project=PROJECT_ID,
+        other_project=OTHER_PROJECT_ID,
         member=PRINCIPAL_IDS["member"],
         outsider=PRINCIPAL_IDS["outsider"],
         membership=_fixture_id("membership-member-alpha"),
         other_membership=_fixture_id("membership-outsider-beta"),
         project_membership=_fixture_id("membership-member-lumen"),
+        other_project_membership=_fixture_id("membership-outsider-mercury"),
     )
 
     @asynccontextmanager
@@ -460,8 +535,18 @@ def _seed_requests() -> tuple[MemoryCaptureRequest, ...]:
             principal_id=member,
             source_id="team-scope-gate:private",
             # A payload that names its own owner is the exact forgery the write
-            # path is supposed to drop, so every seed offers one.
-            metadata={"principal_id": PRINCIPAL_IDS["outsider"], "memory_scope": "organization"},
+            # path is supposed to drop. The scope and owner keys are also
+            # rewritten from authorized values further down that function, so
+            # they alone cannot prove the drop filter runs; the two backfill
+            # provenance keys are never rewritten, which makes them the pair
+            # that fails loudly if the filter is removed. Forging them nominates
+            # the row for a rollback that strips its scope to the fail-open.
+            metadata={
+                "principal_id": PRINCIPAL_IDS["outsider"],
+                "memory_scope": "organization",
+                "scope_backfill_source": "raw_capture",
+                "scope_backfill_prior": {"touched": ["memory_scope"], "prior": {}},
+            },
         ),
         MemoryCaptureRequest(
             title="team deploy runbook",
@@ -471,7 +556,7 @@ def _seed_requests() -> tuple[MemoryCaptureRequest, ...]:
             scope_key=TEAM_ID,
             principal_id=member,
             source_id="team-scope-gate:team",
-            metadata={"scope_key": OTHER_TEAM_ID},
+            metadata={"scope_key": OTHER_TEAM_ID},  # claims another team's audience
         ),
         MemoryCaptureRequest(
             title="project retrieval decision",
@@ -658,7 +743,50 @@ def _expected_probes(
                         boundary=boundary,
                     )
                 )
+
+            # Same row, same reader, but through a credential narrowed to the
+            # reader's project memory spaces. A row whose canonical space the key
+            # does not hold must be refused even when the reader owns it, so the
+            # private row is denied to its own author here.
+            probes.append(
+                ScopeProbe(
+                    surface="graph_metadata_read_narrowed",
+                    reader_label=label,
+                    memory_label=memory.label,
+                    expectation=ALLOW
+                    if (
+                        graph_expectation == ALLOW
+                        and _memory_space_key(memory) in principal.granted_memory_scope_keys
+                    )
+                    else DENY,
+                    requested_scope_key=memory.scope_key,
+                    boundary=boundary,
+                )
+            )
     return sorted(probes, key=lambda probe: probe.key)
+
+
+def membership_resolution_mismatches(
+    principals: Mapping[str, Principal],
+) -> list[str]:
+    """Where a resolver disagrees with the membership rows this gate wrote."""
+    mismatches: list[str] = []
+    for label in sorted(principals):
+        principal = principals[label]
+        for kind, resolved, provisioned in (
+            ("teams", principal.teams, PROVISIONED_TEAMS.get(label, frozenset())),
+            ("projects", principal.projects, PROVISIONED_PROJECTS.get(label, frozenset())),
+        ):
+            if resolved != provisioned:
+                mismatches.append(
+                    f"{label} resolved {kind} {sorted(resolved)} "
+                    f"but was provisioned {sorted(provisioned)}"
+                )
+    return mismatches
+
+
+def _memory_space_key(memory: SeededMemory) -> str:
+    return memory_scope_policy_key(memory.memory_scope, memory.scope_key)
 
 
 def _authorize_raw_read(
@@ -680,7 +808,7 @@ async def _observe_raw_read(
     principal: Principal,
     memory: SeededMemory,
     scope_key: str | None,
-) -> tuple[str, str]:
+) -> SurfaceReading:
     """Run a raw read the way a route runs one: authorize, then query.
 
     The content query builder trusts an already-authorized scope key, so probing
@@ -689,7 +817,7 @@ async def _observe_raw_read(
     """
     decision = _authorize_raw_read(principal, memory, scope_key)
     if not decision.allowed:
-        return (DENY, f"denied_at=authorization reason={decision.reason}")
+        return SurfaceReading(DENY, f"denied_at=authorization reason={decision.reason}")
     listed = await content_service.list_raw_memories_for_scope(
         organization_id=ORGANIZATION_ID,
         principal_id=principal.user_id,
@@ -711,23 +839,32 @@ async def _observe_raw_read(
         f"reason={decision.reason} listed={in_listing} recalled={in_recall} "
         f"rows_listed={len(listed)} rows_recalled={len(recalled)}"
     )
-    if in_listing != in_recall:
-        # Listing and recall disagreeing about one row means one of them is not
-        # applying the scope clause, which is a leak whichever way it points.
-        return (ALLOW, f"{detail} surface_disagreement=True")
-    return (ALLOW if in_listing else DENY, detail)
+    # Two reads of one row that disagree mean one of them stopped applying the
+    # scope clause, and the direction does not make it benign: a recall surface
+    # that returns nothing at all agrees with every denial and would otherwise
+    # pass its allow probes on the listing's answer alone. So the disagreement
+    # is carried as its own counted fact rather than folded into allow or deny,
+    # where an expectation could absorb it.
+    return SurfaceReading(
+        ALLOW if in_listing else DENY,
+        detail,
+        disagreement=in_listing != in_recall,
+    )
 
 
 def _observe_scope_authorization(
     principal: Principal,
     memory: SeededMemory,
     scope_key: str | None,
-) -> tuple[str, str]:
+) -> SurfaceReading:
     decision = _authorize_raw_read(principal, memory, scope_key)
-    return (ALLOW if decision.allowed else DENY, f"reason={decision.reason}")
+    return SurfaceReading(ALLOW if decision.allowed else DENY, f"reason={decision.reason}")
 
 
-def _observe_graph_metadata_read(principal: Principal, memory: SeededMemory) -> tuple[str, str]:
+def _observe_graph_metadata_read(
+    principal: Principal,
+    memory: SeededMemory,
+) -> SurfaceReading:
     allowed = memory_metadata_read_allowed(
         memory.graph_metadata,
         principal_id=principal.user_id,
@@ -737,13 +874,41 @@ def _observe_graph_metadata_read(principal: Principal, memory: SeededMemory) -> 
     )
     stamped_scope = memory.graph_metadata.get("memory_scope")
     stamped_owner = memory.graph_metadata.get("principal_id")
-    return (
+    return SurfaceReading(
         ALLOW if allowed else DENY,
         f"stamped_scope={stamped_scope} owner_is_reader={stamped_owner == principal.user_id}",
     )
 
 
-def _observe_retrieval_filter(principal: Principal, memory: SeededMemory) -> tuple[str, str]:
+def _observe_graph_metadata_read_narrowed(
+    principal: Principal,
+    memory: SeededMemory,
+) -> SurfaceReading:
+    """Read as an API key narrowed to this reader's project memory space.
+
+    A credential narrowed to a project must not reach the principal's own private
+    rows just because the principal owns them, so this is the surface where the
+    canonical memory-space key is the authorization input rather than a label.
+    """
+    granted = principal.granted_memory_scope_keys
+    allowed = memory_metadata_read_allowed(
+        memory.graph_metadata,
+        principal_id=principal.user_id,
+        private_scope_granted=private_scope_granted_for(
+            granted,
+            principal_id=principal.user_id,
+        ),
+        accessible_projects=principal.projects,
+        project_id=None,
+        allowed_memory_scope_keys=granted,
+    )
+    return SurfaceReading(
+        ALLOW if allowed else DENY,
+        f"granted_spaces={len(granted)} row_space={_memory_space_key(memory)}",
+    )
+
+
+def _observe_retrieval_filter(principal: Principal, memory: SeededMemory) -> SurfaceReading:
     plan = build_context_retrieval_plan(
         query=memory.content,
         organization_id=ORGANIZATION_ID,
@@ -764,7 +929,7 @@ def _observe_retrieval_filter(principal: Principal, memory: SeededMemory) -> tup
         project_id=memory.scope_key if memory.memory_scope == MemoryScope.PROJECT.value else None,
     )
     allowed = _candidate_scope_allowed(candidate, plan)
-    return (
+    return SurfaceReading(
         ALLOW if allowed else DENY,
         f"plan_scopes={','.join(sorted(scope.memory_scope.value for scope in plan.scopes))}",
     )
@@ -779,21 +944,24 @@ async def _observe_probe(
     principal = principals[probe.reader_label]
     memory = memories[probe.memory_label]
     if probe.surface in {"raw_targeted_read", "raw_own_scope_read"}:
-        observed, detail = await _observe_raw_read(principal, memory, probe.requested_scope_key)
+        reading = await _observe_raw_read(principal, memory, probe.requested_scope_key)
     elif probe.surface == "scope_authorization":
-        observed, detail = _observe_scope_authorization(
-            principal,
-            memory,
-            probe.requested_scope_key,
-        )
+        reading = _observe_scope_authorization(principal, memory, probe.requested_scope_key)
     elif probe.surface == "graph_metadata_read":
-        observed, detail = _observe_graph_metadata_read(principal, memory)
+        reading = _observe_graph_metadata_read(principal, memory)
+    elif probe.surface == "graph_metadata_read_narrowed":
+        reading = _observe_graph_metadata_read_narrowed(principal, memory)
     elif probe.surface == "retrieval_candidate_filter":
-        observed, detail = _observe_retrieval_filter(principal, memory)
+        reading = _observe_retrieval_filter(principal, memory)
     else:  # pragma: no cover - guarded by _expected_probes
         msg = f"unknown probe surface {probe.surface!r}"
         raise AssertionError(msg)
-    return ProbeObservation(probe=probe, observed=observed, detail=detail)
+    return ProbeObservation(
+        probe=probe,
+        observed=reading.observed,
+        detail=reading.detail,
+        disagreement=reading.disagreement,
+    )
 
 
 async def collect_team_scope_observations() -> dict[str, Any]:
@@ -871,6 +1039,7 @@ def build_team_scope_receipt(
     memories: Sequence[SeededMemory],
     observations: Sequence[ProbeObservation],
 ) -> dict[str, Any]:
+    mismatches = membership_resolution_mismatches(principals)
     ordered = sorted(observations, key=lambda observation: observation.probe.key)
     leaks = [observation for observation in ordered if observation.leaked]
     allow_failures = [observation for observation in ordered if observation.allow_failed]
@@ -886,14 +1055,17 @@ def build_team_scope_receipt(
             if observation.probe.boundary is not None
         }
     )
+    disagreements = [observation for observation in ordered if observation.disagreement]
     metrics: dict[str, Any] = {
         "leak_count": len(leaks),
         "allow_failure_count": len(allow_failures),
+        "surface_disagreement_count": len(disagreements),
         "probe_count": len(ordered),
         "deny_probe_count": len(deny_probes),
         "allow_probe_count": len(allow_probes),
         "surface_count": len(surfaces),
         "graph_team_membership_forwarded": int(graph_team_membership_forwarded()),
+        "membership_resolution_mismatch_count": len(mismatches),
         "owner_forgery_offered_count": sum(
             len(memory.offered_owner_forgeries) for memory in memories
         ),
@@ -918,6 +1090,7 @@ def build_team_scope_receipt(
         "budgets": dict(TEAM_SCOPE_BUDGETS),
         "metrics": metrics,
         "boundaries": boundaries,
+        "membership_mismatches": mismatches,
         "principals": [_principal_entry(principals[label]) for label in sorted(principals)],
         "memories": [_memory_entry(memory) for memory in memories],
         "probes": [observation.as_receipt_entry() for observation in ordered],
@@ -929,6 +1102,7 @@ OBSERVED_RECEIPT_FIELDS: tuple[str, ...] = (
     "schema_version",
     "fixture",
     "boundaries",
+    "membership_mismatches",
     "principals",
     "memories",
     "probes",
@@ -988,7 +1162,11 @@ def with_check_results(
 ) -> dict[str, Any]:
     observed_status = "PASS"
     metrics = receipt.get("metrics", {})
-    if metrics.get("leak_count") or metrics.get("allow_failure_count"):
+    if (
+        metrics.get("leak_count")
+        or metrics.get("allow_failure_count")
+        or metrics.get("surface_disagreement_count")
+    ):
         observed_status = "FAIL"
     checks: list[dict[str, Any]] = [
         {
@@ -1020,13 +1198,30 @@ def validate_team_scope_receipt(receipt: Mapping[str, Any]) -> list[str]:
         return [*failures, "receipt metrics must be an object"]
     failures.extend(_validate_receipt_metrics(metrics))
     failures.extend(_validate_receipt_probes(receipt.get("probes")))
+    failures.extend(_validate_receipt_surfaces(receipt.get("surfaces")))
     failures.extend(_validate_receipt_checks(receipt.get("checks")))
     return failures
 
 
-def _validate_receipt_metrics(metrics: Mapping[str, Any]) -> list[str]:
+def _validate_observed_metrics(metrics: Mapping[str, Any]) -> list[str]:
+    """Budgets that hold without the subprocess evidence checks having run.
+
+    Only the two promotion coverage metrics need those checks, so observe-only
+    runs enforce everything else. Skipping the floors there would make
+    ``--observe-only`` look like a gate while accepting an empty probe set.
+    """
+    return _validate_receipt_metrics(metrics, skip=DERIVED_METRICS)
+
+
+def _validate_receipt_metrics(
+    metrics: Mapping[str, Any],
+    *,
+    skip: frozenset[str] = frozenset(),
+) -> list[str]:
     failures: list[str] = []
     for metric, budget in TEAM_SCOPE_BUDGETS.items():
+        if metric in skip:
+            continue
         value = metrics.get(metric)
         if not isinstance(value, int | float) or isinstance(value, bool):
             failures.append(f"metric {metric!r} must be numeric")
@@ -1036,6 +1231,12 @@ def _validate_receipt_metrics(metrics: Mapping[str, Any]) -> list[str]:
                 failures.append(f"metric {metric!r} exceeds budget {budget}: {value}")
         elif float(value) < float(budget):
             failures.append(f"metric {metric!r} below budget {budget}: {value}")
+    mismatch = metrics.get("membership_resolution_mismatch_count")
+    if isinstance(mismatch, int | float) and not isinstance(mismatch, bool) and mismatch:
+        failures.append(
+            "a membership resolver no longer agrees with the provisioned rows, so "
+            "probe expectations and probe observations are no longer independent"
+        )
     forwarded = metrics.get("graph_team_membership_forwarded")
     if isinstance(forwarded, int | float) and not isinstance(forwarded, bool) and forwarded:
         failures.append(
@@ -1043,6 +1244,22 @@ def _validate_receipt_metrics(metrics: Mapping[str, Any]) -> list[str]:
             "'graph read helper forwards no team or delegation membership' boundary "
             "and add team allow probes on the graph surfaces"
         )
+    return failures
+
+
+def _validate_receipt_surfaces(surfaces: Any) -> list[str]:
+    """Every declared probe surface has to have actually run.
+
+    A count floor catches a shrunken probe set but not a renamed or silently
+    dropped surface, so the surface names are pinned too.
+    """
+    if not isinstance(surfaces, list):
+        return ["receipt surfaces must be a list"]
+    observed = {str(surface) for surface in surfaces}
+    missing = sorted(EXPECTED_PROBE_SURFACES - observed)
+    unexpected = sorted(observed - EXPECTED_PROBE_SURFACES)
+    failures = [f"probe surface {surface!r} never ran" for surface in missing]
+    failures.extend(f"receipt reports unknown probe surface {surface!r}" for surface in unexpected)
     return failures
 
 
@@ -1054,7 +1271,13 @@ def _validate_receipt_probes(probes: Any) -> list[str]:
         if not isinstance(probe, dict):
             failures.append(f"receipt probes[{index}] must be an object")
             continue
-        if probe.get("status") != "PASS":
+        if probe.get("surface_disagreement"):
+            failures.append(
+                f"receipt probes[{index}] {probe.get('surface')} "
+                f"{probe.get('memory')} as {probe.get('reader')}: "
+                "listing and recall disagreed, so one of them stopped filtering"
+            )
+        if probe.get("status") != "PASS" and probe.get("expected") != probe.get("observed"):
             failures.append(
                 f"receipt probes[{index}] {probe.get('surface')} "
                 f"{probe.get('memory')} as {probe.get('reader')} "
@@ -1147,6 +1370,9 @@ def _print_observations(receipt: Mapping[str, Any], *, echo: Echo) -> None:
     )
     echo(f"leak_count: {metrics['leak_count']}")
     echo(f"allow_failure_count: {metrics['allow_failure_count']}")
+    echo(f"surface_disagreement_count: {metrics['surface_disagreement_count']}")
+    for mismatch in receipt.get("membership_mismatches", []):
+        echo(f"membership mismatch: {mismatch}")
     for boundary in receipt.get("boundaries", []):
         echo(f"boundary: {boundary}")
     for probe in receipt["probes"]:
@@ -1191,11 +1417,14 @@ def run_observations(
     if receipt_path is not None:
         write_receipt(receipt, receipt_path)
         echo(f"receipt: {display_path(receipt_path)}")
-    metrics = receipt["metrics"]
-    failures = _validate_receipt_probes(receipt.get("probes"))
-    if metrics["leak_count"] or metrics["allow_failure_count"] or failures:
-        return 1
-    return 0
+    failures = [
+        *_validate_observed_metrics(receipt["metrics"]),
+        *_validate_receipt_probes(receipt.get("probes")),
+        *_validate_receipt_surfaces(receipt.get("surfaces")),
+    ]
+    for failure in failures:
+        echo(f"- {failure}")
+    return 1 if failures else 0
 
 
 def run_gate(
