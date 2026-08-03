@@ -1,8 +1,14 @@
 """Bounded traversal verb request/response models.
 
-The wire bounds are the core clamps, imported rather than restated, so a budget
-change lands in one place and cannot drift between the HTTP contract and the
-walk that honors it.
+The bounds are the core clamps, imported rather than restated, so a budget change
+lands in one place and cannot drift between the HTTP contract and the walk that
+honors it.
+
+They are documented rather than enforced as validation, because the MCP tools and
+these routes are one verb with one contract. A tool signature cannot express a
+range, so MCP clamps; rejecting here would mean the same request that succeeds
+for an agent 422s for a script. Both surfaces clamp, and every response reports
+the bound it actually applied.
 """
 
 from typing import Any, Literal
@@ -29,8 +35,10 @@ class ExpandNeighborsRequest(BaseModel):
     entity_ids: list[str] = Field(
         ...,
         min_length=1,
-        max_length=MAX_EXPAND_ORIGINS,
-        description="Seed entity IDs to expand from",
+        description=(
+            f"Seed entity IDs to expand from. At most {MAX_EXPAND_ORIGINS} are walked; "
+            "the remainder come back in `unresolved`."
+        ),
     )
     relationship_types: list[str] | None = Field(
         default=None,
@@ -41,21 +49,23 @@ class ExpandNeighborsRequest(BaseModel):
     )
     depth: int = Field(
         default=DEFAULT_TRAVERSAL_DEPTH,
-        ge=1,
-        le=MAX_TRAVERSAL_DEPTH,
-        description="Hops to walk from the seeds",
+        description=(
+            f"Hops to walk from the seeds, clamped to 1-{MAX_TRAVERSAL_DEPTH}. "
+            "The response reports the depth actually walked."
+        ),
     )
     limit: int = Field(
         default=DEFAULT_EXPAND_LIMIT,
-        ge=1,
-        le=MAX_EXPAND_LIMIT,
-        description="Maximum neighbors returned",
+        description=(
+            f"Maximum neighbors returned, clamped to 1-{MAX_EXPAND_LIMIT}. "
+            "The response reports the limit actually applied."
+        ),
     )
     content_max_chars: int = Field(
         default=DEFAULT_NEIGHBOR_CONTENT_MAX_CHARS,
-        ge=0,
-        le=MAX_TRAVERSAL_CONTENT_MAX_CHARS,
-        description="Preview characters per neighbor",
+        description=(
+            f"Preview characters per neighbor, clamped to 0-{MAX_TRAVERSAL_CONTENT_MAX_CHARS}."
+        ),
     )
     include_incoming: bool = Field(
         default=True,
@@ -110,15 +120,17 @@ class FetchSliceRequest(BaseModel):
     )
     window: int = Field(
         default=DEFAULT_SLICE_WINDOW,
-        ge=1,
-        le=MAX_SLICE_WINDOW,
-        description="Adjacent spans to return",
+        description=(
+            f"Adjacent spans to return, clamped to 1-{MAX_SLICE_WINDOW}. "
+            "The response reports the window actually applied."
+        ),
     )
     content_max_chars: int = Field(
         default=DEFAULT_SLICE_CONTENT_MAX_CHARS,
-        ge=0,
-        le=MAX_TRAVERSAL_CONTENT_MAX_CHARS,
-        description="Character budget for the whole window",
+        description=(
+            "Character budget for the whole window, clamped to "
+            f"0-{MAX_TRAVERSAL_CONTENT_MAX_CHARS}."
+        ),
     )
     project: str | None = Field(
         default=None, description="Scope the read to one project the caller can read"

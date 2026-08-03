@@ -462,14 +462,18 @@ async def fetch_slice(
             else None
         )
         if resolved_parent is None:
-            # An orphaned span, or one whose memory this reader cannot read. The
-            # span itself was authorized, so serve it alone rather than 404ing.
-            return _single_span_response(
-                requested,
-                window=window,
-                content_max_chars=content_max_chars,
-                anchor_index=anchor_index,
-            )
+            # A span is never more readable than the memory it was cut from, so an
+            # unreadable or missing parent denies the span too.
+            #
+            # This is the invariant and not merely a precaution. A span inherits
+            # its parent's scope once, at write time, and the reprojection that
+            # would refresh it runs only when the body changes: a scope-only edit
+            # tightening a memory to private leaves its spans carrying the old
+            # scope. Trusting the span's own stamp here would serve that memory's
+            # text through the span door while the parent correctly refused.
+            # Authorizing the parent makes the stale stamp unreachable rather than
+            # merely unlikely.
+            raise KeyError(entity_id)
         parent = resolved_parent
 
     spans = await _authorized_spans(runtime, parent_id=parent.id, scope_guard=scope_guard)
@@ -489,6 +493,7 @@ async def fetch_slice(
         # window that quietly omits it.
         return _single_span_response(
             requested,
+            parent=parent,
             window=window,
             content_max_chars=content_max_chars,
             anchor_index=anchor_index,
@@ -629,17 +634,22 @@ def _window_start(spans: Sequence[Entity], *, anchor_index: int | None, window: 
 def _single_span_response(
     span: Entity,
     *,
+    parent: Entity,
     window: int,
     content_max_chars: int,
     anchor_index: int | None,
 ) -> FetchSliceResponse:
+    """Serve one authorized span whose position its parent's span set does not hold.
+
+    Only reachable once the parent itself is authorized, so this is a
+    completeness gap rather than a way around the parent check.
+    """
     content, truncated = _compact(span.content or "", content_max_chars)
-    parent_id = str(span.metadata.get("parent_entity_id") or span.id)
     return FetchSliceResponse(
         entity_id=span.id,
-        parent_id=parent_id,
-        parent_name=span.name,
-        parent_type=span.entity_type.value,
+        parent_id=parent.id,
+        parent_name=parent.name,
+        parent_type=parent.entity_type.value,
         passages=[
             SlicePassage(
                 id=span.id,
@@ -656,12 +666,12 @@ def _single_span_response(
         window_start=anchor_index,
         passage_total=_passage_total(span.metadata),
         covers_parent=False,
-        project_id=_entity_project_id(span),
+        project_id=_entity_project_id(parent),
         content_chars=len(content),
         filters={
             "window": window,
             "round_budget": _TRAVERSAL_ROUND_BUDGET,
-            "parent_unreadable": True,
+            "anchor_outside_span_set": True,
         },
     )
 

@@ -260,21 +260,60 @@ class TestExpandNeighborsRoute:
 
 
 class TestExpandNeighborsRequestBounds:
-    def test_seed_count_is_capped_at_the_core_budget(self) -> None:
-        from sibyl_core.tools.traverse import MAX_EXPAND_ORIGINS
+    """One verb, one contract: both surfaces clamp rather than one rejecting.
 
-        with pytest.raises(ValueError):
-            ExpandNeighborsRequest(
-                entity_ids=[f"seed_{index}" for index in range(MAX_EXPAND_ORIGINS + 1)]
-            )
+    A tool signature cannot express a range, so MCP clamps. Rejecting here would
+    mean the identical request succeeds for an agent and 422s for a script.
+    """
 
-    def test_depth_and_limit_reject_values_past_the_ceiling(self) -> None:
+    def test_out_of_range_budgets_are_accepted_and_clamped_by_the_core(self) -> None:
+        from sibyl_core.tools.traverse import (
+            MAX_EXPAND_LIMIT,
+            MAX_EXPAND_ORIGINS,
+            MAX_TRAVERSAL_DEPTH,
+        )
+
+        request = ExpandNeighborsRequest(
+            entity_ids=[f"seed_{index}" for index in range(MAX_EXPAND_ORIGINS + 5)],
+            depth=MAX_TRAVERSAL_DEPTH + 6,
+            limit=MAX_EXPAND_LIMIT + 100,
+        )
+        assert request.depth == MAX_TRAVERSAL_DEPTH + 6
+        assert len(request.entity_ids) == MAX_EXPAND_ORIGINS + 5
+
+    @pytest.mark.asyncio
+    async def test_the_response_reports_the_bound_it_actually_applied(self) -> None:
+        """Clamping is only honest if the caller can see the effective value."""
         from sibyl_core.tools.traverse import MAX_EXPAND_LIMIT, MAX_TRAVERSAL_DEPTH
 
-        with pytest.raises(ValueError):
-            ExpandNeighborsRequest(entity_ids=["seed"], depth=MAX_TRAVERSAL_DEPTH + 1)
-        with pytest.raises(ValueError):
-            ExpandNeighborsRequest(entity_ids=["seed"], limit=MAX_EXPAND_LIMIT + 1)
+        ctx = stub_auth_context()
+        clamped = _ExpandResult(
+            origins=["decision_seed"],
+            neighbors=[_Neighbor(id="decision_neighbor")],
+            total=1,
+            depth=MAX_TRAVERSAL_DEPTH,
+            limit=MAX_EXPAND_LIMIT,
+        )
+
+        with (
+            patch(
+                "sibyl.api.routes.search.list_accessible_project_graph_ids",
+                AsyncMock(return_value={"proj_a"}),
+            ),
+            patch("sibyl_core.tools.core.expand_neighbors", AsyncMock(return_value=clamped)),
+        ):
+            response = await expand_neighbors(
+                request=ExpandNeighborsRequest(
+                    entity_ids=["decision_seed"],
+                    depth=99,
+                    limit=999,
+                ),
+                org=ORG,
+                ctx=ctx,
+            )
+
+        assert response.depth == MAX_TRAVERSAL_DEPTH
+        assert response.limit == MAX_EXPAND_LIMIT
 
     def test_inbound_edges_are_followed_by_default(self) -> None:
         assert ExpandNeighborsRequest(entity_ids=["seed"]).include_incoming is True
@@ -386,15 +425,39 @@ class TestFetchSliceRequestBounds:
 
         assert FetchSliceRequest(entity_id="x").window == PASSAGE_WINDOW_UNITS
 
-    def test_window_rejects_values_past_the_span_cap(self) -> None:
+    def test_an_oversized_window_is_accepted_and_clamped_by_the_core(self) -> None:
         from sibyl_core.tools.traverse import MAX_SLICE_WINDOW
 
-        with pytest.raises(ValueError):
-            FetchSliceRequest(entity_id="x", window=MAX_SLICE_WINDOW + 1)
+        request = FetchSliceRequest(entity_id="x", window=MAX_SLICE_WINDOW + 40)
+        assert request.window == MAX_SLICE_WINDOW + 40
 
     def test_entity_id_cannot_be_empty(self) -> None:
+        """An absent required id is malformed input, not an out-of-range budget."""
         with pytest.raises(ValueError):
             FetchSliceRequest(entity_id="")
+
+    @pytest.mark.asyncio
+    async def test_malformed_input_is_a_400_rather_than_a_500(self) -> None:
+        ctx = stub_auth_context()
+
+        with (
+            patch(
+                "sibyl.api.routes.search.list_accessible_project_graph_ids",
+                AsyncMock(return_value={"proj_a"}),
+            ),
+            patch(
+                "sibyl_core.tools.core.fetch_slice",
+                AsyncMock(side_effect=ValueError("entity_id is required")),
+            ),
+            pytest.raises(HTTPException) as raised,
+        ):
+            await fetch_slice(
+                request=FetchSliceRequest(entity_id="   "),
+                org=ORG,
+                ctx=ctx,
+            )
+
+        assert raised.value.status_code == 400
 
 
 class TestTraversalToolsAreRegistered:

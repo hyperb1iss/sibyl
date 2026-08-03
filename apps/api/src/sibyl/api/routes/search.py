@@ -446,6 +446,14 @@ async def expand_neighbors(
             duration_ms=elapsed_ms(started_at),
         )
         raise
+    except ValueError as e:
+        # Malformed input rather than an out-of-range budget, which is clamped.
+        telemetry_registry().record_search_operation(
+            surface="expand_neighbors",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         telemetry_registry().record_search_operation(
             surface="expand_neighbors",
@@ -508,6 +516,14 @@ async def fetch_slice(
             duration_ms=elapsed_ms(started_at),
         )
         raise HTTPException(status_code=404, detail="Entity not found") from e
+    except ValueError as e:
+        # Malformed input rather than an out-of-range window, which is clamped.
+        telemetry_registry().record_search_operation(
+            surface="fetch_slice",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         telemetry_registry().record_search_operation(
             surface="fetch_slice",

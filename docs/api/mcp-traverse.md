@@ -36,6 +36,10 @@ unreadable memory is not a route either: you will not receive a two-hop neighbor
 only through someone else's private memory, because receiving it would tell you something sits
 between you and it.
 
+A span is never more readable than the memory it was cut from. `fetch_slice` authorizes the parent
+before serving a span, even when you name the span directly, because a span inherits its parent's
+scope once at write time and a later scope-only edit does not refresh it.
+
 A seed that is absent and a seed the reader may not see are reported identically, and `fetch_slice`
 raises the same 404 for a denied entity as for one that does not exist. Distinguishing them would
 confirm the existence of a row the caller has no right to know about.
@@ -60,6 +64,10 @@ interface ExpandNeighborsInput {
 `include_incoming` defaults to true because the interesting neighbors are usually on that side. The
 graph writes edges from span to memory and from dependent to dependency, so an outgoing-only walk
 reports those neighbors as absent.
+
+`direction` describes the edge that reached a row from the node one hop closer, not from your seed.
+At `distance` 1 those are the same thing; at `distance` 2 and beyond, an `incoming` row points at
+its own predecessor in the walk rather than at the seed you named.
 
 ### Output
 
@@ -157,6 +165,15 @@ answer, not an error to retry.
 fetch_slice("passage_9f2c1b")            # window centered on this span
 fetch_slice("decision_abc", window=5)    # first five spans of this memory
 ```
+
+## Bounds are clamped, not rejected
+
+Both surfaces clamp out-of-range budgets rather than refusing them, and every response reports the
+value it actually applied (`depth`, `limit`, `window`). A tool signature cannot express a range, so
+the MCP verbs clamp; rejecting on the REST side would mean the identical request succeeds for an
+agent and fails for a script. Seeds past the cap come back in `unresolved` rather than being walked
+silently. Malformed input, such as a blank `entity_id`, is a `400` and is a different thing from an
+out-of-range budget.
 
 ## REST equivalents
 
