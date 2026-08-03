@@ -233,6 +233,7 @@ tasks:
       - ~:reflection-quality-gate-test
       - ~:forgetting-gate-test
       - ~:write-path-integrity-gate-test
+      - ~:team-scope-gate-test
       - ~:auth-session-gate-test
       - ~:overview-perf-gate-test
       - ~:synthesis-gate-test
@@ -271,6 +272,7 @@ tasks:
       - ~:reflection-quality-gate-test
       - ~:forgetting-gate-test
       - ~:write-path-integrity-gate-test
+      - ~:team-scope-gate-test
       - ~:auth-session-gate-test
       - ~:overview-perf-gate-test
       - ~:synthesis-gate-test
@@ -1003,6 +1005,30 @@ tasks:
       - tools/trust/**/*.py
       - tools/tests/conftest.py
       - tools/tests/test_write_path_integrity_gate.py
+      - pyproject.toml
+      - moon.yml
+      - apps/api/moon.yml
+      - packages/python/sibyl-core/moon.yml
+
+  team-scope-gate:
+    command: uv run python -m tools.trust.team_scope_gate
+    options:
+      cache: false
+
+  team-scope-gate-observe:
+    command: uv run python -m tools.trust.team_scope_gate --observe-only
+    options:
+      cache: false
+
+  team-scope-gate-test:
+    command: uv run pytest tools/tests/test_team_scope_gate.py -v
+    inputs:
+      - tools/trust/**/*.py
+      - tools/tests/conftest.py
+      - tools/tests/test_team_scope_gate.py
+      - packages/python/sibyl-core/src/sibyl_core/auth/memory_policy.py
+      - packages/python/sibyl-core/src/sibyl_core/memory_pipeline/capture.py
+      - packages/python/sibyl-core/src/sibyl_core/retrieval/search.py
       - pyproject.toml
       - moon.yml
       - apps/api/moon.yml
