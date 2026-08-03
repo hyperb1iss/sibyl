@@ -34,9 +34,15 @@ log = structlog.get_logger()
 DEFAULT_REPLAY_WINDOW_HOURS = 168
 DEFAULT_MAX_MEMORIES_PER_RUN = 200
 
+# Three column names are load-bearing and none of them is the obvious one. The
+# model's ``metadata`` is stored in the ``attributes`` column. The logical id an
+# entity is addressed by is ``uuid``; the ``id`` column holds a Surreal record id
+# that ``EntityManager.update`` (which matches ``WHERE uuid = $uuid``) and search
+# results do not speak. And ``created_at`` has to appear in a non-star projection
+# for 3.x to accept ordering on it.
 _CANDIDATE_QUERY = """
-SELECT id, metadata, created_at FROM entity
-WHERE metadata.memory_probes != NONE
+SELECT uuid, attributes, created_at FROM entity
+WHERE attributes.memory_probes != NONE
   AND created_at > $since
 ORDER BY created_at DESC
 LIMIT $limit;
@@ -45,8 +51,8 @@ LIMIT $limit;
 # One query for the whole batch rather than one per parent: a passage counts as
 # finding its memory, so the targets have to be known before any probe runs.
 _PASSAGE_QUERY = """
-SELECT id, metadata.parent_entity_id AS parent_entity_id FROM entity
-WHERE metadata.parent_entity_id IN $parents;
+SELECT uuid, attributes.parent_entity_id AS parent_entity_id FROM entity
+WHERE attributes.parent_entity_id IN $parents;
 """
 
 
@@ -90,16 +96,18 @@ async def replay_memory_probes(
 
     since = datetime.now(UTC) - timedelta(hours=max(int(window_hours), 1))
     rows = normalize_records(
-        await client.query(
+        await client.execute_query(
             _CANDIDATE_QUERY,
-            {"since": since, "limit": max(int(max_memories), 1)},
+            since=since,
+            limit=max(int(max_memories), 1),
+            _query_label="probes.replay.candidates",
         )
     )
     candidates = [
         (entity_id, metadata, probes)
         for row in rows
-        if (entity_id := str(row.get("id") or ""))
-        and isinstance(metadata := row.get("metadata"), dict)
+        if (entity_id := str(row.get("uuid") or ""))
+        and isinstance(metadata := row.get("attributes"), dict)
         and (probes := probes_from_metadata(metadata))
     ]
     if not candidates:
@@ -158,10 +166,20 @@ async def replay_memory_probes(
         probes_total += int(receipt.get("total") or 0)
         probes_retrievable += int(receipt.get("retrievable") or 0)
         try:
-            await entity_manager.update(
+            written = await entity_manager.update(
                 entity_id,
                 {"metadata": {**metadata, PROBE_LAST_REPLAY_METADATA_KEY: receipt}},
             )
+            if written is None:
+                # The update matches on the logical id and returns None rather
+                # than raising when nothing matched, so an addressing mistake
+                # here would otherwise look like a clean run forever.
+                failures += 1
+                log.warning(
+                    "probe_replay_receipt_matched_no_row",
+                    group_id=group_id,
+                    entity_id=entity_id,
+                )
         except Exception as exc:
             failures += 1
             log.warning(
@@ -234,7 +252,13 @@ async def _passages_by_parent(
     if not parents:
         return {}
     try:
-        rows = normalize(await client.query(_PASSAGE_QUERY, {"parents": parents}))
+        rows = normalize(
+            await client.execute_query(
+                _PASSAGE_QUERY,
+                parents=parents,
+                _query_label="probes.replay.passages",
+            )
+        )
     except Exception as exc:
         # A probe can still match the parent, so a missing passage map costs
         # recall on the receipt rather than the whole replay.
@@ -243,7 +267,7 @@ async def _passages_by_parent(
     grouped: dict[str, list[str]] = {}
     for row in rows:
         parent = _optional_str(row.get("parent_entity_id"))
-        passage_id = _optional_str(row.get("id"))
+        passage_id = _optional_str(row.get("uuid"))
         if parent and passage_id:
             grouped.setdefault(parent, []).append(passage_id)
     return {parent: tuple(ids) for parent, ids in grouped.items()}
