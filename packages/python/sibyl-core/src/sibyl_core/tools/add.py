@@ -10,6 +10,10 @@ from sibyl_core.auth.memory_policy import (
     stamp_memory_scope_metadata,
 )
 from sibyl_core.embeddings.providers import configured_embedding_provider
+from sibyl_core.memory_pipeline.retrieval_keys import (
+    coerce_retrieval_keys,
+    normalize_retrieval_keys,
+)
 from sibyl_core.memory_pipeline.structure import (
     PROBE_REHEARSAL_METADATA_KEY,
     MemoryStructure,
@@ -245,6 +249,7 @@ async def add(
     memory_scope: str | None = None,
     scope_key: str | None = None,
     principal_id: str | None = None,
+    retrieval_keys: list[str] | None = None,
     # Structure the writing agent declares for its own memory
     spans: list[dict[str, Any]] | None = None,
     atomic: bool = False,
@@ -302,6 +307,10 @@ async def add(
         memory_scope: Authorized audience for the row, resolved by the calling surface.
         scope_key: Authorized audience key (a verified project, never a payload value).
         principal_id: Authenticated author of the write.
+        retrieval_keys: Exact-match identifiers this entity answers to (error strings,
+              symbols, config flags, aliases). Matched case-insensitively against
+              identifier-shaped queries, so a key may name something the content
+              never spells out. Max 16 keys, 200 characters each.
         spans: Agent-authored cut plan as [{"start": int, "end": int, "label": str?}].
               Offsets are half-open into the stored (stripped) content and must tile
               it exactly: no gap, no overlap, first starts at 0, last ends at the
@@ -313,6 +322,7 @@ async def add(
               live search path once the write lands, and the ranks come back in
               the response. Supplying probes forces a synchronous write, since a
               rehearsal cannot observe a row that has not been written yet.
+
 
     Returns:
         AddResponse with created entity ID, auto-discovered links, conflicts, and timestamp.
@@ -468,6 +478,21 @@ async def add(
         }
         if project:
             full_metadata["project_id"] = project
+        # Every graph write funnels through here, so this is where a declaration
+        # arriving as an explicit argument and one arriving inside a forwarded
+        # metadata bag become the same normalized list. The explicit argument is
+        # validated strictly because a surface resolved it and can be told it was
+        # refused; the bag is coerced, because it also carries arbitrary caller
+        # junk that must not fail an otherwise valid write.
+        if retrieval_keys is not None:
+            declared_retrieval_keys, _match_forms = normalize_retrieval_keys(retrieval_keys)
+        else:
+            coerced_keys = coerce_retrieval_keys(full_metadata.get("retrieval_keys"))
+            declared_retrieval_keys = coerced_keys[0] if coerced_keys else []
+        if declared_retrieval_keys:
+            full_metadata["retrieval_keys"] = declared_retrieval_keys
+        else:
+            full_metadata.pop("retrieval_keys", None)
 
         # Create appropriate entity type
         entity: Entity | Episode | Pattern | Procedure | Task | Project
