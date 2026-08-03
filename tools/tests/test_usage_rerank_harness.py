@@ -45,7 +45,6 @@ BASE = datetime(2026, 7, 15, 16, 52, 42, tzinfo=UTC)
 ORG = "e7b94a25-dd4c-4fb8-b300-0c75e83998e2"
 
 # The default fixture page serves three items and cites the middle one.
-PAGE_ITEMS = 3
 TWO_SESSIONS = 2
 UNCITED_IN_PAGE = 2
 RANK_OF_SECOND = 2
@@ -348,6 +347,31 @@ def test_attribution_window_sweep_is_monotone() -> None:
     assert sweep["1s"] == 0
     assert sweep["60s"] == 1
     assert sweep["3600s"] == 1
+
+
+def test_an_unrecognized_signal_type_is_neither_exposure_nor_feedback() -> None:
+    """A signal the harness does not know about must not be scored as feedback.
+
+    Treating anything non-exposure as feedback would silently mislabel a future
+    signal type as a citation, which is the kind of drift that shows up as an
+    unexplained jump in the positive count.
+    """
+    rows = [
+        *_exposure_page(["a", "b"]),
+        _event(
+            signal="dwell",
+            item_id="a",
+            offset_us=1_000_000,
+            surface="future_surface",
+            session_key="future_surface:x",
+        ),
+    ]
+    sessions = join.group_exposure_sessions(rows)
+    assert join.attribute_feedback(sessions, rows) == ()
+
+    overlap = join.measure_session_key_overlap(rows)
+    assert overlap.exposure_sessions == 1
+    assert overlap.feedback_sessions == 0
 
 
 def test_gap_summary_reports_nothing_without_attributions() -> None:

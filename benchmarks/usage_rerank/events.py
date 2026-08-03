@@ -53,14 +53,6 @@ class UsageEventRow:
     project_id: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
-    @property
-    def is_exposure(self) -> bool:
-        return self.signal_type == EXPOSURE
-
-    @property
-    def is_feedback(self) -> bool:
-        return self.signal_type in FEEDBACK_SIGNALS
-
     def metadata_text(self, keys: tuple[str, ...]) -> str | None:
         """Return the first non-empty metadata value among `keys`."""
         for key in keys:

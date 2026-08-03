@@ -35,7 +35,7 @@ from datetime import datetime, timedelta
 from itertools import pairwise
 from typing import Any
 
-from events import CITATION, EXPOSURE, MISLED, UsageEventRow
+from events import CITATION, EXPOSURE, FEEDBACK_SIGNALS, MISLED, UsageEventRow
 
 # Surfaces that only a benchmark run can produce. context_pack_eval is NOT here:
 # it posts to /context/pack without record_exposure=false
@@ -102,12 +102,6 @@ class ExposureSession:
 
     def items_of_kind(self, item_kind: str) -> tuple[ExposedItem, ...]:
         return tuple(item for item in self.items if item.item_kind == item_kind)
-
-    def find(self, item_kind: str, item_id: str) -> ExposedItem | None:
-        for item in self.items:
-            if item.item_kind == item_kind and item.item_id == item_id:
-                return item
-        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,7 +225,7 @@ def measure_session_key_overlap(rows: Iterable[UsageEventRow]) -> SessionKeyOver
         if row.signal_type == EXPOSURE:
             exposure_sessions.add(row.session_key)
             exposure_messages.add(row.message_key)
-        else:
+        elif row.signal_type in FEEDBACK_SIGNALS:
             feedback_sessions.add(row.session_key)
             feedback_messages.add(row.message_key)
     return SessionKeyOverlap(
@@ -265,7 +259,7 @@ def attribute_feedback(
     window = timedelta(seconds=window_seconds)
     attributions: list[FeedbackAttribution] = []
     for row in sorted(rows, key=lambda row: row.event_at):
-        if row.signal_type == EXPOSURE:
+        if row.signal_type not in FEEDBACK_SIGNALS:
             continue
         key = (row.item_kind, row.item_id)
         candidates = sessions_by_item.get(key)
