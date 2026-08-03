@@ -37,6 +37,7 @@ from sibyl_core.retrieval.candidates import (
     VectorCandidateFetch,
 )
 from sibyl_core.retrieval.fusion import rrf_merge
+from sibyl_core.retrieval.identifier_query import identifier_probe_tokens
 from sibyl_core.retrieval.query_ranking import rank_items_by_query_coverage
 from sibyl_core.retrieval.temporal import (
     get_entity_timestamp,
@@ -156,6 +157,7 @@ class RetrievalSignal(StrEnum):
     NODE_VECTOR = "node_vector"
     EDGE_VECTOR = "edge_vector"
     GRAPH_EXPANSION = "graph_expansion"
+    EXACT_KEY = "exact_key"
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +166,11 @@ class RetrievalWeights:
     active_task_state_boost: float = 1.3
     project_match_boost: float = 1.2
     direct_raw_source_boost: float = 1.4
+    # Deliberately equal to direct_raw_source_boost: both express the same thing,
+    # a candidate reached through a channel somebody declared outright rather
+    # than one inferred by similarity. A writer stamping an exact key is the
+    # write-side twin of a caller naming a raw source, so the magnitudes match.
+    exact_key_boost: float = 1.4
     graph_expansion_only_boost: float = 0.45
     graph_native_signal_boost_cap: float = 1.2
     freshness_boost_cap: float = 1.5
@@ -178,6 +185,7 @@ class CandidateLimits:
     node_vector: int = DEFAULT_CANDIDATES_PER_SIGNAL
     edge_vector: int = DEFAULT_CANDIDATES_PER_SIGNAL
     graph_expansion: int = DEFAULT_CANDIDATES_PER_SIGNAL
+    exact_key: int = DEFAULT_CANDIDATES_PER_SIGNAL
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,6 +216,7 @@ class RetrievalPlan:
         RetrievalSignal.NODE_VECTOR,
         RetrievalSignal.EDGE_VECTOR,
         RetrievalSignal.GRAPH_EXPANSION,
+        RetrievalSignal.EXACT_KEY,
     )
     project: str | None = None
     accessible_projects: frozenset[str] | None = None
@@ -343,6 +352,7 @@ def build_context_retrieval_plan(
             node_vector=per_signal_limit,
             edge_vector=per_signal_limit,
             graph_expansion=per_signal_limit,
+            exact_key=per_signal_limit,
         ),
         project=project,
         accessible_projects=scoped_accessible_projects,
@@ -389,6 +399,11 @@ async def context_search(
     node_sources_allowed = _node_sources_allowed(requested_types)
     episode_sources_allowed = _episode_sources_allowed(requested_types)
     edge_sources_allowed = _edge_sources_allowed(requested_types)
+    probe_tokens = (
+        identifier_probe_tokens(search_plan.query)
+        if RetrievalSignal.EXACT_KEY in search_plan.signals
+        else ()
+    )
     graph_tasks = [
         (
             RetrievalSignal.NODE_FULLTEXT,
@@ -421,6 +436,18 @@ async def context_search(
                 limit=search_plan.candidate_limits.edge_fulltext,
             )
             if edge_sources_allowed
+            else _empty_candidate_source(),
+        ),
+        (
+            RetrievalSignal.EXACT_KEY,
+            _exact_key_candidates(
+                client=client,
+                plan=search_plan,
+                search_filter=search_filter,
+                limit=search_plan.candidate_limits.exact_key,
+                probe_tokens=probe_tokens,
+            )
+            if node_sources_allowed and probe_tokens
             else _empty_candidate_source(),
         ),
     ]
@@ -475,6 +502,7 @@ async def context_search(
         (RetrievalSignal.NODE_FULLTEXT, graph_candidate_lists[0]),
         (RetrievalSignal.EPISODE_FULLTEXT, graph_candidate_lists[1]),
         (RetrievalSignal.EDGE_FULLTEXT, graph_candidate_lists[2]),
+        (RetrievalSignal.EXACT_KEY, graph_candidate_lists[3]),
         (RetrievalSignal.NODE_VECTOR, vector_candidate_lists[0]),
         (RetrievalSignal.EDGE_VECTOR, vector_candidate_lists[1]),
         (RetrievalSignal.GRAPH_EXPANSION, graph_expansion_candidates),
@@ -551,6 +579,10 @@ async def context_search(
             **candidate_source_metadata,
             **raw_recall_metadata,
             **vector_fetch.as_metadata(),
+            **_exact_key_receipt_metadata(
+                probe_tokens=probe_tokens,
+                candidates=graph_candidate_lists[3],
+            ),
             "stage_timings_ms": stage_timings_ms,
         },
         graph_count=len([result for result in results if result.result_origin == "graph"]),
@@ -747,6 +779,21 @@ def _fusion_receipt_metadata(
     return metadata
 
 
+def _exact_key_receipt_metadata(
+    *,
+    probe_tokens: Sequence[str],
+    candidates: Sequence[RetrievalCandidate],
+) -> dict[str, object]:
+    """Say whether the exact-match arm fired, so "inert" is a checkable claim."""
+
+    metadata: dict[str, object] = {"exact_key_probe_fired": bool(probe_tokens)}
+    if not probe_tokens:
+        return metadata
+    metadata["exact_key_probe_tokens"] = list(probe_tokens)
+    metadata["exact_key_hit_count"] = len(candidates)
+    return metadata
+
+
 def _candidate_list_or_empty(result: object) -> list[RetrievalCandidate]:
     if isinstance(result, BaseException) or not isinstance(result, list):
         return []
@@ -785,6 +832,7 @@ def _candidate_limits_for_limit(
         node_vector=max(1, min(candidate_limits.node_vector, source_limit)),
         edge_vector=max(1, min(candidate_limits.edge_vector, source_limit)),
         graph_expansion=max(1, min(candidate_limits.graph_expansion, source_limit)),
+        exact_key=max(1, min(candidate_limits.exact_key, source_limit)),
     )
 
 
@@ -972,6 +1020,78 @@ async def _node_fulltext_candidates(
         )
         for row in rows
     ]
+
+
+async def _exact_key_candidates(
+    *,
+    client: Any,
+    plan: RetrievalPlan,
+    search_filter: SearchFilter,
+    limit: int,
+    probe_tokens: Sequence[str],
+) -> list[RetrievalCandidate]:
+    """Rows whose writer declared one of the query's identifier-shaped tokens.
+
+    This is the one lane that can find a memory whose text never contains the
+    query: the key is an assertion layered onto the content, not extracted from
+    it. Everything is exact, so the lane cannot return a weakly relevant row and
+    the precision problem that keeps BM25 out of fusion does not arise here.
+
+    Inert by construction when the query carries no identifier: no probe tokens
+    means no read at all, and the fused pool is exactly what it was before.
+    """
+
+    if not probe_tokens:
+        return []
+    filter_clauses, filter_params = _node_filter_clause(search_filter)
+    rows = await _execute_query_records(
+        client,
+        """
+        SELECT *
+        FROM entity
+        WHERE """
+        + _where_clause(["group_id = $group_id", *filter_clauses])
+        + """
+          AND retrieval_keys_normalized CONTAINSANY $probe_keys
+        ORDER BY created_at DESC, uuid DESC
+        LIMIT $limit;
+        """,
+        group_id=plan.organization_id,
+        probe_keys=list(probe_tokens),
+        limit=max(int(limit), 1),
+        **filter_params,
+    )
+    probes = set(probe_tokens)
+    scored: list[tuple[float, list[str], Mapping[str, object]]] = []
+    for row in rows:
+        matched = _matched_retrieval_keys(row, probes)
+        if not matched:
+            continue
+        scored.append((len(matched) / len(probes), matched, row))
+    # Overlap is counted here rather than in SurrealQL so the lane depends on one
+    # index lookup and no array functions, which keeps it identical across the
+    # embedded test engine and the deployed server.
+    scored.sort(key=lambda item: item[0], reverse=True)
+    candidates: list[RetrievalCandidate] = []
+    for score, matched, row in scored:
+        candidate = _candidate_from_node_record(
+            row,
+            signal=RetrievalSignal.EXACT_KEY,
+            score=score,
+        )
+        candidate.metadata["matched_retrieval_keys"] = matched
+        candidates.append(candidate)
+    return candidates
+
+
+def _matched_retrieval_keys(
+    row: Mapping[str, object],
+    probes: set[str],
+) -> list[str]:
+    stored = row.get("retrieval_keys_normalized")
+    if not isinstance(stored, list | tuple):
+        return []
+    return [str(key) for key in stored if str(key) in probes]
 
 
 async def _episode_fulltext_candidates(
@@ -2142,6 +2262,7 @@ def _selected_record_metadata(row: Mapping[str, object]) -> dict[str, object]:
         "complexity",
         "feature",
         "tags",
+        "retrieval_keys",
         "project_id",
         "epic_id",
         "task_id",
@@ -2684,6 +2805,13 @@ def _rank_fused_candidates(
         if graph_signal_multiplier > 1.0:
             score *= graph_signal_multiplier
             fusion_metadata["graph_native_signal_boost"] = graph_signal_multiplier
+        exact_key_multiplier = _exact_key_multiplier(plan, signals=fusion_metadata["sources"])
+        if exact_key_multiplier > 1.0:
+            score *= exact_key_multiplier
+            fusion_metadata["exact_key_boost"] = exact_key_multiplier
+            fusion_metadata["matched_retrieval_keys"] = list(
+                candidate.metadata.get("matched_retrieval_keys") or ()
+            )
         boosted, temporal_multiplier = _boost_score(
             candidate,
             score,
@@ -2709,7 +2837,12 @@ def _merge_graph_expansion_metadata(
 
 
 def _candidate_query_text(candidate: RetrievalCandidate) -> str:
-    parts = [part for part in (candidate.name, candidate.content) if part]
+    # Declared keys count as the candidate's own text. Without them the coverage
+    # re-rank sees an exact-key hit whose body never spells the token out as a
+    # zero-coverage row and pushes it back down, undoing the arm.
+    keys = candidate.metadata.get("retrieval_keys")
+    key_parts = [str(key) for key in keys] if isinstance(keys, list | tuple) else []
+    parts = [part for part in (candidate.name, candidate.content, *key_parts) if part]
     return " ".join(parts).lower()
 
 
@@ -2771,6 +2904,25 @@ def _graph_expansion_only_multiplier(
     if set(signals) != {RetrievalSignal.GRAPH_EXPANSION.value}:
         return 1.0
     return max(min(plan.weights.graph_expansion_only_boost, 1.0), 0.0)
+
+
+def _exact_key_multiplier(
+    plan: RetrievalPlan,
+    *,
+    signals: Sequence[str],
+) -> float:
+    """Lift a candidate whose writer declared one of the query's exact keys.
+
+    Rank-only RRF would score this candidate like the top of any other lane,
+    which is the failure that keeps a weak lexical arm out of fusion: an equal
+    vote for an unequal signal. The boost is what makes the arm high-precision
+    rather than merely present, and it applies to the candidate, not the lane,
+    so a row found by both the key and the vector index is lifted once.
+    """
+
+    if RetrievalSignal.EXACT_KEY.value not in signals:
+        return 1.0
+    return max(plan.weights.exact_key_boost, 1.0)
 
 
 def _graph_native_signal_multiplier(
@@ -2868,6 +3020,11 @@ def _search_result_from_candidate(
         )
     if fusion_metadata.get("graph_native_signal_boost"):
         metadata["graph_native_signal_boost"] = fusion_metadata.get("graph_native_signal_boost")
+    if fusion_metadata.get("exact_key_boost"):
+        metadata["exact_key_boost"] = fusion_metadata.get("exact_key_boost")
+        metadata["matched_retrieval_keys"] = list(
+            fusion_metadata.get("matched_retrieval_keys") or ()
+        )
     if fusion_metadata.get("temporal_decay_multiplier") is not None:
         metadata["temporal_decay_multiplier"] = round(
             float(fusion_metadata["temporal_decay_multiplier"]),
