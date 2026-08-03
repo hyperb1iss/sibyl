@@ -925,6 +925,26 @@ async def add(
                     errors=len(projection_result.errors),
                 )
 
+            # Same ordering as the sync branch: the parent exists, so the edges
+            # have something to point at. Without this the fallback stored a
+            # memory with no spans beside it, agent-planned or otherwise, and
+            # nothing later would notice.
+            fallback_passages = await project_entity_passages(
+                entity_manager=entity_manager,
+                relationship_manager=relationship_manager,
+                source=entity,
+                group_id=org_id,
+                created_source_id=created_id,
+                generate_embeddings=generate_embeddings,
+            )
+            if fallback_passages.errors:
+                log.warning(
+                    "add_fallback_passage_projection_failed",
+                    entity_id=created_id,
+                    passages=fallback_passages.passages,
+                    errors=fallback_passages.errors,
+                )
+
             fallback_message = f"Added (sync fallback): {title}"
             if conflicts:
                 fallback_message += f" (⚠️ {len(conflicts)} potential conflict(s) detected)"
