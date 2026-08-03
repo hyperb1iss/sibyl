@@ -5,6 +5,10 @@ from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 
+from sibyl_core.memory_pipeline.retrieval_keys import (
+    MAX_RETRIEVAL_KEY_LENGTH,
+    MAX_RETRIEVAL_KEYS,
+)
 from sibyl_core.memory_pipeline.spans import MAX_AGENT_SPANS, MAX_SPAN_LABEL_CHARS
 from sibyl_core.memory_pipeline.structure import MAX_PROBE_CHARS, MAX_PROBES_PER_MEMORY
 from sibyl_core.models.entities import EntityType
@@ -81,6 +85,16 @@ class EntityCreate(EntityBase, MemoryStructureFields):
     defer_embeddings: bool = Field(
         default=False,
         description="Persist lexical graph records first and queue embedding backfill",
+    )
+    retrieval_keys: list[Annotated[str, Field(max_length=MAX_RETRIEVAL_KEY_LENGTH)]] | None = Field(
+        default=None,
+        max_length=MAX_RETRIEVAL_KEYS,
+        description=(
+            "Exact-match identifiers this entity answers to (error strings, symbols, "
+            "config flags, aliases). Matched case-insensitively against "
+            "identifier-shaped queries, so a key may name something the content "
+            "never spells out."
+        ),
     )
 
 

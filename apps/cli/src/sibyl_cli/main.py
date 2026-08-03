@@ -472,6 +472,7 @@ async def _write_memory_capture(
     source_id: str | None = None,
     skip_conflicts: bool = False,
     languages: list[str] | None = None,
+    retrieval_keys: list[str] | None = None,
     capture_metadata: Mapping[str, Any] | None = None,
     spans: list[dict[str, Any]] | None = None,
     atomic: bool = False,
@@ -514,6 +515,7 @@ async def _write_memory_capture(
         related_to=resolved_links,
         languages=languages,
         metadata=metadata,
+        retrieval_keys=retrieval_keys,
         provenance={
             "remember_kind": kind,
             "related_to": resolved_links or [],
@@ -560,6 +562,9 @@ async def _write_memory_capture(
             metadata=dict(graph_metadata),
             sync=capture.wait_searchable,
             skip_conflicts=capture.skip_conflicts,
+            retrieval_keys=list(capture.retrieval_keys)
+            if capture.retrieval_keys is not None
+            else None,
             spans=[dict(span) for span in capture.spans] if capture.spans is not None else None,
             atomic=capture.atomic,
             probes=list(capture.probes) if capture.probes is not None else None,
@@ -3550,6 +3555,16 @@ def remember_memory(
         help="Do not auto-scope to the linked project",
     ),
     tags: str | None = typer.Option(None, "--tags", help="Comma-separated tags"),
+    keys: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--key",
+            help=(
+                "Exact-match retrieval key this memory answers to (error string, symbol, "
+                "config flag, alias). Repeatable, up to 16."
+            ),
+        ),
+    ] = None,
     related_to: str | None = typer.Option(
         None,
         "--related-to",
@@ -3636,6 +3651,10 @@ def remember_memory(
         raise typer.Exit(code=1)
 
     parsed_tags = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
+    # Not comma-split: a retrieval key can legitimately contain a comma (an error
+    # string, a formatted tuple), so repeating --key is the only unambiguous way
+    # to declare one.
+    parsed_keys = [key.strip() for key in keys or () if key.strip()] or None
     related_ids = _parse_csv_ids(related_to)
     task_ids = _parse_csv_ids(task)
     probes = [entry.strip() for entry in (probe or []) if entry.strip()]
@@ -3726,6 +3745,7 @@ def remember_memory(
                     memory_scope=memory_scope,
                     scope_key=scope_key,
                     source_id=source_id,
+                    retrieval_keys=parsed_keys,
                     capture_metadata=capture_metadata,
                     spans=parsed_spans,
                     atomic=atomic,

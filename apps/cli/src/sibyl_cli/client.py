@@ -984,6 +984,7 @@ class SibylClient:
         metadata: dict[str, Any] | None = None,
         sync: bool = False,
         skip_conflicts: bool = False,
+        retrieval_keys: list[str] | None = None,
         spans: list[dict[str, Any]] | None = None,
         atomic: bool = False,
         probes: list[str] | None = None,
@@ -993,6 +994,7 @@ class SibylClient:
         Args:
             sync: If True, wait for entity creation to complete (slower but
                   entity is immediately available for operations like task start).
+            retrieval_keys: Exact-match identifiers this entity answers to.
             spans: Agent-authored cut plan tiling the stored content exactly.
             atomic: Declare the body one retrievable unit that must not be cut.
             probes: Questions the memory must answer, rehearsed at write time.
@@ -1022,6 +1024,8 @@ class SibylClient:
             data["metadata"] = metadata
         if skip_conflicts:
             data["skip_conflicts"] = True
+        if retrieval_keys:
+            data["retrieval_keys"] = retrieval_keys
 
         params = {"sync": "true"} if sync else None
         return await self._request("POST", "/entities", json=data, params=params)
