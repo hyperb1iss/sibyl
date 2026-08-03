@@ -59,14 +59,23 @@ type RawMemoryRecallFn = Callable[..., Awaitable[list[RawMemory] | RawMemoryReca
 DEFAULT_FILTER_SELECTIVITY_THRESHOLD = 0.1
 EDGE_FULLTEXT_MATCH_HEADROOM = 8
 EDGE_FULLTEXT_MIN_MATCH_LIMIT = 32
-# Ceiling on candidates any one lane contributes, however large the caller's
-# `limit` is. This is a seed-diversity budget rather than a payload budget: on a
-# whole-state substrate each candidate is a distinct state, while on a passage
-# substrate several candidates can be cuts of one state, so the distinct sources
-# a lane can reach shrinks as the retrieval unit shrinks. Raising it widens the
-# fulltext and HNSW read on every lane for every caller, so it belongs to a
-# measured arm rather than to whichever substrate landed most recently.
-MAX_CANDIDATES_PER_SIGNAL = 8
+# Seed budget: how many candidates one lane may contribute before fusion. It is
+# a seed-diversity budget rather than a payload budget, because several
+# candidates can be cuts of one source once the retrieval unit is a passage
+# rather than a whole memory, so a lane needs more rows to reach the same number
+# of distinct sources. The bound is therefore the caller's own `limit`: no lane
+# may propose more rows than the whole answer holds, and a caller that asks for
+# a wider answer is the caller that pays for the wider fulltext and HNSW read.
+# A single flat ceiling cannot express that, since it pins a 50-item request to
+# the same lane depth as an 8-item one.
+MIN_CANDIDATES_PER_SIGNAL = 2
+MAX_RETRIEVAL_LIMIT = 50
+# Lane depth for a plan built without a limit, equal to what the rule above
+# yields at the narrowest layer a pack can ask for (`ContextLayer.WAKE`).
+DEFAULT_CANDIDATES_PER_SIGNAL = 8
+# The raw-memory lane reads whole memories rather than passages, so it takes a
+# share of the seed budget instead of the whole of it.
+RAW_LEXICAL_LIMIT_DIVISOR = 4
 _ACTIVE_TASK_STATUSES = {"doing", "in_progress", "review"}
 _RAW_MEMORY_CONTEXT_TYPES = {"raw_memory", "session", "episode", "note"}
 _EDGE_CONTEXT_TYPES = {"claim", "relationship"}
@@ -161,12 +170,12 @@ class RetrievalWeights:
 @dataclass(frozen=True, slots=True)
 class CandidateLimits:
     raw_lexical: int = 4
-    node_fulltext: int = MAX_CANDIDATES_PER_SIGNAL
-    episode_fulltext: int = MAX_CANDIDATES_PER_SIGNAL
-    edge_fulltext: int = MAX_CANDIDATES_PER_SIGNAL
-    node_vector: int = MAX_CANDIDATES_PER_SIGNAL
-    edge_vector: int = MAX_CANDIDATES_PER_SIGNAL
-    graph_expansion: int = MAX_CANDIDATES_PER_SIGNAL
+    node_fulltext: int = DEFAULT_CANDIDATES_PER_SIGNAL
+    episode_fulltext: int = DEFAULT_CANDIDATES_PER_SIGNAL
+    edge_fulltext: int = DEFAULT_CANDIDATES_PER_SIGNAL
+    node_vector: int = DEFAULT_CANDIDATES_PER_SIGNAL
+    edge_vector: int = DEFAULT_CANDIDATES_PER_SIGNAL
+    graph_expansion: int = DEFAULT_CANDIDATES_PER_SIGNAL
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,6 +253,12 @@ def fusion_backend_from_env(
     return coerce_fusion_backend(source.get("SIBYL_FUSION_BACKEND"))
 
 
+def seed_candidates_per_signal(limit: int) -> int:
+    """Candidates one lane may seed for a caller asking for `limit` results."""
+
+    return max(MIN_CANDIDATES_PER_SIGNAL, min(int(limit), MAX_RETRIEVAL_LIMIT))
+
+
 def build_context_retrieval_plan(
     *,
     query: str,
@@ -308,7 +323,7 @@ def build_context_retrieval_plan(
             )
         )
 
-    per_signal_limit = max(2, min(MAX_CANDIDATES_PER_SIGNAL, limit))
+    per_signal_limit = seed_candidates_per_signal(limit)
     facet_types_by_facet = {facet: tuple(facet_types.get(facet, ())) for facet in facets}
     return RetrievalPlan(
         query=query,
@@ -318,7 +333,7 @@ def build_context_retrieval_plan(
         scopes=tuple(scopes),
         denied_scopes=tuple(denied_scopes),
         candidate_limits=CandidateLimits(
-            raw_lexical=max(1, min(MAX_CANDIDATES_PER_SIGNAL, limit // 4 or 1)),
+            raw_lexical=max(1, min(per_signal_limit, limit // RAW_LEXICAL_LIMIT_DIVISOR or 1)),
             node_fulltext=per_signal_limit,
             episode_fulltext=per_signal_limit,
             edge_fulltext=per_signal_limit,
@@ -349,7 +364,7 @@ async def context_search(
     search_started_at = time.perf_counter()
     stage_timings_ms: dict[str, float] = {}
     stage_started_at = time.perf_counter()
-    limit = max(1, min(limit, 50))
+    limit = max(1, min(limit, MAX_RETRIEVAL_LIMIT))
     search_plan = replace(
         plan,
         candidate_limits=_candidate_limits_for_limit(plan.candidate_limits, limit),
@@ -754,7 +769,11 @@ def _candidate_limits_for_limit(
     candidate_limits: CandidateLimits,
     limit: int,
 ) -> CandidateLimits:
-    source_limit = max(1, min(int(limit), 50))
+    # Narrows only. A plan is built from the caller's `limit`, so a query-time
+    # limit below it must not leave a lane reading deeper than the answer, while
+    # a query-time limit above it must not widen a plan the caller never asked
+    # to widen.
+    source_limit = max(1, min(int(limit), MAX_RETRIEVAL_LIMIT))
     return CandidateLimits(
         raw_lexical=max(1, min(candidate_limits.raw_lexical, source_limit)),
         node_fulltext=max(1, min(candidate_limits.node_fulltext, source_limit)),
