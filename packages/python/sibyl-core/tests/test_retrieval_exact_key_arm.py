@@ -24,10 +24,12 @@ BODY_WITHOUT_THE_KEY = "The socket dropped mid-handshake and the retry loop gave
 
 
 class _RecordingClient:
-    """A Surreal stand-in that answers one indexed equality read per probe key.
+    """A Surreal stand-in for the exact-key read, recording the query it got.
 
-    Matching mirrors what SurrealDB does for an array-element index: the row
-    comes back when any element of its stored key list equals the bound probe.
+    Matching mirrors CONTAINSANY against an index on the array's elements: the
+    row comes back when any element of its stored key list is among the bound
+    probes. Verified against a live 3.2.3 server, which is the only reason this
+    stand-in can be trusted to mean the same thing the server does.
     """
 
     def __init__(self, rows: list[dict[str, object]] | None = None) -> None:
@@ -36,13 +38,14 @@ class _RecordingClient:
 
     async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
         self.queries.append((query, dict(params)))
-        probe = params.get("probe_key")
-        if probe is None:
+        raw_probes = params.get("probe_keys")
+        if not isinstance(raw_probes, list | tuple):
             return list(self.rows)
+        probes = {str(probe) for probe in raw_probes}
         return [
             dict(row)
             for row in self.rows
-            if str(probe) in {str(key) for key in row.get("retrieval_keys_normalized") or ()}
+            if probes & {str(key) for key in row.get("retrieval_keys_normalized") or ()}
         ]
 
 
@@ -198,14 +201,15 @@ async def test_arm_finds_a_row_whose_body_never_contains_the_query() -> None:
 
 
 @pytest.mark.asyncio
-async def test_arm_reads_the_indexed_column_with_one_equality_per_probe() -> None:
-    """The access path is load-bearing, not stylistic.
+async def test_arm_reads_the_indexed_column_with_one_set_membership_query() -> None:
+    """The read shape and the index definition are one contract, verified live.
 
-    On SurrealDB 3.2.3 an array-element index serves `field = $value` with an
-    IndexScan; CONTAINSANY degrades to a full table scan, and both a multi-value
-    IN and an OR of equalities return nothing at all despite matching data. A
-    refactor back to any of those shapes is a silent correctness or scale
-    regression, so the shape is pinned here.
+    On SurrealDB 3.2.3 this same CONTAINSANY is index-served only because the
+    index is defined on the array's elements (`retrieval_keys_normalized.*`). An
+    index on the bare array field turns it into a full table scan, and turns a
+    bare equality into zero rows unless the WHERE clause happens to carry a
+    second predicate. Both halves are pinned: the query here, the index
+    definition in test_surreal_schema_syntax.py.
     """
 
     client = _RecordingClient()
@@ -219,16 +223,13 @@ async def test_arm_reads_the_indexed_column_with_one_equality_per_probe() -> Non
         probe_tokens=("err_conn_reset_0x7f31", "search.py"),
     )
 
-    assert len(client.queries) == 2
-    for query, params in client.queries:
-        assert "retrieval_keys_normalized = $probe_key" in query
-        assert "CONTAINSANY" not in query
-        assert "retrieval_keys_normalized IN" not in query
-        assert params["group_id"] == "org-123"
-    assert [params["probe_key"] for _query, params in client.queries] == [
-        "err_conn_reset_0x7f31",
-        "search.py",
-    ]
+    assert len(client.queries) == 1
+    query, params = client.queries[0]
+    assert "retrieval_keys_normalized CONTAINSANY $probe_keys" in query
+    assert "retrieval_keys_normalized =" not in query
+    assert "retrieval_keys_normalized IN" not in query
+    assert params["probe_keys"] == ["err_conn_reset_0x7f31", "search.py"]
+    assert params["group_id"] == "org-123"
 
 
 @pytest.mark.asyncio
@@ -539,20 +540,64 @@ def test_an_inert_lane_changes_no_score_and_no_metadata() -> None:
     ]
 
 
-def test_declared_keys_join_the_coverage_text() -> None:
+def test_matched_keys_join_the_coverage_text() -> None:
     """Without this the coverage re-rank buries a hit whose body lacks the token."""
 
     exact = _candidate("exact", retrieval_keys=[PROBE_KEY])
 
-    text = search_module._candidate_query_text(exact)
+    text = search_module._candidate_query_text(exact, matched_keys=(PROBE_KEY.casefold(),))
 
     assert PROBE_KEY.casefold() in text
+
+
+def test_declared_but_unmatched_keys_stay_out_of_the_coverage_text() -> None:
+    """A declared key is not a ranking lever on queries it never matched.
+
+    Folding a row's whole declared list into its coverage text moved scores on
+    prose queries the arm never fired for, which would let a writer buy a
+    permanent coverage lift with sixteen keys of prose keywords.
+    """
+
+    keyed = _candidate("keyed", retrieval_keys=["connection pooling handbook"])
+
+    assert search_module._candidate_query_text(keyed) == f"keyed {BODY_WITHOUT_THE_KEY}".lower()
+    assert "handbook" not in search_module._candidate_query_text(keyed)
 
 
 def test_a_candidate_without_keys_has_unchanged_coverage_text() -> None:
     plain = _candidate("plain")
 
     assert search_module._candidate_query_text(plain) == f"plain {BODY_WITHOUT_THE_KEY}".lower()
+
+
+def test_coverage_rerank_ignores_keys_the_query_did_not_match() -> None:
+    """The end-to-end version of the same property, through the real re-ranker."""
+
+    keyed = _candidate("keyed", retrieval_keys=["connection pooling handbook"])
+    rival = _candidate("rival")
+    fused: list[tuple[RetrievalCandidate, float, dict[str, Any]]] = [
+        (keyed, 1.0, {"sources": [RetrievalSignal.NODE_FULLTEXT.value]}),
+        (rival, 0.9, {"sources": [RetrievalSignal.NODE_FULLTEXT.value]}),
+    ]
+
+    reranked = search_module._apply_query_coverage_to_fused(
+        "how do we handle connection pooling",
+        fused,
+        temporal_target=None,
+    )
+    scores = {candidate.id: score for candidate, score, _meta in reranked}
+
+    stripped: list[tuple[RetrievalCandidate, float, dict[str, Any]]] = [
+        (_candidate("keyed"), 1.0, {"sources": [RetrievalSignal.NODE_FULLTEXT.value]}),
+        (_candidate("rival"), 0.9, {"sources": [RetrievalSignal.NODE_FULLTEXT.value]}),
+    ]
+    baseline = search_module._apply_query_coverage_to_fused(
+        "how do we handle connection pooling",
+        stripped,
+        temporal_target=None,
+    )
+
+    assert scores == {candidate.id: score for candidate, score, _meta in baseline}
 
 
 # ---------------------------------------------------------------------------
@@ -576,6 +621,25 @@ def test_receipt_reports_probe_tokens_and_hit_count() -> None:
         "exact_key_probe_fired": True,
         "exact_key_probe_tokens": ["err_conn_reset_0x7f31"],
         "exact_key_hit_count": 1,
+    }
+
+
+def test_receipt_counts_authorized_hits_only() -> None:
+    """A pre-filter count is an existence oracle for a caller-supplied string.
+
+    An unauthorized caller gets no rows, so the count must not tell them that
+    exactly one memory in the organization declares the key they guessed.
+    """
+
+    denied = search_module._exact_key_receipt_metadata(
+        probe_tokens=("err_conn_reset_0x7f31",),
+        candidates=[],
+    )
+
+    assert denied == {
+        "exact_key_probe_fired": True,
+        "exact_key_probe_tokens": ["err_conn_reset_0x7f31"],
+        "exact_key_hit_count": 0,
     }
 
 

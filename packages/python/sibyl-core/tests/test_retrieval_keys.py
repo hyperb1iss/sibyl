@@ -156,6 +156,16 @@ IDENTIFIER_POSITIVES = [
 ]
 
 
+KEPT_POSITIVES_NEAR_THE_NUMBER_EXCLUSION = ["2fa", "v2beta", "sha256", "utf8mb4", "0x7f31"]
+
+
+@pytest.mark.parametrize("token", KEPT_POSITIVES_NEAR_THE_NUMBER_EXCLUSION)
+def test_number_suffix_exclusion_keeps_real_identifiers(token: str) -> None:
+    """The suffix list is closed, so digit-bearing identifiers still fire."""
+
+    assert is_identifier_shaped_token(token)
+
+
 @pytest.mark.parametrize("token", IDENTIFIER_POSITIVES)
 def test_identifier_shaped_tokens_fire(token: str) -> None:
     assert is_identifier_shaped_token(token)
@@ -185,6 +195,13 @@ IDENTIFIER_NEGATIVES = [
     # bare numbers and years
     "2026",
     "42",
+    # digits carrying an English suffix: ordinals, clock times, decades
+    "3rd",
+    "21st",
+    "10am",
+    "7pm",
+    "1990s",
+    "80s",
     # dotted abbreviations, which is why segments must be two characters
     "e.g",
     "i.e",
@@ -210,6 +227,9 @@ def test_plain_language_tokens_do_not_fire(token: str) -> None:
 
 PROSE_QUERIES = [
     "how do we handle authentication",
+    "what happened on the 3rd attempt",
+    "the meeting is at 10am tomorrow",
+    "back in the 1990s nobody cared",
     "database connection pooling",
     "what is the plan for 2026",
     "e.g. the first one we tried",

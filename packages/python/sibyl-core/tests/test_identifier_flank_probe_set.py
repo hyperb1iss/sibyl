@@ -45,10 +45,10 @@ def _case_ids(cases: list[dict[str, Any]]) -> list[str]:
 
 
 class _KeyIndexClient:
-    """A Surreal stand-in for one indexed equality read against a seeded row.
+    """A Surreal stand-in for the exact-key read against one seeded row.
 
-    Mirrors the array-element index: the row comes back when any element of its
-    stored key list equals the bound probe.
+    Mirrors CONTAINSANY over an index on the array's elements: the row comes
+    back when any element of its stored key list is among the bound probes.
     """
 
     def __init__(self, row: dict[str, object]) -> None:
@@ -57,9 +57,12 @@ class _KeyIndexClient:
 
     async def execute_query(self, _query: str, **params: object) -> list[dict[str, object]]:
         self.reads += 1
-        probe = params.get("probe_key")
+        raw_probes = params.get("probe_keys")
+        if not isinstance(raw_probes, list | tuple):
+            return []
+        probes = {str(probe) for probe in raw_probes}
         stored = {str(key) for key in self.row.get("retrieval_keys_normalized") or ()}
-        return [dict(self.row)] if probe is not None and str(probe) in stored else []
+        return [dict(self.row)] if probes & stored else []
 
 
 def _plan(query: str) -> search_module.RetrievalPlan:

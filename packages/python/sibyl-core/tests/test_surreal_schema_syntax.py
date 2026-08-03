@@ -1072,12 +1072,19 @@ def test_graph_retrieval_key_columns_are_versioned_and_indexed() -> None:
         assert f"DEFINE FIELD IF NOT EXISTS {field} ON entity TYPE option<array<string>>" in (
             NODE_DEFINITIONS
         )
-    index_definition = (
-        "DEFINE INDEX IF NOT EXISTS idx_entity_retrieval_keys "
-        "ON entity FIELDS retrieval_keys_normalized"
+    # The `.*` is the contract, not a detail. On SurrealDB 3.2.3 an index on the
+    # bare array field turns the arm's CONTAINSANY into a full table scan, and
+    # turns a bare equality into zero rows unless the WHERE clause happens to
+    # carry a second predicate. Dropping the suffix would leave every test green
+    # while the lane scanned the table.
+    assert (
+        "DEFINE INDEX OVERWRITE idx_entity_retrieval_keys "
+        "ON entity FIELDS retrieval_keys_normalized.*" in migration_sql
     )
-    assert index_definition in migration_sql
-    assert index_definition in NODE_DEFINITIONS
+    assert (
+        "DEFINE INDEX IF NOT EXISTS idx_entity_retrieval_keys "
+        "ON entity FIELDS retrieval_keys_normalized.*" in NODE_DEFINITIONS
+    )
 
 
 def test_graph_schema_current_version_matches_latest_migration() -> None:
