@@ -39,7 +39,7 @@ def test_probe_cap_matches_the_refinement_query_cap() -> None:
 def test_span_cap_leaves_room_for_every_possible_framing() -> None:
     """An accepted span must render inside one passage row, framing included."""
     worst_case_header = MAX_PASSAGE_TITLE_CHARS + len(" · passage 64/64")
-    assert MAX_SPAN_FRAMING_CHARS >= worst_case_header + MAX_SPAN_LABEL_CHARS + 2
+    assert worst_case_header + MAX_SPAN_LABEL_CHARS + 2 <= MAX_SPAN_FRAMING_CHARS
     assert MAX_AGENT_SPAN_CHARS + MAX_SPAN_FRAMING_CHARS == MAX_PASSAGE_CONTENT_CHARS
 
 
