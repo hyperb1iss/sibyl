@@ -27,9 +27,7 @@ from sibyl_core.retrieval import search as search_module
 from sibyl_core.retrieval.identifier_query import identifier_probe_tokens
 from sibyl_core.retrieval.search import RetrievalSignal, build_context_retrieval_plan
 
-FIXTURE_PATH = (
-    Path(__file__).parent / "fixtures" / "identifier_flank" / "a2_probe_set.json"
-)
+FIXTURE_PATH = Path(__file__).parent / "fixtures" / "identifier_flank" / "a2_probe_set.json"
 
 
 def load_probe_set() -> dict[str, Any]:

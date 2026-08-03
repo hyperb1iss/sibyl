@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 
 from sibyl_core.memory_pipeline.retrieval_keys import (
-    MAX_RETRIEVAL_KEYS,
     MAX_RETRIEVAL_KEY_LENGTH,
+    MAX_RETRIEVAL_KEYS,
     coerce_retrieval_keys,
     normalize_retrieval_keys,
     retrieval_key_match_form,
