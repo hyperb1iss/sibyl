@@ -312,6 +312,7 @@ def _flat_cap_lane_limits(limit: int) -> dict[str, int]:
         "node_vector": per_signal,
         "edge_vector": per_signal,
         "graph_expansion": per_signal,
+        "exact_key": per_signal,
     }
 
 
@@ -336,6 +337,7 @@ def test_seed_budget_widens_lanes_at_slice_scale_limits(
         "node_vector": per_signal,
         "edge_vector": per_signal,
         "graph_expansion": per_signal,
+        "exact_key": per_signal,
     }
     assert lane_limits["node_fulltext"] > _flat_cap_lane_limits(limit)["node_fulltext"]
 

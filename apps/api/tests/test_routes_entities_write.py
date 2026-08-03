@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from sibyl.api.routes.entities import (
+    _bulk_create_metadata,
     _entity_from_bulk_create,
     _reject_unsupported_bulk_entry,
     create_entities_bulk,
@@ -29,6 +30,10 @@ from sibyl.api.schemas import (
 from sibyl.auth.context import AuthContext
 from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl_core.auth import ProjectRole
+from sibyl_core.memory_pipeline.retrieval_keys import (
+    MAX_RETRIEVAL_KEY_LENGTH,
+    MAX_RETRIEVAL_KEYS,
+)
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from tests.harness.auth import stub_auth_context
 
@@ -187,6 +192,101 @@ async def test_create_entity_can_defer_embeddings_to_background_backfill() -> No
     assert response.background_jobs["embedding_backfill"]["status"] == "deferred"
     add.assert_awaited_once()
     assert add.await_args.kwargs["generate_embeddings"] is False
+
+
+@pytest.mark.asyncio
+async def test_create_entity_forwards_declared_retrieval_keys() -> None:
+    org = _org()
+    ctx = _ctx()
+    entity = EntityCreate(
+        name="Connection resets on startup",
+        content="The socket drops mid-handshake and the retry loop gives up.",
+        entity_type=EntityType.NOTE,
+        retrieval_keys=["ERR_CONN_RESET_0x7f31", "connection reset by peer"],
+    )
+    add_result = SimpleNamespace(success=True, id="note_new", message="ok")
+    runtime = SimpleNamespace(entity_manager=SimpleNamespace(get=AsyncMock()))
+
+    with (
+        patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)) as add,
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+    ):
+        response = await create_entity(
+            request=_request(),
+            entity=entity,
+            org=org,
+            ctx=ctx,
+            content_session=None,
+            sync=False,
+        )
+
+    assert response.id == "note_new"
+    assert add.await_args is not None
+    assert add.await_args.kwargs["retrieval_keys"] == [
+        "ERR_CONN_RESET_0x7f31",
+        "connection reset by peer",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_entity_rejects_an_over_long_retrieval_key() -> None:
+    """Bounds live in the schema, so an over-long key never reaches the write."""
+
+    with pytest.raises(ValidationError):
+        EntityCreate(
+            name="Over-long key",
+            content="Body",
+            entity_type=EntityType.NOTE,
+            retrieval_keys=["k" * (MAX_RETRIEVAL_KEY_LENGTH + 1)],
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_entity_rejects_too_many_retrieval_keys() -> None:
+    with pytest.raises(ValidationError):
+        EntityCreate(
+            name="Too many keys",
+            content="Body",
+            entity_type=EntityType.NOTE,
+            retrieval_keys=[f"key_{index}" for index in range(MAX_RETRIEVAL_KEYS + 1)],
+        )
+
+
+def test_bulk_create_metadata_normalizes_declared_retrieval_keys() -> None:
+    """The bulk path builds rows itself, so it must normalize on its own."""
+
+    entity = EntityCreate(
+        name="Bulk keyed note",
+        content="Body",
+        entity_type=EntityType.NOTE,
+        retrieval_keys=["  ERR_X  ", "err_x", ""],
+    )
+
+    metadata = _bulk_create_metadata(
+        entity,
+        group_id="org-123",
+        now=datetime(2026, 8, 3, tzinfo=UTC),
+        principal_id="user-alice",
+    )
+
+    assert metadata["retrieval_keys"] == ["ERR_X"]
+
+
+def test_bulk_create_metadata_omits_the_field_without_a_declaration() -> None:
+    entity = EntityCreate(name="Plain note", content="Body", entity_type=EntityType.NOTE)
+
+    metadata = _bulk_create_metadata(
+        entity,
+        group_id="org-123",
+        now=datetime(2026, 8, 3, tzinfo=UTC),
+        principal_id="user-alice",
+    )
+
+    assert "retrieval_keys" not in metadata
 
 
 @pytest.mark.asyncio
