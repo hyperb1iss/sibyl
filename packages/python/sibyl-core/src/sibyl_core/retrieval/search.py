@@ -1447,19 +1447,14 @@ async def _node_bfs_records(
     limit: int,
     relationship_names: Sequence[str] = (),
     include_incoming: bool = False,
+    include_community_hops: bool = True,
 ) -> list[dict[str, object]]:
     if (not origin_uuids and not episode_origin_uuids) or max_depth < 1:
         return []
 
     wanted = {str(name).upper() for name in relationship_names if str(name).strip()}
     discovered: list[_GraphExpansionHop] = []
-    # Origins are already in the caller's hand, so they are pre-marked as
-    # discovered rather than only as visited. Visiting stops an origin being
-    # walked from twice; it does not stop one being reported as its own
-    # neighbor, which is what a round trip does: with inbound hops enabled every
-    # A->B edge is a 2-cycle, so at depth 2 any seed with an edge finds itself and
-    # spends a result slot on a row the caller supplied.
-    seen_discovered = set(origin_uuids)
+    seen_discovered: set[str] = set()
     visited_entities = set(origin_uuids)
     entity_frontier = _dedupe_strings(origin_uuids)
     episode_frontier = _dedupe_strings(episode_origin_uuids)
@@ -1502,7 +1497,11 @@ async def _node_bfs_records(
                     relationship_names=sorted(wanted),
                 )
             )
-        if depth == 1 and _hop_relationship_wanted("SHARES_COMMUNITY", wanted):
+        if (
+            depth == 1
+            and include_community_hops
+            and _hop_relationship_wanted("SHARES_COMMUNITY", wanted)
+        ):
             next_hops.extend(
                 await _community_member_hops(
                     client=client,
@@ -1864,6 +1863,10 @@ async def expand_neighbor_records(
             limit=_graph_expansion_fetch_limit(limit),
             relationship_names=relationship_names,
             include_incoming=include_incoming,
+            # Every round is depth 1 as far as the shared function can tell, so
+            # the first-hop-only community lane would otherwise re-fire on each
+            # one and widen the neighborhood in a way the scored lane never does.
+            include_community_hops=depth == 1,
         )
         next_frontier: list[str] = []
         for row in hop_rows:
@@ -1874,9 +1877,9 @@ async def expand_neighbor_records(
             if row_allowed is not None and not row_allowed(row):
                 # Unauthorized, so not a result and not a route either.
                 continue
-            # Each round walks one hop, so restate the true distance and re-apply
-            # the decay that distance earns rather than reporting every row as
-            # adjacent to the seed.
+            # The shared function reports every round as adjacent, because each
+            # round is one hop from its own frontier. True distance from the
+            # caller's seeds, and the decay it earns, are this walk's to state.
             relationship = _string_value(row.get("graph_expansion_relationship")) or "RELATED_TO"
             score = _graph_expansion_path_score(relationship, depth=depth)
             row["graph_expansion_depth"] = depth

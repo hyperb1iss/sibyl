@@ -910,7 +910,8 @@ class TestFetchSliceAuthorization:
         assert [passage.passage_index for passage in response.passages] == [0, 2]
 
     @pytest.mark.asyncio
-    async def test_a_span_whose_parent_is_denied_still_serves_itself(self) -> None:
+    async def test_a_span_is_denied_when_its_parent_is(self) -> None:
+        """A span is never more readable than the memory it was cut from."""
         span = _span("decision_secret", 1, 3)
         runtime = _FakeRuntime(
             entity_manager=_FakeEntityManager(
@@ -919,16 +920,91 @@ class TestFetchSliceAuthorization:
             relationship_manager=_FakeRelationshipManager([]),
         )
 
-        with _runtime_patch(runtime):
-            response = await fetch_slice(
+        with _runtime_patch(runtime), pytest.raises(KeyError):
+            await fetch_slice(
                 span.id,
                 organization_id=ORG,
                 principal_id=OWNER,
                 accessible_projects=set(),
             )
 
-        assert response.total == 1
-        assert response.filters["parent_unreadable"] is True
+    @pytest.mark.asyncio
+    async def test_a_stale_span_scope_cannot_outlive_its_parents_tightening(self) -> None:
+        """The leak this closes, spelled out as data.
+
+        A span inherits its parent's scope once, at write time, and the
+        reprojection that would refresh it runs only when the body changes. So a
+        scope-only edit tightening a memory to private leaves its spans stamped
+        with the old, permissive scope. Trusting the span's own stamp would serve
+        the now-private memory's text through the span door while the parent
+        correctly refused.
+        """
+        parent = _private("decision_tightened", OWNER)
+        # Stale on purpose: still carrying the project scope it had before the edit.
+        stale_span = _entity(
+            "decision_tightened_passage_1",
+            entity_type=EntityType.PASSAGE,
+            content="text that is now private",
+            metadata={
+                "parent_entity_id": parent.id,
+                "passage_index": 1,
+                "passage_total": 3,
+                "memory_scope": "project",
+                "scope_key": "proj_a",
+                "project_id": "proj_a",
+                PASSAGE_COVERS_PARENT_KEY: True,
+            },
+        )
+        runtime = _FakeRuntime(
+            entity_manager=_FakeEntityManager({parent.id: parent, stale_span.id: stale_span}),
+            relationship_manager=_FakeRelationshipManager([]),
+        )
+
+        # The stranger is a member of the project the stale stamp still names, so
+        # the span's own scope would admit them.
+        with _runtime_patch(runtime), pytest.raises(KeyError):
+            await fetch_slice(
+                stale_span.id,
+                organization_id=ORG,
+                principal_id=OTHER,
+                accessible_projects={"proj_a"},
+            )
+
+    @pytest.mark.asyncio
+    async def test_the_owner_still_reads_the_span_of_their_tightened_memory(self) -> None:
+        """The allow direction, so the deny above is not just a blanket refusal."""
+        parent = _private("decision_tightened", OWNER)
+        stale_span = _entity(
+            "decision_tightened_passage_1",
+            entity_type=EntityType.PASSAGE,
+            content="text that is now private",
+            metadata={
+                "parent_entity_id": parent.id,
+                "passage_index": 1,
+                "passage_total": 3,
+                "memory_scope": "project",
+                "scope_key": "proj_a",
+                "project_id": "proj_a",
+                PASSAGE_COVERS_PARENT_KEY: True,
+            },
+        )
+        runtime = _FakeRuntime(
+            entity_manager=_FakeEntityManager({parent.id: parent, stale_span.id: stale_span}),
+            relationship_manager=_FakeRelationshipManager(
+                [(stale_span, _part_of(stale_span, parent.id))]
+            ),
+        )
+
+        with _runtime_patch(runtime):
+            response = await fetch_slice(
+                stale_span.id,
+                organization_id=ORG,
+                principal_id=OWNER,
+                accessible_projects={"proj_a"},
+            )
+
+        assert response.parent_id == parent.id
+        assert [passage.id for passage in response.passages] == [stale_span.id]
 
     @pytest.mark.asyncio
     async def test_api_key_without_a_private_grant_cannot_read_its_own_rows(self) -> None:
@@ -1231,3 +1307,165 @@ class TestFetchSliceAnchorNotInSpanSet:
         assert [passage.id for passage in response.passages] == [anchor.id]
         assert response.passages[0].passage_index == 7
         assert response.covers_parent is False
+        # Named as its own condition rather than conflated with an unreadable
+        # parent: this path is only reachable once the parent is authorized.
+        assert response.filters["anchor_outside_span_set"] is True
+        assert response.parent_id == "decision_parent"
+
+
+class TestSteeredWalkMatchesTheScoredLane:
+    @pytest.mark.asyncio
+    async def test_first_hop_only_expanders_do_not_fire_on_later_hops(self) -> None:
+        """The steered walk takes one hop per round, so it must say how far it is.
+
+        `MENTIONS` and `SHARES_COMMUNITY` are first-hop-only in the scored lane.
+        A hop-at-a-time caller that restarted the depth counter every round would
+        re-run both at every level, quietly widening the neighborhood in a way the
+        scored lane never does.
+        """
+        client = _GraphClient(
+            edges=[
+                ("seed", "near", "RELATED_TO"),
+                ("near", "far", "RELATED_TO"),
+            ],
+            rows=[_entity_row("near"), _entity_row("far")],
+        )
+        runtime = _FakeRuntime(
+            client=client,
+            entity_manager=_FakeEntityManager({"seed": _entity("seed")}),
+        )
+
+        with _runtime_patch(runtime):
+            response = await expand_neighbors(
+                ["seed"],
+                organization_id=ORG,
+                depth=3,
+                limit=8,
+                principal_id=OWNER,
+                accessible_projects=set(),
+            )
+
+        community_reads = [query for query, _ in client.queries if "BELONGS_TO" in query]
+        assert len(community_reads) == 1, "community expansion is a first-hop-only lane"
+        assert {neighbor.distance for neighbor in response.neighbors} == {1, 2}
+
+    @pytest.mark.asyncio
+    async def test_depth_decay_is_applied_by_true_distance(self) -> None:
+        from sibyl_core.retrieval.search import _graph_expansion_path_score
+
+        client = _GraphClient(
+            edges=[
+                ("seed", "near", "RELATED_TO"),
+                ("near", "far", "RELATED_TO"),
+            ],
+            rows=[_entity_row("near"), _entity_row("far")],
+        )
+        runtime = _FakeRuntime(
+            client=client,
+            entity_manager=_FakeEntityManager({"seed": _entity("seed")}),
+        )
+
+        with _runtime_patch(runtime):
+            response = await expand_neighbors(
+                ["seed"],
+                organization_id=ORG,
+                depth=2,
+                limit=8,
+                principal_id=OWNER,
+                accessible_projects=set(),
+            )
+
+        by_id = {neighbor.id: neighbor for neighbor in response.neighbors}
+        assert by_id["near"].score == pytest.approx(
+            _graph_expansion_path_score("RELATED_TO", depth=1)
+        )
+        assert by_id["far"].score == pytest.approx(
+            _graph_expansion_path_score("RELATED_TO", depth=2)
+        )
+
+
+class TestSharedBfsContractAtDefaultArgs:
+    """The scored lane calls `_node_bfs_records` directly with default args.
+
+    Every parameter the traversal verbs added defaults to the pre-existing
+    behavior, so the benchmarked retrieval path is byte-identical. These pin that
+    rather than trusting it, because a shared-function edit that looks local to a
+    new caller is exactly how a pinned lane changes without anyone noticing.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_seed_adjacent_to_another_seed_is_still_contributed(self) -> None:
+        """The case a seed-exclusion edit inside the shared function would break.
+
+        With origins ['a', 'b'] and an a->b edge, the expansion lane must still
+        contribute 'b'. Suppressing it there costs 'b' its graph-native signal
+        boost and an RRF rank term on the scored path.
+        """
+        from sibyl_core.retrieval.search import SearchFilter, _node_bfs_records
+
+        client = _GraphClient(
+            edges=[("entity_a", "entity_b", "RELATED_TO")],
+            rows=[_entity_row("entity_b")],
+        )
+
+        records = await _node_bfs_records(
+            client=client,
+            origin_uuids=["entity_a", "entity_b"],
+            search_filter=SearchFilter(),
+            group_id=ORG,
+            max_depth=1,
+            limit=8,
+        )
+
+        assert [record["uuid"] for record in records] == ["entity_b"]
+
+    @pytest.mark.asyncio
+    async def test_defaults_keep_inbound_off_and_community_on(self) -> None:
+        from sibyl_core.retrieval.search import SearchFilter, _node_bfs_records
+
+        client = _GraphClient(
+            edges=[("other", "seed", "RELATED_TO")],
+            rows=[_entity_row("other")],
+        )
+
+        records = await _node_bfs_records(
+            client=client,
+            origin_uuids=["seed"],
+            search_filter=SearchFilter(),
+            group_id=ORG,
+            max_depth=1,
+            limit=8,
+        )
+
+        # Inbound is opt-in, so the row pointing AT the seed is not returned.
+        assert records == []
+        assert not any("target_id IN $target_uuids" in query for query, _ in client.queries)
+        # The community lane is opt-out, so it still runs for the scored lane.
+        assert any("BELONGS_TO" in query for query, _ in client.queries)
+
+
+class TestSpansCoverParentRule:
+    """The rule itself, at the level the mutant survives."""
+
+    def test_disagreeing_totals_defeat_coverage_even_when_indices_look_complete(self) -> None:
+        """Pins the single-total guard rather than reaching False via the range check.
+
+        [(0, 2), (1, 2), (2, 3)] fails the range check anyway, so it passes with
+        the single-total guard deleted. [(0, 2), (1, 3)] is the discriminating
+        input: indices {0, 1} match range(2) under the smaller total, so only the
+        totals disagreement can reject it.
+        """
+        from sibyl_core.projection.passages import spans_cover_parent
+
+        assert spans_cover_parent([(0, 2, True), (1, 2, True)]) is True
+        assert spans_cover_parent([(0, 2, True), (1, 3, True)]) is False
+
+    def test_a_missing_flag_defeats_coverage(self) -> None:
+        from sibyl_core.projection.passages import spans_cover_parent
+
+        assert spans_cover_parent([(0, 2, True), (1, 2, False)]) is False
+
+    def test_a_gap_defeats_coverage(self) -> None:
+        from sibyl_core.projection.passages import spans_cover_parent
+
+        assert spans_cover_parent([(0, 3, True), (2, 3, True)]) is False
