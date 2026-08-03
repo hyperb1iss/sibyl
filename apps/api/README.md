@@ -23,8 +23,8 @@ moon run api:typecheck    # Type check
 
 ## What's Here
 
-- **MCP Server:** eleven tools for search, context packs, exploration, capture, memory, synthesis,
-  and management
+- **MCP Server:** thirteen tools for search, context packs, exploration, bounded traversal, capture,
+  memory, synthesis, and management
 - **REST API:** 31 routers covering entities, tasks, teams, projects, experience, memory, synthesis,
   sources, auth, settings, and admin
 - **Auth System:** JWT sessions, GitHub OAuth, OIDC enterprise SSO (see `docs/admin/`), API keys
@@ -39,7 +39,7 @@ moon run api:typecheck    # Type check
 Sibyl API (port 3334)
 ├── /api/*              → FastAPI REST endpoints
 ├── /api/openapi.json   → OpenAPI schema
-├── /mcp                → MCP server (streamable-http, 11 tools)
+├── /mcp                → MCP server (streamable-http, 13 tools)
 ├── /api/ws             → WebSocket for real-time updates
 └── Lifespan            → Background jobs + coordination broker
 ```

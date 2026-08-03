@@ -22,10 +22,14 @@ from sibyl_core.tools.responses import (
     AddResponse,
     DependencyNode,
     EntitySummary,
+    ExpandNeighborsResponse,
     ExploreResponse,
+    FetchSliceResponse,
+    NeighborEntity,
     RelatedEntity,
     SearchResponse,
     SearchResult,
+    SlicePassage,
 )
 
 
@@ -45,6 +49,18 @@ async def explore(*args: Any, **kwargs: Any) -> Any:
     from sibyl_core.tools.explore import explore as _explore
 
     return await _explore(*args, **kwargs)
+
+
+async def expand_neighbors(*args: Any, **kwargs: Any) -> Any:
+    from sibyl_core.tools.traverse import expand_neighbors as _expand_neighbors
+
+    return await _expand_neighbors(*args, **kwargs)
+
+
+async def fetch_slice(*args: Any, **kwargs: Any) -> Any:
+    from sibyl_core.tools.traverse import fetch_slice as _fetch_slice
+
+    return await _fetch_slice(*args, **kwargs)
 
 
 async def get_health(*args: Any, **kwargs: Any) -> Any:
@@ -110,10 +126,14 @@ __all__ = [
     "AddResponse",
     "DependencyNode",
     "EntitySummary",
+    "ExpandNeighborsResponse",
     "ExploreResponse",
+    "FetchSliceResponse",
+    "NeighborEntity",
     "RelatedEntity",
     "SearchResponse",
     "SearchResult",
+    "SlicePassage",
     "_auto_discover_links",
     "_build_entity_metadata",
     "_generate_id",
@@ -125,7 +145,9 @@ __all__ = [
     "compile_context",
     "context_pack_to_dict",
     "context_pack_to_markdown",
+    "expand_neighbors",
     "explore",
+    "fetch_slice",
     # Health/stats
     "get_health",
     "get_project_tags",

@@ -1,22 +1,18 @@
 """Explore tool for navigating the Sibyl knowledge graph."""
 
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
 
-from sibyl_core.auth.memory_policy import (
-    memory_metadata_read_allowed,
-    memory_row_project_id,
-    private_scope_granted_for,
-)
 from sibyl_core.models.entities import Entity, EntityType, RelationshipType
 from sibyl_core.tools.helpers import (
     VALID_ENTITY_TYPES,
+    ScopeGuard,
     _build_entity_metadata,
     _get_field,
     _project_id_for_policy,
     _serialize_enum,
+    memory_scope_guard,
 )
 from sibyl_core.tools.responses import (
     DependencyNode,
@@ -38,59 +34,6 @@ async def get_graph_runtime(group_id: str):
     from sibyl_core.services.graph import get_surreal_graph_runtime
 
     return await get_surreal_graph_runtime(group_id)
-
-
-ScopeGuard = Callable[[Any], bool]
-
-
-def _memory_scope_guard(
-    *,
-    principal_id: str | None,
-    accessible_projects: set[str] | None,
-    allowed_memory_scope_keys: set[str] | None,
-    enforce_memory_scope: bool,
-) -> ScopeGuard:
-    """Build the per-entity scope check graph navigation shares with search.
-
-    Project membership alone does not authorize a private memory, so browsing
-    and traversal answer to the same rule the retrieval candidate filter uses.
-    """
-    if not enforce_memory_scope:
-        return lambda _entity: True
-
-    # Enforcing against no reader denies every scoped row, so a caller that
-    # forgot to thread its principal gets an empty result that is
-    # indistinguishable from having found nothing. Say so the first time it
-    # actually costs a row; an operator browsing anonymously opts out through
-    # enforce_memory_scope instead.
-    unauthenticated = principal_id is None
-    reported = False
-
-    def allowed(entity: Any) -> bool:
-        nonlocal reported
-        decision = memory_metadata_read_allowed(
-            getattr(entity, "metadata", None),
-            principal_id=principal_id,
-            accessible_projects=accessible_projects,
-            allowed_memory_scope_keys=allowed_memory_scope_keys,
-            private_scope_granted=private_scope_granted_for(
-                allowed_memory_scope_keys, principal_id=principal_id
-            ),
-            row_project_id=memory_row_project_id(
-                getattr(entity, "metadata", None),
-                entity_type=getattr(getattr(entity, "entity_type", None), "value", None),
-                entity_id=getattr(entity, "id", None),
-            ),
-        )
-        if not decision and unauthenticated and not reported:
-            reported = True
-            log.warning(
-                "explore_scope_filtered_without_principal",
-                entity_id=getattr(entity, "id", None),
-            )
-        return decision
-
-    return allowed
 
 
 def _normalize_project_ids(
@@ -252,7 +195,7 @@ async def explore(
     if not organization_id:
         raise ValueError("organization_id is required - cannot access graph without org context")
 
-    scope_guard = _memory_scope_guard(
+    scope_guard = memory_scope_guard(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,

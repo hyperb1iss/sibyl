@@ -14,8 +14,12 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from sibyl.api.decorators import handle_workflow_errors
 from sibyl.api.schemas import (
+    ExpandNeighborsRequest,
+    ExpandNeighborsResponse,
     ExploreRequest,
     ExploreResponse,
+    FetchSliceRequest,
+    FetchSliceResponse,
     SearchRequest,
     SearchResponse,
     TemporalEdgeSchema,
@@ -370,6 +374,164 @@ async def explore(
         )
         log.exception("explore_failed", mode=request.mode, error=str(e))
         raise HTTPException(status_code=500, detail="Explore failed. Please try again.") from e
+
+
+async def _resolve_traversal_scope(
+    *,
+    project: str | None,
+    ctx: AuthContext,
+) -> set[str] | None:
+    """Resolve the project set a bounded traversal may read.
+
+    The verified set has to reach the core even when one project was named: the
+    scope guard denies an unstamped project row when it gets None, so handing
+    None to a member whose access was just verified empties the walk.
+    """
+    if project:
+        await verify_entity_project_access(
+            None,
+            ctx,
+            project,
+            required_role=ProjectRole.VIEWER,
+            require_existing_project=True,
+        )
+        return {project}
+    return await list_accessible_project_graph_ids(ctx)
+
+
+@router.post("/expand", response_model=ExpandNeighborsResponse)
+async def expand_neighbors(
+    request: ExpandNeighborsRequest,
+    org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+) -> ExpandNeighborsResponse:
+    """Widen known memories into their bounded graph neighborhood.
+
+    Step two of an at-most-three-round retrieval loop: search or pack first,
+    widen here, then compose with the context pack. Every neighbor is authorized
+    for the caller, so a private memory stays unreachable by traversal.
+    """
+    started_at = time.perf_counter()
+    try:
+        from sibyl_core.tools.core import expand_neighbors as core_expand_neighbors
+
+        accessible_projects = await _resolve_traversal_scope(project=request.project, ctx=ctx)
+        scope_keys = ctx.api_key_memory_scope_keys
+        result = await core_expand_neighbors(
+            request.entity_ids,
+            organization_id=str(org.id),
+            relationship_types=request.relationship_types,
+            depth=request.depth,
+            limit=request.limit,
+            content_max_chars=request.content_max_chars,
+            include_incoming=request.include_incoming,
+            types=request.types,
+            principal_id=getattr(ctx, "user_id", None),
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=(set(scope_keys) if scope_keys is not None else None),
+        )
+        response = ExpandNeighborsResponse(**asdict(result))
+        telemetry_registry().record_search_operation(
+            surface="expand_neighbors",
+            status="ok",
+            duration_ms=elapsed_ms(started_at),
+            result_count=len(response.neighbors),
+        )
+        return response
+
+    except HTTPException:
+        telemetry_registry().record_search_operation(
+            surface="expand_neighbors",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
+        raise
+    except ValueError as e:
+        # Malformed input rather than an out-of-range budget, which is clamped.
+        telemetry_registry().record_search_operation(
+            surface="expand_neighbors",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        telemetry_registry().record_search_operation(
+            surface="expand_neighbors",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
+        log.exception("expand_neighbors_failed", entity_ids=request.entity_ids, error=str(e))
+        raise HTTPException(status_code=500, detail="Expansion failed. Please try again.") from e
+
+
+@router.post("/slice", response_model=FetchSliceResponse)
+async def fetch_slice(
+    request: FetchSliceRequest,
+    org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+) -> FetchSliceResponse:
+    """Read one memory at span granularity, centered on the span named.
+
+    A memory too short to have been cut comes back whole with `sliced=false`.
+    Cite the parent the response names rather than a span id, because spans are
+    re-cut whenever their memory is edited.
+    """
+    started_at = time.perf_counter()
+    try:
+        from sibyl_core.tools.core import fetch_slice as core_fetch_slice
+
+        accessible_projects = await _resolve_traversal_scope(project=request.project, ctx=ctx)
+        scope_keys = ctx.api_key_memory_scope_keys
+        result = await core_fetch_slice(
+            request.entity_id,
+            organization_id=str(org.id),
+            window=request.window,
+            content_max_chars=request.content_max_chars,
+            principal_id=getattr(ctx, "user_id", None),
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=(set(scope_keys) if scope_keys is not None else None),
+        )
+        response = FetchSliceResponse(**asdict(result))
+        telemetry_registry().record_search_operation(
+            surface="fetch_slice",
+            status="ok",
+            duration_ms=elapsed_ms(started_at),
+            result_count=len(response.passages),
+        )
+        return response
+
+    except HTTPException:
+        telemetry_registry().record_search_operation(
+            surface="fetch_slice",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
+        raise
+    except KeyError as e:
+        # Absent and unauthorized answer alike on purpose: telling them apart
+        # confirms a row the caller has no right to know exists.
+        telemetry_registry().record_search_operation(
+            surface="fetch_slice",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
+        raise HTTPException(status_code=404, detail="Entity not found") from e
+    except ValueError as e:
+        # Malformed input rather than an out-of-range window, which is clamped.
+        telemetry_registry().record_search_operation(
+            surface="fetch_slice",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        telemetry_registry().record_search_operation(
+            surface="fetch_slice",
+            status="error",
+            duration_ms=elapsed_ms(started_at),
+        )
+        log.exception("fetch_slice_failed", entity_id=request.entity_id, error=str(e))
+        raise HTTPException(status_code=500, detail="Slice fetch failed. Please try again.") from e
 
 
 @router.post("/temporal", response_model=TemporalResponse)

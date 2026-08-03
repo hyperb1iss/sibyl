@@ -200,6 +200,14 @@ from .temporal import (
     TemporalRequest,
     TemporalResponse,
 )
+from .traverse import (
+    ExpandNeighborsRequest,
+    ExpandNeighborsResponse,
+    FetchSliceRequest,
+    FetchSliceResponse,
+    NeighborEntityResponse,
+    SlicePassageResponse,
+)
 
 __all__ = [
     "AdminAuditEventResponse",
@@ -248,8 +256,12 @@ __all__ = [
     "EntityListResponse",
     "EntityResponse",
     "EntityUpdate",
+    "ExpandNeighborsRequest",
+    "ExpandNeighborsResponse",
     "ExploreRequest",
     "ExploreResponse",
+    "FetchSliceRequest",
+    "FetchSliceResponse",
     "FullPageResponse",
     "GraphData",
     "GraphEdge",
@@ -285,6 +297,7 @@ __all__ = [
     "MemorySpaceStateLiteral",
     "MemorySpaceUpdateRequest",
     "MutationReceipt",
+    "NeighborEntityResponse",
     "OrgMetricsResponse",
     "OperationalExperienceCaptureRequest",
     "OperationalExperienceCaptureResponse",
@@ -329,6 +342,7 @@ __all__ = [
     "SessionBundleResponse",
     "SessionMemorySummary",
     "SessionTaskSummary",
+    "SlicePassageResponse",
     "SourceAdapterListResponse",
     "SourceAdapterResponse",
     "SourceImportProgressResponse",

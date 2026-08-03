@@ -1,8 +1,8 @@
 """MCP Server definition using FastMCP with streamable-http transport.
 
-Exposes 11 tools and 2 resources:
-- Tools: search, explore, context, remember, reflect, add, manage, logs,
-  synthesis_plan, synthesis_draft, synthesis_verify
+Exposes 13 tools and 2 resources:
+- Tools: search, explore, context, expand_neighbors, fetch_slice, remember,
+  reflect, add, manage, logs, synthesis_plan, synthesis_draft, synthesis_verify
 - Resources: sibyl://health, sibyl://stats
 """
 
@@ -54,6 +54,13 @@ from sibyl_core.services.surreal_content import (
     MemoryScope,
     get_raw_memory,
     get_raw_memory_by_source_id,
+)
+from sibyl_core.tools.traverse import (
+    DEFAULT_EXPAND_LIMIT,
+    DEFAULT_NEIGHBOR_CONTENT_MAX_CHARS,
+    DEFAULT_SLICE_CONTENT_MAX_CHARS,
+    DEFAULT_SLICE_WINDOW,
+    DEFAULT_TRAVERSAL_DEPTH,
 )
 
 log = structlog.get_logger()
@@ -2251,7 +2258,161 @@ def _register_tools(mcp: FastMCP) -> None:
         return _to_dict(result)
 
     # =========================================================================
-    # TOOL 7: add
+    # TOOL 7: expand_neighbors
+    # =========================================================================
+
+    @mcp.tool()
+    async def expand_neighbors(
+        entity_ids: list[str],
+        relationship_types: list[str] | None = None,
+        types: list[str] | None = None,
+        depth: int = DEFAULT_TRAVERSAL_DEPTH,
+        limit: int = DEFAULT_EXPAND_LIMIT,
+        content_max_chars: int = DEFAULT_NEIGHBOR_CONTENT_MAX_CHARS,
+        include_incoming: bool = True,
+        project: str | None = None,
+    ) -> dict[str, Any]:
+        """Widen memories you already found into their graph neighborhood.
+
+        TRAVERSAL CONTRACT (read this before calling):
+        This is a bounded step in a loop of AT MOST THREE ROUNDS. Round one is
+        `search` or `context`. Round two widens with `expand_neighbors` or
+        `fetch_slice`. Round three widens once more, and then you answer.
+        Two widening rounds capture nearly all of the available gain; a fourth
+        costs latency and buys noise.
+
+        SKIP THIS VERB when one hop answers the question. If you want "what do we
+        know about X", call `context` and read the pack it composed. Traversal is
+        for when you have specific memories in hand and need what sits next to
+        them: the tasks blocking this one, the decision a plan supersedes, the
+        spans of a memory a search only matched part of.
+
+        COMPOSITION IS NOT YOURS. This verb returns previews and adjacency so you
+        can choose what to gather. `context` still renders the evidence, and the
+        reserved note lane and evidence ordering stay under its control.
+
+        Every neighbor is authorized for you individually. A neighbor missing
+        from the result may exist and be someone else's private memory; that is
+        the system working, not a gap to route around.
+
+        Args:
+            entity_ids: Seed entity IDs, at most 8 of them.
+                Seeds that resolve to nothing you may read come back in
+                `unresolved` without saying which reason applied.
+            relationship_types: Restrict hops to these relationship names, e.g.
+                ["DEPENDS_ON"] or ["PART_OF"]. Empty walks every relationship.
+            types: Restrict neighbors to these entity types.
+            depth: Hops to walk, 1-3 (default 1). Depth 1 first; deepen only
+                when depth 1 came back thin.
+            limit: Neighbors returned, up to 24 (default 8).
+            content_max_chars: Preview characters per neighbor. These are
+                previews by design; widen a promising one with `fetch_slice`.
+            include_incoming: Follow edges pointing at the seeds too (default
+                True). Dependents and passages are only reachable inbound.
+            project: Scope the walk to one project you can read.
+
+        Returns:
+            Hop-tagged neighbors with relationship, direction, and distance,
+            highest path score first, plus `truncated` when more existed.
+
+        Examples:
+            expand_neighbors(["task_abc"], relationship_types=["DEPENDS_ON"])
+            expand_neighbors(["decision_1", "decision_2"], depth=2)
+        """
+        from sibyl_core.tools.core import expand_neighbors as _expand_neighbors
+
+        ctx = await _require_mcp_context()
+        accessible_projects = await _resolve_mcp_project_scope(ctx, project)
+        api_key_memory_scope_keys = ctx.api_key_memory_scope_keys
+        result = await _expand_neighbors(
+            entity_ids,
+            organization_id=ctx.org_id,
+            relationship_types=relationship_types,
+            types=types,
+            depth=depth,
+            limit=limit,
+            content_max_chars=content_max_chars,
+            include_incoming=include_incoming,
+            principal_id=getattr(ctx, "user_id", None),
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=(
+                set(api_key_memory_scope_keys) if api_key_memory_scope_keys is not None else None
+            ),
+        )
+        return _to_dict(result)
+
+    # =========================================================================
+    # TOOL 8: fetch_slice
+    # =========================================================================
+
+    @mcp.tool()
+    async def fetch_slice(
+        entity_id: str,
+        window: int = DEFAULT_SLICE_WINDOW,
+        content_max_chars: int = DEFAULT_SLICE_CONTENT_MAX_CHARS,
+        project: str | None = None,
+    ) -> dict[str, Any]:
+        """Read one memory at span granularity, centered where you point.
+
+        TRAVERSAL CONTRACT (read this before calling):
+        This is a bounded step in a loop of AT MOST THREE ROUNDS, the same budget
+        `expand_neighbors` spends from. Use it when a search hit is a passage, or
+        when a memory is long and you need the part around a match rather than
+        the whole body.
+
+        SKIP THIS VERB when the memory you found is already short enough to read.
+        A result whose content was not truncated needs no widening.
+
+        COMPOSITION IS NOT YOURS. This verb hands back spans, not an answer.
+        `context` composes the final evidence, and it keeps control of ordering
+        and the reserved note lane whatever you gather here.
+
+        CITE THE PARENT, NOT THE SPAN. The response names `parent_id`, and that
+        is the id a later reader can resolve. Span ids are re-minted whenever the
+        memory is edited, so a citation pointing at one goes stale silently.
+
+        A memory short enough never to have been cut comes back whole with
+        `sliced=false`. That is the answer, not an error to retry.
+
+        Args:
+            entity_id: A passage entity ID, or the ID of the memory it came from.
+                Given a passage, the window is centered on it. Given a memory,
+                the window starts at its first span.
+            window: Adjacent spans to return, 1-64. The default of
+                three is the measured adjacency: three spans reach the same
+                exposure as the whole memory, one span reaches noticeably less.
+            content_max_chars: Character budget for the whole window, spent in
+                span order. The span that exhausts it says `truncated`.
+            project: Scope the read to one project you can read.
+
+        Returns:
+            The ordered span window with per-span index and total, plus the
+            parent memory a citation resolves to.
+
+        Examples:
+            fetch_slice("passage_9f2c1b")
+            fetch_slice("decision_abc", window=5)
+        """
+        from sibyl_core.tools.core import fetch_slice as _fetch_slice
+
+        ctx = await _require_mcp_context()
+        accessible_projects = await _resolve_mcp_project_scope(ctx, project)
+        api_key_memory_scope_keys = ctx.api_key_memory_scope_keys
+        result = await _fetch_slice(
+            entity_id,
+            organization_id=ctx.org_id,
+            window=window,
+            content_max_chars=content_max_chars,
+            principal_id=getattr(ctx, "user_id", None),
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=(
+                set(api_key_memory_scope_keys) if api_key_memory_scope_keys is not None else None
+            ),
+        )
+        return _to_dict(result)
+
+    # =========================================================================
+    # TOOL 9: add
     # =========================================================================
 
     @mcp.tool()
@@ -2359,7 +2520,7 @@ def _register_tools(mcp: FastMCP) -> None:
         )
 
     # =========================================================================
-    # TOOL 8: remember
+    # TOOL 10: remember
     # =========================================================================
 
     @mcp.tool()
@@ -2433,7 +2594,7 @@ def _register_tools(mcp: FastMCP) -> None:
         )
 
     # =========================================================================
-    # TOOL 9: reflect
+    # TOOL 11: reflect
     # =========================================================================
 
     @mcp.tool()
@@ -2482,7 +2643,7 @@ def _register_tools(mcp: FastMCP) -> None:
         )
 
     # =========================================================================
-    # TOOL 10: manage
+    # TOOL 12: manage
     # =========================================================================
 
     @mcp.tool()
@@ -2559,7 +2720,7 @@ def _register_tools(mcp: FastMCP) -> None:
         )
 
     # =========================================================================
-    # TOOL 11: logs (Developer Introspection)
+    # TOOL 13: logs (Developer Introspection)
     # =========================================================================
 
     @mcp.tool()

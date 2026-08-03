@@ -2,14 +2,21 @@
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import structlog
 
+from sibyl_core.auth.memory_policy import (
+    memory_metadata_read_allowed,
+    memory_row_project_id,
+    private_scope_granted_for,
+)
 from sibyl_core.models.entities import EntityType
 
 log = structlog.get_logger()
+
+ScopeGuard = Callable[[Any], bool]
 
 VALID_ENTITY_TYPES = {t.value for t in EntityType}
 AUTO_LINK_ENTITY_TYPES = (
@@ -23,6 +30,57 @@ AUTO_LINK_ENTITY_TYPES = (
 # Validation constants
 MAX_TITLE_LENGTH = 200
 MAX_CONTENT_LENGTH = 50000
+
+
+def memory_scope_guard(
+    *,
+    principal_id: str | None,
+    accessible_projects: set[str] | None,
+    allowed_memory_scope_keys: set[str] | None,
+    enforce_memory_scope: bool = True,
+    surface: str = "explore",
+) -> ScopeGuard:
+    """Build the per-entity scope check graph navigation shares with search.
+
+    Project membership alone does not authorize a private memory, so browsing
+    and traversal answer to the same rule the retrieval candidate filter uses.
+    """
+    if not enforce_memory_scope:
+        return lambda _entity: True
+
+    # Enforcing against no reader denies every scoped row, so a caller that
+    # forgot to thread its principal gets an empty result that is
+    # indistinguishable from having found nothing. Say so the first time it
+    # actually costs a row; an operator browsing anonymously opts out through
+    # enforce_memory_scope instead.
+    unauthenticated = principal_id is None
+    reported = False
+
+    def allowed(entity: Any) -> bool:
+        nonlocal reported
+        decision = memory_metadata_read_allowed(
+            getattr(entity, "metadata", None),
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+            private_scope_granted=private_scope_granted_for(
+                allowed_memory_scope_keys, principal_id=principal_id
+            ),
+            row_project_id=memory_row_project_id(
+                getattr(entity, "metadata", None),
+                entity_type=getattr(getattr(entity, "entity_type", None), "value", None),
+                entity_id=getattr(entity, "id", None),
+            ),
+        )
+        if not decision and unauthenticated and not reported:
+            reported = True
+            log.warning(
+                f"{surface}_scope_filtered_without_principal",
+                entity_id=getattr(entity, "id", None),
+            )
+        return decision
+
+    return allowed
 
 
 def _get_field(entity: Any, field: str, default: Any = None) -> Any:
