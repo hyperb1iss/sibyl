@@ -594,6 +594,10 @@ _SCOPE_READERS_THAT_DO_NOT_AUTHORIZE = {
     "tools/reflect.py::_persist_reflection_source_review": "passes an authorized scope to a write",
     "tools/search.py::_graph_candidate_metadata": "reports the scope on a candidate contract",
     "tools/search.py::search": "passes the scope through as a response filter",
+    "tools/traverse.py::_row_scope_entity": (
+        "normalizer: folds the column into metadata so the one read rule sees it; "
+        "can only add a scope where metadata had none, never relax one"
+    ),
 }
 
 

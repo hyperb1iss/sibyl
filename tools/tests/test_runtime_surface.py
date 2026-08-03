@@ -26,7 +26,7 @@ from tools.inventory.runtime_surface import (
 EXPECTED_ROUTER_COUNT = 31
 EXPECTED_HTTP_ROUTE_COUNT = 3
 EXPECTED_WEBSOCKET_ROUTE_COUNT = 1
-EXPECTED_MCP_TOOL_COUNT = 11
+EXPECTED_MCP_TOOL_COUNT = 13
 EXPECTED_MCP_RESOURCE_COUNT = 2
 EXPECTED_SQLMODEL_TABLE_COUNT = 0
 _GRAPHITI_PACKAGE = "graphiti" + "-core"
@@ -438,6 +438,8 @@ def test_runtime_surface_finds_known_contracts() -> None:
     assert {record.name for record in surface.mcp_tools} >= {
         "search",
         "explore",
+        "expand_neighbors",
+        "fetch_slice",
         "add",
         "synthesis_plan",
         "synthesis_draft",
