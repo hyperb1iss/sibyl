@@ -173,7 +173,17 @@ class _GraphClient:
             ]
         if "FROM entity" in query:
             requested = params.get("uuids") or []
-            return [self.rows[uuid] for uuid in requested if uuid in self.rows]
+            rows = [self.rows[uuid] for uuid in requested if uuid in self.rows]
+            # Mirror the real hydration predicate. Without this a type filter
+            # pushed into the WHERE is invisible here, and a test asserting it is
+            # absent would pass whether or not it actually is.
+            node_types = params.get("node_types")
+            if node_types:
+                wanted_types = {str(value).lower() for value in node_types}
+                rows = [
+                    row for row in rows if str(row.get("entity_type", "")).lower() in wanted_types
+                ]
+            return rows
         return []
 
 
@@ -310,8 +320,12 @@ class TestExpandNeighborRecords:
         assert [record["graph_expansion_direction"] for record in records] == ["incoming"]
 
     @pytest.mark.asyncio
-    async def test_inbound_stays_off_for_the_scored_lane(self) -> None:
-        """The lane that seeds from a scored search must be unchanged."""
+    async def test_inbound_is_opt_in(self) -> None:
+        """Inbound expansion is off unless asked for, so no query is issued for it.
+
+        Named for what it checks. The scored lane's own contract is pinned in
+        TestSharedBfsContractAtDefaultArgs, which calls that lane's entry point.
+        """
         client = _FakeClient(
             incoming=[{"uuid": "task_dependent", "relationship": "DEPENDS_ON"}],
             rows=[_entity_row("task_dependent", entity_type="task")],
@@ -682,13 +696,16 @@ class TestExpandNeighborsBudget:
 
     @pytest.mark.asyncio
     async def test_no_seeds_returns_empty_without_touching_the_graph(self) -> None:
-        runtime = _FakeRuntime(client=_FakeClient(), entity_manager=_FakeEntityManager({}))
+        client = _FakeClient()
+        runtime = _FakeRuntime(client=client, entity_manager=_FakeEntityManager({}))
 
         with _runtime_patch(runtime):
             response = await expand_neighbors([], organization_id=ORG, principal_id=OWNER)
 
         assert response.total == 0
         assert response.neighbors == []
+        # The name promises this, so assert it rather than implying it.
+        assert client.queries == []
 
     @pytest.mark.asyncio
     async def test_organization_is_required(self) -> None:
@@ -1469,3 +1486,84 @@ class TestSpansCoverParentRule:
         from sibyl_core.projection.passages import spans_cover_parent
 
         assert spans_cover_parent([(0, 3, True), (2, 3, True)]) is False
+
+
+class TestTypeFilterNarrowsResultsNotRoutes:
+    @pytest.mark.asyncio
+    async def test_a_two_hop_neighbor_is_reachable_through_another_type(self) -> None:
+        """seed -> task_x -> decision_y, asking only for decisions.
+
+        Pushing the type filter into the hydration WHERE makes `task_x` unread and
+        therefore unwalkable, which hides `decision_y` entirely. The filter belongs
+        to the answer, not to the route.
+        """
+        client = _GraphClient(
+            edges=[
+                ("seed", "task_x", "RELATED_TO"),
+                ("task_x", "decision_y", "RELATED_TO"),
+            ],
+            rows=[
+                _entity_row("task_x", entity_type="task"),
+                _entity_row("decision_y", entity_type="decision"),
+            ],
+        )
+        runtime = _FakeRuntime(
+            client=client,
+            entity_manager=_FakeEntityManager({"seed": _entity("seed")}),
+        )
+
+        with _runtime_patch(runtime):
+            response = await expand_neighbors(
+                ["seed"],
+                organization_id=ORG,
+                types=["decision"],
+                depth=2,
+                limit=8,
+                principal_id=OWNER,
+                accessible_projects=set(),
+            )
+
+        assert [neighbor.id for neighbor in response.neighbors] == ["decision_y"]
+        assert response.neighbors[0].distance == 2
+        # Structural half of the same claim: the type restriction must never reach
+        # the hydration predicate, because a row it excludes there is never read
+        # and so can never be walked through.
+        hydration_params = [params for query, params in client.queries if "FROM entity" in query]
+        assert hydration_params
+        assert all("node_types" not in params for params in hydration_params)
+
+    @pytest.mark.asyncio
+    async def test_an_unauthorized_row_is_still_not_a_route(self) -> None:
+        """The type filter must not have relaxed the authorization gate."""
+        client = _GraphClient(
+            edges=[
+                ("seed", "secret_task", "RELATED_TO"),
+                ("secret_task", "decision_y", "RELATED_TO"),
+            ],
+            rows=[
+                _entity_row(
+                    "secret_task",
+                    entity_type="task",
+                    memory_scope="private",
+                    principal_id=OTHER,
+                ),
+                _entity_row("decision_y", entity_type="decision"),
+            ],
+        )
+        runtime = _FakeRuntime(
+            client=client,
+            entity_manager=_FakeEntityManager({"seed": _entity("seed")}),
+        )
+
+        with _runtime_patch(runtime):
+            response = await expand_neighbors(
+                ["seed"],
+                organization_id=ORG,
+                types=["decision"],
+                depth=2,
+                limit=8,
+                principal_id=OWNER,
+                accessible_projects=set(),
+            )
+
+        assert response.neighbors == []

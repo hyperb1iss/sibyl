@@ -1821,6 +1821,7 @@ async def expand_neighbor_records(
     include_incoming: bool = True,
     search_filter: SearchFilter | None = None,
     row_allowed: Callable[[Mapping[str, object]], bool] | None = None,
+    row_included: Callable[[Mapping[str, object]], bool] | None = None,
 ) -> list[dict[str, object]]:
     """Walk one bounded neighborhood for a caller that steers its own retrieval.
 
@@ -1837,6 +1838,12 @@ async def expand_neighbor_records(
     the scored lanes read with, because a handful of unreadable rows outranking
     the readable ones would otherwise consume the whole budget and report a
     neighborhood as empty when it is not.
+
+    ``row_included`` narrows what the caller sees without narrowing where the walk
+    may go. The two are deliberately separate: authorization is about reachability,
+    while a presentational filter such as an entity-type restriction must not
+    silently sever a route, or asking for one type of neighbor would hide the
+    two-hop rows that are only reachable through another type.
     """
     limit = max(int(limit), 0)
     depth_budget = max(int(max_depth), 1)
@@ -1877,6 +1884,11 @@ async def expand_neighbor_records(
             if row_allowed is not None and not row_allowed(row):
                 # Unauthorized, so not a result and not a route either.
                 continue
+            # Authorized, so it is a route whatever the caller wants to see.
+            next_frontier.append(uuid)
+            if row_included is not None and not row_included(row):
+                # Filtered from the answer, but still walked through.
+                continue
             # The shared function reports every round as adjacent, because each
             # round is one hop from its own frontier. True distance from the
             # caller's seeds, and the decay it earns, are this walk's to state.
@@ -1886,7 +1898,6 @@ async def expand_neighbor_records(
             row["graph_expansion_score"] = score
             row["score"] = score
             collected[uuid] = row
-            next_frontier.append(uuid)
         frontier = next_frontier
 
     ordered = sorted(collected.values(), key=_record_score, reverse=True)

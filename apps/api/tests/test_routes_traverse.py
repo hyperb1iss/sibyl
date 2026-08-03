@@ -480,3 +480,37 @@ class TestTraversalToolsAreRegistered:
             description = by_name[name].description or ""
             assert "THREE ROUNDS" in description
             assert "context" in description
+
+
+class TestAgentFacingBoundsAreNumbers:
+    """A docstring is the only place an agent can read a bound.
+
+    Writing the Python identifier there tells the model the name of a constant it
+    cannot resolve. These assert the literal numbers and that they still match the
+    constants, so the two cannot drift apart silently.
+    """
+
+    @pytest.mark.asyncio
+    async def test_docstrings_state_literal_bounds_matching_the_constants(self) -> None:
+        from sibyl.server import create_mcp_server
+        from sibyl_core.tools.traverse import (
+            MAX_EXPAND_LIMIT,
+            MAX_EXPAND_ORIGINS,
+            MAX_SLICE_WINDOW,
+            MAX_TRAVERSAL_DEPTH,
+        )
+
+        mcp = create_mcp_server()
+        by_name = {tool.name: tool.description or "" for tool in await mcp.list_tools()}
+        expand = by_name["expand_neighbors"]
+        slice_doc = by_name["fetch_slice"]
+
+        assert f"at most {MAX_EXPAND_ORIGINS} of them" in expand
+        assert f"1-{MAX_TRAVERSAL_DEPTH}" in expand
+        assert f"up to {MAX_EXPAND_LIMIT}" in expand
+        assert f"1-{MAX_SLICE_WINDOW}" in slice_doc
+
+        for text in (expand, slice_doc):
+            assert "MAX_EXPAND" not in text
+            assert "MAX_TRAVERSAL_DEPTH" not in text
+            assert "MAX_SLICE_WINDOW" not in text

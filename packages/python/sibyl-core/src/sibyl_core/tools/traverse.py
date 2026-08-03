@@ -37,7 +37,6 @@ from sibyl_core.projection.passages import (
 from sibyl_core.retrieval.operational_sources import PASSAGE_WINDOW_UNITS
 from sibyl_core.retrieval.search import (
     DEFAULT_CANDIDATES_PER_SIGNAL,
-    SearchFilter,
     expand_neighbor_records,
 )
 from sibyl_core.tools.helpers import ScopeGuard, memory_scope_guard
@@ -209,7 +208,9 @@ async def expand_neighbors(
         content_max_chars: Preview characters per neighbor.
         include_incoming: Follow edges that point at the seeds as well as away
             from them. Inbound edges are how dependents and spans are reached.
-        types: Restrict neighbors to these entity types.
+        types: Restrict the neighbors returned to these entity types. The walk
+            still routes through other types, so a two-hop neighbor of the
+            requested type is reachable through one that is not.
         principal_id: Reader identity used to authorize scoped rows.
         accessible_projects: Projects this reader may read, or None when the
             caller could not resolve memberships (which denies project rows).
@@ -301,6 +302,12 @@ async def expand_neighbors(
         parsed[id(row)] = entity
         return True
 
+    def row_included(row: Mapping[str, object]) -> bool:
+        if not node_types:
+            return True
+        entity = parsed.get(id(row))
+        return entity is not None and entity.entity_type.value.lower() in node_types
+
     rows = await expand_neighbor_records(
         client=runtime.client,
         origin_uuids=origins,
@@ -310,8 +317,13 @@ async def expand_neighbors(
         limit=limit + 1,
         relationship_names=wanted_relationships,
         include_incoming=include_incoming,
-        search_filter=SearchFilter(node_types=node_types),
+        # Deliberately not a SearchFilter(node_types=...): that lands in the
+        # hydration WHERE, so a row of the wrong type is never read and therefore
+        # never walked through. A type restriction narrows the answer, not the
+        # routes, or asking for decisions would hide every decision that is only
+        # reachable through a task.
         row_allowed=row_allowed,
+        row_included=row_included,
     )
     truncated = len(rows) > limit
     neighbors = [

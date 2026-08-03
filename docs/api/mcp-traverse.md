@@ -52,7 +52,7 @@ confirm the existence of a row the caller has no right to know about.
 interface ExpandNeighborsInput {
   entity_ids: string[]; // Seeds, at most 8
   relationship_types?: string[]; // Restrict hops, e.g. ["DEPENDS_ON"]
-  types?: string[]; // Restrict neighbors to these entity types
+  types?: string[]; // Restrict the neighbors returned to these entity types
   depth?: number; // 1-3, default 1
   limit?: number; // 1-24, default 8
   content_max_chars?: number; // Preview characters per neighbor, default 500
@@ -64,6 +64,14 @@ interface ExpandNeighborsInput {
 `include_incoming` defaults to true because the interesting neighbors are usually on that side. The
 graph writes edges from span to memory and from dependent to dependency, so an outgoing-only walk
 reports those neighbors as absent.
+
+`types` narrows the answer, not the walk. A two-hop neighbor of the requested type stays reachable
+through a first hop of some other type, so asking for decisions will not hide a decision that sits
+behind a task.
+
+`covers_parent` reads a flag that only the prose passage projection writes, so spans cut from
+operational evidence report `false` even when the window is complete. That is conservative in the
+safe direction: it never claims coverage it does not have.
 
 `direction` describes the edge that reached a row from the node one hop closer, not from your seed.
 At `distance` 1 those are the same thing; at `distance` 2 and beyond, an `incoming` row points at

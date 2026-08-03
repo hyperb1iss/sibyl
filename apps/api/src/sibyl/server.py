@@ -2279,15 +2279,15 @@ def _register_tools(mcp: FastMCP) -> None:
         the system working, not a gap to route around.
 
         Args:
-            entity_ids: Seed entity IDs, at most MAX_EXPAND_ORIGINS of them.
+            entity_ids: Seed entity IDs, at most 8 of them.
                 Seeds that resolve to nothing you may read come back in
                 `unresolved` without saying which reason applied.
             relationship_types: Restrict hops to these relationship names, e.g.
                 ["DEPENDS_ON"] or ["PART_OF"]. Empty walks every relationship.
             types: Restrict neighbors to these entity types.
-            depth: Hops to walk, 1-MAX_TRAVERSAL_DEPTH (default 1). Depth 1
-                first; deepen only when depth 1 came back thin.
-            limit: Neighbors returned, up to MAX_EXPAND_LIMIT.
+            depth: Hops to walk, 1-3 (default 1). Depth 1 first; deepen only
+                when depth 1 came back thin.
+            limit: Neighbors returned, up to 24 (default 8).
             content_max_chars: Preview characters per neighbor. These are
                 previews by design; widen a promising one with `fetch_slice`.
             include_incoming: Follow edges pointing at the seeds too (default
@@ -2361,7 +2361,7 @@ def _register_tools(mcp: FastMCP) -> None:
             entity_id: A passage entity ID, or the ID of the memory it came from.
                 Given a passage, the window is centered on it. Given a memory,
                 the window starts at its first span.
-            window: Adjacent spans to return, 1-MAX_SLICE_WINDOW. The default of
+            window: Adjacent spans to return, 1-64. The default of
                 three is the measured adjacency: three spans reach the same
                 exposure as the whole memory, one span reaches noticeably less.
             content_max_chars: Character budget for the whole window, spent in
