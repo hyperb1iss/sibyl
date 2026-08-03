@@ -393,6 +393,9 @@ async def fetch_slice(
     enough never to have been cut comes back whole with `sliced=False`, which is
     the answer, not a failure.
 
+    Composition is not this verb's job either: it hands back spans, and `context`
+    still renders the evidence.
+
     Args:
         entity_id: A passage entity ID or the ID of the memory it was cut from.
         window: Adjacent spans to return, clamped to 1-MAX_SLICE_WINDOW. The

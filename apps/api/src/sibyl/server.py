@@ -2346,6 +2346,10 @@ def _register_tools(mcp: FastMCP) -> None:
         SKIP THIS VERB when the memory you found is already short enough to read.
         A result whose content was not truncated needs no widening.
 
+        COMPOSITION IS NOT YOURS. This verb hands back spans, not an answer.
+        `context` composes the final evidence, and it keeps control of ordering
+        and the reserved note lane whatever you gather here.
+
         CITE THE PARENT, NOT THE SPAN. The response names `parent_id`, and that
         is the id a later reader can resolve. Span ids are re-minted whenever the
         memory is edited, so a citation pointing at one goes stale silently.
