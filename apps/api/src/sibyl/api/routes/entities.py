@@ -225,7 +225,12 @@ def _resolved_update_structure(
         MemoryStructureError,
         agent_atomic_from_metadata,
     )
-    from sibyl_core.memory_pipeline.structure import build_memory_structure, structure_metadata
+    from sibyl_core.memory_pipeline.structure import (
+        PROBE_LAST_REPLAY_METADATA_KEY,
+        PROBE_REHEARSAL_METADATA_KEY,
+        build_memory_structure,
+        structure_metadata,
+    )
 
     existing_metadata = getattr(existing, "metadata", {}) or {}
     stored_content = (getattr(existing, "content", "") or "").strip()
@@ -258,7 +263,13 @@ def _resolved_update_structure(
             remediation="Recompute the declared structure against the updated content.",
         ) from exc
 
-    declaration_keys = (AGENT_SPANS_METADATA_KEY, AGENT_ATOMIC_METADATA_KEY)
+    declaration_keys = [AGENT_SPANS_METADATA_KEY, AGENT_ATOMIC_METADATA_KEY]
+    if content_changed:
+        # A receipt describes whether a particular body could be found. Once that
+        # body is rewritten the verdict is about text that no longer exists, and a
+        # stale pass is worse than no receipt: the probes survive, so the replay
+        # job produces an honest one on its next run.
+        declaration_keys += [PROBE_REHEARSAL_METADATA_KEY, PROBE_LAST_REPLAY_METADATA_KEY]
     resolved = {key: value for key, value in base_metadata.items() if key not in declaration_keys}
     stamped = structure_metadata(structure)
     # The entity update lands as `UPDATE entity MERGE $patch`, and a MERGE cannot
@@ -368,8 +379,6 @@ def _bulk_create_metadata(
     now: datetime,
     principal_id: str | None,
 ) -> dict[str, Any]:
-    from sibyl_core.memory_pipeline.structure import structure_metadata
-
     request_metadata = strip_structure_metadata(entity.metadata)
     project_id = str(request_metadata.get("project_id") or "").strip()
     return {
@@ -383,15 +392,18 @@ def _bulk_create_metadata(
             principal_id=principal_id,
             verified_project_id=project_id or None,
         ),
-        # Declared through the typed fields and validated, never carried over from
-        # the payload bag: this batch path writes rows directly rather than
-        # through the graph writer that owns those keys everywhere else.
-        **structure_metadata(_bulk_create_structure(entity)),
     }
 
 
 def _reject_unsupported_bulk_entry(entity: EntityCreate) -> None:
-    """Fault a batch entry the direct-write path cannot honor."""
+    """Fault a batch entry the direct-write path cannot honor.
+
+    All three structure fields are refused rather than accepted and ignored. This
+    path writes rows itself and enqueues ``project_memory_batch``, which extracts
+    memory entities and never mints passages, so there is no cutter here to honor
+    a declared plan and nothing searchable to rehearse a probe against. Storing a
+    validated plan no cutter reads would be a promise with no keeper.
+    """
     if entity.entity_type in BULK_UNSUPPORTED_TYPES:
         raise HTTPException(
             status_code=400,
@@ -405,38 +417,21 @@ def _reject_unsupported_bulk_entry(entity: EntityCreate) -> None:
                 "use POST /entities for conflict detection"
             ),
         )
-    if entity.probes:
-        # Rehearsal has to observe the row it asks about, and this path writes a
-        # whole batch without waiting on a searchable write per entry. Accepting
-        # the field and never rehearsing would ship a receipt-shaped promise
-        # nothing keeps.
-        raise unprocessable_entity(
-            "probes are not supported on bulk create; write the memory through "
-            "POST /entities to get a rehearsal receipt",
-            field="probes",
+    declared = [
+        name
+        for name, sent in (
+            ("spans", entity.spans is not None),
+            ("atomic", entity.atomic),
+            ("probes", bool(entity.probes)),
         )
-
-
-def _bulk_create_structure(entity: EntityCreate) -> Any:
-    """Validate one batch entry's declared structure against its own body."""
-    from sibyl_core.memory_pipeline.spans import MemoryStructureError
-    from sibyl_core.memory_pipeline.structure import build_memory_structure
-
-    content = (entity.content or entity.description or entity.name).strip()
-    try:
-        return build_memory_structure(
-            content,
-            spans=[span.model_dump(exclude_none=True) for span in entity.spans]
-            if entity.spans is not None
-            else None,
-            atomic=entity.atomic,
-        )
-    except MemoryStructureError as exc:
+        if sent
+    ]
+    if declared:
         raise unprocessable_entity(
-            str(exc),
-            field=exc.field,
-            remediation="Recompute the declared structure against the entry's own content.",
-        ) from exc
+            f"{', '.join(declared)} not supported on bulk create; "
+            "write the memory through POST /entities",
+            field=declared[0],
+        )
 
 
 def _entity_from_bulk_create(
@@ -2365,7 +2360,12 @@ async def update_entity(
             if update.description is not None:
                 update_data["description"] = update.description
             if update.content is not None:
-                update_data["content"] = update.content
+                # Stripped, because the graph writer strips on create and the
+                # declared span offsets are validated against the stripped body.
+                # Storing the padded string would put the plan one place at
+                # validation and another at projection, so an accepted plan would
+                # be quietly abandoned for the mechanical cutter.
+                update_data["content"] = update.content.strip()
             if update.category is not None:
                 update_data["category"] = update.category
             if update.languages is not None:

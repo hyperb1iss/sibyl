@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import ExitStack, asynccontextmanager, contextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
@@ -12,6 +13,7 @@ from pydantic import ValidationError
 
 from sibyl.api.routes.entities import (
     _entity_from_bulk_create,
+    _reject_unsupported_bulk_entry,
     create_entities_bulk,
     create_entity,
     delete_entity,
@@ -1969,6 +1971,84 @@ async def test_update_entity_nulls_a_withdrawn_plan_because_merge_cannot_delete(
 
 
 @pytest.mark.asyncio
+async def test_update_entity_withdraws_a_receipt_about_a_body_that_is_gone() -> None:
+    """A pass recorded against the old text would read as a pass against the new."""
+    org = _org()
+    ctx = _ctx()
+    owner = str(ctx.user.id)
+    existing = _spanned_memory_entity(owner=owner)
+    existing.metadata = {
+        "memory_scope": "private",
+        "principal_id": owner,
+        "memory_probes": ["why did it break"],
+        "probe_rehearsal": {"retrievable": 1, "total": 1},
+        "probe_last_replay": {"retrievable": 1, "total": 1},
+    }
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing),
+            update=AsyncMock(return_value=existing),
+        ),
+        relationship_manager=SimpleNamespace(),
+    )
+
+    with _update_patches(runtime):
+        await update_entity(
+            entity_id="decision_spanned",
+            update=EntityUpdate(content="a rewritten body with different words"),
+            request=_request(),
+            org=org,
+            ctx=ctx,
+            content_session=None,
+        )
+
+    written = runtime.entity_manager.update.await_args.args[1]["metadata"]
+    # Explicit nulls rather than omissions: the update MERGEs, so a key left out
+    # of the patch keeps the verdict it had about a body that no longer exists.
+    assert written["probe_rehearsal"] is None
+    assert written["probe_last_replay"] is None
+    # The questions still stand; only the verdict about the old body is dropped.
+    assert written["memory_probes"] == ["why did it break"]
+
+
+@pytest.mark.asyncio
+async def test_update_entity_stores_content_stripped_like_the_writer_does() -> None:
+    """Validation strips, so storing the padded body would abandon the plan."""
+    org = _org()
+    ctx = _ctx()
+    owner = str(ctx.user.id)
+    existing = _spanned_memory_entity(owner=owner)
+    body = "one two three four five six seven"
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing),
+            update=AsyncMock(return_value=_spanned_memory_entity(owner=owner, content=body)),
+        ),
+        relationship_manager=SimpleNamespace(),
+    )
+
+    with _update_patches(runtime, passages=2):
+        await update_entity(
+            entity_id="decision_spanned",
+            update=EntityUpdate(
+                content=f"\n\n  {body}   \n",
+                spans=[{"start": 0, "end": 13}, {"start": 13, "end": len(body)}],
+            ),
+            request=_request(),
+            org=org,
+            ctx=ctx,
+            content_session=None,
+        )
+
+    updates = runtime.entity_manager.update.await_args.args[1]
+    assert updates["content"] == body
+    assert updates["metadata"]["agent_spans"] == [
+        {"start": 0, "end": 13},
+        {"start": 13, "end": len(body)},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_update_entity_revalidates_fresh_spans_against_the_new_body() -> None:
     org = _org()
     ctx = _ctx()
@@ -2104,42 +2184,32 @@ async def test_update_entity_cannot_have_a_plan_planted_through_metadata() -> No
     assert "probe_rehearsal" not in written
 
 
-def test_bulk_create_validates_a_declared_plan_against_its_own_entry() -> None:
-    """The batch path writes rows directly, bypassing the graph writer's gate."""
-    now = datetime.now(UTC)
-
-    built = _entity_from_bulk_create(
-        EntityCreate(
-            name="Batch memory",
-            content=_SPANNED_BODY,
-            entity_type=EntityType.EPISODE,
-            skip_conflicts=True,
-            spans=[{"start": 0, "end": 20}, {"start": 20, "end": len(_SPANNED_BODY)}],
-        ),
-        group_id="org-1",
-        now=now,
-    )
-
-    assert built.metadata["agent_spans"] == [
-        {"start": 0, "end": 20},
-        {"start": 20, "end": len(_SPANNED_BODY)},
-    ]
-
+@pytest.mark.parametrize(
+    ("field", "extra"),
+    [
+        ("spans", {"spans": [{"start": 0, "end": 20}, {"start": 20, "end": len(_SPANNED_BODY)}]}),
+        ("atomic", {"atomic": True}),
+        ("probes", {"probes": ["why"]}),
+    ],
+)
+def test_bulk_create_refuses_declared_structure_it_cannot_honor(
+    field: str, extra: dict[str, Any]
+) -> None:
+    """The batch path mints no passages, so accepting a plan would store a no-op."""
     with pytest.raises(HTTPException) as excinfo:
-        _entity_from_bulk_create(
+        _reject_unsupported_bulk_entry(
             EntityCreate(
                 name="Batch memory",
                 content=_SPANNED_BODY,
                 entity_type=EntityType.EPISODE,
                 skip_conflicts=True,
-                spans=[{"start": 0, "end": 10}, {"start": 12, "end": len(_SPANNED_BODY)}],
-            ),
-            group_id="org-1",
-            now=now,
+                **extra,
+            )
         )
 
     assert excinfo.value.status_code == 422
-    assert "must leave no gap" in excinfo.value.detail["message"]
+    assert field in excinfo.value.detail["message"]
+    assert excinfo.value.detail["details"]["field"] == field
 
 
 def test_bulk_create_cannot_have_structure_planted_through_metadata() -> None:
