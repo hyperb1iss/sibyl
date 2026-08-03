@@ -1,9 +1,10 @@
 """Entity and raw-capture request/response models."""
 
+import unicodedata
 from datetime import datetime
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, Field, StringConstraints, model_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
 from sibyl_core.memory_pipeline.retrieval_keys import (
     MAX_RETRIEVAL_KEY_LENGTH,
@@ -96,6 +97,22 @@ class EntityCreate(EntityBase, MemoryStructureFields):
             "never spells out."
         ),
     )
+
+    @field_validator("retrieval_keys")
+    @classmethod
+    def _reject_unprintable_retrieval_keys(cls, value: list[str] | None) -> list[str] | None:
+        """Refuse a control character here so the caller gets a 422, not a 500.
+
+        The key contract raises on control characters at the write boundary, and
+        that exception has no handler on this route, so the one input class the
+        length and count bounds do not cover would surface as a server error.
+        """
+        if value is None:
+            return None
+        for key in value:
+            if any(unicodedata.category(char) == "Cc" for char in key):
+                raise ValueError("retrieval keys must not contain control characters")
+        return value
 
 
 class EntityBulkCreateRequest(BaseModel):

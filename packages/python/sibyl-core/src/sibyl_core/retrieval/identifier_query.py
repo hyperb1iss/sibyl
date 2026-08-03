@@ -13,7 +13,9 @@ predicate below so the matrix test can target it:
 * a quoted span, which is the caller explicitly asking for an exact string
   (double quotes or backticks only; a bare apostrophe is English possessive
   far more often than it is a quote)
-* letters and digits mixed in one token (``0x7f31``, ``sha256``, ``v2beta``)
+* letters and digits mixed in one token (``0x7f31``, ``sha256``, ``v2beta``),
+  excluding digits with an English suffix (``3rd``, ``10am``, ``1990s``), which
+  mix the two characters classes while being plainly prose
 * an underscore (``ERR_CONN_RESET``, ``snake_case``)
 * a ``::`` path separator (``std::vector``)
 * dotted segments of two or more characters each (``search.py``,
@@ -61,6 +63,7 @@ _QUOTED_SPAN = re.compile(r"\"([^\"]+)\"|`([^`]+)`")
 _LEADING_PUNCTUATION = "([{\"'"
 _TRAILING_PUNCTUATION = ")]},;:!?.\"'"
 _HEX_RUN = re.compile(r"[0-9a-fA-F]{8,}")
+_ENGLISH_NUMBER_WORD = re.compile(r"\d+(?:st|nd|rd|th|s|am|pm)", re.IGNORECASE)
 _WORD_CHARACTER = re.compile(r"[^\W_]", re.UNICODE)
 
 __all__ = [
@@ -72,7 +75,20 @@ __all__ = [
 ]
 
 
+def _is_english_number_word(token: str) -> bool:
+    """Digits carrying an English suffix: an ordinal, a clock time, a decade.
+
+    These mix letters and digits, so the shape rule admits them, and they are
+    plainly prose rather than identifiers. The suffix list is closed and short
+    on purpose: `2fa` and `v2beta` are identifiers and stay admitted.
+    """
+
+    return bool(_ENGLISH_NUMBER_WORD.fullmatch(token))
+
+
 def _has_letter_and_digit(token: str) -> bool:
+    if _is_english_number_word(token):
+        return False
     return any(char.isalpha() for char in token) and any(char.isdigit() for char in token)
 
 
