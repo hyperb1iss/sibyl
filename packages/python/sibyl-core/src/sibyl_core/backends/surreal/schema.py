@@ -115,7 +115,7 @@ DEFINE INDEX IF NOT EXISTS idx_entity_parent_task ON entity FIELDS parent_task_i
 DEFINE INDEX IF NOT EXISTS idx_entity_task ON entity FIELDS task_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_status ON entity FIELDS status;
 DEFINE INDEX IF NOT EXISTS idx_entity_memory_scope ON entity FIELDS memory_scope;
-DEFINE INDEX IF NOT EXISTS idx_entity_retrieval_keys ON entity FIELDS retrieval_keys_normalized;
+DEFINE INDEX IF NOT EXISTS idx_entity_retrieval_keys ON entity FIELDS retrieval_keys_normalized.*;
 DEFINE INDEX IF NOT EXISTS idx_entity_priority ON entity FIELDS priority;
 DEFINE INDEX IF NOT EXISTS idx_entity_updated ON entity FIELDS updated_at, created_at, uuid;
 DEFINE INDEX IF NOT EXISTS idx_entity_last_recalled ON entity FIELDS last_recalled_at, created_at, uuid;
@@ -514,10 +514,18 @@ WHERE memory_scope = NONE
     AND attributes.memory_scope != NONE;
 """
 
+# The index is on `.*`, the array's elements, rather than on the array itself.
+# The distinction is not cosmetic on SurrealDB 3.2.3: an index on the bare array
+# field answers a set-membership read with a full table scan, and answers a bare
+# equality with zero rows unless the WHERE clause happens to carry another
+# predicate. Indexing the elements makes CONTAINS and CONTAINSANY index-served
+# and correct on their own. OVERWRITE rather than IF NOT EXISTS so a namespace
+# that already ran an earlier build of this migration gets the element index
+# instead of silently keeping the one that scans.
 ENTITY_RETRIEVAL_KEYS_COLUMN_DEFINITIONS = """
 DEFINE FIELD OVERWRITE retrieval_keys ON entity TYPE option<array<string>>;
 DEFINE FIELD OVERWRITE retrieval_keys_normalized ON entity TYPE option<array<string>>;
-DEFINE INDEX IF NOT EXISTS idx_entity_retrieval_keys ON entity FIELDS retrieval_keys_normalized;
+DEFINE INDEX OVERWRITE idx_entity_retrieval_keys ON entity FIELDS retrieval_keys_normalized.*;
 """
 
 ENTITY_REQUIRED_FIELD_REPAIR_DEFINITIONS = f"""

@@ -523,6 +523,19 @@ async def context_search(
         )
         for signal, candidates in source_lists
     ]
+    # Counted after the scope filter, never before. A pre-filter count answers
+    # "does any memory in this organization declare the string I just sent",
+    # which is a question an unauthorized caller must not be able to ask: the
+    # rows are withheld but their existence would leak, one guessed key at a
+    # time.
+    authorized_exact_key_candidates = next(
+        (
+            candidates
+            for signal, candidates in filtered_lists
+            if signal is RetrievalSignal.EXACT_KEY
+        ),
+        [],
+    )
     temporal_target = resolve_temporal_reference(search_plan.query, datetime.now(UTC))
     fusion_backend = fusion_backend_from_env()
     fusion_failures: list[CandidateSourceFailure] = []
@@ -581,7 +594,7 @@ async def context_search(
             **vector_fetch.as_metadata(),
             **_exact_key_receipt_metadata(
                 probe_tokens=probe_tokens,
-                candidates=graph_candidate_lists[3],
+                candidates=authorized_exact_key_candidates,
             ),
             "stage_timings_ms": stage_timings_ms,
         },
@@ -1044,66 +1057,62 @@ async def _exact_key_candidates(
     if not probe_tokens:
         return []
     filter_clauses, filter_params = _node_filter_clause(search_filter)
-    # One indexed equality per probe rather than a single set-membership read.
-    # On SurrealDB 3.2.3 an array-element index answers `field = $value` with an
-    # IndexScan, while `CONTAINSANY` falls back to a full TableScan; a
-    # multi-value `IN` and an OR of equalities each return no rows at all
-    # despite matching data, verified live against 3.2.3 before this shape was
-    # chosen. Probe tokens are capped, so this is a bounded fan-out of point
-    # lookups rather than a scan that grows with the corpus.
-    row_query = (
+    # CONTAINSANY against the index defined on `retrieval_keys_normalized.*`.
+    # The element index is what makes this both correct and index-served: on
+    # SurrealDB 3.2.3 an index on the bare array field turns this same read into
+    # a full table scan, and turns a bare equality into zero rows unless the
+    # WHERE clause happens to carry a second predicate. Verified live on 3.2.3
+    # (UnionIndexScan across one branch per probe), so the `.*` in the index
+    # definition is load-bearing rather than stylistic.
+    rows = await _execute_query_records(
+        client,
         """
         SELECT *
         FROM entity
         WHERE """
         + _where_clause(["group_id = $group_id", *filter_clauses])
         + """
-          AND retrieval_keys_normalized = $probe_key
+          AND retrieval_keys_normalized CONTAINSANY $probe_keys
         ORDER BY created_at DESC, uuid DESC
         LIMIT $limit;
-        """
-    )
-    row_limit = max(int(limit), 1)
-    reads = await asyncio.gather(
-        *(
-            _execute_query_records(
-                client,
-                row_query,
-                group_id=plan.organization_id,
-                probe_key=probe_key,
-                limit=row_limit,
-                **filter_params,
-            )
-            for probe_key in probe_tokens
-        )
+        """,
+        group_id=plan.organization_id,
+        probe_keys=list(probe_tokens),
+        limit=max(int(limit), 1),
+        **filter_params,
     )
 
-    matched_by_uuid: dict[str, list[str]] = defaultdict(list)
-    row_by_uuid: dict[str, Mapping[str, object]] = {}
-    for probe_key, rows in zip(probe_tokens, reads, strict=True):
-        for row in rows:
-            uuid = str(row.get("uuid") or "")
-            if not uuid:
-                continue
-            row_by_uuid.setdefault(uuid, row)
-            matched_by_uuid[uuid].append(probe_key)
-
-    # A row that answers more of the query's identifiers is the better answer, so
-    # overlap orders the lane. Counted here because the reads are per probe.
-    ordered = sorted(
-        matched_by_uuid.items(),
-        key=lambda item: (-len(item[1]), item[0]),
-    )
+    probes = set(probe_tokens)
+    scored: list[tuple[int, str, list[str], Mapping[str, object]]] = []
+    for row in rows:
+        matched = _matched_retrieval_keys(row, probes)
+        if not matched:
+            continue
+        scored.append((len(matched), str(row.get("uuid") or ""), matched, row))
+    # A row answering more of the query's identifiers is the better answer, so
+    # overlap orders the lane. Counted here rather than in SurrealQL to keep the
+    # read to one index lookup and no array functions.
+    scored.sort(key=lambda item: (-item[0], item[1]))
     candidates: list[RetrievalCandidate] = []
-    for uuid, matched in ordered[:row_limit]:
+    for _count, _uuid, matched, row in scored:
         candidate = _candidate_from_node_record(
-            row_by_uuid[uuid],
+            row,
             signal=RetrievalSignal.EXACT_KEY,
-            score=len(matched) / len(probe_tokens),
+            score=len(matched) / len(probes),
         )
-        candidate.metadata["matched_retrieval_keys"] = list(matched)
+        candidate.metadata["matched_retrieval_keys"] = matched
         candidates.append(candidate)
     return candidates
+
+
+def _matched_retrieval_keys(
+    row: Mapping[str, object],
+    probes: set[str],
+) -> list[str]:
+    stored = row.get("retrieval_keys_normalized")
+    if not isinstance(stored, list | tuple):
+        return []
+    return [str(key) for key in stored if str(key) in probes]
 
 
 async def _episode_fulltext_candidates(
@@ -2861,13 +2870,18 @@ def _merge_exact_key_metadata(
         fusion_metadata["matched_retrieval_keys"] = [str(key) for key in matched]
 
 
-def _candidate_query_text(candidate: RetrievalCandidate) -> str:
-    # Declared keys count as the candidate's own text. Without them the coverage
-    # re-rank sees an exact-key hit whose body never spells the token out as a
-    # zero-coverage row and pushes it back down, undoing the arm.
-    keys = candidate.metadata.get("retrieval_keys")
-    key_parts = [str(key) for key in keys] if isinstance(keys, list | tuple) else []
-    parts = [part for part in (candidate.name, candidate.content, *key_parts) if part]
+def _candidate_query_text(
+    candidate: RetrievalCandidate,
+    *,
+    matched_keys: Sequence[str] = (),
+) -> str:
+    # Only the keys this query actually matched, never the row's whole declared
+    # list. The keys are here so the coverage re-rank cannot bury an exact-key
+    # hit whose body never spells the token out, which needs the matched key and
+    # nothing more. Folding in every declared key would move scores on queries
+    # the arm never fired for, and would hand a writer an ungated ranking lever:
+    # sixteen keys of prose keywords buying a permanent coverage lift.
+    parts = [part for part in (candidate.name, candidate.content, *matched_keys) if part]
     return " ".join(parts).lower()
 
 
@@ -2887,10 +2901,22 @@ def _apply_query_coverage_to_fused(
     metadata_by_id = {
         id(candidate): fusion_metadata for candidate, _score, fusion_metadata in fused
     }
+    # Fusion holds the matched keys, not the candidate, because a row reached by
+    # two lanes keeps whichever instance arrived first. The coverage text is
+    # therefore resolved through the fused metadata rather than off the row.
+    matched_keys_by_id = {
+        id(candidate): tuple(
+            str(key) for key in (fusion_metadata.get("matched_retrieval_keys") or ())
+        )
+        for candidate, _score, fusion_metadata in fused
+    }
     reranked, _applied, _refined = rank_items_by_query_coverage(
         query,
         [(candidate, score) for candidate, score, _fusion_metadata in fused],
-        text_fn=_candidate_query_text,
+        text_fn=lambda candidate: _candidate_query_text(
+            candidate,
+            matched_keys=matched_keys_by_id.get(id(candidate), ()),
+        ),
         id_fn=lambda candidate: candidate.id,
         timestamp_fn=lambda candidate: get_entity_timestamp(candidate) or candidate.created_at,
         temporal_target=temporal_target,
