@@ -106,6 +106,12 @@ ignore = [
     "PLR0915", # too many statements (one function per measurement, kept linear)
     "S311",    # non-crypto random (seeded corpus sampling)
 ]
+# Usage-rerank feasibility harness: offline research scripts, run by hand
+"benchmarks/usage_rerank/*.py" = [
+    "T20",     # print statements (the measurement tables are the output)
+    "PLR2004", # magic numbers (window and weight arms are the thing measured)
+    "S311",    # non-crypto random (seeded permutation null)
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["sibyl", "sibyl_core", "sibyl_cli"]
