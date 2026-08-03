@@ -296,9 +296,7 @@ class TestExpandNeighborRecords:
             relationship_names=["DEPENDS_ON"],
         )
 
-        edge_queries = [
-            params for query, params in client.queries if "FROM relates_to" in query
-        ]
+        edge_queries = [params for query, params in client.queries if "FROM relates_to" in query]
         assert edge_queries
         assert all(params["relationship_names"] == ["DEPENDS_ON"] for params in edge_queries)
 
@@ -362,9 +360,7 @@ class TestExpandNeighborsAuthorization:
     def _neighbors_runtime(rows: list[dict[str, Any]], seeds: dict[str, Entity]) -> _FakeRuntime:
         return _FakeRuntime(
             client=_FakeClient(
-                outgoing=[
-                    {"uuid": row["uuid"], "relationship": "RELATED_TO"} for row in rows
-                ],
+                outgoing=[{"uuid": row["uuid"], "relationship": "RELATED_TO"} for row in rows],
                 rows=rows,
             ),
             entity_manager=_FakeEntityManager(seeds),
@@ -564,9 +560,7 @@ class TestExpandNeighborsBudget:
         seed_ids = [f"seed_{index}" for index in range(MAX_EXPAND_ORIGINS + 2)]
         runtime = _FakeRuntime(
             client=_FakeClient(),
-            entity_manager=_FakeEntityManager(
-                {seed_id: _entity(seed_id) for seed_id in seed_ids}
-            ),
+            entity_manager=_FakeEntityManager({seed_id: _entity(seed_id) for seed_id in seed_ids}),
         )
 
         with _runtime_patch(runtime):
