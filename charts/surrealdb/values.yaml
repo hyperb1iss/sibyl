@@ -15,10 +15,13 @@ surrealdb:
     unauthenticated: false
   strategy:
     type: Recreate
+  # RocksDB can still be flushing at SIGTERM; the default 30s kubelet grace
+  # period risks losing the tail of a compaction on node drains.
+  terminationGracePeriodSeconds: 120
   persistence:
     enabled: true
-    # Set to a premium block-storage class in deployment values once the
-    # upstream 0.4.0 PVC template is patched or vendored.
+    # Empty uses the cluster default storage class; premium block storage
+    # recommended for RocksDB.
     storageClassName: ""
     size: 100Gi
   podExtraEnv:
@@ -79,9 +82,12 @@ snapshot:
   failedJobsHistoryLimit: 3
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 900
+  # alpine/k8s rather than bitnami/kubectl: Docker Hub's bitnami catalog purge
+  # removed versioned tags, and the snapshot script needs a shell plus awk,
+  # which distroless kubectl images do not carry.
   kubectlImage:
-    repository: bitnami/kubectl
-    tag: "1.30.7"
+    repository: alpine/k8s
+    tag: "1.34.1"
     pullPolicy: IfNotPresent
   persistentVolumeClaimName: ""
   volumeSnapshotClassName: ""
