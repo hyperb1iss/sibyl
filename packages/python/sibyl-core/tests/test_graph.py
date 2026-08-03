@@ -1140,6 +1140,34 @@ async def test_native_entity_manager_search_uses_configured_knn_effort(
 
 
 @pytest.mark.asyncio
+async def test_native_entity_manager_search_raises_knn_effort_to_the_candidate_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The vector lane overfetches 4x the request, so limit 50 asks for a 200-row
+    # pool; an HNSW read returns at most `ef` rows, so the effort has to follow.
+    client = _EmbeddingWriteClient()
+    provider = DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
+            provider="deterministic",
+            model="unit-test",
+            dimensions=4,
+            cache_namespace="native-graph-test",
+            tokenizer_estimate_method="unit-test",
+        )
+    )
+    manager = EntityManager(
+        cast(SurrealGraphClient, client),
+        group_id=client.group_id,
+        embedding_provider=provider,
+    )
+    monkeypatch.setattr(graph_module.settings, "graph_knn_ef", 40)
+
+    await manager.search(query="deep vector pool", limit=50)
+
+    assert any("name_embedding <|200, 200|> $query_embedding" in query for query, _ in client.calls)
+
+
+@pytest.mark.asyncio
 async def test_native_entity_manager_search_projections_omit_embeddings() -> None:
     client = _EmbeddingWriteClient()
     manager = EntityManager(cast(SurrealGraphClient, client), group_id=client.group_id)

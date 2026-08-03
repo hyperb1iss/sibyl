@@ -16,6 +16,7 @@ from uuid import uuid4
 import numpy as np
 import structlog
 
+from sibyl_core.backends.surreal.knn import knn_search_effort
 from sibyl_core.config import settings
 from sibyl_core.models.entities import Entity
 from sibyl_core.services.graph import normalize_records
@@ -425,7 +426,7 @@ class EntityDeduplicator:
                 )
             return pairs
 
-        knn_effort = max(1, int(settings.graph_knn_ef))
+        knn_effort = knn_search_effort(candidate_limit, settings.graph_knn_ef)
         statements: list[str] = []
         params: dict[str, Any] = {
             "group_id": group_id,
@@ -550,7 +551,7 @@ class EntityDeduplicator:
             param_prefix="scope",
         )
 
-        knn_effort = max(1, int(settings.graph_knn_ef))
+        knn_effort = knn_search_effort(candidate_limit, settings.graph_knn_ef)
         rows = normalize_records(
             await execute_query(
                 """

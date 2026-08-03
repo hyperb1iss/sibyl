@@ -20,6 +20,7 @@ from sibyl_core.backends.surreal.fulltext import (
     build_fulltext_terms,
     build_match_disjunction,
 )
+from sibyl_core.backends.surreal.knn import knn_search_effort
 from sibyl_core.backends.surreal.records import raise_on_error
 from sibyl_core.backends.surreal.schema import bootstrap_schema
 from sibyl_core.config import settings
@@ -729,7 +730,7 @@ class EntityManager:
         type_values = [entity_type.value for entity_type in entity_types or ()]
         type_clause = "AND entity_type IN $entity_types" if type_values else ""
         candidate_limit = min(max(int(limit) * 4, 32), 200)
-        knn_effort = max(1, int(settings.graph_knn_ef))
+        knn_effort = knn_search_effort(candidate_limit, settings.graph_knn_ef)
         try:
             embeddings = await _embed_texts_with_timeout(
                 self._embedding_provider,

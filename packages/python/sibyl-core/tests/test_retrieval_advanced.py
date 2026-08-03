@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import numpy as np
 import pytest
 
+import sibyl_core.retrieval.dedup as dedup_module
 import sibyl_core.retrieval.hybrid as hybrid_module
 import sibyl_core.retrieval.query_ranking as query_ranking_module
 import sibyl_core.retrieval.search as search_module
@@ -2074,6 +2075,80 @@ class TestEntityDeduplicatorFindDuplicates:
         assert matches["incoming_beta"].entity2_id == "existing_beta"
         assert len(client.calls) == 2
         assert all(query.count("name_embedding <|") == 1 for query, _ in client.calls)
+
+    @pytest.mark.asyncio
+    async def test_dedup_lanes_raise_knn_effort_to_the_candidate_pool(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # An HNSW read returns at most `ef` rows, so the 100-candidate pool the
+        # shipped batch size asks for would silently come back at 40.
+        monkeypatch.setattr(dedup_module.settings, "graph_knn_ef", 40)
+        incoming = [
+            Entity(
+                id="incoming_alpha",
+                name="Alpha",
+                entity_type=EntityType.TOPIC,
+                embedding=[1.0, 0.0],
+            ),
+            Entity(
+                id="incoming_beta",
+                name="Beta",
+                entity_type=EntityType.TOPIC,
+                embedding=[0.0, 1.0],
+            ),
+        ]
+        batch_client = HnswDedupClient()
+        batch_dedup = EntityDeduplicator(
+            client=batch_client,  # type: ignore[arg-type]
+            entity_manager=MockEntityManagerForDedup(),
+        )
+        fallback_client = HnswFallbackDedupClient()
+        fallback_dedup = EntityDeduplicator(
+            client=fallback_client,  # type: ignore[arg-type]
+            entity_manager=MockEntityManagerForDedup(),
+        )
+
+        await batch_dedup.resolve_existing_entities(incoming)
+        await fallback_dedup.resolve_existing_entities(incoming)
+
+        batch_query = batch_client.raw_calls[0][0]
+        assert batch_query.count("name_embedding <|100, 100|>") == 2
+        assert all("name_embedding <|100, 100|>" in query for query, _ in fallback_client.calls)
+
+    @pytest.mark.asyncio
+    async def test_dedup_lanes_keep_configured_knn_effort_for_shallow_pools(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # A pool shallower than the configured effort must not lower it.
+        monkeypatch.setattr(dedup_module.settings, "graph_knn_ef", 40)
+        shallow_config = DedupConfig(batch_size=8, same_type_only=True, min_name_overlap=0.0)
+        client = HnswFallbackDedupClient()
+        dedup = EntityDeduplicator(
+            client=client,  # type: ignore[arg-type]
+            entity_manager=MockEntityManagerForDedup(),
+            config=shallow_config,
+        )
+
+        await dedup.resolve_existing_entities(
+            [
+                Entity(
+                    id="incoming_alpha",
+                    name="Alpha",
+                    entity_type=EntityType.TOPIC,
+                    embedding=[1.0, 0.0],
+                ),
+                Entity(
+                    id="incoming_beta",
+                    name="Beta",
+                    entity_type=EntityType.TOPIC,
+                    embedding=[0.0, 1.0],
+                ),
+            ]
+        )
+
+        assert all("name_embedding <|8, 40|>" in query for query, _ in client.calls)
 
     @pytest.mark.asyncio
     async def test_resolve_existing_entities_executes_surreal_hnsw_batch_query(
