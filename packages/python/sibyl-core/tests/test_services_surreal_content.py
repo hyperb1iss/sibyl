@@ -1001,6 +1001,38 @@ class TestSurrealContentHelpers:
         assert document_params["document_ids"] == ["doc-1"]
 
     @pytest.mark.asyncio
+    async def test_search_document_chunks_raises_knn_effort_to_the_candidate_pool(self) -> None:
+        # Document search overfetches 5x the request up to 100 candidates, and
+        # an HNSW read returns at most `ef` rows, so the effort has to follow.
+        fake_client = FakeClient(
+            [
+                _query_result([{"uuid": "src-1", "organization_id": "org-1", "name": "Docs"}]),
+                _raw_query_result([]),
+                _query_result([]),
+                _query_result([]),
+            ]
+        )
+
+        @asynccontextmanager
+        async def fake_session():
+            yield fake_client
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            await search_document_chunks(
+                organization_id="org-1",
+                query_text="alpha",
+                query_embedding=[1.0, 0.0],
+                source_id="src-1",
+                limit=20,
+            )
+
+        vector_query = next(query for query, _ in fake_client.calls if "embedding <|" in query)
+        assert "embedding <|100, 100|> $query_embedding" in vector_query
+
+    @pytest.mark.asyncio
     async def test_search_document_chunks_filters_source_name_in_surreal(self) -> None:
         fake_client = FakeClient(
             [
@@ -2571,6 +2603,35 @@ class TestSurrealContentHelpers:
         assert "embedding <|8, 40|> $query_embedding" in vector_query
         assert vector_params["query_embedding"] == [1.0, 0.0]
         assert all(memory.score > 0 for memory in memories)
+
+    @pytest.mark.asyncio
+    async def test_recall_raw_memory_raises_knn_effort_to_the_candidate_pool(self) -> None:
+        # Raw memory recall overfetches 4x the request, so limit 50 asks for a
+        # 200-row pool; an HNSW read returns at most `ef` rows, so the effort
+        # has to follow the pool or the lane silently reads 40.
+        fake_client = FakeClient([_query_result([]), _raw_query_result([]), _query_result([])])
+
+        @asynccontextmanager
+        async def fake_session():
+            yield fake_client
+
+        async def query_embedding(_query: str):
+            return [1.0, 0.0]
+
+        from sibyl_core.services import surreal_content as content_service
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_service, "_raw_memory_query_embedding", query_embedding)
+            await recall_raw_memory(
+                organization_id="org-1",
+                principal_id="user-a",
+                query="surrealdb graph",
+                limit=50,
+            )
+
+        vector_query = next(query for query, _ in fake_client.calls if "embedding <|" in query)
+        assert "embedding <|200, 200|> $query_embedding" in vector_query
 
     @pytest.mark.asyncio
     async def test_recall_raw_memory_falls_back_when_vector_recall_fails(self) -> None:

@@ -2595,7 +2595,7 @@ async def test_vector_lanes_raise_knn_effort_to_the_seed_budget(
     assert plan.candidate_limits.node_vector == MAX_RETRIEVAL_LIMIT
     assert f"name_embedding <|{MAX_RETRIEVAL_LIMIT}, {MAX_RETRIEVAL_LIMIT}|>" in node_query
     assert f"fact_embedding <|{MAX_RETRIEVAL_LIMIT}, {MAX_RETRIEVAL_LIMIT}|>" in edge_query
-    assert search_module._graph_knn_effort(8) == 40
+    assert search_module.knn_search_effort(8, 40) == 40
 
 
 def test_node_record_candidates_keep_top_level_provenance_metadata() -> None:

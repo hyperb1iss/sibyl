@@ -24,6 +24,7 @@ from sibyl_core.backends.surreal.fulltext import (
     build_fulltext_terms,
     build_match_disjunction,
 )
+from sibyl_core.backends.surreal.knn import knn_search_effort
 from sibyl_core.backends.surreal.records import SurrealQueryError, query_error
 from sibyl_core.config import core_config
 from sibyl_core.embeddings.providers import EmbeddingMetadata, EmbeddingProvider
@@ -854,15 +855,6 @@ def _project_filter_selectivity(
     return 1.0 / len(accessible_projects)
 
 
-def _graph_knn_effort(candidate_limit: int) -> int:
-    # An HNSW search keeps at most `ef` nodes in flight, so an effort below the
-    # requested `k` truncates the read to `ef` rows and no error is raised. The
-    # configured effort is a floor on search quality, never a ceiling on the
-    # candidates a lane was budgeted, so `k` raises it when the seed budget runs
-    # deeper than the configuration.
-    return max(1, int(core_config.graph_knn_ef), int(candidate_limit))
-
-
 def _explicit_project_denied(plan: RetrievalPlan) -> bool:
     return bool(plan.project and not _authorized_project_ids(plan))
 
@@ -1227,7 +1219,7 @@ async def _node_vector_candidates(
         return []
     filter_clauses, filter_params = _node_filter_clause(search_filter)
     candidate_limit = max(int(limit), 1)
-    knn_effort = _graph_knn_effort(candidate_limit)
+    knn_effort = knn_search_effort(candidate_limit, core_config.graph_knn_ef)
     rows = await _execute_query_records(
         client,
         """
@@ -1275,7 +1267,7 @@ async def _edge_vector_candidates(
         return []
     filter_clauses, filter_params = _edge_filter_clause(search_filter)
     candidate_limit = max(int(limit), 1)
-    knn_effort = _graph_knn_effort(candidate_limit)
+    knn_effort = knn_search_effort(candidate_limit, core_config.graph_knn_ef)
     rows = await _execute_query_records(
         client,
         "SELECT * FROM ("

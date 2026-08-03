@@ -257,10 +257,15 @@ Vector index and reranking knobs. Changing HNSW parameters affects newly built i
 | ---------------------- | -------------------------------------- | ------------------------------------------------------- |
 | `SIBYL_GRAPH_HNSW_EFC` | `150`                                  | Surreal HNSW graph index EF-construction value          |
 | `SIBYL_GRAPH_HNSW_M`   | `12`                                   | Surreal HNSW index max connections per element          |
-| `SIBYL_GRAPH_KNN_EF`   | `40`                                   | Surreal KNN query effort for graph vector retrieval     |
+| `SIBYL_GRAPH_KNN_EF`   | `40`                                   | Floor on Surreal KNN query effort for graph vectors     |
 | `SIBYL_RERANK_ENABLED` | `false`                                | Cross-encoder reranking after RRF fusion                |
 | `SIBYL_RERANK_MODEL`   | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Cross-encoder model for reranking                       |
 | `SIBYL_RERANK_TOP_K`   | `20`                                   | Top candidates to rerank; the rest pass through (1-100) |
+
+`SIBYL_GRAPH_KNN_EF` is a floor on search effort, not a ceiling. A Surreal HNSW read returns at most
+`ef` rows, so retrieval raises the effective effort to the candidate count a lane asked for whenever
+that pool runs deeper than the configured value. Lowering the setting therefore never truncates a
+result set; raising it only improves recall for shallow reads.
 
 Reranking requires the optional `reranking` extra (sentence-transformers). When the extra is not
 installed, the path degrades cleanly to the fused order instead of raising.
