@@ -865,6 +865,37 @@ class RedisQueueBroker:
         )
         return result.job_id
 
+    async def enqueue_probe_replay(
+        self,
+        group_id: str,
+        *,
+        window_hours: int = 168,
+        max_memories: int = 200,
+    ) -> str:
+        """Enqueue an org-scoped probe replay."""
+        job_id = f"replay_memory_probes:{group_id}"
+        result = await self._enqueue_unique(
+            "replay_memory_probes",
+            group_id,
+            job_id=job_id,
+            clear_result=True,
+            window_hours=window_hours,
+            max_memories=max_memories,
+        )
+
+        if not result.created:
+            log.info("Probe replay job already running", job_id=job_id, group_id=group_id)
+            return result.job_id
+
+        log.info(
+            "Enqueued probe replay job",
+            job_id=result.job_id,
+            group_id=group_id,
+            window_hours=window_hours,
+            max_memories=max_memories,
+        )
+        return result.job_id
+
     async def enqueue_reflection_dream_cycle(
         self,
         group_id: str,

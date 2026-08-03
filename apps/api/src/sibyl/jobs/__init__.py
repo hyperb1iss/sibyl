@@ -40,6 +40,7 @@ from sibyl.jobs.pending import (
     process_pending_operations,
     queue_pending_operation,
 )
+from sibyl.jobs.probes import replay_memory_probes, replay_memory_probes_all_orgs
 from sibyl.jobs.queue import (
     JobStatus,
     enqueue_backup,
@@ -54,6 +55,7 @@ from sibyl.jobs.queue import (
     enqueue_memory_projection,
     enqueue_operational_note_distillation,
     enqueue_priority_decay,
+    enqueue_probe_replay,
     enqueue_raw_capture_changefeed_poll,
     enqueue_raw_promotion,
     enqueue_reflection_dream_cycle,
@@ -108,6 +110,7 @@ __all__ = [
     "enqueue_backup_cleanup",
     "enqueue_consolidation",
     "enqueue_priority_decay",
+    "enqueue_probe_replay",
     "enqueue_raw_capture_changefeed_poll",
     "enqueue_raw_promotion",
     "enqueue_reflection_dream_cycle",
@@ -119,6 +122,8 @@ __all__ = [
     "drain_source_import",
     "import_source_archive",
     "promote_raw_captures",
+    "replay_memory_probes",
+    "replay_memory_probes_all_orgs",
     "poll_all_raw_capture_changefeeds",
     "poll_raw_capture_changefeed",
     "create_entity",

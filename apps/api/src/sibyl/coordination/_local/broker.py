@@ -671,6 +671,23 @@ class LocalQueueBroker:
         )
         return result.job_id
 
+    async def enqueue_probe_replay(
+        self,
+        group_id: str,
+        *,
+        window_hours: int = 168,
+        max_memories: int = 200,
+    ) -> str:
+        result = await self._enqueue_unique(
+            "replay_memory_probes",
+            group_id,
+            job_id=f"replay_memory_probes:{group_id}",
+            clear_result=True,
+            window_hours=window_hours,
+            max_memories=max_memories,
+        )
+        return result.job_id
+
     async def enqueue_reflection_dream_cycle(
         self,
         group_id: str,
