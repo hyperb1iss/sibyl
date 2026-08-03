@@ -24,6 +24,13 @@ predicate below so the matrix test can target it:
   English word that happens to spell in ``a-f``
 * a lower-to-upper transition inside one alphanumeric token (``EntityManager``,
   ``getUserById``), which a capitalized sentence opener does not have
+* a long command-line option (``--wait-searchable``), which carries none of the
+  other shapes and which English never produces
+
+One shape is deliberately absent: a bare all-caps acronym such as ``TTL`` or
+``EFC``. English writes acronyms exactly the same way, so admitting them would
+fire the arm on ordinary emphasis. A writer who needs one found declares it as
+a key and a caller quotes it.
 
 False positives are cheap and false negatives are not. A token that looks like
 an identifier but matches no declared key costs one indexed read and returns
@@ -97,6 +104,13 @@ def _has_case_transition(token: str) -> bool:
     return any(previous.islower() and current.isupper() for previous, current in pairwise(token))
 
 
+def _is_command_flag(token: str) -> bool:
+    # A long option is an identifier that carries none of the other shapes:
+    # --wait-searchable has no digit, underscore, dot or case transition. English
+    # never opens a word with a double hyphen, so the prefix is unambiguous.
+    return token.startswith("--") and bool(_WORD_CHARACTER.search(token[2:3]))
+
+
 _TOKEN_SHAPE_RULES = (
     _has_letter_and_digit,
     _has_underscore,
@@ -104,6 +118,7 @@ _TOKEN_SHAPE_RULES = (
     _has_dotted_segments,
     _has_hex_run,
     _has_case_transition,
+    _is_command_flag,
 )
 
 
