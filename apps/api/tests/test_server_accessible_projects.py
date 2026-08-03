@@ -483,6 +483,9 @@ async def test_remember_mcp_memory_scopes_project_metadata() -> None:
         memory_scope="project",
         scope_key="project-a",
         principal_id=ctx.user_id,
+        spans=None,
+        atomic=False,
+        probes=None,
     )
 
 

@@ -200,8 +200,13 @@ def _resolved_update_structure(
     existing: Any,
     update: Any,
     new_content: str | None,
+    base_metadata: dict[str, Any],
 ) -> dict[str, Any]:
-    """Work out what structure metadata an update leaves on the row.
+    """Return the complete metadata an update leaves on the row.
+
+    Complete rather than a patch: dropping a stored plan means the key must be
+    absent from what gets written, and spreading a partial dict over the stored
+    metadata can add keys but never remove them.
 
     Offsets belong to the text they were computed over, so a rewritten body
     invalidates a stored plan outright: without fresh spans the plan is dropped
@@ -253,12 +258,15 @@ def _resolved_update_structure(
             remediation="Recompute the declared structure against the updated content.",
         ) from exc
 
-    resolved = {
-        key: value
-        for key, value in existing_metadata.items()
-        if key not in {AGENT_SPANS_METADATA_KEY, AGENT_ATOMIC_METADATA_KEY}
-    }
-    resolved.update(structure_metadata(structure))
+    declaration_keys = (AGENT_SPANS_METADATA_KEY, AGENT_ATOMIC_METADATA_KEY)
+    resolved = {key: value for key, value in base_metadata.items() if key not in declaration_keys}
+    stamped = structure_metadata(structure)
+    # The entity update lands as `UPDATE entity MERGE $patch`, and a MERGE cannot
+    # remove a key: one omitted from the patch keeps whatever the row already
+    # held. So a withdrawn declaration is written as an explicit null, which the
+    # readers treat as absent, rather than left out and silently preserved.
+    for key in declaration_keys:
+        resolved[key] = stamped.get(key)
     return resolved
 
 
@@ -2337,15 +2345,14 @@ async def update_entity(
                 update.spans is not None or update.atomic is not None or update.content is not None
             )
             if structure_metadata_changed:
-                resolved_structure = _resolved_update_structure(
+                update_data["metadata"] = _resolved_update_structure(
                     existing=existing,
                     update=update,
                     new_content=update.content,
+                    base_metadata=update_data.get(
+                        "metadata", dict(getattr(existing, "metadata", {}) or {})
+                    ),
                 )
-                update_data["metadata"] = {
-                    **update_data.get("metadata", getattr(existing, "metadata", {}) or {}),
-                    **resolved_structure,
-                }
 
             # Update timestamp
             update_data["updated_at"] = datetime.now(UTC)
