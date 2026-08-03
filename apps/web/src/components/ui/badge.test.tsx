@@ -84,16 +84,12 @@ describe('StatusBadge', () => {
     expect(container.firstElementChild).toHaveClass('border');
   });
 
-  it.each([
-    'healthy',
-    'unhealthy',
-    'warning',
-    'idle',
-    'running',
-    'unknown',
-  ] as const)('renders %s status correctly', status => {
-    render(<StatusBadge status={status} />);
-    const capitalizedStatus = status.charAt(0).toUpperCase() + status.slice(1);
-    expect(screen.getByText(capitalizedStatus)).toBeInTheDocument();
-  });
+  it.each(['healthy', 'unhealthy', 'warning', 'idle', 'running', 'unknown'] as const)(
+    'renders %s status correctly',
+    status => {
+      render(<StatusBadge status={status} />);
+      const capitalizedStatus = status.charAt(0).toUpperCase() + status.slice(1);
+      expect(screen.getByText(capitalizedStatus)).toBeInTheDocument();
+    }
+  );
 });
