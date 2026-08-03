@@ -841,6 +841,9 @@ def test_remember_command_records_domain_memory_with_links(
         },
         sync=False,
         skip_conflicts=False,
+        spans=None,
+        atomic=False,
+        probes=None,
     )
     mock_client.explore.assert_awaited_once_with(
         mode="list",
@@ -995,6 +998,9 @@ def test_remember_command_reads_body_from_stdin(
         },
         sync=False,
         skip_conflicts=False,
+        spans=None,
+        atomic=False,
+        probes=None,
     )
     mock_client.explore.assert_not_called()
     mock_resolve_project_from_cwd.assert_called_once_with()

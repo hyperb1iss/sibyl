@@ -4,12 +4,19 @@ from typing import Any
 
 import pytest
 
+from sibyl_core.memory_pipeline.spans import (
+    AGENT_ATOMIC_METADATA_KEY,
+    AGENT_SPANS_METADATA_KEY,
+)
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.projection.passages import (
     MAX_PASSAGE_CONTENT_CHARS,
     MAX_PASSAGES_PER_SOURCE,
     PASSAGE_COVERS_PARENT_KEY,
     PASSAGE_MIN_SOURCE_CHARS,
+    PASSAGE_PLAN_AGENT,
+    PASSAGE_PLAN_KEY,
+    PASSAGE_PLAN_MECHANICAL,
     passage_entity_id,
     plan_entity_passages,
     project_entity_passages,
@@ -461,3 +468,227 @@ async def test_retiring_a_memory_that_never_had_spans_is_a_no_op() -> None:
 
     assert retired == 0
     assert entity_manager.deleted == []
+
+
+# ---------------------------------------------------------------------------
+# Agent-authored cut plans
+# ---------------------------------------------------------------------------
+
+
+def _agent_metadata(*pairs: tuple[int, int, str | None]) -> dict[str, Any]:
+    return {
+        AGENT_SPANS_METADATA_KEY: [
+            {"start": start, "end": end, **({"label": label} if label else {})}
+            for start, end, label in pairs
+        ]
+    }
+
+
+def test_agent_spans_are_honored_verbatim_and_differ_from_the_cutter() -> None:
+    """The writer's seams win, and the passage text is the parent's own bytes."""
+    body = _prose()
+    third = len(body) // 3
+    source = _source(
+        content=body,
+        metadata=_agent_metadata(
+            (0, third, "Opening"),
+            (third, third * 2, "Middle"),
+            (third * 2, len(body), "Close"),
+        ),
+    )
+
+    entities, relationships = plan_entity_passages(source, source_id=_SOURCE_ID, group_id=_GROUP)
+
+    assert len(entities) == 3
+    assert len(relationships) == 3
+    expected = [body[0:third], body[third : third * 2], body[third * 2 :]]
+    for entity, span_text in zip(entities, expected, strict=True):
+        assert entity.content.endswith(span_text)
+        assert span_text in entity.content
+    assert "".join(expected) == body
+
+    mechanical, _ = plan_entity_passages(
+        _source(content=body), source_id=_SOURCE_ID, group_id=_GROUP
+    )
+    assert [entity.content for entity in entities] != [entity.content for entity in mechanical]
+
+
+def test_agent_passages_stamp_the_same_contract_as_mechanical_ones() -> None:
+    body = _prose()
+    half = len(body) // 2
+    source = _source(
+        content=body, metadata=_agent_metadata((0, half, None), (half, len(body), None))
+    )
+
+    entities, _ = plan_entity_passages(source, source_id=_SOURCE_ID, group_id=_GROUP)
+
+    assert [entity.metadata["passage_index"] for entity in entities] == [0, 1]
+    assert {entity.metadata["passage_total"] for entity in entities} == {2}
+    assert all(entity.metadata[PASSAGE_COVERS_PARENT_KEY] is True for entity in entities)
+    assert all(entity.metadata[PASSAGE_PLAN_KEY] == PASSAGE_PLAN_AGENT for entity in entities)
+    assert all(entity.metadata["passage_cut_reason"] == "agent-span" for entity in entities)
+
+
+def test_mechanical_passages_say_so_in_their_plan_stamp() -> None:
+    entities, _ = plan_entity_passages(_source(), source_id=_SOURCE_ID, group_id=_GROUP)
+
+    assert all(entity.metadata[PASSAGE_PLAN_KEY] == PASSAGE_PLAN_MECHANICAL for entity in entities)
+
+
+def test_a_span_label_is_carried_in_the_passage_body() -> None:
+    """Labels are indexed text, so they have to reach the stored content."""
+    body = _prose()
+    half = len(body) // 2
+    source = _source(
+        content=body,
+        metadata=_agent_metadata((0, half, "Root cause"), (half, len(body), "Remediation")),
+    )
+
+    entities, _ = plan_entity_passages(source, source_id=_SOURCE_ID, group_id=_GROUP)
+
+    assert "Root cause" in entities[0].content
+    assert "Remediation" in entities[1].content
+    assert entities[0].metadata["passage_breadcrumb"] == "Root cause"
+
+
+def test_an_atomic_memory_is_never_cut_however_long_it_is() -> None:
+    source = _source(content=_prose(sections=12), metadata={AGENT_ATOMIC_METADATA_KEY: True})
+
+    assert should_project_passages(source) is False
+    assert plan_entity_passages(source, source_id=_SOURCE_ID, group_id=_GROUP) == ([], [])
+
+
+def test_agent_spans_outrank_the_size_threshold() -> None:
+    """The threshold exists because the cutter guesses; here it does not."""
+    body = "one two three four five six seven eight"
+    assert len(body) < PASSAGE_MIN_SOURCE_CHARS
+    source = _source(content=body, metadata=_agent_metadata((0, 15, None), (15, len(body), None)))
+
+    assert should_project_passages(source) is True
+    entities, _ = plan_entity_passages(source, source_id=_SOURCE_ID, group_id=_GROUP)
+    assert len(entities) == 2
+
+
+def test_a_stored_plan_that_no_longer_tiles_the_body_falls_back_to_the_cutter() -> None:
+    """A body rewritten behind the plan must not be cut on stale offsets."""
+    body = _prose()
+    source = _source(content=body, metadata=_agent_metadata((0, 40, None), (40, 90, None)))
+
+    entities, _ = plan_entity_passages(source, source_id=_SOURCE_ID, group_id=_GROUP)
+
+    assert entities
+    assert all(entity.metadata[PASSAGE_PLAN_KEY] == PASSAGE_PLAN_MECHANICAL for entity in entities)
+
+
+def test_passages_do_not_inherit_their_parents_plan_or_probes() -> None:
+    body = _prose()
+    half = len(body) // 2
+    source = _source(
+        content=body,
+        metadata={
+            **_agent_metadata((0, half, None), (half, len(body), None)),
+            AGENT_ATOMIC_METADATA_KEY: False,
+            "memory_probes": ["why"],
+            "memory_scope": "private",
+        },
+    )
+
+    entities, _ = plan_entity_passages(source, source_id=_SOURCE_ID, group_id=_GROUP)
+
+    for entity in entities:
+        assert AGENT_SPANS_METADATA_KEY not in entity.metadata
+        assert "memory_probes" not in entity.metadata
+        assert entity.metadata["memory_scope"] == "private"
+
+
+@pytest.mark.asyncio
+async def test_reprojection_keeps_a_span_written_past_a_skipped_index() -> None:
+    """A hole in the index run must not make the retire sweep eat a live span.
+
+    An unbroken line past the row ceiling is emitted as its own slice and then
+    skipped, so the written indices are not contiguous. Retiring by count would
+    treat the highest written index as stale and delete the span that had just
+    been minted, leaving that text reachable only through the parent.
+    """
+    giant_line = "x" * (MAX_PASSAGE_CONTENT_CHARS + 500)
+    body = "\n".join(
+        [
+            "# Root",
+            "",
+            "## First",
+            "",
+            " ".join(["alpha"] * 200),
+            "",
+            "## Huge",
+            "",
+            giant_line,
+            "",
+            "## Last",
+            "",
+            " ".join(["omega"] * 200),
+            "",
+        ]
+    )
+    source = _source(content=body)
+    entities, _ = plan_entity_passages(source, source_id=_SOURCE_ID, group_id=_GROUP)
+    written = [entity.metadata["passage_index"] for entity in entities]
+    assert written != list(range(len(written))), "probe needs a skipped index to be meaningful"
+
+    entity_manager = _ReprojectEntityManager(existing_indices=set(written))
+    result = await reproject_entity_passages(
+        entity_manager=entity_manager,
+        relationship_manager=_RecordingRelationshipManager(),
+        source=source,
+        group_id=_GROUP,
+        created_source_id=_SOURCE_ID,
+    )
+
+    assert result.passages == len(written)
+    survivors = {
+        entity.metadata["passage_index"]
+        for entity in entity_manager.created
+        if passage_entity_id(_SOURCE_ID, entity.metadata["passage_index"])
+        not in entity_manager.deleted
+    }
+    assert survivors == set(written)
+
+
+def test_a_withdrawn_plan_in_a_stale_snapshot_is_not_read_back() -> None:
+    """A row keeps its metadata twice; only the flattened copy may speak here."""
+    import json
+
+    from sibyl_core.services.graph import entity_from_surreal_row
+
+    body = _prose()
+    stale_plan = [{"start": 0, "end": 40, "label": "Old"}, {"start": 40, "end": len(body)}]
+    row = {
+        "uuid": _SOURCE_ID,
+        "name": "A long decision",
+        "entity_type": "decision",
+        "description": "short blurb",
+        "content": body,
+        "group_id": _GROUP,
+        "attributes": {
+            # The flattened copy no longer carries the plan; the snapshot still does.
+            "memory_scope": "private",
+            "metadata": json.dumps(
+                {
+                    "memory_scope": "private",
+                    "agent_spans": stale_plan,
+                    "probe_rehearsal": {"retrievable": 1},
+                    "keep_me": "kept",
+                }
+            ),
+        },
+    }
+
+    entity = entity_from_surreal_row(row)
+
+    assert entity.metadata["keep_me"] == "kept"
+    assert "agent_spans" not in entity.metadata
+    assert "probe_rehearsal" not in entity.metadata
+    entities, _ = plan_entity_passages(entity, source_id=_SOURCE_ID, group_id=_GROUP)
+    assert entities
+    assert all(
+        passage.metadata[PASSAGE_PLAN_KEY] == PASSAGE_PLAN_MECHANICAL for passage in entities
+    )

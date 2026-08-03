@@ -1,11 +1,48 @@
 """Entity and raw-capture request/response models."""
 
 from datetime import datetime
-from typing import Any, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 
+from sibyl_core.memory_pipeline.spans import MAX_AGENT_SPANS, MAX_SPAN_LABEL_CHARS
+from sibyl_core.memory_pipeline.structure import MAX_PROBE_CHARS, MAX_PROBES_PER_MEMORY
 from sibyl_core.models.entities import EntityType
+
+
+class MemorySpan(BaseModel):
+    """One half-open cut into the stored body, authored by the writing agent."""
+
+    start: int = Field(..., ge=0, description="First character of the span, inclusive")
+    end: int = Field(..., ge=1, description="Character after the span, exclusive")
+    label: str | None = Field(
+        default=None,
+        max_length=MAX_SPAN_LABEL_CHARS,
+        description="Section name rendered into the passage body and indexed with it",
+    )
+
+
+class MemoryStructureFields(BaseModel):
+    """The structure a write may declare for the memory it stores.
+
+    The tiling rules (ordered, gap-free, non-overlapping, whole-body) are checked
+    against the stored content by the server, not here: this schema only fixes
+    the shape and the counts, because the body a span addresses is not known
+    until the route has resolved content, description, and name fallbacks.
+    """
+
+    spans: list[MemorySpan] | None = Field(
+        default=None,
+        max_length=MAX_AGENT_SPANS,
+        description=(
+            "Agent-authored cut plan over the stored content. Offsets must tile the "
+            "whole body with no gap and no overlap; passages carry the exact span text."
+        ),
+    )
+    atomic: bool = Field(
+        default=False,
+        description="Declare the body one retrievable unit that must not be cut into passages",
+    )
 
 
 class EntityBase(BaseModel):
@@ -20,10 +57,19 @@ class EntityBase(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
 
-class EntityCreate(EntityBase):
+class EntityCreate(EntityBase, MemoryStructureFields):
     """Schema for creating a new entity."""
 
     entity_type: EntityType = Field(default=EntityType.EPISODE, description="Type of entity")
+    probes: list[Annotated[str, StringConstraints(max_length=MAX_PROBE_CHARS)]] | None = Field(
+        default=None,
+        max_length=MAX_PROBES_PER_MEMORY,
+        description=(
+            "Questions this memory must answer later. Each is run through the live "
+            "search path once the write lands and the ranks come back in the response. "
+            "Supplying probes forces a synchronous write."
+        ),
+    )
     skip_conflicts: bool = Field(
         default=False,
         description="Skip semantic duplicate/conflict detection for latency-sensitive captures",
@@ -54,7 +100,13 @@ class EntityBulkCreateRequest(BaseModel):
 
 
 class EntityUpdate(BaseModel):
-    """Schema for updating an entity (all fields optional)."""
+    """Schema for updating an entity (all fields optional).
+
+    ``spans`` re-declares the cut plan for the body this update stores. A content
+    change without fresh spans drops any stored plan and hands the body back to
+    the mechanical cutter, because offsets are only meaningful against the text
+    they were computed over.
+    """
 
     name: str | None = Field(default=None, max_length=200)
     description: str | None = None
@@ -63,6 +115,18 @@ class EntityUpdate(BaseModel):
     languages: list[str] | None = None
     tags: list[str] | None = None
     metadata: dict[str, Any] | None = None
+    spans: list[MemorySpan] | None = Field(
+        default=None,
+        max_length=MAX_AGENT_SPANS,
+        description="Cut plan for the body this update stores, tiling it exactly",
+    )
+    atomic: bool | None = Field(
+        default=None,
+        description=(
+            "Re-declare (or with false, withdraw) the claim that this body is one "
+            "retrievable unit. Omitted leaves any stored claim in place."
+        ),
+    )
 
 
 class RelatedEntitySummary(BaseModel):
@@ -87,6 +151,10 @@ class EntityResponse(EntityBase):
         default=None, description="Related entities (when requested via related_limit)"
     )
     background_jobs: dict[str, Any] = Field(default_factory=dict)
+    probe_rehearsal: dict[str, Any] | None = Field(
+        default=None,
+        description="Per-probe rank-or-absent from the write-time rehearsal, when probes were sent",
+    )
 
     model_config = {"from_attributes": True}
 

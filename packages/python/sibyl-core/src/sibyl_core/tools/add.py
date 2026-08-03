@@ -10,6 +10,13 @@ from sibyl_core.auth.memory_policy import (
     stamp_memory_scope_metadata,
 )
 from sibyl_core.embeddings.providers import configured_embedding_provider
+from sibyl_core.memory_pipeline.structure import (
+    PROBE_REHEARSAL_METADATA_KEY,
+    MemoryStructure,
+    build_memory_structure,
+    strip_structure_metadata,
+    structure_metadata,
+)
 from sibyl_core.models.entities import (
     Entity,
     EntityType,
@@ -51,6 +58,64 @@ async def get_graph_runtime(group_id: str):
         group_id,
         embedding_provider=configured_embedding_provider(),
     )
+
+
+async def _rehearse_write(
+    *,
+    entity_manager: Any,
+    entity: Entity,
+    created_id: str,
+    org_id: str,
+    structure: MemoryStructure,
+    passage_ids: list[str],
+    principal_id: str | None,
+    memory_scope: str | None,
+    scope_key: str | None,
+    project: str | None,
+) -> dict[str, Any] | None:
+    """Run the write's probes and record the receipt on the row it describes.
+
+    Everything here is best effort. The memory is durable before this runs, so a
+    rehearsal that cannot complete costs the receipt and nothing else, and a
+    write that failed on a retrieval hiccup would be the worse outcome by far.
+    """
+    if not structure.probes:
+        return None
+
+    from sibyl_core.memory_pipeline.rehearsal import rehearse_memory_probes
+
+    try:
+        receipt = await rehearse_memory_probes(
+            probes=structure.probes,
+            organization_id=org_id,
+            entity_id=created_id,
+            passage_ids=passage_ids,
+            principal_id=principal_id,
+            memory_scope=memory_scope or "private",
+            scope_key=scope_key,
+            project=project,
+            accessible_projects={scope_key} if scope_key else None,
+        )
+    except Exception as exc:
+        log.warning(
+            "probe_rehearsal_failed",
+            entity_id=created_id,
+            error_type=type(exc).__name__,
+        )
+        return None
+
+    try:
+        await entity_manager.update(
+            created_id,
+            {"metadata": {**(entity.metadata or {}), PROBE_REHEARSAL_METADATA_KEY: receipt}},
+        )
+    except Exception as exc:
+        log.warning(
+            "probe_rehearsal_receipt_not_stored",
+            entity_id=created_id,
+            error_type=type(exc).__name__,
+        )
+    return receipt
 
 
 def _build_relationship(rel_data: dict[str, Any]) -> Relationship:
@@ -180,6 +245,10 @@ async def add(
     memory_scope: str | None = None,
     scope_key: str | None = None,
     principal_id: str | None = None,
+    # Structure the writing agent declares for its own memory
+    spans: list[dict[str, Any]] | None = None,
+    atomic: bool = False,
+    probes: list[str] | None = None,
 ) -> AddResponse:
     """Add new knowledge to the Sibyl knowledge graph.
 
@@ -233,6 +302,17 @@ async def add(
         memory_scope: Authorized audience for the row, resolved by the calling surface.
         scope_key: Authorized audience key (a verified project, never a payload value).
         principal_id: Authenticated author of the write.
+        spans: Agent-authored cut plan as [{"start": int, "end": int, "label": str?}].
+              Offsets are half-open into the stored (stripped) content and must tile
+              it exactly: no gap, no overlap, first starts at 0, last ends at the
+              final character. Honored verbatim in place of the mechanical prose
+              cutter; an invalid plan raises rather than falling back.
+        atomic: Declare the body one retrievable unit that must not be cut.
+              Mutually exclusive with spans.
+        probes: Questions this memory must answer later. Each is run through the
+              live search path once the write lands, and the ranks come back in
+              the response. Supplying probes forces a synchronous write, since a
+              rehearsal cannot observe a row that has not been written yet.
 
     Returns:
         AddResponse with created entity ID, auto-discovered links, conflicts, and timestamp.
@@ -279,6 +359,19 @@ async def add(
             message=f"Content exceeds {MAX_CONTENT_LENGTH} characters",
             timestamp=datetime.now(UTC),
         )
+
+    # The structure keys are server-owned. A surface that forwards a request body
+    # cannot plant a span plan nothing validated, nor hand itself a rehearsal
+    # receipt no search produced, for the same reason it cannot name the
+    # principal its row reads as.
+    if metadata:
+        metadata = strip_structure_metadata(metadata)
+    structure = build_memory_structure(content, spans=spans, atomic=atomic, probes=probes)
+    if structure.probes:
+        # A rehearsal has to observe the row it asks about, and the async path
+        # returns before the write lands. Probes are opt-in per write, so this
+        # buys the receipt only for callers that asked for one.
+        sync = True
 
     if (metadata or {}).get("memory_scope") is not None and memory_scope is None:
         # The stamp rebuilds the triple from the authorized values, so a scope
@@ -371,6 +464,7 @@ async def add(
                 scope_key=scope_key,
                 principal_id=principal_id,
             ),
+            **structure_metadata(structure),
         }
         if project:
             full_metadata["project_id"] = project
@@ -712,6 +806,20 @@ async def add(
                     relationships=passage_result.relationships,
                 )
 
+            # After the passages exist, so a probe that lands on a span counts.
+            rehearsal_receipt = await _rehearse_write(
+                entity_manager=entity_manager,
+                entity=entity,
+                created_id=created_id,
+                org_id=org_id,
+                structure=structure,
+                passage_ids=[passage.id for passage in passage_result.created_passages],
+                principal_id=principal_id,
+                memory_scope=memory_scope,
+                scope_key=scope_key,
+                project=project,
+            )
+
             message = f"Added: {title}"
             if relationships_to_create:
                 message += f" (linked: {len(relationships_to_create)})"
@@ -750,6 +858,7 @@ async def add(
                 timestamp=datetime.now(UTC),
                 conflicts=conflicts,
                 background_jobs=background_jobs,
+                probe_rehearsal=rehearsal_receipt,
             )
 
         # Async mode (default): queue arq job, return immediately
@@ -814,6 +923,26 @@ async def add(
                     relationships=projection_result.relationships,
                     projection_state=projection_result.projection_state,
                     errors=len(projection_result.errors),
+                )
+
+            # Same ordering as the sync branch: the parent exists, so the edges
+            # have something to point at. Without this the fallback stored a
+            # memory with no spans beside it, agent-planned or otherwise, and
+            # nothing later would notice.
+            fallback_passages = await project_entity_passages(
+                entity_manager=entity_manager,
+                relationship_manager=relationship_manager,
+                source=entity,
+                group_id=org_id,
+                created_source_id=created_id,
+                generate_embeddings=generate_embeddings,
+            )
+            if fallback_passages.errors:
+                log.warning(
+                    "add_fallback_passage_projection_failed",
+                    entity_id=created_id,
+                    passages=fallback_passages.passages,
+                    errors=fallback_passages.errors,
                 )
 
             fallback_message = f"Added (sync fallback): {title}"

@@ -36,6 +36,7 @@ __all__ = [
     "enqueue_memory_projection",
     "enqueue_operational_note_distillation",
     "enqueue_priority_decay",
+    "enqueue_probe_replay",
     "enqueue_raw_capture_changefeed_poll",
     "enqueue_raw_promotion",
     "enqueue_reflection_dream_cycle",
@@ -358,6 +359,20 @@ async def enqueue_priority_decay(
         group_id,
         min_age_days=min_age_days,
         max_archives_per_run=max_archives_per_run,
+    )
+
+
+async def enqueue_probe_replay(
+    group_id: str,
+    *,
+    window_hours: int = 168,
+    max_memories: int = 200,
+) -> str:
+    """Enqueue an org-scoped replay of probe-carrying memories."""
+    return await get_queue().enqueue_probe_replay(
+        group_id,
+        window_hours=window_hours,
+        max_memories=max_memories,
     )
 
 

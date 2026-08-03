@@ -382,6 +382,14 @@ class QueueBroker(Protocol):
         max_archives_per_run: int = 100,
     ) -> str: ...
 
+    async def enqueue_probe_replay(
+        self,
+        group_id: str,
+        *,
+        window_hours: int = 168,
+        max_memories: int = 200,
+    ) -> str: ...
+
     async def enqueue_reflection_dream_cycle(
         self,
         group_id: str,

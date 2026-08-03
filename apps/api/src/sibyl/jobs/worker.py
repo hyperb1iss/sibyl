@@ -40,6 +40,7 @@ from sibyl.jobs.entities import (
 from sibyl.jobs.memory_extraction import extract_memory_entities
 from sibyl.jobs.operational_distillation import distill_operational_experience_notes
 from sibyl.jobs.privacy import purge_due_deleted_personal_memories
+from sibyl.jobs.probes import replay_memory_probes, replay_memory_probes_all_orgs
 from sibyl.jobs.raw_changefeed import (
     poll_all_raw_capture_changefeeds,
     poll_raw_capture_changefeed,
@@ -246,6 +247,15 @@ def get_schedule_specs() -> list[ScheduleSpec]:
     )
     schedule_specs.append(
         ScheduleSpec(
+            name="replay_memory_probes_all_orgs",
+            function=replay_memory_probes_all_orgs,
+            schedule_label="0 5 * * *",
+            hour=5,
+            minute=0,
+        )
+    )
+    schedule_specs.append(
+        ScheduleSpec(
             name="purge_due_deleted_personal_memories",
             function=purge_due_deleted_personal_memories,
             schedule_label="0 4 * * *",
@@ -309,6 +319,9 @@ class WorkerSettings:
         purge_due_deleted_personal_memories,
         run_reflection_dream_cycle,
         run_reflection_dream_cycle_all_orgs,
+        # Probe replay
+        replay_memory_probes,
+        replay_memory_probes_all_orgs,
     ]
 
     # Cron jobs for scheduled tasks

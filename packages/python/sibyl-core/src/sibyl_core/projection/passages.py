@@ -19,8 +19,17 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from sibyl_core.memory_pipeline.spans import (
+    MAX_PASSAGE_CONTENT_CHARS,
+    MAX_PASSAGES_PER_SOURCE,
+    AgentSpan,
+    MemoryStructureError,
+    agent_atomic_from_metadata,
+    agent_spans_from_metadata,
+    validate_agent_spans,
+)
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
-from sibyl_core.projection.slicing import HARD_MAX, render_slice, slice_prose
+from sibyl_core.projection.slicing import HARD_MAX, Slice, render_slice, slice_prose
 from sibyl_core.tools.helpers import _generate_id
 
 if TYPE_CHECKING:
@@ -28,9 +37,14 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger()
 
-MAX_PASSAGE_CONTENT_CHARS = 18_000
-MAX_PASSAGES_PER_SOURCE = 64
 PASSAGE_PROJECTION_KIND = "passage"
+
+# Which cutter produced a span, stamped on every passage. The replay job and any
+# audit of retrievability need to tell an agent's own seams apart from the ones
+# the prose cutter inferred, and a passage read alone carries no other clue.
+PASSAGE_PLAN_KEY = "passage_plan"
+PASSAGE_PLAN_AGENT = "agent"
+PASSAGE_PLAN_MECHANICAL = "mechanical"
 
 # Set only when the spans between them account for the whole parent body.
 # Retrieval reads it to decide whether the spans may stand in for the memory.
@@ -98,9 +112,22 @@ def passage_entity_id(source_id: str, passage_index: int) -> str:
 
 
 def should_project_passages(source: Entity) -> bool:
-    """Whether this memory is the kind, and the size, worth cutting."""
+    """Whether this memory is the kind, and the size, worth cutting.
+
+    An agent's own declarations outrank the size heuristic in both directions.
+    ``agent_atomic`` means the body is one retrievable unit and must not be cut
+    at any length. A supplied span plan means the writer named seams it wants
+    served, so the plan is honored even under the threshold the mechanical
+    cutter waits for: the heuristic exists because the cutter is guessing, and
+    here it is not.
+    """
     if source.entity_type not in PASSAGE_SOURCE_TYPES:
         return False
+    metadata = source.metadata or {}
+    if agent_atomic_from_metadata(metadata):
+        return False
+    if agent_spans_from_metadata(metadata):
+        return True
     return len(source.content or "") > PASSAGE_MIN_SOURCE_CHARS
 
 
@@ -129,7 +156,10 @@ def plan_entity_passages(
         )
         raise ValueError(msg)
 
-    slices, _ = slice_prose(source.content or "")
+    # Not named ``content``: the loop below rebinds that name to each rendered
+    # passage, and the parent body has to survive the whole walk.
+    body = source.content or ""
+    slices, plan_kind = _plan_slices(body, source)
     if len(slices) < 2:
         # One slice is the parent again. The projection has to earn its row.
         return [], []
@@ -187,6 +217,7 @@ def plan_entity_passages(
                     "passage_total": total,
                     "passage_breadcrumb": passage.breadcrumb,
                     "passage_cut_reason": passage.reason,
+                    PASSAGE_PLAN_KEY: plan_kind,
                     PASSAGE_COVERS_PARENT_KEY: True,
                 },
                 created_at=stamped,
@@ -337,10 +368,14 @@ async def reproject_entity_passages(
         created_source_id=source_id,
         generate_embeddings=generate_embeddings,
     )
-    retired = await _retire_passages_from(
+    retired = await _retire_passages_except(
         entity_manager,
         source_id=source_id,
-        first_stale_index=result.passages,
+        kept_indices=frozenset(
+            index
+            for passage in result.created_passages
+            if isinstance(index := passage.metadata.get("passage_index"), int)
+        ),
     )
     if retired:
         log.info(
@@ -363,36 +398,45 @@ async def retire_entity_passages(
     the text of something the caller deleted, which is the one outcome a delete
     must not produce.
     """
-    return await _retire_passages_from(
+    return await _retire_passages_except(
         entity_manager,
         source_id=source_id,
-        first_stale_index=0,
+        kept_indices=frozenset(),
     )
 
 
-async def _retire_passages_from(
+async def _retire_passages_except(
     entity_manager: Any,
     *,
     source_id: str,
-    first_stale_index: int,
+    kept_indices: frozenset[int],
 ) -> int:
-    """Delete passages at or past an index, stopping at the first absence.
+    """Delete every span of one memory that the current projection did not write.
 
-    The projection always writes a contiguous run from zero, so the first index
-    with no row marks the end of any previous run.
+    Keyed on the indices actually written rather than on how many were written.
+    The oversize-leaf branch can skip an index, so a projection that wrote
+    ``{0, 1, 3, 4}`` is not the same as one that wrote four contiguous spans, and
+    counting would delete index 4, the span that had just been minted.
+
+    The walk stops once it is past every kept index and has found an absence,
+    which is where any previous run must have ended.
     """
     delete = getattr(entity_manager, "delete", None)
     if not callable(delete):
         return 0
+    highest_kept = max(kept_indices, default=-1)
     retired = 0
-    for index in range(first_stale_index, MAX_PASSAGES_PER_SOURCE):
+    for index in range(MAX_PASSAGES_PER_SOURCE):
+        if index in kept_indices:
+            continue
         try:
             removed = await delete(passage_entity_id(source_id, index))
         except Exception:
             break
-        if not removed:
+        if removed:
+            retired += 1
+        elif index > highest_kept:
             break
-        retired += 1
     return retired
 
 
@@ -449,6 +493,50 @@ async def _create_relationships(
     return tuple(relationships[:created])
 
 
+def _plan_slices(content: str, source: Entity) -> tuple[list[Slice], str]:
+    """Choose the cut plan for one body: the agent's if it has one, else the cutter's.
+
+    A stored plan is re-validated against the body it is about to cut. The write
+    path rejects a plan that does not tile its content, so disagreement here means
+    the body was rewritten by a path that did not refresh the plan. Refusing to
+    project would leave the memory fat with the previous revision's spans still
+    beside it, so the mechanical cutter takes over and says so.
+    """
+    spans = agent_spans_from_metadata(source.metadata)
+    if not spans:
+        mechanical, _ = slice_prose(content)
+        return mechanical, PASSAGE_PLAN_MECHANICAL
+    try:
+        validate_agent_spans(content, spans)
+    except MemoryStructureError as exc:
+        log.warning(
+            "passage_projection_agent_plan_stale",
+            source_id=source.id,
+            spans=len(spans),
+            content_chars=len(content),
+            reason=str(exc),
+        )
+        mechanical, _ = slice_prose(content)
+        return mechanical, PASSAGE_PLAN_MECHANICAL
+    return [_slice_from_span(content, span) for span in spans], PASSAGE_PLAN_AGENT
+
+
+def _slice_from_span(content: str, span: AgentSpan) -> Slice:
+    """Render one agent span in the shape the passage builder already consumes.
+
+    The label lands in the breadcrumb slot, which is where the mechanical cutter
+    puts the heading trail: it is part of the passage body, so it is indexed for
+    lexical search and read by the reader exactly like a slice header.
+    """
+    return Slice(
+        line_indices=[],
+        content=span.slice_of(content),
+        cut_depth=0,
+        breadcrumb=span.label or "",
+        reason="agent-span",
+    )
+
+
 def _passage_header(source: Entity, index: int, total: int) -> str:
     """Name the parent on every passage so a span read alone still locates itself."""
     return f"{source.name} · passage {index}/{total}"
@@ -480,6 +568,9 @@ __all__ = [
     "MAX_PASSAGE_CONTENT_CHARS",
     "PASSAGE_COVERS_PARENT_KEY",
     "PASSAGE_MIN_SOURCE_CHARS",
+    "PASSAGE_PLAN_AGENT",
+    "PASSAGE_PLAN_KEY",
+    "PASSAGE_PLAN_MECHANICAL",
     "PASSAGE_PROJECTION_KIND",
     "PASSAGE_SOURCE_TYPES",
     "PassageProjectionResult",

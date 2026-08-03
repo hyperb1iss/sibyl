@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager, contextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
@@ -12,6 +13,7 @@ from pydantic import ValidationError
 
 from sibyl.api.routes.entities import (
     _entity_from_bulk_create,
+    _reject_unsupported_bulk_entry,
     create_entities_bulk,
     create_entity,
     delete_entity,
@@ -1792,3 +1794,445 @@ def test_project_screen_gates_a_note_carrying_only_a_project() -> None:
 
     assert not _entity_visible_to_projects(note, set())
     assert _entity_visible_to_projects(note, {"proj-secret"})
+
+
+# =============================================================================
+# Agent-authored structure
+# =============================================================================
+
+
+_SPANNED_BODY = "alpha beta gamma delta epsilon zeta eta theta iota kappa"
+
+
+def _spanned_memory_entity(*, owner: str, content: str = _SPANNED_BODY) -> SimpleNamespace:
+    return SimpleNamespace(
+        id="decision_spanned",
+        entity_type=EntityType.DECISION,
+        name="Spanned decision",
+        description=content,
+        content=content,
+        category=None,
+        languages=[],
+        tags=[],
+        metadata={
+            "memory_scope": "private",
+            "principal_id": owner,
+            "agent_spans": [{"start": 0, "end": 20}, {"start": 20, "end": len(content)}],
+        },
+        source_file=None,
+        created_at=None,
+        updated_at=None,
+    )
+
+
+@contextmanager
+def _update_patches(runtime: SimpleNamespace, *, passages: int = 0):
+    """Enter the auth and runtime patches an update route call needs.
+
+    Yields the reprojection mock, because the re-cut firing on the request path
+    is itself part of the contract under test.
+    """
+    reproject = AsyncMock(return_value=SimpleNamespace(errors=(), passages=passages))
+    with ExitStack() as stack:
+        for context in (
+            patch("sibyl.locks.entity_lock", _locked_entity),
+            patch(
+                "sibyl.api.routes.entities.get_entity_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            patch("sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()),
+            patch(
+                "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+                AsyncMock(return_value=set()),
+            ),
+            patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+            patch("sibyl.api.routes.entities.reproject_entity_passages", reproject),
+        ):
+            stack.enter_context(context)
+        yield reproject
+
+
+@pytest.mark.asyncio
+async def test_create_entity_forwards_agent_structure_to_the_writer() -> None:
+    org = _org()
+    ctx = _ctx()
+    entity = EntityCreate(
+        name="Structured memory",
+        content=_SPANNED_BODY,
+        entity_type=EntityType.EPISODE,
+        spans=[{"start": 0, "end": 20}, {"start": 20, "end": len(_SPANNED_BODY)}],
+        probes=["what did we learn"],
+    )
+    add_result = SimpleNamespace(
+        success=True,
+        id="episode_new",
+        message="ok",
+        probe_rehearsal={"total": 1, "retrievable": 1, "probes": []},
+    )
+
+    with (
+        patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)) as add_mock,
+        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=SimpleNamespace(entity_manager=SimpleNamespace())),
+        ),
+    ):
+        response = await create_entity(
+            request=_request(),
+            entity=entity,
+            org=org,
+            ctx=ctx,
+            content_session=None,
+            sync=False,
+        )
+
+    kwargs = add_mock.await_args.kwargs
+    assert kwargs["spans"] == [{"start": 0, "end": 20}, {"start": 20, "end": len(_SPANNED_BODY)}]
+    assert kwargs["probes"] == ["what did we learn"]
+    # Probes must force the synchronous shape, or the receipt they asked for is
+    # dropped in favour of a pending response.
+    assert kwargs["sync"] is True
+    assert response.probe_rehearsal == {"total": 1, "retrievable": 1, "probes": []}
+
+
+@pytest.mark.asyncio
+async def test_create_entity_refuses_a_plan_that_does_not_tile_the_body() -> None:
+    org = _org()
+    ctx = _ctx()
+    entity = EntityCreate(
+        name="Structured memory",
+        content=_SPANNED_BODY,
+        entity_type=EntityType.EPISODE,
+        spans=[{"start": 0, "end": 10}, {"start": 12, "end": len(_SPANNED_BODY)}],
+    )
+
+    with (
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=SimpleNamespace(entity_manager=SimpleNamespace())),
+        ),
+        pytest.raises(HTTPException) as excinfo,
+    ):
+        await create_entity(
+            request=_request(),
+            entity=entity,
+            org=org,
+            ctx=ctx,
+            content_session=None,
+            sync=True,
+        )
+
+    assert excinfo.value.status_code == 422
+    # The message reaches the caller intact: an agent correcting its own offsets
+    # cannot act on a generic rejection.
+    assert "must leave no gap" in excinfo.value.detail["message"]
+    assert excinfo.value.detail["details"]["field"] == "spans"
+
+
+@pytest.mark.asyncio
+async def test_update_entity_nulls_a_withdrawn_plan_because_merge_cannot_delete() -> None:
+    """Omitting the key would silently preserve the stale plan.
+
+    The entity update lands as `UPDATE entity MERGE $patch`, so a key left out of
+    the patch keeps whatever the row already held. A dict-backed fake would let an
+    omission look like a deletion, which is why this asserts the written value.
+    """
+    org = _org()
+    ctx = _ctx()
+    owner = str(ctx.user.id)
+    existing = _spanned_memory_entity(owner=owner)
+    updated = _spanned_memory_entity(owner=owner, content="a completely rewritten body")
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing),
+            update=AsyncMock(return_value=updated),
+        ),
+        relationship_manager=SimpleNamespace(),
+    )
+
+    with _update_patches(runtime) as reproject:
+        await update_entity(
+            entity_id="decision_spanned",
+            update=EntityUpdate(content="a completely rewritten body"),
+            request=_request(),
+            org=org,
+            ctx=ctx,
+            content_session=None,
+        )
+
+    written = runtime.entity_manager.update.await_args.args[1]["metadata"]
+    assert "agent_spans" in written
+    assert written["agent_spans"] is None
+    assert written["memory_scope"] == "private"
+    # The re-cut has to happen on the request path: the only other caller of the
+    # reprojection is an arq job nothing enqueues.
+    reproject.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_entity_withdraws_a_receipt_about_a_body_that_is_gone() -> None:
+    """A pass recorded against the old text would read as a pass against the new."""
+    org = _org()
+    ctx = _ctx()
+    owner = str(ctx.user.id)
+    existing = _spanned_memory_entity(owner=owner)
+    existing.metadata = {
+        "memory_scope": "private",
+        "principal_id": owner,
+        "memory_probes": ["why did it break"],
+        "probe_rehearsal": {"retrievable": 1, "total": 1},
+        "probe_last_replay": {"retrievable": 1, "total": 1},
+    }
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing),
+            update=AsyncMock(return_value=existing),
+        ),
+        relationship_manager=SimpleNamespace(),
+    )
+
+    with _update_patches(runtime):
+        await update_entity(
+            entity_id="decision_spanned",
+            update=EntityUpdate(content="a rewritten body with different words"),
+            request=_request(),
+            org=org,
+            ctx=ctx,
+            content_session=None,
+        )
+
+    written = runtime.entity_manager.update.await_args.args[1]["metadata"]
+    # Explicit nulls rather than omissions: the update MERGEs, so a key left out
+    # of the patch keeps the verdict it had about a body that no longer exists.
+    assert written["probe_rehearsal"] is None
+    assert written["probe_last_replay"] is None
+    # The questions still stand; only the verdict about the old body is dropped.
+    assert written["memory_probes"] == ["why did it break"]
+
+
+@pytest.mark.asyncio
+async def test_update_entity_stores_content_stripped_like_the_writer_does() -> None:
+    """Validation strips, so storing the padded body would abandon the plan."""
+    org = _org()
+    ctx = _ctx()
+    owner = str(ctx.user.id)
+    existing = _spanned_memory_entity(owner=owner)
+    body = "one two three four five six seven"
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing),
+            update=AsyncMock(return_value=_spanned_memory_entity(owner=owner, content=body)),
+        ),
+        relationship_manager=SimpleNamespace(),
+    )
+
+    with _update_patches(runtime, passages=2):
+        await update_entity(
+            entity_id="decision_spanned",
+            update=EntityUpdate(
+                content=f"\n\n  {body}   \n",
+                spans=[{"start": 0, "end": 13}, {"start": 13, "end": len(body)}],
+            ),
+            request=_request(),
+            org=org,
+            ctx=ctx,
+            content_session=None,
+        )
+
+    updates = runtime.entity_manager.update.await_args.args[1]
+    assert updates["content"] == body
+    assert updates["metadata"]["agent_spans"] == [
+        {"start": 0, "end": 13},
+        {"start": 13, "end": len(body)},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_update_entity_revalidates_fresh_spans_against_the_new_body() -> None:
+    org = _org()
+    ctx = _ctx()
+    owner = str(ctx.user.id)
+    existing = _spanned_memory_entity(owner=owner)
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing),
+            update=AsyncMock(return_value=existing),
+        ),
+        relationship_manager=SimpleNamespace(),
+    )
+
+    with _update_patches(runtime), pytest.raises(HTTPException) as excinfo:
+        await update_entity(
+            entity_id="decision_spanned",
+            update=EntityUpdate(
+                content="short body",
+                spans=[{"start": 0, "end": 20}, {"start": 20, "end": len(_SPANNED_BODY)}],
+            ),
+            request=_request(),
+            org=org,
+            ctx=ctx,
+            content_session=None,
+        )
+
+    assert excinfo.value.status_code == 422
+    assert "out of bounds" in excinfo.value.detail["message"]
+    runtime.entity_manager.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_entity_stamps_a_fresh_plan_for_the_new_body() -> None:
+    org = _org()
+    ctx = _ctx()
+    owner = str(ctx.user.id)
+    existing = _spanned_memory_entity(owner=owner)
+    new_body = "one two three four five six seven"
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing),
+            update=AsyncMock(return_value=_spanned_memory_entity(owner=owner, content=new_body)),
+        ),
+        relationship_manager=SimpleNamespace(),
+    )
+
+    with _update_patches(runtime, passages=2):
+        await update_entity(
+            entity_id="decision_spanned",
+            update=EntityUpdate(
+                content=new_body,
+                spans=[{"start": 0, "end": 13}, {"start": 13, "end": len(new_body)}],
+            ),
+            request=_request(),
+            org=org,
+            ctx=ctx,
+            content_session=None,
+        )
+
+    written = runtime.entity_manager.update.await_args.args[1]["metadata"]
+    assert written["agent_spans"] == [
+        {"start": 0, "end": 13},
+        {"start": 13, "end": len(new_body)},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_update_entity_keeps_an_atomic_claim_across_a_content_edit() -> None:
+    """Offsets belong to a body; the claim that a body is one unit does not."""
+    org = _org()
+    ctx = _ctx()
+    owner = str(ctx.user.id)
+    existing = _spanned_memory_entity(owner=owner)
+    existing.metadata = {
+        "memory_scope": "private",
+        "principal_id": owner,
+        "agent_atomic": True,
+    }
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing),
+            update=AsyncMock(return_value=existing),
+        ),
+        relationship_manager=SimpleNamespace(),
+    )
+
+    with _update_patches(runtime):
+        await update_entity(
+            entity_id="decision_spanned",
+            update=EntityUpdate(content="a rewritten but still atomic body"),
+            request=_request(),
+            org=org,
+            ctx=ctx,
+            content_session=None,
+        )
+
+    written = runtime.entity_manager.update.await_args.args[1]["metadata"]
+    assert written["agent_atomic"] is True
+
+
+@pytest.mark.asyncio
+async def test_update_entity_cannot_have_a_plan_planted_through_metadata() -> None:
+    org = _org()
+    ctx = _ctx()
+    owner = str(ctx.user.id)
+    existing = _private_memory_entity(owner=owner)
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing),
+            update=AsyncMock(return_value=existing),
+        ),
+        relationship_manager=SimpleNamespace(),
+    )
+
+    with _update_patches(runtime):
+        await update_entity(
+            entity_id="decision_private",
+            update=EntityUpdate(
+                metadata={
+                    "agent_spans": [{"start": 0, "end": 1}],
+                    "probe_rehearsal": {"retrievable": 99},
+                    "note": "kept",
+                }
+            ),
+            request=_request(),
+            org=org,
+            ctx=ctx,
+            content_session=None,
+        )
+
+    written = runtime.entity_manager.update.await_args.args[1]["metadata"]
+    assert written["note"] == "kept"
+    assert "probe_rehearsal" not in written
+
+
+@pytest.mark.parametrize(
+    ("field", "extra"),
+    [
+        ("spans", {"spans": [{"start": 0, "end": 20}, {"start": 20, "end": len(_SPANNED_BODY)}]}),
+        ("atomic", {"atomic": True}),
+        ("probes", {"probes": ["why"]}),
+    ],
+)
+def test_bulk_create_refuses_declared_structure_it_cannot_honor(
+    field: str, extra: dict[str, Any]
+) -> None:
+    """The batch path mints no passages, so accepting a plan would store a no-op."""
+    with pytest.raises(HTTPException) as excinfo:
+        _reject_unsupported_bulk_entry(
+            EntityCreate(
+                name="Batch memory",
+                content=_SPANNED_BODY,
+                entity_type=EntityType.EPISODE,
+                skip_conflicts=True,
+                **extra,
+            )
+        )
+
+    assert excinfo.value.status_code == 422
+    assert field in excinfo.value.detail["message"]
+    assert excinfo.value.detail["details"]["field"] == field
+
+
+def test_bulk_create_cannot_have_structure_planted_through_metadata() -> None:
+    built = _entity_from_bulk_create(
+        EntityCreate(
+            name="Batch memory",
+            content=_SPANNED_BODY,
+            entity_type=EntityType.EPISODE,
+            skip_conflicts=True,
+            metadata={
+                "agent_spans": [{"start": 0, "end": 1}],
+                "agent_atomic": True,
+                "memory_probes": ["forged"],
+                "probe_rehearsal": {"retrievable": 99},
+                "note": "kept",
+            },
+        ),
+        group_id="org-1",
+        now=datetime.now(UTC),
+    )
+
+    assert built.metadata["note"] == "kept"
+    assert "agent_spans" not in built.metadata
+    assert "agent_atomic" not in built.metadata
+    assert "memory_probes" not in built.metadata
+    assert "probe_rehearsal" not in built.metadata

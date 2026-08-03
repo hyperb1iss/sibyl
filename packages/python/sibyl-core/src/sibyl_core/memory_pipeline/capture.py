@@ -8,6 +8,7 @@ from typing import Any
 
 from sibyl_core.auth.memory_policy import stamp_memory_scope_metadata
 from sibyl_core.memory_pipeline.quality import normalize_memory_quality_metadata
+from sibyl_core.memory_pipeline.structure import MemoryStructure, build_memory_structure
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +32,33 @@ class MemoryCaptureRequest:
     diary: bool = False
     agent_id: str | None = None
     project_id: str | None = None
+    # Structure the writing agent supplies for its own memory. Spans are
+    # ``[start, end)`` offsets into ``stored_content`` and never replacement
+    # text; ``atomic`` refuses cutting outright; probes are the questions this
+    # memory has to answer, rehearsed against live retrieval at write time.
+    spans: Sequence[Mapping[str, Any]] | None = None
+    atomic: bool = False
+    probes: Sequence[str] | None = None
+
+    @property
+    def stored_content(self) -> str:
+        """The body the graph row will hold, and the string spans address.
+
+        The graph write strips the content, so offsets computed against an
+        unstripped string would land one place at validation and another at
+        projection. Validating against this property keeps both readings the
+        same one.
+        """
+        return self.content.strip()
+
+    def structure(self) -> MemoryStructure:
+        """Validate the declared structure against the body that will be stored."""
+        return build_memory_structure(
+            self.stored_content,
+            spans=self.spans,
+            atomic=self.atomic,
+            probes=self.probes,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +97,11 @@ class MemoryCaptureService:
         self._create_graph_entity = create_graph_entity
 
     async def capture(self, request: MemoryCaptureRequest) -> MemoryCaptureResult:
+        # Before the raw write, not after. The raw capture lands first and the
+        # graph write validates the same plan again, so validating late would
+        # leave a verbatim record behind for a write that then fails, and the
+        # caller would retry into a duplicate.
+        request.structure()
         raw_memory = await self._remember_raw_memory(request)
         raw_memory_id = _optional_str(raw_memory.get("id"))
         raw_source_id = _optional_str(raw_memory.get("source_id"))
