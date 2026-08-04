@@ -30,6 +30,10 @@ from sibyl_core.projection.experience import (
     MAX_TYPED_ENTITY_CONTENT_CHARS,
 )
 from sibyl_core.projection.slicing import slice_body
+from sibyl_core.services.graph import (
+    MAX_ENTITY_CONTENT_CHARS,
+    _enforce_entity_content_limit,
+)
 
 
 def _experience(*, outcome: str = "success") -> OperationalExperience:
@@ -374,8 +378,14 @@ def test_projection_is_deterministic_and_manifest_is_self_describing() -> None:
     )
     payload = json.loads(manifest_entity.content)
     assert payload["content_hash"] == first.manifest.content_hash
-    assert set(payload["entity_ids"]) == {entity.id for entity in first.entities}
-    assert set(payload["relationship_ids"]) == {
+    assert payload["entity_count"] == len(first.entities)
+    assert payload["relationship_count"] == len(first.relationships)
+    # The inventory itself lives in metadata, which is where every consumer
+    # reads it; the body carries counts so it cannot grow without bound.
+    assert set(manifest_entity.metadata["expected_entity_ids"]) == {
+        entity.id for entity in first.entities
+    }
+    assert set(manifest_entity.metadata["expected_relationship_ids"]) == {
         relationship.id for relationship in first.relationships
     }
 
@@ -443,6 +453,51 @@ def test_projection_rejects_typed_content_overflow() -> None:
                 }
             )
         )
+
+
+def test_large_capture_manifest_body_stays_inside_the_entity_content_cap() -> None:
+    """A big capture must not project a manifest the graph will refuse.
+
+    The manifest body used to inline the projection's whole id inventory, so a
+    capture large enough to project a few thousand records produced a row past
+    the 50,000-char entity content limit and 422'd on write. The inventory
+    scales with record count, and shrinking the per-observation chunk size only
+    adds records, so no caller setting could bound it.
+    """
+    observations = tuple(
+        OperationalObservation(
+            id=f"state-{index}",
+            ordinal=index,
+            uri=f"https://example.test/incidents/INC{index:04d}",
+            action=f"click('INC{index:04d}')",
+            reasoning="Open the incident.",
+            evidence=(
+                OperationalEvidencePart(
+                    id=f"tree-{index}",
+                    content="\n".join(
+                        f"Row: INC{index:04d} field {field} value {field * 3}"
+                        for field in range(40)
+                    ),
+                ),
+            ),
+        )
+        for index in range(360)
+    )
+    projection = project_operational_experience(
+        _experience().model_copy(update={"observations": observations})
+    )
+    manifest_entity = next(
+        entity
+        for entity in projection.entities
+        if entity.id == projection.manifest.manifest_entity_id
+    )
+
+    # Teeth: the retired shape would have been refused on this same capture.
+    retired_body = json.dumps(projection.manifest.model_dump(mode="json"), sort_keys=True)
+    assert len(retired_body) > MAX_ENTITY_CONTENT_CHARS
+
+    assert len(manifest_entity.content or "") <= MAX_ENTITY_CONTENT_CHARS
+    _enforce_entity_content_limit(projection.entities)
 
 
 def test_operational_experience_rejects_unbounded_metadata() -> None:
