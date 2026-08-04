@@ -1506,6 +1506,53 @@ def test_sibyl_memory_oversized_state_parts_repeat_identity() -> None:
     }
 
 
+def test_sibyl_memory_bodies_respect_the_declared_content_max_chars() -> None:
+    """Every body the adapter authors stays inside the cap it declares.
+
+    The adapter threads one ``content_max_chars`` into three emission
+    surfaces, and each reaches the graph as an entity body: the session
+    payloads under both chunking modes, and the evidence parts of the
+    operational experience the server projects into sessions and passages.
+    A surface that skips the cap sends the server a body it will refuse,
+    and the refusal lands mid-ingest after earlier trajectories have
+    already spent embedding credits.
+    """
+    module = _load_memory_module()
+    trajectory = _trajectory("t1", tree="button " + ("Priority " * 400))
+    bodies: list[str] = []
+
+    for mode in ("state", "trajectory"):
+        payloads = module.build_entity_payloads_for_trajectory(
+            trajectory,
+            project_id="project_lme",
+            run_id="run_lme",
+            content_max_chars=TEST_CONTENT_MAX_CHARS,
+            chunking_mode=mode,
+            include_screenshot_refs=True,
+        )
+        assert len(payloads) > 1, mode
+        bodies.extend(str(payload["content"]) for payload in payloads)
+
+    experience = module.build_operational_experience_payload(
+        trajectory,
+        project_id="project_lme",
+        run_id="run_lme",
+        content_max_chars=TEST_CONTENT_MAX_CHARS,
+        include_screenshot_refs=True,
+    )["experience"]
+    evidence_bodies = [
+        str(part["content"])
+        for observation in experience["observations"]
+        for part in observation["evidence"]
+    ]
+    assert len(evidence_bodies) > len(experience["observations"])
+    bodies.extend(evidence_bodies)
+
+    oversized = [len(body) for body in bodies if len(body) > TEST_CONTENT_MAX_CHARS]
+    assert oversized == [], oversized
+    assert max(len(body) for body in bodies) > TEST_CONTENT_MAX_CHARS // 2
+
+
 def test_sibyl_memory_oversized_blocks_split_on_line_boundaries() -> None:
     module = _load_memory_module()
     header = "Trajectory: t1"

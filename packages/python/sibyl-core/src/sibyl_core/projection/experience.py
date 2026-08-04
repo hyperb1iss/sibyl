@@ -813,7 +813,7 @@ def project_operational_experience(
             id=manifest_id,
             entity_type=EntityType.ARTIFACT,
             name=f"Operational experience manifest {experience.source_id}",
-            content=json.dumps(manifest.model_dump(mode="json"), sort_keys=True),
+            content=_manifest_body(manifest),
             organization_id=organization_id,
             created_by=created_by,
             modified_by=created_by,
@@ -830,6 +830,33 @@ def project_operational_experience(
         entities=tuple(entities),
         relationships=tuple(relationships),
         manifest=manifest,
+    )
+
+
+def _manifest_body(manifest: OperationalExperienceManifest) -> str:
+    """Describe the manifest without inlining its id inventory.
+
+    The inventory grows with the projection, roughly 25 characters per id, so
+    dumping the whole model here put an unbounded body on a row that the
+    50,000-char entity content limit then refused: a 101-observation capture
+    projects past 7,000 ids. Shrinking the per-observation chunk size makes it
+    worse rather than better, because more chunks mean more ids, so no caller
+    setting can bound this.
+
+    ``expected_entity_ids`` and ``expected_relationship_ids`` in the row's
+    metadata remain the authoritative inventory, and every consumer already
+    reads them from there. The counts below are for humans reading a row.
+    """
+    return json.dumps(
+        {
+            "source_id": manifest.source_id,
+            "schema_version": manifest.schema_version,
+            "content_hash": manifest.content_hash,
+            "manifest_entity_id": manifest.manifest_entity_id,
+            "entity_count": len(manifest.entity_ids),
+            "relationship_count": len(manifest.relationship_ids),
+        },
+        sort_keys=True,
     )
 
 
