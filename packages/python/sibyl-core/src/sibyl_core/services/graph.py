@@ -2786,8 +2786,14 @@ async def _update_entity_embedding_if_current(
         return False
     rows = normalize_records(
         await client.execute_query(
+            # Addressed through a subquery because the UPDATE planner (unlike
+            # SELECT's) abandons idx_entity_uuid once the if-current guards are
+            # stacked on and iterates the whole table: 2.8s/statement at 43K
+            # rows vs 20ms addressed, and the backfill runs eight of these
+            # concurrently. The guards still evaluate atomically inside the
+            # UPDATE, so if-current semantics are unchanged.
             """
-            UPDATE entity SET
+            UPDATE (SELECT VALUE id FROM entity WHERE group_id = $group_id AND uuid = $uuid LIMIT 1) SET
                 name_embedding = $name_embedding,
                 attributes.embedding_metadata = $embedding_metadata,
                 attributes.updated_at = $updated_at,
