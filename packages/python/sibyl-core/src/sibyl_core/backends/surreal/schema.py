@@ -109,7 +109,7 @@ DEFINE FIELD IF NOT EXISTS name_embedding ON entity TYPE option<array<float, {EM
 
 DEFINE INDEX IF NOT EXISTS idx_entity_uuid ON entity FIELDS uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_entity_type ON entity FIELDS entity_type;
-DEFINE INDEX IF NOT EXISTS idx_entity_labels ON entity FIELDS labels;
+DEFINE INDEX IF NOT EXISTS idx_entity_labels ON entity FIELDS labels.*;
 DEFINE INDEX IF NOT EXISTS idx_entity_project ON entity FIELDS project_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_parent_task ON entity FIELDS parent_task_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_task ON entity FIELDS task_id;
@@ -528,6 +528,15 @@ DEFINE FIELD OVERWRITE retrieval_keys_normalized ON entity TYPE option<array<str
 DEFINE INDEX OVERWRITE idx_entity_retrieval_keys ON entity FIELDS retrieval_keys_normalized.*;
 """
 
+# Same element-vs-array distinction as idx_entity_retrieval_keys above: the
+# bare-array shape answers CONTAINS with a table scan and bare equality with
+# zero rows on SurrealDB 3.2.3. OVERWRITE converts the index every existing
+# namespace already has; CONCURRENTLY because every row carries labels, and a
+# single-transaction rebuild fails on RocksDB once the table is large.
+ENTITY_LABELS_ELEMENT_INDEX_DEFINITIONS = """
+DEFINE INDEX OVERWRITE idx_entity_labels ON entity FIELDS labels.* CONCURRENTLY;
+"""
+
 ENTITY_REQUIRED_FIELD_REPAIR_DEFINITIONS = f"""
 {ENTITY_REQUIRED_FIELD_OPTIONAL_DEFINITIONS}
 UPDATE entity SET revision = 1 WHERE revision = NONE OR revision < 1;
@@ -690,6 +699,13 @@ GRAPH_SCHEMA_MIGRATIONS = (
         version=18,
         name="entity_retrieval_keys_column",
         statements=tuple(split_statements(ENTITY_RETRIEVAL_KEYS_COLUMN_DEFINITIONS)),
+    ),
+    # Converts the label index to element form on namespaces that bootstrapped
+    # before the FIELDS labels.* fix; label-filtered search reads this index.
+    SchemaMigration(
+        version=19,
+        name="entity_labels_element_index",
+        statements=tuple(split_statements(ENTITY_LABELS_ELEMENT_INDEX_DEFINITIONS)),
     ),
 )
 
@@ -1075,6 +1091,7 @@ __all__ = [
     "EMBEDDING_DIM",
     "EMBEDDING_VECTOR_FIELDS",
     "ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS",
+    "ENTITY_LABELS_ELEMENT_INDEX_DEFINITIONS",
     "ENTITY_MEMORY_SCOPE_COLUMN_DEFINITIONS",
     "ENTITY_MISLED_USAGE_SIGNAL_DEFINITIONS",
     "ENTITY_REQUIRED_FIELD_OPTIONAL_DEFINITIONS",
