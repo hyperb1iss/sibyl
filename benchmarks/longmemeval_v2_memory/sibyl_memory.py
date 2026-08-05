@@ -146,6 +146,7 @@ DEFAULT_NEIGHBOR_STITCH_ITEMS = 2
 DEFAULT_NEIGHBOR_STITCH_SPAN = 1
 DEFAULT_STATE_PART_COMPLETION_ITEMS = 0
 DEFAULT_STATE_PART_REFINEMENT = False
+DEFAULT_NEIGHBOR_SUPPORT_EXEMPT = False
 DEFAULT_CONTEXT_EXPANSION_MAX_RATIO = 0.0
 CONTEXT_TOKENIZER_MODEL = "Qwen/Qwen3.5-9B"
 STATE_PART_REFINEMENT_MIN_SCORE_GAIN = 0.05
@@ -181,6 +182,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "neighbor_stitch_span",
         "state_part_completion_items",
         "state_part_refinement",
+        "neighbor_support_exempt",
         "context_expansion_max_ratio",
         "evidence_types",
         "evidence_char_budget",
@@ -684,6 +686,7 @@ def compile_operational_evidence_set(
     mode: str = DEFAULT_EVIDENCE_COMPOSITION_MODE,
     typed_reservation_items: int | None = None,
     char_budget: int | None = None,
+    neighbor_support_exempt: bool = DEFAULT_NEIGHBOR_SUPPORT_EXEMPT,
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
     """Compose the reader's pack from the typed and raw evidence pools.
 
@@ -786,7 +789,11 @@ def compile_operational_evidence_set(
             max(1, min(requested_reservation, max_items - 1)),
         )
         raw_budget = min(len(ranked_raw), max_items - typed_reservation)
-        selected_raw = _select_role_complete_raw_evidence(ranked_raw, budget=raw_budget)
+        selected_raw = _select_role_complete_raw_evidence(
+            ranked_raw,
+            budget=raw_budget,
+            neighbor_support_exempt=neighbor_support_exempt,
+        )
         selected = [*ranked_typed[:typed_reservation], *selected_raw]
         if len(selected) < max_items:
             selected.extend(
@@ -802,7 +809,11 @@ def compile_operational_evidence_set(
             budget=char_budget,
             spent=0,
         )
-        ordered_raw = _select_role_complete_raw_evidence(ranked_raw, budget=len(ranked_raw))
+        ordered_raw = _select_role_complete_raw_evidence(
+            ranked_raw,
+            budget=len(ranked_raw),
+            neighbor_support_exempt=neighbor_support_exempt,
+        )
         selected_raw, spent = _admit_within_char_budget(
             ordered_raw,
             budget=char_budget,
@@ -839,6 +850,7 @@ def compile_operational_evidence_set(
         ),
         "selected_typed_count": selected_typed,
         "selected_raw_count": len(selected) - selected_typed,
+        "neighbor_support_exempt": neighbor_support_exempt,
         "budget_mode": "items" if char_budget is None else "characters",
         "char_budget": char_budget,
         "selected_chars": selected_chars,
@@ -999,6 +1011,7 @@ def _select_role_complete_raw_evidence(
     candidates: list[dict[str, object]],
     *,
     budget: int,
+    neighbor_support_exempt: bool = DEFAULT_NEIGHBOR_SUPPORT_EXEMPT,
 ) -> list[dict[str, object]]:
     if budget <= 0:
         return []
@@ -1013,7 +1026,11 @@ def _select_role_complete_raw_evidence(
         for candidate in candidates
         if _is_support_candidate(candidate)
         and (parent_rank := _support_parent_search_rank(candidate)) in primary_by_search_rank
-        and _support_adds_query_coverage(candidate, primary_by_search_rank[parent_rank])
+        and _support_adds_query_coverage(
+            candidate,
+            primary_by_search_rank[parent_rank],
+            neighbor_exempt=neighbor_support_exempt,
+        )
     ]
     selected_links = _select_diverse_support_links(linked_support, limit=budget // 2)
     selected_support = [support for support, _parent in selected_links]
@@ -1053,8 +1070,20 @@ def _select_role_complete_raw_evidence(
 def _support_adds_query_coverage(
     support: dict[str, object],
     parent: dict[str, object],
+    *,
+    neighbor_exempt: bool,
 ) -> bool:
     if _stripped_str(support.get("_selection_origin")) == "state_part":
+        return True
+    # The overlap comparison asks a stitched neighbor to beat its parent on
+    # QUERY-term coverage, but the neighbor role exists for ANSWER adjacency
+    # and the answer is rarely phrased in the query, so the strict gate
+    # rejects exactly the neighbors that carry the answer (20/21 dropped
+    # stitched chunks in the web stage-1 cohort held the gold state's
+    # trajectory; 8 held the gold state itself). Exemption is arm-selectable
+    # because surviving neighbors displace tail seeds, a trade that has to be
+    # measured, not assumed.
+    if neighbor_exempt:
         return True
     return _numeric_score(support.get("_evidence_selection_overlap")) > _numeric_score(
         parent.get("_evidence_selection_overlap")
@@ -3076,6 +3105,11 @@ class SibylLiveApiMemory(Memory):
             "state_part_refinement",
             DEFAULT_STATE_PART_REFINEMENT,
         )
+        self.neighbor_support_exempt = _param_bool(
+            memory_params,
+            "neighbor_support_exempt",
+            DEFAULT_NEIGHBOR_SUPPORT_EXEMPT,
+        )
         self.evidence_types = _param_evidence_types(
             memory_params,
             "evidence_types",
@@ -4170,6 +4204,11 @@ class SibylLiveApiMemory(Memory):
             ),
             typed_reservation_items=getattr(self, "typed_reservation_items", None),
             char_budget=char_budget,
+            neighbor_support_exempt=getattr(
+                self,
+                "neighbor_support_exempt",
+                DEFAULT_NEIGHBOR_SUPPORT_EXEMPT,
+            ),
         )
         rendered_item_ceiling = context_pack_item_ceiling(
             max_items=self.max_context_items,
