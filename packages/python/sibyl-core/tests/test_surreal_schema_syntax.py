@@ -1087,6 +1087,32 @@ def test_graph_retrieval_key_columns_are_versioned_and_indexed() -> None:
     )
 
 
+def test_graph_label_index_is_element_indexed_and_versioned() -> None:
+    """Label-filtered search reads idx_entity_labels, so its shape is the contract.
+
+    On SurrealDB 3.2.3 an index on the bare array field answers CONTAINS with a
+    full table scan and answers a bare equality with zero rows unless the WHERE
+    clause happens to carry a second predicate. Only the element form
+    (FIELDS labels.*) makes the filter index-served and correct on its own, and
+    the migration must OVERWRITE because every pre-v19 namespace already holds
+    the bare-array index under the same name.
+    """
+    migration = next(
+        item for item in GRAPH_SCHEMA_MIGRATIONS if item.name == "entity_labels_element_index"
+    )
+    migration_sql = "\n".join(migration.statements)
+
+    assert GRAPH_SCHEMA_CURRENT_VERSION >= 19
+    assert migration.version == 19
+    assert (
+        "DEFINE INDEX OVERWRITE idx_entity_labels ON entity FIELDS labels.* CONCURRENTLY"
+        in migration_sql
+    )
+    assert "DEFINE INDEX IF NOT EXISTS idx_entity_labels ON entity FIELDS labels.*" in (
+        NODE_DEFINITIONS
+    )
+
+
 def test_graph_schema_current_version_matches_latest_migration() -> None:
     latest_migration_version = max(migration.version for migration in GRAPH_SCHEMA_MIGRATIONS)
 

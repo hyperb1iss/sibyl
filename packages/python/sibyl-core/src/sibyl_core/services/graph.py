@@ -279,9 +279,15 @@ INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
 """
 _RELATIONSHIP_BULK_UPSERT_QUERY = """
 BEGIN TRANSACTION;
-DELETE FROM relates_to
-WHERE uuid IN $uuids
-  AND (in != $sources[uuid] OR out != $targets[uuid]);
+-- The planner never serves `uuid IN $list` from idx_relates_uuid (TableScan
+-- for every statement type, seconds per capture batch once the table is
+-- large), so the endpoint-move cleanup iterates the batch and addresses each
+-- row through the unique index instead. The endpoint guard stays on the
+-- DELETE itself so it evaluates atomically on the addressed record.
+FOR $edge IN $edges {
+    DELETE (SELECT VALUE id FROM relates_to WHERE uuid = $edge.uuid LIMIT 1)
+    WHERE in != $edge.src OR out != $edge.tgt;
+};
 INSERT RELATION INTO relates_to $rows ON DUPLICATE KEY UPDATE
     name = $input.name,
     fact = $input.fact,
@@ -489,16 +495,28 @@ class EntityManager:
             return []
         rows = normalize_records(
             await self._client.execute_query(
+                # `uuid IN $list` is never index-served, and here the scan
+                # decodes every full row (contents plus embeddings), so each
+                # uuid gets its own indexed lookup. The closure body may
+                # reference nothing but its own argument: any other binding
+                # silently evaluates to nothing on at least one engine, so the
+                # group guard is applied to the returned rows instead (uuid is
+                # unique table-wide). A missing uuid yields a NONE entry,
+                # which normalize_records drops.
                 """
-                SELECT *
-                FROM entity
-                WHERE group_id = $group_id AND uuid IN $uuids;
+                RETURN $uuids.map(|$u|
+                    (SELECT * FROM entity WHERE uuid = $u LIMIT 1)[0]
+                );
                 """,
-                group_id=self._group_id,
                 uuids=ordered_ids,
             )
         )
-        entities_by_id = {entity.id: entity for entity in (_entity_from_row(row) for row in rows)}
+        entities_by_id = {
+            entity.id: entity
+            for entity in (
+                _entity_from_row(row) for row in rows if row.get("group_id") == self._group_id
+            )
+        }
         return [
             entities_by_id[entity_id] for entity_id in ordered_ids if entity_id in entities_by_id
         ]
@@ -1474,14 +1492,23 @@ class RelationshipManager:
             return 0
         rows = await _execute_graph_transaction(
             self._client,
+            # `uuid IN $list` is never index-served, so the targets resolve
+            # through per-uuid indexed lookups first and the DELETE addresses
+            # records directly; RETURN BEFORE still yields the deleted rows.
+            # The closures reference nothing but their own argument (any other
+            # binding silently evaluates to nothing on at least one engine),
+            # so the group guard lives on the DELETE, where it still evaluates
+            # per addressed record.
             """
             BEGIN TRANSACTION;
-            DELETE FROM relates_to
-            WHERE group_id = $group_id AND uuid IN $uuids
-            RETURN BEFORE;
-            DELETE FROM mentions
-            WHERE group_id = $group_id AND uuid IN $uuids
-            RETURN BEFORE;
+            LET $edge_targets = $uuids.map(|$u|
+                (SELECT VALUE id FROM relates_to WHERE uuid = $u LIMIT 1)[0]);
+            DELETE array::filter($edge_targets, |$t| $t != NONE)
+                WHERE group_id = $group_id RETURN BEFORE;
+            LET $mention_targets = $uuids.map(|$u|
+                (SELECT VALUE id FROM mentions WHERE uuid = $u LIMIT 1)[0]);
+            DELETE array::filter($mention_targets, |$t| $t != NONE)
+                WHERE group_id = $group_id RETURN BEFORE;
             COMMIT TRANSACTION;
             """,
             group_id=self._group_id,
@@ -3169,12 +3196,19 @@ async def _record_ids(
         return {}
     rows = normalize_records(
         await client.execute_query(
+            # `uuid IN $list` is never index-served (a whole-table scan per
+            # capture batch), so each uuid gets its own indexed lookup. The
+            # closure body may reference nothing but its own argument: any
+            # other binding silently evaluates to nothing on at least one
+            # engine, so the group guard is applied to the returned rows
+            # instead (uuid is unique table-wide). A missing uuid yields a
+            # NONE entry, which normalize_records drops.
             """
-            SELECT uuid, id AS record_id
-            FROM entity
-            WHERE group_id = $group_id AND uuid IN $uuids;
+            RETURN $uuids.map(|$u|
+                (SELECT uuid, group_id, id AS record_id FROM entity
+                 WHERE uuid = $u LIMIT 1)[0]
+            );
             """,
-            group_id=group_id,
             uuids=unique,
         )
     )
@@ -3182,7 +3216,7 @@ async def _record_ids(
     for row in rows:
         uuid = row.get("uuid")
         record_id = row.get("record_id")
-        if isinstance(uuid, str) and record_id is not None:
+        if isinstance(uuid, str) and record_id is not None and row.get("group_id") == group_id:
             resolved[uuid] = record_id
     return resolved
 
@@ -3218,16 +3252,12 @@ async def _replace_relationships_bulk(
     if not rows:
         return []
 
-    uuids = [str(row["uuid"]) for row in rows]
-    sources = {str(row["uuid"]): row["in"] for row in rows}
-    targets = {str(row["uuid"]): row["out"] for row in rows}
+    edges = [{"uuid": str(row["uuid"]), "src": row["in"], "tgt": row["out"]} for row in rows]
     try:
         await client.execute_query(
             _RELATIONSHIP_BULK_UPSERT_QUERY,
             rows=rows,
-            uuids=uuids,
-            sources=sources,
-            targets=targets,
+            edges=edges,
         )
     except Exception as exc:
         if not _is_transient_connection_error(exc):
@@ -3237,9 +3267,7 @@ async def _replace_relationships_bulk(
         await client.execute_query(
             _RELATIONSHIP_BULK_UPSERT_QUERY,
             rows=rows,
-            uuids=uuids,
-            sources=sources,
-            targets=targets,
+            edges=edges,
         )
     return written_ids
 
