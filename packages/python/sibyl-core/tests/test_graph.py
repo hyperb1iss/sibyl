@@ -74,7 +74,7 @@ class _BatchEntityReadClient:
 
     async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
         self.calls.append((query, params))
-        return [
+        rows: list[dict[str, object]] = [
             {
                 "uuid": entity_id,
                 "name": entity_id,
@@ -86,6 +86,20 @@ class _BatchEntityReadClient:
             }
             for entity_id in ("first", "second")
         ]
+        # The per-uuid lookup is unscoped (uuid is unique table-wide), so the
+        # manager must drop a row whose group does not match its own.
+        rows.append(
+            {
+                "uuid": "foreign",
+                "name": "foreign",
+                "entity_type": "session",
+                "description": "Row from another org",
+                "content": "Row from another org",
+                "group_id": "other-org",
+                "attributes": {},
+            }
+        )
+        return rows
 
 
 class _EntityUpdatePatchClient:
@@ -790,9 +804,13 @@ async def test_native_entity_manager_get_many_preserves_requested_order_and_scop
 
     assert [entity.id for entity in entities] == ["second", "first"]
     query, params = client.calls[0]
-    assert "uuid IN $uuids" in query
+    # Per-uuid indexed lookups: `uuid IN $list` is never index-served, so the
+    # bulk read maps over the ids instead of scanning the table. The closure
+    # sees only its own argument, so scope enforcement happens app-side.
+    assert "uuid IN" not in query
+    assert "$uuids.map" in query
+    assert "uuid = $u" in query
     assert params == {
-        "group_id": "org-native",
         "uuids": ["second", "first", "missing"],
     }
 
@@ -2536,7 +2554,10 @@ class _RelationshipBulkWriteClient:
         self.calls.append((query, params))
         if "AS record_id" in query and "FROM entity" in query:
             uuids = cast("list[str]", params["uuids"])
-            return [{"uuid": uuid, "record_id": f"entity:{uuid}"} for uuid in uuids]
+            return [
+                {"uuid": uuid, "group_id": self.group_id, "record_id": f"entity:{uuid}"}
+                for uuid in uuids
+            ]
         return []
 
 
@@ -2573,12 +2594,21 @@ async def test_native_relationship_bulk_writes_in_one_surreal_query() -> None:
     assert len(write_calls) == 1
     assert len(endpoint_lookups) == 1
 
-    _, write_params = write_calls[0]
+    lookup_query, _ = endpoint_lookups[0]
+    # `uuid IN $list` is never index-served; the lookup must map per-uuid.
+    assert "uuid IN" not in lookup_query
+    assert "$uuids.map" in lookup_query
+
+    write_query, write_params = write_calls[0]
+    # The endpoint-move cleanup iterates the batch through the unique index
+    # instead of scanning the table with an IN-list DELETE.
+    assert "FOR $edge IN $edges" in write_query
+    assert "DELETE FROM relates_to" not in write_query
     rows = cast("list[dict[str, object]]", write_params["rows"])
     assert len(rows) == len(relationships)
-    assert write_params["uuids"] == [relationship.id for relationship in relationships]
-    assert set(cast("dict[str, object]", write_params["sources"])) == set(write_params["uuids"])
-    assert set(cast("dict[str, object]", write_params["targets"])) == set(write_params["uuids"])
+    edges = cast("list[dict[str, object]]", write_params["edges"])
+    assert [edge["uuid"] for edge in edges] == [relationship.id for relationship in relationships]
+    assert all(edge["src"] is not None and edge["tgt"] is not None for edge in edges)
     assert all(row["group_id"] == client.group_id for row in rows)
     assert all("in" in row and "out" in row for row in rows)
     assert {str(row["uuid"]) for row in rows} == {relationship.id for relationship in relationships}
