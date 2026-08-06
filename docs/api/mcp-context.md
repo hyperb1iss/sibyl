@@ -34,7 +34,7 @@ interface ContextInput {
 
   // Output Shaping
   audit?: boolean; // Include full retrieval metadata per item (default false)
-  markdown_token_budget?: number; // Cap rendered markdown at ~this many tokens
+  markdown_token_budget?: number; // Size rendered markdown to ~this many tokens (default 4000, max 32000; null renders count-bounded)
 }
 ```
 
