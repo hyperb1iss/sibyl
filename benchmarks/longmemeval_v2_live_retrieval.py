@@ -68,6 +68,8 @@ def main(argv: list[str] | None = None) -> int:
             "neighbor_support_exempt": args.neighbor_support_exempt,
             "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
             "neighbor_support_overflow_items": args.neighbor_support_overflow_items,
+            "neighbor_stitch_items": args.neighbor_stitch_items,
+            "neighbor_stitch_span": args.neighbor_stitch_span,
             "neighbor_stitch_spread": args.neighbor_stitch_spread,
             "typed_stream_retrieval": args.typed_stream_retrieval,
             "typed_stream_limit": args.typed_stream_limit,
@@ -148,6 +150,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=False,
     )
     parser.add_argument("--neighbor-support-overflow-items", type=int, default=0)
+    parser.add_argument("--neighbor-stitch-items", type=int, default=2)
+    parser.add_argument("--neighbor-stitch-span", type=int, default=1)
     parser.add_argument(
         "--neighbor-stitch-spread",
         action=argparse.BooleanOptionalAction,
@@ -168,6 +172,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("context character limits must be positive")
     if not 1 <= args.max_planned_queries <= MAX_REFINEMENT_QUERIES:
         parser.error(f"--max-planned-queries must be between 1 and {MAX_REFINEMENT_QUERIES}")
+    if args.neighbor_stitch_items < 0:
+        parser.error("--neighbor-stitch-items must be non-negative")
+    if args.neighbor_stitch_span < 0:
+        parser.error("--neighbor-stitch-span must be non-negative")
     return args
 
 
@@ -274,6 +282,8 @@ def build_run_config(
         "neighbor_support_exempt": args.neighbor_support_exempt,
         "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
         "neighbor_support_overflow_items": args.neighbor_support_overflow_items,
+        "neighbor_stitch_items": args.neighbor_stitch_items,
+        "neighbor_stitch_span": args.neighbor_stitch_span,
         "neighbor_stitch_spread": args.neighbor_stitch_spread,
         "typed_stream_retrieval": args.typed_stream_retrieval,
         "typed_stream_limit": args.typed_stream_limit,
