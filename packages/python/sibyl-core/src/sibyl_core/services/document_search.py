@@ -508,6 +508,24 @@ async def search_documents(
             query_embedding=query_embedding,
         )
 
+    if query_embedding is None and not vector_rows_raw and not lexical_rows_raw:
+        # A soft embedding failure leaves only the lexical lane, and a
+        # sentence-shaped query can strike out there entirely. Empty results
+        # here mean the embedder was down, not that nothing matches, so take
+        # the same scan path a hard search failure gets.
+        log.warning("document_search_degraded_to_scan")
+        return await _search_documents_surreal_scan(
+            query=query,
+            organization_id=organization_id,
+            source_id=source_id,
+            source_name=source_name,
+            language=language,
+            limit=limit,
+            include_content=include_content,
+            content_max_chars=content_max_chars,
+            query_embedding=None,
+        )
+
     vector_results = _build_document_results_from_rows(
         vector_rows_raw,
         limit=limit,
