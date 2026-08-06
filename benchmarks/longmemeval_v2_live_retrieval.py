@@ -67,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
             "source_evidence_bundling": args.source_evidence_bundling,
             "neighbor_support_exempt": args.neighbor_support_exempt,
             "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
+            "neighbor_support_overflow_items": args.neighbor_support_overflow_items,
             "typed_stream_retrieval": args.typed_stream_retrieval,
             "typed_stream_limit": args.typed_stream_limit,
         },
@@ -145,6 +146,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=False,
     )
+    parser.add_argument("--neighbor-support-overflow-items", type=int, default=0)
     parser.add_argument("--typed-stream-retrieval", action="store_true")
     parser.add_argument("--typed-stream-limit", type=int, default=8)
     args = parser.parse_args(argv)
@@ -265,6 +267,7 @@ def build_run_config(
         "source_evidence_bundling": args.source_evidence_bundling,
         "neighbor_support_exempt": args.neighbor_support_exempt,
         "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
+        "neighbor_support_overflow_items": args.neighbor_support_overflow_items,
         "typed_stream_retrieval": args.typed_stream_retrieval,
         "typed_stream_limit": args.typed_stream_limit,
     }

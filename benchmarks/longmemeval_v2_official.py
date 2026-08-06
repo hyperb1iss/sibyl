@@ -72,6 +72,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "state_part_refinement",
         "neighbor_support_exempt",
         "neighbor_trajectory_preserving",
+        "neighbor_support_overflow_items",
         "context_expansion_max_ratio",
         "evidence_types",
         "evidence_char_budget",
@@ -454,6 +455,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         action=argparse.BooleanOptionalAction,
         default=False,
     )
+    parser.add_argument("--neighbor-support-overflow-items", type=int, default=0)
     parser.add_argument("--context-expansion-max-ratio", type=float, default=0.0)
     parser.add_argument(
         "--evidence-types",
@@ -687,6 +689,7 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "state_part_refinement": args.state_part_refinement,
         "neighbor_support_exempt": args.neighbor_support_exempt,
         "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
+        "neighbor_support_overflow_items": args.neighbor_support_overflow_items,
         "context_expansion_max_ratio": args.context_expansion_max_ratio,
         "evidence_types": list(args.evidence_types),
         "evidence_char_budget": args.evidence_char_budget,
@@ -834,6 +837,7 @@ def build_run_plan(
         "neighbor_stitch_span": args.neighbor_stitch_span,
         "neighbor_support_exempt": args.neighbor_support_exempt,
         "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
+        "neighbor_support_overflow_items": args.neighbor_support_overflow_items,
         "context_expansion_max_ratio": args.context_expansion_max_ratio,
         "max_context_total_chars": args.max_context_total_chars,
         "evidence_types": list(args.evidence_types),

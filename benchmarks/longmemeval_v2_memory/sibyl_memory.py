@@ -148,6 +148,7 @@ DEFAULT_STATE_PART_COMPLETION_ITEMS = 0
 DEFAULT_STATE_PART_REFINEMENT = False
 DEFAULT_NEIGHBOR_SUPPORT_EXEMPT = False
 DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING = False
+DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS = 0
 DEFAULT_CONTEXT_EXPANSION_MAX_RATIO = 0.0
 CONTEXT_TOKENIZER_MODEL = "Qwen/Qwen3.5-9B"
 STATE_PART_REFINEMENT_MIN_SCORE_GAIN = 0.05
@@ -185,6 +186,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "state_part_refinement",
         "neighbor_support_exempt",
         "neighbor_trajectory_preserving",
+        "neighbor_support_overflow_items",
         "context_expansion_max_ratio",
         "evidence_types",
         "evidence_char_budget",
@@ -690,6 +692,7 @@ def compile_operational_evidence_set(
     char_budget: int | None = None,
     neighbor_support_exempt: bool = DEFAULT_NEIGHBOR_SUPPORT_EXEMPT,
     neighbor_trajectory_preserving: bool = DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING,
+    neighbor_support_overflow_items: int = DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS,
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
     """Compose the reader's pack from the typed and raw evidence pools.
 
@@ -797,6 +800,7 @@ def compile_operational_evidence_set(
             budget=raw_budget,
             neighbor_support_exempt=neighbor_support_exempt,
             neighbor_trajectory_preserving=neighbor_trajectory_preserving,
+            neighbor_support_overflow_items=neighbor_support_overflow_items,
         )
         selected = [*ranked_typed[:typed_reservation], *selected_raw]
         if len(selected) < max_items:
@@ -804,6 +808,10 @@ def compile_operational_evidence_set(
                 ranked_typed[typed_reservation : typed_reservation + max_items - len(selected)]
             )
         selected_chars = sum(len(_stripped_str(item.get("content"))) for item in selected)
+        support_overflow_items = min(
+            max(0, neighbor_support_overflow_items),
+            sum(_is_support_candidate(item) for item in selected_raw),
+        )
     else:
         # The note lane keeps its absolute count inside the budget, but the
         # budget outranks the pin when it cannot hold that many: a lane allowed
@@ -832,6 +840,8 @@ def compile_operational_evidence_set(
         typed_reservation = len(reserved)
         selected = [*reserved, *selected_raw, *overflow]
         selected_chars = spent
+        # A budgeted pack has no item bound for a support to overflow past.
+        support_overflow_items = 0
     for selection_rank, candidate in enumerate(selected, start=1):
         candidate["_evidence_selection_rank"] = selection_rank
 
@@ -857,6 +867,8 @@ def compile_operational_evidence_set(
         "selected_raw_count": len(selected) - selected_typed,
         "neighbor_support_exempt": neighbor_support_exempt,
         "neighbor_trajectory_preserving": neighbor_trajectory_preserving,
+        "neighbor_support_overflow_items": neighbor_support_overflow_items,
+        "support_overflow_items": support_overflow_items,
         "budget_mode": "items" if char_budget is None else "characters",
         "char_budget": char_budget,
         "selected_chars": selected_chars,
@@ -1019,6 +1031,7 @@ def _select_role_complete_raw_evidence(
     budget: int,
     neighbor_support_exempt: bool = DEFAULT_NEIGHBOR_SUPPORT_EXEMPT,
     neighbor_trajectory_preserving: bool = DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING,
+    neighbor_support_overflow_items: int = DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS,
 ) -> list[dict[str, object]]:
     if budget <= 0:
         return []
@@ -1044,6 +1057,12 @@ def _select_role_complete_raw_evidence(
         selected_links = _links_preserving_trajectory_coverage(
             primary, selected_links, budget=budget
         )
+    # Supports compete with seeds only because the pack is bounded by an item
+    # count, and the character budget that count stands in for runs about a
+    # third spent. Overflow slots hand a support its own room instead of a
+    # seed's, up to the granted count; supports past it displace as before.
+    granted_overflow = min(max(0, neighbor_support_overflow_items), len(selected_links))
+    budget += granted_overflow
     selected_support = [support for support, _parent in selected_links]
     selected_primary = _pack_primary_around_links(primary, selected_links, budget=budget)
     selected_primary_ids = {id(candidate) for candidate in selected_primary}
@@ -1189,6 +1208,12 @@ def _support_parent_search_rank(candidate: dict[str, object]) -> int | None:
 
 def _is_support_candidate(candidate: dict[str, object]) -> bool:
     return _stripped_str(candidate.get("_selection_origin")) in {"neighbor", "state_part"}
+
+
+def _nonnegative_int(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return max(0, value)
 
 
 def _optional_positive_int(value: object) -> int | None:
@@ -2311,6 +2336,7 @@ def context_pack_item_ceiling(
     max_items: int,
     char_budget: int | None,
     candidate_count: int,
+    overflow_items: int = 0,
 ) -> int:
     """Item ceiling for the pack stages that run after the API answers.
 
@@ -2322,7 +2348,7 @@ def context_pack_item_ceiling(
     never be measurable. The ceiling then rises to whatever the stage was handed
     so it cannot bind, and the composer stays the one place the pack is bounded.
     """
-    max_items = max(1, max_items)
+    max_items = max(1, max_items) + max(0, overflow_items)
     if char_budget is None:
         return max_items
     return max(max_items, candidate_count)
@@ -3174,6 +3200,12 @@ class SibylLiveApiMemory(Memory):
             memory_params,
             "neighbor_trajectory_preserving",
             DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING,
+        )
+        self.neighbor_support_overflow_items = _param_int(
+            memory_params,
+            "neighbor_support_overflow_items",
+            DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS,
+            minimum=0,
         )
         self.evidence_types = _param_evidence_types(
             memory_params,
@@ -4279,11 +4311,17 @@ class SibylLiveApiMemory(Memory):
                 "neighbor_trajectory_preserving",
                 DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING,
             ),
+            neighbor_support_overflow_items=getattr(
+                self,
+                "neighbor_support_overflow_items",
+                DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS,
+            ),
         )
         rendered_item_ceiling = context_pack_item_ceiling(
             max_items=self.max_context_items,
             char_budget=char_budget,
             candidate_count=len(evidence_set),
+            overflow_items=_nonnegative_int(evidence_composition.get("support_overflow_items")),
         )
         assembly_metadata["typed_context_candidate_count"] = len(typed_results)
         assembly_metadata["typed_context_selected_count"] = sum(
