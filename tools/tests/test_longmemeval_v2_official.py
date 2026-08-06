@@ -2506,6 +2506,260 @@ def test_sibyl_memory_exempt_neighbors_survive_composition_next_to_their_seed() 
     )
 
 
+def test_sibyl_memory_trajectory_preserving_refuses_a_sole_carrier_eviction() -> None:
+    """A neighbor is refused when the seed it displaces is its trajectory's last.
+
+    Exempting neighbors buys state coverage by spending tail seeds, and a
+    stitched neighbor carries its parent's trajectory, so the trade can cost
+    the pack a trajectory outright. Here every seed is the only carrier of its
+    own trajectory, so the preserving arm must refuse the neighbor and hand
+    back exactly the default pack.
+    """
+    module = _load_memory_module()
+    query = "inventory order dashboard prefix"
+    first = _search_result("t1", chunk_index=1, state_index=1, score=1.0)
+    neighbor = _search_result("t1", chunk_index=0, state_index=0, score=0.0)
+    neighbor["content"] = (
+        "Goal: inventory order dashboard prefix\n\n"
+        "State 0\nAccessibility tree:\nanswer-bearing neighboring state"
+    )
+    results = [
+        first,
+        _search_result("t2", chunk_index=0, state_index=0, score=0.9),
+        _search_result("t3", chunk_index=0, state_index=0, score=0.8),
+        _search_result("target", chunk_index=0, state_index=0, score=0.7),
+    ]
+    results[-1]["content"] = query
+    max_items = 4
+    assembled = _assemble_for_neighbor_arms(module, results, {"t1": {0: neighbor, 1: first}}, query)
+
+    selected, composition = module.compile_operational_evidence_set(
+        query=query,
+        typed_results=[],
+        raw_results=assembled,
+        max_items=max_items,
+        neighbor_support_exempt=True,
+        neighbor_trajectory_preserving=True,
+    )
+
+    assert composition["neighbor_trajectory_preserving"] is True
+    assert composition["selected_raw_support_count"] == 0
+    assert len(selected) == max_items
+    assert any(item["metadata"]["longmemeval_v2_trajectory_id"] == "target" for item in selected)
+    assert not any(
+        module._stripped_str(item.get("_selection_origin")) == "neighbor" for item in selected
+    )
+
+
+def test_sibyl_memory_trajectory_preserving_admits_a_replaceable_eviction() -> None:
+    """A neighbor still lands when its displaced seed's trajectory survives.
+
+    The refusal is scoped to trajectory coverage, not to displacement itself.
+    When the evicted tail seed shares its trajectory with a seed that stays in
+    the pack, nothing is lost by admitting the neighbor, so the preserving arm
+    composes the same pack as the plain exempt arm.
+    """
+    module = _load_memory_module()
+    query = "inventory order dashboard prefix"
+    first = _search_result("t1", chunk_index=1, state_index=1, score=1.0)
+    neighbor = _search_result("t1", chunk_index=0, state_index=0, score=0.0)
+    neighbor["content"] = (
+        "Goal: inventory order dashboard prefix\n\n"
+        "State 0\nAccessibility tree:\nanswer-bearing neighboring state"
+    )
+    results = [
+        first,
+        _search_result("t2", chunk_index=0, state_index=0, score=0.9),
+        _search_result("t3", chunk_index=0, state_index=0, score=0.8),
+        _search_result("t3", chunk_index=1, state_index=1, score=0.7),
+    ]
+    max_items = 4
+    assembled = _assemble_for_neighbor_arms(module, results, {"t1": {0: neighbor, 1: first}}, query)
+
+    selected, composition = module.compile_operational_evidence_set(
+        query=query,
+        typed_results=[],
+        raw_results=assembled,
+        max_items=max_items,
+        neighbor_support_exempt=True,
+        neighbor_trajectory_preserving=True,
+    )
+
+    assert composition["selected_raw_support_count"] == 1
+    assert len(selected) == max_items
+    origins_and_chunks = [
+        (
+            module._stripped_str(item.get("_selection_origin")),
+            item["metadata"]["longmemeval_v2_trajectory_id"],
+            item["metadata"]["longmemeval_v2_chunk_index"],
+        )
+        for item in selected
+    ]
+    seed_position = origins_and_chunks.index(("search", "t1", 1))
+    assert origins_and_chunks[seed_position + 1] == ("neighbor", "t1", 0)
+    assert ("search", "t3", 0) in origins_and_chunks
+    assert ("search", "t3", 1) not in origins_and_chunks
+
+
+def test_sibyl_memory_additive_support_slots_spare_the_displaced_seed() -> None:
+    """Overflow slots let a support join the pack without evicting a seed.
+
+    Supports and seeds compete only because the pack is bounded by an item
+    count, and the character budget that count stands in for runs about a third
+    spent. With an overflow slot granted, the same fixture that forces a
+    sole-carrier eviction under the plain exempt arm keeps every baseline seed
+    and gains the neighbor, so the pack is the union of both arms.
+    """
+    module = _load_memory_module()
+    query = "inventory order dashboard prefix"
+    first = _search_result("t1", chunk_index=1, state_index=1, score=1.0)
+    neighbor = _search_result("t1", chunk_index=0, state_index=0, score=0.0)
+    neighbor["content"] = (
+        "Goal: inventory order dashboard prefix\n\n"
+        "State 0\nAccessibility tree:\nanswer-bearing neighboring state"
+    )
+    results = [
+        first,
+        _search_result("t2", chunk_index=0, state_index=0, score=0.9),
+        _search_result("t3", chunk_index=0, state_index=0, score=0.8),
+        _search_result("target", chunk_index=0, state_index=0, score=0.7),
+    ]
+    results[-1]["content"] = query
+    max_items = 4
+    assembled = _assemble_for_neighbor_arms(module, results, {"t1": {0: neighbor, 1: first}}, query)
+
+    selected, composition = module.compile_operational_evidence_set(
+        query=query,
+        typed_results=[],
+        raw_results=assembled,
+        max_items=max_items,
+        neighbor_support_exempt=True,
+        neighbor_support_overflow_items=2,
+    )
+
+    assert composition["support_overflow_items"] == 1
+    assert composition["selected_raw_support_count"] == 1
+    assert len(selected) == max_items + 1
+    origins_and_chunks = [
+        (
+            module._stripped_str(item.get("_selection_origin")),
+            item["metadata"]["longmemeval_v2_trajectory_id"],
+            item["metadata"]["longmemeval_v2_chunk_index"],
+        )
+        for item in selected
+    ]
+    seed_position = origins_and_chunks.index(("search", "t1", 1))
+    assert origins_and_chunks[seed_position + 1] == ("neighbor", "t1", 0)
+    assert ("search", "target", 0) in origins_and_chunks
+
+
+def test_sibyl_memory_render_ceiling_admits_the_granted_overflow() -> None:
+    """The item ceiling downstream of the composer has to follow it.
+
+    Without the overflow the render stage would clip an additive pack back to
+    the old geometry, so the extra items would never reach the reader and the
+    arm would be unmeasurable.
+    """
+    module = _load_memory_module()
+    max_items = 8
+    overflow_items = 2
+    candidate_count = 12
+    assert (
+        module.context_pack_item_ceiling(
+            max_items=max_items,
+            char_budget=None,
+            candidate_count=candidate_count,
+        )
+        == max_items
+    )
+    assert (
+        module.context_pack_item_ceiling(
+            max_items=max_items,
+            char_budget=None,
+            candidate_count=candidate_count,
+            overflow_items=overflow_items,
+        )
+        == max_items + overflow_items
+    )
+
+
+def test_sibyl_memory_stitch_spread_reaches_every_seed_before_the_second_ring() -> None:
+    """Ring-major stitch order spends the budget across seeds, not on the first.
+
+    Seed-major order gives the top seed both of its adjacent chunks and the
+    budget is gone, so a two-item stitch never reaches the second seed however
+    many seeds were retrieved. Ring-major order takes distance one from every
+    seed before distance two from any of them.
+    """
+    module = _load_memory_module()
+    query = "inventory order dashboard prefix"
+    seeds = [
+        _search_result("t1", chunk_index=2, state_index=2, score=1.0),
+        _search_result("t2", chunk_index=2, state_index=2, score=0.9),
+    ]
+    catalog = {
+        trajectory: {
+            index: _search_result(trajectory, chunk_index=index, state_index=index, score=0.0)
+            for index in (0, 1, 2, 3, 4)
+        }
+        for trajectory in ("t1", "t2")
+    }
+    stitch_items = 2
+
+    def stitched(*, spread: bool) -> list[tuple[str, int]]:
+        assembled, _metadata = module.assemble_context_results(
+            [dict(seed) for seed in seeds],
+            chunk_catalog=catalog,
+            max_items=module.context_assembly_candidate_limit(
+                max_items=8,
+                neighbor_stitch_items=stitch_items,
+                state_part_completion_items=0,
+                has_chunk_catalog=True,
+            ),
+            max_chunks_per_trajectory=8,
+            neighbor_stitch_items=stitch_items,
+            neighbor_stitch_span=2,
+            neighbor_stitch_spread=spread,
+            query=query,
+        )
+        return [
+            (
+                item["metadata"]["longmemeval_v2_trajectory_id"],
+                item["metadata"]["longmemeval_v2_chunk_index"],
+            )
+            for item in assembled
+            if module._stripped_str(item.get("_selection_origin")) == "neighbor"
+        ]
+
+    assert stitched(spread=False) == [("t1", 1), ("t1", 3)]
+    assert stitched(spread=True) == [("t1", 1), ("t2", 1)]
+
+
+def _assemble_for_neighbor_arms(
+    module: ModuleType,
+    results: list[dict[str, Any]],
+    chunk_catalog: dict[str, dict[int, dict[str, Any]]],
+    query: str,
+) -> list[dict[str, Any]]:
+    candidate_limit = module.context_assembly_candidate_limit(
+        max_items=4,
+        neighbor_stitch_items=1,
+        state_part_completion_items=0,
+        has_chunk_catalog=True,
+    )
+    assembled, metadata = module.assemble_context_results(
+        results,
+        chunk_catalog=chunk_catalog,
+        max_items=candidate_limit,
+        max_chunks_per_trajectory=2,
+        neighbor_stitch_items=1,
+        neighbor_stitch_span=1,
+        query=query,
+    )
+    assert metadata["stitched_neighbor_count"] == 1
+    return assembled
+
+
 def test_sibyl_memory_restores_transport_truncated_search_content() -> None:
     module = _load_memory_module()
     search_result = _search_result("t1", chunk_index=1, state_index=1, score=0.9)
@@ -4772,6 +5026,9 @@ def test_operational_evidence_set_calibrates_typed_and_raw_score_pools() -> None
         "selected_typed_count": 3,
         "selected_raw_count": 5,
         "neighbor_support_exempt": False,
+        "neighbor_trajectory_preserving": False,
+        "neighbor_support_overflow_items": 0,
+        "support_overflow_items": 0,
         "budget_mode": "items",
         "char_budget": None,
         "selected_chars": sum(len(str(item["content"])) for item in selected),
@@ -5904,6 +6161,9 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
                 "selected_typed_count": 0,
                 "selected_raw_count": 0,
                 "neighbor_support_exempt": False,
+                "neighbor_trajectory_preserving": False,
+                "neighbor_support_overflow_items": 0,
+                "support_overflow_items": 0,
                 "budget_mode": "items",
                 "char_budget": None,
                 "selected_chars": 0,

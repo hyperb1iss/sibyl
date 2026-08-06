@@ -14,7 +14,7 @@ import sys
 import threading
 import time
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import TypeVar
@@ -147,6 +147,9 @@ DEFAULT_NEIGHBOR_STITCH_SPAN = 1
 DEFAULT_STATE_PART_COMPLETION_ITEMS = 0
 DEFAULT_STATE_PART_REFINEMENT = False
 DEFAULT_NEIGHBOR_SUPPORT_EXEMPT = False
+DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING = False
+DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS = 0
+DEFAULT_NEIGHBOR_STITCH_SPREAD = False
 DEFAULT_CONTEXT_EXPANSION_MAX_RATIO = 0.0
 CONTEXT_TOKENIZER_MODEL = "Qwen/Qwen3.5-9B"
 STATE_PART_REFINEMENT_MIN_SCORE_GAIN = 0.05
@@ -183,6 +186,9 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "state_part_completion_items",
         "state_part_refinement",
         "neighbor_support_exempt",
+        "neighbor_trajectory_preserving",
+        "neighbor_support_overflow_items",
+        "neighbor_stitch_spread",
         "context_expansion_max_ratio",
         "evidence_types",
         "evidence_char_budget",
@@ -687,6 +693,8 @@ def compile_operational_evidence_set(
     typed_reservation_items: int | None = None,
     char_budget: int | None = None,
     neighbor_support_exempt: bool = DEFAULT_NEIGHBOR_SUPPORT_EXEMPT,
+    neighbor_trajectory_preserving: bool = DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING,
+    neighbor_support_overflow_items: int = DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS,
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
     """Compose the reader's pack from the typed and raw evidence pools.
 
@@ -793,6 +801,8 @@ def compile_operational_evidence_set(
             ranked_raw,
             budget=raw_budget,
             neighbor_support_exempt=neighbor_support_exempt,
+            neighbor_trajectory_preserving=neighbor_trajectory_preserving,
+            neighbor_support_overflow_items=neighbor_support_overflow_items,
         )
         selected = [*ranked_typed[:typed_reservation], *selected_raw]
         if len(selected) < max_items:
@@ -800,6 +810,10 @@ def compile_operational_evidence_set(
                 ranked_typed[typed_reservation : typed_reservation + max_items - len(selected)]
             )
         selected_chars = sum(len(_stripped_str(item.get("content"))) for item in selected)
+        support_overflow_items = min(
+            max(0, neighbor_support_overflow_items),
+            sum(_is_support_candidate(item) for item in selected_raw),
+        )
     else:
         # The note lane keeps its absolute count inside the budget, but the
         # budget outranks the pin when it cannot hold that many: a lane allowed
@@ -813,6 +827,7 @@ def compile_operational_evidence_set(
             ranked_raw,
             budget=len(ranked_raw),
             neighbor_support_exempt=neighbor_support_exempt,
+            neighbor_trajectory_preserving=neighbor_trajectory_preserving,
         )
         selected_raw, spent = _admit_within_char_budget(
             ordered_raw,
@@ -827,6 +842,8 @@ def compile_operational_evidence_set(
         typed_reservation = len(reserved)
         selected = [*reserved, *selected_raw, *overflow]
         selected_chars = spent
+        # A budgeted pack has no item bound for a support to overflow past.
+        support_overflow_items = 0
     for selection_rank, candidate in enumerate(selected, start=1):
         candidate["_evidence_selection_rank"] = selection_rank
 
@@ -851,6 +868,9 @@ def compile_operational_evidence_set(
         "selected_typed_count": selected_typed,
         "selected_raw_count": len(selected) - selected_typed,
         "neighbor_support_exempt": neighbor_support_exempt,
+        "neighbor_trajectory_preserving": neighbor_trajectory_preserving,
+        "neighbor_support_overflow_items": neighbor_support_overflow_items,
+        "support_overflow_items": support_overflow_items,
         "budget_mode": "items" if char_budget is None else "characters",
         "char_budget": char_budget,
         "selected_chars": selected_chars,
@@ -1012,6 +1032,8 @@ def _select_role_complete_raw_evidence(
     *,
     budget: int,
     neighbor_support_exempt: bool = DEFAULT_NEIGHBOR_SUPPORT_EXEMPT,
+    neighbor_trajectory_preserving: bool = DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING,
+    neighbor_support_overflow_items: int = DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS,
 ) -> list[dict[str, object]]:
     if budget <= 0:
         return []
@@ -1033,18 +1055,19 @@ def _select_role_complete_raw_evidence(
         )
     ]
     selected_links = _select_diverse_support_links(linked_support, limit=budget // 2)
+    if neighbor_trajectory_preserving:
+        selected_links = _links_preserving_trajectory_coverage(
+            primary, selected_links, budget=budget
+        )
+    # Supports compete with seeds only because the pack is bounded by an item
+    # count, and the character budget that count stands in for runs about a
+    # third spent. Overflow slots hand a support its own room instead of a
+    # seed's, up to the granted count; supports past it displace as before.
+    granted_overflow = min(max(0, neighbor_support_overflow_items), len(selected_links))
+    budget += granted_overflow
     selected_support = [support for support, _parent in selected_links]
-    selected_primary: list[dict[str, object]] = []
-    selected_primary_ids: set[int] = set()
-    for _support, parent in selected_links:
-        if id(parent) not in selected_primary_ids:
-            selected_primary.append(parent)
-            selected_primary_ids.add(id(parent))
-    primary_budget = budget - len(selected_support)
-    for candidate in primary:
-        if id(candidate) not in selected_primary_ids and len(selected_primary) < primary_budget:
-            selected_primary.append(candidate)
-            selected_primary_ids.add(id(candidate))
+    selected_primary = _pack_primary_around_links(primary, selected_links, budget=budget)
+    selected_primary_ids = {id(candidate) for candidate in selected_primary}
     candidate_order = {id(candidate): index for index, candidate in enumerate(candidates)}
     selected_primary.sort(key=lambda candidate: candidate_order[id(candidate)])
     selected_support_ids = {id(candidate) for candidate in selected_support}
@@ -1065,6 +1088,64 @@ def _select_role_complete_raw_evidence(
         selected.append(candidate)
         selected.extend(support_by_parent_id.get(id(candidate), []))
     return selected
+
+
+def _pack_primary_around_links(
+    primary: list[dict[str, object]],
+    links: list[tuple[dict[str, object], dict[str, object]]],
+    *,
+    budget: int,
+) -> list[dict[str, object]]:
+    selected: list[dict[str, object]] = []
+    selected_ids: set[int] = set()
+    for _support, parent in links:
+        if id(parent) not in selected_ids:
+            selected.append(parent)
+            selected_ids.add(id(parent))
+    primary_budget = budget - len(links)
+    for candidate in primary:
+        if id(candidate) not in selected_ids and len(selected) < primary_budget:
+            selected.append(candidate)
+            selected_ids.add(id(candidate))
+    return selected
+
+
+def _links_preserving_trajectory_coverage(
+    primary: list[dict[str, object]],
+    links: list[tuple[dict[str, object], dict[str, object]]],
+    *,
+    budget: int,
+) -> list[tuple[dict[str, object], dict[str, object]]]:
+    # Every admitted support costs one tail seed, and a stitched neighbor
+    # almost always carries its parent's trajectory, so the trade can shrink
+    # the pack's trajectory coverage even while it improves state coverage.
+    # Admission is therefore checked one support at a time against the pack it
+    # would produce: a support that evicts the last remaining carrier of some
+    # trajectory is refused, and the seed keeps its slot.
+    admitted: list[tuple[dict[str, object], dict[str, object]]] = []
+    for link in links:
+        kept_before = _pack_primary_around_links(primary, admitted, budget=budget)
+        proposed = [*admitted, link]
+        kept_after = _pack_primary_around_links(primary, proposed, budget=budget)
+        kept_after_ids = {id(row) for row in kept_after}
+        evicted = [row for row in kept_before if id(row) not in kept_after_ids]
+        surviving = {
+            trajectory
+            for row in (*kept_after, *(support for support, _parent in proposed))
+            if (trajectory := _candidate_trajectory_id(row))
+        }
+        if all(
+            not (trajectory := _candidate_trajectory_id(row)) or trajectory in surviving
+            for row in evicted
+        ):
+            admitted = proposed
+    return admitted
+
+
+def _candidate_trajectory_id(candidate: dict[str, object]) -> str:
+    return _stripped_str(
+        _string_key_dict(candidate.get("metadata")).get("longmemeval_v2_trajectory_id")
+    )
 
 
 def _support_adds_query_coverage(
@@ -1129,6 +1210,12 @@ def _support_parent_search_rank(candidate: dict[str, object]) -> int | None:
 
 def _is_support_candidate(candidate: dict[str, object]) -> bool:
     return _stripped_str(candidate.get("_selection_origin")) in {"neighbor", "state_part"}
+
+
+def _nonnegative_int(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return max(0, value)
 
 
 def _optional_positive_int(value: object) -> int | None:
@@ -2251,6 +2338,7 @@ def context_pack_item_ceiling(
     max_items: int,
     char_budget: int | None,
     candidate_count: int,
+    overflow_items: int = 0,
 ) -> int:
     """Item ceiling for the pack stages that run after the API answers.
 
@@ -2262,7 +2350,7 @@ def context_pack_item_ceiling(
     never be measurable. The ceiling then rises to whatever the stage was handed
     so it cannot bind, and the composer stays the one place the pack is bounded.
     """
-    max_items = max(1, max_items)
+    max_items = max(1, max_items) + max(0, overflow_items)
     if char_budget is None:
         return max_items
     return max(max_items, candidate_count)
@@ -2289,6 +2377,7 @@ def assemble_context_results(
     max_chunks_per_trajectory: int,
     neighbor_stitch_items: int,
     neighbor_stitch_span: int,
+    neighbor_stitch_spread: bool = DEFAULT_NEIGHBOR_STITCH_SPREAD,
     query: str = "",
     state_part_completion_items: int = 0,
     state_part_refinement: bool = False,
@@ -2363,6 +2452,7 @@ def assemble_context_results(
         selected_keys=selected_keys,
         limit=neighbor_budget,
         span=neighbor_stitch_span,
+        spread=neighbor_stitch_spread,
     )
     selected.extend(neighbors)
     if len(selected) < max_items:
@@ -2767,29 +2857,57 @@ def _neighbor_results(
     selected_keys: set[tuple[str, int | str]],
     limit: int,
     span: int,
+    spread: bool = DEFAULT_NEIGHBOR_STITCH_SPREAD,
 ) -> list[dict[str, object]]:
     neighbors: list[dict[str, object]] = []
+    for seed, trajectory_id, neighbor_index, distance in _neighbor_stitch_plan(
+        seeds, span=span, spread=spread
+    ):
+        key = (trajectory_id, neighbor_index)
+        catalog_result = chunk_catalog.get(trajectory_id, {}).get(neighbor_index)
+        if catalog_result is None or key in selected_keys:
+            continue
+        neighbor = dict(catalog_result)
+        neighbor["score"] = seed.get("score")
+        neighbor["_selection_origin"] = "neighbor"
+        neighbor["_neighbor_of_search_rank"] = seed.get("_search_rank")
+        neighbor["_neighbor_distance"] = distance
+        neighbors.append(neighbor)
+        selected_keys.add(key)
+        if len(neighbors) >= limit:
+            return neighbors
+    return neighbors
+
+
+def _neighbor_stitch_plan(
+    seeds: list[dict[str, object]],
+    *,
+    span: int,
+    spread: bool,
+) -> Iterator[tuple[dict[str, object], str, int, int]]:
+    """Order the chunks the stitch may claim, as (seed, trajectory, index, distance).
+
+    Seed-major order drains the whole budget on the highest-ranked seed before
+    reaching the second, so at the shipped budget of two the stitch only ever
+    covers one seed's immediate chunks. Ring-major order walks every seed at
+    distance one before any seed at distance two, which spends the same budget
+    across the seed set and keeps the nearest chunks ahead of the farther ones.
+    """
+    anchors: list[tuple[dict[str, object], str, int]] = []
     for seed in seeds:
         trajectory_id, chunk_index = _result_chunk_key(seed)
-        if not isinstance(chunk_index, int):
-            continue
-        trajectory_catalog = chunk_catalog.get(trajectory_id, {})
-        for distance in range(1, span + 1):
-            for neighbor_index in (chunk_index - distance, chunk_index + distance):
-                key = (trajectory_id, neighbor_index)
-                catalog_result = trajectory_catalog.get(neighbor_index)
-                if catalog_result is None or key in selected_keys:
-                    continue
-                neighbor = dict(catalog_result)
-                neighbor["score"] = seed.get("score")
-                neighbor["_selection_origin"] = "neighbor"
-                neighbor["_neighbor_of_search_rank"] = seed.get("_search_rank")
-                neighbor["_neighbor_distance"] = distance
-                neighbors.append(neighbor)
-                selected_keys.add(key)
-                if len(neighbors) >= limit:
-                    return neighbors
-    return neighbors
+        if isinstance(chunk_index, int):
+            anchors.append((seed, trajectory_id, chunk_index))
+    if not spread:
+        for seed, trajectory_id, chunk_index in anchors:
+            for distance in range(1, span + 1):
+                for neighbor_index in (chunk_index - distance, chunk_index + distance):
+                    yield seed, trajectory_id, neighbor_index, distance
+        return
+    for distance in range(1, span + 1):
+        for direction in (-1, 1):
+            for seed, trajectory_id, chunk_index in anchors:
+                yield seed, trajectory_id, chunk_index + direction * distance, distance
 
 
 def _result_diversity_key(result: dict[str, object]) -> tuple[str, int | str]:
@@ -3109,6 +3227,22 @@ class SibylLiveApiMemory(Memory):
             memory_params,
             "neighbor_support_exempt",
             DEFAULT_NEIGHBOR_SUPPORT_EXEMPT,
+        )
+        self.neighbor_trajectory_preserving = _param_bool(
+            memory_params,
+            "neighbor_trajectory_preserving",
+            DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING,
+        )
+        self.neighbor_support_overflow_items = _param_int(
+            memory_params,
+            "neighbor_support_overflow_items",
+            DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS,
+            minimum=0,
+        )
+        self.neighbor_stitch_spread = _param_bool(
+            memory_params,
+            "neighbor_stitch_spread",
+            DEFAULT_NEIGHBOR_STITCH_SPREAD,
         )
         self.evidence_types = _param_evidence_types(
             memory_params,
@@ -4175,6 +4309,11 @@ class SibylLiveApiMemory(Memory):
                 "neighbor_stitch_span",
                 DEFAULT_NEIGHBOR_STITCH_SPAN,
             ),
+            neighbor_stitch_spread=getattr(
+                self,
+                "neighbor_stitch_spread",
+                DEFAULT_NEIGHBOR_STITCH_SPREAD,
+            ),
             query=query,
             state_part_completion_items=state_part_completion_items,
             state_part_refinement=getattr(
@@ -4209,11 +4348,22 @@ class SibylLiveApiMemory(Memory):
                 "neighbor_support_exempt",
                 DEFAULT_NEIGHBOR_SUPPORT_EXEMPT,
             ),
+            neighbor_trajectory_preserving=getattr(
+                self,
+                "neighbor_trajectory_preserving",
+                DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING,
+            ),
+            neighbor_support_overflow_items=getattr(
+                self,
+                "neighbor_support_overflow_items",
+                DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS,
+            ),
         )
         rendered_item_ceiling = context_pack_item_ceiling(
             max_items=self.max_context_items,
             char_budget=char_budget,
             candidate_count=len(evidence_set),
+            overflow_items=_nonnegative_int(evidence_composition.get("support_overflow_items")),
         )
         assembly_metadata["typed_context_candidate_count"] = len(typed_results)
         assembly_metadata["typed_context_selected_count"] = sum(
