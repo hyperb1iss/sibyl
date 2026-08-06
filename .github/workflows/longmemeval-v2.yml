@@ -257,22 +257,31 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$DATA_ROOT/haystacks" ".moon/cache/evals"
-          curl -L --retry 3 --retry-delay 5 \
-            "$HF_BASE/checksums.sha256?download=true" \
-            -o "$DATA_ROOT/checksums.sha256"
-          curl -L --retry 3 --retry-delay 5 \
-            "$HF_BASE/questions.jsonl?download=true" \
-            -o "$DATA_ROOT/questions.jsonl"
-          curl -L --retry 3 --retry-delay 5 \
-            "$HF_BASE/SCHEMA.md?download=true" \
-            -o "$DATA_ROOT/SCHEMA.md"
-          curl -L --retry 3 --retry-delay 5 \
-            "$HF_BASE/haystacks/lme_v2_${{ matrix.tier }}.json?download=true" \
-            -o "$DATA_ROOT/haystacks/lme_v2_${{ matrix.tier }}.json"
+          # -f keeps an HTTP error page from being written over the target.
+          # Without it curl saves the error body and still exits 0, so an
+          # upstream hiccup on checksums.sha256 destroys the verifier for every
+          # other file and only surfaces as an unreadable checksum list below.
+          fetch() {
+            curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "$1" -o "$2"
+          }
+          fetch "$HF_BASE/checksums.sha256?download=true" \
+            "$DATA_ROOT/checksums.sha256"
+          fetch "$HF_BASE/questions.jsonl?download=true" \
+            "$DATA_ROOT/questions.jsonl"
+          fetch "$HF_BASE/SCHEMA.md?download=true" \
+            "$DATA_ROOT/SCHEMA.md"
+          fetch "$HF_BASE/haystacks/lme_v2_${{ matrix.tier }}.json?download=true" \
+            "$DATA_ROOT/haystacks/lme_v2_${{ matrix.tier }}.json"
           (
             cd "$DATA_ROOT"
-            grep -E '  (questions.jsonl|SCHEMA.md|haystacks/lme_v2_${{ matrix.tier }}\.json)$' \
-              checksums.sha256 | sha256sum -c -
+            pattern='  (questions.jsonl|SCHEMA.md|haystacks/lme_v2_${{ matrix.tier }}\.json)$'
+            listed=$(grep -Ec "$pattern" checksums.sha256 || true)
+            if [ "$listed" -ne 3 ]; then
+              echo "checksums.sha256 lists $listed of the 3 expected entries" >&2
+              head -c 400 checksums.sha256 >&2
+              exit 1
+            fi
+            grep -E "$pattern" checksums.sha256 | sha256sum -c -
           )
 
       - name: Run LongMemEval-V2 probe
