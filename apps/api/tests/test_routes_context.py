@@ -2374,3 +2374,19 @@ class TestReflectRoute:
             "requested_project_id": "proj_2",
             "route_action": "context_reflect",
         }
+
+
+def test_context_pack_request_defaults_to_a_markdown_budget() -> None:
+    """A request that states no budget still gets one.
+
+    An unbudgeted render falls back to the count defaults, which expose a
+    fraction of the content retrieval already paid for, so the product surface
+    supplies a budget rather than leaving the pack bounded by item counts.
+    """
+    from sibyl.api.schemas.context import ContextPackRequest
+    from sibyl_core.tools.context import DEFAULT_MARKDOWN_TOKEN_BUDGET
+
+    request = ContextPackRequest(goal="ship the thing")
+
+    assert request.markdown_token_budget == DEFAULT_MARKDOWN_TOKEN_BUDGET
+    assert ContextPackRequest(goal="x", markdown_token_budget=None).markdown_token_budget is None

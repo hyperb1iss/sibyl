@@ -922,6 +922,12 @@ def _quality_metadata_to_markdown(
 
 
 _MARKDOWN_CHARS_PER_TOKEN = 4
+# What an unbudgeted product request should mean. A pack retrieved from a real
+# graph carries several times more content than the count defaults render, and
+# the discarded remainder was already paid for by search and ranking, so a
+# request that states no constraint gets a budget rather than a stub. Library
+# callers keep `None` so measurement baselines rendered by counts still are.
+DEFAULT_MARKDOWN_TOKEN_BUDGET = 4_000
 _MARKDOWN_ITEM_CEILING = 50
 _MARKDOWN_SECTION_ITEM_CEILING = 10
 _MARKDOWN_CONTENT_CEILING = 1200
@@ -1659,6 +1665,7 @@ def context_pack_to_dict(pack: ContextPack) -> dict[str, Any]:
 
 
 __all__ = [
+    "DEFAULT_MARKDOWN_TOKEN_BUDGET",
     "FACET_TYPES",
     "INTENT_FACETS",
     "compile_context",

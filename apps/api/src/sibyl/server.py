@@ -55,6 +55,7 @@ from sibyl_core.services.surreal_content import (
     get_raw_memory,
     get_raw_memory_by_source_id,
 )
+from sibyl_core.tools.context import DEFAULT_MARKDOWN_TOKEN_BUDGET
 from sibyl_core.tools.traverse import (
     DEFAULT_EXPAND_LIMIT,
     DEFAULT_NEIGHBOR_CONTENT_MAX_CHARS,
@@ -341,7 +342,7 @@ async def _compile_mcp_context_pack(
     include_related: bool,
     related_limit: int,
     audit: bool = False,
-    markdown_token_budget: int | None = None,
+    markdown_token_budget: int | None = DEFAULT_MARKDOWN_TOKEN_BUDGET,
 ) -> dict[str, Any]:
     from sibyl_core.tools.core import (
         compile_context as _compile_context,
@@ -2011,7 +2012,7 @@ def _register_tools(mcp: FastMCP) -> None:
         include_related: bool = True,
         related_limit: int = 3,
         audit: bool = False,
-        markdown_token_budget: int | None = None,
+        markdown_token_budget: int | None = DEFAULT_MARKDOWN_TOKEN_BUDGET,
     ) -> dict[str, Any]:
         """Compile a precise context pack for an agent goal.
 
