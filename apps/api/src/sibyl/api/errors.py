@@ -47,11 +47,13 @@ SAFE_DETAIL_FIELDS = frozenset(
         "request_id",
     }
 )
+# Bare UUIDs are deliberately NOT in this set. Record identifiers are the
+# system's public vocabulary: clients send them, mutation receipts return
+# them, and tasks mint them as bare uuid4. Scrubbing them replaced every
+# "Task not found: <id>" with a field-less "Invalid request data.", which made
+# 400/404s undiagnosable while protecting nothing the caller did not already
+# hold.
 _SENSITIVE_DETAIL_PATTERNS = (
-    re.compile(
-        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
-        re.IGNORECASE,
-    ),
     re.compile(r"\b(?:SELECT|INSERT|UPDATE|DELETE|MATCH|RELATE)\b", re.IGNORECASE),
     re.compile(r"(?:/[\w.-]+){2,}"),
     re.compile(r"[A-Za-z]:\\"),
