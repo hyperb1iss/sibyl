@@ -217,3 +217,45 @@ def test_pending_writes_flush_stops_after_auth_refresh_failure(
     assert calls[0] in {"/memory/raw", "/tasks"}
     assert len(pending_writes.list_pending_writes()) == 2
     assert "Stopping flush" in result.stdout
+
+
+def test_pending_writes_flush_failure_summary_names_both_classes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    _create_pending("/memory/raw")
+    _create_pending("/tasks")
+
+    class FakeClient:
+        def __init__(self, *, base_url: str, context_name: str | None = None) -> None:
+            self.base_url = base_url
+            self.context_name = context_name
+
+        async def __aenter__(self) -> FakeClient:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+            if path == "/tasks":
+                raise SibylClientError(
+                    "conflict",
+                    status_code=409,
+                    detail="An identical idempotent request is still in progress.",
+                )
+            pending_writes.delete_pending_write(str(kwargs["_pending_write_id"]))
+            return {"ok": True}
+
+    monkeypatch.setattr(pending, "SibylClient", FakeClient)
+
+    result = CliRunner().invoke(pending.app, ["flush"])
+
+    assert result.exit_code == 1
+    remaining = pending_writes.list_pending_writes()
+    assert len(remaining) == 1
+    assert remaining[0]["path"] == "/tasks"
+    assert "1 replayed, 1 failed" in result.stdout
+    assert "safe to flush again" in result.stdout
+    assert "flush again shortly" in result.stdout

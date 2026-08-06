@@ -173,6 +173,8 @@ def flush_writes(
     @run_async
     async def run_flush() -> None:
         failures = 0
+        replayed = 0
+        contended = 0
         async with AsyncExitStack() as stack:
             clients: dict[tuple[str, str | None], SibylClient] = {}
             for item in replayable:
@@ -198,14 +200,26 @@ def flush_writes(
                         _idempotency_key=str(current["idempotency_key"]),
                     )
                     record_pending_metric("replayed")
+                    replayed += 1
                     success(f"Flushed {write_id[:12]}")
                 except SibylClientError as exc:
                     failures += 1
                     error(f"Failed {write_id[:12]}: {exc.detail or exc}")
+                    if exc.status_code == 409:
+                        contended += 1
                     if _should_abort_flush(exc):
                         error("Stopping flush; remaining writes are still buffered.")
                         break
         if failures:
+            warn(
+                f"{replayed} replayed, {failures} failed; failed writes stay "
+                "buffered and are safe to flush again."
+            )
+            if contended:
+                warn(
+                    f"{contended} hit an identical request still executing on the "
+                    "server; those clear on their own, flush again shortly."
+                )
             raise typer.Exit(code=1)
 
     run_flush()
