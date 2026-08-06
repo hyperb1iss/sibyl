@@ -171,6 +171,49 @@ default install, OIDC is off and local auth is expected.
    echo $SIBYL_PUBLIC_URL
    ```
 
+## Schema Issues
+
+### "table ... does not exist" on a Fresh Store
+
+**Symptoms:**
+
+- API requests return HTTP 500 `internal_error` with a generic message.
+- Server logs show `NotFoundError: table projects does not exist` (or `team_projects`,
+  `raw_captures`, another core table) against a newly provisioned SurrealDB.
+- The instance was just installed, restored onto an empty database, or pointed at a new
+  `SIBYL_SURREAL_URL`.
+
+**What it usually means:**
+
+The auth and content schemas were never applied to this store. The server applies both automatically
+at startup and refuses to start on failure outside development, so hitting this at request time
+means the server started in `development` mode against an empty store, or startup bootstrap failed
+and the log line was missed.
+
+**Solutions:**
+
+1. **Apply the schemas directly (safe to run repeatedly):**
+
+   ```bash
+   sibyld db init
+   ```
+
+   The command applies pending auth and content migrations, verifies schema invariants, never drops
+   tables, and skips migrations already recorded in `schema_version`.
+
+2. **Check the startup bootstrap log** for the failure that stopped the automatic path:
+
+   ```bash
+   sibyl logs tail -l error -s api
+   ```
+
+   Look for `Surreal auth schema bootstrap failed` or `Surreal content schema bootstrap failed`;
+   each names the plane, target version, and error.
+
+3. **Verify readiness before sending traffic.** The readiness endpoint reports schema bootstrap
+   state, and compose/Kubernetes health checks gate on it, so an unhealthy backend that keeps
+   restarting is usually this failure loudly refusing to serve.
+
 ## Performance Issues
 
 ### Slow Queries

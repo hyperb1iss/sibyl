@@ -195,6 +195,22 @@ Without one of these configured, Sibyl logs those emails to its JSONL outbox and
 delivery, so invited users and password-reset requests never receive a link. When setting SMTP
 passwords in a Compose `.env` file, escape literal `$` characters as `$$`.
 
+## Database Schema
+
+The backend applies the auth and content schemas to SurrealDB automatically at startup, records
+applied migrations in `schema_version`, and refuses to start if bootstrap fails outside development
+mode, so a fresh store needs no manual step. To apply or repair the schemas by hand (an empty store,
+a restore, a bootstrap failure named in the logs), run:
+
+```bash
+sibyld db init
+```
+
+The command is non-destructive and safe to run repeatedly: it never drops tables, skips migrations
+already recorded, and verifies schema invariants after applying. If requests fail with
+`table ... does not exist`, see
+[the troubleshooting entry](../deployment/troubleshooting.md#schema-issues).
+
 ## First Owner
 
 The default Sibyl install is local-first. The first setup signup creates the owner/admin user. After
