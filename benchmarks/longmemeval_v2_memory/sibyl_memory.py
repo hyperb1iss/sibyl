@@ -147,6 +147,7 @@ DEFAULT_NEIGHBOR_STITCH_SPAN = 1
 DEFAULT_STATE_PART_COMPLETION_ITEMS = 0
 DEFAULT_STATE_PART_REFINEMENT = False
 DEFAULT_NEIGHBOR_SUPPORT_EXEMPT = False
+DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING = False
 DEFAULT_CONTEXT_EXPANSION_MAX_RATIO = 0.0
 CONTEXT_TOKENIZER_MODEL = "Qwen/Qwen3.5-9B"
 STATE_PART_REFINEMENT_MIN_SCORE_GAIN = 0.05
@@ -183,6 +184,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "state_part_completion_items",
         "state_part_refinement",
         "neighbor_support_exempt",
+        "neighbor_trajectory_preserving",
         "context_expansion_max_ratio",
         "evidence_types",
         "evidence_char_budget",
@@ -687,6 +689,7 @@ def compile_operational_evidence_set(
     typed_reservation_items: int | None = None,
     char_budget: int | None = None,
     neighbor_support_exempt: bool = DEFAULT_NEIGHBOR_SUPPORT_EXEMPT,
+    neighbor_trajectory_preserving: bool = DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING,
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
     """Compose the reader's pack from the typed and raw evidence pools.
 
@@ -793,6 +796,7 @@ def compile_operational_evidence_set(
             ranked_raw,
             budget=raw_budget,
             neighbor_support_exempt=neighbor_support_exempt,
+            neighbor_trajectory_preserving=neighbor_trajectory_preserving,
         )
         selected = [*ranked_typed[:typed_reservation], *selected_raw]
         if len(selected) < max_items:
@@ -813,6 +817,7 @@ def compile_operational_evidence_set(
             ranked_raw,
             budget=len(ranked_raw),
             neighbor_support_exempt=neighbor_support_exempt,
+            neighbor_trajectory_preserving=neighbor_trajectory_preserving,
         )
         selected_raw, spent = _admit_within_char_budget(
             ordered_raw,
@@ -851,6 +856,7 @@ def compile_operational_evidence_set(
         "selected_typed_count": selected_typed,
         "selected_raw_count": len(selected) - selected_typed,
         "neighbor_support_exempt": neighbor_support_exempt,
+        "neighbor_trajectory_preserving": neighbor_trajectory_preserving,
         "budget_mode": "items" if char_budget is None else "characters",
         "char_budget": char_budget,
         "selected_chars": selected_chars,
@@ -1012,6 +1018,7 @@ def _select_role_complete_raw_evidence(
     *,
     budget: int,
     neighbor_support_exempt: bool = DEFAULT_NEIGHBOR_SUPPORT_EXEMPT,
+    neighbor_trajectory_preserving: bool = DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING,
 ) -> list[dict[str, object]]:
     if budget <= 0:
         return []
@@ -1033,18 +1040,13 @@ def _select_role_complete_raw_evidence(
         )
     ]
     selected_links = _select_diverse_support_links(linked_support, limit=budget // 2)
+    if neighbor_trajectory_preserving:
+        selected_links = _links_preserving_trajectory_coverage(
+            primary, selected_links, budget=budget
+        )
     selected_support = [support for support, _parent in selected_links]
-    selected_primary: list[dict[str, object]] = []
-    selected_primary_ids: set[int] = set()
-    for _support, parent in selected_links:
-        if id(parent) not in selected_primary_ids:
-            selected_primary.append(parent)
-            selected_primary_ids.add(id(parent))
-    primary_budget = budget - len(selected_support)
-    for candidate in primary:
-        if id(candidate) not in selected_primary_ids and len(selected_primary) < primary_budget:
-            selected_primary.append(candidate)
-            selected_primary_ids.add(id(candidate))
+    selected_primary = _pack_primary_around_links(primary, selected_links, budget=budget)
+    selected_primary_ids = {id(candidate) for candidate in selected_primary}
     candidate_order = {id(candidate): index for index, candidate in enumerate(candidates)}
     selected_primary.sort(key=lambda candidate: candidate_order[id(candidate)])
     selected_support_ids = {id(candidate) for candidate in selected_support}
@@ -1065,6 +1067,64 @@ def _select_role_complete_raw_evidence(
         selected.append(candidate)
         selected.extend(support_by_parent_id.get(id(candidate), []))
     return selected
+
+
+def _pack_primary_around_links(
+    primary: list[dict[str, object]],
+    links: list[tuple[dict[str, object], dict[str, object]]],
+    *,
+    budget: int,
+) -> list[dict[str, object]]:
+    selected: list[dict[str, object]] = []
+    selected_ids: set[int] = set()
+    for _support, parent in links:
+        if id(parent) not in selected_ids:
+            selected.append(parent)
+            selected_ids.add(id(parent))
+    primary_budget = budget - len(links)
+    for candidate in primary:
+        if id(candidate) not in selected_ids and len(selected) < primary_budget:
+            selected.append(candidate)
+            selected_ids.add(id(candidate))
+    return selected
+
+
+def _links_preserving_trajectory_coverage(
+    primary: list[dict[str, object]],
+    links: list[tuple[dict[str, object], dict[str, object]]],
+    *,
+    budget: int,
+) -> list[tuple[dict[str, object], dict[str, object]]]:
+    # Every admitted support costs one tail seed, and a stitched neighbor
+    # almost always carries its parent's trajectory, so the trade can shrink
+    # the pack's trajectory coverage even while it improves state coverage.
+    # Admission is therefore checked one support at a time against the pack it
+    # would produce: a support that evicts the last remaining carrier of some
+    # trajectory is refused, and the seed keeps its slot.
+    admitted: list[tuple[dict[str, object], dict[str, object]]] = []
+    for link in links:
+        kept_before = _pack_primary_around_links(primary, admitted, budget=budget)
+        proposed = [*admitted, link]
+        kept_after = _pack_primary_around_links(primary, proposed, budget=budget)
+        kept_after_ids = {id(row) for row in kept_after}
+        evicted = [row for row in kept_before if id(row) not in kept_after_ids]
+        surviving = {
+            trajectory
+            for row in (*kept_after, *(support for support, _parent in proposed))
+            if (trajectory := _candidate_trajectory_id(row))
+        }
+        if all(
+            not (trajectory := _candidate_trajectory_id(row)) or trajectory in surviving
+            for row in evicted
+        ):
+            admitted = proposed
+    return admitted
+
+
+def _candidate_trajectory_id(candidate: dict[str, object]) -> str:
+    return _stripped_str(
+        _string_key_dict(candidate.get("metadata")).get("longmemeval_v2_trajectory_id")
+    )
 
 
 def _support_adds_query_coverage(
@@ -3110,6 +3170,11 @@ class SibylLiveApiMemory(Memory):
             "neighbor_support_exempt",
             DEFAULT_NEIGHBOR_SUPPORT_EXEMPT,
         )
+        self.neighbor_trajectory_preserving = _param_bool(
+            memory_params,
+            "neighbor_trajectory_preserving",
+            DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING,
+        )
         self.evidence_types = _param_evidence_types(
             memory_params,
             "evidence_types",
@@ -4208,6 +4273,11 @@ class SibylLiveApiMemory(Memory):
                 self,
                 "neighbor_support_exempt",
                 DEFAULT_NEIGHBOR_SUPPORT_EXEMPT,
+            ),
+            neighbor_trajectory_preserving=getattr(
+                self,
+                "neighbor_trajectory_preserving",
+                DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING,
             ),
         )
         rendered_item_ceiling = context_pack_item_ceiling(

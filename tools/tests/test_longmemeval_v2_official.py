@@ -2506,6 +2506,126 @@ def test_sibyl_memory_exempt_neighbors_survive_composition_next_to_their_seed() 
     )
 
 
+def test_sibyl_memory_trajectory_preserving_refuses_a_sole_carrier_eviction() -> None:
+    """A neighbor is refused when the seed it displaces is its trajectory's last.
+
+    Exempting neighbors buys state coverage by spending tail seeds, and a
+    stitched neighbor carries its parent's trajectory, so the trade can cost
+    the pack a trajectory outright. Here every seed is the only carrier of its
+    own trajectory, so the preserving arm must refuse the neighbor and hand
+    back exactly the default pack.
+    """
+    module = _load_memory_module()
+    query = "inventory order dashboard prefix"
+    first = _search_result("t1", chunk_index=1, state_index=1, score=1.0)
+    neighbor = _search_result("t1", chunk_index=0, state_index=0, score=0.0)
+    neighbor["content"] = (
+        "Goal: inventory order dashboard prefix\n\n"
+        "State 0\nAccessibility tree:\nanswer-bearing neighboring state"
+    )
+    results = [
+        first,
+        _search_result("t2", chunk_index=0, state_index=0, score=0.9),
+        _search_result("t3", chunk_index=0, state_index=0, score=0.8),
+        _search_result("target", chunk_index=0, state_index=0, score=0.7),
+    ]
+    results[-1]["content"] = query
+    max_items = 4
+    assembled = _assemble_for_neighbor_arms(module, results, {"t1": {0: neighbor, 1: first}}, query)
+
+    selected, composition = module.compile_operational_evidence_set(
+        query=query,
+        typed_results=[],
+        raw_results=assembled,
+        max_items=max_items,
+        neighbor_support_exempt=True,
+        neighbor_trajectory_preserving=True,
+    )
+
+    assert composition["neighbor_trajectory_preserving"] is True
+    assert composition["selected_raw_support_count"] == 0
+    assert len(selected) == max_items
+    assert any(item["metadata"]["longmemeval_v2_trajectory_id"] == "target" for item in selected)
+    assert not any(
+        module._stripped_str(item.get("_selection_origin")) == "neighbor" for item in selected
+    )
+
+
+def test_sibyl_memory_trajectory_preserving_admits_a_replaceable_eviction() -> None:
+    """A neighbor still lands when its displaced seed's trajectory survives.
+
+    The refusal is scoped to trajectory coverage, not to displacement itself.
+    When the evicted tail seed shares its trajectory with a seed that stays in
+    the pack, nothing is lost by admitting the neighbor, so the preserving arm
+    composes the same pack as the plain exempt arm.
+    """
+    module = _load_memory_module()
+    query = "inventory order dashboard prefix"
+    first = _search_result("t1", chunk_index=1, state_index=1, score=1.0)
+    neighbor = _search_result("t1", chunk_index=0, state_index=0, score=0.0)
+    neighbor["content"] = (
+        "Goal: inventory order dashboard prefix\n\n"
+        "State 0\nAccessibility tree:\nanswer-bearing neighboring state"
+    )
+    results = [
+        first,
+        _search_result("t2", chunk_index=0, state_index=0, score=0.9),
+        _search_result("t3", chunk_index=0, state_index=0, score=0.8),
+        _search_result("t3", chunk_index=1, state_index=1, score=0.7),
+    ]
+    max_items = 4
+    assembled = _assemble_for_neighbor_arms(module, results, {"t1": {0: neighbor, 1: first}}, query)
+
+    selected, composition = module.compile_operational_evidence_set(
+        query=query,
+        typed_results=[],
+        raw_results=assembled,
+        max_items=max_items,
+        neighbor_support_exempt=True,
+        neighbor_trajectory_preserving=True,
+    )
+
+    assert composition["selected_raw_support_count"] == 1
+    assert len(selected) == max_items
+    origins_and_chunks = [
+        (
+            module._stripped_str(item.get("_selection_origin")),
+            item["metadata"]["longmemeval_v2_trajectory_id"],
+            item["metadata"]["longmemeval_v2_chunk_index"],
+        )
+        for item in selected
+    ]
+    seed_position = origins_and_chunks.index(("search", "t1", 1))
+    assert origins_and_chunks[seed_position + 1] == ("neighbor", "t1", 0)
+    assert ("search", "t3", 0) in origins_and_chunks
+    assert ("search", "t3", 1) not in origins_and_chunks
+
+
+def _assemble_for_neighbor_arms(
+    module: ModuleType,
+    results: list[dict[str, Any]],
+    chunk_catalog: dict[str, dict[int, dict[str, Any]]],
+    query: str,
+) -> list[dict[str, Any]]:
+    candidate_limit = module.context_assembly_candidate_limit(
+        max_items=4,
+        neighbor_stitch_items=1,
+        state_part_completion_items=0,
+        has_chunk_catalog=True,
+    )
+    assembled, metadata = module.assemble_context_results(
+        results,
+        chunk_catalog=chunk_catalog,
+        max_items=candidate_limit,
+        max_chunks_per_trajectory=2,
+        neighbor_stitch_items=1,
+        neighbor_stitch_span=1,
+        query=query,
+    )
+    assert metadata["stitched_neighbor_count"] == 1
+    return assembled
+
+
 def test_sibyl_memory_restores_transport_truncated_search_content() -> None:
     module = _load_memory_module()
     search_result = _search_result("t1", chunk_index=1, state_index=1, score=0.9)
@@ -4772,6 +4892,7 @@ def test_operational_evidence_set_calibrates_typed_and_raw_score_pools() -> None
         "selected_typed_count": 3,
         "selected_raw_count": 5,
         "neighbor_support_exempt": False,
+        "neighbor_trajectory_preserving": False,
         "budget_mode": "items",
         "char_budget": None,
         "selected_chars": sum(len(str(item["content"])) for item in selected),
@@ -5904,6 +6025,7 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
                 "selected_typed_count": 0,
                 "selected_raw_count": 0,
                 "neighbor_support_exempt": False,
+                "neighbor_trajectory_preserving": False,
                 "budget_mode": "items",
                 "char_budget": None,
                 "selected_chars": 0,

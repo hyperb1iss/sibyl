@@ -66,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
             "evidence_composition_mode": args.evidence_composition_mode,
             "source_evidence_bundling": args.source_evidence_bundling,
             "neighbor_support_exempt": args.neighbor_support_exempt,
+            "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
             "typed_stream_retrieval": args.typed_stream_retrieval,
             "typed_stream_limit": args.typed_stream_limit,
         },
@@ -136,6 +137,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--neighbor-support-exempt",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
+    parser.add_argument(
+        "--neighbor-trajectory-preserving",
         action=argparse.BooleanOptionalAction,
         default=False,
     )
@@ -258,6 +264,7 @@ def build_run_config(
         "evidence_composition_mode": args.evidence_composition_mode,
         "source_evidence_bundling": args.source_evidence_bundling,
         "neighbor_support_exempt": args.neighbor_support_exempt,
+        "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
         "typed_stream_retrieval": args.typed_stream_retrieval,
         "typed_stream_limit": args.typed_stream_limit,
     }
