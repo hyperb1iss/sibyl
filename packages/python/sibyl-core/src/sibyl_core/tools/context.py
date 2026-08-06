@@ -922,6 +922,10 @@ def _quality_metadata_to_markdown(
 
 
 _MARKDOWN_CHARS_PER_TOKEN = 4
+_MARKDOWN_ITEM_CEILING = 50
+_MARKDOWN_SECTION_ITEM_CEILING = 10
+_MARKDOWN_CONTENT_CEILING = 1200
+_BUDGET_CONTENT_SHARE = 0.85
 _ACTIVE_WORK_ANCHOR_INTENTS = frozenset({ContextIntent.BUILD, ContextIntent.GENERAL})
 
 
@@ -1018,17 +1022,39 @@ def context_pack_to_markdown(
 ) -> str:
     """Render a context pack as compact Markdown for agent injection.
 
-    token_budget caps the rendered size at roughly that many tokens
-    (chars/4 estimate); at least one item always renders so a tight
-    budget degrades to a minimal brief instead of an empty pack.
+    token_budget is the caller's real constraint, so it decides the pack rather
+    than trimming one already sized by counts. Given a budget, breadth and
+    depth both scale toward it: more of the pack's items render, and each is
+    allowed more of its content, up to the hard ceilings. The per-block guard
+    below is what keeps the result inside the budget, and it always emits at
+    least one item so a tight budget degrades to a minimal brief rather than an
+    empty pack. Without a budget the count defaults bind exactly as they always
+    have, because there is nothing to size against.
     """
 
-    max_items = max(1, min(max_items, 50))
-    items_per_section = max(1, min(items_per_section, 10))
-    max_content_chars = max(80, min(max_content_chars, 1200))
+    max_items = max(1, min(max_items, _MARKDOWN_ITEM_CEILING))
+    items_per_section = max(1, min(items_per_section, _MARKDOWN_SECTION_ITEM_CEILING))
+    max_content_chars = max(80, min(max_content_chars, _MARKDOWN_CONTENT_CEILING))
     char_budget = (
         max(400, token_budget * _MARKDOWN_CHARS_PER_TOKEN) if token_budget is not None else None
     )
+    if char_budget is not None:
+        renderable = max(1, pack.total_items)
+        max_items = min(_MARKDOWN_ITEM_CEILING, max(max_items, renderable))
+        # Each section may claim its share of the item allowance. A fixed
+        # per-section cap would leave the budget unspent whenever the pack's
+        # items concentrate in few facets, which is the same slot rationing the
+        # budget exists to replace, while a share still spreads a wide pack
+        # across its facets instead of letting the first one take everything.
+        section_count = max(1, len(pack.sections))
+        fair_share = -(-max_items // section_count)
+        items_per_section = max(items_per_section, fair_share)
+        # Reserve a share for headers, titles, and related lines so the content
+        # allowance does not budget for text the block has to carry anyway.
+        content_allowance = int(char_budget * _BUDGET_CONTENT_SHARE) // min(max_items, renderable)
+        max_content_chars = min(
+            _MARKDOWN_CONTENT_CEILING, max(max_content_chars, content_allowance)
+        )
 
     lines = [
         f"# Sibyl Context Pack: {pack.goal}",
