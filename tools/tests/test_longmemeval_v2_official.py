@@ -2683,6 +2683,58 @@ def test_sibyl_memory_render_ceiling_admits_the_granted_overflow() -> None:
     )
 
 
+def test_sibyl_memory_stitch_spread_reaches_every_seed_before_the_second_ring() -> None:
+    """Ring-major stitch order spends the budget across seeds, not on the first.
+
+    Seed-major order gives the top seed both of its adjacent chunks and the
+    budget is gone, so a two-item stitch never reaches the second seed however
+    many seeds were retrieved. Ring-major order takes distance one from every
+    seed before distance two from any of them.
+    """
+    module = _load_memory_module()
+    query = "inventory order dashboard prefix"
+    seeds = [
+        _search_result("t1", chunk_index=2, state_index=2, score=1.0),
+        _search_result("t2", chunk_index=2, state_index=2, score=0.9),
+    ]
+    catalog = {
+        trajectory: {
+            index: _search_result(trajectory, chunk_index=index, state_index=index, score=0.0)
+            for index in (0, 1, 2, 3, 4)
+        }
+        for trajectory in ("t1", "t2")
+    }
+    stitch_items = 2
+
+    def stitched(*, spread: bool) -> list[tuple[str, int]]:
+        assembled, _metadata = module.assemble_context_results(
+            [dict(seed) for seed in seeds],
+            chunk_catalog=catalog,
+            max_items=module.context_assembly_candidate_limit(
+                max_items=8,
+                neighbor_stitch_items=stitch_items,
+                state_part_completion_items=0,
+                has_chunk_catalog=True,
+            ),
+            max_chunks_per_trajectory=8,
+            neighbor_stitch_items=stitch_items,
+            neighbor_stitch_span=2,
+            neighbor_stitch_spread=spread,
+            query=query,
+        )
+        return [
+            (
+                item["metadata"]["longmemeval_v2_trajectory_id"],
+                item["metadata"]["longmemeval_v2_chunk_index"],
+            )
+            for item in assembled
+            if module._stripped_str(item.get("_selection_origin")) == "neighbor"
+        ]
+
+    assert stitched(spread=False) == [("t1", 1), ("t1", 3)]
+    assert stitched(spread=True) == [("t1", 1), ("t2", 1)]
+
+
 def _assemble_for_neighbor_arms(
     module: ModuleType,
     results: list[dict[str, Any]],

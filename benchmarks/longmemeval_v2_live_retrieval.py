@@ -68,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
             "neighbor_support_exempt": args.neighbor_support_exempt,
             "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
             "neighbor_support_overflow_items": args.neighbor_support_overflow_items,
+            "neighbor_stitch_spread": args.neighbor_stitch_spread,
             "typed_stream_retrieval": args.typed_stream_retrieval,
             "typed_stream_limit": args.typed_stream_limit,
         },
@@ -147,6 +148,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=False,
     )
     parser.add_argument("--neighbor-support-overflow-items", type=int, default=0)
+    parser.add_argument(
+        "--neighbor-stitch-spread",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
     parser.add_argument("--typed-stream-retrieval", action="store_true")
     parser.add_argument("--typed-stream-limit", type=int, default=8)
     args = parser.parse_args(argv)
@@ -268,6 +274,7 @@ def build_run_config(
         "neighbor_support_exempt": args.neighbor_support_exempt,
         "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
         "neighbor_support_overflow_items": args.neighbor_support_overflow_items,
+        "neighbor_stitch_spread": args.neighbor_stitch_spread,
         "typed_stream_retrieval": args.typed_stream_retrieval,
         "typed_stream_limit": args.typed_stream_limit,
     }

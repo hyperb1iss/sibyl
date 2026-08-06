@@ -52,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
         neighbor_support_exempt=args.neighbor_support_exempt,
         neighbor_trajectory_preserving=args.neighbor_trajectory_preserving,
         neighbor_support_overflow_items=args.neighbor_support_overflow_items,
+        neighbor_stitch_spread=args.neighbor_stitch_spread,
     )
     output = Path(args.output).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -99,6 +100,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--neighbor-support-exempt", action="store_true")
     parser.add_argument("--neighbor-trajectory-preserving", action="store_true")
     parser.add_argument("--neighbor-support-overflow-items", type=int, default=0)
+    parser.add_argument("--neighbor-stitch-spread", action="store_true")
     args = parser.parse_args(argv)
     for name in (
         "max_items",
@@ -141,6 +143,7 @@ def replay_composition(
     neighbor_support_exempt: bool = False,
     neighbor_trajectory_preserving: bool = False,
     neighbor_support_overflow_items: int = 0,
+    neighbor_stitch_spread: bool = False,
 ) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     sources: dict[str, dict[str, Any]] = {}
@@ -177,6 +180,7 @@ def replay_composition(
                     neighbor_support_exempt=neighbor_support_exempt,
                     neighbor_trajectory_preserving=neighbor_trajectory_preserving,
                     neighbor_support_overflow_items=neighbor_support_overflow_items,
+                    neighbor_stitch_spread=neighbor_stitch_spread,
                 )
             )
 
@@ -210,6 +214,7 @@ def replay_composition(
             "neighbor_support_exempt": neighbor_support_exempt,
             "neighbor_trajectory_preserving": neighbor_trajectory_preserving,
             "neighbor_support_overflow_items": neighbor_support_overflow_items,
+            "neighbor_stitch_spread": neighbor_stitch_spread,
         },
         "metrics": {
             "question_count": len(rows),
@@ -281,6 +286,7 @@ def replay_question(
     neighbor_support_exempt: bool = False,
     neighbor_trajectory_preserving: bool = False,
     neighbor_support_overflow_items: int = 0,
+    neighbor_stitch_spread: bool = False,
 ) -> dict[str, Any]:
     query = str(row.get("question_text") or "")
     baseline = result_candidates(row)
@@ -312,6 +318,7 @@ def replay_question(
         max_chunks_per_trajectory=max_chunks_per_trajectory,
         neighbor_stitch_items=neighbor_stitch_items,
         neighbor_stitch_span=neighbor_stitch_span,
+        neighbor_stitch_spread=neighbor_stitch_spread,
         query=query,
         state_part_completion_items=state_part_completion_items,
         state_part_refinement=state_part_refinement,

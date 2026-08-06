@@ -14,7 +14,7 @@ import sys
 import threading
 import time
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import TypeVar
@@ -149,6 +149,7 @@ DEFAULT_STATE_PART_REFINEMENT = False
 DEFAULT_NEIGHBOR_SUPPORT_EXEMPT = False
 DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING = False
 DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS = 0
+DEFAULT_NEIGHBOR_STITCH_SPREAD = False
 DEFAULT_CONTEXT_EXPANSION_MAX_RATIO = 0.0
 CONTEXT_TOKENIZER_MODEL = "Qwen/Qwen3.5-9B"
 STATE_PART_REFINEMENT_MIN_SCORE_GAIN = 0.05
@@ -187,6 +188,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "neighbor_support_exempt",
         "neighbor_trajectory_preserving",
         "neighbor_support_overflow_items",
+        "neighbor_stitch_spread",
         "context_expansion_max_ratio",
         "evidence_types",
         "evidence_char_budget",
@@ -2375,6 +2377,7 @@ def assemble_context_results(
     max_chunks_per_trajectory: int,
     neighbor_stitch_items: int,
     neighbor_stitch_span: int,
+    neighbor_stitch_spread: bool = DEFAULT_NEIGHBOR_STITCH_SPREAD,
     query: str = "",
     state_part_completion_items: int = 0,
     state_part_refinement: bool = False,
@@ -2449,6 +2452,7 @@ def assemble_context_results(
         selected_keys=selected_keys,
         limit=neighbor_budget,
         span=neighbor_stitch_span,
+        spread=neighbor_stitch_spread,
     )
     selected.extend(neighbors)
     if len(selected) < max_items:
@@ -2853,29 +2857,57 @@ def _neighbor_results(
     selected_keys: set[tuple[str, int | str]],
     limit: int,
     span: int,
+    spread: bool = DEFAULT_NEIGHBOR_STITCH_SPREAD,
 ) -> list[dict[str, object]]:
     neighbors: list[dict[str, object]] = []
+    for seed, trajectory_id, neighbor_index, distance in _neighbor_stitch_plan(
+        seeds, span=span, spread=spread
+    ):
+        key = (trajectory_id, neighbor_index)
+        catalog_result = chunk_catalog.get(trajectory_id, {}).get(neighbor_index)
+        if catalog_result is None or key in selected_keys:
+            continue
+        neighbor = dict(catalog_result)
+        neighbor["score"] = seed.get("score")
+        neighbor["_selection_origin"] = "neighbor"
+        neighbor["_neighbor_of_search_rank"] = seed.get("_search_rank")
+        neighbor["_neighbor_distance"] = distance
+        neighbors.append(neighbor)
+        selected_keys.add(key)
+        if len(neighbors) >= limit:
+            return neighbors
+    return neighbors
+
+
+def _neighbor_stitch_plan(
+    seeds: list[dict[str, object]],
+    *,
+    span: int,
+    spread: bool,
+) -> Iterator[tuple[dict[str, object], str, int, int]]:
+    """Order the chunks the stitch may claim, as (seed, trajectory, index, distance).
+
+    Seed-major order drains the whole budget on the highest-ranked seed before
+    reaching the second, so at the shipped budget of two the stitch only ever
+    covers one seed's immediate chunks. Ring-major order walks every seed at
+    distance one before any seed at distance two, which spends the same budget
+    across the seed set and keeps the nearest chunks ahead of the farther ones.
+    """
+    anchors: list[tuple[dict[str, object], str, int]] = []
     for seed in seeds:
         trajectory_id, chunk_index = _result_chunk_key(seed)
-        if not isinstance(chunk_index, int):
-            continue
-        trajectory_catalog = chunk_catalog.get(trajectory_id, {})
-        for distance in range(1, span + 1):
-            for neighbor_index in (chunk_index - distance, chunk_index + distance):
-                key = (trajectory_id, neighbor_index)
-                catalog_result = trajectory_catalog.get(neighbor_index)
-                if catalog_result is None or key in selected_keys:
-                    continue
-                neighbor = dict(catalog_result)
-                neighbor["score"] = seed.get("score")
-                neighbor["_selection_origin"] = "neighbor"
-                neighbor["_neighbor_of_search_rank"] = seed.get("_search_rank")
-                neighbor["_neighbor_distance"] = distance
-                neighbors.append(neighbor)
-                selected_keys.add(key)
-                if len(neighbors) >= limit:
-                    return neighbors
-    return neighbors
+        if isinstance(chunk_index, int):
+            anchors.append((seed, trajectory_id, chunk_index))
+    if not spread:
+        for seed, trajectory_id, chunk_index in anchors:
+            for distance in range(1, span + 1):
+                for neighbor_index in (chunk_index - distance, chunk_index + distance):
+                    yield seed, trajectory_id, neighbor_index, distance
+        return
+    for distance in range(1, span + 1):
+        for direction in (-1, 1):
+            for seed, trajectory_id, chunk_index in anchors:
+                yield seed, trajectory_id, chunk_index + direction * distance, distance
 
 
 def _result_diversity_key(result: dict[str, object]) -> tuple[str, int | str]:
@@ -3206,6 +3238,11 @@ class SibylLiveApiMemory(Memory):
             "neighbor_support_overflow_items",
             DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS,
             minimum=0,
+        )
+        self.neighbor_stitch_spread = _param_bool(
+            memory_params,
+            "neighbor_stitch_spread",
+            DEFAULT_NEIGHBOR_STITCH_SPREAD,
         )
         self.evidence_types = _param_evidence_types(
             memory_params,
@@ -4271,6 +4308,11 @@ class SibylLiveApiMemory(Memory):
                 self,
                 "neighbor_stitch_span",
                 DEFAULT_NEIGHBOR_STITCH_SPAN,
+            ),
+            neighbor_stitch_spread=getattr(
+                self,
+                "neighbor_stitch_spread",
+                DEFAULT_NEIGHBOR_STITCH_SPREAD,
             ),
             query=query,
             state_part_completion_items=state_part_completion_items,
