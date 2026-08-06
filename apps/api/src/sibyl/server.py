@@ -643,16 +643,24 @@ async def _remember_mcp_memory(
             if record.request_hash != idempotency_request_hash(idempotency_payload):
                 raise ValueError("idempotency_key was already used for a different request")
             if idempotency_record_pending(record):
-                raise ValueError(
-                    "idempotent operation is still in progress or was interrupted before "
-                    "its receipt completed"
+                # This branch runs under _serialize_mcp_idempotency's lock, so
+                # no executor is live on this key: the reservation was
+                # interrupted before its receipt completed. Adopt it and
+                # re-execute; completion overwrites the same record id.
+                log.warning(
+                    "mcp_idempotency_interrupted_takeover",
+                    path=idempotency_path,
+                    organization_id=ctx.org_id,
                 )
-            replayed = cast("dict[str, Any]", deepcopy(record.response_body))
-            receipt = replayed.get("mutation_receipt")
-            if isinstance(receipt, dict):
-                replayed["mutation_receipt"] = {**receipt, "replayed": True}
-            return replayed
-        idempotency_claim = record
+                idempotency_claim = record
+            else:
+                replayed = cast("dict[str, Any]", deepcopy(record.response_body))
+                receipt = replayed.get("mutation_receipt")
+                if isinstance(receipt, dict):
+                    replayed["mutation_receipt"] = {**receipt, "replayed": True}
+                return replayed
+        else:
+            idempotency_claim = record
 
     memory_scope = "project" if project else "private"
     write_decision = _authorize_mcp_memory_write(
@@ -1697,25 +1705,27 @@ async def _manage_mcp_action(
                     "data": {},
                 }
             if idempotency_record_pending(record):
-                return {
-                    "success": False,
-                    "action": normalized_action,
-                    "entity_id": entity_id,
-                    "message": (
-                        "idempotent operation is still in progress or was interrupted before "
-                        "its receipt completed"
-                    ),
-                    "data": {},
-                }
-            replayed = cast("dict[str, Any]", deepcopy(record.response_body))
-            raw_response_data = replayed.get("data")
-            if isinstance(raw_response_data, dict):
-                response_data = cast("dict[str, Any]", raw_response_data)
-                receipt = response_data.get("mutation_receipt")
-                if isinstance(receipt, dict):
-                    response_data["mutation_receipt"] = {**receipt, "replayed": True}
-            return replayed
-        idempotency_claim = record
+                # This branch runs under _serialize_mcp_idempotency's lock, so
+                # no executor is live on this key: the reservation was
+                # interrupted before its receipt completed. Adopt it and
+                # re-execute; completion overwrites the same record id.
+                log.warning(
+                    "mcp_idempotency_interrupted_takeover",
+                    path=idempotency_path,
+                    organization_id=ctx.org_id,
+                )
+                idempotency_claim = record
+            else:
+                replayed = cast("dict[str, Any]", deepcopy(record.response_body))
+                raw_response_data = replayed.get("data")
+                if isinstance(raw_response_data, dict):
+                    response_data = cast("dict[str, Any]", raw_response_data)
+                    receipt = response_data.get("mutation_receipt")
+                    if isinstance(receipt, dict):
+                        response_data["mutation_receipt"] = {**receipt, "replayed": True}
+                return replayed
+        else:
+            idempotency_claim = record
 
     full_data = request_data
     full_data["organization_id"] = ctx.org_id
