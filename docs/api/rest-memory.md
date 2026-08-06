@@ -210,9 +210,15 @@ compilation:
 | `max_results_per_source`        | integer  | -             | In accurate mode, prefer source-diverse evidence first (1-50)   |
 | `content_max_chars`             | integer  | 500           | Maximum content characters per evidence result (0-50000)        |
 | `include_retrieval_diagnostics` | boolean  | false         | Include authorized evidence ranking diagnostics                 |
-| `retrieval_mode`                | string   | `fast`        | `fast` (one search) or `accurate` (multi-step refinement)       |
+| `retrieval_mode`                | string   | `fast`        | `fast` (one search) or `accurate` (deprecated, see below)       |
 | `max_planned_queries`           | integer  | 3             | Maximum feedback searches across accurate-mode refinement (1-3) |
 | `reserve_distilled_notes`       | boolean  | true          | Reserve a typed lane for distilled operational notes            |
+
+::: warning `retrieval_mode=accurate` is deprecated Measured at full benchmark scale, accurate mode
+returned lower accuracy than `fast` at 2.5x the latency, so it is scheduled for removal. Requests
+selecting it are still served; the server logs a deprecation warning and the evidence response
+carries a `retrieval_mode_deprecated` filter naming the replacement. Use `fast`, the default, which
+also makes `max_results_per_source` and `max_planned_queries` irrelevant. :::
 
 The response is a context pack with `sections`, `total_items`, `usage_metadata`, `usage_hint`, and a
 rendered `markdown` field. When evidence retrieval was requested, the response also carries an

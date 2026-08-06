@@ -349,6 +349,9 @@ def _fuse_context_evidence(
         query=question,
         filters={
             "retrieval_mode": "accurate",
+            "retrieval_mode_deprecated": (
+                "accurate is deprecated and will be removed; use fast (the default)"
+            ),
             "planner_status": planner_status,
             "planner_strategy": "deterministic_refinement_v3",
             "planner_usage": planner_usage,
@@ -697,6 +700,14 @@ async def _compile_context_with_evidence(
     with capture_embedding_usage(embedding_provider) as embedding_usage:
         pack_task = asyncio.create_task(compile_pack())
         if request.evidence.retrieval_mode == "accurate":
+            # A5 deprecation (measured at full benchmark scale: lower accuracy
+            # AND 2.5x latency vs fast). Served for one release, warned, then
+            # removed together with the planner unless A3 adopts it.
+            log.warning(
+                "retrieval_mode_accurate_deprecated",
+                organization_id=str(org.id),
+                remediation="switch to retrieval_mode=fast (the default)",
+            )
             evidence_task = asyncio.create_task(
                 _execute_accurate_context_evidence_search(
                     request,
