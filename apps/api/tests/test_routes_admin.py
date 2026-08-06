@@ -813,3 +813,48 @@ def test_parse_surreal_metric_names_and_sample() -> None:
     assert sample["surrealdb_transaction_conflicts_total"] is True
     assert sample["surrealdb_http_request_duration_seconds"] is True
     assert sample["surrealdb_query_duration_seconds"] is False
+
+
+class TestDebugDialectBuiltins:
+    """The graph debug gate allowlists read-only builtins instead of banning ::."""
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "SELECT string::len(name) FROM entity LIMIT 5",
+            "SELECT math::mean(scores) FROM entity GROUP ALL",
+            "SELECT time::now() FROM entity LIMIT 1",
+            "SELECT type::thing('entity', id) FROM entity LIMIT 1",
+            "SELECT string::semver::compare(a, b) FROM entity LIMIT 1",
+        ],
+    )
+    def test_read_only_builtins_are_allowed(self, query: str) -> None:
+        from sibyl.api.routes import admin
+
+        assert admin._is_supported_debug_dialect(query)
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "SELECT http::get('https://attacker.example') FROM entity",
+            "SELECT function::custom(name) FROM entity",
+            "SELECT ::orphan(name) FROM entity",
+        ],
+    )
+    def test_unlisted_namespaces_are_rejected(self, query: str) -> None:
+        from sibyl.api.routes import admin
+
+        assert not admin._is_supported_debug_dialect(query)
+
+    def test_separator_inside_string_literal_is_ignored(self) -> None:
+        from sibyl.api.routes import admin
+
+        assert admin._is_supported_debug_dialect(
+            "SELECT name FROM entity WHERE name = 'http::get' LIMIT 1"
+        )
+
+    def test_mutating_statements_stay_rejected(self) -> None:
+        from sibyl.api.routes import admin
+
+        assert not admin._is_supported_debug_dialect("DELETE entity")
+        assert not admin._is_supported_debug_dialect("SELECT * FROM entity; DELETE entity")

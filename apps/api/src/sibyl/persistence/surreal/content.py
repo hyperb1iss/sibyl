@@ -97,8 +97,11 @@ _CONTENT_DEBUG_SELECT_PATTERN = re.compile(
     rf"(?P<table>{_CONTENT_DEBUG_TABLE_PATTERN})\b(?P<tail>.*)\Z",
     re.IGNORECASE | re.DOTALL,
 )
+# GROUP is matched bare because SurrealQL spells aggregates GROUP ALL and
+# allows GROUP <field> without BY; matching only GROUP BY swallows those into
+# the preceding expression.
 _CONTENT_DEBUG_BOUNDARY_PATTERN = re.compile(
-    r"\b(?:GROUP\s+BY|ORDER\s+BY|LIMIT|START|FETCH|TIMEOUT|PARALLEL|EXPLAIN)\b",
+    r"\b(?:GROUP|ORDER\s+BY|LIMIT|START|FETCH|TIMEOUT|PARALLEL|EXPLAIN)\b",
     re.IGNORECASE,
 )
 _CONTENT_DEBUG_WHERE_PATTERN = re.compile(r"\bWHERE\b", re.IGNORECASE)
@@ -817,16 +820,23 @@ def _scope_content_debug_query(query: str) -> str:
         before_where = tail[: where_match.start()]
         after_condition = tail[condition_end:].lstrip()
         suffix = f" {after_condition}" if after_condition else ""
-        return (
-            f"{prefix}{before_where}WHERE ({condition}) "
-            "AND organization_id = $organization_id"
-            f"{suffix}"
-        )
+        head = _content_debug_scope_head(f"{prefix}{before_where}")
+        return f"{head}WHERE ({condition}) AND organization_id = $organization_id{suffix}"
 
     before_boundary = tail[:boundary_start]
     after_boundary = tail[boundary_start:].lstrip()
     suffix = f" {after_boundary}" if after_boundary else ""
-    return f"{prefix}{before_boundary}WHERE organization_id = $organization_id{suffix}"
+    head = _content_debug_scope_head(f"{prefix}{before_boundary}")
+    return f"{head}WHERE organization_id = $organization_id{suffix}"
+
+
+def _content_debug_scope_head(head: str) -> str:
+    # A bare `SELECT * FROM <table>` has an empty tail, so nothing supplies the
+    # separator before the injected WHERE and the query melts into
+    # `<table>WHERE ...`. Guarantee it here rather than at each call site.
+    if head and not head[-1].isspace():
+        return f"{head} "
+    return head
 
 
 async def execute_debug_query(
