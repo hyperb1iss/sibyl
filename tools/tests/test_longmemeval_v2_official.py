@@ -2462,8 +2462,9 @@ def test_sibyl_memory_exempt_neighbors_survive_composition_next_to_their_seed() 
         _search_result("target", chunk_index=0, state_index=0, score=0.7),
     ]
     results[-1]["content"] = query
+    max_items = 4
     candidate_limit = module.context_assembly_candidate_limit(
-        max_items=4,
+        max_items=max_items,
         neighbor_stitch_items=1,
         state_part_completion_items=0,
         has_chunk_catalog=True,
@@ -2482,14 +2483,14 @@ def test_sibyl_memory_exempt_neighbors_survive_composition_next_to_their_seed() 
         query=query,
         typed_results=[],
         raw_results=assembled,
-        max_items=4,
+        max_items=max_items,
         neighbor_support_exempt=True,
     )
 
     assert metadata["stitched_neighbor_count"] == 1
     assert composition["neighbor_support_exempt"] is True
     assert composition["selected_raw_support_count"] == 1
-    assert len(selected) == 4
+    assert len(selected) == max_items
     origins_and_chunks = [
         (
             module._stripped_str(item.get("_selection_origin")),
