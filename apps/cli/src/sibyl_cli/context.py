@@ -464,8 +464,8 @@ def pack_cmd(
         typer.Option(
             "--budget",
             min=100,
-            max=8000,
-            help="Cap rendered markdown at roughly this many tokens",
+            max=32_000,
+            help="Size rendered markdown to roughly this many tokens",
         ),
     ] = None,
 ) -> None:

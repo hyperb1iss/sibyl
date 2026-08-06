@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from sibyl_core.models.context import ContextFacet, ContextIntent, ContextLayer
 from sibyl_core.retrieval.refinement import MAX_REFINEMENT_QUERIES
+from sibyl_core.tools.context import DEFAULT_MARKDOWN_TOKEN_BUDGET
 
 from .search import SearchResponse
 
@@ -84,10 +85,10 @@ class ContextPackRequest(BaseModel):
         description="Record returned items as memory exposure signals",
     )
     markdown_token_budget: int | None = Field(
-        default=None,
+        default=DEFAULT_MARKDOWN_TOKEN_BUDGET,
         ge=100,
-        le=8000,
-        description="Cap rendered markdown at roughly this many tokens",
+        le=32_000,
+        description="Size rendered markdown to roughly this many tokens",
     )
     evidence: ContextEvidenceRequest | None = Field(
         default=None,

@@ -1895,6 +1895,45 @@ def test_markdown_token_budget_always_renders_first_item() -> None:
     assert "Decision 0" in trimmed
 
 
+def test_markdown_token_budget_buys_a_bigger_pack() -> None:
+    """A budget sizes the pack rather than only trimming a count-sized one.
+
+    The item and content defaults are what bound the render when no budget is
+    given, so a caller who asked for more tokens used to receive exactly the
+    same pack. A larger budget must now buy both more items and more of each
+    item's content.
+    """
+    pack = _budget_pack(40)
+
+    small = context_pack_to_markdown(pack, token_budget=500)
+    large = context_pack_to_markdown(pack, token_budget=8000)
+
+    assert len(large) > len(small) * 2
+    assert large.count("\n- **") > small.count("\n- **")
+    assert "Decision 20" not in small
+    assert "Decision 20" in large
+
+
+def test_markdown_token_budget_is_never_exceeded() -> None:
+    """Growing the pack toward the budget must not overrun it."""
+    pack = _budget_pack(40)
+    chars_per_token = 4
+
+    for budget in (200, 500, 1_000, 2_000, 4_000, 8_000):
+        rendered = context_pack_to_markdown(pack, token_budget=budget)
+        assert len(rendered) <= max(400, budget * chars_per_token)
+
+
+def test_markdown_without_a_budget_keeps_the_count_defaults() -> None:
+    """No budget means nothing to size against, so the counts still bind."""
+    pack = _budget_pack(40)
+
+    rendered = context_pack_to_markdown(pack)
+
+    assert rendered.count("\n- **") == 3
+    assert "Decision 3" not in rendered
+
+
 @pytest.mark.asyncio
 async def test_lean_metadata_drops_description_equal_to_content(
     monkeypatch: pytest.MonkeyPatch,
