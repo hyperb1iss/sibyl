@@ -2437,6 +2437,75 @@ def test_sibyl_memory_expansion_candidates_do_not_consume_seed_budget() -> None:
     assert composition["selected_raw_support_count"] == 0
 
 
+def test_sibyl_memory_exempt_neighbors_survive_composition_next_to_their_seed() -> None:
+    """The exempt arm admits stitched neighbors regardless of query coverage.
+
+    The default gate requires a neighbor to beat its parent on query-term
+    overlap, which structurally rejects answer-bearing neighbors (the answer
+    is rarely phrased in the query). With the exemption on, the same
+    no-coverage-gain neighbor must survive composition adjacent to its seed,
+    and the displacement cost is explicit: the support slot comes out of the
+    tail of the primary lane.
+    """
+    module = _load_memory_module()
+    query = "inventory order dashboard prefix"
+    first = _search_result("t1", chunk_index=1, state_index=1, score=1.0)
+    neighbor = _search_result("t1", chunk_index=0, state_index=0, score=0.0)
+    neighbor["content"] = (
+        "Goal: inventory order dashboard prefix\n\n"
+        "State 0\nAccessibility tree:\nanswer-bearing neighboring state"
+    )
+    results = [
+        first,
+        _search_result("t2", chunk_index=0, state_index=0, score=0.9),
+        _search_result("t3", chunk_index=0, state_index=0, score=0.8),
+        _search_result("target", chunk_index=0, state_index=0, score=0.7),
+    ]
+    results[-1]["content"] = query
+    max_items = 4
+    candidate_limit = module.context_assembly_candidate_limit(
+        max_items=max_items,
+        neighbor_stitch_items=1,
+        state_part_completion_items=0,
+        has_chunk_catalog=True,
+    )
+
+    assembled, metadata = module.assemble_context_results(
+        results,
+        chunk_catalog={"t1": {0: neighbor, 1: first}},
+        max_items=candidate_limit,
+        max_chunks_per_trajectory=2,
+        neighbor_stitch_items=1,
+        neighbor_stitch_span=1,
+        query=query,
+    )
+    selected, composition = module.compile_operational_evidence_set(
+        query=query,
+        typed_results=[],
+        raw_results=assembled,
+        max_items=max_items,
+        neighbor_support_exempt=True,
+    )
+
+    assert metadata["stitched_neighbor_count"] == 1
+    assert composition["neighbor_support_exempt"] is True
+    assert composition["selected_raw_support_count"] == 1
+    assert len(selected) == max_items
+    origins_and_chunks = [
+        (
+            module._stripped_str(item.get("_selection_origin")),
+            item["metadata"]["longmemeval_v2_trajectory_id"],
+            item["metadata"]["longmemeval_v2_chunk_index"],
+        )
+        for item in selected
+    ]
+    seed_position = origins_and_chunks.index(("search", "t1", 1))
+    assert origins_and_chunks[seed_position + 1] == ("neighbor", "t1", 0)
+    assert not any(
+        item["metadata"]["longmemeval_v2_trajectory_id"] == "target" for item in selected
+    )
+
+
 def test_sibyl_memory_restores_transport_truncated_search_content() -> None:
     module = _load_memory_module()
     search_result = _search_result("t1", chunk_index=1, state_index=1, score=0.9)
@@ -4702,6 +4771,7 @@ def test_operational_evidence_set_calibrates_typed_and_raw_score_pools() -> None
         "selected_raw_support_count": 0,
         "selected_typed_count": 3,
         "selected_raw_count": 5,
+        "neighbor_support_exempt": False,
         "budget_mode": "items",
         "char_budget": None,
         "selected_chars": sum(len(str(item["content"])) for item in selected),
@@ -5833,6 +5903,7 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
                 "selected_raw_support_count": 0,
                 "selected_typed_count": 0,
                 "selected_raw_count": 0,
+                "neighbor_support_exempt": False,
                 "budget_mode": "items",
                 "char_budget": None,
                 "selected_chars": 0,

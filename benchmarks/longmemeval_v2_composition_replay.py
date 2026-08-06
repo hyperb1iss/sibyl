@@ -49,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
         neighbor_stitch_span=args.neighbor_stitch_span,
         state_part_completion_items=args.state_part_completion_items,
         state_part_refinement=args.state_part_refinement,
+        neighbor_support_exempt=args.neighbor_support_exempt,
     )
     output = Path(args.output).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -93,6 +94,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--neighbor-stitch-span", type=int, default=1)
     parser.add_argument("--state-part-completion-items", type=int, default=0)
     parser.add_argument("--state-part-refinement", action="store_true")
+    parser.add_argument("--neighbor-support-exempt", action="store_true")
     args = parser.parse_args(argv)
     for name in (
         "max_items",
@@ -132,6 +134,7 @@ def replay_composition(
     neighbor_stitch_span: int,
     state_part_completion_items: int = 0,
     state_part_refinement: bool = False,
+    neighbor_support_exempt: bool = False,
 ) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     sources: dict[str, dict[str, Any]] = {}
@@ -165,6 +168,7 @@ def replay_composition(
                     neighbor_stitch_span=neighbor_stitch_span,
                     state_part_completion_items=state_part_completion_items,
                     state_part_refinement=state_part_refinement,
+                    neighbor_support_exempt=neighbor_support_exempt,
                 )
             )
 
@@ -195,6 +199,7 @@ def replay_composition(
             "neighbor_stitch_span": neighbor_stitch_span,
             "state_part_completion_items": state_part_completion_items,
             "state_part_refinement": state_part_refinement,
+            "neighbor_support_exempt": neighbor_support_exempt,
         },
         "metrics": {
             "question_count": len(rows),
@@ -263,6 +268,7 @@ def replay_question(
     neighbor_stitch_span: int,
     state_part_completion_items: int,
     state_part_refinement: bool,
+    neighbor_support_exempt: bool = False,
 ) -> dict[str, Any]:
     query = str(row.get("question_text") or "")
     baseline = result_candidates(row)
@@ -304,6 +310,7 @@ def replay_question(
         raw_results=candidate_assembled,
         max_items=max_items,
         mode="shared_relevance",
+        neighbor_support_exempt=neighbor_support_exempt,
     )
     phrases = answer_phrases(row)
     baseline_exposed = full_phrase_exposure(phrases, baseline)
