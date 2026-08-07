@@ -113,7 +113,7 @@ class TestForbidden:
         """Sensitive permission details should not look like validation failures."""
         exc = HTTPException(
             status_code=403,
-            detail="Project 00000000-0000-0000-0000-000000000000 is forbidden",
+            detail="Project credential missing for /var/lib/sibyl/keys",
         )
 
         assert http_exception_payload(exc, "req_forbidden") == {
@@ -129,7 +129,7 @@ class TestForbidden:
             status_code=403,
             detail={
                 "error": "project_access_denied",
-                "message": "No access to project 00000000-0000-0000-0000-000000000000",
+                "message": "No access; key stored at /var/lib/sibyl/keys/project.pem",
             },
         )
 
@@ -332,3 +332,46 @@ class TestUsagePatterns:
 
         assert exc_info.value.status_code == 403
         assert "admin or owner" in exc_info.value.detail
+
+
+# =============================================================================
+# Record identifiers survive sanitization
+# =============================================================================
+class TestRecordIdsSurviveSanitization:
+    """Sibyl mints record IDs as bare uuid4; errors must be able to name them.
+
+    The sanitizer used to treat any UUID as sensitive and replaced the whole
+    message with a field-less "Invalid request data.", which burned request
+    after request on guessing which argument was wrong.
+    """
+
+    def test_not_found_payload_names_the_missing_id(self) -> None:
+        exc = not_found("Task", "0f9b2f66-4a4d-49c1-a8ff-3f5c9b2d7e11")
+        payload = http_exception_payload(exc, "req_nf")
+
+        assert payload["message"] == ("Task not found: 0f9b2f66-4a4d-49c1-a8ff-3f5c9b2d7e11")
+
+    def test_bad_request_payload_names_the_offending_id(self) -> None:
+        exc = bad_request("Entity 0f9b2f66-4a4d-49c1-a8ff-3f5c9b2d7e11 is not an epic")
+        payload = http_exception_payload(exc, "req_epic")
+
+        assert payload["message"] == ("Entity 0f9b2f66-4a4d-49c1-a8ff-3f5c9b2d7e11 is not an epic")
+
+    def test_sql_fragments_still_sanitize(self) -> None:
+        exc = bad_request("SELECT * FROM entity failed")
+        payload = http_exception_payload(exc, "req_sql")
+
+        assert "SELECT" not in str(payload["message"])
+
+    def test_secret_words_still_sanitize(self) -> None:
+        exc = bad_request("invalid api_key for 0f9b2f66-4a4d-49c1-a8ff-3f5c9b2d7e11")
+        payload = http_exception_payload(exc, "req_key")
+
+        assert "api_key" not in str(payload["message"])
+        assert "0f9b2f66" not in str(payload["message"])
+
+    def test_filesystem_paths_still_sanitize(self) -> None:
+        exc = bad_request("could not read /etc/sibyl/config.toml")
+        payload = http_exception_payload(exc, "req_path")
+
+        assert "/etc" not in str(payload["message"])
