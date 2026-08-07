@@ -28,6 +28,7 @@ from sibyl.persistence.content_runtime import (
     save_document_chunks,
 )
 from sibyl.persistence.graph_runtime import get_entity_graph_runtime
+from sibyl_core.auth.memory_policy import MEMORY_OWNER_METADATA_KEYS
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.sources import SourceImportManifest
 from sibyl_core.observability import elapsed_ms
@@ -76,7 +77,6 @@ async def promote_raw_captures(
         "skipped_superseded_count": 0,
         "skipped_existing_count": 0,
         "skipped_review_count": 0,
-        "skipped_scope_count": 0,
         "failed_count": 0,
         "chunk_count": 0,
         "raw_memory_ids": [],
@@ -109,15 +109,14 @@ async def promote_raw_captures(
             result["promoted_count"] += 1
             result["chunk_count"] += outcome["chunk_count"]
             result["raw_memory_ids"].append(memory.id)
-            result["document_ids"].append(outcome["document_id"])
+            if outcome["document_id"] is not None:
+                result["document_ids"].append(outcome["document_id"])
         elif outcome["status"] == "skipped_deleted":
             result["skipped_deleted_count"] += 1
         elif outcome["status"] == "skipped_superseded":
             result["skipped_superseded_count"] += 1
         elif outcome["status"] == "skipped_existing":
             result["skipped_existing_count"] += 1
-        elif outcome["status"] == "skipped_scope":
-            result["skipped_scope_count"] += 1
         else:
             result["skipped_review_count"] += 1
 
@@ -162,60 +161,75 @@ async def _promote_one(
         return {"status": skip_status, "chunk_count": 0}
 
     document = _document_from_raw_memory(memory)
-    chunks = chunker.chunk_document(document, strategy=_chunk_strategy(memory))
-    if not chunks:
-        raise ValueError("raw capture produced no chunks")
+    scope_restricted = _memory_scope_restricted(memory)
 
-    embeddings = await embedder.embed_chunks(chunks)
-    if len(embeddings) != len(chunks):
-        msg = f"embedding count mismatch: {len(embeddings)} for {len(chunks)} chunks"
-        raise ValueError(msg)
+    if scope_restricted:
+        # The document/chunk store is searched org-wide with no per-row scope
+        # filter, so writing a scoped capture's text there re-opens the leak
+        # this promotion path closes. The capture promotes to the graph only:
+        # its anchor entity and extraction both carry the scope stamps, and
+        # the raw layer already serves the text to its authorized audience.
+        stored_document = document
+        saved_chunk_count = 0
+    else:
+        chunks = chunker.chunk_document(document, strategy=_chunk_strategy(memory))
+        if not chunks:
+            raise ValueError("raw capture produced no chunks")
 
-    db_chunks = [
-        DocumentChunkRecord(
-            id=uuid5(NAMESPACE_URL, f"sibyl.raw_promotion:{memory.id}:{chunk.chunk_index}"),
-            document_id=document.id,
-            organization_id=document.organization_id,
-            source_id=memory.source_id,
-            chunk_index=chunk.chunk_index,
-            chunk_type=chunk.chunk_type,
-            content=chunk.content,
-            context=chunk.context,
-            token_count=chunk.token_count,
-            start_char=chunk.start_char,
-            end_char=chunk.end_char,
-            heading_path=chunk.heading_path,
-            language=chunk.language,
-            embedding=embeddings[index],
-            is_complete=True,
-            has_entities=False,
-            entity_ids=[],
-        )
-        for index, chunk in enumerate(chunks)
-    ]
+        embeddings = await embedder.embed_chunks(chunks)
+        if len(embeddings) != len(chunks):
+            msg = f"embedding count mismatch: {len(embeddings)} for {len(chunks)} chunks"
+            raise ValueError(msg)
 
-    async with get_content_read_session() as session:
-        stored_document = await save_crawled_document_record(session, document=document)
-        await delete_document_chunks_for_document(
-            session,
-            document_id=stored_document.id,
-            organization_id=stored_document.organization_id,
-        )
-        saved_chunks = await save_document_chunks(session, chunks=db_chunks)
+        db_chunks = [
+            DocumentChunkRecord(
+                id=uuid5(NAMESPACE_URL, f"sibyl.raw_promotion:{memory.id}:{chunk.chunk_index}"),
+                document_id=document.id,
+                organization_id=document.organization_id,
+                source_id=memory.source_id,
+                chunk_index=chunk.chunk_index,
+                chunk_type=chunk.chunk_type,
+                content=chunk.content,
+                context=chunk.context,
+                token_count=chunk.token_count,
+                start_char=chunk.start_char,
+                end_char=chunk.end_char,
+                heading_path=chunk.heading_path,
+                language=chunk.language,
+                embedding=embeddings[index],
+                is_complete=True,
+                has_entities=False,
+                entity_ids=[],
+            )
+            for index, chunk in enumerate(chunks)
+        ]
+
+        async with get_content_read_session() as session:
+            stored_document = await save_crawled_document_record(session, document=document)
+            await delete_document_chunks_for_document(
+                session,
+                document_id=stored_document.id,
+                organization_id=stored_document.organization_id,
+            )
+            saved_chunks = await save_document_chunks(session, chunks=db_chunks)
+        saved_chunk_count = len(saved_chunks)
 
     entity_id = await _upsert_document_entity(
-        memory, stored_document, chunk_count=len(saved_chunks)
+        memory, stored_document, chunk_count=saved_chunk_count
     )
     promoted_at = datetime.now(UTC).isoformat()
     metadata = dict(memory.metadata)
     metadata.update(
         {
             "raw_promotion_state": "promoted",
-            "raw_promotion_document_id": str(stored_document.id),
-            "raw_promotion_chunk_count": len(saved_chunks),
+            "raw_promotion_chunk_count": saved_chunk_count,
             "raw_promotion_promoted_at": promoted_at,
         }
     )
+    if scope_restricted:
+        metadata["raw_promotion_content_store"] = "skipped_scoped"
+    else:
+        metadata["raw_promotion_document_id"] = str(stored_document.id)
     metadata.update(
         await _source_extraction_metadata(
             memory,
@@ -229,8 +243,8 @@ async def _promote_one(
     await save_raw_memory(memory)
     return {
         "status": "promoted",
-        "document_id": str(stored_document.id),
-        "chunk_count": len(saved_chunks),
+        "document_id": None if scope_restricted else str(stored_document.id),
+        "chunk_count": saved_chunk_count,
         "entity_id": entity_id,
     }
 
@@ -299,7 +313,43 @@ def _chunk_strategy(memory: RawMemory) -> ChunkStrategy:
     return ChunkStrategy.SEMANTIC
 
 
-_PROMOTABLE_MEMORY_SCOPES = frozenset({MemoryScope.ORGANIZATION, MemoryScope.PUBLIC})
+# Org-wide audiences read through the absent-scope contract: the graph read
+# path admits private/project/team/delegated stamps and denies everything
+# else, so an organization or public row is readable BECAUSE it is unstamped.
+# Stamping one would revoke every reader it has.
+_ORG_WIDE_MEMORY_SCOPES = frozenset({MemoryScope.ORGANIZATION, MemoryScope.PUBLIC})
+
+
+def _memory_scope_restricted(memory: RawMemory) -> bool:
+    return memory.memory_scope not in _ORG_WIDE_MEMORY_SCOPES
+
+
+def _promotion_scope_metadata(memory: RawMemory) -> dict[str, object]:
+    """The scope stamps a promoted row inherits from its capture.
+
+    Values come from the capture's own authorized columns, never a payload, so
+    this is the trusted-job counterpart of stamp_memory_scope_metadata: the
+    capture already proved it may live at this scope, and promotion's whole
+    contract is to preserve that audience rather than re-derive it.
+
+    Org-wide captures return no stamps on purpose (see the frozenset above).
+    """
+    if not _memory_scope_restricted(memory):
+        return {}
+    stamps: dict[str, object] = {"memory_scope": memory.memory_scope.value}
+    if memory.principal_id:
+        stamps["principal_id"] = memory.principal_id
+    if memory.memory_scope is not MemoryScope.PRIVATE and memory.scope_key:
+        stamps["scope_key"] = memory.scope_key
+    if memory.memory_scope is MemoryScope.PROJECT and memory.scope_key:
+        # The read path treats project_id as the audience channel; mirroring
+        # the key is what the extraction projection does for project scope.
+        stamps["project_id"] = memory.scope_key
+    elif memory.project_id:
+        stamps["project_id"] = memory.project_id
+    if memory.agent_id:
+        stamps["agent_id"] = memory.agent_id
+    return stamps
 
 
 def _promotion_skip_status(memory: RawMemory, *, force: bool) -> str | None:
@@ -307,8 +357,6 @@ def _promotion_skip_status(memory: RawMemory, *, force: bool) -> str | None:
         return "skipped_deleted"
     if _raw_memory_superseded(memory):
         return "skipped_superseded"
-    if memory.memory_scope not in _PROMOTABLE_MEMORY_SCOPES:
-        return "skipped_scope"
     if not force and memory.metadata.get("raw_promotion_state") == "promoted" and memory.entity_id:
         return "skipped_existing"
     if not raw_memory_currently_recallable(memory):
@@ -349,6 +397,7 @@ async def _upsert_document_entity(
                 "source_id": memory.source_id,
                 "document_id": str(document.id),
                 "chunk_count": chunk_count,
+                **_promotion_scope_metadata(memory),
             },
         ),
         generate_embedding=False,
@@ -648,15 +697,23 @@ def _memory_extraction_source_payload(
     *,
     entity_id: str,
 ) -> dict[str, object]:
+    base_metadata = {
+        key: value
+        for key, value in dict(memory.metadata).items()
+        if key not in MEMORY_OWNER_METADATA_KEYS
+    }
     metadata = {
-        **dict(memory.metadata),
+        **base_metadata,
         "raw_memory_id": memory.id,
         "source_id": memory.source_id,
         "document_id": str(document.id),
-        "memory_scope": memory.memory_scope.value,
-        "scope_key": memory.scope_key,
-        "principal_id": memory.principal_id,
         "capture_surface": memory.capture_surface,
+        # The extraction projection inherits these onto every entity it mints,
+        # so the stamps here decide who may read the extracted knowledge. An
+        # org-wide capture stays unstamped: an inherited "organization" stamp
+        # would be denied by the read path, which admits only
+        # private/project/team/delegated and reads org-wide as absence.
+        **_promotion_scope_metadata(memory),
     }
     return {
         "id": entity_id,

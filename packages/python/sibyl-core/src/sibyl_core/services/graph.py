@@ -1983,6 +1983,10 @@ def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
 
     for key in (
         "project_id",
+        # The scope column is authoritative when attributes lost the stamp: a
+        # row whose scope lives only in the column would otherwise parse as
+        # unscoped and hand the read path its fail-open.
+        "memory_scope",
         "epic_id",
         "parent_task_id",
         "task_id",
