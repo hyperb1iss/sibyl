@@ -25,11 +25,14 @@ from sibyl_core.projection.passages import (
     PASSAGE_MIN_SOURCE_CHARS,
     PASSAGE_SOURCE_TYPES,
     PassageProjectionResult,
+    entity_scope_stamps,
     passage_entity_id,
     plan_entity_passages,
     project_entity_passages,
     reproject_entity_passages,
+    restamp_entity_passages,
     retire_entity_passages,
+    scope_bearing_entity_update,
     should_project_passages,
 )
 
@@ -45,6 +48,7 @@ __all__ = [
     "ProjectedEntitySourceLink",
     "ProjectedMemoryEntity",
     "ProjectedMemoryFact",
+    "entity_scope_stamps",
     "extract_projected_memory_entities",
     "extract_projected_memory_facts",
     "operational_experience_manifest_id",
@@ -58,6 +62,8 @@ __all__ = [
     "project_memory_entity",
     "project_operational_experience",
     "reproject_entity_passages",
+    "restamp_entity_passages",
     "retire_entity_passages",
+    "scope_bearing_entity_update",
     "should_project_passages",
 ]

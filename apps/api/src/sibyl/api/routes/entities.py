@@ -74,8 +74,10 @@ from sibyl_core.memory_pipeline.structure import strip_structure_metadata
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.projection import (
     MANIFEST_STATE_COMPLETE,
+    entity_scope_stamps,
     extract_projected_memory_entities,
     reproject_entity_passages,
+    restamp_entity_passages,
     retire_entity_passages,
 )
 from sibyl_core.services import KnowledgeReadService
@@ -2439,6 +2441,16 @@ async def update_entity(
                         entity_id=entity_id,
                         errors=passage_result.errors,
                     )
+            elif entity_scope_stamps(existing) != entity_scope_stamps(updated):
+                # The body did not change, so the cut is still valid, but the
+                # audience did: spans inherit their reader checks from these
+                # stamps, and a stale copy keeps serving a tightened memory's
+                # text through search until it is refreshed.
+                await restamp_entity_passages(
+                    entity_manager=runtime.entity_manager,
+                    source=updated,
+                    created_source_id=entity_id,
+                )
 
             response = EntityResponse(
                 id=updated.id,
