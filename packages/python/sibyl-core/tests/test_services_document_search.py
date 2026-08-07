@@ -327,6 +327,107 @@ class TestDocumentSearch:
         assert direct_search.await_args.kwargs["query_embedding"] is None
 
     @pytest.mark.asyncio
+    async def test_search_documents_degrades_to_scan_when_embedding_and_lexical_both_miss(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A dead embedder plus a lexical strikeout must degrade, not go empty.
+
+        Sentence-shaped queries routinely return zero lexical rows, so with the
+        embedder down the direct lanes produce nothing without raising. That is
+        the embedder being down, not a true no-match, and it takes the same
+        scope-scan path a hard search failure gets.
+        """
+        monkeypatch.setattr(document_search_service.settings, "store", "surreal")
+        monkeypatch.setattr(
+            document_search_service,
+            "DOCUMENT_EMBEDDING_TIMEOUT_SECONDS",
+            0.01,
+        )
+
+        source = ContentSource(
+            id="src-1",
+            organization_id="org-1",
+            name="Docs",
+            url="https://docs.example.com",
+        )
+        document = ContentDocument(
+            id="doc-1",
+            source_id="src-1",
+            url="https://docs.example.com/guide",
+            title="Guide",
+            content="alpha beta guide",
+            has_code=False,
+        )
+        chunks = [
+            ContentChunk(
+                id="chunk-1",
+                document_id="doc-1",
+                content="alpha beta",
+                context="intro",
+                heading_path=["Intro"],
+            ),
+        ]
+
+        async def slow_embed_text(query: str) -> list[float]:
+            await asyncio.sleep(1)
+            return [1.0, 0.0]
+
+        direct_search = AsyncMock(return_value=([], []))
+        scope_loader = AsyncMock(
+            return_value=(
+                [source],
+                {source.id: source},
+                {document.id: document},
+                chunks,
+            )
+        )
+        with (
+            patch(
+                "sibyl_core.services.document_search.search_document_chunks",
+                direct_search,
+            ),
+            patch(
+                "sibyl_core.services.document_search.load_search_scope",
+                scope_loader,
+            ),
+            patch("sibyl_core.services.document_search._embed_text", slow_embed_text),
+        ):
+            results = await search_documents("alpha", organization_id="org-1", limit=5)
+
+        assert results, "degraded search must surface lexical scan results, not empty"
+        assert results[0].metadata["document_id"] == "doc-1"
+        direct_search.assert_awaited_once()
+        scope_loader.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_search_documents_healthy_empty_result_does_not_scan(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With a healthy embedder, a true no-match stays a fast empty result."""
+        monkeypatch.setattr(document_search_service.settings, "store", "surreal")
+
+        direct_search = AsyncMock(return_value=([], []))
+        scope_loader = AsyncMock()
+        with (
+            patch(
+                "sibyl_core.services.document_search.search_document_chunks",
+                direct_search,
+            ),
+            patch(
+                "sibyl_core.services.document_search.load_search_scope",
+                scope_loader,
+            ),
+            patch(
+                "sibyl_core.services.document_search._embed_text",
+                AsyncMock(return_value=[1.0, 0.0]),
+            ),
+        ):
+            results = await search_documents("alpha", organization_id="org-1", limit=5)
+
+        assert results == []
+        scope_loader.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_search_documents_tokenizes_document_content_once(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
