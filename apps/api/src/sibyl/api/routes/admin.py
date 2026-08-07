@@ -942,7 +942,33 @@ def _query_has_additional_statement(query: str) -> bool:
     return False
 
 
-def _query_has_namespace_separator(query: str) -> bool:
+# Read-only SurrealQL function namespaces a debug SELECT may call. http:: is
+# absent because it performs network egress, and function:: because it runs
+# arbitrary embedded scripts; everything listed only computes over its inputs.
+_GRAPH_DEBUG_ALLOWED_FUNCTION_NAMESPACES = frozenset(
+    {
+        "array",
+        "bytes",
+        "crypto",
+        "duration",
+        "encoding",
+        "geo",
+        "math",
+        "meta",
+        "object",
+        "parse",
+        "rand",
+        "record",
+        "session",
+        "string",
+        "time",
+        "type",
+        "vector",
+    }
+)
+
+
+def _query_disallowed_namespace_call(query: str) -> bool:
     index = 0
     length = len(query)
     while index < length:
@@ -958,7 +984,24 @@ def _query_has_namespace_separator(query: str) -> bool:
             index = _skip_query_comment(query, index)
             continue
         if char == ":" and next_char == ":":
-            return True
+            # Walk back over the full chain (string::semver::compare walks a
+            # nested separator back to its root) and judge the root namespace.
+            end = index
+            start = end
+            while start > 0:
+                prev = query[start - 1]
+                if prev.isalnum() or prev == "_":
+                    start -= 1
+                elif start >= 2 and query[start - 2 : start] == "::":
+                    start -= 2
+                else:
+                    break
+            namespace = query[start:end].lower()
+            root = namespace.split("::", 1)[0] if namespace else ""
+            if root not in _GRAPH_DEBUG_ALLOWED_FUNCTION_NAMESPACES:
+                return True
+            index += 2
+            continue
         index += 1
     return False
 
@@ -969,7 +1012,7 @@ def _is_supported_debug_dialect(query: str) -> bool:
         bool(tokens)
         and tokens[0] == "SELECT"
         and not _query_has_additional_statement(query)
-        and not _query_has_namespace_separator(query)
+        and not _query_disallowed_namespace_call(query)
         and set(tokens).isdisjoint(_GRAPH_DEBUG_FORBIDDEN_TOKENS)
     )
 
