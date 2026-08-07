@@ -68,6 +68,8 @@ def main(argv: list[str] | None = None) -> int:
             "neighbor_support_exempt": args.neighbor_support_exempt,
             "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
             "neighbor_support_overflow_items": args.neighbor_support_overflow_items,
+            "neighbor_stitch_items": args.neighbor_stitch_items,
+            "neighbor_stitch_span": args.neighbor_stitch_span,
             "neighbor_stitch_spread": args.neighbor_stitch_spread,
             "typed_stream_retrieval": args.typed_stream_retrieval,
             "typed_stream_limit": args.typed_stream_limit,
@@ -148,6 +150,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=False,
     )
     parser.add_argument("--neighbor-support-overflow-items", type=int, default=0)
+    parser.add_argument("--neighbor-stitch-items", type=int, default=2)
+    parser.add_argument("--neighbor-stitch-span", type=int, default=1)
     parser.add_argument(
         "--neighbor-stitch-spread",
         action=argparse.BooleanOptionalAction,
@@ -168,6 +172,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("context character limits must be positive")
     if not 1 <= args.max_planned_queries <= MAX_REFINEMENT_QUERIES:
         parser.error(f"--max-planned-queries must be between 1 and {MAX_REFINEMENT_QUERIES}")
+    if args.neighbor_stitch_items < 0:
+        parser.error("--neighbor-stitch-items must be non-negative")
+    if args.neighbor_stitch_span < 0:
+        parser.error("--neighbor-stitch-span must be non-negative")
     return args
 
 
@@ -274,6 +282,8 @@ def build_run_config(
         "neighbor_support_exempt": args.neighbor_support_exempt,
         "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
         "neighbor_support_overflow_items": args.neighbor_support_overflow_items,
+        "neighbor_stitch_items": args.neighbor_stitch_items,
+        "neighbor_stitch_span": args.neighbor_stitch_span,
         "neighbor_stitch_spread": args.neighbor_stitch_spread,
         "typed_stream_retrieval": args.typed_stream_retrieval,
         "typed_stream_limit": args.typed_stream_limit,
@@ -288,6 +298,15 @@ def prepare_output(
     haystack: dict[str, list[str]],
     resume: bool,
 ) -> set[str]:
+    def _measurement_config(config: dict[str, object]) -> dict[str, object]:
+        # Everything except server provenance defines the measurement; the
+        # provenance fields may legitimately differ across a resume.
+        return {
+            key: value
+            for key, value in config.items()
+            if key not in {"api_runtime", "resume_api_runtimes"}
+        }
+
     output_dir.mkdir(parents=True, exist_ok=True)
     runtime_inputs = output_dir / "runtime_inputs"
     runtime_inputs.mkdir(parents=True, exist_ok=True)
@@ -297,8 +316,18 @@ def prepare_output(
         existing = json.loads(config_path.read_text(encoding="utf-8"))
         if not resume:
             raise ValueError(f"Output already exists; pass --resume: {output_dir}")
-        if existing != run_config:
+        if _measurement_config(existing) != _measurement_config(run_config):
             raise ValueError("Resume configuration does not match the existing run")
+        if existing.get("api_runtime") != run_config.get("api_runtime"):
+            # A server restart changes the runtime fingerprint without changing
+            # what is being measured. Refusing here bricked every multi-hour
+            # run that outlived its API process. The receipt stays honest by
+            # keeping the original runtime and appending every runtime a
+            # resume continued under.
+            resumed = list(existing.get("resume_api_runtimes") or [])
+            resumed.append(run_config.get("api_runtime"))
+            existing["resume_api_runtimes"] = resumed
+            write_json(config_path, existing)
     elif resume and results_path.exists():
         raise ValueError("Cannot resume without run_config.json")
     else:

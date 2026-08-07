@@ -219,3 +219,53 @@ def test_run_queries_flushes_resumable_official_rows(tmp_path: Path) -> None:
     assert summary["query_embedding_usage_this_invocation"]["requests"] == 1
     assert summary["query_cost_usd_this_invocation"] == pytest.approx(0.001)
     assert summary["query_cost_complete"] is True
+
+
+def test_prepare_output_resumes_across_a_server_restart(tmp_path: Path) -> None:
+    """A new api_runtime fingerprint is provenance, not measurement drift.
+
+    Refusing it bricked every multi-hour run that outlived its API process.
+    The receipt keeps the original runtime and appends each runtime a resume
+    continued under, so provenance stays honest without blocking the run.
+    """
+    module = _load_module()
+    output_dir = tmp_path / "run"
+    base = {
+        "schema_version": module.RUN_SCHEMA_VERSION,
+        "project_id": "project_test",
+        "api_runtime": {"runtime": {"commit": "aaa"}},
+    }
+    module.prepare_output(
+        output_dir, run_config=dict(base), questions=[], haystack={}, resume=False
+    )
+
+    module.prepare_output(
+        output_dir,
+        run_config={**base, "api_runtime": {"runtime": {"commit": "bbb"}}},
+        questions=[],
+        haystack={},
+        resume=True,
+    )
+    module.prepare_output(
+        output_dir,
+        run_config={**base, "api_runtime": {"runtime": {"commit": "ccc"}}},
+        questions=[],
+        haystack={},
+        resume=True,
+    )
+
+    config = json.loads((output_dir / "run_config.json").read_text(encoding="utf-8"))
+    assert config["api_runtime"] == {"runtime": {"commit": "aaa"}}
+    assert [entry["runtime"]["commit"] for entry in config["resume_api_runtimes"]] == [
+        "bbb",
+        "ccc",
+    ]
+
+    with pytest.raises(ValueError, match="does not match"):
+        module.prepare_output(
+            output_dir,
+            run_config={**base, "project_id": "project_other"},
+            questions=[],
+            haystack={},
+            resume=True,
+        )
