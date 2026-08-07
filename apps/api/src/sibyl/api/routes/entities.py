@@ -2445,11 +2445,16 @@ async def update_entity(
                 # The body did not change, so the cut is still valid, but the
                 # audience did: spans inherit their reader checks from these
                 # stamps, and a stale copy keeps serving a tightened memory's
-                # text through search until it is refreshed.
+                # text through search until it is refreshed. The managers
+                # enable the failed-write recovery path: this trigger diffs
+                # pre/post stamps, so once the parent carries the new stamps a
+                # partial restamp would never re-fire.
                 await restamp_entity_passages(
                     entity_manager=runtime.entity_manager,
                     source=updated,
                     created_source_id=entity_id,
+                    relationship_manager=runtime.relationship_manager,
+                    group_id=group_id,
                 )
 
             response = EntityResponse(

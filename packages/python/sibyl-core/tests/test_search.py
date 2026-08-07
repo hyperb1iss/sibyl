@@ -3493,3 +3493,101 @@ def test_node_content_resolution_skips_empty_carriers() -> None:
     attributes: dict[str, object] = {"content": "", "description": ""}
 
     assert search_module._content_for_node(node, attributes) == "node summary"
+
+
+@pytest.mark.asyncio
+async def test_restamped_span_stops_surfacing_through_search() -> None:
+    """Tighten a parent to private: the search lane must drop its spans.
+
+    This runs the real projection cut, the real restamp, and the real retrieval
+    candidate gate end to end, because the unit-level stamp assertions cannot
+    catch a drift between what the restamp writes and what the search lane
+    reads.
+    """
+    from sibyl_core.models.entities import Entity, EntityType
+    from sibyl_core.projection.passages import plan_entity_passages, restamp_entity_passages
+
+    body_lines = ["# Root", ""]
+    for index in range(6):
+        body_lines.extend([f"## Section {index}", "", " ".join([f"word{index}"] * 60), ""])
+    parent = Entity(
+        id="decision_search_lane",
+        entity_type=EntityType.DECISION,
+        name="A long project decision",
+        description="short blurb",
+        content="\n".join(body_lines),
+        organization_id="org-123",
+        created_by="user-alice",
+        metadata={
+            "memory_scope": "project",
+            "scope_key": "project_123",
+            "project_id": "project_123",
+            "principal_id": "user-alice",
+        },
+    )
+    spans, _ = plan_entity_passages(parent, source_id=parent.id, group_id="org-123")
+    assert spans
+
+    class _StoreManager:
+        def __init__(self, entities: dict[str, Entity]) -> None:
+            self.entities = dict(entities)
+
+        async def get(self, entity_id: str) -> Entity:
+            try:
+                return self.entities[entity_id]
+            except KeyError:
+                raise KeyError(entity_id) from None
+
+        async def update(self, entity_id: str, updates: dict[str, object]) -> Entity:
+            entity = self.entities[entity_id]
+            metadata = dict(entity.metadata or {})
+            for key, value in (updates.get("metadata") or {}).items():  # type: ignore[union-attr]
+                if value is None:
+                    metadata.pop(key, None)
+                else:
+                    metadata[key] = value
+            updated = entity.model_copy(update={"metadata": metadata})
+            self.entities[entity_id] = updated
+            return updated
+
+    manager = _StoreManager({span.id: span for span in spans})
+    span_id = spans[0].id
+
+    def surfaces_for(principal_id: str) -> bool:
+        span = manager.entities[span_id]
+        candidate = search_module._candidate_from_node_record(
+            {
+                "uuid": span.id,
+                "name": span.name,
+                "content": span.content,
+                "group_id": "org-123",
+                "project_id": (span.metadata or {}).get("project_id"),
+                "attributes": dict(span.metadata or {}),
+            },
+            signal=RetrievalSignal.NODE_FULLTEXT,
+            score=1.0,
+        )
+        return search_module._candidate_allowed(
+            candidate,
+            plan=_plan_for(principal_id, "project_123"),
+            requested_types=set(),
+            facet=None,
+        )
+
+    # Before the tighten, a project co-member reads the span.
+    assert surfaces_for("user-bob") is True
+
+    tightened = parent.model_copy(
+        update={"metadata": {"memory_scope": "private", "principal_id": "user-alice"}}
+    )
+    restamped = await restamp_entity_passages(
+        entity_manager=manager,
+        source=tightened,
+        created_source_id=parent.id,
+    )
+    assert restamped == len(spans)
+
+    # After it, the same search-lane gate serves the owner and refuses the
+    # stranger, and the span text never reaches the candidate list for them.
+    assert surfaces_for("user-alice") is True
+    assert surfaces_for("user-bob") is False

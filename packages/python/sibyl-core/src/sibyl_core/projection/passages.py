@@ -455,6 +455,8 @@ async def restamp_entity_passages(
     entity_manager: Any,
     source: Entity,
     created_source_id: str | None = None,
+    relationship_manager: Any | None = None,
+    group_id: str | None = None,
 ) -> int:
     """Refresh the inherited scope stamps on existing spans after a scope edit.
 
@@ -468,6 +470,14 @@ async def restamp_entity_passages(
     absence, because the oversize-leaf branch of the cutter can skip an index
     and a stale-scope span past the gap is exactly the row this exists to fix.
 
+    A failed span write cannot be left to a retry that will never come: once
+    the parent carries the new stamps, the trigger's pre/post diff is empty on
+    every later edit, so a partially-restamped set would persist indefinitely.
+    When any write fails and the caller supplied ``relationship_manager`` and
+    ``group_id``, the walk stops and full reprojection runs as the recovery
+    path: it rebuilds every span from the parent with correct stamps and
+    retires whatever the failed writes left behind.
+
     Removal has one known soft spot: the row's ``attributes.metadata`` snapshot
     is not rewritten by an update, so a key this pass removes can resurface in
     reads merged from the snapshot. That cannot widen access: a private row's
@@ -479,9 +489,11 @@ async def restamp_entity_passages(
     if not callable(get) or not callable(update):
         return 0
 
+    recovery_available = relationship_manager is not None and group_id is not None
     source_id = created_source_id or source.id
     wanted = entity_scope_stamps(source)
     restamped = 0
+    write_failed = False
     for index in range(MAX_PASSAGES_PER_SOURCE):
         passage_id = passage_entity_id(source_id, index)
         try:
@@ -510,8 +522,30 @@ async def restamp_entity_passages(
                 passage_id=passage_id,
                 error_type=type(exc).__name__,
             )
+            write_failed = True
+            if recovery_available:
+                break
             continue
         restamped += 1
+    if write_failed and recovery_available:
+        log.warning(
+            "passage_scope_restamp_recovering_via_reprojection",
+            source_id=source_id,
+        )
+        result = await reproject_entity_passages(
+            entity_manager=entity_manager,
+            relationship_manager=relationship_manager,
+            source=source,
+            group_id=str(group_id),
+            created_source_id=source_id,
+        )
+        if result.errors:
+            log.warning(
+                "passage_scope_restamp_recovery_failed",
+                source_id=source_id,
+                errors=result.errors,
+            )
+        return result.passages
     if restamped:
         log.info(
             "passage_scope_restamped",

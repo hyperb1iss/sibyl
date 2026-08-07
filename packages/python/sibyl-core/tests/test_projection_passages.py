@@ -17,6 +17,7 @@ from sibyl_core.projection.passages import (
     PASSAGE_PLAN_AGENT,
     PASSAGE_PLAN_KEY,
     PASSAGE_PLAN_MECHANICAL,
+    PassageProjectionResult,
     passage_entity_id,
     plan_entity_passages,
     project_entity_passages,
@@ -827,3 +828,81 @@ async def test_restamp_reaches_spans_past_an_index_gap() -> None:
     )
 
     assert restamped == survivors
+
+
+@pytest.mark.asyncio
+async def test_a_failed_restamp_write_recovers_through_reprojection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A partial restamp can never re-fire, so recovery must happen now.
+
+    The route trigger diffs pre/post stamp projections; once the parent
+    carries the new stamps that diff is empty on every later edit, and a span
+    the failed write left behind would serve the old audience indefinitely.
+    """
+    from sibyl_core.projection import passages as passages_module
+
+    manager = await _spans_in_store(_project_scoped_source())
+
+    first_span_id = sorted(manager.entities)[0]
+    original_update = manager.update
+
+    async def failing_update(entity_id: str, updates: dict[str, Any]) -> Entity:
+        if entity_id == first_span_id:
+            raise RuntimeError("surreal write refused")
+        return await original_update(entity_id, updates)
+
+    manager.update = failing_update  # type: ignore[method-assign]
+
+    reproject_calls: list[dict[str, Any]] = []
+
+    async def fake_reproject(**kwargs: Any) -> PassageProjectionResult:
+        reproject_calls.append(kwargs)
+        return PassageProjectionResult(source_id=kwargs["created_source_id"], passages=4)
+
+    monkeypatch.setattr(passages_module, "reproject_entity_passages", fake_reproject)
+
+    tightened = _source(metadata={"memory_scope": "private", "principal_id": "user-1"})
+    relationship_manager = _RecordingRelationshipManager()
+
+    restamped = await restamp_entity_passages(
+        entity_manager=manager,
+        source=tightened,
+        created_source_id=_SOURCE_ID,
+        relationship_manager=relationship_manager,
+        group_id=_GROUP,
+    )
+
+    assert len(reproject_calls) == 1
+    recovery = reproject_calls[0]
+    assert recovery["source"] is tightened
+    assert recovery["group_id"] == _GROUP
+    assert recovery["created_source_id"] == _SOURCE_ID
+    assert recovery["relationship_manager"] is relationship_manager
+    assert restamped == 4
+
+
+@pytest.mark.asyncio
+async def test_a_failed_restamp_without_recovery_managers_keeps_walking() -> None:
+    """Callers that cannot reproject still get every span the walk can fix."""
+    manager = await _spans_in_store(_project_scoped_source())
+
+    first_span_id = sorted(manager.entities)[0]
+    original_update = manager.update
+
+    async def failing_update(entity_id: str, updates: dict[str, Any]) -> Entity:
+        if entity_id == first_span_id:
+            raise RuntimeError("surreal write refused")
+        return await original_update(entity_id, updates)
+
+    manager.update = failing_update  # type: ignore[method-assign]
+
+    tightened = _source(metadata={"memory_scope": "private", "principal_id": "user-1"})
+
+    restamped = await restamp_entity_passages(
+        entity_manager=manager,
+        source=tightened,
+        created_source_id=_SOURCE_ID,
+    )
+
+    assert restamped == len(manager.entities) - 1

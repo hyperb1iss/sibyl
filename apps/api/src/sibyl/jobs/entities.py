@@ -1403,11 +1403,15 @@ async def update_entity(
         elif result is not None and scope_bearing_entity_update(updates):
             # A scope-only edit leaves the cut valid but changes who may read
             # the spans; their inherited stamps have to follow the parent or a
-            # tightened memory keeps serving its text through search.
+            # tightened memory keeps serving its text through search. The
+            # managers enable the failed-write recovery path: a later retrigger
+            # never comes because the parent already carries the new stamps.
             await restamp_entity_passages(
                 entity_manager=entity_manager,
                 source=result,
                 created_source_id=entity_id,
+                relationship_manager=runtime.relationship_manager,
+                group_id=group_id,
             )
 
         if result:
