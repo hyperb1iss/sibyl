@@ -329,13 +329,21 @@ async def replay_idempotent_response[ResponseModelT: BaseModel](
             detail="Idempotency-Key was already used for a different request",
         )
     if idempotency_record_pending(record):
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Idempotent operation is still in progress or was interrupted before "
-                "its receipt completed"
-            ),
+        # Every caller executes under serialize_idempotent_request's lock, so a
+        # live executor cannot hold this key: it would still own the lock this
+        # request just acquired. A pending reservation observed here was
+        # interrupted before its receipt completed. Adopt the claim and let the
+        # handler re-execute; completion overwrites the same record id. A truly
+        # in-flight duplicate never reaches this branch, because it blocks at
+        # lock acquisition and surfaces as 409 lock contention instead.
+        log.warning(
+            "api_idempotency_interrupted_takeover",
+            method=method,
+            path=path,
+            organization_id=str(organization_id),
         )
+        _store_request_claim(request, record)
+        return None
     response = response_model.model_validate(record.response_body)
     receipt = getattr(response, "mutation_receipt", None)
     if isinstance(receipt, MutationReceipt):
