@@ -3430,6 +3430,16 @@ class SibylLiveApiMemory(Memory):
             DEFAULT_TRAVERSAL_SEARCH_LIMIT,
             minimum=1,
         )
+        if self.agentic_traversal and not (
+            os.environ.get("OPENAI_API_KEY") or os.environ.get("SIBYL_OPENAI_API_KEY")
+        ):
+            # Without this check the missing key surfaces per-question: every
+            # traversal degrades to the arm-off geometry and a full paid run
+            # completes as baseline under the arm's name. Die at t=0 instead.
+            raise RuntimeError(
+                "agentic_traversal requires OPENAI_API_KEY or SIBYL_OPENAI_API_KEY "
+                "in the environment; export one or drop --agentic-traversal"
+            )
         raw_reservation = memory_params.get("typed_reservation_items")
         self.typed_reservation_items = (
             _param_int(memory_params, "typed_reservation_items", 0, minimum=1)

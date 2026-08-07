@@ -692,6 +692,27 @@ def test_runner_traversal_args_reach_memory_params_and_default_off(tmp_path: Pat
     )
 
 
+def test_enabled_arm_without_api_key_fails_at_construction(monkeypatch: Any) -> None:
+    """A missing traversal key dies at t=0, not per-question mid-run.
+
+    Per-question degradation with the arm enabled would complete a full paid
+    run as baseline geometry under the arm's name. The constructor check fires
+    before any auth or network setup, so the run never starts.
+    """
+    module = _load_memory_module()
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("SIBYL_OPENAI_API_KEY", raising=False)
+
+    try:
+        module.SibylLiveApiMemory({"agentic_traversal": True})
+    except RuntimeError as exc:
+        message = str(exc)
+        assert "OPENAI_API_KEY" in message
+        assert "SIBYL_OPENAI_API_KEY" in message
+    else:
+        raise AssertionError("enabled arm without a key must refuse to construct")
+
+
 def test_traversal_params_are_runtime_keys_for_attached_corpora() -> None:
     module = _load_memory_module()
     for key in (
