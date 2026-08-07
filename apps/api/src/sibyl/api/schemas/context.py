@@ -47,7 +47,12 @@ class ContextEvidenceRequest(BaseModel):
     )
     retrieval_mode: Literal["fast", "accurate"] = Field(
         default="fast",
-        description="Use one search or deterministic multi-step evidence refinement",
+        description=(
+            "Use one search (fast) or deterministic multi-step evidence refinement "
+            "(accurate). DEPRECATED: accurate measured lower accuracy at 2.5x the "
+            "latency of fast at full benchmark scale and will be removed in a "
+            "future release; requests selecting it are served but warned."
+        ),
     )
     max_planned_queries: int = Field(
         default=3,

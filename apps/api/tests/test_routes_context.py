@@ -2390,3 +2390,28 @@ def test_context_pack_request_defaults_to_a_markdown_budget() -> None:
 
     assert request.markdown_token_budget == DEFAULT_MARKDOWN_TOKEN_BUDGET
     assert ContextPackRequest(goal="x", markdown_token_budget=None).markdown_token_budget is None
+
+
+def test_accurate_evidence_response_carries_the_deprecation_marker() -> None:
+    """A5: accurate mode is served but announces its own removal in-band."""
+    response = _fuse_context_evidence(
+        question="ship faster",
+        query_specs=[{"name": "original", "query": "ship faster", "facet": "original"}],
+        planned_queries=[],
+        responses=[_search_response("ship faster", ("original", 0.9))],
+        limit=1,
+        candidate_limit=2,
+        failures=[],
+        planner_usage={},
+    )
+
+    marker = response.filters["retrieval_mode_deprecated"]
+    assert "deprecated" in marker
+    assert "fast" in marker
+
+
+def test_retrieval_mode_schema_documents_the_deprecation() -> None:
+    from sibyl.api.schemas.context import ContextEvidenceRequest
+
+    description = ContextEvidenceRequest.model_fields["retrieval_mode"].description
+    assert "DEPRECATED" in description
