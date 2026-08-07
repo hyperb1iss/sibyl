@@ -224,3 +224,115 @@ async def test_handbook_markdown_is_byte_stable_for_the_same_run() -> None:
     second = render_handbook_markdown(await _plan(search_fn))
 
     assert first == second
+
+
+# =============================================================================
+# handbook-integrity-gate (1.2 exit criterion)
+# =============================================================================
+class TestHandbookIntegrityGate:
+    """Zero hallucinated and zero self-referential writes from the distiller.
+
+    The pipeline is extractive by construction (no LLM pass anywhere in
+    plan/draft/verify), so integrity can only break two ways: a rendered line
+    that traces to no selected source, or the distiller selecting synthesis
+    and reflection output as its own input. Both are pinned here on a seeded
+    fixture.
+    """
+
+    @staticmethod
+    def _self_feeding_result(entity_id: str, capture_surface: str) -> SearchResult:
+        return SearchResult(
+            id=entity_id,
+            type="artifact",
+            name=f"Prior output {entity_id}",
+            content="A previously distilled handbook body",
+            score=0.99,
+            source=f"source:{entity_id}",
+            result_origin="graph",
+            metadata={"entity_type": "artifact", "capture_surface": capture_surface},
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "capture_surface",
+        ["synthesis_artifact", "reflection", "reflection_candidate", "reflection_source"],
+    )
+    async def test_self_feeding_surfaces_never_enter_the_plan(self, capture_surface: str) -> None:
+        poisoned = self._self_feeding_result("artifact-poison", capture_surface)
+        clean = _result("artifact-clean", "artifact", "Design doc", score=0.7)
+        run = await _plan(_populated_search([poisoned, clean]))
+
+        selected = {source.id for pack in run.source_packs for source in pack.sources}
+        assert "artifact-poison" not in selected
+        assert "artifact-clean" in selected
+        assert "artifact-poison" not in render_handbook_markdown(run)
+
+    @pytest.mark.asyncio
+    async def test_capture_mode_synthesis_is_excluded_without_a_surface(self) -> None:
+        poisoned = SearchResult(
+            id="artifact-mode",
+            type="artifact",
+            name="Remembered synthesis",
+            content="Synthesis-mode capture with no surface marker",
+            score=0.99,
+            source="source:artifact-mode",
+            result_origin="graph",
+            metadata={"entity_type": "artifact", "capture_mode": "synthesis"},
+        )
+        run = await _plan(_populated_search([poisoned]))
+
+        selected = {source.id for pack in run.source_packs for source in pack.sources}
+        assert "artifact-mode" not in selected
+
+    @pytest.mark.asyncio
+    async def test_every_rendered_line_is_scaffolding_or_traces_to_a_source(self) -> None:
+        fixtures = [
+            _result("decision-1", "decision", "Chose SurrealDB"),
+            _result("task-1", "task", "Ship the exporter"),
+            _result("artifact-1", "artifact", "Design doc"),
+            _result("claim-1", "claim", "Exports are deterministic"),
+        ]
+        run = await _plan(_populated_search(fixtures))
+        markdown = render_handbook_markdown(run)
+
+        fixture_ids = {result.id for result in fixtures}
+        fixture_names = {result.name for result in fixtures}
+        section_titles = {section.title for section in HANDBOOK_SECTIONS}
+        absence_scaffold = (
+            "No citable memory backs these sections yet. Absence here is a gap in "
+            "the graph, not a claim that nothing exists."
+        )
+
+        for line in markdown.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("## "):
+                assert stripped[3:] in ({"Not Covered"} | section_titles), (
+                    f"unexpected heading: {stripped}"
+                )
+                continue
+            if stripped.startswith("Sources: "):
+                cited = {token.strip("`,") for token in stripped.removeprefix("Sources: ").split()}
+                assert cited <= fixture_ids, f"hallucinated citation in: {stripped}"
+                continue
+            if stripped == "_No citable sources were available for this section._":
+                continue
+            if stripped == absence_scaffold:
+                continue
+            if stripped.startswith("- "):
+                traces = any(name in stripped for name in fixture_names) and any(
+                    f"[{source_id}]" in stripped for source_id in fixture_ids
+                )
+                uncovered_title = stripped.removeprefix("- ") in section_titles
+                assert traces or uncovered_title, f"unsourced content line: {stripped}"
+                continue
+            raise AssertionError(f"unrecognized handbook line shape: {stripped}")
+
+    @pytest.mark.asyncio
+    async def test_a_run_with_no_sources_renders_only_the_absence_statement(self) -> None:
+        run = await _plan(_empty_search)
+        markdown = render_handbook_markdown(run)
+
+        assert "## Not Covered" in markdown
+        assert "Sources:" not in markdown

@@ -117,6 +117,20 @@ CORRECTED_LIFECYCLE_STATES = {
     "contested",
     "superseded",
 }
+# Capture surfaces whose records are themselves synthesis or reflection
+# output. Search and neighborhood expansion must never select them: a
+# handbook citing a prior handbook compounds its own summarization loss on
+# every regeneration, which is the self-feeding loop the write-path integrity
+# gate exists to catch. Sources the caller names explicitly stay eligible,
+# because synthesizing FROM a chosen prior artifact is a deliberate request.
+SELF_FEEDING_CAPTURE_SURFACES = frozenset(
+    {
+        "reflection",
+        "reflection_candidate",
+        "reflection_source",
+        "synthesis_artifact",
+    }
+)
 MAX_EXPLICIT_NEIGHBORHOOD_IDS = 100
 
 
@@ -257,6 +271,20 @@ def _dedupe_sources(
         seen.add(source.id)
         deduped.append(source)
     return deduped
+
+
+def _is_self_feeding_source(source: SynthesisSourceReference) -> bool:
+    metadata = source.metadata or {}
+    capture_surface = str(metadata.get("capture_surface") or "").strip().lower()
+    if capture_surface in SELF_FEEDING_CAPTURE_SURFACES:
+        return True
+    return str(metadata.get("capture_mode") or "").strip().lower() == "synthesis"
+
+
+def _without_self_feeding_sources(
+    sources: Iterable[SynthesisSourceReference],
+) -> list[SynthesisSourceReference]:
+    return [source for source in sources if not _is_self_feeding_source(source)]
 
 
 async def _search_sources(
@@ -982,15 +1010,17 @@ async def plan_synthesis(
         ],
     ]
     explicit_sources = _dedupe_sources(explicit_sources)[:MAX_EXPLICIT_NEIGHBORHOOD_IDS]
-    searched_sources = await _search_sources(
-        query=base_query,
-        organization_id=organization_id,
-        project=request.project,
-        domain=request.domain,
-        accessible_projects=accessible_projects,
-        search_fn=search_fn,
+    searched_sources = _without_self_feeding_sources(
+        await _search_sources(
+            query=base_query,
+            organization_id=organization_id,
+            project=request.project,
+            domain=request.domain,
+            accessible_projects=accessible_projects,
+            search_fn=search_fn,
+        )
     )
-    neighborhood_sources = (
+    neighborhood_sources = _without_self_feeding_sources(
         await _neighborhood_sources(
             entity_ids=[source.id for source in explicit_sources],
             organization_id=organization_id,
