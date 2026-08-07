@@ -195,7 +195,7 @@ Compiles a structured context pack for an agent goal. This is the REST equivalen
 | `related_limit`         | integer | No       | 3        | Related items per context item (0-5)        |
 | `audit`                 | boolean | No       | false    | Include full retrieval metadata per item    |
 | `record_exposure`       | boolean | No       | true     | Record returned items as exposure signals   |
-| `markdown_token_budget` | integer | No       | -        | Cap rendered markdown (~100-8000 tokens)    |
+| `markdown_token_budget` | integer | No       | 4000     | Size rendered markdown (100-32,000 tokens)  |
 | `evidence`              | object  | No       | -        | Enhanced source-evidence retrieval controls |
 
 #### Evidence Controls
