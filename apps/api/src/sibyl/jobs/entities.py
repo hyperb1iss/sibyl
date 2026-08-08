@@ -23,6 +23,8 @@ from sibyl_core.projection import (
     project_memory_entities,
     project_memory_entity,
     reproject_entity_passages,
+    restamp_entity_passages,
+    scope_bearing_entity_update,
 )
 from sibyl_core.services.graph import get_surreal_graph_runtime
 from sibyl_core.services.surreal_content import MemoryScope
@@ -1416,6 +1418,19 @@ async def update_entity(
                     entity_id=entity_id,
                     errors=passage_result.errors,
                 )
+        elif result is not None and scope_bearing_entity_update(updates):
+            # A scope-only edit leaves the cut valid but changes who may read
+            # the spans; their inherited stamps have to follow the parent or a
+            # tightened memory keeps serving its text through search. The
+            # managers enable the failed-write recovery path: a later retrigger
+            # never comes because the parent already carries the new stamps.
+            await restamp_entity_passages(
+                entity_manager=entity_manager,
+                source=result,
+                created_source_id=entity_id,
+                relationship_manager=runtime.relationship_manager,
+                group_id=group_id,
+            )
 
         if result:
             # Broadcast update event

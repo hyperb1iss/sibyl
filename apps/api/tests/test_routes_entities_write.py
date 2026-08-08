@@ -1929,10 +1929,11 @@ def _spanned_memory_entity(*, owner: str, content: str = _SPANNED_BODY) -> Simpl
 def _update_patches(runtime: SimpleNamespace, *, passages: int = 0):
     """Enter the auth and runtime patches an update route call needs.
 
-    Yields the reprojection mock, because the re-cut firing on the request path
-    is itself part of the contract under test.
+    Yields the reprojection and restamp mocks, because which of the two fires
+    on the request path is itself part of the contract under test.
     """
     reproject = AsyncMock(return_value=SimpleNamespace(errors=(), passages=passages))
+    restamp = AsyncMock(return_value=0)
     with ExitStack() as stack:
         for context in (
             patch("sibyl.locks.entity_lock", _locked_entity),
@@ -1947,9 +1948,10 @@ def _update_patches(runtime: SimpleNamespace, *, passages: int = 0):
             ),
             patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
             patch("sibyl.api.routes.entities.reproject_entity_passages", reproject),
+            patch("sibyl.api.routes.entities.restamp_entity_passages", restamp),
         ):
             stack.enter_context(context)
-        yield reproject
+        yield reproject, restamp
 
 
 @pytest.mark.asyncio
@@ -2051,7 +2053,7 @@ async def test_update_entity_nulls_a_withdrawn_plan_because_merge_cannot_delete(
         relationship_manager=SimpleNamespace(),
     )
 
-    with _update_patches(runtime) as reproject:
+    with _update_patches(runtime) as (reproject, _restamp):
         await update_entity(
             entity_id="decision_spanned",
             update=EntityUpdate(content="a completely rewritten body"),
@@ -2282,6 +2284,70 @@ async def test_update_entity_cannot_have_a_plan_planted_through_metadata() -> No
     written = runtime.entity_manager.update.await_args.args[1]["metadata"]
     assert written["note"] == "kept"
     assert "probe_rehearsal" not in written
+
+
+@pytest.mark.asyncio
+async def test_update_entity_restamps_spans_when_only_the_scope_changed() -> None:
+    """A scope-only edit must refresh span stamps without re-cutting the body."""
+    org = _org()
+    ctx = _ctx()
+    owner = str(ctx.user.id)
+    existing = _spanned_memory_entity(owner=owner)
+    updated = _spanned_memory_entity(owner=owner)
+    updated.metadata = {
+        **updated.metadata,
+        "memory_scope": "project",
+        "scope_key": "project_x",
+    }
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing),
+            update=AsyncMock(return_value=updated),
+        ),
+        relationship_manager=SimpleNamespace(),
+    )
+
+    with _update_patches(runtime) as (reproject, restamp):
+        await update_entity(
+            entity_id="decision_spanned",
+            update=EntityUpdate(metadata={"note": "cosmetic"}),
+            request=_request(),
+            org=org,
+            ctx=ctx,
+            content_session=None,
+        )
+
+    reproject.assert_not_awaited()
+    restamp.assert_awaited_once()
+    assert restamp.await_args.kwargs["source"] is updated
+
+
+@pytest.mark.asyncio
+async def test_update_entity_leaves_spans_alone_when_stamps_are_unchanged() -> None:
+    org = _org()
+    ctx = _ctx()
+    owner = str(ctx.user.id)
+    existing = _spanned_memory_entity(owner=owner)
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing),
+            update=AsyncMock(return_value=existing),
+        ),
+        relationship_manager=SimpleNamespace(),
+    )
+
+    with _update_patches(runtime) as (reproject, restamp):
+        await update_entity(
+            entity_id="decision_spanned",
+            update=EntityUpdate(metadata={"note": "cosmetic"}),
+            request=_request(),
+            org=org,
+            ctx=ctx,
+            content_session=None,
+        )
+
+    reproject.assert_not_awaited()
+    restamp.assert_not_awaited()
 
 
 @pytest.mark.parametrize(

@@ -17,11 +17,14 @@ from sibyl_core.projection.passages import (
     PASSAGE_PLAN_AGENT,
     PASSAGE_PLAN_KEY,
     PASSAGE_PLAN_MECHANICAL,
+    PassageProjectionResult,
     passage_entity_id,
     plan_entity_passages,
     project_entity_passages,
     reproject_entity_passages,
+    restamp_entity_passages,
     retire_entity_passages,
+    scope_bearing_entity_update,
     should_project_passages,
 )
 
@@ -692,3 +695,214 @@ def test_a_withdrawn_plan_in_a_stale_snapshot_is_not_read_back() -> None:
     assert all(
         passage.metadata[PASSAGE_PLAN_KEY] == PASSAGE_PLAN_MECHANICAL for passage in entities
     )
+
+
+class _ScopedStoreEntityManager:
+    """Get/update over a dict of entities, mirroring update MERGE semantics."""
+
+    def __init__(self, entities: dict[str, Entity]) -> None:
+        self.entities = dict(entities)
+        self.updates: list[tuple[str, dict[str, Any]]] = []
+
+    async def get(self, entity_id: str) -> Entity:
+        try:
+            return self.entities[entity_id]
+        except KeyError:
+            raise KeyError(entity_id) from None
+
+    async def update(self, entity_id: str, updates: dict[str, Any]) -> Entity:
+        self.updates.append((entity_id, updates))
+        entity = self.entities[entity_id]
+        metadata = dict(entity.metadata or {})
+        for key, value in (updates.get("metadata") or {}).items():
+            if value is None:
+                metadata.pop(key, None)
+            else:
+                metadata[key] = value
+        updated = entity.model_copy(update={"metadata": metadata})
+        self.entities[entity_id] = updated
+        return updated
+
+
+def _project_scoped_source() -> Entity:
+    return _source(
+        metadata={
+            "memory_scope": "project",
+            "scope_key": "project_x",
+            "project_id": "project_x",
+            "principal_id": "user-1",
+        }
+    )
+
+
+async def _spans_in_store(source: Entity) -> _ScopedStoreEntityManager:
+    entities, _ = plan_entity_passages(source, source_id=_SOURCE_ID, group_id=_GROUP)
+    assert entities
+    return _ScopedStoreEntityManager({entity.id: entity for entity in entities})
+
+
+def test_scope_bearing_update_detection() -> None:
+    assert scope_bearing_entity_update({"memory_scope": "private"}) is True
+    assert scope_bearing_entity_update({"metadata": {"scope_key": "p"}}) is True
+    assert scope_bearing_entity_update({"metadata": {"project_id": None}}) is True
+    assert scope_bearing_entity_update({"name": "renamed"}) is False
+    assert scope_bearing_entity_update({"metadata": {"category": "note"}}) is False
+    assert scope_bearing_entity_update({"content": "new body"}) is False
+
+
+@pytest.mark.asyncio
+async def test_a_tightened_parent_restamps_its_spans_private() -> None:
+    """Tighten parent to private: a stranger's search gate must refuse its spans."""
+    from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
+
+    manager = await _spans_in_store(_project_scoped_source())
+    tightened = _source(
+        metadata={
+            "memory_scope": "private",
+            "principal_id": "user-1",
+        }
+    )
+
+    restamped = await restamp_entity_passages(
+        entity_manager=manager,
+        source=tightened,
+        created_source_id=_SOURCE_ID,
+    )
+
+    assert restamped == len(manager.entities)
+    for span in manager.entities.values():
+        assert span.metadata["memory_scope"] == "private"
+        assert span.metadata["principal_id"] == "user-1"
+        # The project audience the parent left behind must leave the spans too.
+        assert "scope_key" not in span.metadata
+        assert "project_id" not in span.metadata
+        # The gate search and traversal share: owner reads, a stranger does not.
+        assert (
+            memory_metadata_read_allowed(
+                span.metadata,
+                principal_id="user-1",
+                private_scope_granted=True,
+                accessible_projects={"project_x"},
+            )
+            is True
+        )
+        assert (
+            memory_metadata_read_allowed(
+                span.metadata,
+                principal_id="user-2",
+                private_scope_granted=True,
+                accessible_projects={"project_x"},
+            )
+            is False
+        )
+
+
+@pytest.mark.asyncio
+async def test_matching_stamps_are_left_unwritten() -> None:
+    source = _project_scoped_source()
+    manager = await _spans_in_store(source)
+
+    restamped = await restamp_entity_passages(
+        entity_manager=manager,
+        source=source,
+        created_source_id=_SOURCE_ID,
+    )
+
+    assert restamped == 0
+    assert manager.updates == []
+
+
+@pytest.mark.asyncio
+async def test_restamp_reaches_spans_past_an_index_gap() -> None:
+    """The oversize-leaf branch can skip an index; stale rows past it still count."""
+    manager = await _spans_in_store(_project_scoped_source())
+    dropped = passage_entity_id(_SOURCE_ID, 0)
+    del manager.entities[dropped]
+    survivors = len(manager.entities)
+    tightened = _source(metadata={"memory_scope": "private", "principal_id": "user-1"})
+
+    restamped = await restamp_entity_passages(
+        entity_manager=manager,
+        source=tightened,
+        created_source_id=_SOURCE_ID,
+    )
+
+    assert restamped == survivors
+
+
+@pytest.mark.asyncio
+async def test_a_failed_restamp_write_recovers_through_reprojection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A partial restamp can never re-fire, so recovery must happen now.
+
+    The route trigger diffs pre/post stamp projections; once the parent
+    carries the new stamps that diff is empty on every later edit, and a span
+    the failed write left behind would serve the old audience indefinitely.
+    """
+    from sibyl_core.projection import passages as passages_module
+
+    manager = await _spans_in_store(_project_scoped_source())
+
+    first_span_id = sorted(manager.entities)[0]
+    original_update = manager.update
+
+    async def failing_update(entity_id: str, updates: dict[str, Any]) -> Entity:
+        if entity_id == first_span_id:
+            raise RuntimeError("surreal write refused")
+        return await original_update(entity_id, updates)
+
+    manager.update = failing_update  # type: ignore[method-assign]
+
+    reproject_calls: list[dict[str, Any]] = []
+
+    async def fake_reproject(**kwargs: Any) -> PassageProjectionResult:
+        reproject_calls.append(kwargs)
+        return PassageProjectionResult(source_id=kwargs["created_source_id"], passages=4)
+
+    monkeypatch.setattr(passages_module, "reproject_entity_passages", fake_reproject)
+
+    tightened = _source(metadata={"memory_scope": "private", "principal_id": "user-1"})
+    relationship_manager = _RecordingRelationshipManager()
+
+    restamped = await restamp_entity_passages(
+        entity_manager=manager,
+        source=tightened,
+        created_source_id=_SOURCE_ID,
+        relationship_manager=relationship_manager,
+        group_id=_GROUP,
+    )
+
+    assert len(reproject_calls) == 1
+    recovery = reproject_calls[0]
+    assert recovery["source"] is tightened
+    assert recovery["group_id"] == _GROUP
+    assert recovery["created_source_id"] == _SOURCE_ID
+    assert recovery["relationship_manager"] is relationship_manager
+    assert restamped == 4
+
+
+@pytest.mark.asyncio
+async def test_a_failed_restamp_without_recovery_managers_keeps_walking() -> None:
+    """Callers that cannot reproject still get every span the walk can fix."""
+    manager = await _spans_in_store(_project_scoped_source())
+
+    first_span_id = sorted(manager.entities)[0]
+    original_update = manager.update
+
+    async def failing_update(entity_id: str, updates: dict[str, Any]) -> Entity:
+        if entity_id == first_span_id:
+            raise RuntimeError("surreal write refused")
+        return await original_update(entity_id, updates)
+
+    manager.update = failing_update  # type: ignore[method-assign]
+
+    tightened = _source(metadata={"memory_scope": "private", "principal_id": "user-1"})
+
+    restamped = await restamp_entity_passages(
+        entity_manager=manager,
+        source=tightened,
+        created_source_id=_SOURCE_ID,
+    )
+
+    assert restamped == len(manager.entities) - 1

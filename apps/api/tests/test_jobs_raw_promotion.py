@@ -200,13 +200,34 @@ async def test_promote_raw_captures_writes_chunks_and_graph_entity(
 
 
 @pytest.mark.asyncio
-async def test_promote_raw_captures_skips_private_memories_without_materializing(
+async def test_promote_raw_captures_promotes_a_private_memory_graph_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    memory = _raw_memory(memory_scope=MemoryScope.PRIVATE)
+    """A private capture reaches the graph carrying its scope, never the doc store.
 
-    async def fail_save_memory(_memory: RawMemory) -> RawMemory:
-        raise AssertionError("private raw memories should not be marked or materialized")
+    The document/chunk store is searched org-wide with no per-row scope filter,
+    so a scoped capture's text must not land there; refusing to promote at all
+    was the old behavior and it silently stranded every scoped capture.
+    """
+    memory = _raw_memory(memory_scope=MemoryScope.PRIVATE)
+    saved_memories: list[RawMemory] = []
+    created_entities = []
+
+    async def fail_content_store(*_args: object, **_kwargs: object):
+        raise AssertionError("a scoped capture must not touch the shared document store")
+
+    async def fake_save_memory(updated: RawMemory) -> RawMemory:
+        saved_memories.append(updated)
+        return updated
+
+    class FakeEntityManager:
+        async def create_direct(self, entity, *, generate_embedding: bool = False):
+            created_entities.append(entity)
+            return entity.id
+
+    async def fake_graph_runtime(group_id: str):
+        assert group_id == memory.organization_id
+        return SimpleNamespace(entity_manager=FakeEntityManager())
 
     monkeypatch.setattr(
         raw_promotion,
@@ -214,14 +235,51 @@ async def test_promote_raw_captures_skips_private_memories_without_materializing
         _list_memories([memory]),
     )
     monkeypatch.setattr(raw_promotion, "EmbeddingService", _fake_embedder)
-    monkeypatch.setattr(raw_promotion, "save_raw_memory", fail_save_memory)
+    monkeypatch.setattr(raw_promotion, "save_crawled_document_record", fail_content_store)
+    monkeypatch.setattr(raw_promotion, "delete_document_chunks_for_document", fail_content_store)
+    monkeypatch.setattr(raw_promotion, "save_document_chunks", fail_content_store)
+    monkeypatch.setattr(raw_promotion, "get_entity_graph_runtime", fake_graph_runtime)
+    monkeypatch.setattr(raw_promotion, "save_raw_memory", fake_save_memory)
+    monkeypatch.setattr(raw_promotion.settings, "auto_extract_entities", False)
 
     result = await raw_promotion.promote_raw_captures({}, memory.organization_id)
 
-    assert result["promoted_count"] == 0
-    assert result["skipped_scope_count"] == 1
+    assert result["promoted_count"] == 1
     assert result["failed_count"] == 0
     assert result["document_ids"] == []
+    entity = created_entities[0]
+    assert entity.metadata["memory_scope"] == "private"
+    assert entity.metadata["principal_id"] == "user-1"
+    assert "scope_key" not in entity.metadata
+    marked = saved_memories[-1]
+    assert marked.entity_id == memory.id
+    assert marked.metadata["raw_promotion_state"] == "promoted"
+    assert marked.metadata["raw_promotion_content_store"] == "skipped_scoped"
+    assert marked.metadata["raw_promotion_chunk_count"] == 0
+    assert "raw_promotion_document_id" not in marked.metadata
+
+
+def test_promotion_scope_stamps_by_scope() -> None:
+    org_wide = _raw_memory(memory_scope=MemoryScope.ORGANIZATION)
+    assert raw_promotion._promotion_scope_metadata(org_wide) == {}
+
+    public = _raw_memory(memory_scope=MemoryScope.PUBLIC)
+    assert raw_promotion._promotion_scope_metadata(public) == {}
+
+    project = _raw_memory(memory_scope=MemoryScope.PROJECT)
+    project.scope_key = "project_x"
+    stamps = raw_promotion._promotion_scope_metadata(project)
+    assert stamps["memory_scope"] == "project"
+    assert stamps["scope_key"] == "project_x"
+    # The read path treats project_id as the audience channel.
+    assert stamps["project_id"] == "project_x"
+    assert stamps["principal_id"] == "user-1"
+
+    team = _raw_memory(memory_scope=MemoryScope.TEAM)
+    team.scope_key = "team_y"
+    team_stamps = raw_promotion._promotion_scope_metadata(team)
+    assert team_stamps["memory_scope"] == "team"
+    assert team_stamps["scope_key"] == "team_y"
 
 
 @pytest.mark.asyncio

@@ -743,6 +743,43 @@ def test_entity_from_surreal_row_preserves_native_policy_metadata() -> None:
     assert "category" not in entity.metadata
 
 
+def test_entity_from_surreal_row_reads_a_column_only_scope() -> None:
+    """A row whose scope lives only in the column must not parse as unscoped.
+
+    The read path checks metadata, so dropping the column here handed a
+    column-only private row to the fail-open and served it org-wide.
+    """
+    entity = entity_from_surreal_row(
+        {
+            "id": "entity:decision_column_scope",
+            "uuid": "decision_column_scope",
+            "name": "Column-scoped decision",
+            "entity_type": "decision",
+            "group_id": "org-native",
+            "memory_scope": "private",
+            "attributes": {},
+        }
+    )
+
+    assert entity.metadata["memory_scope"] == "private"
+
+
+def test_entity_from_surreal_row_keeps_the_attribute_scope_over_the_column() -> None:
+    entity = entity_from_surreal_row(
+        {
+            "id": "entity:decision_both_scopes",
+            "uuid": "decision_both_scopes",
+            "name": "Doubly scoped decision",
+            "entity_type": "decision",
+            "group_id": "org-native",
+            "memory_scope": "project",
+            "attributes": {"memory_scope": "private"},
+        }
+    )
+
+    assert entity.metadata["memory_scope"] == "private"
+
+
 def test_entity_from_surreal_row_preserves_content_whitespace() -> None:
     entity = entity_from_surreal_row(
         {
