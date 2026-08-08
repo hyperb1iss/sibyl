@@ -1445,6 +1445,51 @@ async def test_native_embedding_backfill_accepts_hydrated_storage_defaults() -> 
 
 
 @pytest.mark.asyncio
+async def test_native_embedding_backfill_accepts_metadata_content_fallback() -> None:
+    client = SurrealGraphClient(group_id="org-native-meta-content", url="memory://")
+    provider = DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
+            provider="deterministic",
+            model="unit-test",
+            dimensions=1024,
+            cache_namespace="native-meta-content-test",
+            tokenizer_estimate_method="utf8-byte-length",
+        )
+    )
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(
+            client,
+            group_id=client.group_id,
+            embedding_provider=provider,
+        )
+        # Hydration reads content through metadata when the column is empty
+        # (_first_content), so the original payload must still count as
+        # current: refusing it strands the row unembedded forever, because
+        # no later job carries a matching payload.
+        raw = Entity(
+            id="session_meta_content",
+            entity_type=EntityType.SESSION,
+            name="Session capture",
+            content="",
+            organization_id=client.group_id,
+            metadata={"projection_kind": "session", "content": "stashed body in metadata"},
+        )
+        await manager.create_direct_bulk((raw,), generate_embeddings=False)
+
+        original_ids = await manager.backfill_embeddings_if_current((raw,))
+        hydrated = await manager.get(raw.id)
+        hydrated_ids = await manager.backfill_embeddings_if_current((hydrated,))
+        stored = await manager.get(raw.id)
+    finally:
+        await client.close()
+
+    assert original_ids == [raw.id]
+    assert hydrated_ids == [raw.id]
+    assert stored.embedding
+
+
+@pytest.mark.asyncio
 async def test_native_relationship_bulk_persists_edges_readable_after_write() -> None:
     # Regression guard for the bulk relates_to upsert path: it must execute and
     # persist edges that are then readable (the prior unit test used a fake client

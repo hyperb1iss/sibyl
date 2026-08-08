@@ -877,6 +877,7 @@ async def backfill_entity_embeddings(
             lambda: runtime.entity_manager.backfill_embeddings_if_current(entities),
         )
         expected_entity_ids = {entity.id for entity in entities}
+        stale_entity_ids: list[str] = []
         if set(created_ids) != expected_entity_ids:
             if expected_manifest is not None:
                 manifest_state = await _load_operational_manifest_state(
@@ -893,9 +894,24 @@ async def backfill_entity_embeddings(
                         "manifest_state": manifest_state,
                     }
             missing_ids = sorted(expected_entity_ids - set(created_ids))
-            raise RuntimeError(
-                "partial entity embedding backfill; "
-                f"missing current entities: {', '.join(missing_ids)}"
+            # A refused write is not a missing row: operational ids are
+            # stable, so a re-capture between enqueue and drain updates the
+            # row and the currency fence rightly refuses the stale payload
+            # while the newer capture's own backfill owns the current text.
+            # Only rows that are actually gone fail the job.
+            present = await runtime.entity_manager.get_many(missing_ids)
+            present_ids = {entity.id for entity in present}
+            stale_entity_ids = [entity_id for entity_id in missing_ids if entity_id in present_ids]
+            absent_ids = [entity_id for entity_id in missing_ids if entity_id not in present_ids]
+            if absent_ids:
+                raise RuntimeError(
+                    "partial entity embedding backfill; "
+                    f"missing current entities: {', '.join(absent_ids)}"
+                )
+            log.warning(
+                "entity_embedding_backfill_stale_expectations",
+                entity_ids=stale_entity_ids,
+                group_id=group_id,
             )
 
         relationship_ids: list[str] = []
@@ -945,6 +961,8 @@ async def backfill_entity_embeddings(
         "relationship_ids": relationship_ids,
         "embedding_usage": embedding_usage,
     }
+    if stale_entity_ids:
+        result["stale_entity_ids"] = stale_entity_ids
     if manifest_state is not None:
         result["manifest_state"] = manifest_state
     log.info("entity_embedding_backfill_complete", **result)

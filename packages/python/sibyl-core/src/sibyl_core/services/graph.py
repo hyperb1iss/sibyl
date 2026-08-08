@@ -2851,12 +2851,14 @@ async def _update_entity_embedding_if_current(
 
 
 def _persisted_entity_embedding_text(entity: Entity) -> str:
+    # Mirrors entity_from_surreal_row's read-side fallbacks; any divergence
+    # makes the currency fence refuse rows that are byte-identical on disk.
     summary = entity.description[:500] if entity.description else entity.name
     persisted = entity.model_copy(
         update={
             "name": entity.name.strip(),
             "description": (entity.description or summary).strip(),
-            "content": entity.content or summary,
+            "content": _first_content(entity.content, entity.metadata.get("content"), summary),
         }
     )
     return entity_embedding_text(persisted)
