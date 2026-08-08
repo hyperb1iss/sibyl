@@ -502,6 +502,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         default="fast",
     )
     parser.add_argument("--retrieval-max-planned-queries", type=int, default=3)
+    parser.add_argument(
+        "--agentic-traversal",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Enable bounded model-in-the-loop widening between the one-shot pass and "
+            "deterministic composition: the traversal model inspects pool previews and "
+            "gathers via /search/expand, /search/slice, and one follow-up search. "
+            "Score-blind and question-text-only; off reproduces the arm-off geometry."
+        ),
+    )
+    parser.add_argument("--traversal-widening-rounds", type=int, default=1)
+    parser.add_argument("--traversal-model", default="gpt-5.4-nano")
+    parser.add_argument("--traversal-max-actions", type=int, default=4)
+    parser.add_argument("--traversal-followup-searches", type=int, default=1)
+    parser.add_argument("--traversal-deadline-seconds", type=float, default=8.0)
+    parser.add_argument("--traversal-overflow-items", type=int, default=4)
+    parser.add_argument("--traversal-search-limit", type=int, default=8)
     parser.add_argument("--include-screenshot-refs", action="store_true")
     parser.add_argument("--inline-embeddings", action="store_true")
     parser.add_argument("--api-timeout-seconds", type=float, default=600.0)
@@ -709,6 +727,14 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "typed_reservation_items": args.typed_reservation_items,
         "retrieval_mode": args.retrieval_mode,
         "retrieval_max_planned_queries": args.retrieval_max_planned_queries,
+        "agentic_traversal": args.agentic_traversal,
+        "traversal_widening_rounds": args.traversal_widening_rounds,
+        "traversal_model": args.traversal_model,
+        "traversal_max_actions": args.traversal_max_actions,
+        "traversal_followup_searches": args.traversal_followup_searches,
+        "traversal_deadline_seconds": args.traversal_deadline_seconds,
+        "traversal_overflow_items": args.traversal_overflow_items,
+        "traversal_search_limit": args.traversal_search_limit,
         "include_screenshot_refs": args.include_screenshot_refs,
         "defer_embeddings": not args.inline_embeddings,
         "api_timeout_seconds": args.api_timeout_seconds,
@@ -859,6 +885,14 @@ def build_run_plan(
         "typed_reservation_items": args.typed_reservation_items,
         "retrieval_mode": args.retrieval_mode,
         "retrieval_max_planned_queries": args.retrieval_max_planned_queries,
+        "agentic_traversal": args.agentic_traversal,
+        "traversal_widening_rounds": args.traversal_widening_rounds,
+        "traversal_model": args.traversal_model,
+        "traversal_max_actions": args.traversal_max_actions,
+        "traversal_followup_searches": args.traversal_followup_searches,
+        "traversal_deadline_seconds": args.traversal_deadline_seconds,
+        "traversal_overflow_items": args.traversal_overflow_items,
+        "traversal_search_limit": args.traversal_search_limit,
         "include_screenshot_refs": args.include_screenshot_refs,
         "evaluator_model": args.evaluator_model,
         "evaluator_retry_attempts": args.evaluator_retry_attempts,

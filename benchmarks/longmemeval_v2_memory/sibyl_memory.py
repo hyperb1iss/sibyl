@@ -54,6 +54,17 @@ from sibyl_core.retrieval.refinement import (  # noqa: E402
 _BENCHMARKS_ROOT = str(Path(__file__).resolve().parent.parent)
 if _BENCHMARKS_ROOT not in sys.path:
     sys.path.insert(0, _BENCHMARKS_ROOT)
+from longmemeval_v2_memory.agentic_traversal import (  # noqa: E402
+    DEFAULT_FOLLOWUP_SEARCHES,
+    DEFAULT_MAX_ACTIONS_PER_ROUND,
+    DEFAULT_TRAVERSAL_DEADLINE_SECONDS,
+    DEFAULT_WIDENING_ROUNDS,
+    MAX_ACTIONS_PER_ROUND,
+    MAX_FOLLOWUP_SEARCHES,
+    MAX_WIDENING_ROUNDS,
+    TraversalAction,
+    run_agentic_traversal,
+)
 from longmemeval_v2_memory.note_distillation import (  # noqa: E402
     DEFAULT_NOTE_DISTILLATION_MODEL,
     build_note_entity_payloads,
@@ -150,6 +161,14 @@ DEFAULT_NEIGHBOR_SUPPORT_EXEMPT = False
 DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING = False
 DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS = 0
 DEFAULT_NEIGHBOR_STITCH_SPREAD = False
+DEFAULT_AGENTIC_TRAVERSAL = False
+# Granted admission slots for traversal-gathered evidence, mirroring the
+# additive neighbor-overflow mechanism: model-gathered items ride their own
+# lane instead of evicting seeds, and the render ceiling rises with the grant
+# so the arm cannot be clipped into a silent no-op.
+DEFAULT_TRAVERSAL_OVERFLOW_ITEMS = 4
+MAX_TRAVERSAL_OVERFLOW_ITEMS = 8
+DEFAULT_TRAVERSAL_SEARCH_LIMIT = 8
 DEFAULT_CONTEXT_EXPANSION_MAX_RATIO = 0.0
 CONTEXT_TOKENIZER_MODEL = "Qwen/Qwen3.5-9B"
 STATE_PART_REFINEMENT_MIN_SCORE_GAIN = 0.05
@@ -197,6 +216,14 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "retrieval_mode",
         "retrieval_max_planned_queries",
         "checkpoint_dir",
+        "agentic_traversal",
+        "traversal_widening_rounds",
+        "traversal_model",
+        "traversal_max_actions",
+        "traversal_followup_searches",
+        "traversal_deadline_seconds",
+        "traversal_overflow_items",
+        "traversal_search_limit",
     }
 )
 SAVED_MEMORY_IDENTITY_KEYS = frozenset(
@@ -695,6 +722,8 @@ def compile_operational_evidence_set(
     neighbor_support_exempt: bool = DEFAULT_NEIGHBOR_SUPPORT_EXEMPT,
     neighbor_trajectory_preserving: bool = DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING,
     neighbor_support_overflow_items: int = DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS,
+    traversal_results: list[dict[str, object]] | None = None,
+    traversal_overflow_items: int = 0,
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
     """Compose the reader's pack from the typed and raw evidence pools.
 
@@ -844,6 +873,34 @@ def compile_operational_evidence_set(
         selected_chars = spent
         # A budgeted pack has no item bound for a support to overflow past.
         support_overflow_items = 0
+
+    # Traversal-gathered evidence rides its own granted lane, exactly like the
+    # additive neighbor-overflow slots: admitting through the shared budget
+    # would either evict a seed (the measured trajectory-recall tax) or clip
+    # the gathered item before the reader sees it (the arm-as-no-op trap).
+    selected_id_set = {item_id for item in selected if (item_id := _stripped_str(item.get("id")))}
+    traversal_pool = [
+        candidate
+        for candidate in (traversal_results or [])
+        if _stripped_str(candidate.get("content"))
+        and _stripped_str(candidate.get("id")) not in selected_id_set
+    ]
+    traversal_admitted: list[dict[str, object]] = []
+    if traversal_pool and traversal_overflow_items > 0:
+        capped = traversal_pool[: max(0, traversal_overflow_items)]
+        if char_budget is None:
+            traversal_admitted = capped
+            selected_chars += sum(
+                len(_stripped_str(item.get("content"))) for item in traversal_admitted
+            )
+        else:
+            traversal_admitted, selected_chars = _admit_within_char_budget(
+                capped,
+                budget=char_budget,
+                spent=selected_chars,
+            )
+        selected = [*selected, *traversal_admitted]
+
     for selection_rank, candidate in enumerate(selected, start=1):
         candidate["_evidence_selection_rank"] = selection_rank
 
@@ -871,6 +928,9 @@ def compile_operational_evidence_set(
         "neighbor_trajectory_preserving": neighbor_trajectory_preserving,
         "neighbor_support_overflow_items": neighbor_support_overflow_items,
         "support_overflow_items": support_overflow_items,
+        "traversal_candidate_count": len(traversal_pool),
+        "traversal_overflow_items": traversal_overflow_items,
+        "traversal_admitted_items": len(traversal_admitted),
         "budget_mode": "items" if char_budget is None else "characters",
         "char_budget": char_budget,
         "selected_chars": selected_chars,
@@ -3313,6 +3373,73 @@ class SibylLiveApiMemory(Memory):
             4,
             minimum=1,
         )
+        self.agentic_traversal = _param_bool(
+            memory_params,
+            "agentic_traversal",
+            DEFAULT_AGENTIC_TRAVERSAL,
+        )
+        self.traversal_widening_rounds = _param_int(
+            memory_params,
+            "traversal_widening_rounds",
+            DEFAULT_WIDENING_ROUNDS,
+            minimum=1,
+        )
+        if self.traversal_widening_rounds > MAX_WIDENING_ROUNDS:
+            raise ValueError(f"traversal_widening_rounds must be at most {MAX_WIDENING_ROUNDS}")
+        self.traversal_model = _param_str(
+            memory_params,
+            "traversal_model",
+            DEFAULT_NOTE_DISTILLATION_MODEL,
+        )
+        self.traversal_max_actions = _param_int(
+            memory_params,
+            "traversal_max_actions",
+            DEFAULT_MAX_ACTIONS_PER_ROUND,
+            minimum=1,
+        )
+        if self.traversal_max_actions > MAX_ACTIONS_PER_ROUND:
+            raise ValueError(f"traversal_max_actions must be at most {MAX_ACTIONS_PER_ROUND}")
+        self.traversal_followup_searches = _param_int(
+            memory_params,
+            "traversal_followup_searches",
+            DEFAULT_FOLLOWUP_SEARCHES,
+            minimum=0,
+        )
+        if self.traversal_followup_searches > MAX_FOLLOWUP_SEARCHES:
+            raise ValueError(f"traversal_followup_searches must be at most {MAX_FOLLOWUP_SEARCHES}")
+        self.traversal_deadline_seconds = _param_float(
+            memory_params,
+            "traversal_deadline_seconds",
+            DEFAULT_TRAVERSAL_DEADLINE_SECONDS,
+        )
+        if self.traversal_deadline_seconds <= 0:
+            raise ValueError("traversal_deadline_seconds must be positive")
+        self.traversal_overflow_items = _param_int(
+            memory_params,
+            "traversal_overflow_items",
+            DEFAULT_TRAVERSAL_OVERFLOW_ITEMS,
+            minimum=1,
+        )
+        if self.traversal_overflow_items > MAX_TRAVERSAL_OVERFLOW_ITEMS:
+            raise ValueError(
+                f"traversal_overflow_items must be at most {MAX_TRAVERSAL_OVERFLOW_ITEMS}"
+            )
+        self.traversal_search_limit = _param_int(
+            memory_params,
+            "traversal_search_limit",
+            DEFAULT_TRAVERSAL_SEARCH_LIMIT,
+            minimum=1,
+        )
+        if self.agentic_traversal and not (
+            os.environ.get("OPENAI_API_KEY") or os.environ.get("SIBYL_OPENAI_API_KEY")
+        ):
+            # Without this check the missing key surfaces per-question: every
+            # traversal degrades to the arm-off geometry and a full paid run
+            # completes as baseline under the arm's name. Die at t=0 instead.
+            raise RuntimeError(
+                "agentic_traversal requires OPENAI_API_KEY or SIBYL_OPENAI_API_KEY "
+                "in the environment; export one or drop --agentic-traversal"
+            )
         raw_reservation = memory_params.get("typed_reservation_items")
         self.typed_reservation_items = (
             _param_int(memory_params, "typed_reservation_items", 0, minimum=1)
@@ -3421,6 +3548,7 @@ class SibylLiveApiMemory(Memory):
         self._note_executor: ThreadPoolExecutor | None = None
         self._note_futures: list[tuple[str, Future[dict[str, object]], dict[str, object]]] = []
         self._openai_note_client: object | None = None
+        self._openai_traversal_client: object | None = None
         self.note_distillation_written = 0
         self.note_distillation_failures: list[tuple[str, str]] = []
         self._finalize_lock = threading.Lock()
@@ -4331,6 +4459,13 @@ class SibylLiveApiMemory(Memory):
                 query=query,
             ),
         )
+        traversal_results: list[dict[str, object]] = []
+        if getattr(self, "agentic_traversal", DEFAULT_AGENTIC_TRAVERSAL):
+            traversal_results, traversal_trace = self._run_agentic_traversal_stage(
+                query,
+                pool=[*typed_results, *assembled_results],
+            )
+            self._query_local.search_metadata["agentic_traversal"] = traversal_trace
         evidence_set, evidence_composition = compile_operational_evidence_set(
             query=query,
             typed_results=typed_results,
@@ -4358,12 +4493,21 @@ class SibylLiveApiMemory(Memory):
                 "neighbor_support_overflow_items",
                 DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS,
             ),
+            traversal_results=traversal_results,
+            traversal_overflow_items=(
+                getattr(self, "traversal_overflow_items", DEFAULT_TRAVERSAL_OVERFLOW_ITEMS)
+                if traversal_results
+                else 0
+            ),
         )
         rendered_item_ceiling = context_pack_item_ceiling(
             max_items=self.max_context_items,
             char_budget=char_budget,
             candidate_count=len(evidence_set),
-            overflow_items=_nonnegative_int(evidence_composition.get("support_overflow_items")),
+            overflow_items=(
+                _nonnegative_int(evidence_composition.get("support_overflow_items"))
+                + _nonnegative_int(evidence_composition.get("traversal_admitted_items"))
+            ),
         )
         assembly_metadata["typed_context_candidate_count"] = len(typed_results)
         assembly_metadata["typed_context_selected_count"] = sum(
@@ -4391,6 +4535,137 @@ class SibylLiveApiMemory(Memory):
             context_budget=context_budget,
         )
         return memory_context
+
+    def _traversal_llm_client(self) -> object:
+        if self._openai_traversal_client is None:
+            from openai import OpenAI
+
+            api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("SIBYL_OPENAI_API_KEY", "")
+            if not api_key:
+                raise RuntimeError(
+                    "agentic traversal requires OPENAI_API_KEY or SIBYL_OPENAI_API_KEY"
+                )
+            self._openai_traversal_client = OpenAI(api_key=api_key, timeout=30.0, max_retries=1)
+        return self._openai_traversal_client
+
+    def _traversal_complete(self, system_prompt: str, user_prompt: str) -> str:
+        client = self._traversal_llm_client()
+        response = client.chat.completions.create(  # type: ignore[attr-defined]
+            model=getattr(self, "traversal_model", DEFAULT_NOTE_DISTILLATION_MODEL),
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={"type": "json_object"},
+        )
+        return response.choices[0].message.content or ""
+
+    def _traversal_expand_request(self, action: TraversalAction) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "entity_ids": list(action.entity_ids),
+            "project": self.project_id,
+        }
+        if action.relationship_types:
+            payload["relationship_types"] = list(action.relationship_types)
+        if action.types:
+            payload["types"] = list(action.types)
+        return self._request_json("POST", "/search/expand", json=payload)
+
+    def _traversal_slice_request(self, action: TraversalAction) -> dict[str, object]:
+        return self._request_json(
+            "POST",
+            "/search/slice",
+            json={
+                "entity_id": action.entity_id,
+                "project": self.project_id,
+                "content_max_chars": self.max_context_chars_per_item,
+            },
+        )
+
+    def _traversal_search_request(self, action: TraversalAction) -> list[dict[str, object]]:
+        """One model-refined follow-up pass, reusing the evidence request shape.
+
+        The response items are already in the canonical candidate shape, so the
+        controller stamps the traversal origin and nothing else translates.
+        """
+        limit = getattr(self, "traversal_search_limit", DEFAULT_TRAVERSAL_SEARCH_LIMIT)
+        response = self._request_json(
+            "POST",
+            "/context/pack",
+            json={
+                "goal": action.query,
+                "intent": "learn",
+                "layer": "deep_search",
+                "project": self.project_id,
+                "limit": limit,
+                "include_related": True,
+                "related_limit": 3,
+                "audit": True,
+                "record_exposure": False,
+                "evidence": {
+                    "types": list(getattr(self, "evidence_types", DEFAULT_EVIDENCE_TYPES)),
+                    "limit": limit,
+                    "max_results_per_source": getattr(
+                        self,
+                        "max_chunks_per_trajectory",
+                        DEFAULT_MAX_CHUNKS_PER_TRAJECTORY,
+                    ),
+                    "content_max_chars": self.max_context_chars_per_item,
+                    "include_retrieval_diagnostics": False,
+                    "retrieval_mode": "fast",
+                    "max_planned_queries": 1,
+                },
+            },
+        )
+        results, _filters = _required_context_evidence(response)
+        return _flatten_operational_result_metadata(results)
+
+    def _run_agentic_traversal_stage(
+        self,
+        query: str,
+        *,
+        pool: list[dict[str, object]],
+    ) -> tuple[list[dict[str, object]], dict[str, object]]:
+        """Run the bounded widening loop, degrading to the one-shot baseline.
+
+        Any failure that escapes the per-action isolation inside the loop (a
+        client that cannot construct, a model that cannot be reached) costs the
+        arm its gathering for this question and nothing else: the pack composes
+        exactly as the arm-off geometry and the trace says why.
+        """
+        try:
+            gathered, trace = run_agentic_traversal(
+                question=query,
+                pool=pool,
+                llm_complete=self._traversal_complete,
+                execute_expand=self._traversal_expand_request,
+                execute_slice=self._traversal_slice_request,
+                execute_search=self._traversal_search_request,
+                widening_rounds=getattr(
+                    self,
+                    "traversal_widening_rounds",
+                    DEFAULT_WIDENING_ROUNDS,
+                ),
+                max_actions=getattr(
+                    self,
+                    "traversal_max_actions",
+                    DEFAULT_MAX_ACTIONS_PER_ROUND,
+                ),
+                followup_searches=getattr(
+                    self,
+                    "traversal_followup_searches",
+                    DEFAULT_FOLLOWUP_SEARCHES,
+                ),
+                deadline_seconds=getattr(
+                    self,
+                    "traversal_deadline_seconds",
+                    DEFAULT_TRAVERSAL_DEADLINE_SECONDS,
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 - the arm degrades, the run survives
+            return [], {"enabled": True, "failed": str(exc)}
+        trace["model"] = getattr(self, "traversal_model", DEFAULT_NOTE_DISTILLATION_MODEL)
+        return gathered, trace
 
     def _count_context_result_tokens(
         self,
