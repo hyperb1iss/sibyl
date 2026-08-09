@@ -1848,10 +1848,17 @@ async def test_context_search_pushes_facet_types_into_graph_queries(
     assert client.calls
     assert all("FROM relates_to" not in query for query, _ in client.calls)
     assert all("FROM episode" not in query for query, _ in client.calls)
-    assert all(params["node_types"] == ["task"] for _, params in client.calls)
+    knn_calls = [(q, p) for q, p in client.calls if "name_embedding <|" in q]
+    lexical_calls = [(q, p) for q, p in client.calls if "name_embedding <|" not in q]
+    assert knn_calls and lexical_calls
+    # Typed KNN lanes fan out with per-type equality (an IN beside the HNSW
+    # bracket table-scans); lexical lanes keep the IN form.
+    assert all(params["node_type"] == "task" for _, params in knn_calls)
+    assert all("entity_type = $node_type" in query for query, _ in knn_calls)
+    assert all(params["node_types"] == ["task"] for _, params in lexical_calls)
+    assert any("entity_type IN $node_types" in query for query, _ in lexical_calls)
     assert all(params["limit"] == 3 for _, params in client.calls)
-    assert any("entity_type IN $node_types" in query for query, _ in client.calls)
-    assert any("name_embedding <|3, 40|> $query_embedding" in query for query, _ in client.calls)
+    assert any("name_embedding <|3, 40|> $query_embedding" in query for query, _ in knn_calls)
 
 
 @pytest.mark.asyncio
