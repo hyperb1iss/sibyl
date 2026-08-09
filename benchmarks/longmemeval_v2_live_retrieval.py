@@ -64,6 +64,8 @@ def main(argv: list[str] | None = None) -> int:
             "retrieval_mode": args.retrieval_mode,
             "retrieval_max_planned_queries": args.max_planned_queries,
             "evidence_composition_mode": args.evidence_composition_mode,
+            "evidence_types": list(args.evidence_types),
+            "evidence_char_budget": args.evidence_char_budget,
             "source_evidence_bundling": args.source_evidence_bundling,
             "neighbor_support_exempt": args.neighbor_support_exempt,
             "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
@@ -129,6 +131,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-context-total-chars", type=int, default=60_000)
     parser.add_argument("--retrieval-mode", choices=("fast", "accurate"), default="accurate")
     parser.add_argument("--max-planned-queries", type=int, default=3)
+    parser.add_argument(
+        "--evidence-types",
+        nargs="+",
+        choices=["passage", "session"],
+        default=["session"],
+        help=(
+            "Entity types the raw evidence lane may retrieve, mirroring the official "
+            "harness flag. Defaults to the shipped whole-state substrate."
+        ),
+    )
+    parser.add_argument(
+        "--evidence-char-budget",
+        type=int,
+        default=None,
+        help=(
+            "Bound the composed pack by characters instead of item count, mirroring "
+            "the official harness flag. Leave unset for the shipped item-bounded "
+            "geometry."
+        ),
+    )
     parser.add_argument(
         "--evidence-composition-mode",
         choices=sorted(EVIDENCE_COMPOSITION_MODES),
@@ -278,6 +300,8 @@ def build_run_config(
         "max_context_chars_per_item": args.max_context_chars_per_item,
         "max_context_total_chars": args.max_context_total_chars,
         "evidence_composition_mode": args.evidence_composition_mode,
+        "evidence_types": sorted(args.evidence_types),
+        "evidence_char_budget": args.evidence_char_budget,
         "source_evidence_bundling": args.source_evidence_bundling,
         "neighbor_support_exempt": args.neighbor_support_exempt,
         "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
