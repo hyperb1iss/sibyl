@@ -186,3 +186,230 @@ async def test_entity_search_vector_lane_reads_the_whole_pool_on_the_embedded_en
         await client.close()
 
     assert len(results) == 200
+
+
+# --- IN-list fan-out guards (the HNSW planner trap) -------------------------
+#
+# An `IN $list` predicate beside a `<|k, ef|>` bracket drops the planner off
+# the HNSW index into a table scan (measured 9.6s vs 0.5s at 95K rows on the
+# live 3.2.0 engine). Typed vector lanes therefore fan out into per-type
+# equality queries and merge client-side; these tests pin both the composed
+# query shape and the merge semantics.
+
+from sibyl_core.backends.surreal.knn import merge_knn_row_batches  # noqa: E402
+from sibyl_core.models.entities import EntityType  # noqa: E402
+from sibyl_core.retrieval.search import (  # noqa: E402
+    RetrievalPlan,
+    SearchFilter,
+    _edge_vector_candidates,
+    _node_vector_candidates,
+)
+
+
+def test_merge_knn_row_batches_orders_and_trims_like_the_sql() -> None:
+    batches = [
+        [
+            {"uuid": "b", "score": 0.9, "created_at": "2026-01-02"},
+            {"uuid": "d", "score": 0.5, "created_at": "2026-01-01"},
+        ],
+        [
+            {"uuid": "a", "score": 0.9, "created_at": "2026-01-03"},
+            {"uuid": "c", "score": 0.7, "created_at": "2026-01-01"},
+        ],
+    ]
+    merged = merge_knn_row_batches(batches, limit=3)
+    # score DESC first, created_at DESC breaking the 0.9 tie, trim to 3.
+    assert [row["uuid"] for row in merged] == ["a", "b", "c"]
+
+
+class _CapturingClient:
+    """Records every composed query; returns no rows."""
+
+    def __init__(self, group_id: str) -> None:
+        self.group_id = group_id
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        return []
+
+
+def _deterministic_provider(namespace: str) -> DeterministicEmbeddingProvider:
+    return DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
+            provider="deterministic",
+            model="unit-test",
+            dimensions=EMBEDDING_DIM,
+            cache_namespace=namespace,
+            tokenizer_estimate_method="utf8-byte-length",
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_typed_entity_vector_search_fans_out_with_equality_predicates() -> None:
+    client = _CapturingClient(group_id="org-knn-fanout")
+    manager = EntityManager(
+        client,
+        group_id=client.group_id,
+        embedding_provider=_deterministic_provider("knn-fanout-shape"),
+    )
+    await manager._vector_search(
+        query="fan out",
+        entity_types=[EntityType.TOPIC, EntityType.TASK, EntityType.NOTE],
+        limit=10,
+    )
+    vector_calls = [
+        (query, params)
+        for query, params in client.calls
+        if params.get("_query_label") == "entity.search.vector"
+    ]
+    assert len(vector_calls) == 3
+    assert sorted(params["entity_type"] for _, params in vector_calls) == [
+        "note",
+        "task",
+        "topic",
+    ]
+    for query, params in vector_calls:
+        assert "entity_type = $entity_type" in query
+        assert " IN $" not in query
+        assert "entity_types" not in params
+
+
+@pytest.mark.asyncio
+async def test_untyped_entity_vector_search_stays_a_single_bare_query() -> None:
+    client = _CapturingClient(group_id="org-knn-bare")
+    manager = EntityManager(
+        client,
+        group_id=client.group_id,
+        embedding_provider=_deterministic_provider("knn-bare-shape"),
+    )
+    await manager._vector_search(query="bare", entity_types=None, limit=10)
+    vector_calls = [
+        (query, params)
+        for query, params in client.calls
+        if params.get("_query_label") == "entity.search.vector"
+    ]
+    assert len(vector_calls) == 1
+    query, params = vector_calls[0]
+    assert "entity_type" not in params
+    assert "entity_type =" not in query
+    assert " IN $" not in query
+
+
+@pytest.mark.asyncio
+async def test_typed_entity_vector_search_matches_the_in_form_on_the_embedded_engine() -> None:
+    # Semantics guard: the per-type fan-out head must equal the head the old
+    # IN-form query returns on the same corpus (the embedded engine serves
+    # IN + KNN correctly; only the live planner's speed differs).
+    client = SurrealGraphClient(group_id="org-knn-fanout-sem", url="memory://")
+    provider = _deterministic_provider("knn-fanout-sem")
+    try:
+        await prepare_graph_schema(client)
+        rng = random.Random(7)
+        rows = [
+            {
+                "uuid": f"sem_{index:03d}",
+                "group_id": client.group_id,
+                "name": f"Semantics member {index}",
+                "entity_type": ("topic", "task", "note")[index % 3],
+                "name_embedding": [rng.random() for _ in range(EMBEDDING_DIM)],
+                "created_at": datetime.now(UTC),
+            }
+            for index in range(90)
+        ]
+        await client.execute_query("INSERT INTO entity $rows;", rows=rows)
+        manager = EntityManager(
+            client,
+            group_id=client.group_id,
+            embedding_provider=provider,
+        )
+
+        results = await manager._vector_search(
+            query="semantics head",
+            entity_types=[EntityType.TOPIC, EntityType.TASK],
+            limit=10,
+        )
+
+        embeddings = await provider.embed_texts(["semantics head"], input_kind="query")
+        candidate_limit = 40  # min(max(10 * 4, 32), 200)
+        effort = knn_search_effort(candidate_limit, settings.graph_knn_ef)
+        in_form = normalize_records(
+            await client.execute_query(
+                "SELECT * FROM ("
+                "SELECT uuid, (1 - vector::distance::knn()) AS score FROM entity "
+                "WHERE group_id = $group_id AND entity_type IN $entity_types "
+                f"AND name_embedding <|{candidate_limit}, {effort}|> $query_embedding"
+                ") ORDER BY score DESC, created_at DESC, uuid DESC LIMIT $limit;",
+                group_id=client.group_id,
+                entity_types=["topic", "task"],
+                query_embedding=list(embeddings[0]),
+                limit=candidate_limit,
+            )
+        )
+    finally:
+        await client.close()
+
+    fanout_uuids = sorted(entity.id for entity, _ in results)
+    in_form_uuids = sorted(str(row["uuid"]) for row in in_form)
+    assert fanout_uuids == in_form_uuids
+    seeded_types = {row["uuid"]: row["entity_type"] for row in rows}
+    assert all(seeded_types[uuid] in {"topic", "task"} for uuid in fanout_uuids)
+
+
+def _minimal_plan() -> RetrievalPlan:
+    return RetrievalPlan(
+        query="fan out",
+        organization_id="org-knn-lane",
+        facets=(),
+        facet_types={},
+        scopes=(),
+        denied_scopes=(),
+    )
+
+
+_LANE_EMBEDDING_METADATA = EmbeddingMetadata(
+    provider="deterministic",
+    model="unit-test",
+    dimensions=EMBEDDING_DIM,
+    cache_namespace="knn-lane-shape",
+    tokenizer_estimate_method="utf8-byte-length",
+)
+
+
+@pytest.mark.asyncio
+async def test_node_vector_lane_fans_out_types_with_equality() -> None:
+    client = _CapturingClient(group_id="org-knn-lane")
+    await _node_vector_candidates(
+        client=client,
+        plan=_minimal_plan(),
+        search_filter=SearchFilter(node_types=("topic", "task")),
+        query_embedding=[0.0] * EMBEDDING_DIM,
+        embedding_metadata=_LANE_EMBEDDING_METADATA,
+        limit=8,
+    )
+    assert len(client.calls) == 2
+    assert sorted(params["node_type"] for _, params in client.calls) == ["task", "topic"]
+    for query, params in client.calls:
+        assert "entity_type = $node_type" in query
+        assert " IN $" not in query
+        assert "node_types" not in params
+
+
+@pytest.mark.asyncio
+async def test_edge_vector_lane_fans_out_types_with_equality() -> None:
+    client = _CapturingClient(group_id="org-knn-lane")
+    await _edge_vector_candidates(
+        client=client,
+        plan=_minimal_plan(),
+        search_filter=SearchFilter(edge_types=("mentions", "relates")),
+        query_embedding=[0.0] * EMBEDDING_DIM,
+        embedding_metadata=_LANE_EMBEDDING_METADATA,
+        limit=8,
+    )
+    assert len(client.calls) == 2
+    assert sorted(params["edge_type"] for _, params in client.calls) == ["mentions", "relates"]
+    for query, params in client.calls:
+        assert "name = $edge_type" in query
+        assert " IN $" not in query
+        assert "edge_types" not in params

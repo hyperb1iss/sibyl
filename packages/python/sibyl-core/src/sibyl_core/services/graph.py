@@ -20,7 +20,7 @@ from sibyl_core.backends.surreal.fulltext import (
     build_fulltext_terms,
     build_match_disjunction,
 )
-from sibyl_core.backends.surreal.knn import knn_search_effort
+from sibyl_core.backends.surreal.knn import knn_search_effort, merge_knn_row_batches
 from sibyl_core.backends.surreal.records import raise_on_error
 from sibyl_core.backends.surreal.schema import bootstrap_schema
 from sibyl_core.config import settings
@@ -752,7 +752,6 @@ class EntityManager:
         if self._embedding_provider is None:
             return []
         type_values = [entity_type.value for entity_type in entity_types or ()]
-        type_clause = "AND entity_type IN $entity_types" if type_values else ""
         candidate_limit = min(max(int(limit) * 4, 32), 200)
         knn_effort = knn_search_effort(candidate_limit, settings.graph_knn_ef)
         try:
@@ -767,8 +766,14 @@ class EntityManager:
                 embeddings,
                 self._embedding_provider.metadata.dimensions,
             )
-            rows = normalize_records(
-                await self._client.execute_query(
+            # `entity_type IN $list` beside the HNSW bracket drops the planner
+            # to a table scan (9.6s vs 0.5s at 95K rows), so typed searches fan
+            # out into per-type equality queries and merge client-side.
+            type_predicates = (
+                ["AND entity_type = $entity_type"] * len(type_values) if type_values else [""]
+            )
+            queries = [
+                self._client.execute_query(
                     "SELECT *"
                     " FROM ("
                     "SELECT "
@@ -778,7 +783,7 @@ class EntityManager:
                         FROM entity
                         WHERE group_id = $group_id
                     """
-                    + type_clause
+                    + predicate
                     + f"""
                           AND name_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
                     )
@@ -787,10 +792,19 @@ class EntityManager:
                     """,
                     group_id=self._group_id,
                     query_embedding=query_embedding,
-                    entity_types=type_values,
                     limit=candidate_limit,
                     _query_label="entity.search.vector",
+                    **({"entity_type": type_value} if type_value is not None else {}),
                 )
+                for predicate, type_value in zip(
+                    type_predicates, type_values or [None], strict=True
+                )
+            ]
+            row_batches = [normalize_records(result) for result in await asyncio.gather(*queries)]
+            rows = (
+                row_batches[0]
+                if len(row_batches) == 1
+                else merge_knn_row_batches(row_batches, limit=candidate_limit)
             )
         except Exception as exc:
             log.warning(

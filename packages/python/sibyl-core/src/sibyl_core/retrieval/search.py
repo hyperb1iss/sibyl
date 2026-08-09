@@ -24,7 +24,7 @@ from sibyl_core.backends.surreal.fulltext import (
     build_fulltext_terms,
     build_match_disjunction,
 )
-from sibyl_core.backends.surreal.knn import knn_search_effort
+from sibyl_core.backends.surreal.knn import knn_search_effort, merge_knn_row_batches
 from sibyl_core.backends.surreal.records import SurrealQueryError, query_error
 from sibyl_core.config import core_config
 from sibyl_core.embeddings.providers import EmbeddingMetadata, EmbeddingProvider
@@ -1372,32 +1372,50 @@ async def _node_vector_candidates(
 ) -> list[RetrievalCandidate]:
     if limit <= 0:
         return []
-    filter_clauses, filter_params = _node_filter_clause(search_filter)
+    # `entity_type IN $node_types` beside the HNSW bracket drops the planner
+    # to a table scan (9.6s vs 0.5s at 95K rows), so the type filter fans out
+    # into per-type equality queries; the remaining filters ride each query.
+    type_values = list(search_filter.node_types or ())
+    filter_clauses, filter_params = _node_filter_clause(replace(search_filter, node_types=()))
     candidate_limit = max(int(limit), 1)
     knn_effort = knn_search_effort(candidate_limit, core_config.graph_knn_ef)
-    rows = await _execute_query_records(
-        client,
-        """
-        SELECT *
-        FROM (
-            SELECT *,
-                   (1 - vector::distance::knn()) AS score
-            FROM entity
-            WHERE """
-        + _where_clause(["group_id = $group_id", *filter_clauses])
-        + f"""
-              AND name_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
+
+    async def run_lane(extra_clauses: list[str], extra_params: dict[str, Any]) -> list[Any]:
+        return await _execute_query_records(
+            client,
+            """
+            SELECT *
+            FROM (
+                SELECT *,
+                       (1 - vector::distance::knn()) AS score
+                FROM entity
+                WHERE """
+            + _where_clause(["group_id = $group_id", *filter_clauses, *extra_clauses])
+            + f"""
+                  AND name_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
+            )
+            WHERE score >= $min_score
+            ORDER BY score DESC, created_at DESC, uuid DESC
+            LIMIT $limit;
+            """,
+            group_id=plan.organization_id,
+            query_embedding=list(query_embedding),
+            min_score=plan.vector_min_score,
+            limit=candidate_limit,
+            **filter_params,
+            **extra_params,
         )
-        WHERE score >= $min_score
-        ORDER BY score DESC, created_at DESC, uuid DESC
-        LIMIT $limit;
-        """,
-        group_id=plan.organization_id,
-        query_embedding=list(query_embedding),
-        min_score=plan.vector_min_score,
-        limit=candidate_limit,
-        **filter_params,
-    )
+
+    if not type_values:
+        rows = await run_lane([], {})
+    else:
+        row_batches = await asyncio.gather(
+            *(
+                run_lane(["entity_type = $node_type"], {"node_type": type_value})
+                for type_value in type_values
+            )
+        )
+        rows = merge_knn_row_batches(row_batches, limit=candidate_limit)
     return [
         _candidate_from_node_record(
             row,
@@ -1420,28 +1438,45 @@ async def _edge_vector_candidates(
 ) -> list[RetrievalCandidate]:
     if limit <= 0:
         return []
-    filter_clauses, filter_params = _edge_filter_clause(search_filter)
+    # Same HNSW planner trap as the node lane: `name IN $edge_types` beside
+    # the KNN bracket table-scans, so edge types fan out with equality.
+    edge_type_values = list(search_filter.edge_types or ())
+    filter_clauses, filter_params = _edge_filter_clause(replace(search_filter, edge_types=()))
     candidate_limit = max(int(limit), 1)
     knn_effort = knn_search_effort(candidate_limit, core_config.graph_knn_ef)
-    rows = await _execute_query_records(
-        client,
-        "SELECT * FROM ("
-        + _edge_select(extra="(1 - vector::distance::knn()) AS score")
-        + " WHERE "
-        + _where_clause(["group_id = $group_id", *filter_clauses])
-        + f"""
-          AND fact_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
+
+    async def run_lane(extra_clauses: list[str], extra_params: dict[str, Any]) -> list[Any]:
+        return await _execute_query_records(
+            client,
+            "SELECT * FROM ("
+            + _edge_select(extra="(1 - vector::distance::knn()) AS score")
+            + " WHERE "
+            + _where_clause(["group_id = $group_id", *filter_clauses, *extra_clauses])
+            + f"""
+              AND fact_embedding <|{candidate_limit}, {knn_effort}|> $query_embedding
+            )
+            WHERE score >= $min_score
+            ORDER BY score DESC, created_at DESC, uuid DESC
+            LIMIT $limit;
+            """,
+            group_id=plan.organization_id,
+            query_embedding=list(query_embedding),
+            min_score=plan.vector_min_score,
+            limit=candidate_limit,
+            **filter_params,
+            **extra_params,
         )
-        WHERE score >= $min_score
-        ORDER BY score DESC, created_at DESC, uuid DESC
-        LIMIT $limit;
-        """,
-        group_id=plan.organization_id,
-        query_embedding=list(query_embedding),
-        min_score=plan.vector_min_score,
-        limit=candidate_limit,
-        **filter_params,
-    )
+
+    if not edge_type_values:
+        rows = await run_lane([], {})
+    else:
+        row_batches = await asyncio.gather(
+            *(
+                run_lane(["name = $edge_type"], {"edge_type": type_value})
+                for type_value in edge_type_values
+            )
+        )
+        rows = merge_knn_row_batches(row_batches, limit=candidate_limit)
     return [
         _candidate_from_edge_record(
             row,
