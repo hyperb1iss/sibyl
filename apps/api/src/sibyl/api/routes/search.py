@@ -171,6 +171,7 @@ async def execute_search_request(
             limit=request.limit,
             offset=request.offset,
             include_content=request.include_content,
+            knn_type_overfetch=request.knn_type_overfetch,
             content_max_chars=request.content_max_chars,
             include_documents=request.include_documents,
             include_graph=request.include_graph,

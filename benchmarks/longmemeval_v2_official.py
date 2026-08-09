@@ -86,6 +86,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "typed_reservation_items",
         "retrieval_mode",
         "retrieval_max_planned_queries",
+        "knn_type_overfetch",
         "checkpoint_dir",
     }
 )
@@ -496,6 +497,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     parser.add_argument("--note-distillation", action="store_true")
     parser.add_argument("--note-distillation-model", default="gpt-5.4-nano")
     parser.add_argument("--typed-reservation-items", type=int, default=None)
+    parser.add_argument("--knn-type-overfetch", type=int, default=0)
     parser.add_argument(
         "--retrieval-mode",
         choices=["fast", "accurate"],
@@ -726,6 +728,7 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "note_distillation_model": args.note_distillation_model,
         "typed_reservation_items": args.typed_reservation_items,
         "retrieval_mode": args.retrieval_mode,
+        "knn_type_overfetch": args.knn_type_overfetch,
         "retrieval_max_planned_queries": args.retrieval_max_planned_queries,
         "agentic_traversal": args.agentic_traversal,
         "traversal_widening_rounds": args.traversal_widening_rounds,
@@ -884,6 +887,7 @@ def build_run_plan(
         "note_distillation_model": args.note_distillation_model,
         "typed_reservation_items": args.typed_reservation_items,
         "retrieval_mode": args.retrieval_mode,
+        "knn_type_overfetch": args.knn_type_overfetch,
         "retrieval_max_planned_queries": args.retrieval_max_planned_queries,
         "agentic_traversal": args.agentic_traversal,
         "traversal_widening_rounds": args.traversal_widening_rounds,

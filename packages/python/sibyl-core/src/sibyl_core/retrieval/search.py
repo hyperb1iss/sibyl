@@ -24,7 +24,7 @@ from sibyl_core.backends.surreal.fulltext import (
     build_fulltext_terms,
     build_match_disjunction,
 )
-from sibyl_core.backends.surreal.knn import knn_search_effort
+from sibyl_core.backends.surreal.knn import knn_overfetch_pool, knn_search_effort
 from sibyl_core.backends.surreal.records import SurrealQueryError, query_error
 from sibyl_core.config import core_config
 from sibyl_core.embeddings.providers import EmbeddingMetadata, EmbeddingProvider
@@ -208,6 +208,7 @@ class RetrievalPlan:
     denied_scopes: tuple[MemoryPolicyDecision, ...]
     candidate_limits: CandidateLimits = field(default_factory=CandidateLimits)
     weights: RetrievalWeights = field(default_factory=RetrievalWeights)
+    knn_type_overfetch: int = 0
     signals: tuple[RetrievalSignal, ...] = (
         RetrievalSignal.RAW_LEXICAL,
         RetrievalSignal.NODE_FULLTEXT,
@@ -233,6 +234,7 @@ class SearchFilter:
     project_ids: tuple[str, ...] = ()
     edge_uuids: tuple[str, ...] = ()
     edge_types: tuple[str, ...] = ()
+    knn_type_overfetch: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,6 +285,7 @@ def build_context_retrieval_plan(
     agent_id: str | None = None,
     limit: int = 24,
     allowed_memory_scope_keys: Iterable[str] | None = None,
+    knn_type_overfetch: int = 0,
 ) -> RetrievalPlan:
     scopes: list[ScopeSpec] = []
     denied_scopes: list[MemoryPolicyDecision] = []
@@ -344,6 +347,7 @@ def build_context_retrieval_plan(
         facet_types=facet_types_by_facet,
         scopes=tuple(scopes),
         denied_scopes=tuple(denied_scopes),
+        knn_type_overfetch=max(0, int(knn_type_overfetch)),
         candidate_limits=CandidateLimits(
             raw_lexical=max(1, min(per_signal_limit, limit // RAW_LEXICAL_LIMIT_DIVISOR or 1)),
             node_fulltext=per_signal_limit,
@@ -894,6 +898,7 @@ def _search_filter_for_plan(
     requested_types = requested_types or set()
     return SearchFilter(
         node_types=_node_types_for_requested_types(requested_types),
+        knn_type_overfetch=plan.knn_type_overfetch,
         project_ids=_authorized_project_ids(plan),
     )
 
@@ -1375,6 +1380,50 @@ async def _node_vector_candidates(
     filter_clauses, filter_params = _node_filter_clause(search_filter)
     candidate_limit = max(int(limit), 1)
     knn_effort = knn_search_effort(candidate_limit, core_config.graph_knn_ef)
+    overfetch = search_filter.knn_type_overfetch
+    if search_filter.node_types and overfetch > 0:
+        # A selective predicate beside the HNSW bracket forces the walk 10-15x
+        # deeper regardless of syntax, so the arm walks an untyped pool and
+        # filters types outside the bracket. A full head is exactly the typed
+        # KNN head; a shortfall falls back to the classic form below.
+        pool = knn_overfetch_pool(candidate_limit, overfetch)
+        pool_knn_effort = knn_search_effort(pool, core_config.graph_knn_ef)
+        overfetch_clauses = [
+            clause for clause in filter_clauses if clause != "entity_type IN $node_types"
+        ]
+        rows = await _execute_query_records(
+            client,
+            """
+            SELECT *
+            FROM (
+                SELECT *,
+                       (1 - vector::distance::knn()) AS score
+                FROM entity
+                WHERE """
+            + _where_clause(["group_id = $group_id", *overfetch_clauses])
+            + f"""
+                  AND name_embedding <|{pool}, {pool_knn_effort}|> $query_embedding
+            )
+            WHERE score >= $min_score AND entity_type IN $node_types
+            ORDER BY score DESC, created_at DESC, uuid DESC
+            LIMIT $limit;
+            """,
+            group_id=plan.organization_id,
+            query_embedding=list(query_embedding),
+            min_score=plan.vector_min_score,
+            limit=candidate_limit,
+            **filter_params,
+        )
+        if len(rows) >= candidate_limit:
+            return [
+                _candidate_from_node_record(
+                    row,
+                    signal=RetrievalSignal.NODE_VECTOR,
+                    score=_record_score(row),
+                    embedding_metadata=embedding_metadata,
+                )
+                for row in rows
+            ]
     rows = await _execute_query_records(
         client,
         """
@@ -1423,6 +1472,44 @@ async def _edge_vector_candidates(
     filter_clauses, filter_params = _edge_filter_clause(search_filter)
     candidate_limit = max(int(limit), 1)
     knn_effort = knn_search_effort(candidate_limit, core_config.graph_knn_ef)
+    overfetch = search_filter.knn_type_overfetch
+    if search_filter.edge_types and overfetch > 0:
+        # Same HNSW planner trap as the node lane; the edge-type filter moves
+        # outside the bracket and a shortfall falls back to the classic form.
+        pool = knn_overfetch_pool(candidate_limit, overfetch)
+        pool_knn_effort = knn_search_effort(pool, core_config.graph_knn_ef)
+        overfetch_clauses = [
+            clause for clause in filter_clauses if clause != "name IN $edge_types"
+        ]
+        rows = await _execute_query_records(
+            client,
+            "SELECT * FROM ("
+            + _edge_select(extra="(1 - vector::distance::knn()) AS score")
+            + " WHERE "
+            + _where_clause(["group_id = $group_id", *overfetch_clauses])
+            + f"""
+              AND fact_embedding <|{pool}, {pool_knn_effort}|> $query_embedding
+            )
+            WHERE score >= $min_score AND name IN $edge_types
+            ORDER BY score DESC, created_at DESC, uuid DESC
+            LIMIT $limit;
+            """,
+            group_id=plan.organization_id,
+            query_embedding=list(query_embedding),
+            min_score=plan.vector_min_score,
+            limit=candidate_limit,
+            **filter_params,
+        )
+        if len(rows) >= candidate_limit:
+            return [
+                _candidate_from_edge_record(
+                    row,
+                    signal=RetrievalSignal.EDGE_VECTOR,
+                    score=_record_score(row),
+                    embedding_metadata=embedding_metadata,
+                )
+                for row in rows
+            ]
     rows = await _execute_query_records(
         client,
         "SELECT * FROM ("

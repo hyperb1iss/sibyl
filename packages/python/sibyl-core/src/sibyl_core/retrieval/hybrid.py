@@ -249,12 +249,14 @@ async def _vector_search_attempt(
     entity_types: list[Any] | None = None,
     limit: int = 20,
     result_filter: Callable[[Any], bool] | None = None,
+    knn_type_overfetch: int = 0,
 ) -> _VectorSearchAttempt:
     try:
         results = await entity_manager.search(
             query=query,
             entity_types=entity_types,
             limit=limit,
+            knn_type_overfetch=knn_type_overfetch,
         )
         results = _filter_entity_results(results, result_filter)
         log.debug("vector_search_complete", **query_log_fields(query), results=len(results))
@@ -585,6 +587,7 @@ async def hybrid_search(
     include_metadata: bool = False,
     group_id: str | None = None,
     result_filter: Callable[[Any], bool] | None = None,
+    knn_type_overfetch: int = 0,
 ) -> HybridResult:
     """Perform hybrid search combining multiple retrieval strategies.
 
@@ -635,6 +638,7 @@ async def hybrid_search(
         entity_types,
         limit=limit * 2,
         result_filter=result_filter,
+        knn_type_overfetch=knn_type_overfetch,
     )
     vector_results = vector_attempt.results
     stage_timings_ms["seed_search"] = _elapsed_ms(stage_started_at)
