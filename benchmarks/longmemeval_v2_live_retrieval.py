@@ -71,6 +71,8 @@ def main(argv: list[str] | None = None) -> int:
             "neighbor_stitch_items": args.neighbor_stitch_items,
             "neighbor_stitch_span": args.neighbor_stitch_span,
             "neighbor_stitch_spread": args.neighbor_stitch_spread,
+            "semantic_prior_rescue_weight": args.semantic_prior_rescue_weight,
+            "typed_pool": args.typed_pool,
             "typed_stream_retrieval": args.typed_stream_retrieval,
             "typed_stream_limit": args.typed_stream_limit,
         },
@@ -139,6 +141,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=True,
     )
+    parser.add_argument("--semantic-prior-rescue-weight", type=float, default=0.0)
+    parser.add_argument("--typed-pool", default="typed", choices=["typed", "typed_entity_overlap"])
     parser.add_argument(
         "--neighbor-support-exempt",
         action=argparse.BooleanOptionalAction,
@@ -285,6 +289,8 @@ def build_run_config(
         "neighbor_stitch_items": args.neighbor_stitch_items,
         "neighbor_stitch_span": args.neighbor_stitch_span,
         "neighbor_stitch_spread": args.neighbor_stitch_spread,
+        "semantic_prior_rescue_weight": args.semantic_prior_rescue_weight,
+        "typed_pool": args.typed_pool,
         "typed_stream_retrieval": args.typed_stream_retrieval,
         "typed_stream_limit": args.typed_stream_limit,
     }

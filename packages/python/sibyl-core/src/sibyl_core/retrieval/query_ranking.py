@@ -1145,6 +1145,7 @@ def rank_by_query_coverage[T](
     *,
     temporal_target: datetime | None = None,
     query_context: _QueryCoverageQueryContext | None = None,
+    semantic_prior_rescue_weight: float = 0.0,
 ) -> QueryCoverageResult[T]:
     context = query_context or _build_query_coverage_context(
         query,
@@ -1391,6 +1392,19 @@ def rank_by_query_coverage[T](
             )
             + (_TEMPORAL_TARGET_WEIGHT * temporal_alignment * coverage_signal)
         )
+        if semantic_prior_rescue_weight > 0.0:
+            # A no-vocabulary-overlap gold slice arrives here only through a
+            # semantic lane, carrying its cosine as prior_score, and the
+            # 0.04 prior weight cannot outrank lexical overlap. The rescue
+            # term returns the prior in proportion to how little lexical
+            # coverage the candidate has, so vocabulary-ranked candidates
+            # (coverage_signal near 1) are untouched and the arm is an
+            # exact no-op at weight 0.
+            score += (
+                semantic_prior_rescue_weight
+                * normalized_prior_score
+                * max(0.0, 1.0 - min(1.0, coverage_signal))
+            )
         if (
             is_personal_memory_query
             and not is_preference_query
