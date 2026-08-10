@@ -37,7 +37,7 @@ dependencies = [
     # Core Framework
     "fastapi>=0.141.1",
     "mcp>=1.29.0",
-    "starlette>=1.3.1",
+    "starlette>=1.4.1",
     "uvicorn[standard]>=0.52.0",
     # Database (server-only)
     "surrealdb>=2.0.0,<3.0",
