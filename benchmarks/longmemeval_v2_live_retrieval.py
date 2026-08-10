@@ -66,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
             "evidence_composition_mode": args.evidence_composition_mode,
             "evidence_types": list(args.evidence_types),
             "evidence_char_budget": args.evidence_char_budget,
+            "evidence_char_budget_raw_reserve": args.evidence_char_budget_raw_reserve,
             "source_evidence_bundling": args.source_evidence_bundling,
             "neighbor_support_exempt": args.neighbor_support_exempt,
             "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
@@ -149,6 +150,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Bound the composed pack by characters instead of item count, mirroring "
             "the official harness flag. Leave unset for the shipped item-bounded "
             "geometry."
+        ),
+    )
+    parser.add_argument(
+        "--evidence-char-budget-raw-reserve",
+        type=int,
+        default=None,
+        help=(
+            "Reserve this many characters of the budget for the raw evidence lane, "
+            "mirroring the official harness flag. Requires --evidence-char-budget."
         ),
     )
     parser.add_argument(
@@ -302,6 +312,7 @@ def build_run_config(
         "evidence_composition_mode": args.evidence_composition_mode,
         "evidence_types": sorted(args.evidence_types),
         "evidence_char_budget": args.evidence_char_budget,
+        "evidence_char_budget_raw_reserve": args.evidence_char_budget_raw_reserve,
         "source_evidence_bundling": args.source_evidence_bundling,
         "neighbor_support_exempt": args.neighbor_support_exempt,
         "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
