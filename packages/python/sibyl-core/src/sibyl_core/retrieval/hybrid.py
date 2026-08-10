@@ -252,11 +252,15 @@ async def _vector_search_attempt(
     knn_type_overfetch: int = 0,
 ) -> _VectorSearchAttempt:
     try:
+        # Omit the kwarg entirely when unset: entity_manager is duck-typed and
+        # pre-arm implementers do not accept it; the off-arm call shape must
+        # stay byte-identical to main.
+        arm_kwargs = {"knn_type_overfetch": knn_type_overfetch} if knn_type_overfetch > 0 else {}
         results = await entity_manager.search(
             query=query,
             entity_types=entity_types,
             limit=limit,
-            knn_type_overfetch=knn_type_overfetch,
+            **arm_kwargs,
         )
         results = _filter_entity_results(results, result_filter)
         log.debug("vector_search_complete", **query_log_fields(query), results=len(results))
