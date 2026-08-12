@@ -81,6 +81,13 @@ slots. The 3-of-8 reservation is near-optimal (widening to 5 lost the entire gai
 quantity is the **absolute** count 3, not the 3/8 ratio it happens to equal at this pack size — see
 the reservation trap in §4 A1.
 
+**Stage-2 re-baseline (2026-08-09, decision `95677ae0b87b`).** Corpora rebuilt at post-merge HEAD
+(`05ad48d8`) and the frozen FAST+notes config re-anchored under 3-pass paired replication: combined
+**30.38%** (enterprise 31.60%, web 29.31%). This is the valid anchor for every subsequent arm; the
+2026-07-22 table above stays as the historical Pareto receipt. Clean-server latency at this commit
+is enterprise ~32s / web ~18s one-way against the 10s budget — the loudest open Track A item and a
+1.3 carry-forward.
+
 ### 2.3 Gap anatomy — where the missing ~11.5pp live
 
 - **Selection is nearly solved; rendering is not.** Every deep-search arm selects to the same 82.6%
@@ -106,6 +113,19 @@ without notes (−1.48pp), reservation widening 3→5 (−3.70pp), deterministic
 scale (accurate mode, §2.2). Noise floor: 5 replays of one config span 23–27/90; identical contexts
 rescored 22–29 across reader passes; per-question churn ~6.7/45 between passes. **Aggregate flatness
 is not per-question stability; sub-noise deltas are NO-GO by default.**
+
+Added by the 2026-08 A2 screening round (four more classes, all unpaid kills except the first):
+neighbor-support additive stitch (composition-level recall wins, reader-level **−0.67pp**
+inconsistent-sign NO-GO — exposure ≠ conversion, measured twice; decision `95677ae0b87b`);
+semantic-prior rescue re-ranking (0/8 misses recovered, exposure regressed, two new misses minted —
+the miss set is pool-boundary limited, so no re-ranking weight can recover it by construction;
+decision `715454c60c9b`); entity-overlap typed-pool ordering (byte-identical outcomes, the
+historical −3.7pp was entirely the confounded reservation widening; same decision); slice-serving
+geometry at reduced char budgets (partition 16K/12K-reserve and budget-28K arms both dead at serving
+— evidence slices run ~6K chars each, so sub-46K budgets pack _fewer_ retrieval units, the 28-item
+ceiling is unreachable, paired state recall 6.3%/0.0% vs baseline 25.0%; decisions `14686f9a4056`,
+`e180be76037b`). Pack-identity diffs are dead as receipts (~30% near-dup swap between identical
+runs, error pattern `b345e4d9a761`); gate tables compare metrics with jitter floors only.
 
 ### 2.5 Dogfood trust debt — adjudicated 2026-07-24
 
@@ -433,6 +453,14 @@ protocol law, chosen by receipts.
   net exposure regression; scored effects per protocol law. The identifier-flank fix ships with a
   regression probe: an identifier/error-string query set that dense-alone measurably misses.
 
+**Status (2026-08-10, decision `715454c60c9b`): gate ran and FAILED both mechanisms** — see the §2.4
+ledger. The levers ship opt-in and off by default (PR #362, verdicts in the body). The
+identifier-flank probe produced the load-bearing structural finding: **benchmark corpora declare no
+retrieval keys** (`/memory/experience` never sets them), so the exact-key lane is inert on LME
+corpora; closing the flank needs adapter-side key declaration at ingest — a corpus rebuild, which is
+1.3 candidate-acquisition territory (§7). Verbatim fulltext beats dense-alone +10pp at k=10 on
+identifier queries, so the flank is real; it just is not reachable from serving flags.
+
 ### A3. Agentic graph retrieval — multi-step done right
 
 Bounded model-in-the-loop traversal over the A1 substrate: search → expand-neighbors → fetch-slice
@@ -454,12 +482,17 @@ wins factoid lookups — route, don't force.
   ceiling: the 27s knee); GO = ≥ +3pp mean paired over the then-best config, numbers pre-registered
   before the first paid run.
 
-### A4. Full-451 + leaderboard submission
+### A4. Full-451 + leaderboard submission — MOVED TO v1.3 (2026-08-12)
 
 - Gate `baseline-beat-gate`: combined full-451 ≥ 42.8% at ≤ 10s avg with committed receipts.
   **Submission is held until this gate passes** (Bliss, 2026-07-24): a dominated point on an empty
   board invites the wrong comparison. When it passes, submit promptly — first credible entry on an
   empty leaderboard is the payoff the v1.1 W5 harness was built for.
+- **Re-scope (2026-08-12, decision `e180be76037b`):** every serving-flag lever class is now
+  adjudicated dead (§2.4) and the remaining levers — retrieval-key declaration at ingest, sub-1K
+  slice granularity, candidate-pool widening over the overfetch fast path — all require corpus
+  rebuilds. The gate is unreachable inside v1.2; it moves whole to v1.3 with its numbers unchanged
+  (§7). v1.2 ships the valid stage-2 anchor (30.38%, §2.2) and the measurement foundation instead.
 - ⚡SOTA context (2026-07-25): the official leaderboard is **confirmed live and empty** — no vendor
   has published any LME-V2 number; ours would be the first third-party number in existence. The
   official metric is LAFS Gain (accuracy over 1s–200s latency budgets vs the reference frontier),
@@ -561,6 +594,17 @@ Opportunistic seconds (CLI/API hygiene, medium): `7c4cb25a`, `e2206767`, `41606e
 
 ## 7. What slides to v1.3, and why
 
+**The benchmark chase (added 2026-08-12, decision `e180be76037b`).** The `baseline-beat-gate`
+(42.8% + submission, §A4), the exposure/state-recall serving targets, and the latency budget work
+move to v1.3 as one package. The mechanism is fully adjudicated, not abandoned: four lever classes
+died with receipts for $0 in unpaid screens (§2.4), and every surviving lever — retrieval-key
+declaration at ingest, sub-1K slice granularity, wider candidate pools over the overfetch fast path
+— is a corpus-rebuild lever, which is exactly the ingest-side work v1.3's coalescence substrate
+already opens. v1.2 ships what the campaign actually produced: the valid 30.38% anchor, the A3
+traversal arm (scored gate pre-registration still pending), the measurement foundation (same-commit
+pairing, self-testing comparators, jitter floors, chunked screen doctrine), and the killed-lever
+ledger that stops the next session from re-buying dead experiments.
+
 Live coalescence engine (roadmap v1.2 W1–W3), the scale-load/team-isolation gates (W4), and
 TeamMemBench (W5) move to v1.3. The coalescence **data model** (W1) may proceed as a design doc in
 v1.2 if bandwidth allows — design-only, no engine. The roadmap's differentiation argument is
@@ -640,9 +684,18 @@ Open (decide during execution):
 
 ## 10. Exit criteria
 
-- Combined full-451 ≥ 42.8% at ≤ 10s avg with committed receipts; leaderboard submission made.
-- Gold-literal exposure ≥ 50% and state recall@10 ≥ 85% on the replay slices.
-- Accurate-mode fate executed; `query_planning.py` audit closed.
+Re-scoped 2026-08-12 (decision `e180be76037b`): the benchmark-beat criteria moved whole to v1.3
+(§7); v1.2 exits on the anchor, the adjudication record, and the product tracks.
+
+- Stage-2 anchor banked with 3-pass paired receipts (**done**: combined 30.38%, decision
+  `95677ae0b87b`) and every 2026-08 lever class adjudicated in the §2.4 ledger with receipts
+  (**done**: decisions `715454c60c9b`, `14686f9a4056`, `e180be76037b`).
+- A3 traversal arm merged with its scored gate documented and pre-registered numbers recorded, run
+  or explicitly deferred to v1.3 by Bliss's call.
+- Overfetch fast path (PR #371) adjudicated by the metric-level re-screen: merged on a clean paired
+  read or closed with the verdict in the PR body.
+- Accurate-mode fate executed; `query_planning.py` audit closed (**done**: #355 deprecation notice,
+  #357 planner deletion).
 - Handbook + `.sibyl/memory/` projection shipped and serving wake bundles, both gates green.
 - `dogfood-trust-gate` green: zero stranded pending writes, release-saga replay landed, fixtures for
   every §2.5 bug class.
@@ -661,17 +714,20 @@ zero stranded writes.
 
 ## 12. Receipts index
 
-Sibyl decisions: `3da12cba3ccd` (full-451 Pareto win + accurate-mode kill), `0e0677006a04` (format
-defect synthesis + oracle ablation), `7b7b46f1d169` (exposure sweep, selection ceiling),
-`0d07482dd334` (reader A/B, geometry kill), `024f09dbeb0f` (notes win, era-3), `afe1a65abcdc` (web
-v2 GO), `01e6ed6e4006` (enterprise v2 GO), `7a6a1d49b32c` (reservation tuning kill), `9f3c52581c68`
-(typed-stream-alone kill), `109702d198fe` (abstention lever closed), `0f4ab0c8a0cc` (graph-backed
-agentic path). Plans: `17188e6e7820`. Runs: `.moon/cache/evals/nova-full-451-fast/`. Commits:
-`12ac2243` (note distillation), `430dea04` (content-aware digest v2), `1f086b22` (conjunctive-safe
-fulltext), `83c8dd7b` (defaults reverted after tuning kill), `56ecd032` (note lane pinned to an
-absolute slot count). Production port: task `1e1caf57` (done). A1 Stage 0/1 slicer, stage scripts,
-and reports, carrying every §4 A1 boundary-rule receipt: `benchmarks/longmemeval_v2_chunk_geometry/`
-(PR 280). SOTA sweep 2026-07-25: [`SOTA_LANDSCAPE_2026-07-25.md`](SOTA_LANDSCAPE_2026-07-25.md) (six
-lanes, primary-sourced; anchors: LME-V2 arXiv `2605.12493` + empty official leaderboard,
-Fidelity-Before-Structure `2601.00821`, Dissecting-Agentic-RAG `2606.21553`, Retain-or-Consolidate
-`2607.17545`, TriMem `2605.19952`, MemClaw `2606.24535`, OKF v0.1, Penfield LoCoMo audit).
+Sibyl decisions: `3da12cba3ccd` (full-451 Pareto win + accurate-mode kill), `95677ae0b87b` (stage-2
+re-baseline anchor + additive NO-GO), `715454c60c9b` (ranking levers refuted + identifier flank),
+`14686f9a4056` (partition-arm spec-level starvation), `e180be76037b` (geometry gate closed +
+re-scope), `0e0677006a04` (format defect synthesis + oracle ablation), `7b7b46f1d169` (exposure
+sweep, selection ceiling), `0d07482dd334` (reader A/B, geometry kill), `024f09dbeb0f` (notes win,
+era-3), `afe1a65abcdc` (web v2 GO), `01e6ed6e4006` (enterprise v2 GO), `7a6a1d49b32c` (reservation
+tuning kill), `9f3c52581c68` (typed-stream-alone kill), `109702d198fe` (abstention lever closed),
+`0f4ab0c8a0cc` (graph-backed agentic path). Plans: `17188e6e7820`. Runs:
+`.moon/cache/evals/nova-full-451-fast/`. Commits: `12ac2243` (note distillation), `430dea04`
+(content-aware digest v2), `1f086b22` (conjunctive-safe fulltext), `83c8dd7b` (defaults reverted
+after tuning kill), `56ecd032` (note lane pinned to an absolute slot count). Production port: task
+`1e1caf57` (done). A1 Stage 0/1 slicer, stage scripts, and reports, carrying every §4 A1
+boundary-rule receipt: `benchmarks/longmemeval_v2_chunk_geometry/` (PR 280). SOTA sweep 2026-07-25:
+[`SOTA_LANDSCAPE_2026-07-25.md`](SOTA_LANDSCAPE_2026-07-25.md) (six lanes, primary-sourced; anchors:
+LME-V2 arXiv `2605.12493` + empty official leaderboard, Fidelity-Before-Structure `2601.00821`,
+Dissecting-Agentic-RAG `2606.21553`, Retain-or-Consolidate `2607.17545`, TriMem `2605.19952`,
+MemClaw `2606.24535`, OKF v0.1, Penfield LoCoMo audit).
