@@ -440,9 +440,9 @@ async def get_backup_job_status(
 
     info = await get_job_status(job_id)
 
-    # A missing job carries no payload, so it stays reportable to any caller and
-    # keeps the poll loops in the CLI and web client on their terminal state.
-    if info.status != JobStatus.NOT_FOUND and not await job_visible_to_org(info, org=org):
+    # An id the queue never held and an id belonging to another org answer
+    # identically, so the route cannot be used to probe for foreign job ids.
+    if info.status == JobStatus.NOT_FOUND or not await job_visible_to_org(info, org=org):
         raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
 
     return {

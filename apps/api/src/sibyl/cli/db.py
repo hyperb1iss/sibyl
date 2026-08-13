@@ -1688,7 +1688,8 @@ def _api_request(
     *,
     json_data: dict | None = None,
     stream: bool = False,
-) -> dict | bytes:
+    missing_ok: bool = False,
+) -> dict | bytes | None:
     """Make an API request to the backup endpoints.
 
     Note: This requires the API server to be running and assumes local access.
@@ -1720,6 +1721,8 @@ def _api_request(
         error("Cannot connect to Sibyl API. Is 'sibyld serve' running?")
         raise typer.Exit(code=1) from None
     except httpx.HTTPStatusError as e:
+        if missing_ok and e.response.status_code == 404:
+            return None
         error(f"API error: {e.response.status_code} - {e.response.text}")
         raise typer.Exit(code=1) from None
 
@@ -1780,7 +1783,10 @@ def backup_create(
 
         # Poll for completion
         while True:
-            status_result = _api_request("GET", f"/backups/jobs/{job_id}")
+            status_result = _api_request("GET", f"/backups/jobs/{job_id}", missing_ok=True)
+            if status_result is None:
+                error("Job not found (may have been cleaned up)")
+                break
             if not isinstance(status_result, dict):
                 break
 

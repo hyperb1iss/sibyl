@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 from typer.testing import CliRunner
 
 from sibyl.cli import db as db_cli
@@ -359,6 +360,31 @@ def test_backup_create_uses_database_dump_request_field() -> None:
         "include_database_dump": False,
         "include_graph": True,
     }
+
+
+def test_backup_create_wait_stops_when_the_server_forgot_the_job() -> None:
+    with patch(
+        "sibyl.cli.db._api_request",
+        side_effect=[{"job_id": "job-123"}, None],
+    ) as api_request:
+        result = runner.invoke(db_cli.app, ["backup-create", "--wait"])
+
+    assert result.exit_code == 0
+    assert api_request.call_args.args == ("GET", "/backups/jobs/job-123")
+    assert api_request.call_args.kwargs["missing_ok"] is True
+    assert "Job not found" in result.output
+
+
+def test_api_request_reports_a_missing_job_instead_of_exiting() -> None:
+    response = SimpleNamespace(status_code=404, text="Job not found: job-123")
+    request_error = httpx.HTTPStatusError("404", request=None, response=response)
+    client = MagicMock()
+    client.get.return_value.raise_for_status.side_effect = request_error
+
+    with patch("httpx.Client") as client_factory:
+        client_factory.return_value.__enter__.return_value = client
+
+        assert db_cli._api_request("GET", "/backups/jobs/job-123", missing_ok=True) is None
 
 
 class _StubSchemaClient:

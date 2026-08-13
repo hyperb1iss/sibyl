@@ -17,9 +17,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import params
+from fastapi import APIRouter, Depends, FastAPI, params
 from fastapi.dependencies.utils import get_dependant
 from fastapi.routing import APIRoute, APIWebSocketRoute
+from starlette.routing import Host, Mount
 
 from sibyl.api.app import create_api_app
 from sibyl.auth.dependencies import (
@@ -27,6 +28,8 @@ from sibyl.auth.dependencies import (
     get_current_org_role,
     get_current_organization,
     get_current_user,
+    require_org_admin,
+    require_org_role,
 )
 from sibyl.persistence.operations_runtime import (
     require_global_admin,
@@ -48,6 +51,12 @@ CALLER_IDENTITY_DEPENDENCIES = frozenset(
         require_setup_mode_or_auth,
     }
 )
+
+# Factories whose closures authorize a caller against an organization someone
+# else resolved. They reach an identity dependency internally, so crediting
+# anything under them would let a route pass on the strength of the very gate
+# this test exists to discount.
+ORG_ROLE_GATE_FACTORIES = (require_org_admin, require_org_role)
 
 # Routes that answer without knowing the caller, keyed by "<methods> <path>".
 # Adding an entry here is a decision to serve a route to anyone who reaches it,
@@ -105,9 +114,19 @@ ROUTES_WITHOUT_CALLER_IDENTITY: dict[str, str] = {
 MINIMUM_MOUNTED_ROUTES = 150
 
 
+def _is_org_role_gate(call: Any) -> bool:
+    qualname = getattr(call, "__qualname__", "")
+    return any(
+        qualname.startswith(f"{factory.__qualname__}.<locals>.")
+        for factory in ORG_ROLE_GATE_FACTORIES
+    )
+
+
 def _resolved_calls(dependant: Any, found: set[Any]) -> set[Any]:
     for sub in dependant.dependencies:
         if sub.call is not None:
+            if _is_org_role_gate(sub.call):
+                continue
             found.add(sub.call)
         _resolved_calls(sub, found)
     return found
@@ -178,6 +197,35 @@ class TestRouteAuthCoverage:
             "A route resolves no caller identity of its own. Give it "
             "get_current_organization (or another identity dependency), or add "
             "it to ROUTES_WITHOUT_CALLER_IDENTITY with the reason it is safe."
+        )
+
+    def test_a_route_level_role_gate_is_not_a_caller_identity(self) -> None:
+        """The gate reaches get_auth_context internally; that must not count."""
+        router = APIRouter()
+
+        @router.get("/gated", dependencies=[Depends(require_org_admin())])
+        async def gated() -> dict[str, str]:
+            return {}
+
+        app = FastAPI()
+        app.include_router(router)
+        gated_routes = [
+            (route, inherited)
+            for path, route, inherited in _mounted_routes(app.routes)
+            if path == "/gated"
+        ]
+
+        assert len(gated_routes) == 1
+        assert not _self_declared_identity(*gated_routes[0])
+
+    def test_no_sub_application_hides_routes_from_the_walk(self) -> None:
+        mounted = _mounted_routes(create_api_app().routes)
+        opaque = [_route_key(r, p) for p, r, _ in mounted if isinstance(r, Mount | Host)]
+
+        assert opaque == [], (
+            "A mounted sub-application is a single opaque leaf to this walk, so "
+            "allowlisting it would exempt every route inside it. Teach "
+            "_mounted_routes to descend the sub-application instead."
         )
 
     def test_allowlist_carries_no_retired_routes(self) -> None:
