@@ -752,9 +752,7 @@ class EntityManager:
         overfetch_knn_effort = knn_search_effort(pool, settings.graph_knn_ef)
         return (
             "SELECT * FROM ("
-            "SELECT "
-            + _ENTITY_SEARCH_FIELDS
-            + ", (1 - vector::distance::knn()) AS score"
+            "SELECT " + _ENTITY_SEARCH_FIELDS + ", (1 - vector::distance::knn()) AS score"
             " FROM entity WHERE group_id = $group_id"
             f" AND name_embedding <|{pool}, {overfetch_knn_effort}|> $query_embedding"
             ") WHERE entity_type IN $entity_types"

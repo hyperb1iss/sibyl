@@ -4417,6 +4417,14 @@ class SibylLiveApiMemory(Memory):
             "filters": filters,
         }
 
+    def _knn_overfetch_extras(self, evidence_request: dict[str, object]) -> dict[str, object]:
+        knn_type_overfetch = getattr(self, "knn_type_overfetch", DEFAULT_KNN_TYPE_OVERFETCH)
+        if knn_type_overfetch <= 0:
+            # Same omit-when-unset rule as char_budget.
+            return {}
+        evidence_request["knn_type_overfetch"] = knn_type_overfetch
+        return {"knn_type_overfetch": knn_type_overfetch}
+
     def query(self, query: str, query_image: str | None = None) -> list[MemoryContextItem]:
         pending_jobs = len(self._pending_embedding_job_ids) + len(self._pending_projection_job_ids)
         if pending_jobs or not self._ingest_finalized:
@@ -4454,12 +4462,7 @@ class SibylLiveApiMemory(Memory):
             # Omitted rather than sent as null when unset, so a run reproducing
             # the old geometry puts a byte-identical request on the wire.
             evidence_request["char_budget"] = char_budget
-        knn_type_overfetch = getattr(self, "knn_type_overfetch", DEFAULT_KNN_TYPE_OVERFETCH)
-        pack_request_extras: dict[str, object] = {}
-        if knn_type_overfetch > 0:
-            # Same omit-when-unset rule as char_budget.
-            evidence_request["knn_type_overfetch"] = knn_type_overfetch
-            pack_request_extras["knn_type_overfetch"] = knn_type_overfetch
+        pack_request_extras = self._knn_overfetch_extras(evidence_request)
         context_response = self._request_json(
             "POST",
             "/context/pack",

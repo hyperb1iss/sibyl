@@ -1478,9 +1478,7 @@ async def _edge_vector_candidates(
         # outside the bracket and a shortfall falls back to the classic form.
         pool = knn_overfetch_pool(candidate_limit, overfetch)
         pool_knn_effort = knn_search_effort(pool, core_config.graph_knn_ef)
-        overfetch_clauses = [
-            clause for clause in filter_clauses if clause != "name IN $edge_types"
-        ]
+        overfetch_clauses = [clause for clause in filter_clauses if clause != "name IN $edge_types"]
         rows = await _execute_query_records(
             client,
             "SELECT * FROM ("

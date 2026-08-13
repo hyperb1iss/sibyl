@@ -268,9 +268,7 @@ async def test_entity_vector_search_off_arm_is_the_classic_typed_query() -> None
         entity_types=[EntityType.TOPIC],
         limit=10,
     )
-    vector_calls = [
-        (q, p) for q, p in client.calls if "name_embedding <|" in q
-    ]
+    vector_calls = [(q, p) for q, p in client.calls if "name_embedding <|" in q]
     assert len(vector_calls) == 1
     query, params = vector_calls[0]
     assert params.get("_query_label") == "entity.search.vector"
@@ -283,9 +281,7 @@ async def test_entity_vector_search_overfetch_walks_untyped_pool_and_filters_out
     # Full yield: the overfetch head fills the candidate budget, so no
     # fallback query runs.
     full_head = [_entity_row(f"hit_{i:03d}") for i in range(40)]
-    client = _ScriptedClient(
-        "org-overfetch", {"entity.search.vector.overfetch": full_head}
-    )
+    client = _ScriptedClient("org-overfetch", {"entity.search.vector.overfetch": full_head})
     manager = EntityManager(
         client,
         group_id=client.group_id,
@@ -298,9 +294,7 @@ async def test_entity_vector_search_overfetch_walks_untyped_pool_and_filters_out
         knn_type_overfetch=10,
     )
     vector_calls = [(q, p) for q, p in client.calls if "name_embedding <|" in q]
-    assert [p.get("_query_label") for _, p in vector_calls] == [
-        "entity.search.vector.overfetch"
-    ]
+    assert [p.get("_query_label") for _, p in vector_calls] == ["entity.search.vector.overfetch"]
     query, _params = vector_calls[0]
     # Inner bracket walks the untyped pool (40 * 10); the type filter sits
     # outside the bracket, i.e. after it in the composed text.
@@ -333,9 +327,7 @@ async def test_entity_vector_search_overfetch_shortfall_falls_back_to_classic() 
         knn_type_overfetch=10,
     )
     labels = [
-        params.get("_query_label")
-        for query, params in client.calls
-        if "name_embedding <|" in query
+        params.get("_query_label") for query, params in client.calls if "name_embedding <|" in query
     ]
     assert labels == ["entity.search.vector.overfetch", "entity.search.vector"]
     assert len(results) == 12
