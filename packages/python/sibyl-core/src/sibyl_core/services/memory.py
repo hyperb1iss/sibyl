@@ -1780,28 +1780,27 @@ async def _correction_graph_entity_ids(
     leaves a query as the only way back. That query is unindexed, and it is
     affordable here only because a correction is a rare, operator-initiated
     write rather than anything on the read path.
+
+    The query matches `raw_memory_id` and never `raw_source_id`, even though
+    capture writes both. A capture's `source_id` is a non-unique grouping key
+    (`idx_raw_captures_source` is not UNIQUE, and
+    `list_raw_memories_by_source_id` returns a list), while a correction
+    declares exactly one affected capture. Matching the group key would let a
+    correction on one memory stamp the projections of its siblings.
     """
 
     candidate_ids = list(_correction_derived_ids(memory))
-    source_id = memory.source_id or memory.id
-    clauses = ["attributes.raw_memory_id = $raw_memory_id"]
-    params: dict[str, Any] = {
-        "group_id": str(organization_id),
-        "raw_memory_id": memory.id,
-        "limit": _GRAPH_CORRECTION_LOOKUP_LIMIT,
-    }
-    if source_id and source_id != memory.id:
-        clauses.append("attributes.raw_source_id = $raw_source_id")
-        params["raw_source_id"] = source_id
     rows = normalize_records(
         await runtime.client.execute_query(
-            f"""
+            """
             SELECT uuid FROM entity
             WHERE group_id = $group_id
-              AND ({" OR ".join(clauses)})
+              AND attributes.raw_memory_id = $raw_memory_id
             LIMIT $limit;
             """,
-            **params,
+            group_id=str(organization_id),
+            raw_memory_id=memory.id,
+            limit=_GRAPH_CORRECTION_LOOKUP_LIMIT,
         )
     )
     for row in rows:

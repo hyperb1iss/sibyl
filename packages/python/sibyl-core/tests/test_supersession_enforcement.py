@@ -576,3 +576,51 @@ async def test_correction_still_applies_when_the_graph_is_unreachable(
 
     assert result.applied
     assert result.affected_entity_ids == []
+
+
+@pytest.mark.asyncio
+async def test_correction_resolves_only_its_own_capture_not_its_source_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A correction names one capture, so it must not reach sibling captures.
+
+    `raw_captures.source_id` groups memories rather than identifying one
+    (`idx_raw_captures_source` is not UNIQUE), so resolving graph rows through
+    it would stamp projections the correction never declared as affected.
+    """
+
+    memory = _raw_capture(id="candidate-1", source_id="shared-source")
+    runtime = _CorrectionGraphRuntime()
+    queries: list[tuple[str, dict[str, Any]]] = []
+
+    async def execute_query(query: str, **params: object) -> list[dict[str, object]]:
+        queries.append((query, dict(params)))
+        return [{"uuid": "entity-old"}]
+
+    runtime.execute_query = execute_query  # type: ignore[method-assign]
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> _CorrectionGraphRuntime:
+        return runtime
+
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+    monkeypatch.setattr(
+        memory_module,
+        "save_raw_memory",
+        AsyncMock(side_effect=lambda updated, **_kwargs: updated),
+    )
+    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+
+    result = await memory_module.apply_memory_correction(
+        organization_id="org-1",
+        source_id="candidate-1",
+        principal_id="user-1",
+        action="mark_wrong",
+    )
+
+    assert result.applied
+    query, params = queries[0]
+    assert "raw_source_id" not in query
+    assert params["raw_memory_id"] == "candidate-1"
+    assert params["group_id"] == "org-1"
+    assert params["limit"] == memory_module._GRAPH_CORRECTION_LOOKUP_LIMIT
