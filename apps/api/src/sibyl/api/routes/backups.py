@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from sibyl.api.routes.jobs import job_visible_to_org
 from sibyl.auth.dependencies import get_current_organization, get_current_user, require_org_admin
 from sibyl.backup_ids import generate_backup_id
 from sibyl.config import settings
@@ -426,14 +427,23 @@ async def delete_backup(
 
 
 @router.get("/jobs/{job_id}")
-async def get_backup_job_status(job_id: str) -> dict[str, Any]:
+async def get_backup_job_status(
+    job_id: str,
+    org: AuthOrganization = Depends(get_current_organization),
+) -> dict[str, Any]:
     """Get status of a backup job.
 
     Returns job status, result (if complete), or error (if failed).
     """
+    from sibyl.coordination.broker import JobStatus
     from sibyl.jobs.queue import get_job_status
 
     info = await get_job_status(job_id)
+
+    # A missing job carries no payload, so it stays reportable to any caller and
+    # keeps the poll loops in the CLI and web client on their terminal state.
+    if info.status != JobStatus.NOT_FOUND and not await job_visible_to_org(info, org=org):
+        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
 
     return {
         "job_id": info.job_id,

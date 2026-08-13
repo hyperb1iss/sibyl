@@ -39,7 +39,7 @@ async def _source_visible_to_org(
     return source is not None and source.organization_id == org_id
 
 
-async def _job_visible_to_org(
+async def job_visible_to_org(
     job: Any,
     *,
     org: AuthOrganization,
@@ -167,7 +167,7 @@ async def list_jobs(
         visible = [
             j
             for j in jobs
-            if await _job_visible_to_org(
+            if await job_visible_to_org(
                 j,
                 org=org,
                 visible_source_ids=visible_source_ids,
@@ -233,7 +233,7 @@ async def get_jobs_status(
         visible_source_ids = await _resolve_visible_source_ids(infos, org=org)
         jobs: dict[str, dict[str, Any]] = {}
         for job_id, info in zip(job_ids, infos, strict=True):
-            if info.status == JobStatus.NOT_FOUND or not await _job_visible_to_org(
+            if info.status == JobStatus.NOT_FOUND or not await job_visible_to_org(
                 info,
                 org=org,
                 visible_source_ids=visible_source_ids,
@@ -345,7 +345,7 @@ async def get_job(
 
         if info.status == JobStatus.NOT_FOUND:
             raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
-        if not await _job_visible_to_org(info, org=org):
+        if not await job_visible_to_org(info, org=org):
             raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
 
         return _job_status_payload(info)
@@ -369,7 +369,7 @@ async def cancel_job(
 
     try:
         info = await get_job_status(job_id)
-        if not await _job_visible_to_org(info, org=org):
+        if not await job_visible_to_org(info, org=org):
             raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
 
         cancelled = await _cancel_job(job_id)

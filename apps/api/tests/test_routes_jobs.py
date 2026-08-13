@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from sibyl.api.routes.jobs import (
     JobStatusBatchRequest,
-    _job_visible_to_org,
+    job_visible_to_org,
     cancel_job,
     get_jobs_status,
     jobs_health,
@@ -36,8 +36,8 @@ class TestJobVisibility:
             function="project_memory_batch",
         )
 
-        assert await _job_visible_to_org(visible, org=org) is True
-        assert await _job_visible_to_org(hidden, org=org) is False
+        assert await job_visible_to_org(visible, org=org) is True
+        assert await job_visible_to_org(hidden, org=org) is False
 
     @pytest.mark.asyncio
     async def test_source_jobs_use_embedded_org_metadata_without_db_lookup(self) -> None:
@@ -49,7 +49,7 @@ class TestJobVisibility:
             kwargs={"organization_id": str(org.id)},
         )
 
-        assert await _job_visible_to_org(job, org=org, session=session) is True
+        assert await job_visible_to_org(job, org=org, session=session) is True
         session.execute.assert_not_called()
 
     @pytest.mark.asyncio
@@ -62,7 +62,7 @@ class TestJobVisibility:
             kwargs={"organization_id": "00000000-0000-0000-0000-000000000999"},
         )
 
-        assert await _job_visible_to_org(job, org=org, session=session) is False
+        assert await job_visible_to_org(job, org=org, session=session) is False
         session.execute.assert_not_called()
 
     @pytest.mark.asyncio
@@ -79,7 +79,7 @@ class TestJobVisibility:
             "sibyl.api.routes.jobs.get_crawl_source_by_id",
             AsyncMock(return_value=SimpleNamespace(organization_id=org.id)),
         ) as get_source:
-            assert await _job_visible_to_org(job, org=org, session=session) is True
+            assert await job_visible_to_org(job, org=org, session=session) is True
 
         get_source.assert_awaited_once_with(
             session,
@@ -106,9 +106,9 @@ class TestJobVisibility:
             kwargs=None,
         )
 
-        assert await _job_visible_to_org(visible_consolidation, org=org, session=session) is True
-        assert await _job_visible_to_org(visible_reflection, org=org, session=session) is True
-        assert await _job_visible_to_org(hidden, org=org, session=session) is False
+        assert await job_visible_to_org(visible_consolidation, org=org, session=session) is True
+        assert await job_visible_to_org(visible_reflection, org=org, session=session) is True
+        assert await job_visible_to_org(hidden, org=org, session=session) is False
         session.get.assert_not_called()
 
     @pytest.mark.asyncio
@@ -129,8 +129,8 @@ class TestJobVisibility:
             kwargs=None,
         )
 
-        assert await _job_visible_to_org(visible, org=org, session=session) is True
-        assert await _job_visible_to_org(hidden, org=org, session=session) is False
+        assert await job_visible_to_org(visible, org=org, session=session) is True
+        assert await job_visible_to_org(hidden, org=org, session=session) is False
         session.get.assert_not_called()
 
 
@@ -286,7 +286,7 @@ class TestCancelJobRoute:
 
         with (
             patch("sibyl.jobs.queue.get_job_status", AsyncMock(return_value=job)),
-            patch("sibyl.api.routes.jobs._job_visible_to_org", AsyncMock(return_value=False)),
+            patch("sibyl.api.routes.jobs.job_visible_to_org", AsyncMock(return_value=False)),
             pytest.raises(HTTPException) as exc_info,
         ):
             await cancel_job("crawl:source-123", org=org)
