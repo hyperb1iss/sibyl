@@ -2580,12 +2580,33 @@ async def delete_entity(
             # Spans are derived, so they outlive nothing. Left behind they would
             # keep serving the text of a memory the caller deleted, which is the
             # one outcome a delete must not produce.
-            retired = await retire_entity_passages(
+            retirement = await retire_entity_passages(
                 entity_manager=runtime.entity_manager,
                 source_id=entity_id,
             )
-            if retired:
-                log.info("entity_delete_retired_passages", entity_id=entity_id, retired=retired)
+            if retirement.retired:
+                log.info(
+                    "entity_delete_retired_passages",
+                    entity_id=entity_id,
+                    retired=retirement.retired,
+                )
+            if not retirement.complete:
+                # The parent is already gone, so there is nothing to roll back to
+                # and no honest way to report plain success: these spans are still
+                # searchable and still hold the deleted text. Named individually so
+                # the retry has a target rather than a memory id to re-derive from.
+                log.error(
+                    "entity_delete_passages_stranded",
+                    entity_id=entity_id,
+                    stranded=retirement.failed_passage_ids,
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        "Entity deleted, but these passages still serve its text "
+                        f"and must be retried: {', '.join(retirement.failed_passage_ids)}"
+                    ),
+                )
 
             if existing.entity_type == EntityType.PROJECT:
                 await delete_project_record(
