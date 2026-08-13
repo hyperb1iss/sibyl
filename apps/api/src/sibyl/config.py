@@ -585,6 +585,25 @@ class Settings(BaseSettings):
 
         return self
 
+    @model_validator(mode="after")
+    def validate_production_jwt_secret(self) -> "Settings":
+        """Refuse to boot production without a signing key.
+
+        Runs after check_api_key_fallbacks so the non-prefixed JWT_SECRET
+        fallback has already been applied.
+        """
+        if self.environment != "production":
+            return self
+        if self.jwt_secret.get_secret_value():
+            return self
+        raise ValueError(
+            "CRITICAL: A JWT secret is required in production. Without it sessions "
+            "are signed with an empty key and MCP auth disables itself under the "
+            "default mcp_auth_mode=auto. Set SIBYL_JWT_SECRET to a high-entropy "
+            "value, or set SIBYL_ENVIRONMENT=development to use the generated "
+            "development secret."
+        )
+
     embedding_provider: Literal["openai", "gemini"] = Field(
         default="openai",
         description="Provider for document chunk embeddings",

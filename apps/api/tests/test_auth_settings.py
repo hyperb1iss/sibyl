@@ -256,6 +256,7 @@ def test_settings_auth_defaults_disable_production_local_login() -> None:
         surreal_url="ws://surrealdb:8000/rpc",
         surreal_username="sibyl_admin",
         surreal_password="really_secure_password",
+        jwt_secret="test-jwt-secret",
     )
 
     assert s.local_auth_enabled is False
@@ -279,6 +280,7 @@ def test_settings_explicit_production_local_auth_override_is_respected() -> None
         surreal_url="ws://surrealdb:8000/rpc",
         surreal_username="sibyl_admin",
         surreal_password="really_secure_password",
+        jwt_secret="test-jwt-secret",
         local_auth_enabled=True,
     )
 
@@ -294,6 +296,7 @@ def test_settings_enterprise_auth_features_are_opt_in() -> None:
         surreal_url="ws://surrealdb:8000/rpc",
         surreal_username="sibyl_admin",
         surreal_password="really_secure_password",
+        jwt_secret="test-jwt-secret",
     )
 
     assert s.local_auth_enabled is False
