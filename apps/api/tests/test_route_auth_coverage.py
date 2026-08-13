@@ -1,0 +1,399 @@
+"""Every mounted route must receive the caller identity it needs.
+
+Scope tests elsewhere in this suite override the auth dependencies, so a route
+that never declared them looks exactly like a route that did. This test reads
+the mounted application instead of calling it, which is the only way a missing
+dependency becomes visible.
+
+Two things make the rule stricter than "the route is authenticated", and both
+are load-bearing.
+
+A router-level gate such as require_org_admin() proves the caller administers
+some organization, and every user owns a personal organization with the OWNER
+role, so inheriting that gate says nothing about whose data the handler is
+about to serve. A route sitting under one of those gates therefore has to
+receive an organization, not merely sit behind a check.
+
+And a dependency only counts when its value reaches something that uses it. A
+Depends() listed in a route or router decorator has nowhere to put its result,
+so it can prove a check ran but can never hand the handler an organization.
+Only parameter-bound dependencies are credited, which is why this reads the
+route's own parameters rather than the whole resolved dependency tree.
+"""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+from typing import Any
+from uuid import UUID
+
+import pytest
+from fastapi import APIRouter, Depends, FastAPI
+from fastapi.dependencies.utils import get_dependant
+from fastapi.routing import APIRoute, APIWebSocketRoute
+from starlette.routing import Host, Mount
+
+from sibyl.api.app import create_api_app
+from sibyl.api.dependencies import get_graph_store, get_knowledge_read_service
+from sibyl.auth.dependencies import (
+    get_auth_context,
+    get_current_org_role,
+    get_current_organization,
+    get_current_user,
+    require_org_admin,
+    require_org_role,
+)
+from sibyl.persistence import graph_runtime
+from sibyl.persistence.operations_runtime import (
+    require_global_admin,
+    require_setup_mode_or_admin,
+    require_setup_mode_or_auth,
+)
+from sibyl_core.auth import AuthOrganization
+
+# Dependencies that resolve an organization and hand back something already
+# scoped to it, so a handler receiving one cannot read across tenants.
+# test_org_scoped_providers_bind_the_organization_they_resolve holds them to it.
+ORG_SCOPED_PROVIDERS = frozenset({get_graph_store, get_knowledge_read_service})
+
+# Values that tell a handler which organization it is answering for.
+ORG_BEARING_DEPENDENCIES = (
+    frozenset({get_auth_context, get_current_organization}) | ORG_SCOPED_PROVIDERS
+)
+
+# Values that name the caller, whether or not they carry an organization.
+CALLER_IDENTITY_DEPENDENCIES = ORG_BEARING_DEPENDENCIES | frozenset(
+    {get_current_org_role, get_current_user}
+)
+
+# Gates that raise by themselves, so a route may discard what they return.
+# Org role gates are deliberately absent: they authorize a caller against an
+# organization someone else resolved, which is the vacuity this test exists to
+# catch, so they are listed as gate factories instead.
+ENFORCING_GATES = frozenset(
+    {require_global_admin, require_setup_mode_or_admin, require_setup_mode_or_auth}
+)
+
+ORG_ROLE_GATE_FACTORIES = (require_org_admin, require_org_role)
+
+# Routes that answer without knowing the caller, keyed by "<methods> <path>".
+# Adding an entry here is a decision to serve a route to anyone who reaches it,
+# so each one records why that is safe.
+ROUTES_WITHOUT_CALLER_IDENTITY: dict[str, str] = {
+    # Service surface, no stored data.
+    "GET /": "version banner",
+    "GET /health": "liveness probe",
+    "GET /health/ready": "readiness probe",
+    "GET,HEAD /openapi.json": "generated API schema",
+    "GET,HEAD /docs": "Swagger UI shell",
+    "GET,HEAD /docs/oauth2-redirect": "Swagger UI OAuth redirect shim",
+    "GET,HEAD /redoc": "ReDoc UI shell",
+    # Establishing a session: the caller has no identity yet.
+    "GET /auth/providers": "lists configured login providers",
+    "GET /auth/github": "starts the GitHub OAuth redirect",
+    "GET /auth/github/callback": "GitHub OAuth callback, state-verified",
+    "GET /auth/oidc/{provider_name}/login": "starts the OIDC redirect",
+    "GET /auth/oidc/{provider_name}/callback": "OIDC callback, state-verified",
+    "GET /auth/oidc/{provider_name}/refresh": "OIDC silent refresh, cookie-verified",
+    "POST /auth/local/signup": "creates the first account for an email",
+    "POST /auth/local/login": "exchanges credentials for a session",
+    "POST /auth/device": "starts the device authorization grant",
+    "POST /auth/device/token": "polls the device grant for a token",
+    "GET /auth/device/verify": "renders the device code confirmation page",
+    "POST /auth/device/verify": "confirms a device code, session-verified",
+    "POST /auth/refresh": "rotates a session from the refresh cookie",
+    "POST /auth/logout": "clears session cookies",
+    "POST /users/password/reset": "sends a reset mail for an email address",
+    "POST /users/password/reset/confirm": "redeems a reset token",
+    "GET /setup/status": "reports whether the instance is unconfigured",
+    # Instance-wide settings, gated in the handler body by require_settings_owner
+    # rather than by a dependency (see AUDIT_2026-08-13 debt-api finding 6).
+    "GET /settings": "require_settings_owner called in the handler",
+    "PATCH /settings": "require_settings_owner called in the handler",
+    "DELETE /settings/{key}": "require_settings_owner called in the handler",
+    "GET /settings/ai/llm": "require_settings_owner called in the handler",
+    "PUT /settings/ai/llm/{surface}": "require_settings_owner called in the handler",
+    "PUT /settings/ai/llm-budget": "require_settings_owner called in the handler",
+    "POST /settings/ai/llm/{surface}/test": "require_settings_owner called in the handler",
+    "POST /settings/ai/keys/{provider}/test": "require_settings_owner called in the handler",
+    "POST /settings/ai/models/{model_alias}/test": "require_settings_owner called in the handler",
+    "GET /settings/ai/registry": "require_settings_owner called in the handler",
+    # WebSockets cannot use HTTP dependencies and authenticate in the handler.
+    "WS /ws": "token checked in websocket_handler",
+    "WS /logs/stream": "token checked in the stream handler",
+    # Org-independent answers: no row, document or job of any org is reachable.
+    "GET /jobs/health": "broker and queue health counters",
+    "GET /sources/health": "crawler subsystem health",
+    "GET /sources/preview": "fetches a caller-supplied URL, reads nothing stored",
+    "GET /ingestion/import-adapters": "static list of compiled-in import adapters",
+}
+
+# A walk that silently returns nothing would pass every assertion below.
+MINIMUM_MOUNTED_ROUTES = 150
+
+
+def _is_org_role_gate(call: Any) -> bool:
+    qualname = getattr(call, "__qualname__", "")
+    return any(
+        qualname.startswith(f"{factory.__qualname__}.<locals>.")
+        for factory in ORG_ROLE_GATE_FACTORIES
+    )
+
+
+def _tree_has_org_role_gate(dependant: Any) -> bool:
+    """Find a role gate anywhere beneath a dependency, not only at its surface.
+
+    A gate reached through a wrapper still gates the route, so discovery
+    descends even though identity credit never does.
+    """
+    queue = list(dependant.dependencies)
+    while queue:
+        sub = queue.pop()
+        if sub.call is not None and _is_org_role_gate(sub.call):
+            return True
+        queue += sub.dependencies
+    return False
+
+
+def _reaches_org_role_gate(call: Any) -> bool:
+    return _is_org_role_gate(call) or _tree_has_org_role_gate(get_dependant(path="/", call=call))
+
+
+def _route_key(route: Any, path: str) -> str:
+    methods = getattr(route, "methods", None)
+    label = ",".join(sorted(methods)) if methods else "WS"
+    return f"{label} {path}"
+
+
+def _mounted_routes(
+    routes: list[Any],
+    prefix: str = "",
+    gated_above: bool = False,
+) -> list[tuple[str, Any, bool]]:
+    """Flatten the app into its leaf routes, carrying include-time role gates.
+
+    A gate passed to include_router is applied by the mount node rather than
+    baked into the leaf, so it is invisible from the route alone and has to be
+    handed down.
+    """
+    flattened: list[tuple[str, Any, bool]] = []
+    for route in routes:
+        # FastAPI mounts an included router as a single node rather than copying
+        # its routes, so the tree has to be walked through that node.
+        include = getattr(route, "include_context", None)
+        if include is not None:
+            gated = gated_above or any(
+                _reaches_org_role_gate(dependency.dependency)
+                for dependency in include.dependencies
+                if dependency.dependency is not None
+            )
+            flattened += _mounted_routes(
+                include.included_router.routes, prefix + include.prefix, gated
+            )
+            continue
+
+        flattened.append((prefix + getattr(route, "path", ""), route, gated_above))
+    return flattened
+
+
+def _received(route: Any) -> set[Any]:
+    """Dependencies whose resolved value the route is actually handed.
+
+    A Depends() in a route or router decorator resolves into nowhere, so it
+    never appears here however deeply it reaches an identity internally.
+    """
+    if not isinstance(route, APIRoute | APIWebSocketRoute):
+        return set()
+    return {sub.call for sub in route.dependant.dependencies if sub.name is not None and sub.call}
+
+
+def _declared(route: Any) -> set[Any]:
+    if not isinstance(route, APIRoute | APIWebSocketRoute):
+        return set()
+    return {sub.call for sub in route.dependant.dependencies if sub.call}
+
+
+def _has_caller_identity(route: Any, gated_above: bool = False) -> bool:
+    if not isinstance(route, APIRoute | APIWebSocketRoute):
+        return False
+
+    received = _received(route)
+    if gated_above or _tree_has_org_role_gate(route.dependant):
+        return bool(received & ORG_BEARING_DEPENDENCIES)
+    if received & CALLER_IDENTITY_DEPENDENCIES:
+        return True
+    return bool(_declared(route) & ENFORCING_GATES)
+
+
+def _unrecognized_gate() -> Any:
+    """A role gate this test has never heard of, shaped like the real ones."""
+
+    async def _check(ctx: Any = Depends(get_auth_context)) -> None:
+        return None
+
+    return _check
+
+
+_ORG_ADMIN_GATE = Depends(require_org_admin())
+
+
+async def _wrapped_org_gate(_gate: Any = _ORG_ADMIN_GATE) -> None:
+    """A real role gate buried one dependency deep."""
+
+
+async def _stub_graph_runtime(group_id: str) -> Any:
+    """Stand in for the live graph runtime so the probe needs no database."""
+    del group_id
+    return SimpleNamespace(
+        client=SimpleNamespace(),
+        entity_manager=SimpleNamespace(),
+        relationship_manager=SimpleNamespace(),
+    )
+
+
+async def _resolve_provider(provider: Any, org: AuthOrganization) -> Any:
+    """Resolve a provider the way FastAPI would, one signature at a time."""
+    if provider is get_graph_store:
+        return await get_graph_store(org=org)
+    if provider is get_knowledge_read_service:
+        return await get_knowledge_read_service(graph_store=await get_graph_store(org=org))
+    raise AssertionError(f"add a behavioural probe for {provider}")
+
+
+def _bound_organization(capability: Any) -> str:
+    """Read the organization a resolved capability is actually scoped to."""
+    store = getattr(capability, "_store", capability)
+    group_id = getattr(getattr(store, "entities", None), "_group_id", None)
+
+    assert isinstance(group_id, str), f"no organization is observable on {capability!r}"
+    return group_id
+
+
+class TestRouteAuthCoverage:
+    def test_walk_reaches_the_whole_application(self) -> None:
+        assert len(_mounted_routes(create_api_app().routes)) >= MINIMUM_MOUNTED_ROUTES
+
+    def test_every_route_receives_a_caller_identity(self) -> None:
+        unscoped = [
+            _route_key(route, path)
+            for path, route, gated_above in _mounted_routes(create_api_app().routes)
+            if not _has_caller_identity(route, gated_above)
+        ]
+
+        assert sorted(unscoped) == sorted(ROUTES_WITHOUT_CALLER_IDENTITY), (
+            "A route is not handed the caller identity it needs. Bind "
+            "get_current_organization (or another org-bearing dependency) to a "
+            "parameter, or add the route to ROUTES_WITHOUT_CALLER_IDENTITY with "
+            "the reason it is safe to answer without one."
+        )
+
+    @pytest.mark.asyncio
+    async def test_org_scoped_providers_bind_the_organization_they_resolve(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Reaching an org proves nothing; a provider could accept and ignore it.
+
+        Treating these as org-bearing is only sound if what they hand back is
+        scoped to the caller's organization, so resolve each one under two
+        organizations and watch the capability change with them.
+        """
+        monkeypatch.setattr(graph_runtime, "_get_graph_runtime", _stub_graph_runtime)
+        first = AuthOrganization(
+            id=UUID("00000000-0000-0000-0000-0000000000a1"), name="First", slug="first"
+        )
+        second = AuthOrganization(
+            id=UUID("00000000-0000-0000-0000-0000000000b2"), name="Second", slug="second"
+        )
+
+        for provider in ORG_SCOPED_PROVIDERS:
+            for org in (first, second):
+                bound = _bound_organization(await _resolve_provider(provider, org))
+
+                assert bound == str(org.id), provider
+
+    def test_a_discarded_identity_does_not_scope_a_route(self) -> None:
+        """Depends() in the decorator resolves into nowhere, so it proves nothing."""
+        router = APIRouter(dependencies=[Depends(require_org_admin())])
+
+        @router.get("/discarded", dependencies=[Depends(get_current_user)])
+        async def discarded() -> dict[str, str]:
+            return {}
+
+        assert not _has_caller_identity(self._only_route(router, "/discarded"))
+
+    def test_an_unrecognized_role_gate_does_not_scope_a_route(self) -> None:
+        """A gate reaching get_auth_context internally still hands over nothing."""
+        router = APIRouter()
+
+        @router.get("/unknown-gate", dependencies=[Depends(_unrecognized_gate())])
+        async def unknown_gate() -> dict[str, str]:
+            return {}
+
+        assert not _has_caller_identity(self._only_route(router, "/unknown-gate"))
+
+    def test_a_wrapped_role_gate_still_demands_an_organization(self) -> None:
+        """The gate is a dependency deep, so surface-only discovery misses it."""
+        router = APIRouter()
+
+        @router.get("/wrapped", dependencies=[Depends(_wrapped_org_gate)])
+        async def wrapped(user: Any = Depends(get_current_user)) -> dict[str, str]:
+            return {}
+
+        assert not _has_caller_identity(self._only_route(router, "/wrapped"))
+
+    def test_an_include_time_role_gate_still_demands_an_organization(self) -> None:
+        """A gate passed to include_router never reaches the leaf's dependant."""
+        router = APIRouter()
+
+        @router.get("/included")
+        async def included(user: Any = Depends(get_current_user)) -> dict[str, str]:
+            return {}
+
+        app = FastAPI()
+        app.include_router(router, dependencies=[Depends(require_org_admin())])
+        matches = [
+            (route, gated_above)
+            for path, route, gated_above in _mounted_routes(app.routes)
+            if path == "/included"
+        ]
+
+        assert len(matches) == 1
+        assert not _has_caller_identity(*matches[0])
+
+    def test_a_bound_organization_scopes_a_route(self) -> None:
+        """The negative cases would be vacuous if nothing satisfied the rule."""
+        router = APIRouter(dependencies=[Depends(require_org_admin())])
+
+        @router.get("/bound")
+        async def bound(org: Any = Depends(get_current_organization)) -> dict[str, str]:
+            return {}
+
+        assert _has_caller_identity(self._only_route(router, "/bound"))
+
+    def test_no_sub_application_hides_routes_from_the_walk(self) -> None:
+        mounted = _mounted_routes(create_api_app().routes)
+        opaque = [_route_key(r, p) for p, r, _ in mounted if isinstance(r, Mount | Host)]
+
+        assert opaque == [], (
+            "A mounted sub-application is a single opaque leaf to this walk, so "
+            "allowlisting it would exempt every route inside it. Teach "
+            "_mounted_routes to descend the sub-application instead."
+        )
+
+    def test_allowlist_carries_no_retired_routes(self) -> None:
+        routes = _mounted_routes(create_api_app().routes)
+        mounted = {_route_key(route, path) for path, route, _ in routes}
+
+        assert set(ROUTES_WITHOUT_CALLER_IDENTITY) <= mounted
+
+    @staticmethod
+    def _only_route(router: APIRouter, path: str) -> Any:
+        app = FastAPI()
+        app.include_router(router)
+        matches = [
+            route for route_path, route, _ in _mounted_routes(app.routes) if route_path == path
+        ]
+
+        assert len(matches) == 1
+        return matches[0]

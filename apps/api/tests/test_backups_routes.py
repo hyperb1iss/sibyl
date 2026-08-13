@@ -4,8 +4,10 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 
 from sibyl.api.routes import backups as backup_routes
+from sibyl.coordination.broker import JobInfo, JobStatus
 from sibyl.persistence.backups_common import BackupListResult
 
 
@@ -268,3 +270,76 @@ async def test_delete_backup_uses_runtime_delete_helper(monkeypatch: pytest.Monk
     response = await backup_routes.delete_backup("backup_a", org=_org())
 
     assert response == {"deleted": True, "backup_id": "backup_a"}
+
+
+def _backup_job(organization_id: str) -> JobInfo:
+    return JobInfo(
+        job_id="backup:backup_secret",
+        function="run_backup",
+        status=JobStatus.COMPLETE,
+        args=(organization_id,),
+        kwargs={"backup_id": "backup_secret"},
+        result={
+            "success": True,
+            "backup_id": "backup_secret",
+            "organization_id": organization_id,
+            "archive_path": "/var/lib/sibyl/backups/backup_secret.tar.gz",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_backup_job_status_hides_another_orgs_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    reader = _org()
+    owner_org_id = str(uuid4())
+    monkeypatch.setattr(
+        "sibyl.jobs.queue.get_job_status",
+        AsyncMock(return_value=_backup_job(owner_org_id)),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await backup_routes.get_backup_job_status("backup:backup_secret", org=reader)
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "Job not found: backup:backup_secret"
+
+
+@pytest.mark.asyncio
+async def test_backup_job_status_returns_own_orgs_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    org = _org()
+    monkeypatch.setattr(
+        "sibyl.jobs.queue.get_job_status",
+        AsyncMock(return_value=_backup_job(str(org.id))),
+    )
+
+    response = await backup_routes.get_backup_job_status("backup:backup_secret", org=org)
+
+    assert response["status"] == "complete"
+    assert response["result"]["organization_id"] == str(org.id)
+
+
+@pytest.mark.asyncio
+async def test_backup_job_status_answers_unknown_and_foreign_jobs_alike(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 200 for one and a 404 for the other would confirm a foreign job exists."""
+    reader = _org()
+
+    monkeypatch.setattr(
+        "sibyl.jobs.queue.get_job_status",
+        AsyncMock(return_value=_backup_job(str(uuid4()))),
+    )
+    with pytest.raises(HTTPException) as foreign:
+        await backup_routes.get_backup_job_status("backup:backup_secret", org=reader)
+
+    unknown_job = JobInfo(
+        job_id="backup:backup_secret",
+        function="unknown",
+        status=JobStatus.NOT_FOUND,
+    )
+    monkeypatch.setattr("sibyl.jobs.queue.get_job_status", AsyncMock(return_value=unknown_job))
+    with pytest.raises(HTTPException) as unknown:
+        await backup_routes.get_backup_job_status("backup:backup_secret", org=reader)
+
+    assert foreign.value.status_code == unknown.value.status_code == 404
+    assert foreign.value.detail == unknown.value.detail

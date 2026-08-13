@@ -28,6 +28,7 @@ _JOB_ORG_ARGUMENT_INDEX = {
     "consolidate_org": 0,
     "priority_decay": 0,
     "run_reflection_dream_cycle": 0,
+    "run_backup": 0,
 }
 
 
