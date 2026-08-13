@@ -1,5 +1,7 @@
 from collections.abc import Callable
 
+import typer
+
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
     ELECTRIC_PURPLE,
@@ -48,6 +50,7 @@ def add_crawl_source(
                 info(f"Run '{next_step_command} {response['id']}' to start crawling")
             else:
                 error("Failed to add source")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             handle_client_error(e)

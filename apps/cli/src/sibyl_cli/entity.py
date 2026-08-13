@@ -259,6 +259,7 @@ def create_entity(
                 success(f"Entity created: {response['id']}")
             else:
                 error("Failed to create entity")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)

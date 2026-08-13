@@ -429,6 +429,7 @@ def stop(
         success("Sibyl stopped")
     else:
         error("Failed to stop Sibyl")
+        raise typer.Exit(1)
 
 
 @app.command()

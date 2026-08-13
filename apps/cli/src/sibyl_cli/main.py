@@ -2083,6 +2083,7 @@ def note_alias(
                         success(f"Note added to task: {resolved_id}")
                     else:
                         error("Failed to add note")
+                        raise typer.Exit(1)
                     return
 
                 parsed_tags = [t.strip() for t in tags.split(",") if t.strip()] if tags else None

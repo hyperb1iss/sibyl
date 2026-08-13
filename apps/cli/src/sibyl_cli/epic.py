@@ -490,6 +490,7 @@ def create_epic(
                     info(f"Lead: {assignee}")
             else:
                 error("Failed to create epic")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -529,6 +530,7 @@ def start_epic(
                 success(f"Epic started: {epic_id}")
             else:
                 error(f"Failed to start epic: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -572,6 +574,7 @@ def complete_epic(
                     info("Learnings captured")
             else:
                 error(f"Failed to complete epic: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -612,6 +615,7 @@ def archive_epic(
                 success(f"Epic archived: {resolved_id}")
             else:
                 error(f"Failed to archive epic: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -683,6 +687,7 @@ def update_epic(
                 info(f"Fields: {', '.join(updates.keys())}")
             else:
                 error(f"Failed to update epic: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)

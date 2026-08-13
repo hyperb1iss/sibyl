@@ -297,6 +297,7 @@ def delete_source(
                 success(f"Source deleted: {source_id}")
             else:
                 error("Failed to delete source")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)

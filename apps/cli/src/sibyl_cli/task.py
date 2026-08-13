@@ -587,6 +587,7 @@ def start_task(
                 _display_task_panel(entity)
             else:
                 error(f"Failed to start task: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -629,6 +630,7 @@ def block_task(
                 print_mutation_receipt(response)
             else:
                 error(f"Failed to block task: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -670,6 +672,7 @@ def unblock_task(
                 print_mutation_receipt(response)
             else:
                 error(f"Failed to unblock task: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -724,6 +727,7 @@ def submit_review(
                 print_mutation_receipt(response)
             else:
                 error(f"Failed to submit for review: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -813,6 +817,7 @@ def complete_task(
                     )
             else:
                 error(f"Failed to complete task: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -1042,6 +1047,7 @@ def create_task(
                     info(f"Dependencies: {', '.join(dep_list)}")
             else:
                 error(f"Failed to create task: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -1160,6 +1166,7 @@ def update_task(
                 info(f"Fields: {', '.join(response.get('data', {}).keys())}")
             else:
                 error(f"Failed to update task: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -1242,8 +1249,11 @@ def add_note(
             if response.get("id"):
                 success(f"Note added: {response['id']}")
                 print_mutation_receipt(response)
+            elif response.get("success"):
+                success(f"Note added to task: {resolved_id}")
             else:
                 error("Failed to add note")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)

@@ -273,6 +273,7 @@ def create_project(
                 success(f"Project created: {response['id']}")
             else:
                 error("Failed to create project")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
