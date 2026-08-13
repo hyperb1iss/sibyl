@@ -164,6 +164,20 @@ shipped and the consumers half-built. Closing that loop is a story no competitor
 - **Phase 0 — clean room.** Ranker decontamination, fusion decision, pipeline unification (or
   explicit pairing), fresh anchor via the standard unpaid screen ladder. No lever work lands on a
   contaminated baseline.
+- **Phase 0/1 standing direction — make hand-lexicon contamination unwriteable.** The
+  decontamination PR (#386) removed the corpus vocabulary, but the architecture that grew it is
+  intact: the lexical lane is a hand-maintained English micro-NLP pipeline (stopword lists,
+  graded-adjective tables, action-verb groups, fact frames, scaffolding terms), and hand lexicons
+  rot toward whatever eval is being run because entries get added the day a query misses. The
+  durable fix is structural, in order of rightness: (1) move morphological normalization into the
+  search engine — SurrealDB analyzers support `snowball(english)` stemming, which normalizes
+  index-side and query-side uniformly and deletes the comparative table, the plural fallback, and
+  the drifted duplicate tokenizer in one move; (2) where Python-side normalization must survive, a
+  real lemmatizer (`simplemma`-class: pure-Python, no model) replaces every morphology table we
+  would otherwise hand-write; (3) shrink the bespoke coverage ranker's role in favor of the lanes
+  that never had this problem — embeddings are morphology-blind, and the audit already proved most
+  of the ranker's hand weights are ordinal no-ops. New hand-lexicon entries are treated as a design
+  smell requiring adjudication, not a routine fix.
 - **Phase 1 — structure with consequences.** Writable typed predicates (small closed vocabulary:
   supersedes, contradicts, requires, supports, decides/caused-by) feeding the existing traversal
   weights; supersession + correction enforcement at traversal and pack admission (write-time gating
