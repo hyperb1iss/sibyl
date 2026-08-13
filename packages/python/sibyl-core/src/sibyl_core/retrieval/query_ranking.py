@@ -143,6 +143,7 @@ _KEYWORD_STOPWORDS = {
 # compared reaches comparison, referring reaches reference. The stemmed view
 # exists only for callers that have already lost the surface form.
 _KEYWORD_STOPWORD_STEMS = normalize_keyword_tokens(_KEYWORD_STOPWORDS)
+_TRANSCRIPT_SPEAKER_TERMS = normalize_keyword_tokens({"assistant", "user"})
 _RANK_WEIGHT = 0.95
 _PRIOR_WEIGHT = 0.04
 _OVERLAP_WEIGHT = 0.30
@@ -1268,7 +1269,7 @@ def _cluster_affinity_tokens(tokens: set[str]) -> set[str]:
         and token not in _KEYWORD_STOPWORD_STEMS
         and token not in _PREFERENCE_QUERY_SCAFFOLDING_TERMS
         and token not in _CLUSTER_AFFINITY_STOPWORDS
-        and token not in {"assistant", "user"}
+        and token not in _TRANSCRIPT_SPEAKER_TERMS
     }
 
 
