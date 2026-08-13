@@ -7,7 +7,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
-from sibyl_core.query_anchors import extract_explicit_query_anchors
+from sibyl_core.query_anchors import extract_explicit_anchor_phrases
 from sibyl_core.retrieval.query_ranking import extract_keywords
 
 MAX_FEEDBACK_DOCUMENTS = 8
@@ -155,7 +155,7 @@ def plan_deterministic_refinement_queries(
     seen.add(question.casefold())
     planned: list[DeterministicRefinementQuery] = []
 
-    explicit_anchors = extract_explicit_query_anchors(question)
+    explicit_anchors = extract_explicit_anchor_phrases(question)
     for candidate in _structural_refinement_queries(
         question,
         explicit_anchors=explicit_anchors,

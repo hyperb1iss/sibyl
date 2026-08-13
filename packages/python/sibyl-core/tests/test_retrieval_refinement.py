@@ -44,9 +44,9 @@ def test_refinement_strips_answer_formatting_and_focuses_explicit_anchors() -> N
     )
 
     assert [query.facet for query in planned] == ["anchor", "focus"]
-    assert planned[0].query == '"store" "result"'
-    assert planned[0].added_terms == ("store", "result")
-    assert planned[1].query == "column store result"
+    assert planned[0].query == '"store" "results"'
+    assert planned[0].added_terms == ("store", "results")
+    assert planned[1].query == "column store results"
     assert all("boxed" not in query.query for query in planned)
 
 
@@ -75,9 +75,9 @@ def test_refinement_decomposes_enumerated_targets_across_rounds() -> None:
         "target",
     ]
     assert [item.query for item in [*first_round, *second_round]] == [
-        '"layout setting" "pinned" "North list" footer label appear each page',
-        '"layout setting" "pinned" "South list" footer label appear each page',
-        '"layout setting" "pinned" "West list" footer label appear each page',
+        '"layout settings" "pinned" "North list" footer label appears each page',
+        '"layout settings" "pinned" "South list" footer label appears each page',
+        '"layout settings" "pinned" "West list" footer label appears each page',
     ]
 
 
@@ -90,7 +90,7 @@ def test_refinement_isolates_specific_terminal_question_from_quoted_example() ->
     )
 
     assert planned[0].facet == "focus_clause"
-    assert planned[0].query == "prefix used archive review dashboard link"
+    assert planned[0].query == "prefix used archive review dashboard links"
 
 
 def test_refinement_preserves_question_after_prefix_answer_formatting() -> None:
@@ -111,7 +111,7 @@ def test_refinement_strips_response_contract_sentences() -> None:
         max_queries=1,
     )
 
-    assert planned[0].query == "product page want summarize review star rating"
+    assert planned[0].query == "product page want summarize reviews star rating"
 
 
 def test_refinement_strips_standalone_answer_shape_instructions() -> None:
@@ -122,7 +122,7 @@ def test_refinement_strips_standalone_answer_shape_instructions() -> None:
         max_queries=1,
     )
 
-    assert planned[0].query == "button open shipment form"
+    assert planned[0].query == "button opens shipment form"
 
 
 def test_refinement_strips_ordering_and_boxed_output_contracts() -> None:
@@ -133,7 +133,7 @@ def test_refinement_strips_ordering_and_boxed_output_contracts() -> None:
         max_queries=1,
     )
 
-    assert planned[0].query == "label selected"
+    assert planned[0].query == "labels selected"
 
 
 def test_normalization_preserves_semantic_parenthetical_examples() -> None:
