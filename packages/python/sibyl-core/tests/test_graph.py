@@ -943,6 +943,56 @@ async def test_two_writers_touching_disjoint_metadata_keys_both_survive() -> Non
 
 
 @pytest.mark.asyncio
+async def test_removing_retrieval_keys_reaches_the_promoted_columns() -> None:
+    """A promoted key must obey the same removal rule as the rest of the bag.
+
+    Exact-match retrieval reads the column, not the metadata, so a removal that
+    stops at the bag leaves the retired key still matching queries. Absence
+    still means "this write does not speak to the keys", which is what lets a
+    reprojection rebuild an entity without stripping the writer's declaration.
+    """
+    client = SurrealGraphClient(group_id="org-retrieval-key-clear", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        def _note(metadata: dict[str, Any]) -> Entity:
+            return Entity(
+                id="note_retrieval_keys",
+                entity_type=EntityType.NOTE,
+                name="Note with an exact-match key",
+                organization_id=client.group_id,
+                metadata=metadata,
+            )
+
+        await manager.create_direct(_note({"retrieval_keys": ["ALPHA-1"]}))
+
+        # Absence does not speak to the keys, so they survive a partial rebuild.
+        await manager.create_direct(_note({"unrelated": "value"}))
+        assert (await manager.get("note_retrieval_keys")).metadata["retrieval_keys"] == ["ALPHA-1"]
+
+        await manager.create_direct(_note({"retrieval_keys": None}))
+        cleared = await manager.get("note_retrieval_keys")
+
+        assert "retrieval_keys" not in cleared.metadata
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT retrieval_keys, retrieval_keys_normalized
+                FROM entity
+                WHERE group_id = $group_id AND uuid = "note_retrieval_keys"
+                LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+        assert not rows[0]["retrieval_keys"]
+        assert not rows[0]["retrieval_keys_normalized"]
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_removing_a_metadata_key_keeps_it_gone_on_every_read_path() -> None:
     """A key an update removes must not come back from a copy of the old state.
 

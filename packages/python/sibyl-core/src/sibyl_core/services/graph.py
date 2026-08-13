@@ -2076,7 +2076,10 @@ def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
     if row_tags is not None and metadata.get("tags") is None:
         metadata["tags"] = row_tags
     row_retrieval_keys = normalized_row.get("retrieval_keys")
-    if row_retrieval_keys is not None and metadata.get("retrieval_keys") is None:
+    # An empty column is the cleared state, not a value: a write that removed
+    # the keys stores empty lists so the removal reaches the promoted columns,
+    # and copying that back would hand callers a key they just deleted.
+    if row_retrieval_keys and metadata.get("retrieval_keys") is None:
         metadata["retrieval_keys"] = row_retrieval_keys
 
     entity_id = _entity_id_from_row(normalized_row)
@@ -3096,6 +3099,12 @@ def _entity_record(
     # single malformed key must not fail an otherwise valid write; the surfaces
     # that accept keys from a caller validate strictly instead.
     retrieval_keys = coerce_retrieval_keys(metadata.get("retrieval_keys"))
+    # A key written as None means "remove it", the same as anywhere else in the
+    # bag. Promotion would otherwise swallow that: the coercion returns None for
+    # a removal and for a write that never mentioned keys alike, the columns get
+    # skipped, and the upsert's preserve-on-absence keeps the retired key
+    # exact-matching. Empty lists say the removal out loud in column form.
+    clears_retrieval_keys = retrieval_keys is None and metadata.get("retrieval_keys", ...) is None
     epic_id = _metadata_str(metadata, "epic_id")
     parent_task_id = _metadata_str(metadata, "parent_task_id")
     if canonicalize_parent_task_id and not parent_task_id and entity.entity_type == EntityType.TASK:
@@ -3158,6 +3167,9 @@ def _entity_record(
     if retrieval_keys is not None:
         record["retrieval_keys"] = retrieval_keys[0]
         record["retrieval_keys_normalized"] = retrieval_keys[1]
+    elif clears_retrieval_keys:
+        record["retrieval_keys"] = []
+        record["retrieval_keys_normalized"] = []
     if last_recalled_at is not None:
         record["last_recalled_at"] = last_recalled_at
     if last_used_at is not None:
