@@ -31,12 +31,6 @@ from sibyl_cli.pending_writes import (
 app = typer.Typer(help="Inspect and replay locally buffered writes")
 
 
-@app.callback()
-def _claim_queue_report() -> None:
-    """Every command in this group reports the queue itself."""
-    mark_pending_writes_reported()
-
-
 def _summary(item: dict[str, Any]) -> dict[str, Any]:
     title, kind = pending_write_label(item)
     return {
@@ -96,6 +90,7 @@ def list_writes(
     json_output: Annotated[bool, typer.Option("--json", "-j", help="Output JSON")] = False,
 ) -> None:
     """List buffered writes without printing sensitive payload bodies."""
+    mark_pending_writes_reported()
     summaries = [_summary(item) for item in list_pending_writes()]
     if json_output:
         print_json({"pending_writes": summaries})
@@ -166,6 +161,7 @@ def flush_writes(
     ] = None,
 ) -> None:
     """Replay buffered writes."""
+    mark_pending_writes_reported()
     try:
         selected = _selected_writes(write_ids or [])
     except (FileNotFoundError, ValueError) as exc:

@@ -1121,7 +1121,7 @@ def update_task(
                     "--description, --assignee, --epic, --feature, --tags, --tech, "
                     "--add-dep, or --remove-dep"
                 )
-                return
+                raise typer.Exit(1)
 
             resolved_id = await _resolve_task_id(client, task_id)
             assignees = [assignee] if assignee else None

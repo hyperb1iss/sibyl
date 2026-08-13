@@ -271,3 +271,49 @@ def test_crawl_ingest_exits_zero_when_the_crawl_queues() -> None:
         result = CliRunner().invoke(crawl.app, ["ingest", "source_123"])
 
     assert result.exit_code == 0
+
+
+@pytest.mark.parametrize("json_flag", [[], ["--json"]])
+def test_health_exits_nonzero_on_an_unhealthy_server(json_flag: list[str]) -> None:
+    """Table and --json must agree about the same response."""
+    client = _client()
+    client.get = AsyncMock(return_value={"status": "unhealthy", "server_name": "stub"})
+
+    with patch("sibyl_cli.main.get_client", return_value=client):
+        result = CliRunner().invoke(main_app, ["health", *json_flag])
+
+    assert result.exit_code == 1
+
+
+@pytest.mark.parametrize("json_flag", [[], ["--json"]])
+def test_health_exits_zero_on_a_healthy_server(json_flag: list[str]) -> None:
+    client = _client()
+    client.get = AsyncMock(return_value={"status": "healthy", "server_name": "stub"})
+
+    with patch("sibyl_cli.main.get_client", return_value=client):
+        result = CliRunner().invoke(main_app, ["health", *json_flag])
+
+    assert result.exit_code == 0
+
+
+def test_entity_list_exits_nonzero_on_an_invalid_type() -> None:
+    result = CliRunner().invoke(entity.app, ["list", "--type", "not-a-real-type"])
+
+    assert result.exit_code == 1
+    assert "Invalid entity type" in result.stdout
+
+
+def test_entity_create_exits_nonzero_on_an_invalid_type() -> None:
+    result = CliRunner().invoke(
+        entity.app, ["create", "--name", "x", "--type", "not-a-real-type"]
+    )
+
+    assert result.exit_code == 1
+
+
+def test_task_update_exits_nonzero_when_no_fields_are_given(resolved_ids: None) -> None:
+    with patch("sibyl_cli.task.get_client", return_value=_client()):
+        result = CliRunner().invoke(task.app, ["update", TASK_ID])
+
+    assert result.exit_code == 1
+    assert "No fields to update" in result.stdout

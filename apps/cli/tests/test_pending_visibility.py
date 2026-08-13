@@ -249,3 +249,50 @@ def test_a_value_that_merely_looks_like_the_group_name_still_gets_the_notice(
     _run_entry_point(["sibyl", "search", "pending-writes"], monkeypatch)
 
     assert "1 write buffered locally" in capsys.readouterr().err
+
+
+def test_the_quick_context_fast_path_still_warns(
+    sandbox_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Agent hooks take this path, and it never reaches sibyl_cli.main."""
+    from sibyl_cli import entrypoint
+
+    _buffer(1)
+    monkeypatch.setattr("sys.argv", ["sibyl", "context", "--quick", "--json"])
+
+    entrypoint.main()
+
+    assert "1 write buffered locally" in capsys.readouterr().err
+
+
+def test_discarding_an_unknown_id_leaves_the_queue_reported(
+    sandbox_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """discard can leave the queue untouched, so it must not claim the report."""
+    _buffer(1)
+    monkeypatch.setattr("sys.argv", ["sibyl", "pending-writes", "discard"])
+
+    _run_entry_point(["sibyl", "pending-writes", "discard"], monkeypatch)
+
+    assert "1 write buffered locally" in capsys.readouterr().err
+
+
+def test_the_notice_prints_only_once_per_process(
+    sandbox_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Two entry points nest around one command, so the notice has to be idempotent."""
+    from sibyl_cli import entrypoint
+
+    _buffer(2)
+    monkeypatch.setattr("sys.argv", ["sibyl", "version"])
+
+    with pytest.raises(SystemExit):
+        entrypoint.main()
+
+    assert capsys.readouterr().err.count("2 writes buffered locally") == 1

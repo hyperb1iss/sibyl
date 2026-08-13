@@ -115,7 +115,7 @@ def list_entities(
     if entity_type not in ENTITY_TYPES:
         error(f"Invalid entity type: {entity_type}")
         info(f"Valid types: {', '.join(ENTITY_TYPES)}")
-        return
+        raise typer.Exit(1)
 
     @run_async
     async def _list() -> None:
@@ -229,7 +229,7 @@ def create_entity(
     if entity_type not in ENTITY_TYPES:
         error(f"Invalid entity type: {entity_type}")
         info(f"Valid types: {', '.join(ENTITY_TYPES)}")
-        return
+        raise typer.Exit(1)
 
     @run_async
     async def _create() -> None:

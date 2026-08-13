@@ -1508,13 +1508,17 @@ def health(
             async with get_client() as client:
                 data = await client.get("/health")
 
-                if json_output:
-                    mark_pending_writes_reported()
-                    print_json({**data, "pending_writes": pending_write_status()})
-                    return
                 status = data.get("status", "unknown")
                 server = data.get("server_name", "sibyl")
                 healthy = status == "healthy"
+
+                if json_output:
+                    mark_pending_writes_reported()
+                    print_json_result(
+                        {**data, "pending_writes": pending_write_status()},
+                        succeeded=healthy,
+                    )
+                    return
 
                 if healthy:
                     success(f"{server} is healthy")

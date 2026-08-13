@@ -409,7 +409,7 @@ def link_graph(
 
         if status == "error":
             error(response.get("error", "Unknown error"))
-            return
+            raise typer.Exit(1)
 
         console.print(f"\n[{SUCCESS_GREEN}]✓[/{SUCCESS_GREEN}] Graph integration complete\n")
         console.print(

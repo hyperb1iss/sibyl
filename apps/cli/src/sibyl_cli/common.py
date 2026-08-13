@@ -244,6 +244,9 @@ def notify_pending_writes() -> None:
 
     if _pending_writes_reported:
         return
+    # Claim the report before printing, so a caller reachable from more than
+    # one entry point cannot emit the same line twice.
+    mark_pending_writes_reported()
     count = pending_write_count()
     if count <= 0:
         return
