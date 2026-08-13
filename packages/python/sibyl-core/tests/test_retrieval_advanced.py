@@ -126,6 +126,34 @@ def test_query_coverage_keywords_normalize_comparatives_to_the_base_adjective() 
     ]
 
 
+def test_query_coverage_keywords_do_not_fold_noun_homographs_into_adjectives() -> None:
+    """A lighter is an object, not a degree of light."""
+    assert extract_keywords("Which lighter did I buy?") == ["lighter", "buy"]
+    assert extract_keywords("Which cleaner did I buy?") == ["cleaner", "buy"]
+    assert extract_keywords("Which warmer did I buy?") == ["warmer", "buy"]
+    assert extract_keywords("Who was the closer in that game?") == ["closer", "game"]
+    assert extract_keywords("How did I lower the timeout?") == ["lower", "timeout"]
+    # Their superlatives carry no such reading and still normalize.
+    assert extract_keywords("Which lightest frame did I pick?") == ["light", "frame", "pick"]
+
+
+def test_query_coverage_ranks_a_lighter_above_a_light() -> None:
+    """The homograph fold used to hand rank one to a garage lamp."""
+    ranked = _rank_query_ids(
+        "Which lighter did I buy?",
+        [
+            "User: I bought a light for the garage ceiling.",
+            "User: I bought a Zippo lighter at the corner store.",
+            "User: I bought a notebook for the meeting.",
+            "User: I bought a coffee mug for the office.",
+            "User: I bought a cable for the monitor.",
+            "User: I bought a lamp shade for the hallway.",
+        ],
+    )
+
+    assert ranked[0] == "1"
+
+
 def test_query_coverage_keywords_do_not_strip_er_from_agent_nouns() -> None:
     """The comparative table is closed: no suffix rule mangles ordinary nouns."""
     keywords = extract_keywords("Which user reported the server error to another provider?")
@@ -967,6 +995,19 @@ def test_recurring_frequency_frame_needs_a_cadence_in_the_evidence() -> None:
 
     assert frame_score("i run the offsite backup every two weeks.") == 0.82
     assert frame_score("i run the offsite backup from the storage host.") == 0.0
+
+
+def test_fact_frames_do_not_equate_presenting_with_volunteering() -> None:
+    """The same split has to hold on the frame path, which weights into ranking."""
+    present_query = "What did I present at the conference?"
+    volunteer_query = "Where did I volunteer last month?"
+    present_evidence = "User: I presented the slides at the conference."
+    volunteer_evidence = "User: I volunteered at the shelter."
+
+    assert score_fact_frame_match(present_query, volunteer_evidence) < 0.1
+    assert score_fact_frame_match(volunteer_query, present_evidence) < 0.1
+    assert score_fact_frame_match(present_query, present_evidence) >= 0.5
+    assert score_fact_frame_match(volunteer_query, volunteer_evidence) >= 0.4
 
 
 def test_query_coverage_promotes_recurring_frequency() -> None:

@@ -31,14 +31,17 @@ _NORMALIZED_TOKEN_ALIASES = {
 # other into oth. Adjectives whose base or inflections the stopword layer
 # already classifies (new, long, late, early) are deliberately absent, because
 # normalization runs before that check and would change which tokens it drops.
+# Comparatives that double as everyday nouns are absent for a different reason:
+# a lighter, a cleaner, a warmer and a closer are objects and roles, not degrees
+# of light or clean, and folding them in makes a Zippo match a garage lamp.
+# "lower" is out because it is far more often the verb. Their superlatives stay,
+# since nothing reads "lightest" or "closest" as a noun.
 _GRADED_ADJECTIVE_ALIASES = {
     "bigger": "big",
     "biggest": "big",
     "cheaper": "cheap",
     "cheapest": "cheap",
-    "cleaner": "clean",
     "cleanest": "clean",
-    "closer": "close",
     "closest": "close",
     "colder": "cold",
     "coldest": "cold",
@@ -56,11 +59,9 @@ _GRADED_ADJECTIVE_ALIASES = {
     "highest": "high",
     "larger": "large",
     "largest": "large",
-    "lighter": "light",
     "lightest": "light",
     "louder": "loud",
     "loudest": "loud",
-    "lower": "low",
     "lowest": "low",
     "older": "old",
     "oldest": "old",
@@ -78,7 +79,6 @@ _GRADED_ADJECTIVE_ALIASES = {
     "smallest": "small",
     "stronger": "strong",
     "strongest": "strong",
-    "warmer": "warm",
     "warmest": "warm",
     "weaker": "weak",
     "weakest": "weak",
