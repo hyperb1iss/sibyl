@@ -482,6 +482,19 @@ wins factoid lookups — route, don't force.
   ceiling: the 27s knee); GO = ≥ +3pp mean paired over the then-best config, numbers pre-registered
   before the first paid run.
 
+**Status (2026-08-13, decision `8b69af3de865` pre-registration): CLOSED for v1.2 by screen FAIL; no
+paid run made.** The unpaid screen ran the merged arm at its shipped defaults over the full 211
+enterprise questions with activity receipts in every row (traversal armed 211/211, widening round
+used in 209). Paired against the same-commit baseline: pack coverage −4 questions (gate: ≥ +6,
+regression floor −2 breached; 2 rescued, 6 lost) and paired latency +28.4s median (screen line: ≤
++4s; the 15s scored ceiling is unreachable by an order of magnitude). Mechanism: gathered candidates
+grow the pack (median 11 items vs 7) but displace winning evidence more often than they rescue
+misses, and the sufficiency stop never fired (0 early stops in 211), so the loop gathers
+indiscriminately. Traversal moves to v1.3 needing a discriminating sufficiency stop,
+displacement-safe admission, and the latency budget work (§7). Route receipt: the first screen
+attempt ran silently arm-off and was caught by row-level receipt checks — the loaded-memory merge
+was dropping arm flags entirely (fixed as the class in PR #373).
+
 ### A4. Full-451 + leaderboard submission — MOVED TO v1.3 (2026-08-12)
 
 - Gate `baseline-beat-gate`: combined full-451 ≥ 42.8% at ≤ 10s avg with committed receipts.
@@ -691,7 +704,8 @@ Re-scoped 2026-08-12 (decision `e180be76037b`): the benchmark-beat criteria move
   `95677ae0b87b`) and every 2026-08 lever class adjudicated in the §2.4 ledger with receipts
   (**done**: decisions `715454c60c9b`, `14686f9a4056`, `e180be76037b`).
 - A3 traversal arm merged with its scored gate documented and pre-registered numbers recorded, run
-  or explicitly deferred to v1.3 by Bliss's call.
+  or explicitly deferred to v1.3 by Bliss's call (**done**: screen FAILED its pre-registered gate
+  2026-08-13, decision `8b69af3de865`; closed for v1.2 with no paid run, traversal to v1.3).
 - Overfetch fast path (PR #371) adjudicated by the metric-level re-screen: merged on a clean paired
   read or closed with the verdict in the PR body.
 - Accurate-mode fate executed; `query_planning.py` audit closed (**done**: #355 deprecation notice,
