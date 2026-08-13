@@ -820,6 +820,88 @@ async def test_materialize_synthesis_section_packs_drops_self_feeding_sources(
 
 
 @pytest.mark.asyncio
+async def test_materialize_keeps_a_prior_artifact_the_caller_asked_for() -> None:
+    """Naming a prior artifact is a request to build on it, not recursion.
+
+    The self-feeding rule exempts explicitly requested sources at plan time, and
+    materialize rebuilds every pack, so the exemption has to survive this stage
+    too or the caller silently loses the source they named.
+    """
+
+    async def fake_search(**kwargs: Any) -> SearchResponse:
+        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+
+    run = await plan_synthesis(
+        SynthesisRequest(
+            goal="Build on last quarter's handbook",
+            artifact_ids=["source:prior_handbook"],
+            required_sections=[SynthesisSectionRequest(title="Evidence")],
+        ),
+        organization_id="org-123",
+        search_fn=fake_search,
+        related_fn=_empty_related,
+    )
+
+    async def fake_context(**kwargs: Any) -> ContextPack:
+        return ContextPack(
+            goal=kwargs["goal"],
+            intent=ContextIntent.RESEARCH,
+            query=kwargs["goal"],
+            domain=None,
+            project=None,
+            sections=[
+                ContextSection(
+                    facet=ContextFacet.RECENT_MEMORY,
+                    title="Recent Memory",
+                    items=[
+                        ContextItem(
+                            id="raw_memory:prior_handbook",
+                            type="raw_memory",
+                            name="Previous handbook",
+                            content="Deliberately requested handbook text.",
+                            score=0.99,
+                            facet=ContextFacet.RECENT_MEMORY,
+                            reason="named by the caller",
+                            source="source:prior_handbook",
+                            metadata={
+                                "source_id": "source:prior_handbook",
+                                "capture_surface": "synthesis_artifact",
+                            },
+                        ),
+                        ContextItem(
+                            id="raw_memory:unrequested",
+                            type="raw_memory",
+                            name="Some other handbook",
+                            content="Unrequested handbook text must not feed itself.",
+                            score=0.98,
+                            facet=ContextFacet.RECENT_MEMORY,
+                            reason="prior artifact",
+                            source="source:unrequested",
+                            metadata={
+                                "source_id": "source:unrequested",
+                                "capture_surface": "synthesis_artifact",
+                            },
+                        ),
+                    ],
+                )
+            ],
+            total_items=2,
+        )
+
+    materialized = await materialize_synthesis_section_packs(
+        run,
+        organization_id="org-123",
+        principal_id="user-123",
+        context_fn=fake_context,
+        allowed_memory_scope_keys=None,
+    )
+    pack = materialized.source_packs[0]
+
+    assert pack.source_ids == ["source:prior_handbook"]
+    assert pack.hidden_count == 1
+
+
+@pytest.mark.asyncio
 async def test_draft_synthesis_artifact_renders_citable_markdown_and_json() -> None:
     async def fake_search(**kwargs: Any) -> SearchResponse:
         return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})

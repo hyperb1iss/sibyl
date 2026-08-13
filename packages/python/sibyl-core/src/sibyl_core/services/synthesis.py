@@ -291,6 +291,26 @@ def _is_self_feeding_source(source: SynthesisSourceReference) -> bool:
     return _is_self_feeding_metadata(source.metadata)
 
 
+def _explicitly_requested_ids(request: SynthesisRequest) -> frozenset[str]:
+    """Every id the caller named, in the same four lists ``plan_synthesis`` reads.
+
+    These are the sources the self-feeding rule exempts. Naming a prior artifact
+    is a request to synthesize from it, not the recursion the rule exists to
+    stop, and the exemption has to hold at materialize too or the stage that
+    actually builds the packs would drop what the caller asked for.
+    """
+    return frozenset(
+        str(source_id)
+        for source_id in (
+            *request.entity_ids,
+            *request.decision_ids,
+            *request.task_ids,
+            *request.artifact_ids,
+        )
+        if source_id
+    )
+
+
 def _without_self_feeding_sources(
     sources: Iterable[SynthesisSourceReference],
 ) -> list[SynthesisSourceReference]:
@@ -548,6 +568,7 @@ async def materialize_synthesis_section_packs(
         context_item_source_id,
     )
 
+    requested_ids = _explicitly_requested_ids(run.request)
     materialized_packs: list[SynthesisSourcePack] = []
     outline_sections: list[SynthesisOutlineSection] = []
     materialization_gaps: list[SynthesisGap] = []
@@ -583,8 +604,11 @@ async def materialize_synthesis_section_packs(
             # wholesale, so without the same rule here a remembered handbook
             # comes back through the context pack and becomes a source of its
             # own successor. Counted as hidden: from the artifact's side it is
-            # a candidate the pack refused to render.
-            if _is_self_feeding_metadata(metadata):
+            # a candidate the pack refused to render. Sources the caller named
+            # are exempt on both stages, because synthesizing FROM a chosen
+            # prior artifact is a deliberate request rather than recursion.
+            requested = source_id in requested_ids or item.id in requested_ids
+            if not requested and _is_self_feeding_metadata(metadata):
                 hidden_count += 1
                 continue
             if _context_item_is_hidden(
