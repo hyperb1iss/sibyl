@@ -939,16 +939,14 @@ async def _apply_supersession_gate(
             gated.append((signal, kept))
         surviving = gated
 
-    metadata: dict[str, Any] = {
-        "supersession_gate": {
-            "lifecycle_dropped": lifecycle_dropped,
-            "superseded_dropped": edge_dropped,
-            "superseded_uuids": sorted(superseded),
-        }
+    receipt: dict[str, Any] = {
+        "lifecycle_dropped": lifecycle_dropped,
+        "superseded_dropped": edge_dropped,
+        "superseded_uuids": sorted(superseded),
     }
     if lookup_failed is not None:
-        metadata["supersession_gate"]["lookup_error_type"] = lookup_failed
-    return surviving, metadata
+        receipt["lookup_error_type"] = lookup_failed
+    return surviving, {"supersession_gate": receipt}
 
 
 def _candidate_limits_for_limit(

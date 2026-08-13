@@ -10,18 +10,24 @@ admission check before a pack is served.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
 import sibyl_core.retrieval.search as search_module
 import sibyl_core.tools.context as context_module
+from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
 from sibyl_core.models.context import ContextFacet
+from sibyl_core.models.entities import RelationshipType
 from sibyl_core.retrieval.search import (
     RetrievalCandidate,
     RetrievalSignal,
     build_context_retrieval_plan,
 )
+from sibyl_core.services import memory as memory_module
+from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 from sibyl_core.tools.context import compile_context
 from sibyl_core.tools.responses import SearchResponse, SearchResult
 
@@ -358,3 +364,215 @@ async def test_supersession_lookup_failure_degrades_without_failing_the_search(
     ]
     assert metadata["supersession_gate"]["lifecycle_dropped"] == 1
     assert metadata["supersession_gate"]["lookup_error_type"] == "RuntimeError"
+
+
+class _CorrectionGraphRuntime:
+    """Minimal graph double: one projected entity per corrected capture."""
+
+    def __init__(self, *, uuid: str = "entity-old") -> None:
+        self.uuid = uuid
+        self.updates: list[tuple[str, dict[str, Any]]] = []
+        self.relationships: list[Any] = []
+        self.client = self
+        self.entity_manager = self
+        self.relationship_manager = self
+
+    async def execute_query(self, _query: str, **_params: object) -> list[dict[str, object]]:
+        return [{"uuid": self.uuid}]
+
+    async def update(self, entity_id: str, updates: dict[str, Any]) -> None:
+        self.updates.append((entity_id, dict(updates["metadata"])))
+
+    async def create(self, relationship: Any) -> str:
+        self.relationships.append(relationship)
+        return relationship.id
+
+
+def _raw_capture(**overrides: Any) -> RawMemory:
+    values: dict[str, Any] = {
+        "id": "candidate-1",
+        "organization_id": "org-1",
+        "source_id": "source-1",
+        "principal_id": "user-1",
+        "memory_scope": MemoryScope.PRIVATE,
+        "scope_key": None,
+        "review_state": "pending",
+        "entity_type": "decision",
+        "title": "Decision: deploy to Fly",
+        "raw_content": "We decided to deploy to fly.io.",
+        "tags": ["decision"],
+        "metadata": {"capture_surface": "reflection_candidate", "domain": "sibyl"},
+        "provenance": {},
+        "capture_surface": "reflection_candidate",
+        "captured_at": datetime(2026, 5, 12, 12, 0, 0, tzinfo=UTC),
+        "created_at": datetime(2026, 5, 12, 12, 0, 0, tzinfo=UTC),
+    }
+    values.update(overrides)
+    return RawMemory(**values)
+
+
+@pytest.mark.asyncio
+async def test_correction_stamps_the_graph_row_so_recall_stops_serving_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`sibyl correct` reaches the entity, not just `raw_captures`."""
+
+    memory = _raw_capture()
+    runtime = _CorrectionGraphRuntime()
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> _CorrectionGraphRuntime:
+        return runtime
+
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+    monkeypatch.setattr(
+        memory_module,
+        "save_raw_memory",
+        AsyncMock(side_effect=lambda updated, **_kwargs: updated),
+    )
+    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+
+    result = await memory_module.apply_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="mark_wrong",
+        reason="we moved off Fly",
+    )
+
+    assert result.applied
+    assert result.affected_entity_ids == ["entity-old"]
+    entity_id, stamped = runtime.updates[0]
+    assert entity_id == "entity-old"
+    assert stamped["lifecycle_state"] == "contested"
+    assert stamped["excluded_from_recall"] is True
+
+    # The stamp is exactly what the retrieval gate reads, so the same query
+    # that ranked this row first now refuses it admission.
+    assert graph_metadata_recallable(stamped) is False
+
+
+@pytest.mark.asyncio
+async def test_supersede_writes_the_replacement_edge_in_the_direction_retrieval_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Source is the survivor, target is the retired row."""
+
+    memory = _raw_capture(id="source-1")
+    replacement = _raw_capture(id="replacement-1", title="Deploy to Hetzner")
+    runtime = _CorrectionGraphRuntime()
+    seen_uuids = iter(["entity-old", "entity-new"])
+
+    async def execute_query(_query: str, **_params: object) -> list[dict[str, object]]:
+        return [{"uuid": next(seen_uuids)}]
+
+    runtime.execute_query = execute_query  # type: ignore[method-assign]
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> _CorrectionGraphRuntime:
+        return runtime
+
+    monkeypatch.setattr(
+        memory_module,
+        "get_raw_memory",
+        AsyncMock(side_effect=[memory, replacement, memory]),
+    )
+    monkeypatch.setattr(
+        memory_module,
+        "get_raw_memory_by_source_id",
+        AsyncMock(return_value=replacement),
+    )
+    monkeypatch.setattr(
+        memory_module,
+        "save_raw_memory",
+        AsyncMock(side_effect=lambda updated, **_kwargs: updated),
+    )
+    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+
+    result = await memory_module.apply_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="supersede",
+        replacement_source_id="replacement-1",
+    )
+
+    assert result.applied
+    assert result.affected_entity_ids == ["entity-old"]
+    assert len(runtime.relationships) == 1
+    edge = runtime.relationships[0]
+    assert edge.source_id == "entity-new"
+    assert edge.target_id == "entity-old"
+    assert edge.relationship_type is RelationshipType.SUPERSEDES
+
+
+@pytest.mark.asyncio
+async def test_restore_clears_the_graph_stamp_it_wrote(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Enforcement has to be reversible or `restore` is a lie."""
+
+    memory = _raw_capture(
+        review_state="hidden",
+        metadata={
+            "capture_surface": "reflection_candidate",
+            "lifecycle_state": "active",
+            "lifecycle_flags": ["hidden"],
+        },
+    )
+    runtime = _CorrectionGraphRuntime()
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> _CorrectionGraphRuntime:
+        return runtime
+
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+    monkeypatch.setattr(
+        memory_module,
+        "save_raw_memory",
+        AsyncMock(side_effect=lambda updated, **_kwargs: updated),
+    )
+    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+
+    result = await memory_module.apply_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="restore",
+    )
+
+    assert result.applied
+    _entity_id, stamped = runtime.updates[0]
+    assert stamped["excluded_from_recall"] is False
+    assert stamped["superseded_by_source_id"] == ""
+    assert graph_metadata_recallable(stamped) is True
+
+
+@pytest.mark.asyncio
+async def test_correction_still_applies_when_the_graph_is_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The raw write already landed; a graph failure must not undo the report."""
+
+    memory = _raw_capture()
+
+    async def exploding_runtime(_organization_id: str, **_kwargs: object) -> Any:
+        raise RuntimeError("no graph today")
+
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+    monkeypatch.setattr(
+        memory_module,
+        "save_raw_memory",
+        AsyncMock(side_effect=lambda updated, **_kwargs: updated),
+    )
+    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", exploding_runtime)
+
+    result = await memory_module.apply_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="mark_stale",
+    )
+
+    assert result.applied
+    assert result.affected_entity_ids == []

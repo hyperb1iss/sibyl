@@ -2582,8 +2582,14 @@ async def apply_memory_correction_route(
             revision=updated_revision,
             affected_records=(
                 [
-                    f"raw_captures:{affected_id}"
-                    for affected_id in result.preview.affected_source_ids
+                    *(
+                        f"raw_captures:{affected_id}"
+                        for affected_id in result.preview.affected_source_ids
+                    ),
+                    # The graph rows are named too, because they are what
+                    # retrieval ranks: a receipt listing only the capture
+                    # would still read as though the correction stopped there.
+                    *(f"entity:{entity_id}" for entity_id in result.affected_entity_ids),
                 ]
                 if result.applied
                 else []

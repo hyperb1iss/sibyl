@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, cast
@@ -41,7 +41,7 @@ from sibyl_core.models.reflection import (
     with_reflection_finding_metadata,
 )
 from sibyl_core.models.relations import declared_relation_targets
-from sibyl_core.services.graph import get_surreal_graph_runtime
+from sibyl_core.services.graph import get_surreal_graph_runtime, normalize_records
 from sibyl_core.services.memory_autonomy import reflection_autonomy_candidate_metadata
 from sibyl_core.services.surreal_content import (
     MemoryScope,
@@ -173,6 +173,9 @@ class MemoryCorrectionResult:
     applied: bool
     preview: MemoryCorrectionPreview
     updated_memory: RawMemory | None = None
+    # The graph rows the correction actually reached. Empty is a real answer:
+    # a capture with no projection has nothing on the retrieval lane to gate.
+    affected_entity_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1743,7 +1746,221 @@ async def apply_memory_correction(
     if preview.action == "supersede" and canonical_replacement_source_id is not None:
         save_kwargs["superseded_by_memory_id"] = canonical_replacement_source_id
     saved = await save_raw_memory(updated, **save_kwargs)
-    return MemoryCorrectionResult(applied=True, preview=preview, updated_memory=saved)
+    affected_entity_ids = await _project_correction_to_graph(
+        organization_id=organization_id,
+        memory=saved,
+        preview=preview,
+        principal_id=principal_id,
+        replacement_source_id=canonical_replacement_source_id,
+        duplicate_of_source_id=canonical_duplicate_of_source_id,
+    )
+    return MemoryCorrectionResult(
+        applied=True,
+        preview=preview,
+        updated_memory=saved,
+        affected_entity_ids=affected_entity_ids,
+    )
+
+
+_GRAPH_CORRECTION_LOOKUP_LIMIT = 64
+
+
+async def _correction_graph_entity_ids(
+    runtime: Any,
+    *,
+    organization_id: str,
+    memory: RawMemory,
+) -> list[str]:
+    """Find the graph rows projected from this capture.
+
+    Two sources, because the two write paths record the link in opposite
+    directions. Promotion stamps the entity id onto the raw memory, so that
+    one is a metadata read. Direct capture stamps the raw ids onto the graph
+    row's attributes instead (`memory_pipeline/capture.py:137-140`), which
+    leaves a query as the only way back. That query is unindexed, and it is
+    affordable here only because a correction is a rare, operator-initiated
+    write rather than anything on the read path.
+    """
+
+    candidate_ids = list(_correction_derived_ids(memory))
+    source_id = memory.source_id or memory.id
+    clauses = ["attributes.raw_memory_id = $raw_memory_id"]
+    params: dict[str, Any] = {
+        "group_id": str(organization_id),
+        "raw_memory_id": memory.id,
+        "limit": _GRAPH_CORRECTION_LOOKUP_LIMIT,
+    }
+    if source_id and source_id != memory.id:
+        clauses.append("attributes.raw_source_id = $raw_source_id")
+        params["raw_source_id"] = source_id
+    rows = normalize_records(
+        await runtime.client.execute_query(
+            f"""
+            SELECT uuid FROM entity
+            WHERE group_id = $group_id
+              AND ({" OR ".join(clauses)})
+            LIMIT $limit;
+            """,
+            **params,
+        )
+    )
+    for row in rows:
+        uuid = str(row.get("uuid") or "")
+        if uuid:
+            candidate_ids.append(uuid)
+    return list(dict.fromkeys(entity_id for entity_id in candidate_ids if entity_id))
+
+
+def _correction_graph_metadata(
+    preview: MemoryCorrectionPreview,
+    *,
+    replacement_source_id: str | None,
+    duplicate_of_source_id: str | None,
+) -> dict[str, Any]:
+    """Build the verdict the graph row carries from here on.
+
+    Every marker is written on every correction, including the cleared form a
+    restore needs. A patch that only ever adds keys cannot undo itself, and
+    the graph merge has no way to remove one.
+    """
+
+    restoring = preview.action == "restore"
+    excluded = bool(preview.recall_impact.get("excluded_from_recall")) and not restoring
+    return {
+        "lifecycle_state": preview.target_lifecycle_state,
+        "lifecycle_flags": list(preview.target_lifecycle_flags),
+        "lifecycle_action": preview.action,
+        "excluded_from_recall": excluded,
+        "superseded_by_source_id": "" if restoring else (replacement_source_id or ""),
+        "duplicate_of_source_id": "" if restoring else (duplicate_of_source_id or ""),
+    }
+
+
+async def _project_correction_to_graph(
+    *,
+    organization_id: str,
+    memory: RawMemory,
+    preview: MemoryCorrectionPreview,
+    principal_id: str | None,
+    replacement_source_id: str | None,
+    duplicate_of_source_id: str | None,
+) -> list[str]:
+    """Carry a correction across to the rows retrieval actually ranks.
+
+    Correction used to stop at `raw_captures`. The projected entity kept its
+    capture-time metadata, kept its embedding, and kept being expanded into,
+    so `sibyl correct` had no retrieval consequence at all. The raw write has
+    already landed by the time this runs, so a graph failure is logged and
+    swallowed: a correction that half-applied is worth more than one that
+    reports failure after mutating the substrate.
+    """
+
+    try:
+        runtime = await get_surreal_graph_runtime(str(organization_id))
+        entity_ids = await _correction_graph_entity_ids(
+            runtime,
+            organization_id=organization_id,
+            memory=memory,
+        )
+    except Exception as exc:
+        log.warning(
+            "memory_correction_graph_lookup_failed",
+            source_id=memory.id,
+            error_type=type(exc).__name__,
+        )
+        return []
+
+    updates = _correction_graph_metadata(
+        preview,
+        replacement_source_id=replacement_source_id,
+        duplicate_of_source_id=duplicate_of_source_id,
+    )
+    applied: list[str] = []
+    for entity_id in entity_ids:
+        try:
+            await runtime.entity_manager.update(entity_id, {"metadata": updates})
+        except Exception as exc:
+            log.warning(
+                "memory_correction_graph_update_failed",
+                source_id=memory.id,
+                entity_id=entity_id,
+                error_type=type(exc).__name__,
+            )
+            continue
+        applied.append(entity_id)
+
+    if preview.action == "supersede" and replacement_source_id and applied:
+        await _link_graph_supersession(
+            runtime,
+            organization_id=organization_id,
+            principal_id=principal_id,
+            replacement_source_id=replacement_source_id,
+            superseded_entity_ids=applied,
+        )
+    return applied
+
+
+async def _link_graph_supersession(
+    runtime: Any,
+    *,
+    organization_id: str,
+    principal_id: str | None,
+    replacement_source_id: str,
+    superseded_entity_ids: Sequence[str],
+) -> None:
+    """Record the replacement as a real edge, in the direction retrieval reads.
+
+    Source is the surviving row and target is the retired one, matching the
+    promotion write path, which is what lets the retrieval gate recognize a
+    row as superseded from a single inbound-edge lookup.
+    """
+
+    try:
+        replacement = await get_raw_memory_by_source_id(
+            organization_id=str(organization_id),
+            source_id=replacement_source_id,
+        )
+        if replacement is None:
+            return
+        replacement_entity_ids = await _correction_graph_entity_ids(
+            runtime,
+            organization_id=organization_id,
+            memory=replacement,
+        )
+    except Exception as exc:
+        log.warning(
+            "memory_correction_replacement_lookup_failed",
+            source_id=replacement_source_id,
+            error_type=type(exc).__name__,
+        )
+        return
+
+    now = datetime.now(UTC).isoformat()
+    for replacement_entity_id in replacement_entity_ids:
+        for superseded_entity_id in superseded_entity_ids:
+            if replacement_entity_id == superseded_entity_id:
+                continue
+            try:
+                await runtime.relationship_manager.create(
+                    _relationship(
+                        replacement_entity_id,
+                        superseded_entity_id,
+                        RelationshipType.SUPERSEDES,
+                        metadata={
+                            "native_write_path": "memory_correction",
+                            "replacement_reason": "memory_correction_supersede",
+                            "replacement_source_id": replacement_source_id,
+                            "created_by": principal_id,
+                            "valid_from": now,
+                        },
+                    )
+                )
+            except Exception as exc:
+                log.warning(
+                    "memory_correction_supersedes_edge_failed",
+                    entity_id=superseded_entity_id,
+                    error_type=type(exc).__name__,
+                )
 
 
 async def _resolve_reflection_promotion_plan(
