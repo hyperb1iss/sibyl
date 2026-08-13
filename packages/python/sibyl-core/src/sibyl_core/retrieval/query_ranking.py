@@ -424,7 +424,9 @@ _ACTION_EVIDENCE_GROUPS = (
             "purchase",
         }
     ),
-    normalize_keyword_tokens({"assemble", "build", "built", "install", "set"}),
+    # "set" is out: it stems together with the settings/sets noun family, so a
+    # query about deployment settings would read as an assembly action.
+    normalize_keyword_tokens({"assemble", "build", "built", "install"}),
     normalize_keyword_tokens({"donate", "sell", "sold"}),
     normalize_keyword_tokens({"fix", "repair", "replace", "service"}),
     normalize_keyword_tokens({"attend", "join", "participate"}),

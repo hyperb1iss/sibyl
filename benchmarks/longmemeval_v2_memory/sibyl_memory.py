@@ -40,6 +40,10 @@ from sibyl_core.projection import project_operational_experience  # noqa: E402
 from sibyl_core.retrieval.operational_evidence import (  # noqa: E402
     TYPED_NOTE_RESERVATION_ITEMS,
 )
+from sibyl_core.query_anchors import (  # noqa: E402
+    normalize_keyword_token,
+    normalize_keyword_tokens,
+)
 from sibyl_core.retrieval.query_ranking import (  # noqa: E402
     QueryCoverageCandidate,
     QueryCoverageRankedCandidate,
@@ -302,6 +306,12 @@ _QUERY_FOCUS_STOPWORDS = frozenset(
         "what",
         "which",
     }
+)
+# UI nouns are written singular and matched by stem, so a query saying "labels"
+# or "columns" is filtered by the entry that spells one.
+_QUERY_FOCUS_STOPWORD_STEMS = normalize_keyword_tokens(_QUERY_FOCUS_STOPWORDS)
+_QUERY_FOCUS_TERM_STOPWORD_STEMS = _QUERY_FOCUS_STOPWORD_STEMS | normalize_keyword_tokens(
+    {"list", "page"}
 )
 _QUERY_UI_ROLE_PATTERNS = (
     (
@@ -1668,7 +1678,9 @@ def _query_focus_phrases(query: str) -> tuple[str, ...]:
     for match in _QUERY_TARGET_FOCUS_PATTERN.finditer(focused_query):
         phrase = str(match.group("phrase") or "").strip()
         tokens = re.findall(r"[\w-]+", phrase.casefold())
-        if not tokens or all(token in _QUERY_FOCUS_STOPWORDS for token in tokens):
+        if not tokens or all(
+            normalize_keyword_token(token) in _QUERY_FOCUS_STOPWORD_STEMS for token in tokens
+        ):
             continue
         phrase_count = len(phrases)
         add_phrase(phrase)
@@ -1681,9 +1693,12 @@ def _query_focus_phrases(query: str) -> tuple[str, ...]:
     target_queries = [query for query in structural_queries if query.facet == "target"]
     for structural_query in target_queries:
         for term in structural_query.added_terms:
-            if term.casefold() in {*_QUERY_FOCUS_STOPWORDS, "list", "page"}:
+            stem = normalize_keyword_token(term)
+            if stem in _QUERY_FOCUS_TERM_STOPWORD_STEMS:
                 continue
-            add_phrase(term)
+            # Focus phrases are substring-matched against page text, so the
+            # folded form is the one that reaches both spellings of a noun.
+            add_phrase(stem)
     if not target_focus_added and not target_queries:
         for structural_query in structural_queries:
             if structural_query.facet != "focus_clause":
@@ -1691,7 +1706,8 @@ def _query_focus_phrases(query: str) -> tuple[str, ...]:
             structural_terms = [
                 token
                 for token in re.findall(r"[A-Za-z][\w-]*", structural_query.query)
-                if token.casefold() not in _QUERY_FOCUS_STOPWORDS and token.casefold() not in seen
+                if normalize_keyword_token(token) not in _QUERY_FOCUS_STOPWORD_STEMS
+                and token.casefold() not in seen
             ]
             if len(structural_terms) < 2:
                 continue
