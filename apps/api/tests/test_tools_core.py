@@ -979,3 +979,32 @@ class TestHelperFunctions:
         assert id1 == id2  # Same input = same output
         assert id1 != id3  # Different input = different output
         assert id1.startswith("task_")  # Has correct prefix
+
+
+class TestDeclaredPredicatesOnTheDefaultPath:
+    """The async enqueue is what most writes take, so it must carry the type."""
+
+    @pytest.mark.asyncio
+    async def test_enqueued_relationships_keep_the_declared_predicate(self) -> None:
+        async with mock_tools():
+            queue_port = SimpleNamespace(
+                enqueue_create_entity=AsyncMock(return_value="create_entity:typed_123"),
+            )
+
+            with patch("sibyl_core.tools.add.get_queue_port", return_value=queue_port):
+                result = await add(
+                    "Reconsidered pooling call",
+                    "The newer decision about connection pooling.",
+                    entity_type="decision",
+                    related_to=["supersedes:decision_older", "decision_sibling"],
+                    metadata={"organization_id": TEST_ORG_ID},
+                    check_conflicts=False,
+                )
+
+        assert result.success is True
+        relationships = queue_port.enqueue_create_entity.await_args.kwargs["relationships"]
+        by_target = {rel["target_id"]: rel for rel in relationships}
+        assert by_target["decision_older"]["type"] == "SUPERSEDES"
+        assert by_target["decision_older"]["metadata"]["agent_declared"] is True
+        assert by_target["decision_sibling"]["type"] == "RELATED_TO"
+        assert "agent_declared" not in by_target["decision_sibling"]["metadata"]
