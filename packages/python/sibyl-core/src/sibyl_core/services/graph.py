@@ -2836,6 +2836,7 @@ async def _replace_entity(
         await prepare_graph_schema(client)
         result = await _execute_replace_entities_with_schema_retry(client, [record])
     rows = normalize_records(result)
+    await _heal_legacy_metadata_snapshots(client, rows, [record], group_id=group_id)
     if rows:
         return rows[0]
     stored = await _select_one(
@@ -2864,7 +2865,88 @@ async def _replace_entities_bulk(
         mark_graph_schema_dirty(client.group_id)
         await prepare_graph_schema(client)
         result = await _execute_replace_entities_with_schema_retry(client, records)
-    return normalize_records(result)
+    rows = normalize_records(result)
+    await _heal_legacy_metadata_snapshots(client, rows, records, group_id=group_id)
+    return rows
+
+
+async def _heal_legacy_metadata_snapshots(
+    client: SurrealGraphClient,
+    rows: Sequence[Mapping[str, object]],
+    records: Sequence[SurrealRecord],
+    *,
+    group_id: str,
+) -> None:
+    """Fold a pre-flattening row's snapshot into its flattened bag, once, on write.
+
+    A row written before the flattened bag existed carries its metadata only as
+    the JSON snapshot, so the read merges one where it finds one. That merge is
+    also how a removal gets undone: Surreal drops a field written as NONE, and
+    the snapshot then answers for the empty slot, so a rollback that clears a
+    key on such a row reads back unchanged.
+
+    Clearing the snapshot alone would delete whatever lives only inside it, and
+    SurrealQL cannot parse JSON, so the fold cannot happen in the statement.
+    It happens here instead, against the post-write state the upsert already
+    returned: no extra query, and a row that has no snapshot costs nothing. A
+    healed row never needs healing again.
+
+    Precedence matches the read exactly. A key the flattened bag already holds
+    keeps its newer value, and a key this write named (including one it set to
+    None to remove) is left to the write, which is what makes the removal stick
+    rather than come back out of the snapshot.
+    """
+    inputs = {
+        str(record.get("uuid")): record.get("attributes")
+        for record in records
+        if record.get("uuid")
+    }
+    for row in rows:
+        uuid = str(row.get("uuid") or "")
+        attributes = row.get("attributes")
+        if not uuid or not isinstance(attributes, Mapping):
+            continue
+        raw_snapshot = attributes.get("metadata")
+        snapshot = _parsed_metadata_snapshot(raw_snapshot)
+        if snapshot is None:
+            continue
+        written = inputs.get(uuid)
+        written_keys = set(written) if isinstance(written, Mapping) else set()
+        folded = {
+            key: value
+            for key, value in _snapshot_without_owned_keys(snapshot).items()
+            if key not in attributes and key not in written_keys
+        }
+        # None clears the snapshot the same way any other removal clears a key.
+        patch: dict[str, object] = {**folded, "metadata": None}
+        try:
+            await client.execute_query(
+                """
+                UPDATE entity MERGE { attributes: $patch }
+                WHERE group_id = $group_id AND uuid = $uuid;
+                """,
+                group_id=group_id,
+                uuid=uuid,
+                patch=patch,
+            )
+        except Exception as exc:
+            log.warning(
+                "entity_metadata_snapshot_heal_failed",
+                entity_id=uuid,
+                error_type=type(exc).__name__,
+            )
+
+
+def _parsed_metadata_snapshot(raw: object) -> dict[str, object] | None:
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    if isinstance(raw, Mapping):
+        return {str(key): value for key, value in raw.items()}
+    return None
 
 
 async def _update_entity_embedding_if_current(

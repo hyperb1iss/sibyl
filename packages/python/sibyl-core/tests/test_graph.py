@@ -1002,6 +1002,88 @@ async def test_removing_a_metadata_key_keeps_it_gone_on_every_read_path() -> Non
 
 
 @pytest.mark.asyncio
+async def test_a_write_heals_a_legacy_snapshot_instead_of_reading_around_it() -> None:
+    """A pre-flattening row must honor a removal, without losing snapshot-only keys.
+
+    Rows written before the flattened bag existed carry metadata only as the
+    JSON snapshot, and the read merges it. That merge is also how a removal gets
+    undone, because Surreal drops a field written as NONE and the snapshot then
+    answers for the empty slot. The write folds the snapshot down into the
+    flattened bag and clears it, so the removal sticks and nothing that lived
+    only in the snapshot goes with it.
+    """
+    client = SurrealGraphClient(group_id="org-legacy-snapshot", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        await manager.create_direct(
+            Entity(
+                id="note_legacy_snapshot",
+                entity_type=EntityType.NOTE,
+                name="Pre-flattening note",
+                organization_id=client.group_id,
+                metadata={"doomed_key": "resurrects", "moved_on": "new value"},
+            )
+        )
+        # Forge the pre-flattening shape: a snapshot holding a key that exists
+        # nowhere else, plus an older value for a key the flattened bag has.
+        await client.execute_query(
+            """
+            UPDATE entity SET
+                attributes.metadata = $snapshot,
+                attributes.doomed_key = NONE,
+                attributes.snapshot_only = NONE
+            WHERE group_id = $group_id AND uuid = "note_legacy_snapshot";
+            """,
+            group_id=client.group_id,
+            snapshot=json.dumps(
+                {
+                    "doomed_key": "resurrects",
+                    "snapshot_only": "lives nowhere else",
+                    "moved_on": "stale value",
+                }
+            ),
+        )
+
+        resurrected = await manager.get("note_legacy_snapshot")
+        assert resurrected.metadata["doomed_key"] == "resurrects"
+
+        await manager.create_direct(
+            Entity(
+                id="note_legacy_snapshot",
+                entity_type=EntityType.NOTE,
+                name="Pre-flattening note",
+                organization_id=client.group_id,
+                metadata={"doomed_key": None},
+            )
+        )
+
+        healed = await manager.get("note_legacy_snapshot")
+
+        assert "doomed_key" not in healed.metadata
+        assert healed.metadata["snapshot_only"] == "lives nowhere else"
+        assert healed.metadata["moved_on"] == "new value"
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT attributes
+                FROM entity
+                WHERE group_id = $group_id AND uuid = "note_legacy_snapshot"
+                LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+        attributes = cast("dict[str, object]", rows[0]["attributes"])
+        assert "metadata" not in attributes
+        assert attributes["snapshot_only"] == "lives nowhere else"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_native_entity_upsert_preserves_creator_and_updates_modifier() -> None:
     client = SurrealGraphClient(group_id="org-native-actor-upsert", url="memory://")
     try:
