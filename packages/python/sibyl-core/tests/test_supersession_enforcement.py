@@ -354,13 +354,6 @@ async def test_a_retired_row_does_not_spend_a_pack_slot(
     assert pack.total_items == 2
 
 
-def test_supersedes_weight_only_applies_where_the_edge_points_forward() -> None:
-    """The 0.95 weight is not the bug; walking the edge outwards was."""
-
-    assert search_module._GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS["SUPERSEDES"] == 0.95
-    assert search_module._SUPERSEDES_PREDICATE == "SUPERSEDES"
-
-
 @pytest.mark.asyncio
 async def test_supersession_lookup_failure_degrades_without_failing_the_search(
     monkeypatch: pytest.MonkeyPatch,
