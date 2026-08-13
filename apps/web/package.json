@@ -37,9 +37,9 @@
     "@tanstack/react-virtual": "^3.14.9",
     "d3-force": "^3.0.0",
     "iconoir-react": "^7.11.1",
-    "lucide-react": "^1.28.0",
+    "lucide-react": "^1.30.0",
     "motion": "^12.43.0",
-    "next": "16.2.12",
+    "next": "16.3.0",
     "next-dynenv": "^4.0.6",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -48,7 +48,7 @@
     "recharts": "^3.10.1",
     "remark-gfm": "^4.0.1",
     "server-only": "^0.0.1",
-    "shiki": "^4.4.1",
+    "shiki": "^4.4.2",
     "sonner": "^2.0.7"
   },
   "devDependencies": {
