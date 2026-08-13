@@ -21,6 +21,8 @@ _EXTRA_OIDC_ISSUER_HOSTS = {"github.com", "accounts.google.com"}
 _EMBEDDED_SURREAL_SCHEMES = ("memory://", "surrealkv://", "rocksdb://", "file://")
 DEFAULT_LOCAL_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_LOCAL_EMBEDDING_DIMENSIONS = 384
+# Matches the HS256 output width, and what `openssl rand -hex 32` produces.
+MINIMUM_PRODUCTION_JWT_SECRET_BYTES = 32
 _OPENAI_GRAPH_EMBEDDING_MODEL = "text-embedding-3-small"
 _OPENAI_GRAPH_EMBEDDING_DIMENSIONS = 1024
 _LOCAL_EMBEDDING_MODEL_DIMENSIONS = {
@@ -586,23 +588,43 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def validate_production_jwt_secret(self) -> "Settings":
-        """Refuse to boot production without a signing key.
+    def validate_production_auth_posture(self) -> "Settings":
+        """Refuse to boot production with a weak signing key or MCP auth off.
 
         Runs after check_api_key_fallbacks so the non-prefixed JWT_SECRET
         fallback has already been applied.
         """
         if self.environment != "production":
             return self
-        if self.jwt_secret.get_secret_value():
-            return self
-        raise ValueError(
-            "CRITICAL: A JWT secret is required in production. Without it sessions "
-            "are signed with an empty key and MCP auth disables itself under the "
-            "default mcp_auth_mode=auto. Set SIBYL_JWT_SECRET to a high-entropy "
-            "value, or set SIBYL_ENVIRONMENT=development to use the generated "
-            "development secret."
-        )
+
+        # A key arriving from a file or a k8s Secret often carries a trailing
+        # newline, which would make the API and worker disagree on the signature.
+        secret = self.jwt_secret.get_secret_value().strip()
+        if secret != self.jwt_secret.get_secret_value():
+            object.__setattr__(self, "jwt_secret", SecretStr(secret))
+
+        if not secret:
+            raise ValueError(
+                "CRITICAL: A JWT secret is required in production. Without it sessions "
+                "are signed with an empty key and MCP auth disables itself under the "
+                "default mcp_auth_mode=auto. Generate one with `openssl rand -hex 32` "
+                "and set SIBYL_JWT_SECRET, or set SIBYL_ENVIRONMENT=development to use "
+                "the generated development secret."
+            )
+        if len(secret.encode()) < MINIMUM_PRODUCTION_JWT_SECRET_BYTES:
+            raise ValueError(
+                f"CRITICAL: The production JWT secret is {len(secret.encode())} bytes; "
+                f"at least {MINIMUM_PRODUCTION_JWT_SECRET_BYTES} are required. HS256 "
+                "signatures are only as strong as the key, so a short one is forgeable. "
+                "Generate a replacement with `openssl rand -hex 32`."
+            )
+        if self.mcp_auth_mode == "off":
+            raise ValueError(
+                "CRITICAL: mcp_auth_mode=off is forbidden in production. It serves every "
+                'MCP tool unauthenticated. Use "auto" or "on", or set '
+                "SIBYL_ENVIRONMENT=development for a local unauthenticated endpoint."
+            )
+        return self
 
     embedding_provider: Literal["openai", "gemini"] = Field(
         default="openai",
