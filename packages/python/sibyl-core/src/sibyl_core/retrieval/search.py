@@ -28,6 +28,7 @@ from sibyl_core.backends.surreal.knn import knn_overfetch_pool, knn_search_effor
 from sibyl_core.backends.surreal.records import SurrealQueryError, query_error
 from sibyl_core.config import core_config
 from sibyl_core.embeddings.providers import EmbeddingMetadata, EmbeddingProvider
+from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
 from sibyl_core.memory_pipeline.retrieval import CandidateSourceFailure, CandidateSourceResult
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.retrieval.candidates import (
@@ -105,6 +106,12 @@ _GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS = {
     "RELATED_TO": 0.64,
     "MENTIONS": 0.58,
 }
+_SUPERSEDES_PREDICATE = "SUPERSEDES"
+# An entity carrying an inbound SUPERSEDES edge is the row somebody replaced.
+# Resolving that over the surviving candidate set costs one indexed lookup
+# (idx_relates_name_target) and is the only way a lane that never walked the
+# graph -- vector, fulltext, exact key -- learns the row is stale.
+_SUPERSESSION_LOOKUP_LIMIT = 512
 _GRAPH_EXPANSION_DEPTH_DECAY = 0.72
 _GRAPH_EXPANSION_FETCH_HEADROOM = 4
 _GRAPH_EXPANSION_METADATA_KEYS = (
@@ -532,6 +539,11 @@ async def context_search(
         (signal, [candidate for candidate in candidates if candidate_authorized(candidate)])
         for signal, candidates in source_lists
     ]
+    filtered_lists, supersession_metadata = await _apply_supersession_gate(
+        client=client,
+        group_id=search_plan.organization_id,
+        source_lists=filtered_lists,
+    )
     # Counted after the scope filter, never before. A pre-filter count answers
     # "does any memory in this organization declare the string I just sent",
     # which is a question an unauthorized caller must not be able to ask: the
@@ -605,6 +617,7 @@ async def context_search(
                 probe_tokens=probe_tokens,
                 candidates=authorized_exact_key_candidates,
             ),
+            **supersession_metadata,
             "stage_timings_ms": stage_timings_ms,
         },
         graph_count=len([result for result in results if result.result_origin == "graph"]),
@@ -835,6 +848,107 @@ async def _execute_query_records(
     if error := query_error(result):
         raise SurrealQueryError(query, error)
     return normalize_records(result)
+
+
+async def _superseded_candidate_uuids(
+    client: Any,
+    *,
+    group_id: str,
+    uuids: Sequence[str],
+) -> set[str]:
+    """Resolve which of these candidates something else declared it replaced."""
+
+    if not uuids:
+        return set()
+    rows = await _execute_query_records(
+        client,
+        """
+        SELECT target_id AS uuid
+        FROM relates_to
+        WHERE name = $predicate
+          AND target_id IN $uuids
+          AND group_id = $group_id
+        LIMIT $limit;
+        """,
+        predicate=_SUPERSEDES_PREDICATE,
+        uuids=list(uuids),
+        group_id=group_id,
+        limit=_SUPERSESSION_LOOKUP_LIMIT,
+    )
+    return {uuid for row in rows if (uuid := _string_value(row.get("uuid")))}
+
+
+async def _apply_supersession_gate(
+    *,
+    client: Any,
+    group_id: str,
+    source_lists: Sequence[tuple[RetrievalSignal, list[RetrievalCandidate]]],
+) -> tuple[list[tuple[RetrievalSignal, list[RetrievalCandidate]]], dict[str, Any]]:
+    """Drop rows a writer has already retired, before anything is fused.
+
+    Supersession and correction are declarations the graph lane never acted
+    on: a corrected row kept its embedding, kept its rank, and kept being
+    expanded into. Two independent signals retire a candidate here. Its own
+    stamped lifecycle metadata, written by the correction path, covers rows
+    whose replacement is not itself a graph entity. An inbound SUPERSEDES edge
+    covers the reflection-promotion case, where the replacement exists and the
+    edge is the only record of it. Because the successor carries neither
+    signal, this is also what makes the newer row win whenever both match.
+    """
+
+    lifecycle_dropped = 0
+    surviving: list[tuple[RetrievalSignal, list[RetrievalCandidate]]] = []
+    for signal, candidates in source_lists:
+        kept: list[RetrievalCandidate] = []
+        for candidate in candidates:
+            if graph_metadata_recallable(candidate.metadata):
+                kept.append(candidate)
+            else:
+                lifecycle_dropped += 1
+        surviving.append((signal, kept))
+
+    node_uuids = _dedupe_strings(
+        candidate.id
+        for _signal, candidates in surviving
+        for candidate in candidates
+        if candidate.type not in _EDGE_CONTEXT_TYPES
+    )
+    superseded: set[str] = set()
+    lookup_failed: str | None = None
+    if node_uuids:
+        try:
+            superseded = await _superseded_candidate_uuids(
+                client,
+                group_id=group_id,
+                uuids=node_uuids[:_SUPERSESSION_LOOKUP_LIMIT],
+            )
+        except Exception as exc:
+            # A gate that cannot read its own edges must not silently pass
+            # every stale row as fresh, but it also must not fail the search
+            # outright: lifecycle metadata still applies and the receipt says
+            # the edge half did not run.
+            lookup_failed = type(exc).__name__
+            log.warning("supersession_lookup_failed", error_type=lookup_failed)
+
+    edge_dropped = 0
+    if superseded:
+        gated: list[tuple[RetrievalSignal, list[RetrievalCandidate]]] = []
+        for signal, candidates in surviving:
+            kept = [candidate for candidate in candidates if candidate.id not in superseded]
+            edge_dropped += len(candidates) - len(kept)
+            gated.append((signal, kept))
+        surviving = gated
+
+    metadata: dict[str, Any] = {
+        "supersession_gate": {
+            "lifecycle_dropped": lifecycle_dropped,
+            "superseded_dropped": edge_dropped,
+            "superseded_uuids": sorted(superseded),
+        }
+    }
+    if lookup_failed is not None:
+        metadata["supersession_gate"]["lookup_error_type"] = lookup_failed
+    return surviving, metadata
 
 
 def _candidate_limits_for_limit(
@@ -1715,6 +1829,9 @@ async def _node_bfs_records(
                 depth=depth,
                 limit=fetch_limit,
                 relationship_names=sorted(wanted),
+                exclude_relationship_names=(
+                    () if _SUPERSEDES_PREDICATE in wanted else (_SUPERSEDES_PREDICATE,)
+                ),
             )
         )
         if include_incoming:
@@ -1831,10 +1948,22 @@ async def _relation_target_hops(
     depth: int,
     limit: int,
     relationship_names: Sequence[str] = (),
+    exclude_relationship_names: Sequence[str] = (),
 ) -> list[_GraphExpansionHop]:
+    """Walk edges that point away from the frontier.
+
+    `exclude_relationship_names` exists for predicates whose written direction
+    makes the outgoing endpoint the wrong answer. A SUPERSEDES edge is stored
+    new-row to old-row, so walking it outwards lands on the row the writer
+    declared replaced, and the weight table would then score that stale row at
+    0.95 -- a supersession would raise its own victim.
+    """
     if not source_uuids:
         return []
     name_clause = "AND name IN $relationship_names" if relationship_names else ""
+    exclude_clause = (
+        "AND name NOT IN $exclude_relationship_names" if exclude_relationship_names else ""
+    )
     rows = await _execute_query_records(
         client,
         f"""
@@ -1844,12 +1973,18 @@ async def _relation_target_hops(
           AND group_id = $group_id
           AND out.group_id = $group_id
           {name_clause}
+          {exclude_clause}
         LIMIT $limit;
         """,
         source_uuids=list(source_uuids),
         group_id=group_id,
         limit=max(int(limit), 1),
         **({"relationship_names": list(relationship_names)} if relationship_names else {}),
+        **(
+            {"exclude_relationship_names": list(exclude_relationship_names)}
+            if exclude_relationship_names
+            else {}
+        ),
     )
     hops: list[_GraphExpansionHop] = []
     for row in rows:

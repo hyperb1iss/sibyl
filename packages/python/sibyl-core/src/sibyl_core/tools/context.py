@@ -15,6 +15,7 @@ from sibyl_core.auth.memory_policy import (
     private_scope_granted_for,
 )
 from sibyl_core.embeddings.providers import configured_embedding_provider
+from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
 from sibyl_core.models.context import (
     ContextFacet,
     ContextIntent,
@@ -621,7 +622,9 @@ _ITEM_METADATA_KEYS = (
     "principal_id",
     "scope_key",
     "redacted",
+    "excluded_from_recall",
     "superseded_by_source_id",
+    "superseded_by_raw_memory_id",
     "duplicate_of_source_id",
     "unresolved_claims",
     "supported",
@@ -743,6 +746,24 @@ def _lineage_rank(item: ContextItem) -> tuple[int, float]:
             return (-1, -item.score)
     type_rank = _LINEAGE_TYPE_RANK.get(item_type, _LINEAGE_DEFAULT_RANK)
     return (type_rank, -item.score)
+
+
+def _drop_retired_items(sections: list[ContextSection]) -> list[ContextSection]:
+    """Refuse admission to any row a correction retired.
+
+    The native lane gates its own candidates, but a pack also admits rows the
+    gate never saw: the active-work lookup, the related-item attachment, and
+    the fallback search all reach a section directly. This is the last
+    chokepoint before serving, so it re-checks the same lifecycle verdict
+    rather than trusting that every upstream path applied it.
+    """
+
+    kept: list[ContextSection] = []
+    for section in sections:
+        items = [item for item in section.items if graph_metadata_recallable(item.metadata)]
+        if items:
+            kept.append(replace(section, items=items))
+    return kept
 
 
 def _dedupe_lineage(sections: list[ContextSection]) -> list[ContextSection]:
@@ -1676,6 +1697,7 @@ async def compile_context(
             principal_id=principal_id,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
+    sections = _drop_retired_items(sections)
     usage_metadata: dict[str, Any] = {}
     if sections and record_exposure:
         usage_metadata[_USAGE_EXPOSURE_SUMMARY_KEY] = await annotate_context_item_exposures(

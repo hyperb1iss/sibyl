@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Protocol
 
 from sibyl_core.models.reflection import MemoryLifecycleState, memory_lifecycle_from_metadata
@@ -83,3 +83,39 @@ def raw_memory_lifecycle_recallable(memory: MemoryLifecycleView) -> bool:
     if metadata.get("superseded_by_source_id"):
         return False
     return not metadata.get("duplicate_of_source_id")
+
+
+GRAPH_RECALL_EXCLUSION_KEYS = (
+    "excluded_from_recall",
+    "superseded_by_source_id",
+    "superseded_by_raw_memory_id",
+    "duplicate_of_source_id",
+)
+
+
+def _flag_values(value: object) -> Iterable[str]:
+    if isinstance(value, str):
+        return (_normalized_state(value),)
+    if isinstance(value, Iterable):
+        return tuple(_normalized_state(item) for item in value)
+    return ()
+
+
+def graph_metadata_recallable(metadata: Mapping[str, object] | None) -> bool:
+    """Report whether a projected graph row is still eligible to be served.
+
+    The raw lane decides this from a `RawMemory`; the graph row carries the
+    same verdict as flat metadata stamped by the correction write-through,
+    because the graph has no lifecycle column and joining every candidate back
+    to its capture at query time would cost a second round trip per row.
+    """
+
+    if not metadata:
+        return True
+    if _normalized_state(metadata.get("review_state")) in RECALL_EXCLUDED_REVIEW_STATES:
+        return False
+    if _normalized_state(metadata.get("lifecycle_state")) in RECALL_EXCLUDED_LIFECYCLE_STATES:
+        return False
+    if RECALL_EXCLUDED_LIFECYCLE_FLAGS.intersection(_flag_values(metadata.get("lifecycle_flags"))):
+        return False
+    return not any(metadata.get(key) for key in GRAPH_RECALL_EXCLUSION_KEYS)
