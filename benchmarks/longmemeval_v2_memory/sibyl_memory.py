@@ -215,6 +215,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "context_expansion_max_ratio",
         "evidence_types",
         "evidence_char_budget",
+        "evidence_char_budget_raw_reserve",
         "evidence_composition_mode",
         "source_evidence_bundling",
         "retrieval_mode",
@@ -725,6 +726,7 @@ def compile_operational_evidence_set(
     mode: str = DEFAULT_EVIDENCE_COMPOSITION_MODE,
     typed_reservation_items: int | None = None,
     char_budget: int | None = None,
+    char_budget_raw_reserve: int | None = None,
     neighbor_support_exempt: bool = DEFAULT_NEIGHBOR_SUPPORT_EXEMPT,
     neighbor_trajectory_preserving: bool = DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING,
     neighbor_support_overflow_items: int = DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS,
@@ -756,6 +758,16 @@ def compile_operational_evidence_set(
             raise ValueError("char_budget must be positive")
         if mode != "shared_relevance":
             msg = f"char_budget is only defined for shared_relevance composition, not {mode!r}"
+            raise ValueError(msg)
+    if char_budget_raw_reserve is not None:
+        if char_budget is None:
+            raise ValueError("char_budget_raw_reserve requires char_budget")
+        if not 0 < char_budget_raw_reserve < char_budget:
+            msg = (
+                f"char_budget_raw_reserve ({char_budget_raw_reserve}) must be positive "
+                f"and below char_budget ({char_budget}); reserving the whole budget "
+                "leaves the reserved note lane no room and stops measuring a partition"
+            )
             raise ValueError(msg)
     max_items = max(1, max_items)
     typed_candidates: list[dict[str, object]] = []
@@ -857,27 +869,57 @@ def compile_operational_evidence_set(
         # The note lane keeps its absolute count inside the budget, but the
         # budget outranks the pin when it cannot hold that many: a lane allowed
         # to overrun the budget is not a budget.
-        reserved, spent = _admit_within_char_budget(
-            ranked_typed[: max(1, requested_reservation)],
-            budget=char_budget,
-            spent=0,
-        )
         ordered_raw = _select_role_complete_raw_evidence(
             ranked_raw,
             budget=len(ranked_raw),
             neighbor_support_exempt=neighbor_support_exempt,
             neighbor_trajectory_preserving=neighbor_trajectory_preserving,
         )
-        selected_raw, spent = _admit_within_char_budget(
-            ordered_raw,
-            budget=char_budget,
-            spent=spent,
-        )
-        overflow, spent = _admit_within_char_budget(
-            ranked_typed[len(reserved) :],
-            budget=char_budget,
-            spent=spent,
-        )
+        if char_budget_raw_reserve is None:
+            reserved, spent = _admit_within_char_budget(
+                ranked_typed[: max(1, requested_reservation)],
+                budget=char_budget,
+                spent=0,
+            )
+            selected_raw, spent = _admit_within_char_budget(
+                ordered_raw,
+                budget=char_budget,
+                spent=spent,
+            )
+            overflow, spent = _admit_within_char_budget(
+                ranked_typed[len(reserved) :],
+                budget=char_budget,
+                spent=spent,
+            )
+        else:
+            # Partitioned admission: the raw lane spends into its own reserve
+            # FIRST, so typed items can never consume the evidence lane's
+            # budget, and prefix-stop on a fat raw candidate costs at most the
+            # reserve rather than the whole pack. Unspent reserve returns to
+            # the shared pool, and each lane's admission stays a contiguous
+            # prefix of its ranking (a continuation with a larger budget
+            # extends the same prefix).
+            selected_raw, raw_spent = _admit_within_char_budget(
+                ordered_raw,
+                budget=char_budget_raw_reserve,
+                spent=0,
+            )
+            reserved, spent = _admit_within_char_budget(
+                ranked_typed[: max(1, requested_reservation)],
+                budget=char_budget,
+                spent=raw_spent,
+            )
+            raw_continuation, spent = _admit_within_char_budget(
+                ordered_raw[len(selected_raw) :],
+                budget=char_budget,
+                spent=spent,
+            )
+            selected_raw = [*selected_raw, *raw_continuation]
+            overflow, spent = _admit_within_char_budget(
+                ranked_typed[len(reserved) :],
+                budget=char_budget,
+                spent=spent,
+            )
         typed_reservation = len(reserved)
         selected = [*reserved, *selected_raw, *overflow]
         selected_chars = spent
@@ -945,6 +987,7 @@ def compile_operational_evidence_set(
         "typed_pool": typed_pool,
         "budget_mode": "items" if char_budget is None else "characters",
         "char_budget": char_budget,
+        "char_budget_raw_reserve": char_budget_raw_reserve,
         "selected_chars": selected_chars,
     }
 
@@ -3495,6 +3538,14 @@ class SibylLiveApiMemory(Memory):
             max_context_chars_per_item=self.max_context_chars_per_item,
             max_context_total_chars=self.max_context_total_chars,
         )
+        raw_reserve = memory_params.get("evidence_char_budget_raw_reserve")
+        self.evidence_char_budget_raw_reserve = (
+            _param_int(memory_params, "evidence_char_budget_raw_reserve", 0, minimum=1)
+            if raw_reserve is not None
+            else None
+        )
+        if self.evidence_char_budget_raw_reserve is not None and self.evidence_char_budget is None:
+            raise ValueError("evidence_char_budget_raw_reserve requires evidence_char_budget")
         self.context_expansion_max_ratio = _param_context_expansion_ratio(
             memory_params,
             "context_expansion_max_ratio",
@@ -4507,6 +4558,7 @@ class SibylLiveApiMemory(Memory):
             ),
             typed_reservation_items=getattr(self, "typed_reservation_items", None),
             char_budget=char_budget,
+            char_budget_raw_reserve=getattr(self, "evidence_char_budget_raw_reserve", None),
             neighbor_support_exempt=getattr(
                 self,
                 "neighbor_support_exempt",

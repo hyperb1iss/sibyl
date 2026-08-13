@@ -77,6 +77,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "context_expansion_max_ratio",
         "evidence_types",
         "evidence_char_budget",
+        "evidence_char_budget_raw_reserve",
         "evidence_composition_mode",
         "source_evidence_bundling",
         "typed_stream_retrieval",
@@ -477,6 +478,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         ),
     )
     parser.add_argument(
+        "--evidence-char-budget-raw-reserve",
+        type=int,
+        default=None,
+        help=(
+            "Reserve this many characters of --evidence-char-budget for the raw "
+            "evidence lane, admitted before typed items spend anything. Requires "
+            "--evidence-char-budget; unset reproduces the shared-budget admission."
+        ),
+    )
+    parser.add_argument(
         "--evidence-char-budget",
         type=int,
         default=None,
@@ -722,6 +733,7 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "context_expansion_max_ratio": args.context_expansion_max_ratio,
         "evidence_types": list(args.evidence_types),
         "evidence_char_budget": args.evidence_char_budget,
+        "evidence_char_budget_raw_reserve": args.evidence_char_budget_raw_reserve,
         "evidence_composition_mode": args.evidence_composition_mode,
         "source_evidence_bundling": args.source_evidence_bundling,
         "typed_stream_retrieval": args.typed_stream_retrieval,
@@ -882,6 +894,7 @@ def build_run_plan(
         "max_context_total_chars": args.max_context_total_chars,
         "evidence_types": list(args.evidence_types),
         "evidence_char_budget": args.evidence_char_budget,
+        "evidence_char_budget_raw_reserve": args.evidence_char_budget_raw_reserve,
         "evidence_composition_mode": args.evidence_composition_mode,
         "source_evidence_bundling": args.source_evidence_bundling,
         "typed_stream_retrieval": args.typed_stream_retrieval,
