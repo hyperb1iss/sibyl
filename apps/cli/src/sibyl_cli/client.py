@@ -51,7 +51,7 @@ class ErrorPayload:
     details: dict[str, object] | None = None
 
 
-def _get_default_api_url(context_name: str | None = None) -> str:
+def resolve_api_base_url(context_name: str | None = None) -> str:
     """Get API URL from context, config file, env var, or default.
 
     Priority:
@@ -60,6 +60,10 @@ def _get_default_api_url(context_name: str | None = None) -> str:
     3. Environment variable (SIBYL_API_URL)
     4. Legacy config file (server.url)
     5. Default (http://localhost:3334/api)
+
+    This is the single source of truth for CLI server selection. `sibyl auth`
+    resolves through it too, so a login stores its token under the same server
+    key every later command reads.
 
     Args:
         context_name: Optional context name to use instead of active context.
@@ -347,7 +351,7 @@ class SibylClient:
         """
         self.context_name = context_name
         self._explicit_base_url = base_url is not None
-        self.base_url = normalize_api_url(base_url or _get_default_api_url(context_name))
+        self.base_url = normalize_api_url(base_url or resolve_api_base_url(context_name))
         self.credential_scope = (
             _auth_credential_scope(context_name)
             if context_name or not self._explicit_base_url

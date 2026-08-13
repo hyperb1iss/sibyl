@@ -21,7 +21,12 @@ from sibyl_cli.auth_store import (
     read_server_credentials,
     set_tokens,
 )
-from sibyl_cli.client import SibylClient, SibylClientError, get_client
+from sibyl_cli.client import (
+    SibylClient,
+    SibylClientError,
+    get_client,
+    resolve_api_base_url,
+)
 from sibyl_cli.common import error, info, print_json, run_async, success, warn
 
 app = typer.Typer(help="Authentication and credentials")
@@ -40,28 +45,33 @@ def _pkce_s256(code_verifier: str) -> str:
     return base64.urlsafe_b64encode(sha256).decode("utf-8").rstrip("=")
 
 
-def _compute_api_url(server: str | None) -> str:
+def _effective_context_name(context_name: str | None = None) -> str | None:
+    """Resolve the context every other command would use for this invocation."""
+    from sibyl_cli import config_store
+
+    return context_name or config_store.resolve_context_name()
+
+
+def _compute_api_url(server: str | None, *, context_name: str | None = None) -> str:
+    """Resolve the server an auth command should act on.
+
+    An explicit --server/URL wins; everything else defers to the client's
+    resolver, so the token lands under the key later commands read back.
+    """
     if server and server.strip():
         raw = server.strip().rstrip("/")
         if raw.endswith("/api"):
             return normalize_api_url(raw)
         return normalize_api_url(raw + "/api")
 
-    env_api_url = os.environ.get("SIBYL_API_URL", "").strip()
-    if env_api_url:
-        return normalize_api_url(env_api_url)
-
-    return normalize_api_url(SibylClient().base_url)
+    return normalize_api_url(resolve_api_base_url(_effective_context_name(context_name)))
 
 
 def _current_credential_scope(context_name: str | None = None) -> str | None:
     from sibyl_cli import config_store
 
-    ctx = (
-        config_store.get_context(context_name)
-        if context_name
-        else config_store.get_active_context()
-    )
+    resolved = _effective_context_name(context_name)
+    ctx = config_store.get_context(resolved) if resolved else None
     if ctx is None:
         return None
     return credential_scope(ctx.name, ctx.org_slug)
@@ -655,7 +665,7 @@ def status_cmd() -> None:
     """Show auth status for the current context."""
     from sibyl_cli import config_store
 
-    ctx = config_store.get_active_context()
+    ctx = config_store.resolve_effective_context()
     api_url = _compute_api_url(None)
     scope = _current_credential_scope()
     creds = read_server_credentials(api_url, credential_scope=scope)
@@ -790,7 +800,7 @@ def login_cmd(
     """
     # Positional URL takes precedence over --server option
     effective_server = url.strip() if url.strip() else server
-    api_url = _compute_api_url(effective_server)
+    api_url = _compute_api_url(effective_server, context_name=context)
     scope = _login_credential_scope(context)
 
     # Perform login
