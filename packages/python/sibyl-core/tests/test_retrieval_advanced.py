@@ -911,6 +911,22 @@ def test_query_coverage_promotes_repair_action_evidence() -> None:
     assert "7" in ranked[:5]
 
 
+def test_action_evidence_does_not_equate_presenting_with_volunteering() -> None:
+    """Distinct verbs stay distinct: only the benchmark grouped them together."""
+    present_query = "What did I present at the conference?"
+    volunteer_query = "Where did I volunteer last month?"
+
+    assert query_ranking_module._action_evidence_score(present_query, {"present", "slide"}) == 1.0
+    assert (
+        query_ranking_module._action_evidence_score(present_query, {"volunteer", "shelter"}) == 0.0
+    )
+    assert (
+        query_ranking_module._action_evidence_score(volunteer_query, {"volunteer", "shelter"})
+        == 1.0
+    )
+    assert query_ranking_module._action_evidence_score(volunteer_query, {"present", "slide"}) == 0.0
+
+
 def test_query_coverage_promotes_recurring_frequency() -> None:
     ranked = _rank_query_ids(
         "How often do I attend classes to help with my anxiety?",

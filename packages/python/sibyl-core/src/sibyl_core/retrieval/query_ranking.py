@@ -413,7 +413,8 @@ _ACTION_EVIDENCE_GROUPS = (
     frozenset({"donate", "donated", "sell", "sold"}),
     frozenset({"fix", "repair", "repaired", "replace", "replaced", "service", "serviced"}),
     frozenset({"attend", "join", "joined", "participate", "participated"}),
-    frozenset({"present", "volunteer"}),
+    frozenset({"present"}),
+    frozenset({"volunteer"}),
     frozenset({"register", "registered", "subscribe", "subscription"}),
     frozenset({"rely", "use", "used", "using"}),
 )
