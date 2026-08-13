@@ -1520,6 +1520,7 @@ async def compile_context(
     active_work_fn: ActiveWorkFn | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
     record_exposure: bool = True,
+    knn_type_overfetch: int = 0,
 ) -> ContextPack:
     """Build a small, structured context pack for an agent goal."""
 
@@ -1548,6 +1549,7 @@ async def compile_context(
         agent_id=agent_id,
         limit=limit,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
+        knn_type_overfetch=knn_type_overfetch,
     )
 
     sections: list[ContextSection] = []

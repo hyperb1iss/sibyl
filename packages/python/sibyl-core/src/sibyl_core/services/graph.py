@@ -20,7 +20,7 @@ from sibyl_core.backends.surreal.fulltext import (
     build_fulltext_terms,
     build_match_disjunction,
 )
-from sibyl_core.backends.surreal.knn import knn_search_effort
+from sibyl_core.backends.surreal.knn import knn_overfetch_pool, knn_search_effort
 from sibyl_core.backends.surreal.records import raise_on_error
 from sibyl_core.backends.surreal.schema import bootstrap_schema
 from sibyl_core.config import settings
@@ -608,6 +608,7 @@ class EntityManager:
         query: str,
         entity_types: Sequence[EntityType] | None = None,
         limit: int = 10,
+        knn_type_overfetch: int = 0,
     ) -> list[tuple[Entity, float]]:
         search_query = build_fulltext_query(query)
         if not search_query:
@@ -626,6 +627,7 @@ class EntityManager:
                 query=query,
                 entity_types=entity_types,
                 limit=result_limit,
+                knn_type_overfetch=knn_type_overfetch,
             ),
         ]
         if anchor_search_query and anchor_search_query != search_query:
@@ -742,12 +744,29 @@ class EntityManager:
             for entity in (_entity_from_row(row) for row in rows)
         ]
 
+    @staticmethod
+    def _typed_overfetch_vector_query(*, candidate_limit: int, overfetch: int) -> str:
+        # The inner query walks the HNSW index with only the group predicate;
+        # the type filter applies to the materialized pool outside the bracket.
+        pool = knn_overfetch_pool(candidate_limit, overfetch)
+        overfetch_knn_effort = knn_search_effort(pool, settings.graph_knn_ef)
+        return (
+            "SELECT * FROM ("
+            "SELECT " + _ENTITY_SEARCH_FIELDS + ", (1 - vector::distance::knn()) AS score"
+            " FROM entity WHERE group_id = $group_id"
+            f" AND name_embedding <|{pool}, {overfetch_knn_effort}|> $query_embedding"
+            ") WHERE entity_type IN $entity_types"
+            " ORDER BY score DESC, created_at DESC, uuid DESC"
+            " LIMIT $limit;"
+        )
+
     async def _vector_search(
         self,
         *,
         query: str,
         entity_types: Sequence[EntityType] | None,
         limit: int,
+        knn_type_overfetch: int = 0,
     ) -> list[tuple[Entity, float]]:
         if self._embedding_provider is None:
             return []
@@ -767,6 +786,32 @@ class EntityManager:
                 embeddings,
                 self._embedding_provider.metadata.dimensions,
             )
+            rows: list[dict[str, Any]] = []
+            if type_values and knn_type_overfetch > 0:
+                rows = normalize_records(
+                    await self._client.execute_query(
+                        self._typed_overfetch_vector_query(
+                            candidate_limit=candidate_limit,
+                            overfetch=knn_type_overfetch,
+                        ),
+                        group_id=self._group_id,
+                        query_embedding=query_embedding,
+                        entity_types=type_values,
+                        limit=candidate_limit,
+                        _query_label="entity.search.vector.overfetch",
+                    )
+                )
+                if len(rows) >= candidate_limit:
+                    return [(_entity_from_row(row), _row_score(row)) for row in rows]
+                # Yield shortfall: the query embedding sits in a cluster the
+                # requested types do not reach at this depth, so the exactness
+                # argument no longer covers the tail. Fall through to the
+                # classic typed form, which digs as deep as it needs to.
+                log.info(
+                    "entity_vector_search_overfetch_fallback",
+                    typed_yield=len(rows),
+                    candidate_limit=candidate_limit,
+                )
             rows = normalize_records(
                 await self._client.execute_query(
                     "SELECT *"

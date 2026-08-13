@@ -142,6 +142,7 @@ TYPED_STREAM_TYPES = ("note", "event", "procedure", "error_pattern")
 # would have ranked.
 DEFAULT_EVIDENCE_TYPES = ("session",)
 SUPPORTED_EVIDENCE_TYPES = frozenset({"passage", "session"})
+DEFAULT_KNN_TYPE_OVERFETCH = 0
 DEFAULT_RETRIEVAL_MAX_PLANNED_QUERIES = 3
 DEFAULT_API_TIMEOUT_SECONDS = 600.0
 DEFAULT_API_RETRY_ATTEMPTS = 3
@@ -220,6 +221,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "source_evidence_bundling",
         "retrieval_mode",
         "retrieval_max_planned_queries",
+        "knn_type_overfetch",
         "checkpoint_dir",
         "agentic_traversal",
         "traversal_widening_rounds",
@@ -3399,6 +3401,12 @@ class SibylLiveApiMemory(Memory):
             DEFAULT_RETRIEVAL_MAX_PLANNED_QUERIES,
             minimum=1,
         )
+        self.knn_type_overfetch = _param_int(
+            memory_params,
+            "knn_type_overfetch",
+            DEFAULT_KNN_TYPE_OVERFETCH,
+            minimum=0,
+        )
         if self.retrieval_max_planned_queries > MAX_REFINEMENT_QUERIES:
             raise ValueError(
                 f"retrieval_max_planned_queries must be at most {MAX_REFINEMENT_QUERIES}"
@@ -4363,6 +4371,20 @@ class SibylLiveApiMemory(Memory):
         self,
         query: str,
     ) -> tuple[list[dict[str, object]], dict[str, object]]:
+        stream_evidence: dict[str, object] = {
+            "types": list(TYPED_STREAM_TYPES),
+            "limit": self.typed_stream_limit,
+            "content_max_chars": self.max_context_chars_per_item,
+            "include_retrieval_diagnostics": False,
+            "retrieval_mode": "fast",
+            "max_planned_queries": 1,
+        }
+        stream_extras: dict[str, object] = {}
+        stream_overfetch = getattr(self, "knn_type_overfetch", DEFAULT_KNN_TYPE_OVERFETCH)
+        if stream_overfetch > 0:
+            # Same omit-when-unset rule as the main evidence request.
+            stream_evidence["knn_type_overfetch"] = stream_overfetch
+            stream_extras["knn_type_overfetch"] = stream_overfetch
         response = self._request_json(
             "POST",
             "/context/pack",
@@ -4376,14 +4398,8 @@ class SibylLiveApiMemory(Memory):
                 "related_limit": 3,
                 "audit": True,
                 "record_exposure": False,
-                "evidence": {
-                    "types": list(TYPED_STREAM_TYPES),
-                    "limit": self.typed_stream_limit,
-                    "content_max_chars": self.max_context_chars_per_item,
-                    "include_retrieval_diagnostics": False,
-                    "retrieval_mode": "fast",
-                    "max_planned_queries": 1,
-                },
+                "evidence": stream_evidence,
+                **stream_extras,
             },
         )
         results, filters = _required_context_evidence(response)
@@ -4400,6 +4416,14 @@ class SibylLiveApiMemory(Memory):
             "result_count": len(stream_results),
             "filters": filters,
         }
+
+    def _knn_overfetch_extras(self, evidence_request: dict[str, object]) -> dict[str, object]:
+        knn_type_overfetch = getattr(self, "knn_type_overfetch", DEFAULT_KNN_TYPE_OVERFETCH)
+        if knn_type_overfetch <= 0:
+            # Same omit-when-unset rule as char_budget.
+            return {}
+        evidence_request["knn_type_overfetch"] = knn_type_overfetch
+        return {"knn_type_overfetch": knn_type_overfetch}
 
     def query(self, query: str, query_image: str | None = None) -> list[MemoryContextItem]:
         pending_jobs = len(self._pending_embedding_job_ids) + len(self._pending_projection_job_ids)
@@ -4438,6 +4462,7 @@ class SibylLiveApiMemory(Memory):
             # Omitted rather than sent as null when unset, so a run reproducing
             # the old geometry puts a byte-identical request on the wire.
             evidence_request["char_budget"] = char_budget
+        pack_request_extras = self._knn_overfetch_extras(evidence_request)
         context_response = self._request_json(
             "POST",
             "/context/pack",
@@ -4452,6 +4477,7 @@ class SibylLiveApiMemory(Memory):
                 "audit": True,
                 "record_exposure": False,
                 "evidence": evidence_request,
+                **pack_request_extras,
             },
         )
         typed_results = context_pack_to_search_results(

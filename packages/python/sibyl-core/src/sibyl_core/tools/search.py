@@ -724,6 +724,7 @@ async def search(
     allowed_memory_scope_keys: set[str] | None = None,
     record_exposure: bool = True,
     include_retrieval_diagnostics: bool = False,
+    knn_type_overfetch: int = 0,
 ) -> SearchResponse:
     """Unified semantic search across knowledge graph AND documentation.
 
@@ -1077,6 +1078,11 @@ async def search(
                             entity_types=entity_types,
                             limit=limit * 3,
                             config=hybrid_config,
+                            **(
+                                {"knn_type_overfetch": knn_type_overfetch}
+                                if knn_type_overfetch > 0
+                                else {}
+                            ),
                             include_metadata=include_retrieval_diagnostics,
                             group_id=organization_id,
                             result_filter=graph_result_allowed,
@@ -1111,6 +1117,11 @@ async def search(
                             query=query,
                             entity_types=entity_types,
                             limit=limit * 3,
+                            **(
+                                {"knn_type_overfetch": knn_type_overfetch}
+                                if knn_type_overfetch > 0
+                                else {}
+                            ),
                         ),
                         timeout_seconds=TIMEOUTS["search"],
                         operation_name="search",

@@ -64,6 +64,19 @@ class ContextEvidenceRequest(BaseModel):
         default=True,
         description="Reserve a typed lane for distilled operational notes",
     )
+    knn_type_overfetch: int = Field(
+        default=0,
+        ge=0,
+        le=32,
+        description=(
+            "When >0 and a type filter is set, typed vector reads walk an "
+            "untyped KNN pool this many times the candidate budget and filter "
+            "types outside the HNSW bracket (a selective predicate beside the "
+            "bracket forces a 10-15x deeper walk); a full head is exactly the "
+            "typed KNN head, a shortfall falls back to the classic form. "
+            "0 keeps the classic typed query."
+        ),
+    )
 
 
 class ContextPackRequest(BaseModel):
@@ -98,6 +111,19 @@ class ContextPackRequest(BaseModel):
     evidence: ContextEvidenceRequest | None = Field(
         default=None,
         description="Run enhanced source-evidence retrieval alongside context compilation",
+    )
+    knn_type_overfetch: int = Field(
+        default=0,
+        ge=0,
+        le=32,
+        description=(
+            "When >0 and a type filter is set, typed vector reads walk an "
+            "untyped KNN pool this many times the candidate budget and filter "
+            "types outside the HNSW bracket (a selective predicate beside the "
+            "bracket forces a 10-15x deeper walk); a full head is exactly the "
+            "typed KNN head, a shortfall falls back to the classic form. "
+            "0 keeps the classic typed query."
+        ),
     )
 
 

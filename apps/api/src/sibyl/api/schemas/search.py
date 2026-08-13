@@ -14,6 +14,19 @@ class SearchRequest(BaseModel):
     """
 
     query: str = Field(..., min_length=1, description="Natural language search query")
+    knn_type_overfetch: int = Field(
+        default=0,
+        ge=0,
+        le=32,
+        description=(
+            "When >0 and a type filter is set, typed vector reads walk an "
+            "untyped KNN pool this many times the candidate budget and filter "
+            "types outside the HNSW bracket (a selective predicate beside the "
+            "bracket forces a 10-15x deeper walk); a full head is exactly the "
+            "typed KNN head, a shortfall falls back to the classic form. "
+            "0 keeps the classic typed query."
+        ),
+    )
     types: list[str] | None = Field(
         default=None,
         description="Filter by entity types. Options: pattern, rule, template, topic, "

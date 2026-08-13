@@ -124,6 +124,7 @@ def _context_evidence_request(
         boost_recent=False,
         include_retrieval_diagnostics=request.evidence.include_retrieval_diagnostics,
         record_exposure=(request.record_exposure and not request.evidence.reserve_distilled_notes),
+        knn_type_overfetch=request.evidence.knn_type_overfetch,
     )
 
 
@@ -148,6 +149,7 @@ def _distilled_context_evidence_request(
         boost_recent=False,
         include_retrieval_diagnostics=request.evidence.include_retrieval_diagnostics,
         record_exposure=False,
+        knn_type_overfetch=request.evidence.knn_type_overfetch,
     )
 
 
@@ -830,6 +832,7 @@ async def context_pack(
                 related_limit=request.related_limit,
                 audit=request.audit,
                 record_exposure=request.record_exposure,
+                knn_type_overfetch=request.knn_type_overfetch,
                 allowed_memory_scope_keys=set(ctx.api_key_memory_scope_keys)
                 if ctx.api_key_memory_scope_keys is not None
                 else None,
