@@ -1,6 +1,7 @@
 """Add tool for creating new knowledge in the Sibyl graph."""
 
 import inspect
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -30,6 +31,7 @@ from sibyl_core.models.entities import (
     Relationship,
     RelationshipType,
 )
+from sibyl_core.models.relations import parse_relation_declarations
 from sibyl_core.models.tasks import (
     Epic,
     EpicStatus,
@@ -130,6 +132,34 @@ def _build_relationship(rel_data: dict[str, Any]) -> Relationship:
         relationship_type=RelationshipType(rel_data["type"]),
         metadata=rel_data.get("metadata", {}),
     )
+
+
+def _declared_relationship_payloads(
+    entity_id: str,
+    related_to: Sequence[str] | None,
+) -> list[dict[str, Any]]:
+    """Turn a `related_to` list into edge payloads, honoring declared predicates.
+
+    An undeclared entry keeps the exact id and RELATED_TO type it has always
+    had. A declared one carries its predicate into the relationship id too, so
+    an agent can both supersede and reference the same target without the two
+    edges colliding on a deterministic id.
+    """
+    payloads: list[dict[str, Any]] = []
+    for declaration in parse_relation_declarations(related_to):
+        metadata: dict[str, Any] = {"created_at": datetime.now(UTC).isoformat()}
+        if declaration.declared:
+            metadata["agent_declared"] = True
+        payloads.append(
+            {
+                "id": f"rel_{entity_id}_{declaration.edge_slug}_{declaration.target_id}",
+                "source_id": entity_id,
+                "target_id": declaration.target_id,
+                "type": declaration.relationship_type.value,
+                "metadata": metadata,
+            }
+        )
+    return payloads
 
 
 def _accepts_keyword(function: Any, keyword: str) -> bool:
@@ -285,7 +315,15 @@ async def add(
         category: Domain category (authentication, database, api, debugging, etc.).
         languages: Programming languages (python, typescript, rust, etc.).
         tags: Searchable tags for discovery.
-        related_to: Entity IDs to explicitly link (creates RELATED_TO edges).
+        related_to: Entity IDs to explicitly link. A bare ID creates an untyped
+              RELATED_TO edge. Prefixing an ID with a predicate from the closed
+              vocabulary declares what this memory does to that one, and
+              retrieval weights the declared predicate when it walks the graph:
+              "supersedes:<id>" (this replaces that), "contradicts:<id>",
+              "requires:<id>", "supports:<id>" (this is evidence for that),
+              "decides:<id>" (this settles that). The memory being written is
+              always the subject. Any other prefix is read as part of the ID
+              and links untyped, exactly as before.
         metadata: Additional structured data.
         project: Project ID (REQUIRED for tasks and epics, creates BELONGS_TO edge).
         epic: Epic ID for tasks (optional, creates BELONGS_TO edge).
@@ -709,20 +747,10 @@ async def add(
                 ]
             )
 
-        # Generic RELATED_TO relationships
-        if related_to:
-            relationships_to_create.extend(
-                [
-                    {
-                        "id": f"rel_{entity_id}_related_to_{related_id}",
-                        "source_id": entity_id,
-                        "target_id": related_id,
-                        "type": "RELATED_TO",
-                        "metadata": {"created_at": datetime.now(UTC).isoformat()},
-                    }
-                    for related_id in related_to
-                ]
-            )
+        # Declared relationships. A bare id still collapses to RELATED_TO; a
+        # "<predicate>:<id>" entry from the closed vocabulary mints the edge
+        # type the graph expansion scorer actually weights.
+        relationships_to_create.extend(_declared_relationship_payloads(entity_id, related_to))
 
         # Sync mode: create entity + relationships immediately via Surreal
         if sync:

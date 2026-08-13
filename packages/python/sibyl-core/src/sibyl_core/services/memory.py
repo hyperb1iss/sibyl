@@ -36,6 +36,7 @@ from sibyl_core.models.reflection import (
     with_memory_lifecycle_metadata,
     with_reflection_finding_metadata,
 )
+from sibyl_core.models.relations import declared_relation_targets
 from sibyl_core.services.graph import get_surreal_graph_runtime
 from sibyl_core.services.memory_autonomy import reflection_autonomy_candidate_metadata
 from sibyl_core.services.surreal_content import (
@@ -3194,7 +3195,11 @@ def _relationships_for_promotion(
             )
         )
     excluded_targets = {entity_id, project, source_id}
-    for related_id in related_to or ():
+    # Promotion resolves a declared predicate down to its target id and links
+    # untyped. SUPERSEDES on this path is minted only from `supersedes`, whose
+    # targets passed `_authorized_superseded_entity_ids`; honoring a predicate
+    # declared on the free `related_to` channel would route around that gate.
+    for related_id in declared_relation_targets(list(related_to or ())):
         if related_id in excluded_targets:
             continue
         relationships.append(

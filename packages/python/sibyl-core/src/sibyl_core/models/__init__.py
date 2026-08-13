@@ -47,6 +47,15 @@ from sibyl_core.models.projects import (
     SHARED_PROJECT_SLUG,
     is_shared_project_slug,
 )
+from sibyl_core.models.relations import (
+    DECLARABLE_PREDICATE_HELP,
+    DECLARABLE_RELATIONSHIP_PREDICATES,
+    RELATION_DECLARATION_SEPARATOR,
+    RelationDeclaration,
+    declared_relation_targets,
+    parse_relation_declaration,
+    parse_relation_declarations,
+)
 from sibyl_core.models.responses import (
     EntityResponse,
     GraphStatsResponse,
@@ -122,6 +131,9 @@ from sibyl_core.models.tools import (
 )
 
 __all__ = [
+    "DECLARABLE_PREDICATE_HELP",
+    "DECLARABLE_RELATIONSHIP_PREDICATES",
+    "RELATION_DECLARATION_SEPARATOR",
     "SHARED_PROJECT_DESCRIPTION",
     "SHARED_PROJECT_NAME",
     "SHARED_PROJECT_SLUG",
@@ -173,6 +185,7 @@ __all__ = [
     "Project",
     "ProjectStatus",
     "RecordDebuggingInput",
+    "RelationDeclaration",
     "Relationship",
     "RelationshipType",
     "Rule",
@@ -220,6 +233,9 @@ __all__ = [
     "TimeEntry",
     "Tool",
     "Topic",
+    "declared_relation_targets",
     "derive_container_status",
     "is_shared_project_slug",
+    "parse_relation_declaration",
+    "parse_relation_declarations",
 ]
