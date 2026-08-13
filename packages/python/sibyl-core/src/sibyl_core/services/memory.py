@@ -1877,7 +1877,7 @@ async def _project_correction_to_graph(
     applied: list[str] = []
     for entity_id in entity_ids:
         try:
-            await runtime.entity_manager.update(entity_id, {"metadata": updates})
+            updated = await runtime.entity_manager.update(entity_id, {"metadata": updates})
         except Exception as exc:
             log.warning(
                 "memory_correction_graph_update_failed",
@@ -1886,7 +1886,12 @@ async def _project_correction_to_graph(
                 error_type=type(exc).__name__,
             )
             continue
-        applied.append(entity_id)
+        # A miss is expected rather than exceptional. `_correction_derived_ids`
+        # reports everything derived from the capture, relationship ids
+        # included, and only the rows that were really stamped may reach the
+        # mutation receipt or become an endpoint for the supersession edge.
+        if updated is not None:
+            applied.append(entity_id)
 
     if preview.action == "supersede" and replacement_source_id and applied:
         await _link_graph_supersession(

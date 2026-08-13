@@ -408,8 +408,9 @@ async def test_supersession_lookup_failure_degrades_without_failing_the_search(
 class _CorrectionGraphRuntime:
     """Minimal graph double: one projected entity per corrected capture."""
 
-    def __init__(self, *, uuid: str = "entity-old") -> None:
+    def __init__(self, *, uuid: str = "entity-old", missing: frozenset[str] = frozenset()) -> None:
         self.uuid = uuid
+        self.missing = missing
         self.updates: list[tuple[str, dict[str, Any]]] = []
         self.relationships: list[Any] = []
         self.client = self
@@ -419,8 +420,11 @@ class _CorrectionGraphRuntime:
     async def execute_query(self, _query: str, **_params: object) -> list[dict[str, object]]:
         return [{"uuid": self.uuid}]
 
-    async def update(self, entity_id: str, updates: dict[str, Any]) -> None:
+    async def update(self, entity_id: str, updates: dict[str, Any]) -> object | None:
+        if entity_id in self.missing:
+            return None
         self.updates.append((entity_id, dict(updates["metadata"])))
+        return object()
 
     async def create(self, relationship: Any) -> str:
         self.relationships.append(relationship)
@@ -705,3 +709,51 @@ async def test_the_edge_lookup_is_not_fed_ids_that_cannot_be_edge_endpoints() ->
     )
 
     assert seen_uuids == [["entity-real"]]
+
+
+@pytest.mark.asyncio
+async def test_the_receipt_names_only_rows_that_were_really_stamped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_correction_derived_ids` reports relationship ids too, and those are not entities.
+
+    An id that matches no entity row must not reach the mutation receipt, or
+    the receipt claims a write that never happened.
+    """
+
+    memory = _raw_capture(
+        id="source-1",
+        metadata={
+            "capture_surface": "reflection_candidate",
+            "promoted_entity_id": "entity-old",
+            "relationship_ids": ["rel_entity-old_supersedes_entity-gone"],
+        },
+    )
+    runtime = _CorrectionGraphRuntime(missing=frozenset({"rel_entity-old_supersedes_entity-gone"}))
+
+    async def execute_query(_query: str, **_params: object) -> list[dict[str, object]]:
+        return []
+
+    runtime.execute_query = execute_query  # type: ignore[method-assign]
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> _CorrectionGraphRuntime:
+        return runtime
+
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+    monkeypatch.setattr(
+        memory_module,
+        "save_raw_memory",
+        AsyncMock(side_effect=lambda updated, **_kwargs: updated),
+    )
+    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+
+    result = await memory_module.apply_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="mark_wrong",
+    )
+
+    assert result.applied
+    assert result.affected_entity_ids == ["entity-old"]
