@@ -252,7 +252,7 @@ jobs:
           to: HEAD
           version-name: ${{ steps.version.outputs.version }}
           provider: anthropic
-          model: claude-opus-4-8
+          model: claude-opus-5
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 
       - name: "◇ Prepare release notes"
