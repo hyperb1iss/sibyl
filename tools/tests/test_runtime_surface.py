@@ -169,6 +169,31 @@ def test_helm_production_render_rejects_a_configmap_resident_jwt_secret() -> Non
 
 
 @requires_helm
+def test_helm_production_guard_matches_env_keys_case_insensitively() -> None:
+    """pydantic-settings resolves env vars case-insensitively, so the guard must too."""
+    for key in ("sibyl_jwt_secret", "Sibyl_Jwt_Secret"):
+        result = _helm_template(
+            "--set",
+            "backend.existingSecret=sibyl-secrets",
+            "--set",
+            f"backend.env.{key}=hunter2",
+        )
+
+        assert result.returncode != 0, f"{key} rendered instead of failing"
+        assert "backend.env.SIBYL_JWT_SECRET must not be used in production" in result.stderr
+
+    lowercase_production = _helm_template(
+        "--set",
+        "backend.env.SIBYL_ENVIRONMENT=null",
+        "--set",
+        "backend.env.sibyl_environment=production",
+    )
+
+    assert lowercase_production.returncode != 0
+    assert "backend.existingSecret is required" in lowercase_production.stderr
+
+
+@requires_helm
 def test_helm_enterprise_evidence_render_args_still_render() -> None:
     """The readiness evidence tool renders charts/sibyl with these exact overrides."""
     assert _HELM_BINARY is not None
