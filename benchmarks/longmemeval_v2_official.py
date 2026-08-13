@@ -77,6 +77,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "context_expansion_max_ratio",
         "evidence_types",
         "evidence_char_budget",
+        "evidence_char_budget_raw_reserve",
         "evidence_composition_mode",
         "source_evidence_bundling",
         "typed_stream_retrieval",
@@ -458,6 +459,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         default=False,
     )
     parser.add_argument("--neighbor-support-overflow-items", type=int, default=0)
+    parser.add_argument("--semantic-prior-rescue-weight", type=float, default=0.0)
+    parser.add_argument("--typed-pool", default="typed", choices=["typed", "typed_entity_overlap"])
     parser.add_argument(
         "--neighbor-stitch-spread",
         action=argparse.BooleanOptionalAction,
@@ -473,6 +476,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
             "Entity types the raw evidence lane may retrieve. The list reaches the search "
             "as a hard node-type filter, so a type left out never enters the candidate pool. "
             "Defaults to the shipped whole-state substrate."
+        ),
+    )
+    parser.add_argument(
+        "--evidence-char-budget-raw-reserve",
+        type=int,
+        default=None,
+        help=(
+            "Reserve this many characters of --evidence-char-budget for the raw "
+            "evidence lane, admitted before typed items spend anything. Requires "
+            "--evidence-char-budget; unset reproduces the shared-budget admission."
         ),
     )
     parser.add_argument(
@@ -717,9 +730,12 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
         "neighbor_support_overflow_items": args.neighbor_support_overflow_items,
         "neighbor_stitch_spread": args.neighbor_stitch_spread,
+        "semantic_prior_rescue_weight": args.semantic_prior_rescue_weight,
+        "typed_pool": args.typed_pool,
         "context_expansion_max_ratio": args.context_expansion_max_ratio,
         "evidence_types": list(args.evidence_types),
         "evidence_char_budget": args.evidence_char_budget,
+        "evidence_char_budget_raw_reserve": args.evidence_char_budget_raw_reserve,
         "evidence_composition_mode": args.evidence_composition_mode,
         "source_evidence_bundling": args.source_evidence_bundling,
         "typed_stream_retrieval": args.typed_stream_retrieval,
@@ -875,10 +891,13 @@ def build_run_plan(
         "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
         "neighbor_support_overflow_items": args.neighbor_support_overflow_items,
         "neighbor_stitch_spread": args.neighbor_stitch_spread,
+        "semantic_prior_rescue_weight": args.semantic_prior_rescue_weight,
+        "typed_pool": args.typed_pool,
         "context_expansion_max_ratio": args.context_expansion_max_ratio,
         "max_context_total_chars": args.max_context_total_chars,
         "evidence_types": list(args.evidence_types),
         "evidence_char_budget": args.evidence_char_budget,
+        "evidence_char_budget_raw_reserve": args.evidence_char_budget_raw_reserve,
         "evidence_composition_mode": args.evidence_composition_mode,
         "source_evidence_bundling": args.source_evidence_bundling,
         "typed_stream_retrieval": args.typed_stream_retrieval,

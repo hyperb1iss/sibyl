@@ -5032,8 +5032,11 @@ def test_operational_evidence_set_calibrates_typed_and_raw_score_pools() -> None
         "traversal_candidate_count": 0,
         "traversal_overflow_items": 0,
         "traversal_admitted_items": 0,
+        "semantic_prior_rescue_weight": 0.0,
+        "typed_pool": "typed",
         "budget_mode": "items",
         "char_budget": None,
+        "char_budget_raw_reserve": None,
         "selected_chars": sum(len(str(item["content"])) for item in selected),
     }
 
@@ -6170,8 +6173,11 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
                 "traversal_candidate_count": 0,
                 "traversal_overflow_items": 0,
                 "traversal_admitted_items": 0,
+                "semantic_prior_rescue_weight": 0.0,
+                "typed_pool": "typed",
                 "budget_mode": "items",
                 "char_budget": None,
+                "char_budget_raw_reserve": None,
                 "selected_chars": 0,
             },
             "context_budget": {
@@ -7003,3 +7009,149 @@ def _passage_result(
             "passage_index": passage_index,
         },
     }
+
+
+def test_raw_reserve_cures_fat_head_starvation() -> None:
+    """A fat top-ranked raw candidate must not zero out the evidence lane.
+
+    Without a reserve, prefix-stop admission lets the reserved notes spend
+    first and the fat head then exceeds the remainder, so the raw lane admits
+    nothing (the observed stage-2 slice-screen geometry). With the reserve,
+    the raw lane spends first and the same pool keeps its evidence.
+    """
+    module = _load_memory_module()
+    typed = [
+        {
+            "id": f"note_{index}",
+            "type": "note",
+            "content": "distilled note ".ljust(200, "n"),
+            "metadata": {"longmemeval_v2_trajectory_id": f"nt{index}"},
+        }
+        for index in range(3)
+    ]
+    raw = [
+        {
+            "id": "session_fat",
+            "type": "session",
+            "content": "fat state ".ljust(5_000, "f"),
+            "metadata": {"longmemeval_v2_trajectory_id": "tf"},
+        },
+        {
+            "id": "passage_small",
+            "type": "passage",
+            "content": "small slice ".ljust(400, "p"),
+            "metadata": {"longmemeval_v2_trajectory_id": "tp"},
+        },
+    ]
+
+    char_budget = 5_500
+    raw_reserve = 5_200
+    starved, _starved_meta = module.compile_operational_evidence_set(
+        query="find the field",
+        typed_results=typed,
+        raw_results=raw,
+        max_items=8,
+        mode="shared_relevance",
+        char_budget=char_budget,
+    )
+    starved_ids = {item["id"] for item in starved}
+    assert "session_fat" not in starved_ids
+    assert "passage_small" not in starved_ids
+
+    cured, cured_meta = module.compile_operational_evidence_set(
+        query="find the field",
+        typed_results=typed,
+        raw_results=raw,
+        max_items=8,
+        mode="shared_relevance",
+        char_budget=char_budget,
+        char_budget_raw_reserve=raw_reserve,
+    )
+    assert cured_meta["char_budget_raw_reserve"] == raw_reserve
+    assert cured_meta["selected_chars"] <= char_budget
+    assert any(item["id"] == "session_fat" for item in cured)
+
+
+def test_raw_reserve_returns_unspent_budget_to_the_shared_pool() -> None:
+    module = _load_memory_module()
+    typed = [
+        {
+            "id": f"note_{index}",
+            "type": "note",
+            "content": "typed item ".ljust(300, "t"),
+            "metadata": {"longmemeval_v2_trajectory_id": f"nt{index}"},
+        }
+        for index in range(12)
+    ]
+    raw = [
+        {
+            "id": "passage_only",
+            "type": "passage",
+            "content": "tiny slice ".ljust(500, "p"),
+            "metadata": {"longmemeval_v2_trajectory_id": "tp"},
+        }
+    ]
+
+    char_budget = 6_000
+    raw_reserve = 3_000
+    note_chars = 600
+    selected, meta = module.compile_operational_evidence_set(
+        query="find the field",
+        typed_results=typed,
+        raw_results=raw,
+        max_items=8,
+        mode="shared_relevance",
+        char_budget=char_budget,
+        char_budget_raw_reserve=raw_reserve,
+    )
+    assert any(item["id"] == "passage_only" for item in selected)
+    # The raw lane spent 500 of its 3000 reserve; typed overflow must reach
+    # past reserve + notes or the unspent reserve was burned.
+    assert meta["selected_chars"] > raw_reserve + note_chars
+    assert meta["selected_chars"] <= char_budget
+    assert meta["selected_chars"] == sum(len(str(item["content"])) for item in selected)
+
+
+def test_raw_reserve_validation() -> None:
+    module = _load_memory_module()
+    typed, raw = _budget_pools(note_chars=200, raw_chars=1_000)
+    with pytest.raises(ValueError, match="requires char_budget"):
+        module.compile_operational_evidence_set(
+            query="q",
+            typed_results=typed,
+            raw_results=raw,
+            max_items=8,
+            mode="shared_relevance",
+            char_budget_raw_reserve=1_000,
+        )
+    with pytest.raises(ValueError, match="below char_budget"):
+        module.compile_operational_evidence_set(
+            query="q",
+            typed_results=typed,
+            raw_results=raw,
+            max_items=8,
+            mode="shared_relevance",
+            char_budget=5_000,
+            char_budget_raw_reserve=5_000,
+        )
+
+
+def test_raw_reserve_none_is_byte_identical_to_the_shipped_budget_path() -> None:
+    module = _load_memory_module()
+    typed, raw = _budget_pools(note_chars=200, raw_chars=1_000)
+    kwargs = {
+        "query": "find the field",
+        "typed_results": typed,
+        "raw_results": raw,
+        "max_items": 8,
+        "mode": "shared_relevance",
+        "char_budget": 3 * 200 + 10 * 1_000,
+    }
+    base_selected, base_meta = module.compile_operational_evidence_set(**kwargs)
+    none_selected, none_meta = module.compile_operational_evidence_set(
+        **kwargs, char_budget_raw_reserve=None
+    )
+    assert [item["id"] for item in base_selected] == [item["id"] for item in none_selected]
+    base_meta.pop("char_budget_raw_reserve")
+    none_meta.pop("char_budget_raw_reserve")
+    assert base_meta == none_meta

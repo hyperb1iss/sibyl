@@ -163,6 +163,10 @@ DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING = False
 DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS = 0
 DEFAULT_NEIGHBOR_STITCH_SPREAD = False
 DEFAULT_AGENTIC_TRAVERSAL = False
+DEFAULT_SEMANTIC_PRIOR_RESCUE_WEIGHT = 0.0
+MAX_SEMANTIC_PRIOR_RESCUE_WEIGHT = 1.0
+DEFAULT_TYPED_POOL = "typed"
+SUPPORTED_TYPED_POOLS = frozenset({"typed", "typed_entity_overlap"})
 # Granted admission slots for traversal-gathered evidence, mirroring the
 # additive neighbor-overflow mechanism: model-gathered items ride their own
 # lane instead of evicting seeds, and the render ceiling rises with the grant
@@ -212,6 +216,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "context_expansion_max_ratio",
         "evidence_types",
         "evidence_char_budget",
+        "evidence_char_budget_raw_reserve",
         "evidence_composition_mode",
         "source_evidence_bundling",
         "retrieval_mode",
@@ -226,6 +231,8 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "traversal_deadline_seconds",
         "traversal_overflow_items",
         "traversal_search_limit",
+        "semantic_prior_rescue_weight",
+        "typed_pool",
     }
 )
 SAVED_MEMORY_IDENTITY_KEYS = frozenset(
@@ -721,11 +728,14 @@ def compile_operational_evidence_set(
     mode: str = DEFAULT_EVIDENCE_COMPOSITION_MODE,
     typed_reservation_items: int | None = None,
     char_budget: int | None = None,
+    char_budget_raw_reserve: int | None = None,
     neighbor_support_exempt: bool = DEFAULT_NEIGHBOR_SUPPORT_EXEMPT,
     neighbor_trajectory_preserving: bool = DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING,
     neighbor_support_overflow_items: int = DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS,
     traversal_results: list[dict[str, object]] | None = None,
     traversal_overflow_items: int = 0,
+    semantic_prior_rescue_weight: float = DEFAULT_SEMANTIC_PRIOR_RESCUE_WEIGHT,
+    typed_pool: str = DEFAULT_TYPED_POOL,
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
     """Compose the reader's pack from the typed and raw evidence pools.
 
@@ -750,6 +760,16 @@ def compile_operational_evidence_set(
             raise ValueError("char_budget must be positive")
         if mode != "shared_relevance":
             msg = f"char_budget is only defined for shared_relevance composition, not {mode!r}"
+            raise ValueError(msg)
+    if char_budget_raw_reserve is not None:
+        if char_budget is None:
+            raise ValueError("char_budget_raw_reserve requires char_budget")
+        if not 0 < char_budget_raw_reserve < char_budget:
+            msg = (
+                f"char_budget_raw_reserve ({char_budget_raw_reserve}) must be positive "
+                f"and below char_budget ({char_budget}); reserving the whole budget "
+                "leaves the reserved note lane no room and stops measuring a partition"
+            )
             raise ValueError(msg)
     max_items = max(1, max_items)
     typed_candidates: list[dict[str, object]] = []
@@ -805,12 +825,14 @@ def compile_operational_evidence_set(
     ranked_typed, typed_ranking = _rank_operational_evidence_pool(
         query,
         typed_candidates,
-        pool="typed",
+        pool=typed_pool,
+        semantic_prior_rescue_weight=semantic_prior_rescue_weight,
     )
     ranked_raw, raw_ranking = _rank_operational_evidence_pool(
         query,
         raw_candidates,
         pool="raw",
+        semantic_prior_rescue_weight=semantic_prior_rescue_weight,
     )
     # Absolute, not proportional: the note lane was tuned at three items, and
     # widening it to five lost the whole measured gain. A slice-granular pack
@@ -849,27 +871,57 @@ def compile_operational_evidence_set(
         # The note lane keeps its absolute count inside the budget, but the
         # budget outranks the pin when it cannot hold that many: a lane allowed
         # to overrun the budget is not a budget.
-        reserved, spent = _admit_within_char_budget(
-            ranked_typed[: max(1, requested_reservation)],
-            budget=char_budget,
-            spent=0,
-        )
         ordered_raw = _select_role_complete_raw_evidence(
             ranked_raw,
             budget=len(ranked_raw),
             neighbor_support_exempt=neighbor_support_exempt,
             neighbor_trajectory_preserving=neighbor_trajectory_preserving,
         )
-        selected_raw, spent = _admit_within_char_budget(
-            ordered_raw,
-            budget=char_budget,
-            spent=spent,
-        )
-        overflow, spent = _admit_within_char_budget(
-            ranked_typed[len(reserved) :],
-            budget=char_budget,
-            spent=spent,
-        )
+        if char_budget_raw_reserve is None:
+            reserved, spent = _admit_within_char_budget(
+                ranked_typed[: max(1, requested_reservation)],
+                budget=char_budget,
+                spent=0,
+            )
+            selected_raw, spent = _admit_within_char_budget(
+                ordered_raw,
+                budget=char_budget,
+                spent=spent,
+            )
+            overflow, spent = _admit_within_char_budget(
+                ranked_typed[len(reserved) :],
+                budget=char_budget,
+                spent=spent,
+            )
+        else:
+            # Partitioned admission: the raw lane spends into its own reserve
+            # FIRST, so typed items can never consume the evidence lane's
+            # budget, and prefix-stop on a fat raw candidate costs at most the
+            # reserve rather than the whole pack. Unspent reserve returns to
+            # the shared pool, and each lane's admission stays a contiguous
+            # prefix of its ranking (a continuation with a larger budget
+            # extends the same prefix).
+            selected_raw, raw_spent = _admit_within_char_budget(
+                ordered_raw,
+                budget=char_budget_raw_reserve,
+                spent=0,
+            )
+            reserved, spent = _admit_within_char_budget(
+                ranked_typed[: max(1, requested_reservation)],
+                budget=char_budget,
+                spent=raw_spent,
+            )
+            raw_continuation, spent = _admit_within_char_budget(
+                ordered_raw[len(selected_raw) :],
+                budget=char_budget,
+                spent=spent,
+            )
+            selected_raw = [*selected_raw, *raw_continuation]
+            overflow, spent = _admit_within_char_budget(
+                ranked_typed[len(reserved) :],
+                budget=char_budget,
+                spent=spent,
+            )
         typed_reservation = len(reserved)
         selected = [*reserved, *selected_raw, *overflow]
         selected_chars = spent
@@ -933,8 +985,11 @@ def compile_operational_evidence_set(
         "traversal_candidate_count": len(traversal_pool),
         "traversal_overflow_items": traversal_overflow_items,
         "traversal_admitted_items": len(traversal_admitted),
+        "semantic_prior_rescue_weight": semantic_prior_rescue_weight,
+        "typed_pool": typed_pool,
         "budget_mode": "items" if char_budget is None else "characters",
         "char_budget": char_budget,
+        "char_budget_raw_reserve": char_budget_raw_reserve,
         "selected_chars": selected_chars,
     }
 
@@ -1033,6 +1088,7 @@ def _rank_operational_evidence_pool(
     candidates: list[dict[str, object]],
     *,
     pool: str,
+    semantic_prior_rescue_weight: float = 0.0,
 ) -> tuple[list[dict[str, object]], QueryCoverageResult[dict[str, object]]]:
     ranking = rank_by_query_coverage(
         query,
@@ -1046,6 +1102,7 @@ def _rank_operational_evidence_pool(
             )
             for index, candidate in enumerate(candidates, start=1)
         ],
+        semantic_prior_rescue_weight=semantic_prior_rescue_weight,
     )
     ranked_by_id = {candidate.stable_id: candidate for candidate in ranking.ranked}
     if pool == "typed_entity_overlap":
@@ -3448,6 +3505,21 @@ class SibylLiveApiMemory(Memory):
                 "agentic_traversal requires OPENAI_API_KEY or SIBYL_OPENAI_API_KEY "
                 "in the environment; export one or drop --agentic-traversal"
             )
+        self.semantic_prior_rescue_weight = _param_float(
+            memory_params,
+            "semantic_prior_rescue_weight",
+            DEFAULT_SEMANTIC_PRIOR_RESCUE_WEIGHT,
+        )
+        if not 0 <= self.semantic_prior_rescue_weight <= MAX_SEMANTIC_PRIOR_RESCUE_WEIGHT:
+            raise ValueError(
+                "semantic_prior_rescue_weight must be within "
+                f"[0, {MAX_SEMANTIC_PRIOR_RESCUE_WEIGHT}]: the rescue term adds at most "
+                "weight*1.0 to a zero-coverage candidate, and past 1.0 it can outvote "
+                "genuine vocabulary winners instead of rescuing the uncovered tail"
+            )
+        self.typed_pool = _param_str(memory_params, "typed_pool", DEFAULT_TYPED_POOL)
+        if self.typed_pool not in SUPPORTED_TYPED_POOLS:
+            raise ValueError(f"typed_pool must be one of {sorted(SUPPORTED_TYPED_POOLS)}")
         raw_reservation = memory_params.get("typed_reservation_items")
         self.typed_reservation_items = (
             _param_int(memory_params, "typed_reservation_items", 0, minimum=1)
@@ -3474,6 +3546,14 @@ class SibylLiveApiMemory(Memory):
             max_context_chars_per_item=self.max_context_chars_per_item,
             max_context_total_chars=self.max_context_total_chars,
         )
+        raw_reserve = memory_params.get("evidence_char_budget_raw_reserve")
+        self.evidence_char_budget_raw_reserve = (
+            _param_int(memory_params, "evidence_char_budget_raw_reserve", 0, minimum=1)
+            if raw_reserve is not None
+            else None
+        )
+        if self.evidence_char_budget_raw_reserve is not None and self.evidence_char_budget is None:
+            raise ValueError("evidence_char_budget_raw_reserve requires evidence_char_budget")
         self.context_expansion_max_ratio = _param_context_expansion_ratio(
             memory_params,
             "context_expansion_max_ratio",
@@ -4501,6 +4581,7 @@ class SibylLiveApiMemory(Memory):
             ),
             typed_reservation_items=getattr(self, "typed_reservation_items", None),
             char_budget=char_budget,
+            char_budget_raw_reserve=getattr(self, "evidence_char_budget_raw_reserve", None),
             neighbor_support_exempt=getattr(
                 self,
                 "neighbor_support_exempt",
@@ -4522,6 +4603,12 @@ class SibylLiveApiMemory(Memory):
                 if traversal_results
                 else 0
             ),
+            semantic_prior_rescue_weight=getattr(
+                self,
+                "semantic_prior_rescue_weight",
+                DEFAULT_SEMANTIC_PRIOR_RESCUE_WEIGHT,
+            ),
+            typed_pool=getattr(self, "typed_pool", DEFAULT_TYPED_POOL),
         )
         rendered_item_ceiling = context_pack_item_ceiling(
             max_items=self.max_context_items,

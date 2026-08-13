@@ -64,6 +64,9 @@ def main(argv: list[str] | None = None) -> int:
             "retrieval_mode": args.retrieval_mode,
             "retrieval_max_planned_queries": args.max_planned_queries,
             "evidence_composition_mode": args.evidence_composition_mode,
+            "evidence_types": list(args.evidence_types),
+            "evidence_char_budget": args.evidence_char_budget,
+            "evidence_char_budget_raw_reserve": args.evidence_char_budget_raw_reserve,
             "source_evidence_bundling": args.source_evidence_bundling,
             "neighbor_support_exempt": args.neighbor_support_exempt,
             "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
@@ -71,6 +74,8 @@ def main(argv: list[str] | None = None) -> int:
             "neighbor_stitch_items": args.neighbor_stitch_items,
             "neighbor_stitch_span": args.neighbor_stitch_span,
             "neighbor_stitch_spread": args.neighbor_stitch_spread,
+            "semantic_prior_rescue_weight": args.semantic_prior_rescue_weight,
+            "typed_pool": args.typed_pool,
             "typed_stream_retrieval": args.typed_stream_retrieval,
             "typed_stream_limit": args.typed_stream_limit,
         },
@@ -130,6 +135,35 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--retrieval-mode", choices=("fast", "accurate"), default="accurate")
     parser.add_argument("--max-planned-queries", type=int, default=3)
     parser.add_argument(
+        "--evidence-types",
+        nargs="+",
+        choices=["passage", "session"],
+        default=["session"],
+        help=(
+            "Entity types the raw evidence lane may retrieve, mirroring the official "
+            "harness flag. Defaults to the shipped whole-state substrate."
+        ),
+    )
+    parser.add_argument(
+        "--evidence-char-budget",
+        type=int,
+        default=None,
+        help=(
+            "Bound the composed pack by characters instead of item count, mirroring "
+            "the official harness flag. Leave unset for the shipped item-bounded "
+            "geometry."
+        ),
+    )
+    parser.add_argument(
+        "--evidence-char-budget-raw-reserve",
+        type=int,
+        default=None,
+        help=(
+            "Reserve this many characters of the budget for the raw evidence lane, "
+            "mirroring the official harness flag. Requires --evidence-char-budget."
+        ),
+    )
+    parser.add_argument(
         "--evidence-composition-mode",
         choices=sorted(EVIDENCE_COMPOSITION_MODES),
         default=DEFAULT_EVIDENCE_COMPOSITION_MODE,
@@ -139,6 +173,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=True,
     )
+    parser.add_argument("--semantic-prior-rescue-weight", type=float, default=0.0)
+    parser.add_argument("--typed-pool", default="typed", choices=["typed", "typed_entity_overlap"])
     parser.add_argument(
         "--neighbor-support-exempt",
         action=argparse.BooleanOptionalAction,
@@ -278,6 +314,9 @@ def build_run_config(
         "max_context_chars_per_item": args.max_context_chars_per_item,
         "max_context_total_chars": args.max_context_total_chars,
         "evidence_composition_mode": args.evidence_composition_mode,
+        "evidence_types": sorted(args.evidence_types),
+        "evidence_char_budget": args.evidence_char_budget,
+        "evidence_char_budget_raw_reserve": args.evidence_char_budget_raw_reserve,
         "source_evidence_bundling": args.source_evidence_bundling,
         "neighbor_support_exempt": args.neighbor_support_exempt,
         "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
@@ -285,6 +324,8 @@ def build_run_config(
         "neighbor_stitch_items": args.neighbor_stitch_items,
         "neighbor_stitch_span": args.neighbor_stitch_span,
         "neighbor_stitch_spread": args.neighbor_stitch_spread,
+        "semantic_prior_rescue_weight": args.semantic_prior_rescue_weight,
+        "typed_pool": args.typed_pool,
         "typed_stream_retrieval": args.typed_stream_retrieval,
         "typed_stream_limit": args.typed_stream_limit,
     }
