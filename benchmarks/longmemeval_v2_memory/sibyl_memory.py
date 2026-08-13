@@ -129,7 +129,11 @@ DEFAULT_EVIDENCE_COMPOSITION_MODE = "shared_relevance"
 EVIDENCE_COMPOSITION_MODES = frozenset({"reserved_support", "shared_relevance"})
 DEFAULT_SOURCE_EVIDENCE_BUNDLING = False
 DEFAULT_RETRIEVAL_MODE = "fast"
-RETRIEVAL_MODES = frozenset({"accurate", "fast"})
+# `naive` is the 1.3 Phase 0 control arm: BM25 plus dense KNN plus plain RRF
+# plus a tight pack, served with no traversal, synthesis, query planning, or
+# coverage ranking. It is a server-side mode, so selecting it here changes what
+# the pack and evidence come back holding, not how this adapter composes them.
+RETRIEVAL_MODES = frozenset({"accurate", "fast", "naive"})
 DEFAULT_TYPED_STREAM_RETRIEVAL = False
 DEFAULT_TYPED_STREAM_LIMIT = 8
 # The distilled-note lane, retrieved on its own request. It is not the raw
@@ -3448,6 +3452,27 @@ class SibylLiveApiMemory(Memory):
             "agentic_traversal",
             DEFAULT_AGENTIC_TRAVERSAL,
         )
+        if self.retrieval_mode == "naive":
+            # Both of these issue their own retrieval outside the arm: the typed
+            # stream makes a second pack request pinned to fast, and agentic
+            # traversal widens the pool with model-driven follow-up searches. A
+            # run carrying either would report the arm's name over a pool the
+            # arm did not produce, so the conflict fails loudly here rather than
+            # silently at read time.
+            conflicting = [
+                name
+                for name, enabled in (
+                    ("typed_stream_retrieval", self.typed_stream_retrieval),
+                    ("agentic_traversal", self.agentic_traversal),
+                )
+                if enabled
+            ]
+            if conflicting:
+                msg = (
+                    "retrieval_mode=naive is the control arm and cannot run with "
+                    f"{', '.join(sorted(conflicting))}: disable them to race the arm"
+                )
+                raise ValueError(msg)
         self.traversal_widening_rounds = _param_int(
             memory_params,
             "traversal_widening_rounds",

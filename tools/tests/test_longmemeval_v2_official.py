@@ -7238,3 +7238,67 @@ def test_loaded_memory_merge_rejects_unclassified_request_keys(tmp_path: Path) -
     }
     with pytest.raises(RuntimeError, match="future_arm_flag"):
         module.build_loaded_memory_config(memory_dir, requested_config=requested)
+
+
+# ---------------------------------------------------------------------------
+# The naive-strong control arm (1.3 Phase 0)
+# ---------------------------------------------------------------------------
+
+
+def test_naive_is_a_selectable_retrieval_mode() -> None:
+    module = _load_memory_module()
+
+    assert "naive" in module.RETRIEVAL_MODES
+    # The arm must stay opt-in: a run that does not name it gets the machine.
+    assert module.DEFAULT_RETRIEVAL_MODE == "fast"
+
+
+def test_official_runner_carries_the_naive_arm_into_memory_params(tmp_path: Path) -> None:
+    """The arm is only screenable if a command line can select it end to end."""
+
+    module = _load_runner_module()
+    data_root = tmp_path / "data"
+    _write_dataset(data_root)
+
+    args = module.parse_args(
+        [
+            "--data-root",
+            str(data_root),
+            "--domain",
+            "enterprise",
+            "--output-dir",
+            str(tmp_path / "output"),
+            "--plan-only",
+            "--retrieval-mode",
+            "naive",
+        ]
+    )
+
+    config = module.build_memory_config(args)
+
+    assert config["memory_params"]["retrieval_mode"] == "naive"
+
+
+def test_the_arm_refuses_to_run_beside_retrieval_that_bypasses_it() -> None:
+    """Both flags retrieve outside the arm, so the arm's name would be a lie."""
+
+    module = _load_memory_module()
+
+    for conflicting in ("typed_stream_retrieval", "agentic_traversal"):
+        with pytest.raises(ValueError, match="control arm"):
+            module.SibylLiveApiMemory(
+                {
+                    "allow_localhost": True,
+                    "project_id": "project_test",
+                    "retrieval_mode": "naive",
+                    conflicting: True,
+                }
+            )
+
+
+def test_the_arm_is_replayable_onto_a_loaded_corpus() -> None:
+    """Arms are screened against an existing corpus, so the key must be runtime."""
+
+    module = _load_runner_module()
+
+    assert "retrieval_mode" in module.LOADED_MEMORY_RUNTIME_KEYS

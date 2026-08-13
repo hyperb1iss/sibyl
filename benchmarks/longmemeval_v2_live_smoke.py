@@ -57,7 +57,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output", required=True)
     parser.add_argument("--run-id", default="")
     parser.add_argument("--timeout-seconds", type=float, default=600.0)
-    parser.add_argument("--retrieval-mode", choices=("fast", "accurate"), default="fast")
+    parser.add_argument(
+        "--retrieval-mode",
+        choices=("fast", "accurate", "naive"),
+        default="fast",
+    )
     parser.add_argument("--max-planned-queries", type=int, default=3)
     parser.add_argument(
         "--evidence-composition-mode",

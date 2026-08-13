@@ -132,7 +132,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-context-items", type=int, default=8)
     parser.add_argument("--max-context-chars-per-item", type=int, default=12_000)
     parser.add_argument("--max-context-total-chars", type=int, default=60_000)
-    parser.add_argument("--retrieval-mode", choices=("fast", "accurate"), default="accurate")
+    parser.add_argument(
+        "--retrieval-mode",
+        choices=("fast", "accurate", "naive"),
+        default="accurate",
+    )
     parser.add_argument("--max-planned-queries", type=int, default=3)
     parser.add_argument(
         "--evidence-types",

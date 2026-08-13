@@ -143,11 +143,12 @@ on:
         type: boolean
         default: false
       official_retrieval_mode:
-        description: "Evidence retrieval controller; frozen screens require fast"
+        description: "Retrieval pipeline; naive is the 1.3 control arm, frozen screens require fast"
         type: choice
         options:
           - fast
           - accurate
+          - naive
         default: accurate
       official_retrieval_max_planned_queries:
         description: "Maximum supplemental evidence queries in accurate mode"
