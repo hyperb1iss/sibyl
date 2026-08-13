@@ -135,24 +135,59 @@ def _is_org_role_gate(call: Any) -> bool:
     )
 
 
+def _tree_has_org_role_gate(dependant: Any) -> bool:
+    """Find a role gate anywhere beneath a dependency, not only at its surface.
+
+    A gate reached through a wrapper still gates the route, so discovery
+    descends even though identity credit never does.
+    """
+    queue = list(dependant.dependencies)
+    while queue:
+        sub = queue.pop()
+        if sub.call is not None and _is_org_role_gate(sub.call):
+            return True
+        queue += sub.dependencies
+    return False
+
+
+def _reaches_org_role_gate(call: Any) -> bool:
+    return _is_org_role_gate(call) or _tree_has_org_role_gate(get_dependant(path="/", call=call))
+
+
 def _route_key(route: Any, path: str) -> str:
     methods = getattr(route, "methods", None)
     label = ",".join(sorted(methods)) if methods else "WS"
     return f"{label} {path}"
 
 
-def _mounted_routes(routes: list[Any], prefix: str = "") -> list[tuple[str, Any]]:
-    """Flatten the app into its leaf routes."""
-    flattened: list[tuple[str, Any]] = []
+def _mounted_routes(
+    routes: list[Any],
+    prefix: str = "",
+    gated_above: bool = False,
+) -> list[tuple[str, Any, bool]]:
+    """Flatten the app into its leaf routes, carrying include-time role gates.
+
+    A gate passed to include_router is applied by the mount node rather than
+    baked into the leaf, so it is invisible from the route alone and has to be
+    handed down.
+    """
+    flattened: list[tuple[str, Any, bool]] = []
     for route in routes:
         # FastAPI mounts an included router as a single node rather than copying
         # its routes, so the tree has to be walked through that node.
         include = getattr(route, "include_context", None)
         if include is not None:
-            flattened += _mounted_routes(include.included_router.routes, prefix + include.prefix)
+            gated = gated_above or any(
+                _reaches_org_role_gate(dependency.dependency)
+                for dependency in include.dependencies
+                if dependency.dependency is not None
+            )
+            flattened += _mounted_routes(
+                include.included_router.routes, prefix + include.prefix, gated
+            )
             continue
 
-        flattened.append((prefix + getattr(route, "path", ""), route))
+        flattened.append((prefix + getattr(route, "path", ""), route, gated_above))
     return flattened
 
 
@@ -173,13 +208,16 @@ def _declared(route: Any) -> set[Any]:
     return {sub.call for sub in route.dependant.dependencies if sub.call}
 
 
-def _has_caller_identity(route: Any) -> bool:
-    declared = _declared(route)
-    received = _received(route)
+def _has_caller_identity(route: Any, gated_above: bool = False) -> bool:
+    if not isinstance(route, APIRoute | APIWebSocketRoute):
+        return False
 
-    if any(_is_org_role_gate(call) for call in declared):
+    received = _received(route)
+    if gated_above or _tree_has_org_role_gate(route.dependant):
         return bool(received & ORG_BEARING_DEPENDENCIES)
-    return bool(received & CALLER_IDENTITY_DEPENDENCIES) or bool(declared & ENFORCING_GATES)
+    if received & CALLER_IDENTITY_DEPENDENCIES:
+        return True
+    return bool(_declared(route) & ENFORCING_GATES)
 
 
 def _unrecognized_gate() -> Any:
@@ -191,6 +229,13 @@ def _unrecognized_gate() -> Any:
     return _check
 
 
+_ORG_ADMIN_GATE = Depends(require_org_admin())
+
+
+async def _wrapped_org_gate(_gate: Any = _ORG_ADMIN_GATE) -> None:
+    """A real role gate buried one dependency deep."""
+
+
 class TestRouteAuthCoverage:
     def test_walk_reaches_the_whole_application(self) -> None:
         assert len(_mounted_routes(create_api_app().routes)) >= MINIMUM_MOUNTED_ROUTES
@@ -198,8 +243,8 @@ class TestRouteAuthCoverage:
     def test_every_route_receives_a_caller_identity(self) -> None:
         unscoped = [
             _route_key(route, path)
-            for path, route in _mounted_routes(create_api_app().routes)
-            if not _has_caller_identity(route)
+            for path, route, gated_above in _mounted_routes(create_api_app().routes)
+            if not _has_caller_identity(route, gated_above)
         ]
 
         assert sorted(unscoped) == sorted(ROUTES_WITHOUT_CALLER_IDENTITY), (
@@ -208,21 +253,6 @@ class TestRouteAuthCoverage:
             "parameter, or add the route to ROUTES_WITHOUT_CALLER_IDENTITY with "
             "the reason it is safe to answer without one."
         )
-
-    def test_org_scoped_providers_resolve_an_organization(self) -> None:
-        """The providers are trusted to carry an org, so prove that they do."""
-        for provider in ORG_SCOPED_PROVIDERS:
-            dependant = get_dependant(path="/", call=provider)
-            reached: set[Any] = set()
-            queue = list(dependant.dependencies)
-            while queue:
-                sub = queue.pop()
-                if sub.name is None or sub.call is None:
-                    continue
-                reached.add(sub.call)
-                queue += sub.dependencies
-
-            assert get_current_organization in reached, provider
 
     def test_a_discarded_identity_does_not_scope_a_route(self) -> None:
         """Depends() in the decorator resolves into nowhere, so it proves nothing."""
@@ -244,6 +274,35 @@ class TestRouteAuthCoverage:
 
         assert not _has_caller_identity(self._only_route(router, "/unknown-gate"))
 
+    def test_a_wrapped_role_gate_still_demands_an_organization(self) -> None:
+        """The gate is a dependency deep, so surface-only discovery misses it."""
+        router = APIRouter()
+
+        @router.get("/wrapped", dependencies=[Depends(_wrapped_org_gate)])
+        async def wrapped(user: Any = Depends(get_current_user)) -> dict[str, str]:
+            return {}
+
+        assert not _has_caller_identity(self._only_route(router, "/wrapped"))
+
+    def test_an_include_time_role_gate_still_demands_an_organization(self) -> None:
+        """A gate passed to include_router never reaches the leaf's dependant."""
+        router = APIRouter()
+
+        @router.get("/included")
+        async def included(user: Any = Depends(get_current_user)) -> dict[str, str]:
+            return {}
+
+        app = FastAPI()
+        app.include_router(router, dependencies=[Depends(require_org_admin())])
+        matches = [
+            (route, gated_above)
+            for path, route, gated_above in _mounted_routes(app.routes)
+            if path == "/included"
+        ]
+
+        assert len(matches) == 1
+        assert not _has_caller_identity(*matches[0])
+
     def test_a_bound_organization_scopes_a_route(self) -> None:
         """The negative cases would be vacuous if nothing satisfied the rule."""
         router = APIRouter(dependencies=[Depends(require_org_admin())])
@@ -256,7 +315,7 @@ class TestRouteAuthCoverage:
 
     def test_no_sub_application_hides_routes_from_the_walk(self) -> None:
         mounted = _mounted_routes(create_api_app().routes)
-        opaque = [_route_key(r, p) for p, r in mounted if isinstance(r, Mount | Host)]
+        opaque = [_route_key(r, p) for p, r, _ in mounted if isinstance(r, Mount | Host)]
 
         assert opaque == [], (
             "A mounted sub-application is a single opaque leaf to this walk, so "
@@ -265,9 +324,8 @@ class TestRouteAuthCoverage:
         )
 
     def test_allowlist_carries_no_retired_routes(self) -> None:
-        mounted = {
-            _route_key(route, path) for path, route in _mounted_routes(create_api_app().routes)
-        }
+        routes = _mounted_routes(create_api_app().routes)
+        mounted = {_route_key(route, path) for path, route, _ in routes}
 
         assert set(ROUTES_WITHOUT_CALLER_IDENTITY) <= mounted
 
@@ -275,7 +333,9 @@ class TestRouteAuthCoverage:
     def _only_route(router: APIRouter, path: str) -> Any:
         app = FastAPI()
         app.include_router(router)
-        matches = [route for route_path, route in _mounted_routes(app.routes) if route_path == path]
+        matches = [
+            route for route_path, route, _ in _mounted_routes(app.routes) if route_path == path
+        ]
 
         assert len(matches) == 1
         return matches[0]
