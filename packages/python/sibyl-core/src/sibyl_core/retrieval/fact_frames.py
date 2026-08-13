@@ -126,6 +126,8 @@ _NORMALIZED_TOKEN_ALIASES = {
     "picked": "pick",
     "played": "play",
     "playing": "play",
+    "presented": "present",
+    "presenting": "present",
     "purchased": "purchase",
     "purchasing": "purchase",
     "read": "read",
@@ -141,6 +143,7 @@ _NORMALIZED_TOKEN_ALIASES = {
     "visited": "visit",
     "visiting": "visit",
     "volunteered": "volunteer",
+    "volunteering": "volunteer",
     "watching": "watch",
 }
 
@@ -156,20 +159,10 @@ _ACTION_TERMS: dict[str, frozenset[str]] = {
             "purchase",
         }
     ),
-    "attend": frozenset(
-        {
-            "attend",
-            "complete",
-            "finish",
-            "join",
-            "participate",
-            "present",
-            "visit",
-            "volunteer",
-            "went",
-        }
-    ),
+    "attend": frozenset({"attend", "join", "participate", "visit", "went"}),
+    "complete": frozenset({"complete", "finish"}),
     "create": frozenset({"build", "compose", "create", "draft", "generate", "make", "write"}),
+    "present": frozenset({"present", "presentation"}),
     "profile": frozenset({"field", "focus", "profession", "research", "role", "specialty"}),
     "repair": frozenset({"fix", "repair", "replace"}),
     "use": frozenset(
@@ -185,6 +178,7 @@ _ACTION_TERMS: dict[str, frozenset[str]] = {
             "watch",
         }
     ),
+    "volunteer": frozenset({"volunteer"}),
 }
 
 _QUERY_ACTION_TERMS: dict[str, frozenset[str]] = {
