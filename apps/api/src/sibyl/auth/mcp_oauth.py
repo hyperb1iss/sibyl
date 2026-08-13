@@ -390,8 +390,8 @@ class SibylMcpOAuthProvider(
             auth = await self._authenticate_api_key(token)
             if auth is None:
                 return None
-            scopes = list(auth.scopes or []) or [OAUTH_SCOPE]
-            if scopes and OAUTH_SCOPE not in scopes:
+            scopes = list(auth.scopes or [])
+            if OAUTH_SCOPE not in scopes:
                 return None
             return AccessToken(token=token, client_id=f"api_key:{auth.api_key_id}", scopes=scopes)
 

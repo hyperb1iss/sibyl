@@ -12,6 +12,7 @@ from sibyl.auth.mcp_auth import (
     insufficient_mcp_scope_message,
     mcp_scopes_allow,
 )
+from sibyl.auth.mcp_oauth import SibylMcpOAuthProvider
 from sibyl.server import (
     McpContext,
     _add_mcp_entity,
@@ -226,6 +227,30 @@ async def test_synthesis_draft_gates_only_the_remembering_variant() -> None:
             await _synthesis_mcp_draft(goal="ship faster", project="project-a", remember=True)
 
     draft.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scopes", [[], None, ["api:read"]])
+async def test_oauth_load_access_token_refuses_keys_without_mcp_scope(
+    monkeypatch, scopes: list[str] | None
+) -> None:
+    provider = SibylMcpOAuthProvider()
+    auth = SimpleNamespace(api_key_id=uuid4(), scopes=scopes)
+    monkeypatch.setattr(provider, "_authenticate_api_key", AsyncMock(return_value=auth))
+
+    assert await provider.load_access_token("sk_live_x") is None
+
+
+@pytest.mark.asyncio
+async def test_oauth_load_access_token_preserves_granular_scopes(monkeypatch) -> None:
+    provider = SibylMcpOAuthProvider()
+    auth = SimpleNamespace(api_key_id=uuid4(), scopes=["mcp", "api:read"])
+    monkeypatch.setattr(provider, "_authenticate_api_key", AsyncMock(return_value=auth))
+
+    access = await provider.load_access_token("sk_live_x")
+
+    assert access is not None
+    assert access.scopes == ["mcp", "api:read"]
 
 
 @pytest.mark.asyncio
