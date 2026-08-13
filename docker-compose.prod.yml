@@ -127,6 +127,9 @@ services:
         ${SIBYL_SURREAL_USERNAME:?Set SIBYL_SURREAL_USERNAME in the environment}
       SIBYL_SURREAL_PASSWORD:
         ${SIBYL_SURREAL_PASSWORD:?Set SIBYL_SURREAL_PASSWORD in the environment}
+      # Auth (REQUIRED): the worker shares the API's signing key so both agree on
+      # a signature, and production refuses to start without one.
+      SIBYL_JWT_SECRET: ${SIBYL_JWT_SECRET:?Set SIBYL_JWT_SECRET in the environment}
       SIBYL_OPENAI_API_KEY: ${SIBYL_OPENAI_API_KEY:?Set SIBYL_OPENAI_API_KEY in the environment}
       SIBYL_ANTHROPIC_API_KEY:
         ${SIBYL_ANTHROPIC_API_KEY:?Set SIBYL_ANTHROPIC_API_KEY in the environment}
