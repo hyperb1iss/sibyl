@@ -133,3 +133,69 @@ async def test_entities_create_rejects_missing_related_to_target() -> None:
     assert exc.value.status_code == 404
     assert exc.value.detail == "Related entity not found: decision_missing"
     add.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_entities_create_validates_the_target_behind_a_predicate() -> None:
+    """A declared predicate rides on the id string and must not reach the lookup.
+
+    Validation resolves `supersedes:decision_123` to `decision_123`, so the
+    existence and project-access checks run against the entity the edge will
+    actually point at. The declaration itself travels intact to `add()`, which
+    is where the predicate becomes the edge type.
+    """
+    org = MagicMock()
+    org.id = uuid4()
+
+    request = MagicMock()
+    request.headers = {}
+    request.cookies = {}
+
+    content_session = AsyncMock()
+    ctx = MagicMock()
+
+    entity = EntityCreate(
+        name="Reconsidered decision",
+        description="",
+        content="the newer call",
+        entity_type=EntityType.DECISION,
+        related_to=["supersedes:decision_123", "decision_456"],
+    )
+
+    add_result = MagicMock()
+    add_result.success = True
+    add_result.id = "decision_new"
+    add_result.message = "ok"
+
+    related_target = MagicMock()
+    related_target.entity_type = EntityType.DECISION
+    related_target.project_id = None
+    related_target.metadata = {}
+    runtime = MagicMock()
+    runtime.entity_manager = MagicMock()
+    runtime.entity_manager.get = AsyncMock(return_value=related_target)
+
+    with (
+        patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)) as add,
+        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+    ):
+        resp = await create_entity(
+            request=request,
+            entity=entity,
+            org=org,
+            ctx=ctx,
+            content_session=content_session,
+            sync=False,
+        )
+
+    assert resp.id == "decision_new"
+    assert [call.args[0] for call in runtime.entity_manager.get.await_args_list] == [
+        "decision_123",
+        "decision_456",
+    ]
+    _, kwargs = add.call_args
+    assert kwargs["related_to"] == ["supersedes:decision_123", "decision_456"]

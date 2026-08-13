@@ -71,7 +71,11 @@ from sibyl_core.auth.memory_policy import (
 )
 from sibyl_core.memory_pipeline.retrieval_keys import normalize_retrieval_keys
 from sibyl_core.memory_pipeline.structure import strip_structure_metadata
-from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
+from sibyl_core.models.entities import Entity, EntityType, Relationship
+from sibyl_core.models.relations import (
+    declared_relation_targets,
+    parse_relation_declarations,
+)
 from sibyl_core.projection import (
     MANIFEST_STATE_COMPLETE,
     entity_scope_stamps,
@@ -815,7 +819,10 @@ async def _validate_related_to_targets_for_write(
         return
 
     checked_ids: set[str] = set()
-    for related_id in related_to:
+    # A declared predicate rides on the same string as the id, so existence and
+    # project access are checked against the target the edge will actually point
+    # at rather than against "supersedes:ent_0a1b".
+    for related_id in declared_relation_targets(related_to):
         if related_id in checked_ids:
             continue
         checked_ids.add(related_id)
@@ -1701,13 +1708,17 @@ async def create_entities_bulk(
         relationships.extend(
             [
                 Relationship(
-                    id=f"rel_{created_id}_related_to_{related_id}",
+                    id=f"rel_{created_id}_{declaration.edge_slug}_{declaration.target_id}",
                     source_id=created_id,
-                    target_id=related_id,
-                    relationship_type=RelationshipType.RELATED_TO,
-                    metadata={"created_at": now.isoformat()},
+                    target_id=declaration.target_id,
+                    relationship_type=declaration.relationship_type,
+                    metadata=(
+                        {"created_at": now.isoformat(), "agent_declared": True}
+                        if declaration.declared
+                        else {"created_at": now.isoformat()}
+                    ),
                 )
-                for related_id in entity.related_to or ()
+                for declaration in parse_relation_declarations(entity.related_to)
             ]
         )
     if relationships:
