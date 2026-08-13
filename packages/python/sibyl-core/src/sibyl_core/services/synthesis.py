@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import asdict, replace
 from typing import Any
 
@@ -273,12 +273,22 @@ def _dedupe_sources(
     return deduped
 
 
-def _is_self_feeding_source(source: SynthesisSourceReference) -> bool:
-    metadata = source.metadata or {}
+def _is_self_feeding_metadata(metadata: Mapping[str, Any] | None) -> bool:
+    """Whether a candidate source is this pipeline's own prior output.
+
+    Keyed on metadata rather than on a source reference so the same rule can run
+    at plan time and again over raw context-pack items at materialize time,
+    which is the stage whose packs actually reach the renderer.
+    """
+    metadata = metadata or {}
     capture_surface = str(metadata.get("capture_surface") or "").strip().lower()
     if capture_surface in SELF_FEEDING_CAPTURE_SURFACES:
         return True
     return str(metadata.get("capture_mode") or "").strip().lower() == "synthesis"
+
+
+def _is_self_feeding_source(source: SynthesisSourceReference) -> bool:
+    return _is_self_feeding_metadata(source.metadata)
 
 
 def _without_self_feeding_sources(
@@ -569,6 +579,14 @@ async def materialize_synthesis_section_packs(
             lifecycle_flags = context_item_lifecycle_flags(item)
             metadata = dict(item.metadata)
             project_id = context_item_project_id(item)
+            # The plan-stage filter runs over sources this stage then replaces
+            # wholesale, so without the same rule here a remembered handbook
+            # comes back through the context pack and becomes a source of its
+            # own successor. Counted as hidden: from the artifact's side it is
+            # a candidate the pack refused to render.
+            if _is_self_feeding_metadata(metadata):
+                hidden_count += 1
+                continue
             if _context_item_is_hidden(
                 lifecycle_state,
                 lifecycle_flags,
