@@ -23,8 +23,11 @@ route's own parameters rather than the whole resolved dependency tree.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
+from uuid import UUID
 
+import pytest
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.dependencies.utils import get_dependant
 from fastapi.routing import APIRoute, APIWebSocketRoute
@@ -40,15 +43,17 @@ from sibyl.auth.dependencies import (
     require_org_admin,
     require_org_role,
 )
+from sibyl.persistence import graph_runtime
 from sibyl.persistence.operations_runtime import (
     require_global_admin,
     require_setup_mode_or_admin,
     require_setup_mode_or_auth,
 )
+from sibyl_core.auth import AuthOrganization
 
 # Dependencies that resolve an organization and hand back something already
 # scoped to it, so a handler receiving one cannot read across tenants.
-# test_org_scoped_providers_resolve_an_organization holds them to that claim.
+# test_org_scoped_providers_bind_the_organization_they_resolve holds them to it.
 ORG_SCOPED_PROVIDERS = frozenset({get_graph_store, get_knowledge_read_service})
 
 # Values that tell a handler which organization it is answering for.
@@ -236,6 +241,34 @@ async def _wrapped_org_gate(_gate: Any = _ORG_ADMIN_GATE) -> None:
     """A real role gate buried one dependency deep."""
 
 
+async def _stub_graph_runtime(group_id: str) -> Any:
+    """Stand in for the live graph runtime so the probe needs no database."""
+    del group_id
+    return SimpleNamespace(
+        client=SimpleNamespace(),
+        entity_manager=SimpleNamespace(),
+        relationship_manager=SimpleNamespace(),
+    )
+
+
+async def _resolve_provider(provider: Any, org: AuthOrganization) -> Any:
+    """Resolve a provider the way FastAPI would, one signature at a time."""
+    if provider is get_graph_store:
+        return await get_graph_store(org=org)
+    if provider is get_knowledge_read_service:
+        return await get_knowledge_read_service(graph_store=await get_graph_store(org=org))
+    raise AssertionError(f"add a behavioural probe for {provider}")
+
+
+def _bound_organization(capability: Any) -> str:
+    """Read the organization a resolved capability is actually scoped to."""
+    store = getattr(capability, "_store", capability)
+    group_id = getattr(getattr(store, "entities", None), "_group_id", None)
+
+    assert isinstance(group_id, str), f"no organization is observable on {capability!r}"
+    return group_id
+
+
 class TestRouteAuthCoverage:
     def test_walk_reaches_the_whole_application(self) -> None:
         assert len(_mounted_routes(create_api_app().routes)) >= MINIMUM_MOUNTED_ROUTES
@@ -253,6 +286,31 @@ class TestRouteAuthCoverage:
             "parameter, or add the route to ROUTES_WITHOUT_CALLER_IDENTITY with "
             "the reason it is safe to answer without one."
         )
+
+    @pytest.mark.asyncio
+    async def test_org_scoped_providers_bind_the_organization_they_resolve(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Reaching an org proves nothing; a provider could accept and ignore it.
+
+        Treating these as org-bearing is only sound if what they hand back is
+        scoped to the caller's organization, so resolve each one under two
+        organizations and watch the capability change with them.
+        """
+        monkeypatch.setattr(graph_runtime, "_get_graph_runtime", _stub_graph_runtime)
+        first = AuthOrganization(
+            id=UUID("00000000-0000-0000-0000-0000000000a1"), name="First", slug="first"
+        )
+        second = AuthOrganization(
+            id=UUID("00000000-0000-0000-0000-0000000000b2"), name="Second", slug="second"
+        )
+
+        for provider in ORG_SCOPED_PROVIDERS:
+            for org in (first, second):
+                bound = _bound_organization(await _resolve_provider(provider, org))
+
+                assert bound == str(org.id), provider
 
     def test_a_discarded_identity_does_not_scope_a_route(self) -> None:
         """Depends() in the decorator resolves into nowhere, so it proves nothing."""
