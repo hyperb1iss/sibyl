@@ -484,7 +484,6 @@ tasks:
       tools/tests/test_usage_rerank_harness.py -v
     inputs:
       - tools/**/*.py
-      - charts/sibyl/**/*
       - benchmarks/git_provenance.py
       - benchmarks/longmemeval_v2_official.py
       - benchmarks/longmemeval_v2_reader_replay.py
