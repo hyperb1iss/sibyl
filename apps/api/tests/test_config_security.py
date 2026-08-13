@@ -266,12 +266,29 @@ class TestProductionJwtSecret:
                 jwt_secret="x",
             )
 
-    def test_whitespace_padding_is_stripped_before_the_length_check(
+    def test_padded_jwt_secret_is_rejected_not_trimmed(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A key read from a file or a k8s Secret often carries a trailing newline."""
+        """Trimming would change the signing key and split a rolling upgrade."""
         monkeypatch.delenv("JWT_SECRET", raising=False)
-        padded = "  " + "a" * 40 + "\n"
+        for padded in ("a" * 40 + "\n", "  " + "a" * 40, " " + "a" * 40 + " "):
+            with pytest.raises(ValueError, match="leading or trailing whitespace"):
+                Settings(
+                    _env_file=None,
+                    environment="production",
+                    store="surreal",
+                    auth_store="surreal",
+                    surreal_url="ws://surrealdb:8000/rpc",
+                    surreal_username="sibyl_admin",
+                    surreal_password="really_secure_password",
+                    jwt_secret=padded,
+                )
+
+    def test_clean_jwt_secret_is_preserved_byte_for_byte(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("JWT_SECRET", raising=False)
+        key = "a" * 40
         settings = Settings(
             _env_file=None,
             environment="production",
@@ -280,10 +297,10 @@ class TestProductionJwtSecret:
             surreal_url="ws://surrealdb:8000/rpc",
             surreal_username="sibyl_admin",
             surreal_password="really_secure_password",
-            jwt_secret=padded,
+            jwt_secret=key,
         )
 
-        assert settings.jwt_secret.get_secret_value() == "a" * 40
+        assert settings.jwt_secret.get_secret_value() == key
 
     def test_whitespace_only_jwt_secret_forbidden_in_production(
         self, monkeypatch: pytest.MonkeyPatch

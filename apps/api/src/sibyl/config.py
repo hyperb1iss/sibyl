@@ -597,11 +597,8 @@ class Settings(BaseSettings):
         if self.environment != "production":
             return self
 
-        # A key arriving from a file or a k8s Secret often carries a trailing
-        # newline, which would make the API and worker disagree on the signature.
-        secret = self.jwt_secret.get_secret_value().strip()
-        if secret != self.jwt_secret.get_secret_value():
-            object.__setattr__(self, "jwt_secret", SecretStr(secret))
+        raw = self.jwt_secret.get_secret_value()
+        secret = raw.strip()
 
         if not secret:
             raise ValueError(
@@ -610,6 +607,16 @@ class Settings(BaseSettings):
                 "default mcp_auth_mode=auto. Generate one with `openssl rand -hex 32` "
                 "and set SIBYL_JWT_SECRET, or set SIBYL_ENVIRONMENT=development to use "
                 "the generated development secret."
+            )
+        # Rejected rather than trimmed: silently trimming would change the signing
+        # key, so a rolling upgrade would leave old and new revisions unable to
+        # verify each other's tokens.
+        if secret != raw:
+            raise ValueError(
+                "CRITICAL: The production JWT secret has leading or trailing whitespace, "
+                "which usually means a trailing newline from `$(cat secret.txt)` or a "
+                "file-projected Kubernetes Secret. Remove it and restart. The value is "
+                "used exactly as given, so trimming it here would change every signature."
             )
         if len(secret.encode()) < MINIMUM_PRODUCTION_JWT_SECRET_BYTES:
             raise ValueError(
