@@ -162,6 +162,10 @@ DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING = False
 DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS = 0
 DEFAULT_NEIGHBOR_STITCH_SPREAD = False
 DEFAULT_AGENTIC_TRAVERSAL = False
+DEFAULT_SEMANTIC_PRIOR_RESCUE_WEIGHT = 0.0
+MAX_SEMANTIC_PRIOR_RESCUE_WEIGHT = 1.0
+DEFAULT_TYPED_POOL = "typed"
+SUPPORTED_TYPED_POOLS = frozenset({"typed", "typed_entity_overlap"})
 # Granted admission slots for traversal-gathered evidence, mirroring the
 # additive neighbor-overflow mechanism: model-gathered items ride their own
 # lane instead of evicting seeds, and the render ceiling rises with the grant
@@ -224,6 +228,8 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "traversal_deadline_seconds",
         "traversal_overflow_items",
         "traversal_search_limit",
+        "semantic_prior_rescue_weight",
+        "typed_pool",
     }
 )
 SAVED_MEMORY_IDENTITY_KEYS = frozenset(
@@ -724,6 +730,8 @@ def compile_operational_evidence_set(
     neighbor_support_overflow_items: int = DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS,
     traversal_results: list[dict[str, object]] | None = None,
     traversal_overflow_items: int = 0,
+    semantic_prior_rescue_weight: float = DEFAULT_SEMANTIC_PRIOR_RESCUE_WEIGHT,
+    typed_pool: str = DEFAULT_TYPED_POOL,
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
     """Compose the reader's pack from the typed and raw evidence pools.
 
@@ -803,12 +811,14 @@ def compile_operational_evidence_set(
     ranked_typed, typed_ranking = _rank_operational_evidence_pool(
         query,
         typed_candidates,
-        pool="typed",
+        pool=typed_pool,
+        semantic_prior_rescue_weight=semantic_prior_rescue_weight,
     )
     ranked_raw, raw_ranking = _rank_operational_evidence_pool(
         query,
         raw_candidates,
         pool="raw",
+        semantic_prior_rescue_weight=semantic_prior_rescue_weight,
     )
     # Absolute, not proportional: the note lane was tuned at three items, and
     # widening it to five lost the whole measured gain. A slice-granular pack
@@ -931,6 +941,8 @@ def compile_operational_evidence_set(
         "traversal_candidate_count": len(traversal_pool),
         "traversal_overflow_items": traversal_overflow_items,
         "traversal_admitted_items": len(traversal_admitted),
+        "semantic_prior_rescue_weight": semantic_prior_rescue_weight,
+        "typed_pool": typed_pool,
         "budget_mode": "items" if char_budget is None else "characters",
         "char_budget": char_budget,
         "selected_chars": selected_chars,
@@ -1031,6 +1043,7 @@ def _rank_operational_evidence_pool(
     candidates: list[dict[str, object]],
     *,
     pool: str,
+    semantic_prior_rescue_weight: float = 0.0,
 ) -> tuple[list[dict[str, object]], QueryCoverageResult[dict[str, object]]]:
     ranking = rank_by_query_coverage(
         query,
@@ -1044,6 +1057,7 @@ def _rank_operational_evidence_pool(
             )
             for index, candidate in enumerate(candidates, start=1)
         ],
+        semantic_prior_rescue_weight=semantic_prior_rescue_weight,
     )
     ranked_by_id = {candidate.stable_id: candidate for candidate in ranking.ranked}
     if pool == "typed_entity_overlap":
@@ -3440,6 +3454,21 @@ class SibylLiveApiMemory(Memory):
                 "agentic_traversal requires OPENAI_API_KEY or SIBYL_OPENAI_API_KEY "
                 "in the environment; export one or drop --agentic-traversal"
             )
+        self.semantic_prior_rescue_weight = _param_float(
+            memory_params,
+            "semantic_prior_rescue_weight",
+            DEFAULT_SEMANTIC_PRIOR_RESCUE_WEIGHT,
+        )
+        if not 0 <= self.semantic_prior_rescue_weight <= MAX_SEMANTIC_PRIOR_RESCUE_WEIGHT:
+            raise ValueError(
+                "semantic_prior_rescue_weight must be within "
+                f"[0, {MAX_SEMANTIC_PRIOR_RESCUE_WEIGHT}]: the rescue term adds at most "
+                "weight*1.0 to a zero-coverage candidate, and past 1.0 it can outvote "
+                "genuine vocabulary winners instead of rescuing the uncovered tail"
+            )
+        self.typed_pool = _param_str(memory_params, "typed_pool", DEFAULT_TYPED_POOL)
+        if self.typed_pool not in SUPPORTED_TYPED_POOLS:
+            raise ValueError(f"typed_pool must be one of {sorted(SUPPORTED_TYPED_POOLS)}")
         raw_reservation = memory_params.get("typed_reservation_items")
         self.typed_reservation_items = (
             _param_int(memory_params, "typed_reservation_items", 0, minimum=1)
@@ -4499,6 +4528,12 @@ class SibylLiveApiMemory(Memory):
                 if traversal_results
                 else 0
             ),
+            semantic_prior_rescue_weight=getattr(
+                self,
+                "semantic_prior_rescue_weight",
+                DEFAULT_SEMANTIC_PRIOR_RESCUE_WEIGHT,
+            ),
+            typed_pool=getattr(self, "typed_pool", DEFAULT_TYPED_POOL),
         )
         rendered_item_ceiling = context_pack_item_ceiling(
             max_items=self.max_context_items,

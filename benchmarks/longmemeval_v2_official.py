@@ -457,6 +457,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         default=False,
     )
     parser.add_argument("--neighbor-support-overflow-items", type=int, default=0)
+    parser.add_argument("--semantic-prior-rescue-weight", type=float, default=0.0)
+    parser.add_argument("--typed-pool", default="typed", choices=["typed", "typed_entity_overlap"])
     parser.add_argument(
         "--neighbor-stitch-spread",
         action=argparse.BooleanOptionalAction,
@@ -715,6 +717,8 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
         "neighbor_support_overflow_items": args.neighbor_support_overflow_items,
         "neighbor_stitch_spread": args.neighbor_stitch_spread,
+        "semantic_prior_rescue_weight": args.semantic_prior_rescue_weight,
+        "typed_pool": args.typed_pool,
         "context_expansion_max_ratio": args.context_expansion_max_ratio,
         "evidence_types": list(args.evidence_types),
         "evidence_char_budget": args.evidence_char_budget,
@@ -872,6 +876,8 @@ def build_run_plan(
         "neighbor_trajectory_preserving": args.neighbor_trajectory_preserving,
         "neighbor_support_overflow_items": args.neighbor_support_overflow_items,
         "neighbor_stitch_spread": args.neighbor_stitch_spread,
+        "semantic_prior_rescue_weight": args.semantic_prior_rescue_weight,
+        "typed_pool": args.typed_pool,
         "context_expansion_max_ratio": args.context_expansion_max_ratio,
         "max_context_total_chars": args.max_context_total_chars,
         "evidence_types": list(args.evidence_types),
