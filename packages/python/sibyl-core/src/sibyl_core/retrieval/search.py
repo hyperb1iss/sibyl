@@ -112,6 +112,10 @@ _SUPERSEDES_PREDICATE = "SUPERSEDES"
 # (idx_relates_name_target) and is the only way a lane that never walked the
 # graph -- vector, fulltext, exact key -- learns the row is stale.
 _SUPERSESSION_LOOKUP_LIMIT = 512
+# Candidate ids that are not entity uuids and so can never match an edge
+# endpoint. Raw memories carry a "raw_memory:" prefix and episodes live in
+# their own table, so feeding either to the lookup only widens the IN list.
+_NON_ENTITY_CANDIDATE_TYPES = frozenset({"claim", "relationship", "raw_memory", "episode"})
 _GRAPH_EXPANSION_DEPTH_DECAY = 0.72
 _GRAPH_EXPANSION_FETCH_HEADROOM = 4
 _GRAPH_EXPANSION_METADATA_KEYS = (
@@ -911,7 +915,7 @@ async def _apply_supersession_gate(
         candidate.id
         for _signal, candidates in surviving
         for candidate in candidates
-        if candidate.type not in _EDGE_CONTEXT_TYPES
+        if candidate.type not in _NON_ENTITY_CANDIDATE_TYPES
     )
     superseded: set[str] = set()
     lookup_failed: str | None = None

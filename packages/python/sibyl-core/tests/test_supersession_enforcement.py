@@ -663,3 +663,45 @@ async def test_correction_resolves_only_its_own_capture_not_its_source_group(
     assert params["raw_memory_id"] == "candidate-1"
     assert params["group_id"] == "org-1"
     assert params["limit"] == memory_module._GRAPH_CORRECTION_LOOKUP_LIMIT
+
+
+@pytest.mark.asyncio
+async def test_the_edge_lookup_is_not_fed_ids_that_cannot_be_edge_endpoints() -> None:
+    """Raw memories and episodes are not entity uuids, so they stay out of the IN list."""
+
+    seen_uuids: list[list[str]] = []
+
+    class RecordingClient:
+        async def execute_query(self, _query: str, **params: object) -> list[dict[str, object]]:
+            seen_uuids.append(list(params.get("uuids") or ()))
+            return []
+
+    def candidate(identifier: str, entity_type: str) -> RetrievalCandidate:
+        return RetrievalCandidate(
+            id=identifier,
+            type=entity_type,
+            name=identifier,
+            content="body",
+            score=1.0,
+            source=None,
+            metadata={},
+            project_id="project_123",
+        )
+
+    await search_module._apply_supersession_gate(
+        client=RecordingClient(),
+        group_id="org-123",
+        source_lists=[
+            (
+                RetrievalSignal.NODE_FULLTEXT,
+                [
+                    candidate("entity-real", "decision"),
+                    candidate("raw_memory:abc", "raw_memory"),
+                    candidate("episode-1", "episode"),
+                    candidate("rel-1", "relationship"),
+                ],
+            )
+        ],
+    )
+
+    assert seen_uuids == [["entity-real"]]
