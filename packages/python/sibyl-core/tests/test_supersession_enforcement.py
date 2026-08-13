@@ -11,6 +11,7 @@ admission check before a pack is served.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -408,9 +409,18 @@ async def test_supersession_lookup_failure_degrades_without_failing_the_search(
 class _CorrectionGraphRuntime:
     """Minimal graph double: one projected entity per corrected capture."""
 
-    def __init__(self, *, uuid: str = "entity-old", missing: frozenset[str] = frozenset()) -> None:
+    def __init__(
+        self,
+        *,
+        uuid: str = "entity-old",
+        missing: frozenset[str] = frozenset(),
+        owner_id: str = "user-1",
+        foreign: frozenset[str] = frozenset(),
+    ) -> None:
         self.uuid = uuid
         self.missing = missing
+        self.owner_id = owner_id
+        self.foreign = foreign
         self.updates: list[tuple[str, dict[str, Any]]] = []
         self.relationships: list[Any] = []
         self.client = self
@@ -419,6 +429,16 @@ class _CorrectionGraphRuntime:
 
     async def execute_query(self, _query: str, **_params: object) -> list[dict[str, object]]:
         return [{"uuid": self.uuid}]
+
+    async def get(self, entity_id: str) -> Any:
+        # A private row owned by somebody else is what the write check has to
+        # refuse; everything else belongs to the correcting principal.
+        owner = "user-intruder" if entity_id in self.foreign else self.owner_id
+        return SimpleNamespace(
+            id=entity_id,
+            created_by=owner,
+            metadata={"memory_scope": "private", "principal_id": owner},
+        )
 
     async def update(self, entity_id: str, updates: dict[str, Any]) -> object | None:
         if entity_id in self.missing:
@@ -757,3 +777,164 @@ async def test_the_receipt_names_only_rows_that_were_really_stamped(
 
     assert result.applied
     assert result.affected_entity_ids == ["entity-old"]
+
+
+@pytest.mark.asyncio
+async def test_a_correction_cannot_retire_an_entity_the_caller_cannot_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Capture metadata is caller pass-through, so a named target is not a trusted target.
+
+    Without a per-target write check, a caller could plant another
+    principal's entity id in their own capture's `promoted_entity_id`,
+    correct that capture, and retire a row they have no write access to.
+    """
+
+    memory = _raw_capture(
+        id="source-1",
+        metadata={
+            "capture_surface": "reflection_candidate",
+            "promoted_entity_id": "entity-victim",
+        },
+    )
+    runtime = _CorrectionGraphRuntime(foreign=frozenset({"entity-victim"}))
+
+    async def execute_query(_query: str, **_params: object) -> list[dict[str, object]]:
+        return [{"uuid": "entity-own"}]
+
+    runtime.execute_query = execute_query  # type: ignore[method-assign]
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> _CorrectionGraphRuntime:
+        return runtime
+
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+    monkeypatch.setattr(
+        memory_module,
+        "save_raw_memory",
+        AsyncMock(side_effect=lambda updated, **_kwargs: updated),
+    )
+    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+
+    result = await memory_module.apply_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="mark_wrong",
+    )
+
+    assert result.applied
+    # The caller's own projected row is stamped; the planted one is refused.
+    assert result.affected_entity_ids == ["entity-own"]
+    assert [entity_id for entity_id, _stamp in runtime.updates] == ["entity-own"]
+
+
+def test_a_promoted_near_duplicate_survivor_stays_recallable() -> None:
+    """Reflection's duplicate marker outlives the verdict that set it.
+
+    `services/reflection.py` stamps `duplicate_of_source_id` on a candidate it
+    thinks near-duplicates a prior memory, and `_promotion_lifecycle_metadata`
+    resets the promoted row to ACTIVE by adding keys without removing that
+    one. The survivor has no SUPERSEDES edge and is the only graph row for its
+    content, so treating the residue as a verdict would make it invisible from
+    birth.
+    """
+
+    promoted = {
+        "lifecycle_state": "active",
+        "lifecycle_action": "promote",
+        "duplicate_of_source_id": "raw_memory:prior",
+        "duplicate_reason": "near_normalized_text_duplicate",
+    }
+    assert graph_metadata_recallable(promoted) is True
+
+    # The carve-out is scoped to that one key and to the ACTIVE state, so a
+    # genuine mark_duplicate correction (which lands CONTESTED) still retires,
+    # and no other marker is softened.
+    assert graph_metadata_recallable({**promoted, "lifecycle_state": "contested"}) is False
+    assert graph_metadata_recallable({**promoted, "excluded_from_recall": True}) is False
+    assert (
+        graph_metadata_recallable({**promoted, "superseded_by_source_id": "raw_memory:x"}) is False
+    )
+
+
+def test_dict_shaped_lifecycle_flags_are_not_read_as_set_flags() -> None:
+    """Iterating a Mapping yields keys, so a dict flag bag would retire on a False value."""
+
+    assert graph_metadata_recallable({"lifecycle_flags": {"hidden": False}}) is True
+    assert graph_metadata_recallable({"lifecycle_flags": ["hidden"]}) is False
+    assert graph_metadata_recallable({"lifecycle_flags": ("redacted",)}) is False
+    assert graph_metadata_recallable({"lifecycle_flags": "sensitive"}) is False
+
+
+@pytest.mark.asyncio
+async def test_a_truncated_supersession_check_says_so_in_the_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cap fails open, so it must never fail silently."""
+
+    monkeypatch.setattr(search_module, "_SUPERSESSION_LOOKUP_LIMIT", 2)
+
+    async def empty_lookup(*_args: object, **_kwargs: object) -> set[str]:
+        return set()
+
+    monkeypatch.setattr(search_module, "_superseded_candidate_uuids", empty_lookup)
+
+    def candidate(identifier: str) -> RetrievalCandidate:
+        return RetrievalCandidate(
+            id=identifier,
+            type="decision",
+            name=identifier,
+            content="body",
+            score=1.0,
+            source=None,
+            metadata={},
+            project_id="project_123",
+        )
+
+    _surviving, metadata = await search_module._apply_supersession_gate(
+        client=_SupersessionGraphClient(),
+        group_id="org-123",
+        source_lists=[
+            (RetrievalSignal.NODE_FULLTEXT, [candidate(f"entity-{index}") for index in range(5)])
+        ],
+    )
+
+    gate = metadata["supersession_gate"]
+    assert gate["truncated"] is True
+    assert gate["checked_candidates"] == 2
+    assert gate["total_candidates"] == 5
+
+
+@pytest.mark.asyncio
+async def test_an_untruncated_check_carries_no_truncation_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def empty_lookup(*_args: object, **_kwargs: object) -> set[str]:
+        return set()
+
+    monkeypatch.setattr(search_module, "_superseded_candidate_uuids", empty_lookup)
+
+    _surviving, metadata = await search_module._apply_supersession_gate(
+        client=_SupersessionGraphClient(),
+        group_id="org-123",
+        source_lists=[
+            (
+                RetrievalSignal.NODE_FULLTEXT,
+                [
+                    RetrievalCandidate(
+                        id="entity-1",
+                        type="decision",
+                        name="one",
+                        content="body",
+                        score=1.0,
+                        source=None,
+                        metadata={},
+                        project_id="project_123",
+                    )
+                ],
+            )
+        ],
+    )
+
+    assert "truncated" not in metadata["supersession_gate"]

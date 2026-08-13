@@ -1751,6 +1751,7 @@ async def apply_memory_correction(
         memory=saved,
         preview=preview,
         principal_id=principal_id,
+        accessible_projects=accessible_projects,
         replacement_source_id=canonical_replacement_source_id,
         duplicate_of_source_id=canonical_duplicate_of_source_id,
     )
@@ -1770,6 +1771,8 @@ async def _correction_graph_entity_ids(
     *,
     organization_id: str,
     memory: RawMemory,
+    principal_id: str | None,
+    accessible_projects: Iterable[str] | None,
 ) -> list[str]:
     """Find the graph rows projected from this capture.
 
@@ -1787,6 +1790,16 @@ async def _correction_graph_entity_ids(
     `list_raw_memories_by_source_id` returns a list), while a correction
     declares exactly one affected capture. Matching the group key would let a
     correction on one memory stamp the projections of its siblings.
+
+    Every candidate is then re-authorized against the correcting principal.
+    The metadata half of the candidate set is caller-reachable: `promoted_
+    entity_id` and friends are read straight off the capture's metadata bag,
+    and capture metadata is pass-through rather than a whitelist, so a caller
+    could otherwise name somebody else's entity, correct their own capture,
+    and retire a row they cannot write. The reflection path guards its
+    supersession targets exactly this way
+    (`_authorized_superseded_entity_ids`), and this is the same guard on the
+    same class of danger.
     """
 
     candidate_ids = list(_correction_derived_ids(memory))
@@ -1807,7 +1820,28 @@ async def _correction_graph_entity_ids(
         uuid = str(row.get("uuid") or "")
         if uuid:
             candidate_ids.append(uuid)
-    return list(dict.fromkeys(entity_id for entity_id in candidate_ids if entity_id))
+
+    authorized: list[str] = []
+    for entity_id in dict.fromkeys(value for value in candidate_ids if value):
+        try:
+            target = await runtime.entity_manager.get(entity_id)
+        except Exception:
+            continue
+        if target is None:
+            continue
+        if not _promoted_entity_write_allowed(
+            entity=target,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        ):
+            log.warning(
+                "memory_correction_graph_target_refused",
+                source_id=memory.id,
+                entity_id=entity_id,
+            )
+            continue
+        authorized.append(entity_id)
+    return authorized
 
 
 def _correction_graph_metadata(
@@ -1841,6 +1875,7 @@ async def _project_correction_to_graph(
     memory: RawMemory,
     preview: MemoryCorrectionPreview,
     principal_id: str | None,
+    accessible_projects: Iterable[str] | None,
     replacement_source_id: str | None,
     duplicate_of_source_id: str | None,
 ) -> list[str]:
@@ -1860,6 +1895,8 @@ async def _project_correction_to_graph(
             runtime,
             organization_id=organization_id,
             memory=memory,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
         )
     except Exception as exc:
         log.warning(
@@ -1898,6 +1935,7 @@ async def _project_correction_to_graph(
             runtime,
             organization_id=organization_id,
             principal_id=principal_id,
+            accessible_projects=accessible_projects,
             replacement_source_id=replacement_source_id,
             superseded_entity_ids=applied,
         )
@@ -1909,6 +1947,7 @@ async def _link_graph_supersession(
     *,
     organization_id: str,
     principal_id: str | None,
+    accessible_projects: Iterable[str] | None,
     replacement_source_id: str,
     superseded_entity_ids: Sequence[str],
 ) -> None:
@@ -1930,6 +1969,8 @@ async def _link_graph_supersession(
             runtime,
             organization_id=organization_id,
             memory=replacement,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
         )
     except Exception as exc:
         log.warning(

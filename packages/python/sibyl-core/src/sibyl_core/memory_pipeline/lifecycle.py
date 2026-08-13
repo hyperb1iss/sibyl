@@ -91,12 +91,23 @@ GRAPH_RECALL_EXCLUSION_KEYS = (
     "superseded_by_raw_memory_id",
     "duplicate_of_source_id",
 )
+# Reflection stamps `duplicate_of_source_id` on a near-duplicate candidate,
+# and promotion resets that candidate's lifecycle to ACTIVE without clearing
+# the key, so on the graph lane the bare marker outlives the verdict that set
+# it. An explicit ACTIVE state is the later, deliberate statement and wins.
+# The other markers do not get this treatment: a correction that excludes a
+# row never leaves it ACTIVE, so nothing here can soften supersession.
+_STATE_OVERRIDABLE_EXCLUSION_KEYS = frozenset({"duplicate_of_source_id"})
 
 
 def _flag_values(value: object) -> Iterable[str]:
     if isinstance(value, str):
         return (_normalized_state(value),)
-    if isinstance(value, Iterable):
+    # A Mapping is Iterable, and iterating one yields its keys, so a
+    # dict-shaped flag bag would read every key as a set flag no matter what
+    # it maps to: `{"hidden": False}` would retire the row. Sequence and set
+    # shapes are the only ones a flag list is ever written in.
+    if isinstance(value, list | tuple | set | frozenset):
         return tuple(_normalized_state(item) for item in value)
     return ()
 
@@ -112,10 +123,16 @@ def graph_metadata_recallable(metadata: Mapping[str, object] | None) -> bool:
 
     if not metadata:
         return True
+    state = _normalized_state(metadata.get("lifecycle_state"))
     if _normalized_state(metadata.get("review_state")) in RECALL_EXCLUDED_REVIEW_STATES:
         return False
-    if _normalized_state(metadata.get("lifecycle_state")) in RECALL_EXCLUDED_LIFECYCLE_STATES:
+    if state in RECALL_EXCLUDED_LIFECYCLE_STATES:
         return False
     if RECALL_EXCLUDED_LIFECYCLE_FLAGS.intersection(_flag_values(metadata.get("lifecycle_flags"))):
         return False
-    return not any(metadata.get(key) for key in GRAPH_RECALL_EXCLUSION_KEYS)
+    active = state == MemoryLifecycleState.ACTIVE.value
+    return not any(
+        metadata.get(key)
+        for key in GRAPH_RECALL_EXCLUSION_KEYS
+        if not (active and key in _STATE_OVERRIDABLE_EXCLUSION_KEYS)
+    )

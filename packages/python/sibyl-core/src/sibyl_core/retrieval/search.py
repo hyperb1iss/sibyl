@@ -919,6 +919,11 @@ async def _apply_supersession_gate(
     )
     superseded: set[str] = set()
     lookup_failed: str | None = None
+    # Both caps fail open: a candidate past the slice is never checked, and a
+    # retired row can carry several inbound edges so the row cap can bite
+    # before the candidate cap does. Neither is reachable at current pool
+    # sizes, and neither may pass silently if it ever becomes reachable.
+    truncated = len(node_uuids) > _SUPERSESSION_LOOKUP_LIMIT
     if node_uuids:
         try:
             superseded = await _superseded_candidate_uuids(
@@ -948,6 +953,10 @@ async def _apply_supersession_gate(
         "superseded_dropped": edge_dropped,
         "superseded_uuids": sorted(superseded),
     }
+    if truncated or len(superseded) >= _SUPERSESSION_LOOKUP_LIMIT:
+        receipt["truncated"] = True
+        receipt["checked_candidates"] = min(len(node_uuids), _SUPERSESSION_LOOKUP_LIMIT)
+        receipt["total_candidates"] = len(node_uuids)
     if lookup_failed is not None:
         receipt["lookup_error_type"] = lookup_failed
     return surviving, {"supersession_gate": receipt}
