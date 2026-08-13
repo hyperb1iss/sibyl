@@ -353,7 +353,7 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       SIBYL_ENVIRONMENT: production
-      SIBYL_JWT_SECRET: test-secret-for-longmemeval-v2
+      SIBYL_JWT_SECRET: not-a-real-secret-not-a-real-secret
       SIBYL_STORE: surreal
       SIBYL_AUTH_STORE: surreal
       SIBYL_PUBLIC_SIGNUPS_ENABLED: "true"

@@ -96,6 +96,8 @@ SIBYL_HELM_RENDER_ARGS = (
     "--set",
     "breakGlass.allowedIPs[0]=203.0.113.0/24",
     "--set",
+    "backend.existingSecret=sibyl-secrets",
+    "--set",
     "backend.surreal.existingSecret=sibyl-surrealdb-root",
     "--set",
     "oidc.providers[0].name=entra",

@@ -33,6 +33,7 @@ def test_cookie_secure_defaults_true_in_production_http(monkeypatch) -> None:
     monkeypatch.setenv("SIBYL_SURREAL_URL", "ws://surrealdb:8000/rpc")
     monkeypatch.setenv("SIBYL_SURREAL_USERNAME", "sibyl_admin")
     monkeypatch.setenv("SIBYL_SURREAL_PASSWORD", "really_secure_password")
+    monkeypatch.setenv("SIBYL_JWT_SECRET", "test-jwt-secret-0123456789abcdef0123456789abcdef")
     monkeypatch.delenv("SIBYL_COOKIE_SECURE", raising=False)
 
     from sibyl import config as config_module

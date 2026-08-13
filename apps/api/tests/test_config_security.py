@@ -44,6 +44,7 @@ class TestDisableAuthSecurity:
             }
             if env == "production":
                 kwargs["surreal_url"] = "ws://surrealdb:8000/rpc"
+                kwargs["jwt_secret"] = "test-jwt-secret-0123456789abcdef0123456789abcdef"
             settings = Settings(**kwargs)  # type: ignore[arg-type]
             assert settings.disable_auth is False
 
@@ -75,6 +76,7 @@ class TestEnvironmentValidation:
             }
             if env == "production":
                 kwargs["surreal_url"] = "ws://surrealdb:8000/rpc"
+                kwargs["jwt_secret"] = "test-jwt-secret-0123456789abcdef0123456789abcdef"
             settings = Settings(**kwargs)  # type: ignore[arg-type]
             assert settings.environment == env
 
@@ -109,6 +111,7 @@ class TestProductionPasswordSecurity:
             store="surreal",
             auth_store="surreal",
             surreal_url="ws://surrealdb:8000/rpc",
+            jwt_secret="test-jwt-secret-0123456789abcdef0123456789abcdef",
         )
 
         assert settings.fully_surreal is True
@@ -149,6 +152,7 @@ class TestProductionPasswordSecurity:
             surreal_username="sibyl_admin",
             surreal_password="really_secure_password",
             allow_embedded_single_writer=True,
+            jwt_secret="test-jwt-secret-0123456789abcdef0123456789abcdef",
         )
 
         assert settings.resolved_surreal_url == "surrealkv:///var/lib/sibyl/surreal"
@@ -184,6 +188,7 @@ class TestProductionPasswordSecurity:
             surreal_url="ws://surrealdb:8000/rpc",
             surreal_username="sibyl_admin",
             surreal_password="really_secure_password",
+            jwt_secret="test-jwt-secret-0123456789abcdef0123456789abcdef",
         )
 
         assert settings.environment == "production"
@@ -195,5 +200,151 @@ class TestProductionPasswordSecurity:
             store="surreal",
             auth_store="surreal",
             surreal_url="ws://surrealdb:8000/rpc",
+            jwt_secret="test-jwt-secret-0123456789abcdef0123456789abcdef",
         )
         assert settings.environment == "production"
+
+
+class TestProductionJwtSecret:
+    """Tests for the production JWT signing key requirement."""
+
+    def test_missing_jwt_secret_forbidden_in_production(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("JWT_SECRET", raising=False)
+        with pytest.raises(ValueError, match="A JWT secret is required in production"):
+            Settings(
+                _env_file=None,
+                environment="production",
+                store="surreal",
+                auth_store="surreal",
+                surreal_url="ws://surrealdb:8000/rpc",
+                surreal_username="sibyl_admin",
+                surreal_password="really_secure_password",
+            )
+
+    def test_non_prefixed_jwt_secret_satisfies_production(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("JWT_SECRET", "fallback-jwt-secret-0123456789abcdef0123456789ab")
+        settings = Settings(
+            _env_file=None,
+            environment="production",
+            store="surreal",
+            auth_store="surreal",
+            surreal_url="ws://surrealdb:8000/rpc",
+            surreal_username="sibyl_admin",
+            surreal_password="really_secure_password",
+        )
+
+        assert (
+            settings.jwt_secret.get_secret_value()
+            == "fallback-jwt-secret-0123456789abcdef0123456789ab"
+        )
+
+    def test_missing_jwt_secret_allowed_outside_production(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("JWT_SECRET", raising=False)
+        settings = Settings(_env_file=None, environment="staging")
+
+        assert settings.jwt_secret.get_secret_value()
+
+    def test_short_jwt_secret_forbidden_in_production(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("JWT_SECRET", raising=False)
+        with pytest.raises(ValueError, match="at least 32 are required"):
+            Settings(
+                _env_file=None,
+                environment="production",
+                store="surreal",
+                auth_store="surreal",
+                surreal_url="ws://surrealdb:8000/rpc",
+                surreal_username="sibyl_admin",
+                surreal_password="really_secure_password",
+                jwt_secret="x",
+            )
+
+    def test_padded_jwt_secret_is_rejected_not_trimmed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Trimming would change the signing key and split a rolling upgrade."""
+        monkeypatch.delenv("JWT_SECRET", raising=False)
+        for padded in ("a" * 40 + "\n", "  " + "a" * 40, " " + "a" * 40 + " "):
+            with pytest.raises(ValueError, match="leading or trailing whitespace"):
+                Settings(
+                    _env_file=None,
+                    environment="production",
+                    store="surreal",
+                    auth_store="surreal",
+                    surreal_url="ws://surrealdb:8000/rpc",
+                    surreal_username="sibyl_admin",
+                    surreal_password="really_secure_password",
+                    jwt_secret=padded,
+                )
+
+    def test_clean_jwt_secret_is_preserved_byte_for_byte(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("JWT_SECRET", raising=False)
+        key = "a" * 40
+        settings = Settings(
+            _env_file=None,
+            environment="production",
+            store="surreal",
+            auth_store="surreal",
+            surreal_url="ws://surrealdb:8000/rpc",
+            surreal_username="sibyl_admin",
+            surreal_password="really_secure_password",
+            jwt_secret=key,
+        )
+
+        assert settings.jwt_secret.get_secret_value() == key
+
+    def test_whitespace_only_jwt_secret_forbidden_in_production(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("JWT_SECRET", raising=False)
+        with pytest.raises(ValueError, match="A JWT secret is required in production"):
+            Settings(
+                _env_file=None,
+                environment="production",
+                store="surreal",
+                auth_store="surreal",
+                surreal_url="ws://surrealdb:8000/rpc",
+                surreal_username="sibyl_admin",
+                surreal_password="really_secure_password",
+                jwt_secret="   ",
+            )
+
+
+class TestProductionMcpAuthMode:
+    """MCP auth must not be switched off in production."""
+
+    def _production(self, **overrides: object) -> Settings:
+        kwargs: dict[str, object] = {
+            "_env_file": None,
+            "environment": "production",
+            "store": "surreal",
+            "auth_store": "surreal",
+            "surreal_url": "ws://surrealdb:8000/rpc",
+            "surreal_username": "sibyl_admin",
+            "surreal_password": "really_secure_password",
+            "jwt_secret": "a" * 40,
+        }
+        kwargs.update(overrides)
+        return Settings(**kwargs)  # type: ignore[arg-type]
+
+    def test_auth_mode_off_forbidden_in_production(self) -> None:
+        with pytest.raises(ValueError, match="mcp_auth_mode=off is forbidden in production"):
+            self._production(mcp_auth_mode="off")
+
+    def test_auth_mode_auto_and_on_allowed_in_production(self) -> None:
+        for mode in ("auto", "on"):
+            assert self._production(mcp_auth_mode=mode).mcp_auth_mode == mode
+
+    def test_auth_mode_off_allowed_outside_production(self) -> None:
+        settings = Settings(_env_file=None, environment="development", mcp_auth_mode="off")
+
+        assert settings.mcp_auth_mode == "off"

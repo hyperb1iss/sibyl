@@ -1,6 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 {{- include "sibyl.validateOidcProviders" . }}
+{{- include "sibyl.validateProductionAuthSecret" . }}
 {{- if hasKey .Values "store" }}
 {{- fail "Deprecated value 'store' is no longer supported. Remove it and complete legacy-to-Surreal migration before upgrading." }}
 {{- end }}
