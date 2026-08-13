@@ -889,6 +889,65 @@ async def test_native_entity_manager_update_uses_server_side_merge() -> None:
 
 
 @pytest.mark.asyncio
+async def test_removing_a_metadata_key_keeps_it_gone_on_every_read_path() -> None:
+    """A key an update removes must not come back from a copy of the old state.
+
+    Surreal drops a field written as NONE, so the removal empties the flattened
+    slot. While a JSON snapshot of the same bag sat beside it, untouched by the
+    merge, every read filled the empty slot back in from the pre-update picture
+    and the removal was invisible to callers.
+    """
+    client = SurrealGraphClient(group_id="org-metadata-removal", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        await manager.create_direct(
+            Entity(
+                id="note_metadata_removal",
+                entity_type=EntityType.NOTE,
+                name="Note with a withdrawn key",
+                organization_id=client.group_id,
+                metadata={"kept_key": "still here", "withdrawn_key": "must not come back"},
+            )
+        )
+        await manager.update("note_metadata_removal", {"metadata": {"withdrawn_key": None}})
+
+        fetched = await manager.get("note_metadata_removal")
+        (many,) = await manager.get_many(["note_metadata_removal"])
+        listed = [
+            entity
+            for entity in await manager.list_by_type(EntityType.NOTE)
+            if entity.id == "note_metadata_removal"
+        ]
+        all_listed = [
+            entity for entity in await manager.list_all() if entity.id == "note_metadata_removal"
+        ]
+
+        for entity in (fetched, many, *listed, *all_listed):
+            assert entity.metadata.get("kept_key") == "still here"
+            assert "withdrawn_key" not in entity.metadata
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT attributes
+                FROM entity
+                WHERE group_id = $group_id AND uuid = "note_metadata_removal"
+                LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+        attributes = cast("dict[str, object]", rows[0]["attributes"])
+        assert attributes["kept_key"] == "still here"
+        assert "withdrawn_key" not in attributes
+        assert "metadata" not in attributes
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_native_entity_upsert_preserves_creator_and_updates_modifier() -> None:
     client = SurrealGraphClient(group_id="org-native-actor-upsert", url="memory://")
     try:
@@ -2521,6 +2580,10 @@ async def test_graph_filters_recheck_metadata_only_denormalized_fields() -> None
             "task_legacy_metadata_only",
             "task_legacy_archived_metadata_only",
         ):
+            # The shape of a row written before the flattened bag existed: no
+            # denormalized columns, no flattened keys, everything in the JSON
+            # snapshot. Stamped here rather than left over from create_direct,
+            # which no longer writes a snapshot for anything it stores.
             await client.execute_query(
                 """
                 UPDATE entity SET
@@ -2533,10 +2596,22 @@ async def test_graph_filters_recheck_metadata_only_denormalized_fields() -> None
                     attributes.status = NONE,
                     attributes.priority = NONE,
                     attributes.complexity = NONE,
-                    attributes.feature = NONE
+                    attributes.feature = NONE,
+                    attributes.metadata = $snapshot
                 WHERE uuid = $uuid;
                 """,
                 uuid=entity_id,
+                snapshot=json.dumps(
+                    {
+                        "project_id": "project_legacy",
+                        "status": (
+                            "archived" if entity_id.endswith("archived_metadata_only") else "doing"
+                        ),
+                        "priority": "high",
+                        "complexity": "simple",
+                        "feature": "legacy",
+                    }
+                ),
             )
 
         filtered = await entity_manager.list_by_type(
@@ -3092,7 +3167,11 @@ async def test_graph_writes_entities_and_relationships() -> None:
         assert rows[0]["project_id"] == "project_native"
         attributes = cast("dict[str, object]", rows[0]["attributes"])
         assert attributes["source_file"] == "raw_123"
-        assert attributes["metadata"]
+        # The flattened bag is the only copy: a JSON snapshot beside it could
+        # only ever go stale, since an update reaches the flattened keys and
+        # never the string.
+        assert attributes["project_id"] == "project_native"
+        assert "metadata" not in attributes
 
         relationships = normalize_records(
             await client.execute_query(

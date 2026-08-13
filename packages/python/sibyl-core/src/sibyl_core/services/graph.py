@@ -1979,14 +1979,16 @@ async def get_surreal_graph_runtime(
     )
 
 
-# A row stores its metadata twice: flattened into ``attributes``, and again as a
-# JSON snapshot under ``attributes.metadata``. The flattened copy wins for any key
-# present in both, but an update writes only the flattened copy, so a key the
-# update deliberately removed comes back from the stale snapshot. For most keys
-# that is merely old data; for these the absence is the meaning. A withdrawn span
-# plan resurrected here would cut a rewritten body on seams the agent authored for
-# the previous revision, and a resurrected rehearsal receipt would report a verdict
-# about text that is gone. The flattened copy is the only place they are read from.
+# Rows written before the flattened bag existed carry their metadata only as a
+# JSON snapshot, so the read still merges one when it finds one. Nothing writes a
+# new snapshot, which is what makes the flattened bag authoritative, but a row
+# that predates this and has not been fully rewritten since still has the stale
+# picture on it, and an update that removes one of these keys would let the
+# picture answer for it. For most keys that is merely old data; for these the
+# absence is the meaning. A withdrawn span plan resurrected here would cut a
+# rewritten body on seams the agent authored for the previous revision, and a
+# resurrected rehearsal receipt would report a verdict about text that is gone.
+# The population this protects only shrinks: any full write clears the snapshot.
 _SNAPSHOT_SHADOWED_METADATA_KEYS = frozenset(
     {
         "agent_atomic",
@@ -3014,13 +3016,19 @@ def _entity_record(
     retrieval_count = _metadata_optional_int(metadata.get("retrieval_count"))
     citation_count = _metadata_optional_int(metadata.get("citation_count"))
     misled_count = _metadata_optional_int(metadata.get("misled_count"))
+    # No ``metadata`` snapshot beside the flattened bag. Both copies came from
+    # this same dict, so the snapshot never held anything the flattened keys did
+    # not, while an update merges into the flattened copy alone and cannot reach
+    # a JSON string. That left the snapshot a frozen picture of pre-update state
+    # whose only observable effect was resurrecting keys an update removed:
+    # Surreal drops a field written as NONE, so removal empties the flattened
+    # slot and the read then filled it back in from the stale picture.
     attributes: dict[str, object] = {
         **metadata,
         "description": entity.description or "",
         "source_file": entity.source_file or "",
         "updated_at": updated_at,
         "_direct_insert": True,
-        "metadata": json.dumps(metadata),
         "entity_type": entity.entity_type.value,
     }
     record: SurrealRecord = {
