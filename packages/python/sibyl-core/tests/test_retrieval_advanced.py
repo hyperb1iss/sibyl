@@ -95,6 +95,29 @@ def test_query_coverage_keywords_drop_answer_shape_scaffolding() -> None:
     assert keywords == ["rice", "favorite"]
 
 
+def test_query_coverage_keeps_content_words_a_preference_query_asks_about() -> None:
+    """Words naming what a memory is about survive the preference focus pass."""
+    query = "Should I serve the API from the edge and watch the queue over the weekend?"
+
+    context = query_ranking_module._build_query_coverage_context(query, temporal_target=None)
+
+    assert {"serve", "watch", "weekend"} <= set(context.keywords)
+
+
+def test_query_coverage_cluster_affinity_keeps_content_words() -> None:
+    tokens = query_ranking_module._cluster_affinity_tokens(
+        {"serve", "watch", "weekend", "visit", "deploy"}
+    )
+
+    assert tokens == {"serve", "watch", "weekend", "visit", "deploy"}
+
+
+def test_query_coverage_keywords_keep_free_as_content() -> None:
+    keywords = extract_keywords("Which free software license did I choose?")
+
+    assert "free" in keywords
+
+
 def test_query_coverage_preserves_explicit_anchors_outside_keyword_stopwords() -> None:
     anchors = extract_explicit_query_anchors(
         'On a `Report` record, open "Related Links" after clicking "Create Order".'
