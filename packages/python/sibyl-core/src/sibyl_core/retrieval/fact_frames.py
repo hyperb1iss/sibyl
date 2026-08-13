@@ -197,112 +197,6 @@ _QUERY_ACTION_TERMS: dict[str, frozenset[str]] = {
     ),
 }
 
-_CATEGORY_TERMS: dict[str, frozenset[str]] = {
-    "appliance": frozenset(
-        {
-            "appliance",
-            "bbq",
-            "blender",
-            "coffee",
-            "cooker",
-            "fryer",
-            "grill",
-            "kettle",
-            "kitchen",
-            "mixer",
-            "oven",
-            "processor",
-            "toaster",
-        }
-    ),
-    "event": frozenset(
-        {
-            "anniversary",
-            "ceremony",
-            "conference",
-            "event",
-            "exhibition",
-            "festival",
-            "gala",
-            "opening",
-            "reunion",
-            "workshop",
-        }
-    ),
-    "life_event": frozenset(
-        {
-            "anniversary",
-            "birthday",
-            "ceremony",
-            "engagement",
-            "funeral",
-            "graduation",
-            "memorial",
-            "party",
-            "reunion",
-            "shower",
-            "wedding",
-        }
-    ),
-    "media": frozenset(
-        {
-            "album",
-            "audio",
-            "book",
-            "documentary",
-            "film",
-            "movie",
-            "music",
-            "podcast",
-            "series",
-            "show",
-            "song",
-            "stream",
-            "video",
-        }
-    ),
-    "professional_domain": frozenset(
-        {
-            "analysis",
-            "conference",
-            "domain",
-            "field",
-            "journal",
-            "paper",
-            "profession",
-            "publication",
-            "research",
-            "role",
-            "specialty",
-            "study",
-        }
-    ),
-    "service": frozenset(
-        {
-            "app",
-            "delivery",
-            "platform",
-            "provider",
-            "service",
-            "streaming",
-            "subscription",
-        }
-    ),
-    "tool": frozenset(
-        {
-            "drill",
-            "driver",
-            "equipment",
-            "gadget",
-            "hardware",
-            "kit",
-            "machine",
-            "saw",
-            "tool",
-        }
-    ),
-}
-
 _RELATION_TERMS: dict[str, frozenset[str]] = {
     "friend": frozenset({"colleague", "coworker", "friend", "partner", "roommate"}),
     "relative": frozenset(
@@ -391,7 +285,7 @@ def _frame_from_span(span: str, *, query: bool) -> FactFrame | None:
 
     action_source = _QUERY_ACTION_TERMS if query else _ACTION_TERMS
     actions = set(_labels_for_terms(terms, action_source))
-    categories = set(_labels_for_terms(terms, _CATEGORY_TERMS))
+    categories: set[str] = set()
     relations = set(_labels_for_terms(terms, _RELATION_TERMS))
     lowered = span.lower()
 
@@ -409,8 +303,6 @@ def _frame_from_span(span: str, *, query: bool) -> FactFrame | None:
     if query and re.search(r"\b(?:what|which|name)\b[^?]{0,100}\bservice\b", lowered):
         categories.add("service")
         actions.add("use")
-    if query and "life" in terms and "event" in terms:
-        categories.add("life_event")
     if query and "relative" in terms:
         relations.add("relative")
     if _RECENCY_PATTERN.search(span):
@@ -455,13 +347,6 @@ def _score_pair(query_frame: FactFrame, evidence_frame: FactFrame) -> float:
             score = max(score, 0.84)
         elif evidence_frame.personal:
             score = max(score, 0.68)
-
-    if (
-        query_frame.categories & {"life_event"}
-        and evidence_frame.categories & {"life_event"}
-        and (not query_frame.relations or relation_overlap > 0.0)
-    ):
-        score = max(score, 0.88)
 
     if (
         query_frame.categories & {"service"}

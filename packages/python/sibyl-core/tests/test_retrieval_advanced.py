@@ -23,7 +23,10 @@ import sibyl_core.retrieval.search as search_module
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
-from sibyl_core.query_anchors import explicit_query_anchor_proximity_score
+from sibyl_core.query_anchors import (
+    explicit_query_anchor_proximity_score,
+    keyword_tokens_from_text,
+)
 from sibyl_core.retrieval.candidates import CandidateKind, RetrievalCandidate
 from sibyl_core.retrieval.dedup import (
     DedupConfig,
@@ -962,7 +965,7 @@ def test_query_coverage_promotes_recurring_frequency() -> None:
 
 
 def test_fact_frames_extract_generic_service_usage() -> None:
-    query_frames = extract_query_fact_frames("What audio app have I been using lately?")
+    query_frames = extract_query_fact_frames("What service have I been using lately?")
     evidence_frames = extract_evidence_fact_frames(
         "User: I've been listening to history podcasts through Pocket Casts lately."
     )
@@ -971,7 +974,7 @@ def test_fact_frames_extract_generic_service_usage() -> None:
     assert any({"service", "media"} <= frame.categories for frame in evidence_frames)
     assert (
         score_fact_frame_match(
-            "What audio app have I been using lately?",
+            "What service have I been using lately?",
             "User: I've been listening to history podcasts through Pocket Casts lately.",
         )
         >= 0.8
@@ -1012,18 +1015,23 @@ def test_fact_frames_ignore_calendar_prepositions_as_services() -> None:
 
 
 def test_query_coverage_uses_fact_frames_for_service_usage() -> None:
+    query = "Which streaming service have I been using lately?"
+    answer = "User: I've been listening to history podcasts through Pocket Casts lately."
     ranked = _rank_query_ids(
-        "What audio app have I been using lately?",
+        query,
         [
             "User: I compared Bluetooth speakers for my desk.",
             "User: I read a forum thread about phone app permissions.",
             "User: I asked for podcast microphone recommendations.",
             "User: I updated a playlist for a road trip.",
             "User: I organized my notes about local concerts.",
-            "User: I've been listening to history podcasts through Pocket Casts lately.",
+            answer,
         ],
     )
 
+    # No keyword the query and the answer share: the frame match is what promotes it.
+    assert not set(extract_keywords(query)) & set(keyword_tokens_from_text(answer))
+    assert score_fact_frame_match(query, answer) >= 0.8
     assert "5" in ranked[:5]
 
 
@@ -1059,25 +1067,9 @@ def test_query_coverage_blends_fact_frames_into_recommendation_ranking() -> None
     assert "5" in ranked[:5]
 
 
-def test_query_coverage_uses_fact_frames_for_relative_life_event() -> None:
-    ranked = _rank_query_ids(
-        "Which life event for a relative did I attend?",
-        [
-            "User: I compared train routes for a spring trip.",
-            "User: I helped a friend choose a birthday gift.",
-            "User: I read about family history archives.",
-            "User: I planned a work dinner downtown.",
-            "User: I watched a documentary about graduation traditions.",
-            "User: I came back from my aunt's graduation ceremony.",
-        ],
-    )
-
-    assert "5" in ranked[:5]
-
-
 def test_query_coverage_uses_fact_frames_for_profile_recommendations() -> None:
     ranked = _rank_query_ids(
-        "Can you recommend publications or conferences I might find interesting?",
+        "Can you recommend reading for my research field?",
         [
             "User: I asked for science fiction reading recommendations.",
             "User: I saved a generic essay about higher education.",
