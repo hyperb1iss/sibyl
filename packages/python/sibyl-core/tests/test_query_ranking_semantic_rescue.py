@@ -100,7 +100,5 @@ def test_rescue_never_displaces_the_vocabulary_winner_in_supported_range() -> No
 
 
 def test_rescue_is_monotone_in_weight_for_the_gold() -> None:
-    positions = [
-        _order(weight).index("novocab-gold") for weight in (0.0, 0.25, 0.5, 1.0)
-    ]
+    positions = [_order(weight).index("novocab-gold") for weight in (0.0, 0.25, 0.5, 1.0)]
     assert positions == sorted(positions, reverse=True) or len(set(positions)) == 1

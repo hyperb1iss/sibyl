@@ -58,7 +58,7 @@ def mangle_identifier(token: str) -> str:
     result lowercases, so no predicate in the classifier fires while the
     words survive for dense retrieval.
     """
-    text = token.strip("\"`")
+    text = token.strip('"`')
     text = text.replace("::", " ").replace("_", " ").replace("--", " ")
     text = re.sub(r"\.(?=\w{2})", " ", text)
     text = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", text)
