@@ -1682,13 +1682,35 @@ def _get_api_url() -> str:
     return f"http://{host}:{settings.server_port}"
 
 
+def _is_api_not_found(response: Any, message: str) -> bool:
+    """Recognize the API's own not-found envelope rather than any 404.
+
+    A reverse proxy, a stale route table and a server too old to serve the
+    path all answer 404 too. Reading those as "the record is gone" would turn
+    an unreachable API into a clean answer.
+    """
+    if response.status_code != 404:
+        return False
+
+    try:
+        body = response.json()
+    except ValueError:
+        return False
+
+    return (
+        isinstance(body, dict)
+        and body.get("error") == "not_found"
+        and body.get("message") == message
+    )
+
+
 def _api_request(
     method: str,
     path: str,
     *,
     json_data: dict | None = None,
     stream: bool = False,
-    missing_ok: bool = False,
+    missing_message: str | None = None,
 ) -> dict | bytes | None:
     """Make an API request to the backup endpoints.
 
@@ -1721,7 +1743,7 @@ def _api_request(
         error("Cannot connect to Sibyl API. Is 'sibyld serve' running?")
         raise typer.Exit(code=1) from None
     except httpx.HTTPStatusError as e:
-        if missing_ok and e.response.status_code == 404:
+        if missing_message is not None and _is_api_not_found(e.response, missing_message):
             return None
         error(f"API error: {e.response.status_code} - {e.response.text}")
         raise typer.Exit(code=1) from None
@@ -1780,14 +1802,20 @@ def backup_create(
 
     if wait:
         info("Waiting for backup to complete...")
+        confirmed = False
 
         # Poll for completion
         while True:
-            status_result = _api_request("GET", f"/backups/jobs/{job_id}", missing_ok=True)
+            status_result = _api_request(
+                "GET",
+                f"/backups/jobs/{job_id}",
+                missing_message=f"Job not found: {job_id}",
+            )
             if status_result is None:
                 error("Job not found (may have been cleaned up)")
                 break
             if not isinstance(status_result, dict):
+                error("Unexpected response from API")
                 break
 
             status = status_result.get("status", "unknown")
@@ -1795,6 +1823,7 @@ def backup_create(
             if status == "complete":
                 job_result = status_result.get("result", {})
                 if job_result.get("success"):
+                    confirmed = True
                     archive_path = job_result.get("archive_path", "unknown")
                     size_kb = job_result.get("archive_size_bytes", 0) / 1024
                     duration = job_result.get("duration_seconds", 0)
@@ -1819,6 +1848,11 @@ def backup_create(
             time.sleep(2)
 
         console.print()  # Newline after dots
+
+        # --wait promises the archive exists by the time it returns, so every
+        # way out of the loop except a confirmed success is a failed run.
+        if not confirmed:
+            raise typer.Exit(code=1)
 
 
 @app.command("backup-list")

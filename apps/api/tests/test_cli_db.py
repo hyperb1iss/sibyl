@@ -8,6 +8,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+import pytest
+import typer
 from typer.testing import CliRunner
 
 from sibyl.cli import db as db_cli
@@ -362,29 +364,69 @@ def test_backup_create_uses_database_dump_request_field() -> None:
     }
 
 
-def test_backup_create_wait_stops_when_the_server_forgot_the_job() -> None:
+def test_backup_create_wait_fails_when_the_server_forgot_the_job() -> None:
+    """--wait never saw the archive, so it must not exit green."""
     with patch(
         "sibyl.cli.db._api_request",
         side_effect=[{"job_id": "job-123"}, None],
     ) as api_request:
         result = runner.invoke(db_cli.app, ["backup-create", "--wait"])
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert api_request.call_args.args == ("GET", "/backups/jobs/job-123")
-    assert api_request.call_args.kwargs["missing_ok"] is True
+    assert api_request.call_args.kwargs["missing_message"] == "Job not found: job-123"
     assert "Job not found" in result.output
 
 
-def test_api_request_reports_a_missing_job_instead_of_exiting() -> None:
-    response = SimpleNamespace(status_code=404, text="Job not found: job-123")
-    request_error = httpx.HTTPStatusError("404", request=None, response=response)
-    client = MagicMock()
-    client.get.return_value.raise_for_status.side_effect = request_error
+def test_backup_create_wait_succeeds_on_a_confirmed_archive() -> None:
+    archive = {"success": True, "archive_path": "backups/a.tar.gz"}
+    complete = {"status": "complete", "result": archive}
+    with patch("sibyl.cli.db._api_request", side_effect=[{"job_id": "job-123"}, complete]):
+        result = runner.invoke(db_cli.app, ["backup-create", "--wait"])
 
+    assert result.exit_code == 0
+    assert "Backup complete!" in result.output
+
+
+def _client_raising(status_code: int, body: object, text: str = "") -> MagicMock:
+    response = MagicMock(status_code=status_code, text=text)
+    if isinstance(body, Exception):
+        response.json.side_effect = body
+    else:
+        response.json.return_value = body
+    client = MagicMock()
+    client.get.return_value.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "error", request=None, response=response
+    )
+    return client
+
+
+def _get_with(client: MagicMock, **kwargs: object) -> object:
     with patch("httpx.Client") as client_factory:
         client_factory.return_value.__enter__.return_value = client
+        return db_cli._api_request("GET", "/backups/jobs/job-123", **kwargs)
 
-        assert db_cli._api_request("GET", "/backups/jobs/job-123", missing_ok=True) is None
+
+def test_api_request_reports_the_apis_own_missing_job() -> None:
+    client = _client_raising(404, {"error": "not_found", "message": "Job not found: job-123"})
+
+    assert _get_with(client, missing_message="Job not found: job-123") is None
+
+
+def test_api_request_does_not_read_an_unrelated_404_as_a_missing_job() -> None:
+    """A proxy or a route the server does not serve must not look like success."""
+    unrelated = [
+        _client_raising(404, {"error": "not_found", "message": "Not Found"}),
+        _client_raising(404, {"detail": "Not Found"}),
+        _client_raising(404, ValueError("not json"), text="<html>404</html>"),
+        _client_raising(404, {"error": "not_found", "message": "Job not found: other-job"}),
+    ]
+
+    for client in unrelated:
+        with pytest.raises(typer.Exit) as exit_info:
+            _get_with(client, missing_message="Job not found: job-123")
+
+        assert exit_info.value.exit_code == 1
 
 
 class _StubSchemaClient:
