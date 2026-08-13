@@ -190,25 +190,34 @@ def test_collect_forgetting_dogfood_evidence_from_debug_query(tmp_path: Path) ->
     write_integrity_path = tmp_path / "write-path-integrity-receipt.json"
     _write_integrity_receipt(write_integrity_path)
 
+    # The collector compares against the live clock, so fixed fixture dates
+    # age across the staleness and decay thresholds and flip the expected
+    # counts (this test broke on 2026-08-13 exactly that way). Anchor the
+    # fixture to now: creation far past the minimum age, usage recent enough
+    # that recency keeps the used rows above the decay threshold.
+    fixture_now = forgetting_gate.datetime.now(forgetting_gate.UTC)
+    created_old = (fixture_now - forgetting_gate.timedelta(days=550)).isoformat()
+    used_recently = (fixture_now - forgetting_gate.timedelta(days=1)).isoformat()
+
     def query_runner(query: str) -> list[dict[str, object]]:
         queries.append(query)
         assert "FROM entity" in query
         return [
             {
                 "uuid": "entity-stale-uncited",
-                "created_at": "2025-01-01T00:00:00+00:00",
+                "created_at": created_old,
                 "metadata": {"importance": 0.1},
             },
             {
                 "uuid": "entity-protected-cited",
-                "created_at": "2025-01-01T00:00:00+00:00",
-                "last_used_at": "2026-07-04T12:00:00+00:00",
+                "created_at": created_old,
+                "last_used_at": used_recently,
                 "citation_count": 1,
             },
             {
                 "uuid": "entity-exposed",
-                "created_at": "2025-01-01T00:00:00+00:00",
-                "last_recalled_at": "2026-07-04T12:05:00+00:00",
+                "created_at": created_old,
+                "last_recalled_at": used_recently,
                 "retrieval_count": 1,
             },
         ]
