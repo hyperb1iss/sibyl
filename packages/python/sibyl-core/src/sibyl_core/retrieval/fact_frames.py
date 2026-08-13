@@ -6,6 +6,8 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from sibyl_core.query_anchors import normalize_keyword_token, normalize_keyword_tokens
+
 _TOKEN_PATTERN = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9'-]{1,}")
 _SPAN_SPLIT_PATTERN = re.compile(r"(?<=[.!?])\s+|\n+")
 _FIRST_PERSON_PATTERN = re.compile(r"\b(?:i|i'm|i've|i'd|me|my|mine|we|our)\b", re.I)
@@ -68,7 +70,6 @@ _STOPWORDS = {
     "me",
     "mine",
     "month",
-    "months",
     "more",
     "much",
     "my",
@@ -80,7 +81,6 @@ _STOPWORDS = {
     "our",
     "out",
     "recent",
-    "recently",
     "some",
     "that",
     "the",
@@ -90,10 +90,8 @@ _STOPWORDS = {
     "to",
     "up",
     "user",
-    "using",
     "was",
     "week",
-    "weeks",
     "what",
     "when",
     "which",
@@ -103,69 +101,36 @@ _STOPWORDS = {
     "you",
 }
 
-_NORMALIZED_TOKEN_ALIASES = {
-    "acquired": "acquire",
-    "acquiring": "acquire",
-    "assembled": "assemble",
-    "assembling": "assemble",
-    "attended": "attend",
-    "attending": "attend",
-    "bought": "buy",
-    "classes": "class",
-    "completed": "complete",
-    "finishing": "finish",
-    "fixed": "fix",
-    "fixing": "fix",
-    "got": "get",
-    "listened": "listen",
-    "listening": "listen",
-    "ordered": "order",
-    "ordering": "order",
-    "participated": "participate",
-    "participating": "participate",
-    "picked": "pick",
-    "played": "play",
-    "playing": "play",
-    "presented": "present",
-    "presenting": "present",
-    "purchased": "purchase",
-    "purchasing": "purchase",
-    "read": "read",
-    "relying": "rely",
-    "researched": "research",
-    "researching": "research",
-    "serviced": "repair",
-    "servicing": "repair",
-    "studied": "study",
-    "studying": "study",
-    "subscribed": "subscribe",
-    "using": "use",
-    "visited": "visit",
-    "visiting": "visit",
-    "volunteered": "volunteer",
-    "volunteering": "volunteer",
-    "watching": "watch",
-}
-
+# Every group is written in surface English and stemmed at import, so a term
+# covers its own inflections. Irregular pasts (bought, got, went) survive
+# stemming unchanged and are therefore listed beside the verb they belong to,
+# and "service" sits under repair because that is a sense mapping the stemmer
+# has no opinion about.
 _ACTION_TERMS: dict[str, frozenset[str]] = {
-    "acquire": frozenset(
+    "acquire": normalize_keyword_tokens(
         {
             "acquire",
+            "bought",
             "buy",
             "get",
+            "got",
             "invest",
             "order",
             "pick",
             "purchase",
         }
     ),
-    "attend": frozenset({"attend", "join", "participate", "visit", "went"}),
-    "complete": frozenset({"complete", "finish"}),
-    "create": frozenset({"build", "compose", "create", "draft", "generate", "make", "write"}),
-    "present": frozenset({"present", "presentation"}),
-    "profile": frozenset({"field", "focus", "profession", "research", "role", "specialty"}),
-    "repair": frozenset({"fix", "repair", "replace"}),
-    "use": frozenset(
+    "attend": normalize_keyword_tokens({"attend", "join", "participate", "visit", "went"}),
+    "complete": normalize_keyword_tokens({"complete", "finish"}),
+    "create": normalize_keyword_tokens(
+        {"build", "compose", "create", "draft", "generate", "make", "write"}
+    ),
+    "present": normalize_keyword_tokens({"present", "presentation"}),
+    "profile": normalize_keyword_tokens(
+        {"field", "focus", "profession", "research", "role", "specialty"}
+    ),
+    "repair": normalize_keyword_tokens({"fix", "repair", "replace", "service"}),
+    "use": normalize_keyword_tokens(
         {
             "choose",
             "follow",
@@ -178,12 +143,12 @@ _ACTION_TERMS: dict[str, frozenset[str]] = {
             "watch",
         }
     ),
-    "volunteer": frozenset({"volunteer"}),
+    "volunteer": normalize_keyword_tokens({"volunteer"}),
 }
 
 _QUERY_ACTION_TERMS: dict[str, frozenset[str]] = {
     **_ACTION_TERMS,
-    "recommend": frozenset(
+    "recommend": normalize_keyword_tokens(
         {
             "recommend",
             "suggest",
@@ -191,9 +156,11 @@ _QUERY_ACTION_TERMS: dict[str, frozenset[str]] = {
     ),
 }
 
+_RELATIVE_TERM = normalize_keyword_token("relative")
+
 _RELATION_TERMS: dict[str, frozenset[str]] = {
-    "friend": frozenset({"colleague", "coworker", "friend", "partner", "roommate"}),
-    "relative": frozenset(
+    "friend": normalize_keyword_tokens({"colleague", "coworker", "friend", "partner", "roommate"}),
+    "relative": normalize_keyword_tokens(
         {
             "aunt",
             "brother",
@@ -297,7 +264,7 @@ def _frame_from_span(span: str, *, query: bool) -> FactFrame | None:
     if query and re.search(r"\b(?:what|which|name)\b[^?]{0,100}\bservice\b", lowered):
         categories.add("service")
         actions.add("use")
-    if query and "relative" in terms:
+    if query and _RELATIVE_TERM in terms:
         relations.add("relative")
     if _RECENCY_PATTERN.search(span):
         relations.add("recency")
@@ -377,31 +344,14 @@ def _salient_terms(text: str) -> list[str]:
     terms: list[str] = []
     seen: set[str] = set()
     for raw_token in _TOKEN_PATTERN.findall(text.lower()):
-        token = _normalize_token(raw_token)
-        if token in _STOPWORDS or token in seen or len(token) < 2:
+        if raw_token in _STOPWORDS:
+            continue
+        token = normalize_keyword_token(raw_token)
+        if token in seen or len(token) < 2:
             continue
         seen.add(token)
         terms.append(token)
     return terms
-
-
-def _normalize_token(token: str) -> str:
-    token = token.strip("'\"")
-    if token.endswith("'s"):
-        token = token[:-2]
-    elif token.endswith("'"):
-        token = token[:-1]
-    if token in _NORMALIZED_TOKEN_ALIASES:
-        return _NORMALIZED_TOKEN_ALIASES[token]
-    if len(token) > 4 and token.endswith("ies"):
-        return f"{token[:-3]}y"
-    if len(token) > 4 and token.endswith(("ches", "shes", "xes", "zes")):
-        return token[:-2]
-    if len(token) > 4 and token.endswith(("ces", "ses")):
-        return token[:-1]
-    if len(token) > 3 and token.endswith("s") and not token.endswith(("is", "ous", "ss", "us")):
-        return token[:-1]
-    return token
 
 
 def _overlap(left: frozenset[str], right: frozenset[str]) -> float:
