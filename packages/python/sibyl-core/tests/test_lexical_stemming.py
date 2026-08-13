@@ -52,6 +52,9 @@ def test_every_fulltext_index_is_backed_by_a_stemming_analyzer() -> None:
     referenced = set(re.findall(r"FULLTEXT ANALYZER (\w+)", _INDEX_SOURCES))
 
     assert referenced, "no fulltext indexes found; the source constants moved"
+    # Pinned rather than subtracted: adding an analyzer to the exemption set is
+    # how a non-stemming index would otherwise slip past this check.
+    assert referenced & _UNSTEMMED_ANALYZERS == {"code_analyzer"}
     for analyzer in sorted(referenced - _UNSTEMMED_ANALYZERS):
         assert "snowball(english)" in chains[analyzer], (
             f"{analyzer} backs a BM25 index but does not stem, so query-side and "
@@ -86,6 +89,13 @@ async def test_python_normalization_matches_the_engine_analyzer() -> None:
         "RETURN search::analyze('content_analyzer', $text);", {"text": "fastest strongest"}
     )
     assert graded == ["fastest", "strongest"]
+
+    # Accent folding matches the analyzer's ascii filter. The token patterns
+    # feeding this function are ASCII-only, so only a direct caller reaches it.
+    accented = await db.query(
+        "RETURN search::analyze('content_analyzer', $text);", {"text": "café naïve Zürich"}
+    )
+    assert accented == [normalize_keyword_token(word) for word in ("café", "naïve", "Zürich")]
     assert [normalize_keyword_token(word) for word in ("fastest", "strongest")] == [
         "fast",
         "strong",
