@@ -3193,7 +3193,7 @@ class TestHybridSearch:
         entity = make_entity_for_test(
             "assistant-answer",
             description=(
-                "User: I need generic cleaning advice. Assistant: I avoid lavender "
+                "User: I need generic cleaning advice. Assistant: I avoid scented "
                 "laundry detergent on towels."
             ),
         )
@@ -3201,14 +3201,14 @@ class TestHybridSearch:
         primary_text = hybrid_module._entity_primary_text(entity)
 
         assert "generic cleaning advice" in primary_text
-        assert "lavender laundry detergent" not in primary_text
+        assert "scented laundry detergent" not in primary_text
 
     def test_hybrid_search_plain_text_is_not_primary_scoped(self) -> None:
         primary_text, has_primary_text = hybrid_module._extract_primary_text_from_text(
-            "plain memory about lavender laundry detergent"
+            "plain memory about scented laundry detergent"
         )
 
-        assert primary_text == "plain memory about lavender laundry detergent"
+        assert primary_text == "plain memory about scented laundry detergent"
         assert has_primary_text is False
 
     @pytest.mark.asyncio
