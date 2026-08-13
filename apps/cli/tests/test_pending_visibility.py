@@ -156,3 +156,22 @@ def test_doctor_passes_on_an_empty_queue(sandbox_home: Path) -> None:
     check = doctor_module._check_pending_writes()
 
     assert check.status == "pass"
+
+
+def test_an_unreadable_home_does_not_break_a_working_command(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The notice is best-effort. It must never be the thing that fails a command."""
+
+    def no_home() -> Path:
+        raise RuntimeError("Could not determine home directory")
+
+    monkeypatch.setattr(pending_writes.Path, "home", no_home)
+    monkeypatch.setattr("sys.argv", ["sibyl", "version"])
+
+    with pytest.raises(SystemExit) as exc:
+        cli_main()
+
+    assert exc.value.code == 0
+    assert "buffered locally" not in capsys.readouterr().err
