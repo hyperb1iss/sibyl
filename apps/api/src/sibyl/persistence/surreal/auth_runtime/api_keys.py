@@ -288,6 +288,15 @@ async def create_api_key_for_user(
     expires_at,
     request,
 ):
+    # An empty scope array is how keys that predate the scopes column read, and
+    # the MCP surface resolves that shape to full legacy access. Minting a new
+    # key into it would hand out that access silently, so the invariant belongs
+    # here rather than only on the HTTP model.
+    normalized_scopes = [scope.strip() for scope in scopes if str(scope).strip()]
+    if not normalized_scopes:
+        msg = "API key scopes must include at least one scope"
+        raise ValueError(msg)
+
     async with _auth_client_scope() as client:
         repo = _SurrealRepository(client)
         project_record_ids = await _resolve_api_key_project_record_ids(
@@ -311,7 +320,7 @@ async def create_api_key_for_user(
             "key_prefix": api_key_prefix(raw),
             "key_salt": salt_hex,
             "key_hash": hash_hex,
-            "scopes": [scope.strip() for scope in scopes if str(scope).strip()],
+            "scopes": normalized_scopes,
             "expires_at": _coerce_datetime(expires_at),
             "revoked_at": None,
             "last_used_at": None,

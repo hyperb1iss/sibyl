@@ -76,7 +76,7 @@ def test_stored_scopes_are_left_alone_when_present(stored: list[str]) -> None:
     assert effective_api_key_scopes(stored) == set(stored)
 
 
-def test_api_key_creation_refuses_an_empty_scope_list() -> None:
+def test_api_key_request_model_refuses_an_empty_scope_list() -> None:
     """The legacy carve-out stays closed to newly minted keys."""
     from pydantic import ValidationError
 
@@ -87,6 +87,33 @@ def test_api_key_creation_refuses_an_empty_scope_list() -> None:
     for empty in ([], [""], ["   "]):
         with pytest.raises(ValidationError, match="at least one scope"):
             ApiKeyCreateRequest(name="scopeless", scopes=empty)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("empty", [[], [""], ["   "]])
+async def test_api_key_issuer_refuses_an_empty_scope_list(empty: list[str]) -> None:
+    """The issuer holds the invariant too, not just the HTTP model above it."""
+    from sibyl.persistence.surreal.auth_runtime.api_keys import create_api_key_for_user
+
+    client_scope = AsyncMock()
+    with (
+        patch(
+            "sibyl.persistence.surreal.auth_runtime.api_keys._auth_client_scope",
+            client_scope,
+        ),
+        pytest.raises(ValueError, match="at least one scope"),
+    ):
+        await create_api_key_for_user(
+            organization_id=uuid4(),
+            user_id=uuid4(),
+            name="scopeless",
+            live=True,
+            scopes=empty,
+            expires_at=None,
+            request=None,
+        )
+
+    client_scope.assert_not_called()
 
 
 def test_insufficient_scope_message_names_the_missing_scope() -> None:
