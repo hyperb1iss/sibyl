@@ -36,6 +36,8 @@ if TYPE_CHECKING:
 
 # Shared console instance (for styled output only, NOT for JSON)
 console = Console(width=160) if not sys.stdout.isatty() else Console()
+# Second console for notices that must never land in a --json pipe.
+err_console = Console(stderr=True, width=160) if not sys.stderr.isatty() else Console(stderr=True)
 DEFAULT_CONTENT_FILE_MAX_SIZE = 1_048_576
 CONTENT_FILE_BINARY_CHECK_BYTES = 8192
 
@@ -198,6 +200,28 @@ def info(message: str) -> None:
 def hint(message: str) -> None:
     """Print a hint message."""
     console.print(f"[{ELECTRIC_YELLOW}]Hint:[/{ELECTRIC_YELLOW}] {message}")
+
+
+def pending_writes_summary(count: int) -> str:
+    plural = "s" if count != 1 else ""
+    return (
+        f"{count} write{plural} buffered locally and not saved on the server. "
+        "Run 'sibyl pending-writes flush' to replay them."
+    )
+
+
+def notify_pending_writes() -> None:
+    """Warn on stderr when writes are sitting in the local buffer.
+
+    Runs at the end of every command, including the ones that just filled
+    the buffer, so a queued write is never silent.
+    """
+    from sibyl_cli.pending_writes import pending_write_count
+
+    count = pending_write_count()
+    if count <= 0:
+        return
+    err_console.print(f"[{ELECTRIC_YELLOW}]![/{ELECTRIC_YELLOW}] {pending_writes_summary(count)}")
 
 
 def print_db_hint() -> None:

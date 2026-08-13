@@ -34,6 +34,8 @@ from sibyl_cli.common import (
     error,
     handle_client_error,
     info,
+    notify_pending_writes,
+    pending_writes_summary,
     print_json,
     print_mutation_receipt,
     resolve_content_input,
@@ -74,6 +76,7 @@ from sibyl_cli.memory_display import (
 )
 from sibyl_cli.org import app as org_app
 from sibyl_cli.pending import app as pending_writes_app
+from sibyl_cli.pending_writes import pending_write_count, pending_write_status
 from sibyl_cli.project import app as project_app
 from sibyl_cli.project_refs import resolve_project_reference
 from sibyl_cli.session import app as session_app
@@ -1481,6 +1484,15 @@ def _print_version_lines(data: dict[str, object]) -> None:
         warn(f"Server is newer than this CLI ({server_text} > {current}) — run `sibyl update`.")
 
 
+def _print_pending_write_health() -> None:
+    """Report the local write buffer, the queue a failed write lands in."""
+    count = pending_write_count()
+    if count:
+        warn(pending_writes_summary(count))
+    else:
+        console.print("  [dim]Pending writes: 0[/dim]")
+
+
 @app.command()
 def health(
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
@@ -1494,12 +1506,13 @@ def health(
                 data = await client.get("/health")
 
                 if json_output:
-                    print_json(data)
+                    print_json({**data, "pending_writes": pending_write_status()})
                     return
                 status = data.get("status", "unknown")
                 server = data.get("server_name", "sibyl")
+                healthy = status == "healthy"
 
-                if status == "healthy":
+                if healthy:
                     success(f"{server} is healthy")
                     _print_version_lines(data)
                     if counts := data.get("counts"):
@@ -1509,6 +1522,10 @@ def health(
                         )
                 else:
                     error(f"{server} is unhealthy: {status}")
+
+                _print_pending_write_health()
+
+                if not healthy:
                     raise typer.Exit(1)
         except SibylClientError as e:
             _handle_client_error(e)
@@ -3939,7 +3956,12 @@ def version() -> None:
 
 def main() -> None:
     """CLI entry point."""
-    app()
+    try:
+        app()
+    finally:
+        # The pending-writes commands report the queue themselves.
+        if "pending-writes" not in sys.argv[1:]:
+            notify_pending_writes()
 
 
 if __name__ == "__main__":

@@ -7,12 +7,14 @@ from typer.testing import CliRunner
 
 from sibyl_cli import config_store
 from sibyl_cli import doctor as doctor_module
+from sibyl_cli import pending_writes
 from sibyl_cli.doctor import DoctorCheck, DoctorContext
 from sibyl_cli.main import app
 
 
 def _use_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config_store.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
 
 
 def test_doctor_json_reports_missing_config(
@@ -89,6 +91,7 @@ async def test_doctor_collects_healthy_local_context(
         "port",
         "embedded-lock",
         "write-test",
+        "pending-writes",
     ]
 
 

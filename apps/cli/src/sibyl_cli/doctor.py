@@ -498,6 +498,22 @@ def _check_agent_prompt_content() -> DoctorCheck:
     )
 
 
+def _check_pending_writes() -> DoctorCheck:
+    """Surface the local write buffer, where refused writes accumulate unseen."""
+    from sibyl_cli.pending_writes import pending_write_count, pending_writes_dir
+
+    count = pending_write_count()
+    if not count:
+        return DoctorCheck("pending-writes", "pass", "No writes are buffered locally.")
+    plural = "s" if count != 1 else ""
+    return DoctorCheck(
+        "pending-writes",
+        "warn",
+        f"{count} write{plural} buffered locally and not saved on the server.",
+        f"Replay with 'sibyl pending-writes flush'; queued at {pending_writes_dir()}.",
+    )
+
+
 def collect_agent_checks() -> list[DoctorCheck]:
     """Filesystem-only checks: skill stub, hooks, and CLAUDE.md content."""
     return [
@@ -526,6 +542,7 @@ async def collect_doctor_checks(
                 )
             )
         checks.append(await _check_write_probe(write_test))
+    checks.append(_check_pending_writes())
     if not skip_agent:
         checks.extend(collect_agent_checks())
     return checks
