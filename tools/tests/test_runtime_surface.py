@@ -679,4 +679,40 @@ def test_helm_guard_remediation_names_the_release_namespace() -> None:
 
     assert result.returncode != 0
     assert "--namespace sibyl-prod" in result.stderr
-    assert "helm upgrade --install sibyl charts/sibyl --namespace sibyl-prod" in result.stderr
+    assert "helm install sibyl charts/sibyl --namespace sibyl-prod" in result.stderr
+
+
+@requires_helm
+def test_helm_guard_remediation_separates_install_from_upgrade() -> None:
+    """`helm upgrade --set` without --reuse-values resets a release to chart defaults."""
+    result = _helm_template()
+
+    assert result.returncode != 0
+    assert "for a first install:" in result.stderr
+    assert "--reuse-values --set backend.existingSecret=" in result.stderr
+
+
+@requires_helm
+def test_helm_guard_remediation_refuses_to_interpolate_shell_metacharacters() -> None:
+    """The remediation is a snippet operators paste, so an unvalidated name executes."""
+    for hostile in ("$(id)", "`id`", "a;rm -rf /", "UPPERCASE"):
+        result = _helm_template(
+            "--set-string",
+            f"backend.existingSecret={hostile}",
+            "--set",
+            "backend.env.SIBYL_JWT_SECRET=x",
+        )
+
+        assert result.returncode != 0
+        assert "<your-secret-name>" in result.stderr
+        assert hostile not in result.stderr
+
+    valid = _helm_template(
+        "--set-string",
+        "backend.existingSecret=ok-name-123",
+        "--set",
+        "backend.env.SIBYL_JWT_SECRET=x",
+    )
+
+    assert valid.returncode != 0
+    assert "kubectl create secret generic ok-name-123" in valid.stderr
