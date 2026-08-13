@@ -53,7 +53,7 @@ RELEASE_WORKFLOW_REQUIRED_FRAGMENTS = (
     "Generate AI release notes",
     "provider: anthropic",
     "version: v2.1.0",
-    "model: claude-opus-5",
+    "model: claude-opus-4-8",
     "secrets.ANTHROPIC_API_KEY",
     "Prepare release notes",
     "steps.ai_release_notes.outputs.content",
