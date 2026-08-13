@@ -112,6 +112,24 @@ def test_query_coverage_cluster_affinity_keeps_content_words() -> None:
     assert tokens == {"serve", "watch", "weekend", "visit", "deploy"}
 
 
+def test_query_coverage_keywords_normalize_comparatives_to_the_base_adjective() -> None:
+    """A query about something older matches evidence that says old."""
+    assert extract_keywords("How many years older is my grandma than me?") == ["old", "grandma"]
+    assert extract_keywords("Which server had the largest disk?") == [
+        "server",
+        "had",
+        "large",
+        "disk",
+    ]
+
+
+def test_query_coverage_keywords_do_not_strip_er_from_agent_nouns() -> None:
+    """The comparative table is closed: no suffix rule mangles ordinary nouns."""
+    keywords = extract_keywords("Which user reported the server error to another provider?")
+
+    assert {"user", "server", "provider"} <= set(keywords)
+
+
 def test_query_coverage_keywords_keep_free_as_content() -> None:
     keywords = extract_keywords("Which free software license did I choose?")
 
@@ -763,7 +781,7 @@ def test_query_coverage_penalizes_assistant_only_memory_matches() -> None:
         ],
     )
 
-    assert "4" in ranked[:5]
+    assert {"3", "4"} <= set(ranked[:5])
     assert ranked.index("4") < ranked.index("5")
 
 

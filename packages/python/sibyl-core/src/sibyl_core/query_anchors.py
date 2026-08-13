@@ -29,6 +29,67 @@ _NORMALIZED_TOKEN_ALIASES = {
     "volunteering": "volunteer",
     "weddings": "wedding",
 }
+# Comparatives and superlatives are the same lemma as their base adjective, and
+# no suffix rule recovers that safely: stripping "er" turns user into us and
+# other into oth. Adjectives whose base or inflections the stopword layer
+# already classifies (new, long, late, early) are deliberately absent, because
+# normalization runs before that check and would change which tokens it drops.
+_GRADED_ADJECTIVE_ALIASES = {
+    "bigger": "big",
+    "biggest": "big",
+    "cheaper": "cheap",
+    "cheapest": "cheap",
+    "cleaner": "clean",
+    "cleanest": "clean",
+    "closer": "close",
+    "closest": "close",
+    "colder": "cold",
+    "coldest": "cold",
+    "deeper": "deep",
+    "deepest": "deep",
+    "easier": "easy",
+    "easiest": "easy",
+    "faster": "fast",
+    "fastest": "fast",
+    "harder": "hard",
+    "hardest": "hard",
+    "heavier": "heavy",
+    "heaviest": "heavy",
+    "higher": "high",
+    "highest": "high",
+    "larger": "large",
+    "largest": "large",
+    "lighter": "light",
+    "lightest": "light",
+    "louder": "loud",
+    "loudest": "loud",
+    "lower": "low",
+    "lowest": "low",
+    "older": "old",
+    "oldest": "old",
+    "quicker": "quick",
+    "quickest": "quick",
+    "safer": "safe",
+    "safest": "safe",
+    "shorter": "short",
+    "shortest": "short",
+    "simpler": "simple",
+    "simplest": "simple",
+    "slower": "slow",
+    "slowest": "slow",
+    "smaller": "small",
+    "smallest": "small",
+    "stronger": "strong",
+    "strongest": "strong",
+    "warmer": "warm",
+    "warmest": "warm",
+    "weaker": "weak",
+    "weakest": "weak",
+    "wider": "wide",
+    "widest": "wide",
+    "younger": "young",
+    "youngest": "young",
+}
 _EXPLICIT_ANCHOR_PATTERN = re.compile(
     r"`(?P<backtick>[^`\n]{1,160})`"
     r'|"(?P<double>[^"\n]{1,160})"'
@@ -40,6 +101,8 @@ def normalize_keyword_token(token: str) -> str:
     token = token.strip("'\"")
     if token in _NORMALIZED_TOKEN_ALIASES:
         return _NORMALIZED_TOKEN_ALIASES[token]
+    if token in _GRADED_ADJECTIVE_ALIASES:
+        return _GRADED_ADJECTIVE_ALIASES[token]
     if len(token) > 4 and token.endswith("ies"):
         return f"{token[:-3]}y"
     if len(token) > 4 and token.endswith(("ches", "shes", "xes", "zes")):
