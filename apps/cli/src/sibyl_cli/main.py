@@ -1349,7 +1349,7 @@ def _handle_client_error(e: SibylClientError) -> None:
             f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl auth login[/bold {NEON_CYAN}]   [dim]Log in[/dim]"
         )
         console.print(
-            f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl auth signup[/bold {NEON_CYAN}]  [dim]Create account[/dim]"
+            f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl auth local-signup[/bold {NEON_CYAN}]  [dim]Create a local account[/dim]"
         )
         console.print()
     elif e.status_code == 403:

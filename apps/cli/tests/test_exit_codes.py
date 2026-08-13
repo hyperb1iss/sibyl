@@ -174,3 +174,27 @@ def test_an_empty_result_set_still_exits_zero() -> None:
         result = CliRunner().invoke(task.app, ["list"])
 
     assert result.exit_code == 0
+
+
+def test_the_401_remediation_names_commands_that_exist() -> None:
+    """The most-hit error path pointed at `sibyl auth signup`, which was never registered."""
+    from sibyl_cli import auth
+
+    client = _client()
+    client.get = AsyncMock(side_effect=SibylClientError("Not authenticated", status_code=401))
+
+    with patch("sibyl_cli.main.get_client", return_value=client):
+        result = CliRunner().invoke(main_app, ["health"])
+
+    assert result.exit_code == 1
+    suggested = {
+        line.split("sibyl auth ", 1)[1].split()[0]
+        for line in result.stdout.splitlines()
+        if "sibyl auth " in line
+    }
+    registered = {command.name for command in auth.app.registered_commands if command.name} | {
+        group.name for group in auth.app.registered_groups if group.name
+    }
+
+    assert suggested
+    assert suggested <= registered
