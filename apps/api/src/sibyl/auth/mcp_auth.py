@@ -26,13 +26,13 @@ from sibyl.persistence.auth_runtime import authenticate_api_key, validate_access
 # single key describes one capability on both surfaces: a key that REST refuses
 # a mutation must not be handed the same mutation through an MCP tool.
 #
-# Keys that carry `mcp` and no granular scope keep unrestricted MCP access.
-# That is the default scope set every key has been issued with, and revoking
-# their writes would break every deployed agent.
+# A key whose only scope is `mcp` keeps unrestricted MCP access. That is the
+# default scope set every key has been issued with, and revoking its writes
+# would break every deployed agent. The carve-out is the bare shape alone: any
+# further scope on the key, recognized or not, means its capabilities were
+# enumerated by whoever issued it, so a write has to be enumerated too.
 MCP_SURFACE_SCOPE = "mcp"
-MCP_READ_SCOPE = "api:read"
 MCP_WRITE_SCOPE = "api:write"
-MCP_GRANULAR_SCOPES = frozenset({MCP_READ_SCOPE, MCP_WRITE_SCOPE})
 
 
 def normalize_scopes(scopes: Iterable[str] | None) -> set[str]:
@@ -49,9 +49,9 @@ def mcp_scopes_allow(scopes: Iterable[str] | None, *, write: bool) -> bool:
         return False
     if not write:
         return True
-    if not normalized & MCP_GRANULAR_SCOPES:
+    if MCP_WRITE_SCOPE in normalized:
         return True
-    return MCP_WRITE_SCOPE in normalized
+    return normalized == {MCP_SURFACE_SCOPE}
 
 
 def insufficient_mcp_scope_message(scopes: Iterable[str] | None, *, write: bool) -> str:

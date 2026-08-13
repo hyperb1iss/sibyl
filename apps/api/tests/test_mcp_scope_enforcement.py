@@ -18,6 +18,7 @@ from sibyl.server import (
     _add_mcp_entity,
     _get_mcp_context,
     _manage_mcp_action,
+    _optional_mcp_org_id,
     _remember_mcp_memory,
     _require_mcp_context,
     _synthesis_mcp_draft,
@@ -46,6 +47,8 @@ def _api_key_ctx(scopes: list[str] | None) -> McpContext:
         ([], False, False),
         (None, False, False),
         (["billing:admin"], False, False),
+        (["mcp", "billing:admin"], True, False),
+        (["mcp", "billing:admin", "api:write"], True, True),
         ([" mcp "], True, True),
         ([" mcp ", " api:read "], True, False),
     ],
@@ -227,6 +230,27 @@ async def test_synthesis_draft_gates_only_the_remembering_variant() -> None:
             await _synthesis_mcp_draft(goal="ship faster", project="project-a", remember=True)
 
     draft.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_health_org_lookup_stays_anonymous_without_a_credential() -> None:
+    with patch("sibyl.server._get_mcp_context", AsyncMock(return_value=None)):
+        assert await _optional_mcp_org_id() is None
+
+
+@pytest.mark.asyncio
+async def test_health_org_lookup_applies_the_read_gate() -> None:
+    allowed = _api_key_ctx(["mcp", "api:read"])
+    refused = _api_key_ctx(["billing:admin"])
+
+    with patch("sibyl.server._get_mcp_context", AsyncMock(return_value=allowed)):
+        assert await _optional_mcp_org_id() == allowed.org_id
+
+    with (
+        patch("sibyl.server._get_mcp_context", AsyncMock(return_value=refused)),
+        pytest.raises(ValueError, match="Expected mcp"),
+    ):
+        await _optional_mcp_org_id()
 
 
 @pytest.mark.asyncio

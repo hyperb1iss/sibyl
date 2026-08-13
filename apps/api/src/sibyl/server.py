@@ -237,14 +237,21 @@ async def _get_mcp_context() -> McpContext | None:
     return None
 
 
-async def _get_org_id_from_context() -> str | None:
-    """Extract organization ID from the authenticated MCP context.
+async def _optional_mcp_org_id() -> str | None:
+    """Extract the organization ID when the caller presents a usable credential.
+
+    Health reporting works without an org, so an anonymous caller gets None
+    rather than an error. A credential that is presented still has to clear the
+    read gate: failing scopes are refused, not silently downgraded to anonymous.
 
     Returns:
         The organization ID string if authenticated and org-scoped, None otherwise.
     """
     ctx = await _get_mcp_context()
-    return ctx.org_id if ctx else None
+    if ctx is None:
+        return None
+    _authorize_mcp_scope(ctx, write=False)
+    return ctx.org_id
 
 
 def _authorize_mcp_scope(ctx: McpContext, *, write: bool) -> None:
@@ -2850,7 +2857,7 @@ def _register_resources(mcp: FastMCP) -> None:
         from sibyl_core.tools.core import get_health
 
         # Get org context (optional for health - basic health works without org)
-        org_id = await _get_org_id_from_context()
+        org_id = await _optional_mcp_org_id()
         health = await get_health(organization_id=org_id)
         return json.dumps(health, indent=2)
 
