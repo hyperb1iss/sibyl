@@ -142,7 +142,6 @@ _NORMALIZED_TOKEN_ALIASES = {
     "visiting": "visit",
     "volunteered": "volunteer",
     "watching": "watch",
-    "weddings": "wedding",
 }
 
 _ACTION_TERMS: dict[str, frozenset[str]] = {

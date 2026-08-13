@@ -11,8 +11,6 @@ _NORMALIZED_TOKEN_ALIASES = {
     "assembling": "assemble",
     "classes": "class",
     "engaged": "engagement",
-    "engagements": "engagement",
-    "events": "event",
     "fixed": "fix",
     "fixing": "fix",
     "presented": "present",
@@ -27,7 +25,6 @@ _NORMALIZED_TOKEN_ALIASES = {
     "subscribing": "subscription",
     "volunteered": "volunteer",
     "volunteering": "volunteer",
-    "weddings": "wedding",
 }
 # Comparatives and superlatives are the same lemma as their base adjective, and
 # no suffix rule recovers that safely: stripping "er" turns user into us and
