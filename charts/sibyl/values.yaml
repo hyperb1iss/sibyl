@@ -165,6 +165,8 @@ backend:
   # -- Reference to existing secret for sensitive env vars
   # Must contain: SIBYL_JWT_SECRET and SIBYL_SETTINGS_KEY.
   # Add provider and LLM API keys as needed. Production and read-only containers require this.
+  # Leaving this empty while env.SIBYL_ENVIRONMENT is "production" fails the render, because the
+  # backend would otherwise start with an empty JWT secret and turn MCP auth off.
   existingSecret: ""
 
   # -- SurrealDB connection settings

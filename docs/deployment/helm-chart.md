@@ -247,10 +247,17 @@ backend:
   existingSecret: ""
 ```
 
-Production and read-only containers must set `existingSecret`. Both required keys are non-optional
-pod references, so a missing key fails before Sibyl starts instead of silently generating an
-ephemeral replacement. Keep `SIBYL_SETTINGS_KEY` stable across upgrades and pod replacements;
-changing it makes encrypted settings unreadable.
+Production and read-only containers must set `existingSecret`. The chart enforces this at render
+time: with `backend.env.SIBYL_ENVIRONMENT` set to `production` and no `backend.existingSecret`,
+`helm template` and `helm install` both abort with an error naming the value to set. That guard
+exists because an unset `SIBYL_JWT_SECRET` makes the backend sign sessions with an empty key and
+makes MCP auth disable itself under the default `mcp_auth_mode: auto`. The chart deliberately does
+not auto-generate the secret in production, since a per-render value would rotate on every upgrade
+and diverge across the backend, worker, and bootstrap pods.
+
+Both required keys are non-optional pod references, so a missing key fails before Sibyl starts
+instead of silently generating an ephemeral replacement. Keep `SIBYL_SETTINGS_KEY` stable across
+upgrades and pod replacements; changing it makes encrypted settings unreadable.
 
 ### Storage Mode
 
