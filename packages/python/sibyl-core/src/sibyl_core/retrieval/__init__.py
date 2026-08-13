@@ -73,9 +73,23 @@ _SEARCH_EXPORTS = {
     "build_context_retrieval_plan",
     "context_search",
 }
+# The naive arm imports the search module's lane readers, so it inherits the
+# same deferred-import treatment: naming it here must not drag the retrieval
+# planner into every importer of this package.
+_NAIVE_EXPORTS = {
+    "NAIVE_RETRIEVAL_MODE",
+    "NAIVE_RRF_K",
+    "NaiveSignal",
+    "fuse_naive_candidates",
+    "naive_retrieval_plan",
+    "naive_search",
+    "pack_naive_results",
+}
 
 __all__ = [
     "DEFAULT_FILTER_SELECTIVITY_THRESHOLD",
+    "NAIVE_RETRIEVAL_MODE",
+    "NAIVE_RRF_K",
     "CandidateKind",
     "CandidateLimits",
     "CandidateScope",
@@ -90,6 +104,7 @@ __all__ = [
     "FusionConfig",
     "HybridConfig",
     "HybridResult",
+    "NaiveSignal",
     "RerankResult",
     "RetrievalCandidate",
     "RetrievalPlan",
@@ -107,10 +122,14 @@ __all__ = [
     "cross_encoder_rerank",
     "find_duplicates",
     "fit_feature_weighted_reranker",
+    "fuse_naive_candidates",
     "get_deduplicator",
     "get_entity_decay_timestamp",
     "hybrid_search",
     "merge_candidate_signals",
+    "naive_retrieval_plan",
+    "naive_search",
+    "pack_naive_results",
     "rerank_by_feature_weights",
     "rerank_results",
     "rrf_merge",
@@ -127,6 +146,11 @@ def __getattr__(name: str) -> object:
     if name in _SEARCH_EXPORTS:
         search = import_module("sibyl_core.retrieval.search")
         value = getattr(search, name)
+        globals()[name] = value
+        return value
+    if name in _NAIVE_EXPORTS:
+        naive = import_module("sibyl_core.retrieval.naive")
+        value = getattr(naive, name)
         globals()[name] = value
         return value
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
