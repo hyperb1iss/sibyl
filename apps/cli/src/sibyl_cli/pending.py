@@ -9,7 +9,16 @@ import typer
 
 from sibyl_cli.auth_store import normalize_api_url
 from sibyl_cli.client import SibylClient, SibylClientError, _is_read_like_post
-from sibyl_cli.common import console, create_table, error, print_json, run_async, success, warn
+from sibyl_cli.common import (
+    console,
+    create_table,
+    error,
+    mark_pending_writes_reported,
+    print_json,
+    run_async,
+    success,
+    warn,
+)
 from sibyl_cli.pending_writes import (
     delete_pending_write,
     increment_attempts,
@@ -20,6 +29,12 @@ from sibyl_cli.pending_writes import (
 )
 
 app = typer.Typer(help="Inspect and replay locally buffered writes")
+
+
+@app.callback()
+def _claim_queue_report() -> None:
+    """Every command in this group reports the queue itself."""
+    mark_pending_writes_reported()
 
 
 def _summary(item: dict[str, Any]) -> dict[str, Any]:

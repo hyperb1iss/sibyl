@@ -67,6 +67,17 @@ def print_json(data: object) -> None:
     print(json.dumps(clean_data, indent=2, default=str, ensure_ascii=False))
 
 
+def print_json_result(data: object, *, succeeded: bool) -> None:
+    """Emit a machine-readable result and let a refusal reach the exit status.
+
+    Agents and CI call --json, so a refused write has to move $? on this path
+    too and not only in the table renderer.
+    """
+    print_json(data)
+    if not succeeded:
+        raise typer.Exit(1)
+
+
 def print_mutation_receipt(response: Mapping[str, object]) -> None:
     receipt = response.get("mutation_receipt")
     if not isinstance(receipt, Mapping):
@@ -210,6 +221,19 @@ def pending_writes_summary(count: int) -> str:
     )
 
 
+_pending_writes_reported = False
+
+
+def mark_pending_writes_reported() -> None:
+    """Claim the queue report for a command that already made it.
+
+    `sibyl health`, `sibyl doctor`, and the pending-writes group all render the
+    queue themselves, so the end-of-command notice would repeat them verbatim.
+    """
+    global _pending_writes_reported
+    _pending_writes_reported = True
+
+
 def notify_pending_writes() -> None:
     """Warn on stderr when writes are sitting in the local buffer.
 
@@ -218,6 +242,8 @@ def notify_pending_writes() -> None:
     """
     from sibyl_cli.pending_writes import pending_write_count
 
+    if _pending_writes_reported:
+        return
     count = pending_write_count()
     if count <= 0:
         return

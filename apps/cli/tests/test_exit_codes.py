@@ -198,3 +198,76 @@ def test_the_401_remediation_names_commands_that_exist() -> None:
 
     assert suggested
     assert suggested <= registered
+
+
+@pytest.mark.parametrize(
+    ("command", "method"),
+    [
+        (["start", TASK_ID], "start_task"),
+        (["block", TASK_ID, "--reason", "waiting on review"], "block_task"),
+        (["unblock", TASK_ID], "unblock_task"),
+        (["review", TASK_ID], "submit_review"),
+        (["complete", TASK_ID], "complete_task"),
+        (["update", TASK_ID, "--priority", "high"], "update_task"),
+    ],
+)
+def test_json_output_still_exits_nonzero_on_a_refused_write(
+    resolved_ids: None,
+    command: list[str],
+    method: str,
+) -> None:
+    """--json is what agents invoke, so the refusal has to reach $? on that path too."""
+    import json
+
+    with patch("sibyl_cli.task.get_client", return_value=_client(**{method: REFUSED})):
+        result = CliRunner().invoke(task.app, [*command, "--json"])
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["success"] is False
+
+
+def test_json_output_still_exits_zero_when_the_write_lands(resolved_ids: None) -> None:
+    import json
+
+    accepted = {"success": True, "data": {}}
+
+    with patch("sibyl_cli.task.get_client", return_value=_client(start_task=accepted)):
+        result = CliRunner().invoke(task.app, ["start", TASK_ID, "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["success"] is True
+
+
+def test_crawl_ingest_exits_nonzero_when_the_crawl_is_refused() -> None:
+    """The sibling of `source add` in the same module, missed by the audit's list."""
+    from sibyl_cli import crawl
+
+    refused = {"status": "failed", "message": "crawler exploded"}
+
+    with patch("sibyl_cli.crawl_shared.get_client", return_value=_client(start_crawl=refused)):
+        result = CliRunner().invoke(crawl.app, ["ingest", "source_123"])
+
+    assert result.exit_code == 1
+    assert "Crawl failed" in result.stdout
+
+
+def test_crawl_ingest_json_exits_nonzero_when_the_crawl_is_refused() -> None:
+    from sibyl_cli import crawl
+
+    refused = {"status": "failed", "message": "crawler exploded"}
+
+    with patch("sibyl_cli.crawl_shared.get_client", return_value=_client(start_crawl=refused)):
+        result = CliRunner().invoke(crawl.app, ["ingest", "source_123", "--json"])
+
+    assert result.exit_code == 1
+
+
+def test_crawl_ingest_exits_zero_when_the_crawl_queues() -> None:
+    from sibyl_cli import crawl
+
+    queued = {"status": "queued", "message": "Crawl queued"}
+
+    with patch("sibyl_cli.crawl_shared.get_client", return_value=_client(start_crawl=queued)):
+        result = CliRunner().invoke(crawl.app, ["ingest", "source_123"])
+
+    assert result.exit_code == 0

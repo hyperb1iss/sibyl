@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
+from sibyl_cli import common
 from sibyl_cli import doctor as doctor_module
 from sibyl_cli import pending_writes
 from sibyl_cli.main import app as cli_app
@@ -30,6 +31,12 @@ def _buffer(count: int) -> None:
             json_payload={"title": f"queued {index}"},
             params=None,
         )
+
+
+@pytest.fixture(autouse=True)
+def _unclaimed_queue_report(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real invocation is one command per process; a test session is not."""
+    monkeypatch.setattr(common, "_pending_writes_reported", False)
 
 
 @pytest.fixture
@@ -175,3 +182,70 @@ def test_an_unreadable_home_does_not_break_a_working_command(
 
     assert exc.value.code == 0
     assert "buffered locally" not in capsys.readouterr().err
+
+
+def _run_entry_point(argv: list[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drive the real console-script path so the finally-block notice runs."""
+    monkeypatch.setattr("sys.argv", argv)
+    with pytest.raises(SystemExit):
+        cli_main()
+
+
+def test_health_reports_the_queue_exactly_once(
+    sandbox_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`sibyl health` renders the queue itself, so the global notice must stand down."""
+    _buffer(1)
+    client = _health_client({"status": "healthy", "server_name": "sibyl"})
+
+    with patch("sibyl_cli.main.get_client", return_value=client):
+        _run_entry_point(["sibyl", "health"], monkeypatch)
+
+    captured = capsys.readouterr()
+    assert captured.out.count("1 write buffered locally") == 1
+    assert "buffered locally" not in captured.err
+
+
+def test_health_json_does_not_add_a_stderr_notice(
+    sandbox_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import json
+
+    _buffer(1)
+    client = _health_client({"status": "healthy", "server_name": "sibyl"})
+
+    with patch("sibyl_cli.main.get_client", return_value=client):
+        _run_entry_point(["sibyl", "health", "--json"], monkeypatch)
+
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["pending_writes"]["count"] == 1
+    assert "buffered locally" not in captured.err
+
+
+def test_the_pending_writes_group_reports_the_queue_exactly_once(
+    sandbox_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _buffer(1)
+
+    _run_entry_point(["sibyl", "pending-writes", "list"], monkeypatch)
+
+    assert "buffered locally" not in capsys.readouterr().err
+
+
+def test_a_value_that_merely_looks_like_the_group_name_still_gets_the_notice(
+    sandbox_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Suppression follows the command that ran, not a string anywhere in argv."""
+    _buffer(1)
+
+    _run_entry_point(["sibyl", "search", "pending-writes"], monkeypatch)
+
+    assert "1 write buffered locally" in capsys.readouterr().err

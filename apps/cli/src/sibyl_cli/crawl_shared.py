@@ -10,6 +10,7 @@ from sibyl_cli.common import (
     error,
     info,
     print_json,
+    print_json_result,
     run_async,
     success,
 )
@@ -42,7 +43,7 @@ def add_crawl_source(
             )
 
             if json_out:
-                print_json(response)
+                print_json_result(response, succeeded=bool(response.get("id")))
                 return
 
             if response.get("id"):
@@ -118,7 +119,10 @@ def start_crawl_source(
             status = response.get("status", "unknown")
 
             if json_out:
-                print_json(response)
+                print_json_result(
+                    response,
+                    succeeded=status in {"queued", "started", "already_running"},
+                )
                 return
 
             if status in {"queued", "started"}:
@@ -128,6 +132,7 @@ def start_crawl_source(
                 info(response.get("message", "Crawl already in progress"))
             else:
                 error(f"Crawl failed: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             handle_client_error(e)

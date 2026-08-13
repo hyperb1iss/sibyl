@@ -22,6 +22,7 @@ from sibyl_cli.common import (
     handle_client_error,
     info,
     print_json,
+    print_json_result,
     run_async,
     success,
     truncate,
@@ -251,19 +252,22 @@ def health(
         try:
             response = await client.crawler_health()
 
+            available = bool(response.get("crawl4ai_available"))
+
             # JSON output (default)
             if json_out:
-                print_json(response)
+                print_json_result(response, succeeded=available)
                 return
 
             # Table output
             console.print(f"\n[{ELECTRIC_PURPLE}]Crawl System Health[/{ELECTRIC_PURPLE}]\n")
 
             # Check Crawl4AI
-            if response.get("crawl4ai_available"):
+            if available:
                 success("Crawl4AI: Ready")
             else:
                 error("Crawl4AI: Not available")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -289,7 +293,7 @@ def delete_source(
 
             # JSON output (default)
             if json_out:
-                print_json(response)
+                print_json_result(response, succeeded=bool(response.get("deleted")))
                 return
 
             # Table output

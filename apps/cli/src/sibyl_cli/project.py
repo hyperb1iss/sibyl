@@ -23,6 +23,7 @@ from sibyl_cli.common import (
     handle_client_error,
     info,
     print_json,
+    print_json_result,
     run_async,
     success,
     truncate,
@@ -265,7 +266,7 @@ def create_project(
 
             # JSON output (default)
             if json_out:
-                print_json(response)
+                print_json_result(response, succeeded=bool(response.get("id")))
                 return
 
             # Table output

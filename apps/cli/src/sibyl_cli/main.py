@@ -34,9 +34,11 @@ from sibyl_cli.common import (
     error,
     handle_client_error,
     info,
+    mark_pending_writes_reported,
     notify_pending_writes,
     pending_writes_summary,
     print_json,
+    print_json_result,
     print_mutation_receipt,
     resolve_content_input,
     run_async,
@@ -1486,6 +1488,7 @@ def _print_version_lines(data: dict[str, object]) -> None:
 
 def _print_pending_write_health() -> None:
     """Report the local write buffer, the queue a failed write lands in."""
+    mark_pending_writes_reported()
     count = pending_write_count()
     if count:
         warn(pending_writes_summary(count))
@@ -1506,6 +1509,7 @@ def health(
                 data = await client.get("/health")
 
                 if json_output:
+                    mark_pending_writes_reported()
                     print_json({**data, "pending_writes": pending_write_status()})
                     return
                 status = data.get("status", "unknown")
@@ -2091,7 +2095,10 @@ def note_alias(
                         author or "",
                     )
                     if json_output:
-                        print_json(response)
+                        print_json_result(
+                            response,
+                            succeeded=bool(response.get("id") or response.get("success")),
+                        )
                         return
                     note_id = response.get("id")
                     if note_id:
@@ -3959,9 +3966,7 @@ def main() -> None:
     try:
         app()
     finally:
-        # The pending-writes commands report the queue themselves.
-        if "pending-writes" not in sys.argv[1:]:
-            notify_pending_writes()
+        notify_pending_writes()
 
 
 if __name__ == "__main__":

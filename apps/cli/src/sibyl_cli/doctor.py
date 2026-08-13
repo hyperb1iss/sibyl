@@ -500,8 +500,10 @@ def _check_agent_prompt_content() -> DoctorCheck:
 
 def _check_pending_writes() -> DoctorCheck:
     """Surface the local write buffer, where refused writes accumulate unseen."""
+    from sibyl_cli.common import mark_pending_writes_reported
     from sibyl_cli.pending_writes import pending_write_count, pending_writes_dir
 
+    mark_pending_writes_reported()
     count = pending_write_count()
     if not count:
         return DoctorCheck("pending-writes", "pass", "No writes are buffered locally.")
