@@ -3515,10 +3515,7 @@ class SibylLiveApiMemory(Memory):
             if raw_reserve is not None
             else None
         )
-        if (
-            self.evidence_char_budget_raw_reserve is not None
-            and self.evidence_char_budget is None
-        ):
+        if self.evidence_char_budget_raw_reserve is not None and self.evidence_char_budget is None:
             raise ValueError("evidence_char_budget_raw_reserve requires evidence_char_budget")
         self.context_expansion_max_ratio = _param_context_expansion_ratio(
             memory_params,

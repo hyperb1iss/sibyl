@@ -272,7 +272,8 @@ def test_prepare_output_resumes_across_a_server_restart(tmp_path: Path) -> None:
 
 
 def test_evidence_geometry_flags_thread_into_the_run_config(tmp_path: Path) -> None:
-    from benchmarks.longmemeval_v2_live_retrieval import build_run_config, parse_args
+    module = _load_module()
+    armed_char_budget = 16000
 
     questions = tmp_path / "questions.json"
     haystack = tmp_path / "haystack.json"
@@ -283,18 +284,26 @@ def test_evidence_geometry_flags_thread_into_the_run_config(tmp_path: Path) -> N
     trajectories.write_text("", encoding="utf-8")
 
     base = [
-        "--api-token-file", str(tmp_path / "tok"),
-        "--project-id", "project_x",
-        "--run-id", "run_x",
-        "--questions", str(questions),
-        "--haystack", str(haystack),
-        "--trajectories", str(trajectories),
-        "--question-ids-file", str(ids),
-        "--output-dir", str(tmp_path / "out"),
+        "--api-token-file",
+        str(tmp_path / "tok"),
+        "--project-id",
+        "project_x",
+        "--run-id",
+        "run_x",
+        "--questions",
+        str(questions),
+        "--haystack",
+        str(haystack),
+        "--trajectories",
+        str(trajectories),
+        "--question-ids-file",
+        str(ids),
+        "--output-dir",
+        str(tmp_path / "out"),
     ]
 
-    defaults = parse_args(base)
-    default_config = build_run_config(
+    defaults = module.parse_args(base)
+    default_config = module.build_run_config(
         defaults,
         question_ids=[],
         questions_path=questions,
@@ -305,10 +314,17 @@ def test_evidence_geometry_flags_thread_into_the_run_config(tmp_path: Path) -> N
     assert default_config["evidence_types"] == ["session"]
     assert default_config["evidence_char_budget"] is None
 
-    armed = parse_args(
-        [*base, "--evidence-types", "passage", "session", "--evidence-char-budget", "16000"]
+    armed = module.parse_args(
+        [
+            *base,
+            "--evidence-types",
+            "passage",
+            "session",
+            "--evidence-char-budget",
+            str(armed_char_budget),
+        ]
     )
-    armed_config = build_run_config(
+    armed_config = module.build_run_config(
         armed,
         question_ids=[],
         questions_path=questions,
@@ -316,4 +332,4 @@ def test_evidence_geometry_flags_thread_into_the_run_config(tmp_path: Path) -> N
         api_runtime={},
     )
     assert armed_config["evidence_types"] == ["passage", "session"]
-    assert armed_config["evidence_char_budget"] == 16000
+    assert armed_config["evidence_char_budget"] == armed_char_budget

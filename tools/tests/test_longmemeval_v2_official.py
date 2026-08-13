@@ -6173,7 +6173,7 @@ def test_sibyl_memory_finalize_drains_jobs_before_search() -> None:
                 "traversal_admitted_items": 0,
                 "budget_mode": "items",
                 "char_budget": None,
-        "char_budget_raw_reserve": None,
+                "char_budget_raw_reserve": None,
                 "selected_chars": 0,
             },
             "context_budget": {
@@ -7040,13 +7040,15 @@ def test_raw_reserve_cures_fat_head_starvation() -> None:
         },
     ]
 
-    starved, starved_meta = module.compile_operational_evidence_set(
+    char_budget = 5_500
+    raw_reserve = 5_200
+    starved, _starved_meta = module.compile_operational_evidence_set(
         query="find the field",
         typed_results=typed,
         raw_results=raw,
         max_items=8,
         mode="shared_relevance",
-        char_budget=5_500,
+        char_budget=char_budget,
     )
     starved_ids = {item["id"] for item in starved}
     assert "session_fat" not in starved_ids
@@ -7058,11 +7060,11 @@ def test_raw_reserve_cures_fat_head_starvation() -> None:
         raw_results=raw,
         max_items=8,
         mode="shared_relevance",
-        char_budget=5_500,
-        char_budget_raw_reserve=5_200,
+        char_budget=char_budget,
+        char_budget_raw_reserve=raw_reserve,
     )
-    assert cured_meta["char_budget_raw_reserve"] == 5_200
-    assert cured_meta["selected_chars"] <= 5_500
+    assert cured_meta["char_budget_raw_reserve"] == raw_reserve
+    assert cured_meta["selected_chars"] <= char_budget
     assert any(item["id"] == "session_fat" for item in cured)
 
 
@@ -7086,20 +7088,23 @@ def test_raw_reserve_returns_unspent_budget_to_the_shared_pool() -> None:
         }
     ]
 
+    char_budget = 6_000
+    raw_reserve = 3_000
+    note_chars = 600
     selected, meta = module.compile_operational_evidence_set(
         query="find the field",
         typed_results=typed,
         raw_results=raw,
         max_items=8,
         mode="shared_relevance",
-        char_budget=6_000,
-        char_budget_raw_reserve=3_000,
+        char_budget=char_budget,
+        char_budget_raw_reserve=raw_reserve,
     )
     assert any(item["id"] == "passage_only" for item in selected)
     # The raw lane spent 500 of its 3000 reserve; typed overflow must reach
-    # past 3600 (reserve + notes) or the unspent reserve was burned.
-    assert meta["selected_chars"] > 3_600
-    assert meta["selected_chars"] <= 6_000
+    # past reserve + notes or the unspent reserve was burned.
+    assert meta["selected_chars"] > raw_reserve + note_chars
+    assert meta["selected_chars"] <= char_budget
     assert meta["selected_chars"] == sum(len(str(item["content"])) for item in selected)
 
 
