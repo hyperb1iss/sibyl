@@ -31,8 +31,8 @@ milestones, artifact for objects/media/files/systems, and the technical types
 when they are the most specific fit.
 
 Keep names short and canonical, but preserve the answer-bearing detail: for
-example, "Instagram screen time average", "coffee limit decreased",
-"Air Fryer purchase", or "Rachel's birthday". Evidence should be a short source
+example, "weekly screen time average", "coffee limit decreased",
+"standing desk purchase", or "Rachel's birthday". Evidence should be a short source
 span. Skip generic assistant advice unless it is tied to a user-specific fact.
 When multiple sources are provided, attach each extraction to the exact source_id
 from the prompt.

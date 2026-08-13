@@ -201,7 +201,6 @@ _QUERY_ACTION_TERMS: dict[str, frozenset[str]] = {
 _CATEGORY_TERMS: dict[str, frozenset[str]] = {
     "appliance": frozenset(
         {
-            "airfryer",
             "appliance",
             "bbq",
             "blender",
@@ -214,7 +213,6 @@ _CATEGORY_TERMS: dict[str, frozenset[str]] = {
             "mixer",
             "oven",
             "processor",
-            "smoker",
             "toaster",
         }
     ),

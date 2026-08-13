@@ -40,8 +40,6 @@ def normalize_keyword_token(token: str) -> str:
     token = token.strip("'\"")
     if token in _NORMALIZED_TOKEN_ALIASES:
         return _NORMALIZED_TOKEN_ALIASES[token]
-    if token == "buisiness":
-        return "business"
     if len(token) > 4 and token.endswith("ies"):
         return f"{token[:-3]}y"
     if len(token) > 4 and token.endswith(("ches", "shes", "xes", "zes")):
