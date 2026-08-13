@@ -161,9 +161,28 @@ shipped and the consumers half-built. Closing that loop is a story no competitor
 
 ## 6. Proposed 1.3 shape
 
-- **Phase 0 — clean room.** Ranker decontamination, fusion decision, pipeline unification (or
-  explicit pairing), fresh anchor via the standard unpaid screen ladder. No lever work lands on a
-  contaminated baseline.
+- **Phase 0 — clean room.** Ranker decontamination (landed, #386), fresh anchor via the standard
+  unpaid screen ladder, and the headline experiment below. No lever work lands on a contaminated
+  baseline.
+- **Phase 0 headline experiment — race the machine against a naive-strong arm.** The evidence says
+  simplicity is already winning: the 42.8% frontier baseline is naive slice-RAG; Emergence AI's 86%
+  on LongMemEval-V1 is turn-match → session-scope retrieval → cross-encoder rerank → CoT with no
+  memory architecture at all ("advanced memory architecture appears to be overkill"); the bottleneck
+  study measures retrieval method at a 20-point spread on LoCoMo vs 3-8 for write strategy. Against
+  that, Sibyl runs two mutually-unaware pipelines (8-lane `context_search`, 2-lane `hybrid_search`),
+  ordinal fusion that discards score magnitudes (so most hand weights cannot change outcomes), and
+  sequential phases that put enterprise at ~32s against a 10s budget. The experiment: build a
+  naive-strong arm — verbatim spans + BM25 with analyzer-level stemming + dense KNN +
+  reciprocal-rank fusion + tight pack + extract-then-answer reader (mostly existing pieces;
+  `hybrid_search` is ~80% of it) — and screen it against the full machine on the same corpus under
+  standard protocol. Every outcome wins: parity or better deletes the machine (and most of the
+  latency); a loss is the first clean measurement of which lanes actually carry the 30.4%. The
+  fusion decision and pipeline unification questions resolve as consequences of the race rather than
+  as abstract design calls. Note: re-ranking's refutation (decision `715454c60c9b`) was conditional
+  on pool-absence under the current acquisition — the simplified pipeline changes the mechanism, so
+  the cross-encoder re-enters through the killed-lever ledger's own revival clause. The graph then
+  stops competing with flat retrieval and does the two jobs flat pipelines can't:
+  supersession/correction enforcement and typed multi-hop traversal.
 - **Phase 0/1 standing direction — make hand-lexicon contamination unwriteable.** The
   decontamination PR (#386) removed the corpus vocabulary, but the architecture that grew it is
   intact: the lexical lane is a hand-maintained English micro-NLP pipeline (stopword lists,
