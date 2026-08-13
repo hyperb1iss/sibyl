@@ -1971,6 +1971,69 @@ async def test_apply_memory_correction_returns_updated_review_state() -> None:
 
 
 @pytest.mark.asyncio
+async def test_correction_receipt_names_the_graph_rows_it_retired() -> None:
+    """The receipt has to show the write reached retrieval, not just the capture.
+
+    A correction that stamps entity rows but reports only `raw_captures:` reads
+    exactly like the old behavior, where the blast radius genuinely stopped at
+    the substrate retrieval mostly does not read.
+    """
+
+    org = _org()
+    memory = _memory(id="memory-1", organization_id=str(org.id), source_id="source-1")
+    updated = _memory(
+        id="memory-1",
+        organization_id=str(org.id),
+        source_id="source-1",
+        review_state="pending",
+    )
+    preview = MemoryCorrectionPreview(
+        allowed=True,
+        source_id="memory-1",
+        action="mark_wrong",
+        reason="wrong",
+        target_lifecycle_state="contested",
+        target_lifecycle_flags=[],
+        affected_source_ids=["memory-1"],
+        affected_derived_ids=[],
+        reversible=True,
+        recall_impact={"excluded_from_recall": True},
+        synthesis_impact={"excluded_from_synthesis": True},
+        audit_action="memory.correction.mark_wrong",
+    )
+    updated.revision = 2
+    result = MemoryCorrectionResult(
+        applied=True,
+        preview=preview,
+        updated_memory=updated,
+        affected_entity_ids=["entity-1", "entity-2"],
+    )
+
+    with (
+        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch(
+            "sibyl.api.routes.memory.apply_memory_correction",
+            AsyncMock(return_value=result),
+        ),
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()),
+    ):
+        response = await apply_memory_correction_route(
+            "memory-1",
+            MemoryCorrectionRequest(action="mark_wrong", reason="wrong"),
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(org_role=OrganizationRole.OWNER),
+        )
+
+    assert response.mutation_receipt is not None
+    assert response.mutation_receipt.affected_records == [
+        "raw_captures:memory-1",
+        "entity:entity-1",
+        "entity:entity-2",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_denied_memory_correction_receipt_reports_no_write() -> None:
     org = _org()
     memory = _memory(id="memory-1", organization_id=str(org.id), source_id="source-1")
