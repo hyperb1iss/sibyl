@@ -108,16 +108,24 @@ async def naive_search(
     include_content: bool = True,
     embedding_provider: EmbeddingProvider | None = None,
     char_budget: int | None = None,
+    content_max_chars: int | None = None,
 ) -> SearchResponse:
     """Retrieve with BM25 + dense KNN + plain RRF + a tight pack, and nothing else."""
 
     from sibyl_core.tools.responses import SearchResponse
+    from sibyl_core.tools.search import MAX_SEARCH_CONTENT_MAX_CHARS
 
     search_started_at = time.perf_counter()
     stage_timings_ms: dict[str, float] = {}
     stage_started_at = time.perf_counter()
 
     limit = max(1, min(limit, MAX_RETRIEVAL_LIMIT))
+    # Clamped exactly as the enhanced path clamps it, so an item costs the arm
+    # the same characters it would cost the machine. Without this the arm packs
+    # untruncated spans against a budget the machine spends truncated ones on,
+    # and the race compares payload sizes instead of retrieval.
+    if content_max_chars is not None:
+        content_max_chars = max(0, min(int(content_max_chars), MAX_SEARCH_CONTENT_MAX_CHARS))
     search_plan = naive_retrieval_plan(
         replace(
             plan,
@@ -231,6 +239,7 @@ async def naive_search(
         fused,
         include_content=include_content,
         char_budget=char_budget,
+        content_max_chars=content_max_chars,
     )
     stage_timings_ms["pack"] = _elapsed_ms(stage_started_at)
     stage_timings_ms["total"] = _elapsed_ms(search_started_at)
@@ -295,6 +304,7 @@ def pack_naive_results(
     *,
     include_content: bool,
     char_budget: int | None,
+    content_max_chars: int | None = None,
 ) -> tuple[list[SearchResult], dict[str, object]]:
     """Take fused results in rank order until the character budget is spent.
 
@@ -302,6 +312,10 @@ def pack_naive_results(
     rather than being truncated, so every item the reader sees is a whole span.
     A single item wider than the whole budget is still admitted, because an
     empty pack answers nothing.
+
+    `content_max_chars` caps a single item the way the enhanced path caps it,
+    and it is applied before the budget is charged so an item costs the arm what
+    the same item costs the machine.
     """
 
     results: list[SearchResult] = []
@@ -314,6 +328,8 @@ def pack_naive_results(
             fusion_metadata=metadata,
             include_content=include_content,
         )
+        if content_max_chars is not None and result.content:
+            result.content = result.content[:content_max_chars]
         cost = len(result.content or "")
         if char_budget is not None and results and spent + cost > char_budget:
             stopped_on_budget = True
@@ -326,5 +342,6 @@ def pack_naive_results(
         "naive_pack_item_count": len(results),
         "naive_pack_candidate_count": len(fused),
         "naive_pack_budget_exhausted": stopped_on_budget,
+        "content_max_chars": content_max_chars,
     }
     return results, receipt

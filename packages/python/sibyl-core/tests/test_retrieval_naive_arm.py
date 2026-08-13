@@ -259,6 +259,46 @@ def test_pack_without_a_budget_keeps_every_fused_result() -> None:
     assert receipt["naive_pack_budget_exhausted"] is False
 
 
+def test_pack_caps_each_item_before_charging_it_to_the_budget() -> None:
+    """An item must cost the arm what the same item costs the machine.
+
+    The enhanced evidence path truncates every result to `content_max_chars`
+    before it leaves the server. An arm that packed untruncated spans against
+    the same budget would fit fewer, larger items and the race would be
+    comparing payload sizes rather than retrieval.
+    """
+
+    capped, receipt = pack_naive_results(
+        _fused_for_pack(5_000, 5_000, 5_000),
+        include_content=True,
+        char_budget=250,
+        content_max_chars=100,
+    )
+    uncapped, _receipt = pack_naive_results(
+        _fused_for_pack(5_000, 5_000, 5_000),
+        include_content=True,
+        char_budget=250,
+    )
+
+    assert [len(result.content) for result in capped] == [100, 100]
+    assert receipt["naive_pack_chars_used"] == 200
+    assert receipt["content_max_chars"] == 100
+    # The cap is charged, not cosmetic: the same budget buys one oversized item
+    # without it and two capped ones with it.
+    assert len(uncapped) == 1
+
+
+def test_pack_leaves_content_whole_when_no_cap_is_requested() -> None:
+    results, _receipt = pack_naive_results(
+        _fused_for_pack(5_000),
+        include_content=True,
+        char_budget=None,
+        content_max_chars=None,
+    )
+
+    assert len(results[0].content) == 5_000
+
+
 def test_pack_costs_nothing_per_item_when_content_is_withheld() -> None:
     results, receipt = pack_naive_results(
         _fused_for_pack(5_000, 5_000),

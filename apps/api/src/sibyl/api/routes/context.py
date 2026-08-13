@@ -182,6 +182,7 @@ async def _execute_naive_context_evidence_search(
             include_content=True,
             embedding_provider=embedding_provider,
             char_budget=request.evidence.char_budget,
+            content_max_chars=request.evidence.content_max_chars,
         )
     except HTTPException:
         raise
