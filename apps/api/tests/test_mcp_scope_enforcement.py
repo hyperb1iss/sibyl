@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 
 from sibyl.auth.mcp_auth import (
+    effective_api_key_scopes,
     insufficient_mcp_scope_message,
     mcp_scopes_allow,
 )
@@ -60,6 +61,34 @@ def test_mcp_scopes_allow_matrix(
     assert mcp_scopes_allow(scopes, write=True) is write_allowed
 
 
+@pytest.mark.parametrize("stored", [[], None, [""], ["  "]])
+def test_empty_stored_scopes_resolve_to_the_legacy_shape(stored: list[str] | None) -> None:
+    """Keys minted before the scopes column landed act as bare-mcp keys."""
+    resolved = effective_api_key_scopes(stored)
+
+    assert resolved == {"mcp"}
+    assert mcp_scopes_allow(resolved, write=False) is True
+    assert mcp_scopes_allow(resolved, write=True) is True
+
+
+@pytest.mark.parametrize("stored", [["mcp", "api:read"], ["api:read"], ["billing:admin"]])
+def test_stored_scopes_are_left_alone_when_present(stored: list[str]) -> None:
+    assert effective_api_key_scopes(stored) == set(stored)
+
+
+def test_api_key_creation_refuses_an_empty_scope_list() -> None:
+    """The legacy carve-out stays closed to newly minted keys."""
+    from pydantic import ValidationError
+
+    from sibyl.api.routes.auth import ApiKeyCreateRequest
+
+    assert ApiKeyCreateRequest(name="default").scopes == ["mcp"]
+
+    for empty in ([], [""], ["   "]):
+        with pytest.raises(ValidationError, match="at least one scope"):
+            ApiKeyCreateRequest(name="scopeless", scopes=empty)
+
+
 def test_insufficient_scope_message_names_the_missing_scope() -> None:
     surface = insufficient_mcp_scope_message(["api:read"], write=True)
     assert "Expected mcp" in surface
@@ -91,6 +120,18 @@ async def test_require_mcp_context_allows_write_for_legacy_mcp_key() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("scopes", [[], None])
+async def test_require_mcp_context_keeps_legacy_scopeless_keys_working(
+    scopes: list[str] | None,
+) -> None:
+    ctx = _api_key_ctx(scopes)
+
+    with patch("sibyl.server._get_mcp_context", AsyncMock(return_value=ctx)):
+        assert await _require_mcp_context() is ctx
+        assert await _require_mcp_context(write=True) is ctx
+
+
+@pytest.mark.asyncio
 async def test_require_mcp_context_allows_write_for_granular_write_key() -> None:
     ctx = _api_key_ctx(["mcp", "api:write"])
 
@@ -99,7 +140,7 @@ async def test_require_mcp_context_allows_write_for_granular_write_key() -> None
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("scopes", [None, [], ["api:read"], ["billing:admin"]])
+@pytest.mark.parametrize("scopes", [["api:read"], ["billing:admin"]])
 async def test_require_mcp_context_refuses_keys_without_mcp_scope(
     scopes: list[str] | None,
 ) -> None:
@@ -254,7 +295,7 @@ async def test_health_org_lookup_applies_the_read_gate() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("scopes", [[], None, ["api:read"]])
+@pytest.mark.parametrize("scopes", [["api:read"], ["billing:admin"]])
 async def test_oauth_load_access_token_refuses_keys_without_mcp_scope(
     monkeypatch, scopes: list[str] | None
 ) -> None:
@@ -266,6 +307,21 @@ async def test_oauth_load_access_token_refuses_keys_without_mcp_scope(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("scopes", [[], None])
+async def test_oauth_load_access_token_admits_legacy_scopeless_keys(
+    monkeypatch, scopes: list[str] | None
+) -> None:
+    provider = SibylMcpOAuthProvider()
+    auth = SimpleNamespace(api_key_id=uuid4(), scopes=scopes)
+    monkeypatch.setattr(provider, "_authenticate_api_key", AsyncMock(return_value=auth))
+
+    access = await provider.load_access_token("sk_live_x")
+
+    assert access is not None
+    assert access.scopes == ["mcp"]
+
+
+@pytest.mark.asyncio
 async def test_oauth_load_access_token_preserves_granular_scopes(monkeypatch) -> None:
     provider = SibylMcpOAuthProvider()
     auth = SimpleNamespace(api_key_id=uuid4(), scopes=["mcp", "api:read"])
@@ -274,7 +330,7 @@ async def test_oauth_load_access_token_preserves_granular_scopes(monkeypatch) ->
     access = await provider.load_access_token("sk_live_x")
 
     assert access is not None
-    assert access.scopes == ["mcp", "api:read"]
+    assert sorted(access.scopes) == ["api:read", "mcp"]
 
 
 @pytest.mark.asyncio

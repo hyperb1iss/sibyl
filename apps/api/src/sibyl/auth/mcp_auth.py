@@ -34,12 +34,25 @@ from sibyl.persistence.auth_runtime import authenticate_api_key, validate_access
 MCP_SURFACE_SCOPE = "mcp"
 MCP_WRITE_SCOPE = "api:write"
 
+# Keys minted before scopes existed carry an empty scope list. The migration
+# that added the column (0b6b47ef, 2025-12-28) set server_default '{}' and
+# deliberately skipped the backfill, so on those rows an empty list means
+# "issued before scopes" rather than "granted nothing", and it resolves to the
+# capability those keys have always had. Issuance refuses an empty scope list
+# (api/routes/auth.py validate_scopes), so no new key can arrive this way.
+LEGACY_API_KEY_SCOPES = frozenset({MCP_SURFACE_SCOPE})
+
 
 def normalize_scopes(scopes: Iterable[str] | None) -> set[str]:
     """Return the non-empty, whitespace-stripped string scopes in ``scopes``."""
     if not scopes:
         return set()
     return {scope.strip() for scope in scopes if isinstance(scope, str) and scope.strip()}
+
+
+def effective_api_key_scopes(scopes: Iterable[str] | None) -> set[str]:
+    """Resolve the scopes an API key acts under, covering pre-scopes keys."""
+    return normalize_scopes(scopes) or set(LEGACY_API_KEY_SCOPES)
 
 
 def mcp_scopes_allow(scopes: Iterable[str] | None, *, write: bool) -> bool:

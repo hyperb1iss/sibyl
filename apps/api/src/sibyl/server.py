@@ -27,9 +27,9 @@ from sibyl.api.idempotency import (
 )
 from sibyl.auth.api_key_common import api_key_memory_scope_key
 from sibyl.auth.mcp_auth import (
+    effective_api_key_scopes,
     insufficient_mcp_scope_message,
     mcp_scopes_allow,
-    normalize_scopes,
 )
 from sibyl.config import settings
 from sibyl.persistence.auth_runtime import (
@@ -262,15 +262,16 @@ def _authorize_mcp_scope(ctx: McpContext, *, write: bool) -> None:
     """
     if not ctx.is_api_key:
         return
-    if mcp_scopes_allow(ctx.scopes, write=write):
+    scopes = effective_api_key_scopes(ctx.scopes)
+    if mcp_scopes_allow(scopes, write=write):
         return
     log.warning(
         "mcp_insufficient_scope",
         org_id=ctx.org_id,
         write=write,
-        scopes=sorted(normalize_scopes(ctx.scopes)),
+        scopes=sorted(scopes),
     )
-    raise ValueError(insufficient_mcp_scope_message(ctx.scopes, write=write))
+    raise ValueError(insufficient_mcp_scope_message(scopes, write=write))
 
 
 async def _require_mcp_context(*, write: bool = False) -> McpContext:
