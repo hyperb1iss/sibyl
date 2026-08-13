@@ -24,10 +24,10 @@ write safely without creating a duplicate if part of it already landed. Inspect 
 
 A non-empty buffer is reported in three places, so a queued write is never silent:
 
-- Every command prints a one-line warning to **stderr** as it finishes, carrying the queue depth
-  and the flush command. It goes to stderr, so `--json` output stays parseable.
-- `sibyl health` reports the queue depth alongside server health, and `sibyl health --json`
-  carries it under `pending_writes`.
+- Every command prints a one-line warning to **stderr** as it finishes, carrying the queue depth and
+  the flush command. It goes to stderr, so `--json` output stays parseable.
+- `sibyl health` reports the queue depth alongside server health, and `sibyl health --json` carries
+  it under `pending_writes`.
 - `sibyl doctor` runs a `pending-writes` check that warns while anything is queued.
 
 ---

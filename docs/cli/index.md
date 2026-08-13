@@ -169,9 +169,9 @@ sibyl task list --csv > tasks.csv            # CSV export
 | `SIBYL_API_URL`      | Server URL (legacy)        | `http://localhost:3334/api` |
 | `SIBYL_ACCESS_TOKEN` | Auth token (rarely needed) | `eyJhbG...`                 |
 
-`SIBYL_API_URL` is a legacy fallback, not an override. Server selection resolves in this
-order, and `sibyl auth login` follows the same order as every other command so a login
-always writes its token under the server key the next command reads:
+`SIBYL_API_URL` is a legacy fallback, not an override. Server selection resolves in this order, and
+`sibyl auth login` follows the same order as every other command so a login always writes its token
+under the server key the next command reads:
 
 1. An explicit server argument (`sibyl auth login https://...`, `--server`)
 2. The selected context (`--context` / `-C`, `SIBYL_CONTEXT`, directory pin, active context)
