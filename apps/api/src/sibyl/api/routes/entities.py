@@ -71,8 +71,9 @@ from sibyl_core.auth.memory_policy import (
 )
 from sibyl_core.memory_pipeline.retrieval_keys import normalize_retrieval_keys
 from sibyl_core.memory_pipeline.structure import strip_structure_metadata
-from sibyl_core.models.entities import Entity, EntityType, Relationship
+from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.relations import (
+    SUPPRESSING_RELATIONSHIP_TYPES,
     declared_relation_targets,
     parse_relation_declarations,
 )
@@ -85,6 +86,7 @@ from sibyl_core.projection import (
     retire_entity_passages,
 )
 from sibyl_core.services import KnowledgeReadService
+from sibyl_core.services.memory import declared_suppression_allowed
 from sibyl_core.tools.helpers import _generate_id
 
 log = structlog.get_logger()
@@ -807,6 +809,51 @@ async def _require_entity_read_access(ctx: AuthContext, entity: Any) -> set[str]
             required_role=ProjectRole.VIEWER,
         )
     return await _require_entity_scope_visible(ctx, entity, project_id=project_id)
+
+
+async def _declared_bulk_relationships(
+    source_id: str,
+    related_to: list[str] | None,
+    *,
+    entity_manager: Any,
+    principal_id: str | None,
+    accessible_projects: set[str],
+    now: datetime,
+) -> list[Relationship]:
+    """Build a bulk entry's edges, honoring and authorizing declared predicates.
+
+    Bulk mints its own edges rather than routing through `add()`, so it repeats
+    the same authorization: an edge retrieval demotes on cannot be aimed at a
+    memory this caller could not write. A refusal downgrades that edge to
+    RELATED_TO rather than failing the batch.
+    """
+    relationships: list[Relationship] = []
+    for declaration in parse_relation_declarations(related_to):
+        relationship_type = declaration.relationship_type
+        declared = declaration.declared
+        if declared and relationship_type in SUPPRESSING_RELATIONSHIP_TYPES:
+            allowed = await declared_suppression_allowed(
+                entity_manager=entity_manager,
+                target_id=declaration.target_id,
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
+            )
+            if not allowed:
+                relationship_type = RelationshipType.RELATED_TO
+                declared = False
+        metadata: dict[str, Any] = {"created_at": now.isoformat()}
+        if declared:
+            metadata["agent_declared"] = True
+        relationships.append(
+            Relationship(
+                id=f"rel_{source_id}_{relationship_type.value.lower()}_{declaration.target_id}",
+                source_id=source_id,
+                target_id=declaration.target_id,
+                relationship_type=relationship_type,
+                metadata=metadata,
+            )
+        )
+    return relationships
 
 
 async def _validate_related_to_targets_for_write(
@@ -1706,20 +1753,14 @@ async def create_entities_bulk(
     relationships: list[Relationship] = []
     for created_id, entity in zip(created_ids, batch.entities, strict=True):
         relationships.extend(
-            [
-                Relationship(
-                    id=f"rel_{created_id}_{declaration.edge_slug}_{declaration.target_id}",
-                    source_id=created_id,
-                    target_id=declaration.target_id,
-                    relationship_type=declaration.relationship_type,
-                    metadata=(
-                        {"created_at": now.isoformat(), "agent_declared": True}
-                        if declaration.declared
-                        else {"created_at": now.isoformat()}
-                    ),
-                )
-                for declaration in parse_relation_declarations(entity.related_to)
-            ]
+            await _declared_bulk_relationships(
+                created_id,
+                entity.related_to,
+                entity_manager=runtime.entity_manager,
+                principal_id=principal_id,
+                accessible_projects=verified_project_ids,
+                now=now,
+            )
         )
     if relationships:
         create_direct_bulk = getattr(runtime.relationship_manager, "create_direct_bulk", None)

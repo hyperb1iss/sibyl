@@ -2621,6 +2621,35 @@ def _promoted_entity_write_allowed(
     return decision.allowed
 
 
+async def declared_suppression_allowed(
+    *,
+    entity_manager: Any,
+    target_id: str,
+    principal_id: str | None,
+    accessible_projects: Iterable[str] | None,
+) -> bool:
+    """May this principal declare that `target_id` is replaced or wrong?
+
+    A suppressing predicate is a claim about a memory the writer does not own,
+    and retrieval acts on it by demoting what it points at, so the answer is
+    the same one reflection promotion already asks before it mints SUPERSEDES:
+    private targets need their owner, scoped targets need write access. A
+    caller that cannot answer (no project scope resolved) fails closed, and the
+    write surface downgrades the edge rather than refusing the memory.
+    """
+    try:
+        target = await entity_manager.get(target_id)
+    except Exception:
+        return False
+    if target is None:
+        return False
+    return _promoted_entity_write_allowed(
+        entity=target,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+    )
+
+
 def _temporal_invalidation_metadata(
     metadata: Mapping[str, object],
     *,

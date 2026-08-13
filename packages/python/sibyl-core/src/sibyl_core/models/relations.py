@@ -73,6 +73,7 @@ __all__ = [
     "DECLARABLE_PREDICATE_HELP",
     "DECLARABLE_RELATIONSHIP_PREDICATES",
     "RELATION_DECLARATION_SEPARATOR",
+    "SUPPRESSING_RELATIONSHIP_TYPES",
     "RelationDeclaration",
     "declared_relation_targets",
     "parse_relation_declaration",
@@ -89,6 +90,15 @@ DECLARABLE_RELATIONSHIP_PREDICATES: MappingProxyType[str, RelationshipType] = Ma
         "supports": RelationshipType.SUPPORTS,
         "decides": RelationshipType.DECIDES,
     }
+)
+
+# The two predicates that assert the target is wrong rather than merely
+# related. Retrieval demotes or hides what they point at, so declaring one is a
+# claim about someone else's memory and the write surface authorizes the target
+# before minting it. The other three only raise a traversal weight, which is no
+# more consequential than the untyped link an agent could already write.
+SUPPRESSING_RELATIONSHIP_TYPES = frozenset(
+    {RelationshipType.SUPERSEDES, RelationshipType.CONTRADICTS}
 )
 
 # Rendered into tool descriptions and field help so a model reading the schema

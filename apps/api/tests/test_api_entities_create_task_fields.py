@@ -1,13 +1,14 @@
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
 
-from sibyl.api.routes.entities import create_entity
+from sibyl.api.routes.entities import _declared_bulk_relationships, create_entity
 from sibyl.api.schemas import EntityCreate
 from sibyl_core.auth import ProjectRole
-from sibyl_core.models.entities import EntityType
+from sibyl_core.models.entities import EntityType, RelationshipType
 
 
 @pytest.mark.asyncio
@@ -199,3 +200,64 @@ async def test_entities_create_validates_the_target_behind_a_predicate() -> None
     ]
     _, kwargs = add.call_args
     assert kwargs["related_to"] == ["supersedes:decision_123", "decision_456"]
+
+
+class TestBulkDeclaredRelationships:
+    """The bulk route builds its own edges, so it needs its own receipts.
+
+    `create_entities_bulk` does not route through `add()`, which means the id
+    format, the metadata keys, and the suppression gate are all duplicated
+    there and could drift from the writer they were copied from.
+    """
+
+    @staticmethod
+    def _entity_manager(owner: str) -> MagicMock:
+        target = MagicMock()
+        target.metadata = {"memory_scope": "private", "principal_id": owner}
+        target.created_by = owner
+        manager = MagicMock()
+        manager.get = AsyncMock(return_value=target)
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_untyped_entry_keeps_its_edge_shape(self) -> None:
+        now = datetime(2026, 8, 13, tzinfo=UTC)
+        [rel] = await _declared_bulk_relationships(
+            "ep_new",
+            ["ep_old"],
+            entity_manager=self._entity_manager("principal-a"),
+            principal_id="principal-a",
+            accessible_projects=set(),
+            now=now,
+        )
+        assert rel.id == "rel_ep_new_related_to_ep_old"
+        assert rel.relationship_type is RelationshipType.RELATED_TO
+        assert rel.metadata == {"created_at": now.isoformat()}
+
+    @pytest.mark.asyncio
+    async def test_writable_target_keeps_the_declared_predicate(self) -> None:
+        [rel] = await _declared_bulk_relationships(
+            "ep_new",
+            ["supersedes:ep_old"],
+            entity_manager=self._entity_manager("principal-a"),
+            principal_id="principal-a",
+            accessible_projects=set(),
+            now=datetime(2026, 8, 13, tzinfo=UTC),
+        )
+        assert rel.id == "rel_ep_new_supersedes_ep_old"
+        assert rel.relationship_type is RelationshipType.SUPERSEDES
+        assert rel.metadata["agent_declared"] is True
+
+    @pytest.mark.asyncio
+    async def test_another_principals_target_is_downgraded(self) -> None:
+        [rel] = await _declared_bulk_relationships(
+            "ep_new",
+            ["supersedes:ep_old"],
+            entity_manager=self._entity_manager("principal-b"),
+            principal_id="principal-a",
+            accessible_projects=set(),
+            now=datetime(2026, 8, 13, tzinfo=UTC),
+        )
+        assert rel.id == "rel_ep_new_related_to_ep_old"
+        assert rel.relationship_type is RelationshipType.RELATED_TO
+        assert "agent_declared" not in rel.metadata

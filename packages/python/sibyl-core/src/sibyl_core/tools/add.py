@@ -1,7 +1,7 @@
 """Add tool for creating new knowledge in the Sibyl graph."""
 
 import inspect
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -31,7 +31,10 @@ from sibyl_core.models.entities import (
     Relationship,
     RelationshipType,
 )
-from sibyl_core.models.relations import parse_relation_declarations
+from sibyl_core.models.relations import (
+    SUPPRESSING_RELATIONSHIP_TYPES,
+    parse_relation_declarations,
+)
 from sibyl_core.models.tasks import (
     Epic,
     EpicStatus,
@@ -134,9 +137,13 @@ def _build_relationship(rel_data: dict[str, Any]) -> Relationship:
     )
 
 
-def _declared_relationship_payloads(
+async def _declared_relationship_payloads(
     entity_id: str,
     related_to: Sequence[str] | None,
+    *,
+    entity_manager: Any = None,
+    principal_id: str | None = None,
+    accessible_projects: Iterable[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Turn a `related_to` list into edge payloads, honoring declared predicates.
 
@@ -144,18 +151,46 @@ def _declared_relationship_payloads(
     had. A declared one carries its predicate into the relationship id too, so
     an agent can both supersede and reference the same target without the two
     edges colliding on a deterministic id.
+
+    A suppressing predicate is authorized against its target first, because
+    retrieval demotes what one points at and an unauthorized writer would
+    otherwise be able to bury a memory it cannot even write. A refusal
+    downgrades that one edge to RELATED_TO rather than failing the write: the
+    link the agent asked for still exists, and the claim it is not entitled to
+    make does not.
     """
     payloads: list[dict[str, Any]] = []
     for declaration in parse_relation_declarations(related_to):
+        relationship_type = declaration.relationship_type
+        declared = declaration.declared
+        if declared and relationship_type in SUPPRESSING_RELATIONSHIP_TYPES:
+            from sibyl_core.services.memory import declared_suppression_allowed
+
+            allowed = entity_manager is not None and await declared_suppression_allowed(
+                entity_manager=entity_manager,
+                target_id=declaration.target_id,
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
+            )
+            if not allowed:
+                log.info(
+                    "declared_suppression_downgraded",
+                    source_id=entity_id,
+                    target_id=declaration.target_id,
+                    predicate=relationship_type.value,
+                )
+                relationship_type = RelationshipType.RELATED_TO
+                declared = False
+
         metadata: dict[str, Any] = {"created_at": datetime.now(UTC).isoformat()}
-        if declaration.declared:
+        if declared:
             metadata["agent_declared"] = True
         payloads.append(
             {
-                "id": f"rel_{entity_id}_{declaration.edge_slug}_{declaration.target_id}",
+                "id": f"rel_{entity_id}_{relationship_type.value.lower()}_{declaration.target_id}",
                 "source_id": entity_id,
                 "target_id": declaration.target_id,
-                "type": declaration.relationship_type.value,
+                "type": relationship_type.value,
                 "metadata": metadata,
             }
         )
@@ -750,7 +785,18 @@ async def add(
         # Declared relationships. A bare id still collapses to RELATED_TO; a
         # "<predicate>:<id>" entry from the closed vocabulary mints the edge
         # type the graph expansion scorer actually weights.
-        relationships_to_create.extend(_declared_relationship_payloads(entity_id, related_to))
+        relationships_to_create.extend(
+            await _declared_relationship_payloads(
+                entity_id,
+                related_to,
+                entity_manager=entity_manager,
+                principal_id=principal_id,
+                # Same reader the write was authorized as, matching the
+                # duplicate check above: a project write may supersede inside
+                # its own project and nothing here widens beyond that.
+                accessible_projects={scope_key} if scope_key else set(),
+            )
+        )
 
         # Sync mode: create entity + relationships immediately via Surreal
         if sync:

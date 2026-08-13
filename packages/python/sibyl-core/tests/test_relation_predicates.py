@@ -90,28 +90,118 @@ class TestParsing:
             assert weight >= untyped, relationship_type
 
 
+class _WritableTargets:
+    """Entity manager stub whose every target the writer is allowed to write."""
+
+    def __init__(self, owner: str = "principal-a") -> None:
+        self.owner = owner
+
+    async def get(self, entity_id: str) -> Entity:
+        return Entity(
+            id=entity_id,
+            entity_type=EntityType.EPISODE,
+            name="Target",
+            description="",
+            content="",
+            created_by=self.owner,
+            metadata={"memory_scope": "private", "principal_id": self.owner},
+        )
+
+
 class TestEdgePayloads:
-    def test_untyped_payload_is_unchanged(self) -> None:
-        [payload] = add_module._declared_relationship_payloads("ep_new", ["ep_old"])
+    @pytest.mark.asyncio
+    async def test_untyped_payload_is_unchanged(self) -> None:
+        [payload] = await add_module._declared_relationship_payloads("ep_new", ["ep_old"])
         assert payload["id"] == "rel_ep_new_related_to_ep_old"
         assert payload["source_id"] == "ep_new"
         assert payload["target_id"] == "ep_old"
         assert payload["type"] == "RELATED_TO"
         assert "agent_declared" not in payload["metadata"]
 
-    def test_declared_payload_carries_predicate_and_receipt(self) -> None:
-        [payload] = add_module._declared_relationship_payloads("ep_new", ["supersedes:ep_old"])
+    @pytest.mark.asyncio
+    async def test_declared_payload_carries_predicate_and_receipt(self) -> None:
+        [payload] = await add_module._declared_relationship_payloads(
+            "ep_new",
+            ["supersedes:ep_old"],
+            entity_manager=_WritableTargets(),
+            principal_id="principal-a",
+        )
         assert payload["id"] == "rel_ep_new_supersedes_ep_old"
         assert payload["source_id"] == "ep_new"
         assert payload["target_id"] == "ep_old"
         assert payload["type"] == "SUPERSEDES"
         assert payload["metadata"]["agent_declared"] is True
 
-    def test_two_predicates_at_one_target_do_not_collide(self) -> None:
-        payloads = add_module._declared_relationship_payloads(
-            "ep_new", ["supersedes:ep_old", "contradicts:ep_old", "ep_old"]
+    @pytest.mark.asyncio
+    async def test_two_predicates_at_one_target_do_not_collide(self) -> None:
+        payloads = await add_module._declared_relationship_payloads(
+            "ep_new",
+            ["supersedes:ep_old", "contradicts:ep_old", "ep_old"],
+            entity_manager=_WritableTargets(),
+            principal_id="principal-a",
         )
         assert len({payload["id"] for payload in payloads}) == 3
+
+    @pytest.mark.asyncio
+    async def test_non_suppressing_predicates_need_no_target_lookup(self) -> None:
+        """requires/supports/decides only raise a weight, so they stay ungated.
+
+        Passing no entity manager proves the authorization path is not even
+        consulted for them, which is what keeps the common case free of an
+        extra read per declared link.
+        """
+        payloads = await add_module._declared_relationship_payloads(
+            "ep_new", ["requires:ep_a", "supports:ep_b", "decides:ep_c"]
+        )
+        assert [payload["type"] for payload in payloads] == [
+            "REQUIRES",
+            "SUPPORTS",
+            "DECIDES",
+        ]
+        assert all(payload["metadata"]["agent_declared"] for payload in payloads)
+
+
+class TestSuppressionAuthorization:
+    """SUPERSEDES and CONTRADICTS are claims about someone else's memory."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("predicate", ["supersedes", "contradicts"])
+    async def test_unwritable_target_downgrades_to_related_to(self, predicate: str) -> None:
+        [payload] = await add_module._declared_relationship_payloads(
+            "ep_new",
+            [f"{predicate}:ep_someone_elses"],
+            entity_manager=_WritableTargets(owner="principal-b"),
+            principal_id="principal-a",
+        )
+        assert payload["type"] == "RELATED_TO"
+        assert payload["id"] == "rel_ep_new_related_to_ep_someone_elses"
+        assert "agent_declared" not in payload["metadata"]
+        # The link the agent asked for survives; only the claim is dropped.
+        assert payload["target_id"] == "ep_someone_elses"
+
+    @pytest.mark.asyncio
+    async def test_missing_target_downgrades_rather_than_raising(self) -> None:
+        class Missing:
+            async def get(self, entity_id: str) -> None:
+                return None
+
+        [payload] = await add_module._declared_relationship_payloads(
+            "ep_new",
+            ["supersedes:ep_gone"],
+            entity_manager=Missing(),
+            principal_id="principal-a",
+        )
+        assert payload["type"] == "RELATED_TO"
+
+    @pytest.mark.asyncio
+    async def test_absent_entity_manager_fails_closed(self) -> None:
+        [payload] = await add_module._declared_relationship_payloads(
+            "ep_new", ["supersedes:ep_old"]
+        )
+        assert payload["type"] == "RELATED_TO"
+
+
+PRINCIPAL = "principal-declaring"
 
 
 async def _write_and_read_edges(
@@ -119,8 +209,14 @@ async def _write_and_read_edges(
     *,
     group_id: str,
     related_to: list[str],
+    target_owner: str = PRINCIPAL,
 ) -> tuple[str, list[dict[str, Any]]]:
-    """Run a real `add()` against embedded Surreal and read back its edges."""
+    """Run a real `add()` against embedded Surreal and read back its edges.
+
+    Targets are written as private memories owned by `target_owner`, so the
+    default run is a writer superseding its own memory and passing a
+    `target_owner` someone else owns exercises the refusal.
+    """
     client = SurrealGraphClient(group_id=group_id, url="memory://")
     await client.connect()
     try:
@@ -152,7 +248,12 @@ async def _write_and_read_edges(
                     name=f"Existing memory {index}",
                     description="Prior memory the new write points at.",
                     content="Prior memory the new write points at.",
-                    metadata={"organization_id": group_id},
+                    created_by=target_owner,
+                    metadata={
+                        "organization_id": group_id,
+                        "memory_scope": "private",
+                        "principal_id": target_owner,
+                    },
                 ),
                 generate_embedding=False,
             )
@@ -162,6 +263,8 @@ async def _write_and_read_edges(
             "The memory that declares what it does to its neighbors.",
             related_to=related_to,
             metadata={"organization_id": group_id},
+            principal_id=PRINCIPAL,
+            memory_scope="private",
             sync=True,
             generate_embeddings=False,
             check_conflicts=False,
@@ -245,4 +348,29 @@ async def test_unknown_predicate_keeps_the_untyped_collapse(
 
     [row] = [row for row in rows if row["target_id"] == target]
     assert row["name"] == "RELATED_TO"
+    assert "agent_declared" not in row["attributes"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("predicate", ["supersedes", "contradicts"])
+async def test_suppressing_predicate_at_another_principals_memory_is_refused(
+    predicate: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Read back from Surreal that the refusal reaches the stored edge.
+
+    A writer that could bury another principal's memory by asserting it stale
+    would turn the declaration channel into a denial of recall, so the edge
+    that lands is the untyped one and carries no `agent_declared` receipt.
+    """
+    target = f"episode_{predicate[:6]}notmine"
+    created_id, rows = await _write_and_read_edges(
+        monkeypatch,
+        group_id=f"org-refuse-{predicate}",
+        related_to=[f"{predicate}:{target}"],
+        target_owner="principal-someone-else",
+    )
+
+    [row] = [row for row in rows if row["target_id"] == target]
+    assert row["name"] == "RELATED_TO"
+    assert row["source_id"] == created_id
     assert "agent_declared" not in row["attributes"]
