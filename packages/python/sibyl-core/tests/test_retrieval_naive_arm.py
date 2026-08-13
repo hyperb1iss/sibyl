@@ -8,6 +8,7 @@ and the non-interference tests pin the surface it is not allowed to touch.
 
 from __future__ import annotations
 
+import inspect
 from datetime import UTC, datetime
 from typing import Any
 
@@ -810,3 +811,34 @@ def test_the_arm_module_exposes_no_tunable_weights() -> None:
     }
 
     assert tunables == set()
+    # The module constants are the whole configuration surface, so enumerate
+    # them rather than pattern-matching names a future knob could dodge.
+    assert {
+        name
+        for name in dir(naive_module)
+        if name.isupper() and not name.startswith("_") and name != "TYPE_CHECKING"
+    } == {"NAIVE_RRF_K", "NAIVE_RETRIEVAL_MODE", "MAX_RETRIEVAL_LIMIT"}
+
+
+def test_no_caller_can_reweight_the_arm_per_request() -> None:
+    """A tuned control measures nothing, so the entry point takes no knobs.
+
+    ``fuse_naive_candidates`` keeps a ``k`` keyword for direct unit testing, but
+    nothing reachable from the API or bench surface can set it: ``naive_search``
+    neither accepts a fusion parameter nor forwards one.
+    """
+
+    parameters = set(inspect.signature(naive_module.naive_search).parameters)
+
+    assert parameters == {
+        "plan",
+        "types",
+        "facet",
+        "limit",
+        "include_content",
+        "embedding_provider",
+        "char_budget",
+        "content_max_chars",
+    }
+    source = inspect.getsource(naive_module.naive_search)
+    assert "fuse_naive_candidates(filtered_lists, limit=limit)" in source

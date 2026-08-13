@@ -863,6 +863,21 @@ async def _compile_context_with_evidence(
                 "reserve_distilled_notes": False,
             }
         )
+    if request.evidence.retrieval_mode == "naive" and request.record_exposure:
+        # The enhanced path stamps exposure inside the search it runs, which the
+        # arm does not use. Stamped here instead, so a run under the arm leaves
+        # the same receipts and exposure analysis can compare the two arms
+        # rather than reading the arm as a run that surfaced nothing.
+        from sibyl_core.tools.usage_exposure import annotate_search_result_exposures
+
+        evidence_response.filters["usage_exposure"] = await annotate_search_result_exposures(
+            evidence_response.results,
+            organization_id=str(org.id),
+            principal_id=ctx.user_id,
+            project_id=request.project,
+            source_surface="context_pack_evidence",
+            request_metadata={"agent_id": request.agent_id} if request.agent_id else None,
+        )
     if typed_task is not None:
         typed_response, typed_error = typed_outcome
         evidence_response = _compose_context_evidence_response(

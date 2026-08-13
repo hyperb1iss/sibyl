@@ -2556,6 +2556,74 @@ class TestNaiveRetrievalArm:
         assert response.evidence.filters["reserve_distilled_notes"] is False
 
     @pytest.mark.asyncio
+    async def test_the_arm_still_records_exposure(self) -> None:
+        """Exposure receipts must exist under both arms or they cannot be compared."""
+
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        exposure = AsyncMock(return_value={"status": "stamped", "item_count": 1})
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
+            patch(
+                "sibyl_core.retrieval.naive.naive_search",
+                AsyncMock(return_value=self._arm_response()),
+            ),
+            patch("sibyl_core.tools.usage_exposure.annotate_search_result_exposures", exposure),
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+        ):
+            response = await context_pack(
+                request=ContextPackRequest(
+                    goal="ship faster",
+                    evidence=self._evidence("naive"),
+                    record_exposure=True,
+                ),
+                org=org,
+                ctx=_ctx(),
+            )
+
+        exposure.assert_awaited_once()
+        assert exposure.await_args.kwargs["source_surface"] == "context_pack_evidence"
+        assert response.evidence is not None
+        assert response.evidence.filters["usage_exposure"] == {
+            "status": "stamped",
+            "item_count": 1,
+        }
+
+    @pytest.mark.asyncio
+    async def test_the_arm_honors_a_request_that_declines_exposure(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        exposure = AsyncMock(side_effect=AssertionError("exposure recorded against the request"))
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
+            patch(
+                "sibyl_core.retrieval.naive.naive_search",
+                AsyncMock(return_value=self._arm_response()),
+            ),
+            patch("sibyl_core.tools.usage_exposure.annotate_search_result_exposures", exposure),
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+        ):
+            await context_pack(
+                request=ContextPackRequest(
+                    goal="ship faster",
+                    evidence=self._evidence("naive"),
+                    record_exposure=False,
+                ),
+                org=org,
+                ctx=_ctx(),
+            )
+
+        exposure.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_the_default_path_never_reaches_the_arm(self) -> None:
         """The hard invariant: an unselected arm is an unreachable arm."""
 
@@ -2564,7 +2632,10 @@ class TestNaiveRetrievalArm:
         compile_context = AsyncMock(return_value=_pack())
         machine = AsyncMock(return_value=_search_response("ship faster", ("evidence_1", 0.9)))
 
-        for evidence in (None, self._evidence("fast")):
+        # Every mode other than naive, not just the default: the branch that
+        # routes to the arm is an elif chain, so the third mode is the one a
+        # careless reordering would break.
+        for evidence in (None, self._evidence("fast"), self._evidence("accurate")):
             with (
                 patch(
                     "sibyl.api.routes.context.list_accessible_project_graph_ids",
@@ -2573,6 +2644,10 @@ class TestNaiveRetrievalArm:
                 patch("sibyl_core.tools.context.compile_context", compile_context),
                 patch("sibyl_core.retrieval.naive.naive_search", arm),
                 patch("sibyl.api.routes.search.execute_search_request", machine),
+                patch(
+                    "sibyl.api.routes.context.plan_deterministic_refinement_queries",
+                    return_value=[],
+                ),
                 patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
             ):
                 await context_pack(
