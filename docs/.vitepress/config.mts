@@ -17,6 +17,7 @@ export default defineConfig({
     // retrieval-system.md is the one lowercase architecture doc and ships.
     srcExclude: [
         'architecture/[A-Z]*.md',
+        'architecture/AUDIT_*/**',
         '_archive/**',
         'research/**',
         'testing/PERMISSION_TEST_STRATEGY.md',
