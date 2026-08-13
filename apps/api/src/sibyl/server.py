@@ -26,6 +26,11 @@ from sibyl.api.idempotency import (
     reserve_idempotency_record,
 )
 from sibyl.auth.api_key_common import api_key_memory_scope_key
+from sibyl.auth.mcp_auth import (
+    effective_api_key_scopes,
+    insufficient_mcp_scope_message,
+    mcp_scopes_allow,
+)
 from sibyl.config import settings
 from sibyl.persistence.auth_runtime import (
     authenticate_api_key,
@@ -125,6 +130,10 @@ class McpContext:
     org_role: str | None = None
     delegated_authority: str | None = None
     agent_id: str | None = None
+    # True when the caller authenticated with an API key. Scope enforcement is
+    # an API-key concern on both surfaces: user sessions carry no scope claim,
+    # and REST gates scopes only on its own API-key branch.
+    is_api_key: bool = False
 
     def to_memory_policy_context(
         self,
@@ -198,6 +207,7 @@ async def _get_mcp_context() -> McpContext | None:
                 ]
                 if getattr(auth, "memory_spaces", None) is not None
                 else None,
+                is_api_key=True,
             )
         return None
 
@@ -227,21 +237,52 @@ async def _get_mcp_context() -> McpContext | None:
     return None
 
 
-async def _get_org_id_from_context() -> str | None:
-    """Extract organization ID from the authenticated MCP context.
+async def _optional_mcp_org_id() -> str | None:
+    """Extract the organization ID when the caller presents a usable credential.
+
+    Health reporting works without an org, so an anonymous caller gets None
+    rather than an error. A credential that is presented still has to clear the
+    read gate: failing scopes are refused, not silently downgraded to anonymous.
 
     Returns:
         The organization ID string if authenticated and org-scoped, None otherwise.
     """
     ctx = await _get_mcp_context()
-    return ctx.org_id if ctx else None
+    if ctx is None:
+        return None
+    _authorize_mcp_scope(ctx, write=False)
+    return ctx.org_id
 
 
-async def _require_mcp_context() -> McpContext:
-    """Require full MCP context including user_id.
+def _authorize_mcp_scope(ctx: McpContext, *, write: bool) -> None:
+    """Enforce API-key scopes for an MCP tool call.
 
     Raises:
-        ValueError: If no context is available.
+        ValueError: If the key lacks the scope this tool requires.
+    """
+    if not ctx.is_api_key:
+        return
+    scopes = effective_api_key_scopes(ctx.scopes)
+    if mcp_scopes_allow(scopes, write=write):
+        return
+    log.warning(
+        "mcp_insufficient_scope",
+        org_id=ctx.org_id,
+        write=write,
+        scopes=sorted(scopes),
+    )
+    raise ValueError(insufficient_mcp_scope_message(scopes, write=write))
+
+
+async def _require_mcp_context(*, write: bool = False) -> McpContext:
+    """Require full MCP context including user_id.
+
+    Args:
+        write: True when the caller is about to mutate state, which demands the
+            `api:write` scope from any key that carries granular REST scopes.
+
+    Raises:
+        ValueError: If no context is available or its scopes are insufficient.
 
     Returns:
         McpContext with org_id and user_id.
@@ -249,6 +290,7 @@ async def _require_mcp_context() -> McpContext:
     ctx = await _get_mcp_context()
     if not ctx:
         raise ValueError("Organization context required. Authenticate with an org-scoped token.")
+    _authorize_mcp_scope(ctx, write=write)
     return ctx
 
 
@@ -271,7 +313,7 @@ def _serialize_mcp_idempotency[**P, R](
             if action_scoped:
                 action = str(kwargs.get("action", "unknown")).lower().strip()
                 scoped_path = f"{path}/{action}"
-            ctx = await _require_mcp_context()
+            ctx = await _require_mcp_context(write=True)
             async with idempotency_lock(
                 organization_id=ctx.org_id,
                 principal_id=ctx.user_id or "unknown",
@@ -594,7 +636,7 @@ async def _remember_mcp_memory(
     from sibyl_core.services.surreal_content import remember_raw_memory
     from sibyl_core.tools.core import add
 
-    ctx = await _require_mcp_context()
+    ctx = await _require_mcp_context(write=True)
     accessible_projects = await _resolve_mcp_project_scope(
         ctx,
         project,
@@ -805,7 +847,7 @@ async def _reflect_mcp_memory(
         reflection_pack_to_markdown,
     )
 
-    ctx = await _require_mcp_context()
+    ctx = await _require_mcp_context(write=True)
     accessible_projects = await _resolve_mcp_project_scope(
         ctx,
         project,
@@ -1004,7 +1046,7 @@ async def _synthesis_mcp_draft(
 ) -> dict[str, Any]:
     from sibyl_core.tools.core import synthesis_draft
 
-    ctx = await _require_mcp_context()
+    ctx = await _require_mcp_context(write=remember)
     accessible_projects = await _resolve_mcp_project_scope(ctx, project)
     resolved_scope_key = scope_key
     policy_reason: str | None = None
@@ -1088,7 +1130,7 @@ async def _add_mcp_entity(
 ) -> dict[str, Any]:
     from sibyl_core.tools.core import add
 
-    ctx = await _require_mcp_context()
+    ctx = await _require_mcp_context(write=True)
     normalized_entity_type = entity_type.strip().lower()
     accessible_projects = await _resolve_mcp_project_scope(
         ctx,
@@ -1649,7 +1691,7 @@ async def _manage_mcp_action(
 ) -> dict[str, Any]:
     from sibyl_core.tools.manage import manage
 
-    ctx = await _require_mcp_context()
+    ctx = await _require_mcp_context(write=True)
     accessible_projects = await _get_accessible_projects(ctx)
     policy_decision = await _authorize_mcp_manage_action(
         ctx=ctx,
@@ -1787,10 +1829,8 @@ async def _require_org_id() -> str:
     Returns:
         The organization ID string.
     """
-    org_id = await _get_org_id_from_context()
-    if not org_id:
-        raise ValueError("Organization context required. Authenticate with an org-scoped token.")
-    return org_id
+    ctx = await _require_mcp_context()
+    return ctx.org_id
 
 
 async def _require_owner_mcp_context(ctx: McpContext) -> None:
@@ -2818,7 +2858,7 @@ def _register_resources(mcp: FastMCP) -> None:
         from sibyl_core.tools.core import get_health
 
         # Get org context (optional for health - basic health works without org)
-        org_id = await _get_org_id_from_context()
+        org_id = await _optional_mcp_org_id()
         health = await get_health(organization_id=org_id)
         return json.dumps(health, indent=2)
 

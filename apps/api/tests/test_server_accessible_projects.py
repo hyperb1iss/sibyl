@@ -1590,6 +1590,7 @@ async def test_get_mcp_context_uses_legacy_api_key_auth() -> None:
         user_id=str(auth.user_id),
         scopes=["mcp"],
         api_key_project_ids=[str(auth.project_ids[0])],
+        is_api_key=True,
     )
     authenticate.assert_awaited_once_with(raw)
 

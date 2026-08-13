@@ -41,6 +41,7 @@ from starlette.responses import HTMLResponse, RedirectResponse, Response
 from sibyl import config as config_module
 from sibyl.auth.api_key_common import ApiKeyAuth
 from sibyl.auth.jwt import JwtError, create_access_token, verify_access_token
+from sibyl.auth.mcp_auth import effective_api_key_scopes
 from sibyl.persistence.auth_runtime import (
     authenticate_api_key,
     authenticate_local_user,
@@ -390,8 +391,8 @@ class SibylMcpOAuthProvider(
             auth = await self._authenticate_api_key(token)
             if auth is None:
                 return None
-            scopes = list(auth.scopes or []) or [OAUTH_SCOPE]
-            if scopes and OAUTH_SCOPE not in scopes:
+            scopes = sorted(effective_api_key_scopes(auth.scopes))
+            if OAUTH_SCOPE not in scopes:
                 return None
             return AccessToken(token=token, client_id=f"api_key:{auth.api_key_id}", scopes=scopes)
 
