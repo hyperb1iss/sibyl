@@ -171,7 +171,7 @@ def test_helm_production_render_rejects_a_configmap_resident_jwt_secret() -> Non
 @requires_helm
 def test_helm_production_guard_matches_env_keys_case_insensitively() -> None:
     """pydantic-settings resolves env vars case-insensitively, so the guard must too."""
-    for key in ("sibyl_jwt_secret", "Sibyl_Jwt_Secret"):
+    for key in ("sibyl_jwt_secret", "Sibyl_Jwt_Secret", "JWT_SECRET", "jwt_secret"):
         result = _helm_template(
             "--set",
             "backend.existingSecret=sibyl-secrets",
@@ -180,7 +180,7 @@ def test_helm_production_guard_matches_env_keys_case_insensitively() -> None:
         )
 
         assert result.returncode != 0, f"{key} rendered instead of failing"
-        assert "backend.env.SIBYL_JWT_SECRET must not be used in production" in result.stderr
+        assert f"backend.env.{key} must not be used in production" in result.stderr
 
     lowercase_production = _helm_template(
         "--set",
@@ -627,3 +627,56 @@ def test_no_graphiti_smoke_covers_default_entrypoints() -> None:
 
     for expected in ("apps/cli/src/sibyl_cli/data/hooks/session-start.py",):
         assert expected in entrypoint_script
+
+
+@requires_helm
+def test_helm_production_render_rejects_mcp_auth_mode_off() -> None:
+    """auth_mode off serves every MCP tool unauthenticated regardless of the secret."""
+    for key, value in (
+        ("SIBYL_MCP_AUTH_MODE", "off"),
+        ("sibyl_mcp_auth_mode", "OFF"),
+    ):
+        result = _helm_template(
+            "--set",
+            "backend.existingSecret=sibyl-secrets",
+            "--set",
+            f"backend.env.{key}={value}",
+        )
+
+        assert result.returncode != 0, f"{key}={value} rendered instead of failing"
+        assert "SIBYL_MCP_AUTH_MODE=off is forbidden in production" in result.stderr
+
+    enforcing = _helm_template(
+        "--set",
+        "backend.existingSecret=sibyl-secrets",
+        "--set",
+        "backend.env.SIBYL_MCP_AUTH_MODE=on",
+    )
+
+    assert enforcing.returncode == 0, enforcing.stderr
+
+    development = _helm_template(
+        "--set",
+        "backend.env.SIBYL_ENVIRONMENT=development",
+        "--set",
+        "backend.env.SIBYL_MCP_AUTH_MODE=off",
+    )
+
+    assert development.returncode == 0, development.stderr
+
+
+@requires_helm
+def test_helm_guard_remediation_names_the_release_namespace() -> None:
+    """A namespace-free kubectl line would create the Secret in `default` instead."""
+    assert _HELM_BINARY is not None
+    result = subprocess.run(  # noqa: S603
+        [_HELM_BINARY, "template", "sibyl", "charts/sibyl", "--namespace", "sibyl-prod"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "--namespace sibyl-prod" in result.stderr
+    assert "helm upgrade --install sibyl charts/sibyl --namespace sibyl-prod" in result.stderr

@@ -144,35 +144,48 @@ Fail fast when a non-corporate extra provider is configured without the explicit
 {{- end }}
 
 {{/*
-Fail fast when a production-labelled release configures no JWT secret source.
+Fail fast when a production-labelled release configures no JWT secret source,
+puts the signing key in a plaintext ConfigMap, or switches MCP auth off.
 Without SIBYL_JWT_SECRET the API starts with an empty signing key, the server
 disables MCP auth under the default mcp_auth_mode=auto, and session cookies are
 signed with an empty key. The chart must not auto-generate that secret in
 production: a per-render value would rotate every upgrade and diverge between
-the backend, worker, and bootstrap pods. An inline backend.env.SIBYL_JWT_SECRET
-is rejected too, because backend.env is rendered into a plaintext ConfigMap.
-Keys are matched case-insensitively: pydantic-settings resolves environment
-variables that way, so sibyl_jwt_secret reaches the process exactly as
-SIBYL_JWT_SECRET does.
+the backend, worker, and bootstrap pods.
+
+Keys are matched case-insensitively, and both SIBYL_JWT_SECRET and the
+unprefixed JWT_SECRET alias count, because pydantic-settings resolves
+environment variables case-insensitively and config.py falls back to the
+unprefixed name. Either spelling in backend.env reaches the process while
+sitting in the plaintext ConfigMap.
 */}}
 {{- define "sibyl.validateProductionAuthSecret" -}}
 {{- $env := default dict .Values.backend.env -}}
 {{- $isProduction := false -}}
-{{- $inlineJwt := "" -}}
+{{- $inlineJwtKeys := list -}}
+{{- $authOff := false -}}
 {{- range $key, $value := $env -}}
+{{- $upperKey := upper $key -}}
 {{- $normalized := trim (toString $value) -}}
-{{- if and (eq (upper $key) "SIBYL_ENVIRONMENT") (eq (lower $normalized) "production") -}}
+{{- if and (eq $upperKey "SIBYL_ENVIRONMENT") (eq (lower $normalized) "production") -}}
 {{- $isProduction = true -}}
 {{- end -}}
-{{- if and (eq (upper $key) "SIBYL_JWT_SECRET") (not (empty $normalized)) -}}
-{{- $inlineJwt = $normalized -}}
+{{- if and (has $upperKey (list "SIBYL_JWT_SECRET" "JWT_SECRET")) (not (empty $normalized)) -}}
+{{- $inlineJwtKeys = append $inlineJwtKeys $key -}}
+{{- end -}}
+{{- if and (eq $upperKey "SIBYL_MCP_AUTH_MODE") (eq (lower $normalized) "off") -}}
+{{- $authOff = true -}}
 {{- end -}}
 {{- end -}}
 {{- $existing := trim (default "" .Values.backend.existingSecret) -}}
+{{- $secretName := default "sibyl-secrets" $existing -}}
+{{- $remediation := printf "Create the Secret in the release namespace, then point the chart at it:\n  kubectl create secret generic %s --namespace %s \\\n    --from-literal=SIBYL_JWT_SECRET=\"$(openssl rand -hex 32)\" \\\n    --from-literal=SIBYL_SETTINGS_KEY=\"$(openssl rand -hex 32)\"\n  helm upgrade --install %s charts/sibyl --namespace %s --set backend.existingSecret=%s" $secretName .Release.Namespace .Release.Name .Release.Namespace $secretName -}}
 {{- if and $isProduction (empty $existing) -}}
-{{- fail "backend.existingSecret is required when backend.env.SIBYL_ENVIRONMENT is \"production\".\nWithout it SIBYL_JWT_SECRET is never set, so the API signs sessions with an empty key and MCP auth disables itself (mcp_auth_mode defaults to \"auto\", which enforces Bearer auth only when a JWT secret is present).\nCreate the secret, then point the chart at it:\n  kubectl create secret generic sibyl-secrets \\\n    --from-literal=SIBYL_JWT_SECRET=\"$(openssl rand -hex 32)\" \\\n    --from-literal=SIBYL_SETTINGS_KEY=\"$(openssl rand -hex 32)\"\n  helm install sibyl charts/sibyl --set backend.existingSecret=sibyl-secrets\nSetting backend.env.SIBYL_JWT_SECRET does not satisfy this: every backend.env key is rendered into the plaintext sibyl-config ConfigMap, which is readable under broader RBAC than a Secret.\nFor a non-production trial set backend.env.SIBYL_ENVIRONMENT=development instead. The server then derives its own JWT secret per process, so sessions break on restart and across replicas, which is why that path is unfit for production." -}}
+{{- fail (printf "backend.existingSecret is required when backend.env.SIBYL_ENVIRONMENT is \"production\".\nWithout it SIBYL_JWT_SECRET is never set, so the API signs sessions with an empty key and MCP auth disables itself (mcp_auth_mode defaults to \"auto\", which enforces Bearer auth only when a JWT secret is present).\n%s\nSetting backend.env.SIBYL_JWT_SECRET or backend.env.JWT_SECRET does not satisfy this: every backend.env key is rendered into the plaintext %s-config ConfigMap, which is readable under broader RBAC than a Secret.\nFor a non-production trial set backend.env.SIBYL_ENVIRONMENT=development instead. The server then derives its own JWT secret per process, so sessions break on restart and across replicas, which is why that path is unfit for production." $remediation (include "sibyl.fullname" .)) -}}
 {{- end -}}
-{{- if and $isProduction (not (empty $inlineJwt)) -}}
-{{- fail "backend.env.SIBYL_JWT_SECRET must not be used in production. Every backend.env key is rendered into the plaintext sibyl-config ConfigMap, so the signing key would be stored unencrypted and readable under broader RBAC than a Secret. Put SIBYL_JWT_SECRET in the Secret referenced by backend.existingSecret instead." -}}
+{{- if and $isProduction (not (empty $inlineJwtKeys)) -}}
+{{- fail (printf "backend.env.%s must not be used in production. Every backend.env key is rendered into the plaintext %s-config ConfigMap, so the signing key would be stored unencrypted and readable under broader RBAC than a Secret. The unprefixed JWT_SECRET alias is rejected for the same reason, because config.py falls back to it. Put SIBYL_JWT_SECRET in the Secret referenced by backend.existingSecret instead.\n%s" (join ", backend.env." $inlineJwtKeys) (include "sibyl.fullname" .) $remediation) -}}
+{{- end -}}
+{{- if and $isProduction $authOff -}}
+{{- fail "backend.env.SIBYL_MCP_AUTH_MODE=off is forbidden in production. It serves every MCP tool unauthenticated regardless of the JWT secret. Use \"auto\" (enforce once a secret is set) or \"on\" (always enforce), or set backend.env.SIBYL_ENVIRONMENT=development for a local unauthenticated endpoint." -}}
 {{- end -}}
 {{- end }}
