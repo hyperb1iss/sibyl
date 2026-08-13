@@ -948,20 +948,42 @@ def test_action_evidence_does_not_equate_presenting_with_volunteering() -> None:
     assert query_ranking_module._action_evidence_score(volunteer_query, {"present", "slide"}) == 0.0
 
 
+def test_recurring_frequency_frame_needs_a_cadence_in_the_evidence() -> None:
+    """The kept frequency frame scores cadence language and nothing else."""
+    query = "How often do I run the offsite backup?"
+    query_terms = set(extract_keywords(query))
+
+    def frame_score(text: str) -> float:
+        tokens = set(keyword_tokens_from_text(text))
+        return query_ranking_module._query_frame_score(
+            query,
+            query_terms,
+            token_set=tokens,
+            primary_token_set=tokens,
+            memory_token_set=set(),
+            primary_text=text,
+            memory_text="",
+        )
+
+    assert frame_score("i run the offsite backup every two weeks.") == 0.82
+    assert frame_score("i run the offsite backup from the storage host.") == 0.0
+
+
 def test_query_coverage_promotes_recurring_frequency() -> None:
+    """Every candidate shares the query's vocabulary, so only the cadence separates them."""
     ranked = _rank_query_ids(
-        "How often do I attend classes to help with my anxiety?",
+        "How often do I run the offsite backup?",
         [
-            "User: I asked about anxiety breathing exercises.",
-            "User: I read about class scheduling software.",
-            "User: I planned weekend errands around the gym.",
-            "User: I compared meditation apps.",
-            "User: I saved an article about sleep routines.",
-            "User: I attend classes twice a week to help with anxiety.",
+            "User: I run the offsite backup from the storage host.",
+            "User: I documented the offsite backup restore path.",
+            "User: I checked the offsite backup retention policy.",
+            "User: I reviewed the offsite backup encryption keys.",
+            "User: I priced the offsite backup storage tier.",
+            "User: I run the offsite backup every two weeks.",
         ],
     )
 
-    assert "5" in ranked[:5]
+    assert "5" in ranked[:3]
 
 
 def test_fact_frames_extract_generic_service_usage() -> None:
