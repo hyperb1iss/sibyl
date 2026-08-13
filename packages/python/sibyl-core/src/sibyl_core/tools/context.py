@@ -752,10 +752,10 @@ def _drop_retired_items(sections: list[ContextSection]) -> list[ContextSection]:
     """Refuse admission to any row a correction retired.
 
     The native lane gates its own candidates, but a pack also admits rows the
-    gate never saw: the active-work lookup, the related-item attachment, and
-    the fallback search all reach a section directly. This is the last
-    chokepoint before serving, so it re-checks the same lifecycle verdict
-    rather than trusting that every upstream path applied it.
+    gate never saw: the active-work lookup and the legacy fallback search both
+    reach a section directly. Running ahead of selection rather than after it
+    is what keeps a retired row from spending one of the pack's limited slots
+    and shrinking the answer on its way out.
     """
 
     kept: list[ContextSection] = []
@@ -1662,22 +1662,24 @@ async def compile_context(
             )
         sections = _merge_active_work(sections, active_items, facets)
 
-    sections = _dedupe_lineage(sections)
+    sections = _dedupe_lineage(_drop_retired_items(sections))
     sections = _dedupe_sections(sections, limit, per_facet_limit=per_facet_limit)
     if not sections and retrieval_failed:
         sections = _dedupe_sections(
-            await _compile_fallback_sections(
-                query=query,
-                facets=facets,
-                domain=domain,
-                project=project,
-                accessible_projects=accessible_projects,
-                organization_id=organization_id,
-                limit=limit,
-                search_fn=search_fn,
-                principal_id=principal_id,
-                allowed_memory_scope_keys=allowed_memory_scope_keys,
-                audit=audit,
+            _drop_retired_items(
+                await _compile_fallback_sections(
+                    query=query,
+                    facets=facets,
+                    domain=domain,
+                    project=project,
+                    accessible_projects=accessible_projects,
+                    organization_id=organization_id,
+                    limit=limit,
+                    search_fn=search_fn,
+                    principal_id=principal_id,
+                    allowed_memory_scope_keys=allowed_memory_scope_keys,
+                    audit=audit,
+                )
             ),
             limit,
             per_facet_limit=per_facet_limit,
@@ -1697,7 +1699,6 @@ async def compile_context(
             principal_id=principal_id,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
-    sections = _drop_retired_items(sections)
     usage_metadata: dict[str, Any] = {}
     if sections and record_exposure:
         usage_metadata[_USAGE_EXPOSURE_SUMMARY_KEY] = await annotate_context_item_exposures(

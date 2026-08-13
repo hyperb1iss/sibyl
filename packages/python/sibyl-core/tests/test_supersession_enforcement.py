@@ -314,6 +314,45 @@ async def test_pack_admission_drops_a_corrected_item_it_was_handed(
     assert pack.total_items == 1
 
 
+@pytest.mark.asyncio
+async def test_a_retired_row_does_not_spend_a_pack_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gating ahead of selection is the difference between a full pack and a short one."""
+
+    served: list[SearchResult] = [
+        _search_result("decision-wrong", "Deploy to Fly", {"lifecycle_state": "contested"}),
+        _search_result("decision-live", "Deploy to Hetzner", {}),
+        _search_result("decision-also-live", "Deploy to Vultr", {}),
+    ]
+
+    async def fake_context_search(**_kwargs: object) -> SearchResponse:
+        return SearchResponse(
+            results=served,
+            total=len(served),
+            query="deployment target",
+            filters={},
+            graph_count=len(served),
+            document_count=0,
+            limit=len(served),
+        )
+
+    monkeypatch.setattr(context_module, "context_search", fake_context_search)
+
+    pack = await compile_context(
+        "deployment target",
+        intent="decide",
+        organization_id="org-123",
+        limit=2,
+        record_exposure=False,
+    )
+
+    # Both surviving rows are served. Dropping the retired row after selection
+    # would have spent one of the two slots on it and returned a pack of one.
+    assert sorted(item.id for item in pack.items) == ["decision-also-live", "decision-live"]
+    assert pack.total_items == 2
+
+
 def test_supersedes_weight_only_applies_where_the_edge_points_forward() -> None:
     """The 0.95 weight is not the bug; walking the edge outwards was."""
 
