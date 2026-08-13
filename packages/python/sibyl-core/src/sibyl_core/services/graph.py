@@ -235,7 +235,20 @@ INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
     description = $input.description,
     content = $input.content,
     labels = $input.labels,
-    attributes = $input.attributes,
+    -- Absence means "this write does not speak to that key", the same rule
+    -- memory_scope and retrieval_keys below already spell out for themselves.
+    -- Assigning the input bag wholesale made every write a full replace, so a
+    -- reprojection or restore that rebuilt an Entity from partial knowledge
+    -- silently dropped every key it had never heard of; three fields were
+    -- rescued from that one at a time, after each one lost data in production.
+    -- Merging generalizes the rescue to the whole bag, and it is order-free:
+    -- two writers touching disjoint keys both land whichever way they race.
+    -- Removing a key is the update path's job, where writing it as NONE clears
+    -- the slot and no later write puts it back.
+    attributes = object::from_entries(array::concat(
+        object::entries(attributes ?? {{}}),
+        object::entries($input.attributes)
+    )),
     attributes.memory_scope = IF $input.memory_scope = '{CLEAR_MEMORY_SCOPE}' {{ NONE }}
         ELSE {{ $input.memory_scope ?? memory_scope }},
     attributes.last_recalled_at = $input.last_recalled_at ?? last_recalled_at,

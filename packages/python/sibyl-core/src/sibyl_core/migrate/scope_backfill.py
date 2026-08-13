@@ -310,9 +310,11 @@ async def _stamped_entity(
     # A scopeless row cannot legitimately carry this pass's provenance: the
     # forward pass only ever writes it alongside a scope, and the reverse pass
     # removes both together. Finding one here means it arrived on a write
-    # payload, so it is dropped rather than trusted or restored from.
-    metadata.pop(SCOPE_BACKFILL_PRIOR_KEY, None)
-    metadata.pop(SCOPE_BACKFILL_SOURCE_KEY, None)
+    # payload, so it is dropped rather than trusted or restored from. Written as
+    # None rather than popped: the upsert reads an absent key as "this write
+    # does not speak to it" and would leave the untrusted value standing.
+    metadata[SCOPE_BACKFILL_PRIOR_KEY] = None
+    metadata[SCOPE_BACKFILL_SOURCE_KEY] = None
 
     raw_memory_id = _text(metadata.get("raw_memory_id"))
     if raw_memory_id:
@@ -380,7 +382,9 @@ def _recovered(
         if not (owner := _text(principal_id)):
             return None
         stamped["principal_id"] = owner
-        stamped.pop("scope_key", None)
+        # None, not popped: an absent key leaves the stale value on the row, and
+        # a stale scope_key beside a private scope is the widening this guards.
+        stamped["scope_key"] = None
         return stamped
     if not (key := _text(scope_key)):
         return None
@@ -436,26 +440,27 @@ async def _reverse_in_org(
     async for entity in _iter_backfilled_entities(client, group_id=group_id):
         counts.scanned += 1
         metadata = dict(entity.metadata or {})
-        metadata.pop(SCOPE_BACKFILL_SOURCE_KEY, None)
+        # Every removal here is written as None rather than popped. The upsert
+        # reads an absent key as "this write does not speak to it" and preserves
+        # whatever the row already had, so a rollback that dropped keys from its
+        # payload would leave the stamp it exists to undo standing on the row.
+        metadata[SCOPE_BACKFILL_SOURCE_KEY] = None
         # Restore from what the forward pass recorded rather than guessing which
         # fields it introduced. Anything it overwrote comes back with its
         # original value; anything it created is removed. Guessing is how a
         # pre-existing scope_key gets deleted by a rollback that was supposed to
         # be a no-op for it.
-        raw_record = metadata.pop(SCOPE_BACKFILL_PRIOR_KEY, None)
+        raw_record = metadata.get(SCOPE_BACKFILL_PRIOR_KEY)
+        metadata[SCOPE_BACKFILL_PRIOR_KEY] = None
         record: dict[Any, Any] = raw_record if isinstance(raw_record, dict) else {}
         raw_prior = record.get("prior")
         prior: dict[Any, Any] = raw_prior if isinstance(raw_prior, dict) else {}
         touched = record.get("touched")
         for key in touched if isinstance(touched, list) else ():
-            if (value := prior.get(key)) is not None:
-                metadata[str(key)] = value
-            else:
-                metadata.pop(str(key), None)
-        # Removing the key would only mean "this write does not speak to scope",
-        # and the upsert would preserve the stamp this pass is trying to undo.
-        # Returning a row to scopeless has to be said out loud.
-        if "memory_scope" not in metadata:
+            metadata[str(key)] = prior.get(key)
+        # Scope has its own way of saying it: the column beside the bag takes a
+        # sentinel, and returning a row to scopeless has to be said out loud.
+        if metadata.get("memory_scope") is None:
             metadata["memory_scope"] = CLEAR_MEMORY_SCOPE
         counts.recovered += 1
         pending.append(_with_metadata(entity, metadata))

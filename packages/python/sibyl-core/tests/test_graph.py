@@ -889,6 +889,60 @@ async def test_native_entity_manager_update_uses_server_side_merge() -> None:
 
 
 @pytest.mark.asyncio
+async def test_two_writers_touching_disjoint_metadata_keys_both_survive() -> None:
+    """A write must not discard the keys it never knew about.
+
+    Reprojection and restore both rebuild an Entity from partial knowledge and
+    upsert it. While that assigned the attributes bag wholesale, whichever of
+    them wrote last erased the other's fields along with anything the original
+    write had carried.
+    """
+    client = SurrealGraphClient(group_id="org-disjoint-writers", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        def _writer(field: str, value: str | None) -> Entity:
+            return Entity(
+                id="decision_disjoint",
+                entity_type=EntityType.DECISION,
+                name="Contended decision",
+                organization_id=client.group_id,
+                metadata={field: value},
+            )
+
+        await manager.create_direct(
+            Entity(
+                id="decision_disjoint",
+                entity_type=EntityType.DECISION,
+                name="Contended decision",
+                organization_id=client.group_id,
+                metadata={"original_key": "written once", "alpha": "before", "beta": "before"},
+            )
+        )
+        await asyncio.gather(
+            manager.create_direct(_writer("alpha", "from writer a")),
+            manager.create_direct(_writer("beta", "from writer b")),
+        )
+
+        entity = await manager.get("decision_disjoint")
+
+        assert entity.metadata["alpha"] == "from writer a"
+        assert entity.metadata["beta"] == "from writer b"
+        assert entity.metadata["original_key"] == "written once"
+
+        # Preserving absent keys is only safe while removal has a way to be
+        # said: a key written as None is cleared and does not come back.
+        await manager.create_direct(_writer("original_key", None))
+        cleared = await manager.get("decision_disjoint")
+
+        assert "original_key" not in cleared.metadata
+        assert cleared.metadata["beta"] == "from writer b"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_removing_a_metadata_key_keeps_it_gone_on_every_read_path() -> None:
     """A key an update removes must not come back from a copy of the old state.
 
