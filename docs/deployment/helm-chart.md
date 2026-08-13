@@ -255,6 +255,14 @@ makes MCP auth disable itself under the default `mcp_auth_mode: auto`. The chart
 not auto-generate the secret in production, since a per-render value would rotate on every upgrade
 and diverge across the backend, worker, and bootstrap pods.
 
+Passing the signing key as `backend.env.SIBYL_JWT_SECRET` fails the render as well. Every key under
+`backend.env` is written into the plaintext `<release>-config` ConfigMap, which is readable under
+broader RBAC than a Secret and routinely committed to GitOps repositories. The escape hatch for a
+trial install is `backend.env.SIBYL_ENVIRONMENT: development`, which is unsuitable for real traffic:
+the server then derives a JWT secret per process, and the chart's default
+`readOnlyRootFilesystem: true` blocks the write that would persist it, so sessions break on every
+restart and across replicas.
+
 Both required keys are non-optional pod references, so a missing key fails before Sibyl starts
 instead of silently generating an ephemeral replacement. Keep `SIBYL_SETTINGS_KEY` stable across
 upgrades and pod replacements; changing it makes encrypted settings unreadable.

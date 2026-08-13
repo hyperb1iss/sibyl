@@ -24,6 +24,7 @@ from tools.inventory.runtime_surface import (
     parse_dependency_name,
     unclassified_graphiti_imports,
 )
+from tools.trust.enterprise_readiness_evidence import SIBYL_HELM_RENDER_ARGS
 
 EXPECTED_ROUTER_COUNT = 31
 EXPECTED_HTTP_ROUTE_COUNT = 3
@@ -145,6 +146,42 @@ def test_helm_non_production_render_keeps_development_jwt_autogeneration() -> No
     assert result.returncode == 0, result.stderr
     assert 'SIBYL_ENVIRONMENT: "development"' in result.stdout
     assert "key: SIBYL_JWT_SECRET" not in result.stdout
+
+
+@requires_helm
+def test_helm_production_render_rejects_a_configmap_resident_jwt_secret() -> None:
+    """An inline env secret satisfies neither guard, with or without a Secret alongside it."""
+    inline_only = _helm_template("--set", "backend.env.SIBYL_JWT_SECRET=hunter2")
+
+    assert inline_only.returncode != 0
+    assert "backend.existingSecret is required" in inline_only.stderr
+    assert "does not satisfy this" in inline_only.stderr
+
+    alongside_secret = _helm_template(
+        "--set",
+        "backend.existingSecret=sibyl-secrets",
+        "--set",
+        "backend.env.SIBYL_JWT_SECRET=hunter2",
+    )
+
+    assert alongside_secret.returncode != 0
+    assert "backend.env.SIBYL_JWT_SECRET must not be used in production" in alongside_secret.stderr
+
+
+@requires_helm
+def test_helm_enterprise_evidence_render_args_still_render() -> None:
+    """The readiness evidence tool renders charts/sibyl with these exact overrides."""
+    assert _HELM_BINARY is not None
+    result = subprocess.run(  # noqa: S603
+        [_HELM_BINARY, *SIBYL_HELM_RENDER_ARGS],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "key: SIBYL_JWT_SECRET" in result.stdout
 
 
 CORE_LEGACY_GRAPH_CONTRACT_MARKED_TESTS = (

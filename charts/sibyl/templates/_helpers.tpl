@@ -149,14 +149,18 @@ Without SIBYL_JWT_SECRET the API starts with an empty signing key, the server
 disables MCP auth under the default mcp_auth_mode=auto, and session cookies are
 signed with an empty key. The chart must not auto-generate that secret in
 production: a per-render value would rotate every upgrade and diverge between
-the backend, worker, and bootstrap pods.
+the backend, worker, and bootstrap pods. An inline backend.env.SIBYL_JWT_SECRET
+is rejected too, because backend.env is rendered into a plaintext ConfigMap.
 */}}
 {{- define "sibyl.validateProductionAuthSecret" -}}
 {{- $env := default dict .Values.backend.env -}}
 {{- $environment := lower (trim (default "" (get $env "SIBYL_ENVIRONMENT"))) -}}
 {{- $inlineJwt := trim (default "" (get $env "SIBYL_JWT_SECRET")) -}}
 {{- $existing := trim (default "" .Values.backend.existingSecret) -}}
-{{- if and (eq $environment "production") (empty $existing) (empty $inlineJwt) -}}
-{{- fail "backend.existingSecret is required when backend.env.SIBYL_ENVIRONMENT is \"production\".\nWithout it SIBYL_JWT_SECRET is never set, so the API signs sessions with an empty key and MCP auth disables itself (mcp_auth_mode defaults to \"auto\", which enforces Bearer auth only when a JWT secret is present).\nCreate the secret, then point the chart at it:\n  kubectl create secret generic sibyl-secrets \\\n    --from-literal=SIBYL_JWT_SECRET=\"$(openssl rand -hex 32)\" \\\n    --from-literal=SIBYL_SETTINGS_KEY=\"$(openssl rand -hex 32)\"\n  helm install sibyl charts/sibyl --set backend.existingSecret=sibyl-secrets\nFor a non-production trial set backend.env.SIBYL_ENVIRONMENT=development instead, which lets the server generate a development JWT secret on its own." -}}
+{{- if and (eq $environment "production") (empty $existing) -}}
+{{- fail "backend.existingSecret is required when backend.env.SIBYL_ENVIRONMENT is \"production\".\nWithout it SIBYL_JWT_SECRET is never set, so the API signs sessions with an empty key and MCP auth disables itself (mcp_auth_mode defaults to \"auto\", which enforces Bearer auth only when a JWT secret is present).\nCreate the secret, then point the chart at it:\n  kubectl create secret generic sibyl-secrets \\\n    --from-literal=SIBYL_JWT_SECRET=\"$(openssl rand -hex 32)\" \\\n    --from-literal=SIBYL_SETTINGS_KEY=\"$(openssl rand -hex 32)\"\n  helm install sibyl charts/sibyl --set backend.existingSecret=sibyl-secrets\nSetting backend.env.SIBYL_JWT_SECRET does not satisfy this: every backend.env key is rendered into the plaintext sibyl-config ConfigMap, which is readable under broader RBAC than a Secret.\nFor a non-production trial set backend.env.SIBYL_ENVIRONMENT=development instead. The server then derives its own JWT secret per process, so sessions break on restart and across replicas, which is why that path is unfit for production." -}}
+{{- end -}}
+{{- if and (eq $environment "production") (not (empty $inlineJwt)) -}}
+{{- fail "backend.env.SIBYL_JWT_SECRET must not be used in production. Every backend.env key is rendered into the plaintext sibyl-config ConfigMap, so the signing key would be stored unencrypted and readable under broader RBAC than a Secret. Put SIBYL_JWT_SECRET in the Secret referenced by backend.existingSecret instead." -}}
 {{- end -}}
 {{- end }}

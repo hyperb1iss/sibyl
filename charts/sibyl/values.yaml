@@ -166,7 +166,9 @@ backend:
   # Must contain: SIBYL_JWT_SECRET and SIBYL_SETTINGS_KEY.
   # Add provider and LLM API keys as needed. Production and read-only containers require this.
   # Leaving this empty while env.SIBYL_ENVIRONMENT is "production" fails the render, because the
-  # backend would otherwise start with an empty JWT secret and turn MCP auth off.
+  # backend would otherwise start with an empty JWT secret and turn MCP auth off. Supplying
+  # env.SIBYL_JWT_SECRET instead also fails the render: every env key lands in a plaintext
+  # ConfigMap, so the signing key has to come from a Secret.
   existingSecret: ""
 
   # -- SurrealDB connection settings
