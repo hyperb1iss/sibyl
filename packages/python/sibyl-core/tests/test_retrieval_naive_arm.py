@@ -385,6 +385,135 @@ async def _embedded_runtime(group_id: str) -> tuple[SurrealGraphClient, Any]:
     return client, Runtime(client)
 
 
+async def _seed_private_row(
+    client: SurrealGraphClient,
+    provider: Any,
+    *,
+    group_id: str,
+    owner: str,
+) -> None:
+    """One row that answers the query perfectly and belongs to somebody else."""
+
+    embedding = (await provider.embed_texts([CORPUS_QUERY], input_kind="query"))[0]
+    await client.execute_query(
+        "INSERT INTO entity $rows;",
+        rows=[
+            {
+                "uuid": "private_to_someone_else",
+                "group_id": group_id,
+                "name": "deployment pipeline stale token",
+                "content": "The deployment pipeline stale token rotation runbook.",
+                "summary": "deployment pipeline stale token",
+                "entity_type": "session",
+                "name_embedding": list(embedding),
+                "created_at": datetime.now(UTC),
+                "attributes": {"memory_scope": "private", "principal_id": owner},
+            }
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_arm_withholds_a_row_the_reader_does_not_own(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The arm deletes ranking surface, never access control.
+
+    The withheld row is the strongest lexical and dense match in the corpus, so
+    a scope check that the arm skipped would put it at rank one rather than
+    leaving it out, and the failure would be loud rather than subtle.
+    """
+
+    client, runtime = await _embedded_runtime(f"{ORG_ID}-scope")
+    provider = _embedding_provider()
+    try:
+        await _seed_corpus(client, provider, group_id=client.group_id)
+        await _seed_private_row(
+            client,
+            provider,
+            group_id=client.group_id,
+            owner="user-somebody-else",
+        )
+
+        async def fake_runtime(_organization_id: str, **_kwargs: object) -> Any:
+            return runtime
+
+        monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+
+        stranger = await naive_search(
+            plan=_plan(query=CORPUS_QUERY, organization_id=client.group_id),
+            types=["session"],
+            limit=10,
+            embedding_provider=provider,
+        )
+        owner = await naive_search(
+            plan=build_context_retrieval_plan(
+                query=CORPUS_QUERY,
+                organization_id=client.group_id,
+                facets=[ContextFacet.RECENT_MEMORY],
+                facet_types={ContextFacet.RECENT_MEMORY: ["session"]},
+                principal_id="user-somebody-else",
+                project=None,
+                accessible_projects=None,
+                limit=10,
+            ),
+            types=["session"],
+            limit=10,
+            embedding_provider=provider,
+        )
+    finally:
+        await client.close()
+
+    assert "private_to_someone_else" not in {result.id for result in stranger.results}
+    # The owner reaching it is what proves the row was retrievable at all, so
+    # the withholding above is a scope decision rather than an empty lane.
+    assert "private_to_someone_else" in {result.id for result in owner.results}
+
+
+@pytest.mark.asyncio
+async def test_the_arm_authorizes_every_lane_before_fusion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Filtering after fusion would let a denied row displace an allowed one."""
+
+    seen: list[str] = []
+    real_allowed = search_module._candidate_allowed
+
+    def recording_allowed(candidate: Any, **kwargs: Any) -> bool:
+        seen.append(candidate.id)
+        return real_allowed(candidate, **kwargs)
+
+    client, runtime = await _embedded_runtime(f"{ORG_ID}-lane-scope")
+    provider = _embedding_provider()
+    try:
+        await _seed_corpus(client, provider, group_id=client.group_id)
+        await _seed_private_row(
+            client,
+            provider,
+            group_id=client.group_id,
+            owner="user-somebody-else",
+        )
+
+        async def fake_runtime(_organization_id: str, **_kwargs: object) -> Any:
+            return runtime
+
+        monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+        monkeypatch.setattr(naive_module, "_candidate_allowed", recording_allowed)
+
+        response = await naive_search(
+            plan=_plan(query=CORPUS_QUERY, organization_id=client.group_id),
+            types=["session"],
+            limit=10,
+            embedding_provider=provider,
+        )
+    finally:
+        await client.close()
+
+    # Every candidate any lane proposed was checked, including the denied one.
+    assert "private_to_someone_else" in seen
+    assert {result.id for result in response.results} <= set(seen)
+
+
 @pytest.mark.asyncio
 async def test_naive_arm_returns_rows_fused_from_both_lanes(
     monkeypatch: pytest.MonkeyPatch,
