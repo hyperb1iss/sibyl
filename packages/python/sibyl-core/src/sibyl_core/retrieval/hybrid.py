@@ -24,7 +24,7 @@ from sibyl_core.query_anchors import (
 )
 from sibyl_core.retrieval.fusion import rrf_merge_with_metadata
 from sibyl_core.retrieval.query_ranking import (
-    extract_keywords,
+    extract_keyword_stems,
     extract_primary_text_from_text,
     generic_assistant_marker_count,
     rank_items_by_query_coverage,
@@ -84,7 +84,12 @@ def _resolve_group_id(entity_manager: Any, group_id: str | None) -> str:
 
 
 def _extract_keywords(query: str) -> list[str]:
-    return extract_keywords(query)
+    """Stems, because the boost probes these as substrings of raw entity text.
+
+    A stem is a prefix of the forms it covers, so it reaches "restaurant" and
+    "restaurants" where the surface plural reaches neither.
+    """
+    return extract_keyword_stems(query)
 
 
 def _entity_text(entity: Any) -> str:

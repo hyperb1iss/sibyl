@@ -100,6 +100,10 @@ _STOPWORDS = {
     "year",
     "you",
 }
+# Matched both ways: as written, so an entry only silences the word it spells,
+# and by stem, so its own plural cannot slip past the entry that lists it.
+# "using" is deliberately absent from both, since it carries the use action.
+_STOPWORD_STEMS = normalize_keyword_tokens(_STOPWORDS)
 
 # Every group is written in surface English and stemmed at import, so a term
 # covers its own inflections. Irregular pasts (bought, got, went) survive
@@ -347,7 +351,7 @@ def _salient_terms(text: str) -> list[str]:
         if raw_token in _STOPWORDS:
             continue
         token = normalize_keyword_token(raw_token)
-        if token in seen or len(token) < 2:
+        if token in _STOPWORD_STEMS or token in seen or len(token) < 2:
             continue
         seen.add(token)
         terms.append(token)
