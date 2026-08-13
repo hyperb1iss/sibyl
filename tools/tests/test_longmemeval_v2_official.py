@@ -7155,3 +7155,86 @@ def test_raw_reserve_none_is_byte_identical_to_the_shipped_budget_path() -> None
     base_meta.pop("char_budget_raw_reserve")
     none_meta.pop("char_budget_raw_reserve")
     assert base_meta == none_meta
+
+
+def _load_adapter_module_for_keys() -> ModuleType:
+    return _load_module(
+        Path(__file__).parents[2] / "benchmarks" / "longmemeval_v2_memory" / "sibyl_memory.py",
+        "sibyl_memory_for_runtime_keys",
+    )
+
+
+def test_loaded_runtime_keys_stay_in_parity_with_the_adapter() -> None:
+    """The runner and the adapter each merge saved configs against their own
+    copy of LOADED_MEMORY_RUNTIME_KEYS. A key present in one copy and absent
+    from the other is silently dropped by that side's merge, which turns an
+    armed run into a baseline replica under the arm's name (the A3 traversal
+    screen failed exactly this way). The only tolerated divergence is the
+    adapter-side secret aliases the runner never produces."""
+    runner = _load_runner_module()
+    adapter = _load_adapter_module_for_keys()
+    runner_keys = set(runner.LOADED_MEMORY_RUNTIME_KEYS)
+    adapter_keys = set(adapter.LOADED_MEMORY_RUNTIME_KEYS)
+    assert runner_keys <= adapter_keys
+    assert adapter_keys - runner_keys == {"api_credentials_path", "refresh_token"}
+
+
+def test_loaded_memory_merge_threads_every_behavioral_request_key(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    memory_dir = tmp_path / "memory_state"
+    memory_dir.mkdir()
+    max_actions = 3
+    rescue_weight = 0.5
+    (memory_dir / "memory_config.json").write_text(
+        json.dumps(
+            {
+                "memory_type": "sibyl_live_api",
+                "memory_params": {
+                    "api_url": "http://127.0.0.1:3434/api",
+                    "project_id": "project_saved",
+                    "run_id": "run-saved",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    args = module.parse_args(
+        [
+            "--data-root",
+            str(tmp_path / "data"),
+            "--domain",
+            "enterprise",
+            "--output-dir",
+            str(tmp_path / "output"),
+            "--api-url",
+            "http://127.0.0.1:3434/api",
+            "--load-memory-dir",
+            str(memory_dir),
+            "--agentic-traversal",
+            "--traversal-max-actions",
+            str(max_actions),
+            "--semantic-prior-rescue-weight",
+            str(rescue_weight),
+        ]
+    )
+    params = module.build_memory_config(args)["memory_params"]
+    assert params["agentic_traversal"] is True
+    assert params["traversal_max_actions"] == max_actions
+    assert params["traversal_model"] == args.traversal_model
+    assert params["semantic_prior_rescue_weight"] == pytest.approx(rescue_weight)
+
+
+def test_loaded_memory_merge_rejects_unclassified_request_keys(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    memory_dir = tmp_path / "memory_state"
+    memory_dir.mkdir()
+    (memory_dir / "memory_config.json").write_text(
+        json.dumps({"memory_type": "sibyl_live_api", "memory_params": {"run_id": "run-saved"}}),
+        encoding="utf-8",
+    )
+    requested = {
+        "memory_type": "sibyl_live_api",
+        "memory_params": {"run_id": "run-new", "future_arm_flag": True},
+    }
+    with pytest.raises(RuntimeError, match="future_arm_flag"):
+        module.build_loaded_memory_config(memory_dir, requested_config=requested)
