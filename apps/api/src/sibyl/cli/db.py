@@ -1844,6 +1844,10 @@ def backup_create(
                 error("Job not found (may have been cleaned up)")
                 break
 
+            if status == "cancelled":
+                error("Backup job was cancelled")
+                break
+
             console.print(".", end="", style="dim")
             time.sleep(2)
 

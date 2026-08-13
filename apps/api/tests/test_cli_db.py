@@ -388,6 +388,20 @@ def test_backup_create_wait_succeeds_on_a_confirmed_archive() -> None:
     assert "Backup complete!" in result.output
 
 
+def test_backup_create_wait_stops_on_a_cancelled_job() -> None:
+    """cancelled is terminal, so polling it forever would hang the command."""
+    cancelled = {"status": "cancelled", "result": None}
+    with patch(
+        "sibyl.cli.db._api_request",
+        side_effect=[{"job_id": "job-123"}, cancelled],
+    ) as api_request:
+        result = runner.invoke(db_cli.app, ["backup-create", "--wait"])
+
+    assert result.exit_code == 1
+    assert api_request.call_count == 2
+    assert "cancelled" in result.output
+
+
 def _client_raising(status_code: int, body: object, text: str = "") -> MagicMock:
     response = MagicMock(status_code=status_code, text=text)
     if isinstance(body, Exception):
