@@ -11,8 +11,6 @@ _NORMALIZED_TOKEN_ALIASES = {
     "assembling": "assemble",
     "classes": "class",
     "engaged": "engagement",
-    "engagements": "engagement",
-    "events": "event",
     "fixed": "fix",
     "fixing": "fix",
     "presented": "present",
@@ -27,7 +25,67 @@ _NORMALIZED_TOKEN_ALIASES = {
     "subscribing": "subscription",
     "volunteered": "volunteer",
     "volunteering": "volunteer",
-    "weddings": "wedding",
+}
+# Comparatives and superlatives are the same lemma as their base adjective, and
+# no suffix rule recovers that safely: stripping "er" turns user into us and
+# other into oth. Adjectives whose base or inflections the stopword layer
+# already classifies (new, long, late, early) are deliberately absent, because
+# normalization runs before that check and would change which tokens it drops.
+# Comparatives that double as everyday nouns are absent for a different reason:
+# a lighter, a cleaner, a warmer and a closer are objects and roles, not degrees
+# of light or clean, and folding them in makes a Zippo match a garage lamp.
+# "lower" is out because it is far more often the verb. Their superlatives stay,
+# since nothing reads "lightest" or "closest" as a noun.
+_GRADED_ADJECTIVE_ALIASES = {
+    "bigger": "big",
+    "biggest": "big",
+    "cheaper": "cheap",
+    "cheapest": "cheap",
+    "cleanest": "clean",
+    "closest": "close",
+    "colder": "cold",
+    "coldest": "cold",
+    "deeper": "deep",
+    "deepest": "deep",
+    "easier": "easy",
+    "easiest": "easy",
+    "faster": "fast",
+    "fastest": "fast",
+    "harder": "hard",
+    "hardest": "hard",
+    "heavier": "heavy",
+    "heaviest": "heavy",
+    "higher": "high",
+    "highest": "high",
+    "larger": "large",
+    "largest": "large",
+    "lightest": "light",
+    "louder": "loud",
+    "loudest": "loud",
+    "lowest": "low",
+    "older": "old",
+    "oldest": "old",
+    "quicker": "quick",
+    "quickest": "quick",
+    "safer": "safe",
+    "safest": "safe",
+    "shorter": "short",
+    "shortest": "short",
+    "simpler": "simple",
+    "simplest": "simple",
+    "slower": "slow",
+    "slowest": "slow",
+    "smaller": "small",
+    "smallest": "small",
+    "stronger": "strong",
+    "strongest": "strong",
+    "warmest": "warm",
+    "weaker": "weak",
+    "weakest": "weak",
+    "wider": "wide",
+    "widest": "wide",
+    "younger": "young",
+    "youngest": "young",
 }
 _EXPLICIT_ANCHOR_PATTERN = re.compile(
     r"`(?P<backtick>[^`\n]{1,160})`"
@@ -40,8 +98,8 @@ def normalize_keyword_token(token: str) -> str:
     token = token.strip("'\"")
     if token in _NORMALIZED_TOKEN_ALIASES:
         return _NORMALIZED_TOKEN_ALIASES[token]
-    if token == "buisiness":
-        return "business"
+    if token in _GRADED_ADJECTIVE_ALIASES:
+        return _GRADED_ADJECTIVE_ALIASES[token]
     if len(token) > 4 and token.endswith("ies"):
         return f"{token[:-3]}y"
     if len(token) > 4 and token.endswith(("ches", "shes", "xes", "zes")):

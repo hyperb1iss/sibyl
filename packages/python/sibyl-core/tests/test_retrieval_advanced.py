@@ -23,7 +23,10 @@ import sibyl_core.retrieval.search as search_module
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
-from sibyl_core.query_anchors import explicit_query_anchor_proximity_score
+from sibyl_core.query_anchors import (
+    explicit_query_anchor_proximity_score,
+    keyword_tokens_from_text,
+)
 from sibyl_core.retrieval.candidates import CandidateKind, RetrievalCandidate
 from sibyl_core.retrieval.dedup import (
     DedupConfig,
@@ -93,6 +96,75 @@ def test_query_coverage_keywords_drop_answer_shape_scaffolding() -> None:
     keywords = extract_keywords("What type of rice is my favorite?")
 
     assert keywords == ["rice", "favorite"]
+
+
+def test_query_coverage_keeps_content_words_a_preference_query_asks_about() -> None:
+    """Words naming what a memory is about survive the preference focus pass."""
+    query = "Should I serve the API from the edge and watch the queue over the weekend?"
+
+    context = query_ranking_module._build_query_coverage_context(query, temporal_target=None)
+
+    assert {"serve", "watch", "weekend"} <= set(context.keywords)
+
+
+def test_query_coverage_cluster_affinity_keeps_content_words() -> None:
+    tokens = query_ranking_module._cluster_affinity_tokens(
+        {"serve", "watch", "weekend", "visit", "deploy"}
+    )
+
+    assert tokens == {"serve", "watch", "weekend", "visit", "deploy"}
+
+
+def test_query_coverage_keywords_normalize_comparatives_to_the_base_adjective() -> None:
+    """A query about something older matches evidence that says old."""
+    assert extract_keywords("How many years older is my grandma than me?") == ["old", "grandma"]
+    assert extract_keywords("Which server had the largest disk?") == [
+        "server",
+        "had",
+        "large",
+        "disk",
+    ]
+
+
+def test_query_coverage_keywords_do_not_fold_noun_homographs_into_adjectives() -> None:
+    """A lighter is an object, not a degree of light."""
+    assert extract_keywords("Which lighter did I buy?") == ["lighter", "buy"]
+    assert extract_keywords("Which cleaner did I buy?") == ["cleaner", "buy"]
+    assert extract_keywords("Which warmer did I buy?") == ["warmer", "buy"]
+    assert extract_keywords("Who was the closer in that game?") == ["closer", "game"]
+    assert extract_keywords("How did I lower the timeout?") == ["lower", "timeout"]
+    # Their superlatives carry no such reading and still normalize.
+    assert extract_keywords("Which lightest frame did I pick?") == ["light", "frame", "pick"]
+
+
+def test_query_coverage_ranks_a_lighter_above_a_light() -> None:
+    """The homograph fold used to hand rank one to a garage lamp."""
+    ranked = _rank_query_ids(
+        "Which lighter did I buy?",
+        [
+            "User: I bought a light for the garage ceiling.",
+            "User: I bought a Zippo lighter at the corner store.",
+            "User: I bought a notebook for the meeting.",
+            "User: I bought a coffee mug for the office.",
+            "User: I bought a cable for the monitor.",
+            "User: I bought a lamp shade for the hallway.",
+        ],
+    )
+
+    assert ranked[0] == "1"
+
+
+def test_query_coverage_keywords_do_not_strip_er_from_agent_nouns() -> None:
+    """The comparative table is closed: no suffix rule mangles ordinary nouns."""
+    keywords = extract_keywords("Which user reported the server error to another provider?")
+
+    assert {"user", "server", "provider"} <= set(keywords)
+
+
+def test_query_coverage_keywords_keep_free_as_content() -> None:
+    keywords = extract_keywords("Which free software license did I choose?")
+
+    assert "free" in keywords
 
 
 def test_query_coverage_preserves_explicit_anchors_outside_keyword_stopwords() -> None:
@@ -343,14 +415,6 @@ def test_query_coverage_keywords_drop_temporal_chatter() -> None:
     assert keywords == ["working", "role"]
 
 
-def test_query_coverage_keywords_normalize_common_business_typo() -> None:
-    keywords = extract_keywords(
-        "What was the significant buisiness milestone I mentioned four weeks ago?"
-    )
-
-    assert keywords == ["business", "milestone"]
-
-
 def test_query_coverage_keywords_strip_quoted_answer_terms() -> None:
     keywords = extract_keywords(
         "Which book did I finish reading first, 'The Hate U Give' or 'The Nightingale'?"
@@ -494,22 +558,6 @@ def test_query_coverage_rescues_strong_preference_tail_candidate() -> None:
     assert "5" in ranked[:5]
 
 
-def test_query_coverage_promotes_phone_accessory_evidence() -> None:
-    ranked = _rank_query_ids(
-        "Can you suggest some useful accessories for my phone?",
-        [
-            "User: I asked for advice about cat chew toys.",
-            "User: I bought gaming accessories for a PS5.",
-            "User: I asked for healthy lunch ideas.",
-            "User: I wanted outfit inspiration for white sneakers.",
-            "User: I compared smart light bulb brands.",
-            "User: I need a new screen protector for my iPhone 13 Pro.",
-        ],
-    )
-
-    assert "5" in ranked[:5]
-
-
 def test_query_coverage_preserves_sparse_preference_top_five_candidate() -> None:
     ranked = _rank_query_ids(
         "Can you recommend a show or movie for me to watch tonight?",
@@ -546,10 +594,10 @@ def test_query_coverage_preserves_temporal_top_five_candidates() -> None:
     assert "5" not in ranked[:5]
 
 
-def test_query_coverage_uses_temporal_target_with_concept_evidence() -> None:
+def test_query_coverage_uses_temporal_target_with_action_evidence() -> None:
     target = datetime(2026, 1, 10, tzinfo=UTC)
     result = rank_by_query_coverage(
-        "What kitchen appliance did I buy 10 days ago?",
+        "What power tool did I buy 10 days ago?",
         [
             QueryCoverageCandidate(
                 item="phone",
@@ -592,9 +640,9 @@ def test_query_coverage_uses_temporal_target_with_concept_evidence() -> None:
                 timestamp="2026/01/10 18:00",
             ),
             QueryCoverageCandidate(
-                item="smoker",
-                stable_id="smoker",
-                text="User: I got a smoker today and want BBQ sauce recipes.",
+                item="drill",
+                stable_id="drill",
+                text="User: I got a cordless drill today and want project ideas.",
                 prior_score=0.95,
                 original_rank=6,
                 timestamp="2026/01/10 11:00",
@@ -603,58 +651,26 @@ def test_query_coverage_uses_temporal_target_with_concept_evidence() -> None:
         temporal_target=target,
     )
 
-    assert "smoker" in [candidate.stable_id for candidate in result.ranked[:5]]
+    assert "drill" in [candidate.stable_id for candidate in result.ranked[:5]]
 
 
 def test_query_coverage_promotes_brand_lookup_evidence() -> None:
     ranked = _rank_query_ids(
-        "What brand of shampoo do I currently use?",
+        "What brand of keyboard do I currently use?",
         [
-            "User: I bought skincare products from Sephora for dry skin.",
+            "User: I compared standing desk risers for the home office.",
             "User: I washed running socks after a workout.",
-            "User: I organized my bathroom cleaning schedule.",
-            "User: I compared hair dryers and towels.",
-            "User: I asked for generic hair care tips.",
-            "User: I've been using a lavender scented shampoo that I picked up at Trader Joe's.",
+            "User: I organized my office cleaning schedule.",
+            "User: I compared monitor arms and cable trays.",
+            "User: I asked for generic desk setup tips.",
+            "User: I've been using a mechanical keyboard that I picked up at the outlet store.",
         ],
     )
 
-    assert "5" in ranked[:5]
+    assert ranked[0] == "5"
 
 
-def test_query_coverage_promotes_sibling_count_evidence_set() -> None:
-    ranked = _rank_query_ids(
-        "What is the total number of siblings I have?",
-        [
-            "User: I read demographic tables about age groups.",
-            "User: I asked about area calculations for a circular shield.",
-            "User: I researched professional network gender dynamics.",
-            "User: I come from a family with 3 sisters.",
-            "User: I have a brother who influences my social circle.",
-            "User: I compared book club participation by age.",
-        ],
-    )
-
-    assert {"3", "4"} <= set(ranked[:5])
-
-
-def test_query_coverage_promotes_age_arithmetic_evidence_set() -> None:
-    ranked = _rank_query_ids(
-        "How many years older am I than when I graduated from college?",
-        [
-            "User: I planned a graduation ceremony for a colleague's daughter.",
-            "User: I asked about online marketing courses.",
-            "User: I have a Bachelor's degree that I completed at the age of 25.",
-            "User: As a 32-year-old Digital Marketing Specialist, I want to advance.",
-            "User: I saved notes about certification providers.",
-            "User: I organized old photos from my grandma's album.",
-        ],
-    )
-
-    assert {"2", "3"} <= set(ranked[:5])
-
-
-def test_query_coverage_promotes_personal_sports_event_with_temporal_target() -> None:
+def test_query_coverage_promotes_personal_event_with_temporal_target() -> None:
     target = datetime(2023, 6, 17, tzinfo=UTC)
     result = rank_by_query_coverage(
         "I mentioned participating in a sports event two weeks ago. What was the event?",
@@ -800,78 +816,6 @@ def test_query_coverage_penalizes_assistant_only_memory_matches() -> None:
     assert ranked.index("4") < ranked.index("5")
 
 
-def test_query_coverage_treats_generic_events_as_weak_sports_evidence() -> None:
-    result = rank_by_query_coverage(
-        "What is the order of the three sports events I participated in?",
-        [
-            QueryCoverageCandidate(
-                item="generic",
-                stable_id="generic",
-                text="User: Can you suggest family-friendly events for kids to attend?",
-                prior_score=1.0,
-                original_rank=1,
-            ),
-            QueryCoverageCandidate(
-                item="run",
-                stable_id="run",
-                text="User: I just finished a 5K run with a personal best time.",
-                prior_score=0.99,
-                original_rank=2,
-            ),
-        ],
-    )
-    overlap_by_id = {candidate.stable_id: candidate.overlap for candidate in result.ranked}
-
-    assert overlap_by_id["generic"] < overlap_by_id["run"]
-
-
-def test_query_coverage_promotes_business_milestone_evidence() -> None:
-    ranked = _rank_query_ids(
-        "What was the significant business milestone I mentioned four weeks ago?",
-        [
-            "User: I organized my task list and project notes.",
-            "User: I read articles about European politics.",
-            "User: I launched my website and created a business plan outline.",
-            "User: I asked about indoor plants.",
-            "User: I signed a contract with my first freelance client today.",
-        ],
-    )
-
-    assert {"2", "4"} <= set(ranked[:5])
-
-
-def test_query_coverage_promotes_business_milestone_with_common_typo() -> None:
-    ranked = _rank_query_ids(
-        "What was the significant buisiness milestone I mentioned four weeks ago?",
-        [
-            "User: My supervisor Rachel helped me settle into my new role.",
-            "User: I read articles about European politics.",
-            "User: I just launched my website and created a business plan outline.",
-            "User: Which industries in Ibadan are growing fastest?",
-            "User: I just signed a contract with my first freelance client today.",
-        ],
-    )
-
-    assert {"2", "4"} <= set(ranked[:5])
-
-
-def test_query_coverage_keeps_specific_social_activity_evidence() -> None:
-    ranked = _rank_query_ids(
-        "Which event happened first, my participation in the #PlankChallenge "
-        "or my post about vegan chili recipe?",
-        [
-            "User: I posted photos from a racing event on Instagram.",
-            "User: I shared a vegan chili recipe using #FoodieAdventures.",
-            "User: I participated in a social media challenge called #PlankChallenge.",
-            "User: I asked for sourdough recipe headings.",
-            "User: I planned vegetarian protein meals.",
-            "User: I watched a new TV show.",
-        ],
-    )
-
-    assert {"1", "2"} <= set(ranked[:5])
-
-
 def test_query_coverage_promotes_assistant_created_artifact_sections() -> None:
     ranked = _rank_query_ids(
         "Can you remind me what the chord progression was for the chorus "
@@ -901,14 +845,14 @@ def test_query_coverage_completes_evidence_sets_over_low_signal_distractors() ->
             "User: I organized a weekly calendar for household chores.",
             "User: I watched a science fiction show with a doctor character.",
             "User: I compared health insurance websites.",
-            "User: I visited Dr. Smith for a therapy appointment.",
+            "User: I visited a doctor for a therapy appointment.",
+            "User: I saw a second doctor for a skin check.",
             "User: I read an article about hospital architecture.",
-            "User: I saw my dermatologist for a skin check.",
-            "User: I went to the eye doctor for a new prescription.",
+            "User: I went to a third doctor for a new prescription.",
         ],
     )
 
-    assert {"3", "5", "6"} <= set(ranked[:5])
+    assert {"3", "4", "6"} <= set(ranked[:5])
 
 
 def test_query_coverage_keeps_strong_aggregate_evidence_window_stable() -> None:
@@ -950,7 +894,7 @@ def test_query_coverage_promotes_service_action_evidence() -> None:
     ranked = _rank_query_ids(
         "How many different services did I order, rely on, or subscribe to?",
         [
-            "User: I cooked dinner with basil from the garden.",
+            "User: I sorted the pantry shelves on Saturday.",
             "User: I compared grocery budgets for the week.",
             "User: I asked for restaurant recommendations downtown.",
             "User: I made a meal plan for Sunday.",
@@ -968,7 +912,7 @@ def test_query_coverage_promotes_reliance_evidence() -> None:
     ranked = _rank_query_ids(
         "Which service have I been relying on when meetings run late?",
         [
-            "User: I cooked dinner with basil from the garden.",
+            "User: I sorted the pantry shelves on Saturday.",
             "User: I compared grocery budgets for the week.",
             "User: I asked for restaurant recommendations downtown.",
             "User: I made a meal plan for Sunday.",
@@ -1000,7 +944,7 @@ def test_query_coverage_promotes_object_action_evidence() -> None:
 
 def test_query_coverage_promotes_repair_action_evidence() -> None:
     ranked = _rank_query_ids(
-        "Which item did I fix after dinner?",
+        "Which household item did I fix?",
         [
             "User: I bought new screws for a kitchen drawer.",
             "User: I read a moving checklist for renters.",
@@ -1016,24 +960,75 @@ def test_query_coverage_promotes_repair_action_evidence() -> None:
     assert "7" in ranked[:5]
 
 
+def test_action_evidence_does_not_equate_presenting_with_volunteering() -> None:
+    """Distinct verbs stay distinct: only the benchmark grouped them together."""
+    present_query = "What did I present at the conference?"
+    volunteer_query = "Where did I volunteer last month?"
+
+    assert query_ranking_module._action_evidence_score(present_query, {"present", "slide"}) == 1.0
+    assert (
+        query_ranking_module._action_evidence_score(present_query, {"volunteer", "shelter"}) == 0.0
+    )
+    assert (
+        query_ranking_module._action_evidence_score(volunteer_query, {"volunteer", "shelter"})
+        == 1.0
+    )
+    assert query_ranking_module._action_evidence_score(volunteer_query, {"present", "slide"}) == 0.0
+
+
+def test_recurring_frequency_frame_needs_a_cadence_in_the_evidence() -> None:
+    """The kept frequency frame scores cadence language and nothing else."""
+    query = "How often do I run the offsite backup?"
+    query_terms = set(extract_keywords(query))
+
+    def frame_score(text: str) -> float:
+        tokens = set(keyword_tokens_from_text(text))
+        return query_ranking_module._query_frame_score(
+            query,
+            query_terms,
+            token_set=tokens,
+            primary_token_set=tokens,
+            memory_token_set=set(),
+            primary_text=text,
+            memory_text="",
+        )
+
+    assert frame_score("i run the offsite backup every two weeks.") == 0.82
+    assert frame_score("i run the offsite backup from the storage host.") == 0.0
+
+
+def test_fact_frames_do_not_equate_presenting_with_volunteering() -> None:
+    """The same split has to hold on the frame path, which weights into ranking."""
+    present_query = "What did I present at the conference?"
+    volunteer_query = "Where did I volunteer last month?"
+    present_evidence = "User: I presented the slides at the conference."
+    volunteer_evidence = "User: I volunteered at the shelter."
+
+    assert score_fact_frame_match(present_query, volunteer_evidence) < 0.1
+    assert score_fact_frame_match(volunteer_query, present_evidence) < 0.1
+    assert score_fact_frame_match(present_query, present_evidence) >= 0.5
+    assert score_fact_frame_match(volunteer_query, volunteer_evidence) >= 0.4
+
+
 def test_query_coverage_promotes_recurring_frequency() -> None:
+    """Every candidate shares the query's vocabulary, so only the cadence separates them."""
     ranked = _rank_query_ids(
-        "How often do I attend classes to help with my anxiety?",
+        "How often do I run the offsite backup?",
         [
-            "User: I asked about anxiety breathing exercises.",
-            "User: I read about class scheduling software.",
-            "User: I planned weekend errands around the gym.",
-            "User: I compared meditation apps.",
-            "User: I saved an article about sleep routines.",
-            "User: I attend classes twice a week to help with anxiety.",
+            "User: I run the offsite backup from the storage host.",
+            "User: I documented the offsite backup restore path.",
+            "User: I checked the offsite backup retention policy.",
+            "User: I reviewed the offsite backup encryption keys.",
+            "User: I priced the offsite backup storage tier.",
+            "User: I run the offsite backup every two weeks.",
         ],
     )
 
-    assert "5" in ranked[:5]
+    assert "5" in ranked[:3]
 
 
 def test_fact_frames_extract_generic_service_usage() -> None:
-    query_frames = extract_query_fact_frames("What audio app have I been using lately?")
+    query_frames = extract_query_fact_frames("What service have I been using lately?")
     evidence_frames = extract_evidence_fact_frames(
         "User: I've been listening to history podcasts through Pocket Casts lately."
     )
@@ -1042,7 +1037,7 @@ def test_fact_frames_extract_generic_service_usage() -> None:
     assert any({"service", "media"} <= frame.categories for frame in evidence_frames)
     assert (
         score_fact_frame_match(
-            "What audio app have I been using lately?",
+            "What service have I been using lately?",
             "User: I've been listening to history podcasts through Pocket Casts lately.",
         )
         >= 0.8
@@ -1083,18 +1078,23 @@ def test_fact_frames_ignore_calendar_prepositions_as_services() -> None:
 
 
 def test_query_coverage_uses_fact_frames_for_service_usage() -> None:
+    query = "Which streaming service have I been using lately?"
+    answer = "User: I've been listening to history podcasts through Pocket Casts lately."
     ranked = _rank_query_ids(
-        "What audio app have I been using lately?",
+        query,
         [
             "User: I compared Bluetooth speakers for my desk.",
             "User: I read a forum thread about phone app permissions.",
             "User: I asked for podcast microphone recommendations.",
             "User: I updated a playlist for a road trip.",
             "User: I organized my notes about local concerts.",
-            "User: I've been listening to history podcasts through Pocket Casts lately.",
+            answer,
         ],
     )
 
+    # No keyword the query and the answer share: the frame match is what promotes it.
+    assert not set(extract_keywords(query)) & set(keyword_tokens_from_text(answer))
+    assert score_fact_frame_match(query, answer) >= 0.8
     assert "5" in ranked[:5]
 
 
@@ -1130,25 +1130,9 @@ def test_query_coverage_blends_fact_frames_into_recommendation_ranking() -> None
     assert "5" in ranked[:5]
 
 
-def test_query_coverage_uses_fact_frames_for_relative_life_event() -> None:
-    ranked = _rank_query_ids(
-        "Which life event for a relative did I attend?",
-        [
-            "User: I compared train routes for a spring trip.",
-            "User: I helped a friend choose a birthday gift.",
-            "User: I read about family history archives.",
-            "User: I planned a work dinner downtown.",
-            "User: I watched a documentary about graduation traditions.",
-            "User: I came back from my aunt's graduation ceremony.",
-        ],
-    )
-
-    assert "5" in ranked[:5]
-
-
 def test_query_coverage_uses_fact_frames_for_profile_recommendations() -> None:
     ranked = _rank_query_ids(
-        "Can you recommend publications or conferences I might find interesting?",
+        "Can you recommend reading for my research field?",
         [
             "User: I asked for science fiction reading recommendations.",
             "User: I saved a generic essay about higher education.",
@@ -3246,53 +3230,11 @@ class TestHybridSearch:
         assert "answer" in [entity.id for entity in result.entities]
         assert result.metadata["query_coverage_rerank_applied"] is True
 
-    @pytest.mark.asyncio
-    async def test_hybrid_search_query_coverage_uses_product_domain_aliases(
-        self,
-    ) -> None:
-        client = MockGraphClientForHybrid()
-        manager = MockEntityManagerForHybrid()
-
-        generic = make_entity_for_test(
-            "generic",
-            description="User: I saved a general app organization note.",
-        )
-        answer = make_entity_for_test(
-            "answer",
-            description=(
-                "User: I keep my portable power bank and wireless charging pad in a travel pouch."
-            ),
-        )
-        tail = [
-            make_entity_for_test(f"tail-{index}", description="User: unrelated note.")
-            for index in range(8)
-        ]
-        manager.search_results = [
-            (generic, 1.0),
-            (answer, 0.99),
-            *[(entity, 0.8 - (index * 0.01)) for index, entity in enumerate(tail)],
-        ]
-
-        result = await hybrid_search(
-            "Any tips for better phone battery life?",
-            client,  # type: ignore[arg-type]
-            manager,  # type: ignore[arg-type]
-            limit=5,
-            config=HybridConfig(
-                graph_weight=0,
-                apply_temporal=False,
-                apply_keyword_boost=False,
-            ),
-        )
-
-        assert result.entities[0].id == "answer"
-        assert result.metadata["query_coverage_rerank_applied"] is True
-
     def test_hybrid_search_primary_text_ignores_assistant_turn_answers(self) -> None:
         entity = make_entity_for_test(
             "assistant-answer",
             description=(
-                "User: I need generic cleaning advice. Assistant: I avoid lavender "
+                "User: I need generic cleaning advice. Assistant: I avoid scented "
                 "laundry detergent on towels."
             ),
         )
@@ -3300,14 +3242,14 @@ class TestHybridSearch:
         primary_text = hybrid_module._entity_primary_text(entity)
 
         assert "generic cleaning advice" in primary_text
-        assert "lavender laundry detergent" not in primary_text
+        assert "scented laundry detergent" not in primary_text
 
     def test_hybrid_search_plain_text_is_not_primary_scoped(self) -> None:
         primary_text, has_primary_text = hybrid_module._extract_primary_text_from_text(
-            "plain memory about lavender laundry detergent"
+            "plain memory about scented laundry detergent"
         )
 
-        assert primary_text == "plain memory about lavender laundry detergent"
+        assert primary_text == "plain memory about scented laundry detergent"
         assert has_primary_text is False
 
     @pytest.mark.asyncio

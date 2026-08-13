@@ -3097,8 +3097,8 @@ def test_context_query_coverage_reranks_through_shared_core(
     strong = RetrievalCandidate(
         id="strong",
         type="session",
-        name="Homegrown tomato basil dinner",
-        content="User: my homegrown tomato and basil dinner recipe was a hit.",
+        name="Quarterly billing migration notes",
+        content="User: my quarterly billing migration notes covered the rollout.",
         score=1.0,
         source=None,
         metadata={},
@@ -3115,12 +3115,12 @@ def test_context_query_coverage_reranks_through_shared_core(
     fused = [_fused_entry(weak, 0.9), _fused_entry(strong, 0.8)]
 
     reranked = search_module._apply_query_coverage_to_fused(
-        "what homegrown tomato basil dinner recipe did I make",
+        "what quarterly billing migration notes did I write",
         fused,
         temporal_target=None,
     )
 
-    assert calls == ["what homegrown tomato basil dinner recipe did I make"]
+    assert calls == ["what quarterly billing migration notes did I write"]
     assert reranked[0][0].id == "strong"
     # Fusion metadata is preserved through the rerank for each candidate.
     assert {candidate.id for candidate, _score, _meta in reranked} == {"strong", "weak"}
@@ -3306,13 +3306,13 @@ def test_hybrid_query_coverage_rerank_matches_direct_core_call() -> None:
         (
             {
                 "id": "strong",
-                "name": "Homegrown tomato basil dinner",
-                "content": "User: my homegrown tomato and basil dinner recipe was a hit.",
+                "name": "Quarterly billing migration notes",
+                "content": "User: my quarterly billing migration notes covered the rollout.",
             },
             0.8,
         ),
     ]
-    query = "what homegrown tomato basil dinner recipe did I make"
+    query = "what quarterly billing migration notes did I write"
 
     via_helper = hybrid_module._apply_query_coverage_rerank(query, list(results))
     via_core = query_ranking_module.rank_items_by_query_coverage(
@@ -3345,8 +3345,8 @@ def test_query_coverage_refinement_reuses_candidate_text() -> None:
         (
             {
                 "id": "strong",
-                "name": "Homegrown tomato basil dinner",
-                "content": "User: my homegrown tomato and basil dinner recipe was a hit.",
+                "name": "Quarterly billing migration notes",
+                "content": "User: my quarterly billing migration notes covered the rollout.",
             },
             0.8,
         ),
@@ -3358,7 +3358,7 @@ def test_query_coverage_refinement_reuses_candidate_text() -> None:
         return hybrid_module._entity_text(item)
 
     query_ranking_module.rank_items_by_query_coverage(
-        "what homegrown tomato basil dinner recipe did I make",
+        "what quarterly billing migration notes did I write",
         list(results),
         text_fn=text_fn,
         id_fn=hybrid_module._entity_id,
