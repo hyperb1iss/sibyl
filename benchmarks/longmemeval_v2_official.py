@@ -89,6 +89,16 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "retrieval_max_planned_queries",
         "knn_type_overfetch",
         "checkpoint_dir",
+        "semantic_prior_rescue_weight",
+        "typed_pool",
+        "agentic_traversal",
+        "traversal_widening_rounds",
+        "traversal_model",
+        "traversal_max_actions",
+        "traversal_followup_searches",
+        "traversal_deadline_seconds",
+        "traversal_overflow_items",
+        "traversal_search_limit",
     }
 )
 QWEN_READER_MODEL_FRAGMENT = "qwen3.5-9b"
@@ -793,6 +803,30 @@ def install_memory_credentials(args: argparse.Namespace) -> None:
             os.environ[environment_key] = value
 
 
+# Requested keys deliberately NOT merged into a loaded memory config: ingest
+# identity is pinned by the saved corpus, and transport/provenance describe
+# this run, not retrieval behavior. Every other requested key MUST be in
+# LOADED_MEMORY_RUNTIME_KEYS or the merge below would silently drop it (the
+# arm-off-under-the-arm's-name failure mode).
+LOADED_MEMORY_NON_MERGED_KEYS = frozenset(
+    {
+        "api_url",
+        "project_id",
+        "run_id",
+        "reuse_existing_project",
+        "content_max_chars",
+        "chunking_mode",
+        "include_screenshot_refs",
+        "defer_embeddings",
+        "bulk_max_entities",
+        "bulk_max_content_chars",
+        "embedding_backfill_max_pending_jobs",
+        "embedding_job_wait_timeout_seconds",
+        "runner_provenance",
+    }
+)
+
+
 def build_loaded_memory_config(
     memory_dir: Path,
     *,
@@ -807,6 +841,14 @@ def build_loaded_memory_config(
     requested_params = requested_config.get("memory_params")
     if not isinstance(saved_params, dict) or not isinstance(requested_params, dict):
         msg = f"Saved or requested memory config is missing memory_params: {saved_path}"
+        raise RuntimeError(msg)
+    dropped = set(requested_params) - LOADED_MEMORY_RUNTIME_KEYS - LOADED_MEMORY_NON_MERGED_KEYS
+    if dropped:
+        msg = (
+            "loaded-memory merge would silently drop requested keys "
+            f"{sorted(dropped)}; classify them in LOADED_MEMORY_RUNTIME_KEYS "
+            "or LOADED_MEMORY_NON_MERGED_KEYS"
+        )
         raise RuntimeError(msg)
     effective_params = dict(saved_params)
     effective_params.update(

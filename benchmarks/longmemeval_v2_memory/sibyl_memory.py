@@ -233,6 +233,11 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "traversal_search_limit",
         "semantic_prior_rescue_weight",
         "typed_pool",
+        "typed_stream_retrieval",
+        "typed_stream_limit",
+        "note_distillation",
+        "note_distillation_model",
+        "typed_reservation_items",
     }
 )
 SAVED_MEMORY_IDENTITY_KEYS = frozenset(
