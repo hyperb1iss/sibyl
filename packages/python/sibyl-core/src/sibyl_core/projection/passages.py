@@ -586,25 +586,35 @@ async def _retire_passages_except(
     ``{0, 1, 3, 4}`` is not the same as one that wrote four contiguous spans, and
     counting would delete index 4, the span that had just been minted.
 
-    The walk stops once it is past every kept index and has found an absence,
-    which is where any previous run must have ended.
+    The walk does not stop at the first absence, and one failed delete does not
+    end it. An absence is not the end of the run: the oversize-leaf branch skips
+    an index it cannot store, so a hole sits between live spans, and a sweep that
+    read the hole as the end would leave every span past it serving the previous
+    revision's text under a current id. On the delete path there are no kept
+    indices at all, so index 0 being a hole would strand the whole set. Sweeping
+    the full range costs deletes that find nothing on a short memory, which is
+    the same trade ``restamp_entity_passage_scope`` already makes for the same
+    reason, and it is bounded by ``MAX_PASSAGES_PER_SOURCE``.
     """
     delete = getattr(entity_manager, "delete", None)
     if not callable(delete):
         return 0
-    highest_kept = max(kept_indices, default=-1)
     retired = 0
     for index in range(MAX_PASSAGES_PER_SOURCE):
         if index in kept_indices:
             continue
         try:
             removed = await delete(passage_entity_id(source_id, index))
-        except Exception:
-            break
+        except Exception as exc:
+            log.warning(
+                "passage_retire_delete_failed",
+                source_id=source_id,
+                passage_index=index,
+                error_type=type(exc).__name__,
+            )
+            continue
         if removed:
             retired += 1
-        elif index > highest_kept:
-            break
     return retired
 
 

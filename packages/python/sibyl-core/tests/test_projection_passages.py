@@ -461,6 +461,65 @@ async def test_deleting_a_memory_retires_every_span_cut_from_it() -> None:
 
 
 @pytest.mark.asyncio
+async def test_deleting_a_memory_retires_spans_sitting_past_a_hole() -> None:
+    """The deleted memory's text must stop being served even when index 0 is absent.
+
+    An unbreakable oversize line is emitted as a slice and then skipped, so a
+    previous projection can leave the run starting at 1. A sweep that reads the
+    absence at 0 as the end of the run deletes nothing at all, and every span of
+    the deleted memory keeps answering searches under a current id.
+    """
+    entity_manager = _ReprojectEntityManager(existing_indices={1, 2, 3})
+
+    retired = await retire_entity_passages(
+        entity_manager=entity_manager,
+        source_id=_SOURCE_ID,
+    )
+
+    assert retired == 3
+    assert entity_manager.existing == set()
+
+
+@pytest.mark.asyncio
+async def test_reprojection_retires_stale_spans_sitting_past_a_hole() -> None:
+    """A body too short to project must still take its old spans down with it."""
+    entity_manager = _ReprojectEntityManager(existing_indices={1, 2})
+    relationship_manager = _RecordingRelationshipManager()
+
+    result = await reproject_entity_passages(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        source=_source(content="a short body now"),
+        group_id=_GROUP,
+        created_source_id=_SOURCE_ID,
+    )
+
+    assert result.passages == 0
+    assert entity_manager.existing == set()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_delete_does_not_strand_the_rest_of_the_sweep() -> None:
+    """One transport blip must not leave later spans serving a deleted memory."""
+
+    class _FlakyEntityManager(_ReprojectEntityManager):
+        async def delete(self, entity_id: str) -> bool:
+            if entity_id == passage_entity_id(_SOURCE_ID, 1):
+                raise RuntimeError("transport blip")
+            return await super().delete(entity_id)
+
+    entity_manager = _FlakyEntityManager(existing_indices={0, 1, 2})
+
+    retired = await retire_entity_passages(
+        entity_manager=entity_manager,
+        source_id=_SOURCE_ID,
+    )
+
+    assert retired == 2
+    assert entity_manager.existing == {1}
+
+
+@pytest.mark.asyncio
 async def test_retiring_a_memory_that_never_had_spans_is_a_no_op() -> None:
     entity_manager = _ReprojectEntityManager(existing_indices=set())
 
