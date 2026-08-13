@@ -938,3 +938,49 @@ async def test_an_untruncated_check_carries_no_truncation_receipt(
     )
 
     assert "truncated" not in metadata["supersession_gate"]
+
+
+def test_an_active_state_never_rescues_a_flagged_or_genuinely_duplicate_row() -> None:
+    """The ACTIVE carve-out has to be narrow, because ACTIVE is a common state.
+
+    `_LEGACY_LIFECYCLE_STATES` maps hidden, redacted, and sensitive to ACTIVE
+    and carries the verdict in the flags instead, while a real mark_duplicate
+    correction maps to CONTESTED. So the carve-out can only ever reach a row
+    that no correction touched.
+    """
+
+    for flag in ("hidden", "redacted", "sensitive"):
+        assert (
+            graph_metadata_recallable(
+                {
+                    "lifecycle_state": "active",
+                    "lifecycle_flags": [flag],
+                    "duplicate_of_source_id": "raw_memory:prior",
+                }
+            )
+            is False
+        )
+
+    assert (
+        graph_metadata_recallable(
+            {
+                "lifecycle_state": "contested",
+                "lifecycle_action": "mark_duplicate",
+                "duplicate_of_source_id": "raw_memory:prior",
+            }
+        )
+        is False
+    )
+
+    # And a correction always stamps the explicit flag alongside the state, so
+    # even an ACTIVE row it excluded stays excluded.
+    assert (
+        graph_metadata_recallable(
+            {
+                "lifecycle_state": "active",
+                "excluded_from_recall": True,
+                "duplicate_of_source_id": "raw_memory:prior",
+            }
+        )
+        is False
+    )
