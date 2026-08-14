@@ -64,7 +64,7 @@ from sibyl.persistence.content_runtime import (
 )
 from sibyl_core.auth import AuthOrganization, MemoryPolicyContext, OrganizationRole, ProjectRole
 from sibyl_core.auth.memory_policy import (
-    MEMORY_OWNER_METADATA_KEYS,
+    SERVER_OWNED_METADATA_KEYS,
     authorize_memory_read,
     memory_metadata_read_allowed,
     private_scope_granted_for,
@@ -2500,7 +2500,11 @@ async def update_entity(
             if update.metadata is not None:
                 # Merge metadata, keeping the stored owner channels: reassigning
                 # them would hand the row to a different principal or project.
-                # The structure keys go the same way, so a forwarded body cannot
+                # Capture provenance is kept for the same reason, because the
+                # correction write-through retires rows by querying it, so a
+                # patch that could rewrite it could nominate this row to be
+                # retired later by a correction on an unrelated capture. The
+                # structure keys go the same way, so a forwarded body cannot
                 # plant a plan the server never validated.
                 existing_meta = getattr(existing, "metadata", {}) or {}
                 update_data["metadata"] = {
@@ -2508,7 +2512,7 @@ async def update_entity(
                     **{
                         key: value
                         for key, value in strip_structure_metadata(update.metadata).items()
-                        if key not in MEMORY_OWNER_METADATA_KEYS
+                        if key not in SERVER_OWNED_METADATA_KEYS
                     },
                 }
 

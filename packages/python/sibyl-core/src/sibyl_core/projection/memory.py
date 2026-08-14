@@ -14,6 +14,11 @@ import structlog
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.memory_extraction import ExtractedMemoryEntity
+from sibyl_core.projection.inheritance import (
+    LIFECYCLE_METADATA_KEYS,
+    parent_lifecycle_as_stored,
+)
+from sibyl_core.projection.reconcile import reconcile_with_parent
 from sibyl_core.retrieval.dedup import DedupConfig, EntityDeduplicator
 from sibyl_core.retrieval.fact_frames import FactFrame, extract_evidence_fact_frames
 from sibyl_core.tools.helpers import _generate_id
@@ -350,7 +355,15 @@ async def project_memory_entities(
         if not _projection_allowed(source):
             skipped += 1
             continue
-        projected_source = source.model_copy(update={"id": source_id})
+        # The parent's lifecycle is read back rather than taken from the
+        # caller's copy, because a correction can land between the parent
+        # write and this one: it stamps the parent, finds no derived rows
+        # because none exist yet, and returns.
+        projected_source = await parent_lifecycle_as_stored(
+            entity_manager,
+            source.model_copy(update={"id": source_id}),
+            source_id=source_id,
+        )
         extracted = extract_projected_memory_entities(
             projected_source,
             max_entities=max_entities,
@@ -425,7 +438,15 @@ async def project_extracted_memory_entities(
         if source.entity_type not in PROJECTABLE_ENTITY_TYPES:
             skipped += 1
             continue
-        projected_source = source.model_copy(update={"id": source_id})
+        # The parent's lifecycle is read back rather than taken from the
+        # caller's copy, because a correction can land between the parent
+        # write and this one: it stamps the parent, finds no derived rows
+        # because none exist yet, and returns.
+        projected_source = await parent_lifecycle_as_stored(
+            entity_manager,
+            source.model_copy(update={"id": source_id}),
+            source_id=source_id,
+        )
         extracted = _projected_from_extracted_entities(
             extractions_by_source_id.get(source_id, ()),
             source=projected_source,
@@ -515,6 +536,29 @@ async def _persist_projection_batch(
         source_id: tuple(link.entity_id for link in links)
         for source_id, links in resolved_links_by_source_id.items()
     }
+
+    # The parent can be corrected while these rows are being written, and that
+    # interval is the one no pre-write read reaches: the correction's cascade
+    # runs before the rows exist, finds nothing, and the stale rows commit
+    # behind it. The stamp each row was built with is compared against the
+    # parent as it stands now, and the rows are restamped if it moved.
+    for source_id, row_ids in resolved_entity_ids_by_source_id.items():
+        if not row_ids:
+            continue
+        reconciled = await reconcile_with_parent(
+            entity_manager,
+            source_id=source_id,
+            row_ids=row_ids,
+        )
+        if reconciled.changed:
+            log.warning(
+                "memory_projection_lifecycle_reconciled",
+                source_id=source_id,
+                rows=list(row_ids),
+                restamped=reconciled.restamped,
+                unverified=reconciled.unverified,
+                cleared=reconciled.cleared,
+            )
     relationship_count = 0
     created_projection_relationships: tuple[Relationship, ...] = ()
     if relationships:
@@ -1190,10 +1234,18 @@ def _valid_fact_span(span: str) -> bool:
 
 
 def _inherited_scope_metadata(source: Entity) -> dict[str, object]:
+    """Carry the parent's scope and lifecycle onto every row derived from it.
+
+    A projected entity copies the parent's candidate context and a projected
+    fact copies its span, so each is an independently servable copy of part of
+    a memory. One that reads as active after its parent was retired serves the
+    retired text under an id the retirement never named, exactly as a span
+    would.
+    """
     metadata = dict(source.metadata or {})
     return {
         key: metadata[key]
-        for key in _SCOPE_METADATA_KEYS
+        for key in (*_SCOPE_METADATA_KEYS, *LIFECYCLE_METADATA_KEYS)
         if key in metadata and metadata[key] is not None
     }
 

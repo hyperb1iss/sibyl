@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import asdict, replace
 from typing import Any
 
@@ -15,6 +15,10 @@ from sibyl_core.auth.memory_policy import (
     private_scope_granted_for,
 )
 from sibyl_core.embeddings.providers import configured_embedding_provider
+from sibyl_core.memory_pipeline.lifecycle import (
+    GRAPH_RECALL_EXCLUSION_KEYS,
+    graph_metadata_recallable,
+)
 from sibyl_core.models.context import (
     ContextFacet,
     ContextIntent,
@@ -482,6 +486,12 @@ async def _default_related_items(
             if entity_project is not None and entity_project not in accessible_projects:
                 continue
 
+        # Related items ride along inside an admitted item rather than as
+        # section items of their own, so the admission filter never sees them.
+        # A retired neighbour would otherwise reach the reader as the body of
+        # somebody else's row.
+        if not graph_metadata_recallable(getattr(entity, "metadata", None)):
+            continue
         related.append(
             ContextRelatedItem(
                 id=str(entity.id),
@@ -555,6 +565,14 @@ async def _default_related_items_batch(
                 if entity_project is not None and entity_project not in accessible_projects:
                     continue
 
+            # The same gate the singular lane runs, for the same reason: related
+            # items ride inside an admitted item, so the admission filter never
+            # sees them. `compile_context` picks this batch lane whenever the
+            # default related function is in play, which makes it the lane
+            # production actually reads through.
+            if not graph_metadata_recallable(getattr(entity, "metadata", None)):
+                continue
+
             source_id = str(getattr(relationship, "source_id", ""))
             support_content = _related_source_content(
                 entity,
@@ -621,7 +639,9 @@ _ITEM_METADATA_KEYS = (
     "principal_id",
     "scope_key",
     "redacted",
+    "excluded_from_recall",
     "superseded_by_source_id",
+    "superseded_by_raw_memory_id",
     "duplicate_of_source_id",
     "unresolved_claims",
     "supported",
@@ -743,6 +763,24 @@ def _lineage_rank(item: ContextItem) -> tuple[int, float]:
             return (-1, -item.score)
     type_rank = _LINEAGE_TYPE_RANK.get(item_type, _LINEAGE_DEFAULT_RANK)
     return (type_rank, -item.score)
+
+
+def _drop_retired_items(sections: list[ContextSection]) -> list[ContextSection]:
+    """Refuse admission to any row a correction retired.
+
+    The native lane gates its own candidates, but a pack also admits rows the
+    gate never saw: the active-work lookup and the legacy fallback search both
+    reach a section directly. Running ahead of selection rather than after it
+    is what keeps a retired row from spending one of the pack's limited slots
+    and shrinking the answer on its way out.
+    """
+
+    kept: list[ContextSection] = []
+    for section in sections:
+        items = [item for item in section.items if graph_metadata_recallable(item.metadata)]
+        if items:
+            kept.append(replace(section, items=items))
+    return kept
 
 
 def _dedupe_lineage(sections: list[ContextSection]) -> list[ContextSection]:
@@ -1342,12 +1380,31 @@ def _sections_from_response(
     ]
 
 
+_LIFECYCLE_ADMISSION_KEYS = (
+    "lifecycle_state",
+    "lifecycle_flags",
+    "review_state",
+    *GRAPH_RECALL_EXCLUSION_KEYS,
+)
 _ACTIVE_WORK_LOOKUP_STATUSES = "doing,blocked,review"
 _ACTIVE_WORK_LOOKUP_LIMIT = 5
 
 
 def _enum_value(value: Any) -> str:
     return str(getattr(value, "value", value))
+
+
+def _lifecycle_metadata(metadata: Any) -> dict[str, Any]:
+    """Project just the fields admission reads, for lanes that rebuild metadata."""
+
+    if not isinstance(metadata, Mapping):
+        return {}
+    carried: dict[str, Any] = {}
+    for key in _LIFECYCLE_ADMISSION_KEYS:
+        value = metadata.get(key)
+        if value is not None and value != "" and value != [] and value != {}:
+            carried[key] = value
+    return carried
 
 
 def _item_from_active_entity(entity: Any) -> ContextItem:
@@ -1365,6 +1422,11 @@ def _item_from_active_entity(entity: Any) -> ContextItem:
         "active_lookup": True,
         "status": status,
         "priority": _enum_value(getattr(entity, "priority", "") or ""),
+        # This lane rebuilds item metadata from the entity rather than
+        # projecting a search result, so anything not named here is invisible
+        # to admission. The lifecycle keys have to be carried explicitly or a
+        # corrected task walks straight past the filter into the pack.
+        **_lifecycle_metadata(getattr(entity, "metadata", None)),
     }
     # Tasks invert the usual relationship: Task.set_entity_fields seeds content
     # from description at creation and the update path never rewrites it, so
@@ -1641,22 +1703,24 @@ async def compile_context(
             )
         sections = _merge_active_work(sections, active_items, facets)
 
-    sections = _dedupe_lineage(sections)
+    sections = _dedupe_lineage(_drop_retired_items(sections))
     sections = _dedupe_sections(sections, limit, per_facet_limit=per_facet_limit)
     if not sections and retrieval_failed:
         sections = _dedupe_sections(
-            await _compile_fallback_sections(
-                query=query,
-                facets=facets,
-                domain=domain,
-                project=project,
-                accessible_projects=accessible_projects,
-                organization_id=organization_id,
-                limit=limit,
-                search_fn=search_fn,
-                principal_id=principal_id,
-                allowed_memory_scope_keys=allowed_memory_scope_keys,
-                audit=audit,
+            _drop_retired_items(
+                await _compile_fallback_sections(
+                    query=query,
+                    facets=facets,
+                    domain=domain,
+                    project=project,
+                    accessible_projects=accessible_projects,
+                    organization_id=organization_id,
+                    limit=limit,
+                    search_fn=search_fn,
+                    principal_id=principal_id,
+                    allowed_memory_scope_keys=allowed_memory_scope_keys,
+                    audit=audit,
+                )
             ),
             limit,
             per_facet_limit=per_facet_limit,

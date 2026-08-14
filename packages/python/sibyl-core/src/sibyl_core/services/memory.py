@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, cast
@@ -24,6 +24,7 @@ from sibyl_core.auth.memory_policy import (
     stamp_memory_scope_metadata,
 )
 from sibyl_core.errors import EntityNotFoundError
+from sibyl_core.memory_pipeline.lifecycle import graph_lifecycle_stamp
 from sibyl_core.memory_pipeline.quality import normalize_memory_quality_metadata
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.reflection import (
@@ -41,7 +42,8 @@ from sibyl_core.models.reflection import (
     with_reflection_finding_metadata,
 )
 from sibyl_core.models.relations import declared_relation_targets
-from sibyl_core.services.graph import get_surreal_graph_runtime
+from sibyl_core.projection.reconcile import RECONCILE_PENDING_KEY
+from sibyl_core.services.graph import get_surreal_graph_runtime, normalize_records
 from sibyl_core.services.memory_autonomy import reflection_autonomy_candidate_metadata
 from sibyl_core.services.surreal_content import (
     MemoryScope,
@@ -173,6 +175,18 @@ class MemoryCorrectionResult:
     applied: bool
     preview: MemoryCorrectionPreview
     updated_memory: RawMemory | None = None
+    # The graph rows the correction actually reached. Empty is a real answer:
+    # a capture with no projection has nothing on the retrieval lane to gate.
+    affected_entity_ids: list[str] = field(default_factory=list)
+    # Rows the capture named that this principal may not write. A correction
+    # with a non-empty list here applied to the capture but not to everything
+    # the capture claimed, and saying so is the difference between a partial
+    # write and a silent no-op.
+    refused_entity_ids: list[str] = field(default_factory=list)
+    # The lineage walk stopped at its page ceiling, so rows projected from this
+    # capture may still be servable. Reported rather than logged alone, because
+    # a caller told "applied" has no other way to learn the write was partial.
+    projection_walk_truncated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -1743,7 +1757,633 @@ async def apply_memory_correction(
     if preview.action == "supersede" and canonical_replacement_source_id is not None:
         save_kwargs["superseded_by_memory_id"] = canonical_replacement_source_id
     saved = await save_raw_memory(updated, **save_kwargs)
-    return MemoryCorrectionResult(applied=True, preview=preview, updated_memory=saved)
+    (
+        affected_entity_ids,
+        refused_entity_ids,
+        projection_walk_truncated,
+    ) = await _project_correction_to_graph(
+        organization_id=organization_id,
+        memory=saved,
+        preview=preview,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        replacement_source_id=canonical_replacement_source_id,
+        duplicate_of_source_id=canonical_duplicate_of_source_id,
+    )
+    return MemoryCorrectionResult(
+        applied=True,
+        preview=preview,
+        updated_memory=saved,
+        affected_entity_ids=affected_entity_ids,
+        refused_entity_ids=refused_entity_ids,
+        projection_walk_truncated=projection_walk_truncated,
+    )
+
+
+async def projected_row_lifecycle_stamp(
+    *,
+    organization_id: str,
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Read the current verdict for the capture a row is about to be projected from.
+
+    The correction write-through can only stamp rows that exist when it runs.
+    Graph writes are queued, so the rows a capture projects into can be created
+    minutes after the capture was corrected, from a payload serialized before
+    the correction existed. Reading the capture back at creation time is what
+    closes that window: `raw_captures` is the row the correction mutated, and
+    it is already correct by the time the worker gets here.
+
+    One indexed read per projected row, on the write path only. Nothing on the
+    recall path consults this, because the stamp it returns is exactly what
+    the recall gate already reads off the row.
+
+    Empty whenever the capture is unknown, unreadable, or still recallable, so
+    the caller can merge it unconditionally.
+    """
+
+    fields = metadata if isinstance(metadata, Mapping) else {}
+    raw_memory_id = _metadata_str(fields, "raw_memory_id")
+    raw_source_id = _metadata_str(fields, "raw_source_id")
+    if not raw_memory_id and not raw_source_id:
+        return {}
+    try:
+        memory = None
+        if raw_memory_id:
+            memory = await get_raw_memory(
+                organization_id=str(organization_id),
+                memory_id=raw_memory_id,
+            )
+        if memory is None and raw_source_id:
+            memory = await get_raw_memory_by_source_id(
+                organization_id=str(organization_id),
+                source_id=raw_source_id,
+            )
+    except Exception as exc:
+        # Raised rather than swallowed. Writing the row anyway mints a fully
+        # recallable copy of text that may already be retired, and nothing
+        # comes back for it: the correction that would have stamped it has
+        # already run and found nothing. A raised failure leaves the write to
+        # be retried, which is recoverable in a way a silently active row is
+        # not.
+        log.warning(
+            "projected_row_lifecycle_lookup_failed",
+            raw_memory_id=raw_memory_id,
+            error_type=type(exc).__name__,
+        )
+        raise
+    if memory is None:
+        # An absent capture is not an unreadable one. Nothing was stamped on a
+        # row that does not exist, so there is no verdict to inherit.
+        return {}
+    stamp = graph_lifecycle_stamp(memory)
+    if stamp:
+        log.info(
+            "projected_row_born_retired",
+            raw_memory_id=memory.id,
+            lifecycle_state=stamp.get("lifecycle_state"),
+        )
+    return dict(stamp)
+
+
+_GRAPH_CORRECTION_LOOKUP_LIMIT = 64
+# Each corrected row can carry up to `MAX_PASSAGES_PER_SOURCE` spans, so the
+# span cap is the parent cap multiplied by that ceiling: a limit that bound
+# earlier would leave spans of a retired memory recallable.
+# One parent can carry `MAX_PASSAGES_PER_SOURCE` spans plus its projected
+# entities and facts, so a single fixed multiplier is a guess that goes stale
+# the moment any projection widens. The walk pages instead, and the page cap
+# exists only so a pathological corpus cannot hold the write open forever.
+_GRAPH_CORRECTION_PROJECTION_PAGE_SIZE = 512
+_GRAPH_CORRECTION_PROJECTION_MAX_PAGES = 64
+_CORRECTION_NATIVE_WRITE_PATH = "memory_correction"
+
+
+@dataclass(frozen=True, slots=True)
+class _CorrectionGraphTargets:
+    """Graph rows a correction may stamp, and the ones it was refused.
+
+    Spans are held apart from the memories they were cut from because the two
+    take different halves of the correction. Both get the lifecycle stamp, so
+    both leave recall. Only a memory gets a supersession edge: "this row
+    replaced that one" is a claim a writer made about a memory, and minting it
+    once per span would assert a replacement nobody declared, on up to
+    `MAX_PASSAGES_PER_SOURCE` rows per correction.
+    """
+
+    authorized: list[str]
+    refused: list[str]
+    projections: list[str] = field(default_factory=list)
+    truncated: bool = False
+
+    @property
+    def stampable(self) -> list[str]:
+        return [*self.authorized, *self.projections]
+
+
+async def _correction_graph_entity_ids(
+    runtime: Any,
+    *,
+    organization_id: str,
+    memory: RawMemory,
+    principal_id: str | None,
+    accessible_projects: Iterable[str] | None,
+) -> _CorrectionGraphTargets:
+    """Find the graph rows projected from this capture.
+
+    Two sources, because the two write paths record the link in opposite
+    directions. Promotion stamps the entity id onto the raw memory, so that
+    one is a metadata read. Direct capture stamps the raw ids onto the graph
+    row's attributes instead (`memory_pipeline/capture.py:137-140`), which
+    leaves a query as the only way back. That query is unindexed, and it is
+    affordable here only because a correction is a rare, operator-initiated
+    write rather than anything on the read path.
+
+    The query matches `raw_memory_id` and never `raw_source_id`, even though
+    capture writes both. A capture's `source_id` is a non-unique grouping key
+    (`idx_raw_captures_source` is not UNIQUE, and
+    `list_raw_memories_by_source_id` returns a list), while a correction
+    declares exactly one affected capture. Matching the group key would let a
+    correction on one memory stamp the projections of its siblings.
+
+    The two halves are guarded differently, because they differ in who
+    authored them.
+
+    The query half is server-authoritative. `raw_memory_id` is assigned from
+    the completed raw write and overwrites anything the caller stamped
+    (`memory_pipeline/capture.py:137-138`), so a row it returns is a
+    projection of the very capture `preview_memory_correction` just
+    authorized this principal to correct. Re-authorizing it would not add
+    safety, and it would subtract enormously: `authorize_memory_write` refuses
+    SHARED, ORGANIZATION, and PUBLIC outright, refuses TEAM without
+    `accessible_teams`, and refuses a row carrying no scope metadata at all.
+    Promotion makes rows visible at ORGANIZATION and PUBLIC, so guarding this
+    half would silently disable the write-through for most of a real corpus:
+    the capture would retire while the graph row kept ranking, which is the
+    exact defect this whole change exists to kill.
+
+    One subtlety, because it reads like a hole and is not: the promotion path
+    builds entity metadata by spreading the candidate bag, so a promoted row's
+    `raw_memory_id` can carry a caller-supplied value rather than a stamped
+    one. Planting somebody else's capture id there only arranges for the row
+    to be retired when THAT capture is corrected, and the row in question is
+    the planter's own. Reaching a foreign row requires stamping this capture's
+    id onto it, which needs the write access the attack is trying to obtain.
+
+    The metadata half is caller-reachable and keeps the guard.
+    `promoted_entity_id` and friends are read straight off the capture's
+    metadata bag, and capture metadata is pass-through rather than a
+    whitelist, so without a check a caller could name somebody else's entity,
+    correct their own capture, and retire a row they cannot write. The
+    reflection path guards its supersession targets exactly this way
+    (`_authorized_superseded_entity_ids`).
+    """
+
+    rows = normalize_records(
+        await runtime.client.execute_query(
+            """
+            SELECT uuid FROM entity
+            WHERE group_id = $group_id
+              AND attributes.raw_memory_id = $raw_memory_id
+            LIMIT $limit;
+            """,
+            group_id=str(organization_id),
+            raw_memory_id=memory.id,
+            limit=_GRAPH_CORRECTION_LOOKUP_LIMIT,
+        )
+    )
+    projected_ids = [uuid for row in rows if (uuid := str(row.get("uuid") or ""))]
+    declared = [
+        entity_id
+        for entity_id in _correction_derived_ids(memory)
+        if entity_id and entity_id not in set(projected_ids)
+    ]
+
+    # Provenance is server-owned as of `SERVER_OWNED_METADATA_KEYS`, but rows
+    # written before that could carry a planted `raw_memory_id`, and nothing
+    # rewrites history. So a projected row must still be one this principal
+    # can currently see: that is what stops "plant the id on a row you can
+    # write, lose access, then correct your own capture to retire it". A
+    # genuine projection inherits its capture's audience, so this refuses no
+    # legitimate target.
+    projected = await _readable_correction_targets(
+        runtime,
+        entity_ids=projected_ids,
+        source_id=memory.id,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        log_event="memory_correction_graph_provenance_unreadable",
+    )
+
+    # Declared ids come off caller-writable capture metadata, so the refused
+    # list is caller-chosen input echoed back. A row that does not exist and a
+    # row that exists but is denied must therefore be reported identically: any
+    # difference between the two turns a guessed id into an existence probe for
+    # rows outside this principal's scope.
+    refused: list[str] = []
+    authorized: list[str] = list(projected)
+    for entity_id in dict.fromkeys(declared):
+        allowed = False
+        try:
+            target = await runtime.entity_manager.get(entity_id)
+        except Exception:
+            target = None
+        if target is not None:
+            allowed = _promoted_entity_write_allowed(
+                entity=target,
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
+            )
+        if allowed:
+            authorized.append(entity_id)
+            continue
+        log.warning(
+            "memory_correction_graph_target_refused",
+            source_id=memory.id,
+            entity_id=entity_id,
+        )
+        refused.append(entity_id)
+
+    projections, walk_truncated = await _correction_projected_row_ids(
+        runtime,
+        organization_id=organization_id,
+        memory=memory,
+        parent_ids=authorized,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+    )
+    known = set(authorized)
+    return _CorrectionGraphTargets(
+        authorized=authorized,
+        refused=refused,
+        projections=[
+            entity_id for entity_id in dict.fromkeys(projections) if entity_id not in known
+        ],
+        truncated=walk_truncated,
+    )
+
+
+async def _readable_correction_targets(
+    runtime: Any,
+    *,
+    entity_ids: Sequence[str],
+    source_id: str,
+    principal_id: str | None,
+    accessible_projects: Iterable[str] | None,
+    log_event: str,
+) -> list[str]:
+    """Keep the rows a correction found that this principal can still read.
+
+    `private_scope_granted` says only that this principal may hold private
+    memories at all; ownership is still checked inside, so a private row
+    belonging to somebody else is refused either way. The correction route has
+    already authorized this principal against the capture, so the grant is not
+    the thing under test here.
+    """
+
+    readable: list[str] = []
+    for entity_id in dict.fromkeys(entity_ids):
+        try:
+            row = await runtime.entity_manager.get(entity_id)
+        except Exception:
+            continue
+        if row is None:
+            continue
+        row_metadata = getattr(row, "metadata", None)
+        if not memory_metadata_read_allowed(
+            row_metadata,
+            principal_id=principal_id,
+            private_scope_granted=principal_id is not None,
+            accessible_projects=accessible_projects,
+            row_project_id=memory_row_project_id(row_metadata),
+        ):
+            log.warning(log_event, source_id=source_id, entity_id=entity_id)
+            continue
+        readable.append(entity_id)
+    return readable
+
+
+async def _correction_projected_row_ids(
+    runtime: Any,
+    *,
+    organization_id: str,
+    memory: RawMemory,
+    parent_ids: Sequence[str],
+    principal_id: str | None,
+    accessible_projects: Iterable[str] | None,
+) -> tuple[list[str], bool]:
+    """Follow the correction down into every row projected from the corrected rows.
+
+    Three projections mint rows carrying a parent memory's text: spans carry
+    its words verbatim (`projection/passages.py`), projected entities carry its
+    candidate context, and projected facts carry their span and content
+    (`projection/memory.py`). Each is independently indexed and independently
+    servable, and each inherits the parent's scope but not its provenance, so
+    the provenance query that finds the parent cannot see any of them. A
+    correction that stopped at the parent left the retired text ranking under
+    every projected id.
+
+    Lineage is the linkage rather than provenance, because it is the only one a
+    projected row carries: every projection stamps `source_entity_id`, spans
+    stamp `parent_entity_id` beside it, and rows written before any given
+    provenance rule still carry them. Matching either is what makes historical
+    projections reachable from a correction.
+
+    Requiring `projection_kind` keeps this to rows claiming to be projections
+    at all, which is the narrowing the passage-only version got from its
+    entity-type filter. It is not the security boundary: the parents are rows
+    this correction was already authorized against, and each projected row is
+    re-checked for readability exactly like a provenance row, because neither
+    lineage nor `projection_kind` is server-owned and naming a parent must not
+    be enough to have somebody else's row retired.
+    """
+
+    parents = [str(parent_id) for parent_id in dict.fromkeys(parent_ids) if parent_id]
+    if not parents:
+        return [], False
+    rows: list[dict[str, Any]] = []
+    cursor = ""
+    truncated = False
+    try:
+        for page in range(_GRAPH_CORRECTION_PROJECTION_MAX_PAGES):
+            batch = normalize_records(
+                await runtime.client.execute_query(
+                    """
+                    SELECT uuid FROM entity
+                    WHERE group_id = $group_id
+                      AND attributes.projection_kind IS NOT NONE
+                      AND uuid > $cursor
+                      AND (attributes.parent_entity_id IN $parent_ids
+                           OR attributes.source_entity_id IN $parent_ids)
+                    ORDER BY uuid
+                    LIMIT $limit;
+                    """,
+                    group_id=str(organization_id),
+                    parent_ids=parents,
+                    cursor=cursor,
+                    limit=_GRAPH_CORRECTION_PROJECTION_PAGE_SIZE,
+                )
+            )
+            rows.extend(batch)
+            if len(batch) < _GRAPH_CORRECTION_PROJECTION_PAGE_SIZE:
+                break
+            cursor = str(batch[-1].get("uuid") or "")
+            if not cursor:
+                break
+            if page + 1 >= _GRAPH_CORRECTION_PROJECTION_MAX_PAGES:
+                # Only reachable on a corpus far past anything this walk was
+                # sized for, and a silent stop here leaves projected rows of a
+                # retired memory servable, so it is said out loud.
+                log.warning(
+                    "memory_correction_projection_walk_truncated",
+                    source_id=memory.id,
+                    parents=len(parents),
+                    rows=len(rows),
+                )
+                truncated = True
+    except Exception as exc:
+        # The parent has already been stamped by the time this runs, so a
+        # failure here leaves the correction half-applied rather than undone.
+        # Saying so is worth more than throwing away the half that landed.
+        log.warning(
+            "memory_correction_projection_lookup_failed",
+            source_id=memory.id,
+            error_type=type(exc).__name__,
+        )
+        return [], truncated
+    projected_ids = [uuid for row in rows if (uuid := str(row.get("uuid") or ""))]
+    if not projected_ids:
+        return [], truncated
+    readable = await _readable_correction_targets(
+        runtime,
+        entity_ids=[entity_id for entity_id in projected_ids if entity_id not in set(parents)],
+        source_id=memory.id,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        log_event="memory_correction_projection_unreadable",
+    )
+    return readable, truncated
+
+
+def _correction_graph_metadata(
+    preview: MemoryCorrectionPreview,
+    *,
+    replacement_source_id: str | None,
+    duplicate_of_source_id: str | None,
+) -> dict[str, Any]:
+    """Build the verdict the graph row carries from here on.
+
+    Every marker is written on every correction, including the cleared form a
+    restore needs. A patch that only ever adds keys cannot undo itself, and
+    the graph merge has no way to remove one.
+    """
+
+    restoring = preview.action == "restore"
+    excluded = bool(preview.recall_impact.get("excluded_from_recall")) and not restoring
+    return {
+        "lifecycle_state": preview.target_lifecycle_state,
+        "lifecycle_flags": list(preview.target_lifecycle_flags),
+        "lifecycle_action": preview.action,
+        "excluded_from_recall": excluded,
+        "superseded_by_source_id": "" if restoring else (replacement_source_id or ""),
+        "duplicate_of_source_id": "" if restoring else (duplicate_of_source_id or ""),
+        # A correction is somebody reading the verdict and writing it down, so
+        # a marker saying nobody could read one is answered by this write.
+        # `None` removes the key on the graph's merge patch rather than
+        # leaving it present and falsy.
+        RECONCILE_PENDING_KEY: None,
+    }
+
+
+async def _project_correction_to_graph(
+    *,
+    organization_id: str,
+    memory: RawMemory,
+    preview: MemoryCorrectionPreview,
+    principal_id: str | None,
+    accessible_projects: Iterable[str] | None,
+    replacement_source_id: str | None,
+    duplicate_of_source_id: str | None,
+) -> tuple[list[str], list[str], bool]:
+    """Carry a correction across to the rows retrieval actually ranks.
+
+    Correction used to stop at `raw_captures`. The projected entity kept its
+    capture-time metadata, kept its embedding, and kept being expanded into,
+    so `sibyl correct` had no retrieval consequence at all. The raw write has
+    already landed by the time this runs, so a graph failure is logged and
+    swallowed: a correction that half-applied is worth more than one that
+    reports failure after mutating the substrate.
+    """
+
+    try:
+        runtime = await get_surreal_graph_runtime(str(organization_id))
+        targets = await _correction_graph_entity_ids(
+            runtime,
+            organization_id=organization_id,
+            memory=memory,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        )
+    except Exception as exc:
+        log.warning(
+            "memory_correction_graph_lookup_failed",
+            source_id=memory.id,
+            error_type=type(exc).__name__,
+        )
+        return [], [], False
+    entity_ids = targets.stampable
+
+    updates = _correction_graph_metadata(
+        preview,
+        replacement_source_id=replacement_source_id,
+        duplicate_of_source_id=duplicate_of_source_id,
+    )
+    applied: list[str] = []
+    for entity_id in entity_ids:
+        try:
+            updated = await runtime.entity_manager.update(entity_id, {"metadata": updates})
+        except Exception as exc:
+            log.warning(
+                "memory_correction_graph_update_failed",
+                source_id=memory.id,
+                entity_id=entity_id,
+                error_type=type(exc).__name__,
+            )
+            continue
+        # A miss is expected rather than exceptional. `_correction_derived_ids`
+        # reports everything derived from the capture, relationship ids
+        # included, and only the rows that were really stamped may reach the
+        # mutation receipt or become an endpoint for the supersession edge.
+        if updated is not None:
+            applied.append(entity_id)
+
+    if preview.action == "restore" and applied:
+        await _unlink_graph_supersession(
+            runtime,
+            organization_id=organization_id,
+            source_id=memory.id,
+            restored_entity_ids=applied,
+        )
+    projected_ids = set(targets.projections)
+    superseded_memories = [entity_id for entity_id in applied if entity_id not in projected_ids]
+    if preview.action == "supersede" and replacement_source_id and superseded_memories:
+        await _link_graph_supersession(
+            runtime,
+            organization_id=organization_id,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            replacement_source_id=replacement_source_id,
+            superseded_entity_ids=superseded_memories,
+        )
+    return applied, list(targets.refused), targets.truncated
+
+
+async def _unlink_graph_supersession(
+    runtime: Any,
+    *,
+    organization_id: str,
+    source_id: str,
+    restored_entity_ids: Sequence[str],
+) -> None:
+    """Remove the supersession edges a correction minted, so restore can undo.
+
+    Clearing the lifecycle stamp is not enough on its own. The admission gate
+    retires any row carrying an inbound SUPERSEDES edge, so a restored row
+    whose edge survived stays excluded forever, and a supersede/restore
+    /counter-supersede sequence would black out both rows. Only edges this
+    correction path wrote are removed: a supersession asserted by reflection
+    promotion is a different claim and restore has no opinion about it.
+    """
+
+    if not restored_entity_ids:
+        return
+    try:
+        await runtime.client.execute_query(
+            """
+            DELETE FROM relates_to
+            WHERE group_id = $group_id
+              AND name = $predicate
+              AND target_id IN $target_ids
+              AND attributes.native_write_path = $write_path;
+            """,
+            group_id=str(organization_id),
+            predicate=RelationshipType.SUPERSEDES.value,
+            target_ids=list(restored_entity_ids),
+            write_path=_CORRECTION_NATIVE_WRITE_PATH,
+        )
+    except Exception as exc:
+        log.warning(
+            "memory_correction_supersedes_unlink_failed",
+            source_id=source_id,
+            error_type=type(exc).__name__,
+        )
+
+
+async def _link_graph_supersession(
+    runtime: Any,
+    *,
+    organization_id: str,
+    principal_id: str | None,
+    accessible_projects: Iterable[str] | None,
+    replacement_source_id: str,
+    superseded_entity_ids: Sequence[str],
+) -> None:
+    """Record the replacement as a real edge, in the direction retrieval reads.
+
+    Source is the surviving row and target is the retired one, matching the
+    promotion write path, which is what lets the retrieval gate recognize a
+    row as superseded from a single inbound-edge lookup.
+    """
+
+    try:
+        replacement = await get_raw_memory_by_source_id(
+            organization_id=str(organization_id),
+            source_id=replacement_source_id,
+        )
+        if replacement is None:
+            return
+        replacement_targets = await _correction_graph_entity_ids(
+            runtime,
+            organization_id=organization_id,
+            memory=replacement,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        )
+        replacement_entity_ids = replacement_targets.authorized
+    except Exception as exc:
+        log.warning(
+            "memory_correction_replacement_lookup_failed",
+            source_id=replacement_source_id,
+            error_type=type(exc).__name__,
+        )
+        return
+
+    now = datetime.now(UTC).isoformat()
+    for replacement_entity_id in replacement_entity_ids:
+        for superseded_entity_id in superseded_entity_ids:
+            if replacement_entity_id == superseded_entity_id:
+                continue
+            try:
+                await runtime.relationship_manager.create(
+                    _relationship(
+                        replacement_entity_id,
+                        superseded_entity_id,
+                        RelationshipType.SUPERSEDES,
+                        metadata={
+                            "native_write_path": _CORRECTION_NATIVE_WRITE_PATH,
+                            "replacement_reason": "memory_correction_supersede",
+                            "replacement_source_id": replacement_source_id,
+                            "created_by": principal_id,
+                            "valid_from": now,
+                        },
+                    )
+                )
+            except Exception as exc:
+                log.warning(
+                    "memory_correction_supersedes_edge_failed",
+                    entity_id=superseded_entity_id,
+                    error_type=type(exc).__name__,
+                )
 
 
 async def _resolve_reflection_promotion_plan(

@@ -479,6 +479,14 @@ async def test_remember_mcp_memory_scopes_project_metadata() -> None:
             "raw_memory_id": "raw_123",
             "raw_source_id": "mcp:remember:decision",
         },
+        # Provenance rides here as well as in the metadata bag, because the
+        # graph writer strips server-owned keys out of that bag. Without this
+        # argument the row reaches the graph naming no capture, and a later
+        # correction on this memory can neither find it nor retire it.
+        capture_provenance={
+            "raw_memory_id": "raw_123",
+            "raw_source_id": "mcp:remember:decision",
+        },
         project="project-a",
         memory_scope="project",
         scope_key="project-a",

@@ -30,6 +30,11 @@ from sibyl_core.memory_pipeline.spans import (
     validate_agent_spans,
 )
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
+from sibyl_core.projection.inheritance import (
+    LIFECYCLE_METADATA_KEYS,
+    parent_lifecycle_as_stored,
+)
+from sibyl_core.projection.reconcile import reconcile_with_parent
 from sibyl_core.projection.slicing import HARD_MAX, Slice, render_slice, slice_prose
 from sibyl_core.tools.helpers import _generate_id
 
@@ -91,7 +96,11 @@ _SCOPE_METADATA_KEYS = (
 
 # The subset of an entity update that changes who may read its spans. A caller
 # that sees any of these in an update must refresh the spans' inherited stamps
-# even though the body, and therefore the cut, is unchanged.
+# even though the body, and therefore the cut, is unchanged. Lifecycle keys are
+# deliberately absent: the restamp walk writes scope stamps only, so listing
+# them here would fire a trigger that reads every span and fixes nothing. A
+# lifecycle change reaches existing spans through the correction cascade
+# instead (`services/memory.py`).
 SCOPE_BEARING_UPDATE_KEYS = frozenset(_SCOPE_METADATA_KEYS)
 
 
@@ -328,10 +337,18 @@ async def project_entity_passages(
     not there yet is how the operational-experience projection silently dropped
     every PART_OF it created and never self-healed, so the ordering here is
     load-bearing: entities first, then the edges that point at them.
+
+    The parent is read back rather than trusted as passed, because the caller's
+    copy can be older than the row. Both this projection and a correction can
+    be in flight at once: the correction stamps the parent, finds no spans
+    because none exist yet, and this then cuts spans from an in-memory object
+    that predates the verdict. Spans born from the stored row instead inherit
+    whatever lifecycle the parent is actually carrying.
     """
     source_id = created_source_id or source.id
+    stored_parent = await parent_lifecycle_as_stored(entity_manager, source, source_id=source_id)
     entities, relationships = plan_entity_passages(
-        source,
+        stored_parent,
         source_id=source_id,
         group_id=group_id,
     )
@@ -363,6 +380,26 @@ async def project_entity_passages(
             source_id=source_id,
             reason="entity_write_failed",
             errors=(str(exc),),
+        )
+
+    # The parent can be corrected while these spans are being written, which
+    # is an interval no pre-write read reaches: the correction's cascade runs
+    # before the spans exist and finds nothing to stamp.
+    reconciled = await reconcile_with_parent(
+        entity_manager,
+        source_id=source_id,
+        row_ids=[entity.id for entity in created_passages],
+        organization_id=group_id,
+    )
+    if reconciled.changed:
+        log.warning(
+            "passage_projection_lifecycle_reconciled",
+            organization_id=group_id,
+            source_id=source_id,
+            passages=[entity.id for entity in created_passages],
+            restamped=reconciled.restamped,
+            unverified=reconciled.unverified,
+            cleared=reconciled.cleared,
         )
 
     created_ids = {entity.id for entity in created_passages}
@@ -772,17 +809,22 @@ def _summary(content: str) -> str:
 
 
 def _inherited_scope_metadata(source: Entity) -> dict[str, object]:
-    """Carry the parent's scope onto every passage.
+    """Carry the parent's scope and lifecycle onto every passage.
 
     A passage that loses ``memory_scope``/``scope_key`` either leaks past the
     boundary its parent sits behind or vanishes from the packs that filter on
     it. Inheriting verbatim keeps the span exactly as reachable as the memory
     it was cut from, and no more.
+
+    Lifecycle inherits for the same reason and is the sharper half: a span is
+    an independently indexed copy of the parent's own words, so a span of a
+    retired memory that reads as active serves the retired text under a row id
+    the retirement never named.
     """
     metadata = dict(source.metadata or {})
     return {
         key: metadata[key]
-        for key in _SCOPE_METADATA_KEYS
+        for key in (*_SCOPE_METADATA_KEYS, *LIFECYCLE_METADATA_KEYS)
         if key in metadata and metadata[key] is not None
     }
 

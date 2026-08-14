@@ -1,13 +1,14 @@
 """Add tool for creating new knowledge in the Sibyl graph."""
 
 import inspect
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
 import structlog
 
 from sibyl_core.auth.memory_policy import (
+    server_provenance_metadata,
     stamp_memory_scope_metadata,
 )
 from sibyl_core.embeddings.providers import configured_embedding_provider
@@ -47,6 +48,7 @@ from sibyl_core.models.tasks import (
 from sibyl_core.projection import project_entity_passages, project_memory_entity
 from sibyl_core.runtime_ports import get_queue_port
 from sibyl_core.services.graph import get_surreal_graph_runtime
+from sibyl_core.services.memory import projected_row_lifecycle_stamp
 from sibyl_core.tools.helpers import (
     MAX_CONTENT_LENGTH,
     MAX_TITLE_LENGTH,
@@ -216,7 +218,24 @@ async def _create_entity_record(
     entity: Entity,
     *,
     generate_embeddings: bool,
+    organization_id: str | None = None,
 ) -> str:
+    # The same reconciliation the queued path does at the worker, for the same
+    # reason: the capture is written before this runs and can be corrected in
+    # between, and the row would otherwise be created recallable carrying text
+    # a writer has already retired. The window is narrow here rather than
+    # absent, and an unstamped row is not self-healing. Nothing is read for an
+    # entity that carries no capture provenance, which is every entity this
+    # path creates that no correction can ever name.
+    if organization_id:
+        stamp = await projected_row_lifecycle_stamp(
+            organization_id=organization_id,
+            metadata=entity.metadata,
+        )
+        if stamp:
+            object.__setattr__(entity, "metadata", {**(entity.metadata or {}), **stamp})
+            log.info("add_entity_born_retired", entity_id=entity.id)
+
     create_direct = getattr(entity_manager, "create_direct", None)
     if inspect.iscoroutinefunction(create_direct):
         if _accepts_keyword(create_direct, "generate_embedding"):
@@ -326,6 +345,8 @@ async def add(
     spans: list[dict[str, Any]] | None = None,
     atomic: bool = False,
     probes: list[str] | None = None,
+    # Server-stamped provenance, never caller input. See below.
+    capture_provenance: Mapping[str, Any] | None = None,
 ) -> AddResponse:
     """Add new knowledge to the Sibyl knowledge graph.
 
@@ -561,6 +582,17 @@ async def add(
             ),
             **structure_metadata(structure),
         }
+        # Re-attached after the strip, and only from the dedicated argument.
+        # The capture pipeline stamps provenance from the completed raw write
+        # and then calls this function, whose strip drops exactly those keys,
+        # so a row written through capture reached the graph naming no capture
+        # at all: the correction write-through could not find it and the
+        # projection boundary had nothing to re-read. Passing it inside
+        # `metadata` cannot work and must not, because that bag is caller
+        # input; passing it here is a statement by the server about a raw write
+        # it just completed, and no caller-facing surface forwards this
+        # argument.
+        full_metadata.update(server_provenance_metadata(capture_provenance))
         if project:
             full_metadata["project_id"] = project
         # Every graph write funnels through here, so this is where a declaration
@@ -822,6 +854,7 @@ async def add(
                 entity_manager,
                 entity,
                 generate_embeddings=generate_embeddings,
+                organization_id=org_id,
             )
 
             await _create_relationships_bulk(
@@ -1003,6 +1036,7 @@ async def add(
                 entity_manager,
                 entity,
                 generate_embeddings=generate_embeddings,
+                organization_id=org_id,
             )
 
             await _create_relationships_bulk(

@@ -2075,7 +2075,6 @@ async def test_lean_metadata_keeps_policy_gate_fields(
                     "principal_id": "user-1",
                     "scope_key": "user-1",
                     "redacted": True,
-                    "superseded_by_source_id": "raw_memory:def",
                     "unresolved_claims": ["claim-1"],
                     "supported": False,
                     "retrieval_signals": ["raw_lexical"],
@@ -2092,10 +2091,23 @@ async def test_lean_metadata_keeps_policy_gate_fields(
     assert metadata["principal_id"] == "user-1"
     assert metadata["scope_key"] == "user-1"
     assert metadata["redacted"] is True
-    assert metadata["superseded_by_source_id"] == "raw_memory:def"
     assert metadata["unresolved_claims"] == ["claim-1"]
     assert metadata["supported"] is False
     assert "retrieval_signals" not in metadata
+    # The correction markers are projected too, so the admission gate and the
+    # downstream synthesis filters can both read them off a served item.
+    retired = context_module._lean_item_metadata(
+        {
+            "superseded_by_source_id": "raw_memory:def",
+            "duplicate_of_source_id": "raw_memory:ghi",
+            "excluded_from_recall": True,
+            "retrieval_signals": ["raw_lexical"],
+        }
+    )
+    assert retired["superseded_by_source_id"] == "raw_memory:def"
+    assert retired["duplicate_of_source_id"] == "raw_memory:ghi"
+    assert retired["excluded_from_recall"] is True
+    assert "retrieval_signals" not in retired
 
 
 @pytest.mark.asyncio

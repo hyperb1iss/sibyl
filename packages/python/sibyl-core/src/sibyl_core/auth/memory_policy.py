@@ -28,6 +28,21 @@ MEMORY_OWNER_METADATA_KEYS = frozenset(
     }
 )
 
+# Capture provenance. These name the raw row a graph row was projected from,
+# and the correction write-through resolves its targets by querying them, so a
+# payload that can set them can nominate any row it can currently write to be
+# retired later by a correction on an unrelated capture. The server stamps
+# them from the completed raw write after this strip runs
+# (`memory_pipeline/capture.py`), so no legitimate writer supplies them.
+MEMORY_PROVENANCE_METADATA_KEYS = frozenset(
+    {
+        "raw_memory_id",
+        "raw_source_id",
+    }
+)
+
+SERVER_OWNED_METADATA_KEYS = MEMORY_OWNER_METADATA_KEYS | MEMORY_PROVENANCE_METADATA_KEYS
+
 
 class MemoryPolicyAction(StrEnum):
     READ = "read"
@@ -679,6 +694,31 @@ def memory_metadata_read_allowed(
     }
 
 
+def server_provenance_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Lift the server-stamped provenance out of a bag before it is stripped.
+
+    Provenance names the capture a graph row was projected from, which is how a
+    correction finds that row and how the projection boundary reads the
+    capture's current verdict. It is server-owned precisely because a caller
+    that could set it could nominate any row it can write to be retired by a
+    correction on an unrelated capture, so `stamp_memory_scope_metadata` drops
+    it from every incoming bag.
+
+    The capture pipeline is not an incoming bag. It stamps these keys itself
+    from the completed raw write, and the strip runs again downstream, so
+    without a channel that survives it the authoritative ids never reach the
+    row. This is that channel: read the keys here, pass them separately, and
+    re-attach them after the strip.
+    """
+
+    fields = metadata if isinstance(metadata, Mapping) else {}
+    return {
+        key: fields[key]
+        for key in MEMORY_PROVENANCE_METADATA_KEYS
+        if fields.get(key) not in (None, "")
+    }
+
+
 def stamp_memory_scope_metadata(
     metadata: Mapping[str, Any] | None,
     *,
@@ -692,11 +732,14 @@ def stamp_memory_scope_metadata(
     never name the principal or project a row reads as. A declared scope with
     no authorized owner keeps the scope and loses the owner, which fails the
     read check closed rather than falling back to the payload.
+
+    Capture provenance goes the same way, because the correction write-through
+    resolves the rows it retires by querying those keys.
     """
     stamped = {
         key: value
         for key, value in (metadata or {}).items()
-        if key not in MEMORY_OWNER_METADATA_KEYS
+        if key not in SERVER_OWNED_METADATA_KEYS
     }
     scope = _coerce_scope(memory_scope) if memory_scope is not None else None
     if scope is None:
@@ -719,6 +762,8 @@ def stamp_memory_scope_metadata(
 
 __all__ = [
     "MEMORY_OWNER_METADATA_KEYS",
+    "MEMORY_PROVENANCE_METADATA_KEYS",
+    "SERVER_OWNED_METADATA_KEYS",
     "MemoryPolicyAction",
     "MemoryPolicyDecision",
     "authorize_memory_read",
@@ -729,5 +774,6 @@ __all__ = [
     "memory_row_project_id",
     "memory_scope_policy_key",
     "private_scope_granted_for",
+    "server_provenance_metadata",
     "stamp_memory_scope_metadata",
 ]
