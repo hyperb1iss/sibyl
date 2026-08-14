@@ -536,13 +536,21 @@ async def create_entity(  # noqa: PLR0915
         # row commit behind it. Reading the verdict once more now closes that
         # interval, and an unreadable verdict leaves the row excluded rather
         # than servable.
-        await reconcile_with_capture(
+        reconciled = await reconcile_with_capture(
             entity_manager,
             organization_id=group_id,
             metadata=entity.metadata,
             row_ids=[created_id],
-            applied_stamp=lifecycle_stamp,
         )
+        if reconciled.changed:
+            log.warning(
+                "create_entity_lifecycle_reconciled",
+                organization_id=group_id,
+                entity_id=created_id,
+                restamped=reconciled.restamped,
+                unverified=reconciled.unverified,
+                cleared=reconciled.cleared,
+            )
 
         relationship_manager = runtime.relationship_manager
         relationships_for_embedding_backfill: list[Relationship] = []

@@ -42,6 +42,7 @@ from sibyl_core.models.reflection import (
     with_reflection_finding_metadata,
 )
 from sibyl_core.models.relations import declared_relation_targets
+from sibyl_core.projection.reconcile import RECONCILE_PENDING_KEY
 from sibyl_core.services.graph import get_surreal_graph_runtime, normalize_records
 from sibyl_core.services.memory_autonomy import reflection_autonomy_candidate_metadata
 from sibyl_core.services.surreal_content import (
@@ -182,6 +183,10 @@ class MemoryCorrectionResult:
     # the capture claimed, and saying so is the difference between a partial
     # write and a silent no-op.
     refused_entity_ids: list[str] = field(default_factory=list)
+    # The lineage walk stopped at its page ceiling, so rows projected from this
+    # capture may still be servable. Reported rather than logged alone, because
+    # a caller told "applied" has no other way to learn the write was partial.
+    projection_walk_truncated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -1752,7 +1757,11 @@ async def apply_memory_correction(
     if preview.action == "supersede" and canonical_replacement_source_id is not None:
         save_kwargs["superseded_by_memory_id"] = canonical_replacement_source_id
     saved = await save_raw_memory(updated, **save_kwargs)
-    affected_entity_ids, refused_entity_ids = await _project_correction_to_graph(
+    (
+        affected_entity_ids,
+        refused_entity_ids,
+        projection_walk_truncated,
+    ) = await _project_correction_to_graph(
         organization_id=organization_id,
         memory=saved,
         preview=preview,
@@ -1767,6 +1776,7 @@ async def apply_memory_correction(
         updated_memory=saved,
         affected_entity_ids=affected_entity_ids,
         refused_entity_ids=refused_entity_ids,
+        projection_walk_truncated=projection_walk_truncated,
     )
 
 
@@ -1864,6 +1874,7 @@ class _CorrectionGraphTargets:
     authorized: list[str]
     refused: list[str]
     projections: list[str] = field(default_factory=list)
+    truncated: bool = False
 
     @property
     def stampable(self) -> list[str]:
@@ -1993,7 +2004,7 @@ async def _correction_graph_entity_ids(
         )
         refused.append(entity_id)
 
-    projections = await _correction_projected_row_ids(
+    projections, walk_truncated = await _correction_projected_row_ids(
         runtime,
         organization_id=organization_id,
         memory=memory,
@@ -2008,6 +2019,7 @@ async def _correction_graph_entity_ids(
         projections=[
             entity_id for entity_id in dict.fromkeys(projections) if entity_id not in known
         ],
+        truncated=walk_truncated,
     )
 
 
@@ -2059,7 +2071,7 @@ async def _correction_projected_row_ids(
     parent_ids: Sequence[str],
     principal_id: str | None,
     accessible_projects: Iterable[str] | None,
-) -> list[str]:
+) -> tuple[list[str], bool]:
     """Follow the correction down into every row projected from the corrected rows.
 
     Three projections mint rows carrying a parent memory's text: spans carry
@@ -2088,9 +2100,10 @@ async def _correction_projected_row_ids(
 
     parents = [str(parent_id) for parent_id in dict.fromkeys(parent_ids) if parent_id]
     if not parents:
-        return []
+        return [], False
     rows: list[dict[str, Any]] = []
     cursor = ""
+    truncated = False
     try:
         for page in range(_GRAPH_CORRECTION_PROJECTION_MAX_PAGES):
             batch = normalize_records(
@@ -2127,6 +2140,7 @@ async def _correction_projected_row_ids(
                     parents=len(parents),
                     rows=len(rows),
                 )
+                truncated = True
     except Exception as exc:
         # The parent has already been stamped by the time this runs, so a
         # failure here leaves the correction half-applied rather than undone.
@@ -2136,11 +2150,11 @@ async def _correction_projected_row_ids(
             source_id=memory.id,
             error_type=type(exc).__name__,
         )
-        return []
+        return [], truncated
     projected_ids = [uuid for row in rows if (uuid := str(row.get("uuid") or ""))]
     if not projected_ids:
-        return []
-    return await _readable_correction_targets(
+        return [], truncated
+    readable = await _readable_correction_targets(
         runtime,
         entity_ids=[entity_id for entity_id in projected_ids if entity_id not in set(parents)],
         source_id=memory.id,
@@ -2148,6 +2162,7 @@ async def _correction_projected_row_ids(
         accessible_projects=accessible_projects,
         log_event="memory_correction_projection_unreadable",
     )
+    return readable, truncated
 
 
 def _correction_graph_metadata(
@@ -2172,6 +2187,11 @@ def _correction_graph_metadata(
         "excluded_from_recall": excluded,
         "superseded_by_source_id": "" if restoring else (replacement_source_id or ""),
         "duplicate_of_source_id": "" if restoring else (duplicate_of_source_id or ""),
+        # A correction is somebody reading the verdict and writing it down, so
+        # a marker saying nobody could read one is answered by this write.
+        # `None` removes the key on the graph's merge patch rather than
+        # leaving it present and falsy.
+        RECONCILE_PENDING_KEY: None,
     }
 
 
@@ -2184,7 +2204,7 @@ async def _project_correction_to_graph(
     accessible_projects: Iterable[str] | None,
     replacement_source_id: str | None,
     duplicate_of_source_id: str | None,
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], bool]:
     """Carry a correction across to the rows retrieval actually ranks.
 
     Correction used to stop at `raw_captures`. The projected entity kept its
@@ -2210,7 +2230,7 @@ async def _project_correction_to_graph(
             source_id=memory.id,
             error_type=type(exc).__name__,
         )
-        return [], []
+        return [], [], False
     entity_ids = targets.stampable
 
     updates = _correction_graph_metadata(
@@ -2255,7 +2275,7 @@ async def _project_correction_to_graph(
             replacement_source_id=replacement_source_id,
             superseded_entity_ids=superseded_memories,
         )
-    return applied, list(targets.refused)
+    return applied, list(targets.refused), targets.truncated
 
 
 async def _unlink_graph_supersession(

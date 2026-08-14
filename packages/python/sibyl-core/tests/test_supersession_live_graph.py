@@ -965,3 +965,161 @@ async def test_capture_overwrites_planted_provenance_with_the_real_write() -> No
     assert seen["raw_memory_id"] == "raw-real"
     assert seen["raw_source_id"] == "source-real"
     assert seen["unrelated"] == "kept"
+
+
+@pytest.mark.asyncio
+async def test_a_stale_reconcile_cannot_overwrite_a_newer_correction(
+    graph: _Runtime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The post-write pass is itself a read-modify-write, so it needs a fence.
+
+    The schedule that breaks an unfenced pass: a correction retires the memory
+    while the row is being written, the pass reads that verdict, and a restore
+    lands before the pass gets to write. Last writer wins by default, so the
+    pass would put the retirement back on a row somebody had just restored.
+
+    The restore is injected between the pass's read and its write, which is the
+    only interval where it can do that.
+    """
+
+    from sibyl_core.projection.reconcile import reconcile_with_capture
+
+    retired = {
+        "lifecycle_state": "contested",
+        "excluded_from_recall": True,
+    }
+    restored = {
+        "lifecycle_state": "active",
+        "excluded_from_recall": False,
+    }
+
+    row = _entity(graph, "fenced-row", "Deploy to Fly", "fenced hosting body")
+    await graph.entity_manager.create_direct(row)
+
+    capture_verdict: dict[str, Any] = dict(retired)
+    reads: list[str] = []
+
+    async def verdict_then_restore(**_kwargs: object) -> dict[str, Any]:
+        answer = dict(capture_verdict)
+        reads.append(str(answer.get("lifecycle_state")))
+        if answer.get("lifecycle_state") == "contested":
+            # The restore lands between this pass's read and its write, and it
+            # updates the capture and the row the way a real restore does.
+            stored = await graph.entity_manager.get("fenced-row")
+            await graph.entity_manager.update(
+                "fenced-row",
+                {"metadata": restored},
+                expected_revision=stored.revision,
+            )
+            capture_verdict.clear()
+            capture_verdict.update(restored)
+        return answer
+
+    monkeypatch.setattr(
+        "sibyl_core.services.memory.projected_row_lifecycle_stamp",
+        verdict_then_restore,
+    )
+
+    await reconcile_with_capture(
+        graph.entity_manager,
+        organization_id=graph.group_id,
+        metadata={"raw_memory_id": "raw-fenced"},
+        row_ids=["fenced-row"],
+    )
+
+    assert len(reads) > 1, "the refused write has to send the pass back for a fresh verdict"
+
+    settled = await graph.entity_manager.get("fenced-row")
+    assert settled.metadata.get("lifecycle_state") == "active", (
+        "the newer correction has to survive a pass that started before it"
+    )
+    assert settled.metadata.get("excluded_from_recall") is False
+
+    served = _pack_ids(await _pack(graph, "fenced hosting body"))
+    assert "fenced-row" in served
+
+
+@pytest.mark.asyncio
+async def test_a_readable_verdict_clears_the_pending_marker(
+    graph: _Runtime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The marker says nobody could check, so a check has to take it off.
+
+    A marker that outlived the outage would keep a healthy row excluded
+    forever, which turns a transient store blip into permanent data loss from
+    the reader's point of view. It is asserted gone from the row rather than
+    merely falsy, because the graph patch expresses removal as an explicit
+    None and a key that merely reads falsy is still there for anything
+    querying on presence.
+    """
+
+    from sibyl_core.projection.reconcile import RECONCILE_PENDING_KEY, reconcile_with_capture
+
+    row = _entity(
+        graph,
+        "pending-row",
+        "Deploy to Fly",
+        "pending marker hosting body",
+    )
+    await graph.entity_manager.create_direct(row)
+    await graph.entity_manager.update(
+        "pending-row",
+        {"metadata": {"excluded_from_recall": True, RECONCILE_PENDING_KEY: True}},
+    )
+    marked = await graph.entity_manager.get("pending-row")
+    assert marked.metadata.get(RECONCILE_PENDING_KEY) is True
+    assert "pending-row" not in _pack_ids(await _pack(graph, "pending marker hosting body"))
+
+    async def healthy_verdict(**_kwargs: object) -> dict[str, Any]:
+        return {}
+
+    monkeypatch.setattr(
+        "sibyl_core.services.memory.projected_row_lifecycle_stamp",
+        healthy_verdict,
+    )
+
+    outcome = await reconcile_with_capture(
+        graph.entity_manager,
+        organization_id=graph.group_id,
+        metadata={"raw_memory_id": "raw-pending"},
+        row_ids=["pending-row"],
+    )
+
+    assert outcome.changed
+    settled = await graph.entity_manager.get("pending-row")
+    assert RECONCILE_PENDING_KEY not in settled.metadata, "the marker has to be gone, not falsy"
+    assert settled.metadata.get("excluded_from_recall") is False
+    assert "pending-row" in _pack_ids(await _pack(graph, "pending marker hosting body"))
+
+
+@pytest.mark.asyncio
+async def test_a_correction_clears_the_pending_marker_it_finds(
+    graph: _Runtime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A correction is somebody reading the verdict, so it answers the marker."""
+
+    from sibyl_core.projection.reconcile import RECONCILE_PENDING_KEY
+
+    row = _entity(
+        graph,
+        "marked-parent",
+        "Deploy to Fly",
+        "marked parent hosting body",
+        raw_memory_id="raw-marked-parent",
+    )
+    await graph.entity_manager.create_direct(row)
+    await graph.entity_manager.update(
+        "marked-parent",
+        {"metadata": {RECONCILE_PENDING_KEY: True}},
+    )
+
+    result = await _correct(graph, monkeypatch, raw_memory_id="raw-marked-parent")
+    assert result.applied
+    assert "marked-parent" in result.affected_entity_ids
+
+    settled = await graph.entity_manager.get("marked-parent")
+    assert RECONCILE_PENDING_KEY not in settled.metadata
+    assert settled.metadata.get("excluded_from_recall") is True

@@ -32,7 +32,6 @@ from sibyl_core.memory_pipeline.spans import (
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.projection.inheritance import (
     LIFECYCLE_METADATA_KEYS,
-    inherited_lifecycle_metadata,
     parent_lifecycle_as_stored,
 )
 from sibyl_core.projection.reconcile import reconcile_with_parent
@@ -348,7 +347,6 @@ async def project_entity_passages(
     """
     source_id = created_source_id or source.id
     stored_parent = await parent_lifecycle_as_stored(entity_manager, source, source_id=source_id)
-    inherited = inherited_lifecycle_metadata(stored_parent.metadata)
     entities, relationships = plan_entity_passages(
         stored_parent,
         source_id=source_id,
@@ -387,12 +385,22 @@ async def project_entity_passages(
     # The parent can be corrected while these spans are being written, which
     # is an interval no pre-write read reaches: the correction's cascade runs
     # before the spans exist and finds nothing to stamp.
-    await reconcile_with_parent(
+    reconciled = await reconcile_with_parent(
         entity_manager,
         source_id=source_id,
         row_ids=[entity.id for entity in created_passages],
-        applied_stamp=inherited,
+        organization_id=group_id,
     )
+    if reconciled.changed:
+        log.warning(
+            "passage_projection_lifecycle_reconciled",
+            organization_id=group_id,
+            source_id=source_id,
+            passages=[entity.id for entity in created_passages],
+            restamped=reconciled.restamped,
+            unverified=reconciled.unverified,
+            cleared=reconciled.cleared,
+        )
 
     created_ids = {entity.id for entity in created_passages}
     pending = [

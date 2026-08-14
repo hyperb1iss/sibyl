@@ -1646,7 +1646,16 @@ async def test_an_unreadable_verdict_retires_the_row_instead_of_poisoning_the_jo
     monkeypatch.setattr("asyncio.sleep", AsyncMock())
 
     class _Manager:
-        async def update(self, entity_id: str, updates: dict[str, Any]) -> object:
+        async def get(self, entity_id: str) -> Any:
+            return SimpleNamespace(id=entity_id, metadata={}, revision=1)
+
+        async def update(
+            self,
+            entity_id: str,
+            updates: dict[str, Any],
+            *,
+            expected_revision: int | None = None,
+        ) -> object:
             stamped.append((entity_id, dict(updates["metadata"])))
             return object()
 
@@ -1655,7 +1664,6 @@ async def test_an_unreadable_verdict_retires_the_row_instead_of_poisoning_the_jo
         organization_id="org-1",
         metadata={"raw_memory_id": "raw-1"},
         row_ids=["row-1"],
-        applied_stamp={},
     )
 
     assert len(attempts) == RECONCILE_MAX_ATTEMPTS, "transient failures are retried, bounded"
@@ -1693,3 +1701,50 @@ async def test_an_absent_parent_is_not_treated_as_an_unreadable_one() -> None:
     resolved = await parent_lifecycle_as_stored(_Manager(), source, source_id="missing-parent")
 
     assert resolved is source
+
+
+@pytest.mark.asyncio
+async def test_a_walk_that_hits_its_ceiling_reports_a_partial_correction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A correction that could not reach every projected row must say so.
+
+    The page ceiling is a stop, not a guarantee. A caller told "applied" with
+    no qualifier would have no way to learn that rows projected from this
+    capture are still servable, which is the same silence the truncation
+    receipt on the retrieval gate exists to prevent.
+    """
+
+    page_size = memory_module._GRAPH_CORRECTION_PROJECTION_PAGE_SIZE
+    max_pages = memory_module._GRAPH_CORRECTION_PROJECTION_MAX_PAGES
+
+    class _Runtime:
+        def __init__(self) -> None:
+            self.client = self
+            self.entity_manager = self
+
+        async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+            if "parent_entity_id" not in query:
+                return [{"uuid": "parent-1"}]
+            # Always a full page, so the walk can only stop at its ceiling.
+            cursor = str(params.get("cursor") or "")
+            start = int(cursor.rsplit("-", 1)[-1]) + 1 if cursor else 0
+            return [{"uuid": f"projected-{index:07d}"} for index in range(start, start + page_size)]
+
+        async def get(self, entity_id: str) -> Any:
+            return SimpleNamespace(
+                id=entity_id,
+                created_by="user-1",
+                metadata={"memory_scope": "private", "principal_id": "user-1"},
+            )
+
+    targets = await memory_module._correction_graph_entity_ids(
+        _Runtime(),
+        organization_id="org-1",
+        memory=_raw_capture(),
+        principal_id="user-1",
+        accessible_projects=None,
+    )
+
+    assert targets.truncated is True
+    assert len(targets.projections) == page_size * max_pages

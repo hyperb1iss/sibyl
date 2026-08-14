@@ -924,6 +924,12 @@ def _correction_result_response(
     if result.refused_entity_ids:
         recall_impact["refused_entity_ids"] = list(result.refused_entity_ids)
         recall_impact["partially_applied"] = True
+    if result.projection_walk_truncated:
+        # The lineage walk stopped at its page ceiling, so rows projected from
+        # this capture may still be servable. A caller told `applied: true`
+        # with no qualifier has no other way to learn that.
+        recall_impact["projection_walk_truncated"] = True
+        recall_impact["partially_applied"] = True
     return response.model_copy(update={"recall_impact": recall_impact})
 
 

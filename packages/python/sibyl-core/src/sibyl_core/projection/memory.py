@@ -16,7 +16,6 @@ from sibyl_core.models.entities import Entity, EntityType, Relationship, Relatio
 from sibyl_core.models.memory_extraction import ExtractedMemoryEntity
 from sibyl_core.projection.inheritance import (
     LIFECYCLE_METADATA_KEYS,
-    inherited_lifecycle_metadata,
     parent_lifecycle_as_stored,
 )
 from sibyl_core.projection.reconcile import reconcile_with_parent
@@ -546,20 +545,20 @@ async def _persist_projection_batch(
     for source_id, row_ids in resolved_entity_ids_by_source_id.items():
         if not row_ids:
             continue
-        planned = next(
-            (
-                projected_by_id[link.entity_id].metadata
-                for link in projected_entity_links_by_source_id.get(source_id, ())
-                if link.entity_id in projected_by_id
-            ),
-            None,
-        )
-        await reconcile_with_parent(
+        reconciled = await reconcile_with_parent(
             entity_manager,
             source_id=source_id,
             row_ids=row_ids,
-            applied_stamp=inherited_lifecycle_metadata(planned),
         )
+        if reconciled.changed:
+            log.warning(
+                "memory_projection_lifecycle_reconciled",
+                source_id=source_id,
+                rows=list(row_ids),
+                restamped=reconciled.restamped,
+                unverified=reconciled.unverified,
+                cleared=reconciled.cleared,
+            )
     relationship_count = 0
     created_projection_relationships: tuple[Relationship, ...] = ()
     if relationships:

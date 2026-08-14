@@ -3530,3 +3530,64 @@ async def test_promote_reflection_candidate_returns_404_for_missing_candidate() 
             "review_state": "missing",
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_a_truncated_projection_walk_says_the_correction_was_partial() -> None:
+    """The lineage walk stopping early is a partial write, not a complete one.
+
+    A capture with more projected rows than the walk's page ceiling admits
+    leaves some of them servable. The caller is told `applied: true` either
+    way, so the qualifier is the only signal that the retirement did not reach
+    everything it was supposed to.
+    """
+
+    org = _org()
+    memory = _memory(id="memory-1", organization_id=str(org.id), source_id="source-1")
+    updated = _memory(
+        id="memory-1",
+        organization_id=str(org.id),
+        source_id="source-1",
+        review_state="pending",
+    )
+    preview = MemoryCorrectionPreview(
+        allowed=True,
+        source_id="memory-1",
+        action="mark_wrong",
+        reason="wrong",
+        target_lifecycle_state="contested",
+        target_lifecycle_flags=[],
+        affected_source_ids=["memory-1"],
+        affected_derived_ids=[],
+        reversible=True,
+        recall_impact={"excluded_from_recall": True},
+        synthesis_impact={"excluded_from_synthesis": True},
+        audit_action="memory.correction.mark_wrong",
+    )
+    updated.revision = 2
+    result = MemoryCorrectionResult(
+        applied=True,
+        preview=preview,
+        updated_memory=updated,
+        affected_entity_ids=["entity-1"],
+        projection_walk_truncated=True,
+    )
+
+    with (
+        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch(
+            "sibyl.api.routes.memory.apply_memory_correction",
+            AsyncMock(return_value=result),
+        ),
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()),
+    ):
+        response = await apply_memory_correction_route(
+            "memory-1",
+            MemoryCorrectionRequest(action="mark_wrong", reason="wrong"),
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(org_role=OrganizationRole.OWNER),
+        )
+
+    assert response.recall_impact["projection_walk_truncated"] is True
+    assert response.recall_impact["partially_applied"] is True
