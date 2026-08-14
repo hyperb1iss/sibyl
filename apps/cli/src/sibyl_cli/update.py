@@ -513,3 +513,4 @@ def update(
         success("Update complete!")
     else:
         warn("Update completed with some issues")
+        raise typer.Exit(1)

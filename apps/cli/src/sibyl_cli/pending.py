@@ -141,22 +141,28 @@ def discard_writes(
     if not selected:
         success("No pending writes matched")
         return
+    # Deduplicated, since the same id named twice discards once and the second
+    # pass would otherwise count as a miss.
+    selected = list(dict.fromkeys(selected))
     removed = 0
+    missed = 0
     for write_id in selected:
         try:
             if delete_pending_write(write_id):
                 removed += 1
                 record_pending_metric("discarded")
+            else:
+                missed += 1
         except ValueError as exc:
             error(str(exc))
             raise typer.Exit(code=1) from exc
 
+    success(f"Discarded {removed} pending write{'s' if removed != 1 else ''}")
     # A named id that matched nothing is a refusal, not an empty result: the
     # caller asked for a specific write and the queue still holds it.
-    if not read_like and removed < len(selected):
-        error(f"No pending write matched {len(selected) - removed} of the given IDs")
+    if not read_like and missed:
+        error(f"No pending write matched {missed} of the given IDs")
         raise typer.Exit(code=1)
-    success(f"Discarded {removed} pending write{'s' if removed != 1 else ''}")
 
 
 @app.command("flush")

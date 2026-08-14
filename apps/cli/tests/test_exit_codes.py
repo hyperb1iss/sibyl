@@ -369,3 +369,58 @@ def test_explore_dependencies_exits_nonzero_without_a_target() -> None:
 
     assert result.exit_code == 1
     assert "Must specify either" in result.stdout
+
+
+@pytest.mark.parametrize("json_flag", [[], ["--json"]])
+def test_synthesis_remember_exits_nonzero_when_nothing_was_remembered(
+    json_flag: list[str],
+) -> None:
+    """The command's whole job is to remember; a run that did not is a failure."""
+    drafted = {"artifact": {"title": "x", "remembered_memory_id": None}}
+
+    with patch("sibyl_cli.main.get_client", return_value=_client(synthesis_draft=drafted)):
+        result = CliRunner().invoke(main_app, ["synthesis", "remember", "a goal", *json_flag])
+
+    assert result.exit_code == 1
+
+
+@pytest.mark.parametrize("json_flag", [[], ["--json"]])
+def test_synthesis_remember_exits_zero_when_it_lands(json_flag: list[str]) -> None:
+    remembered = {
+        "artifact": {
+            "title": "x",
+            "remembered_memory_id": "mem_1",
+            "remembered_source_id": "src_1",
+            "artifact_id": "art_1",
+        }
+    }
+
+    with patch("sibyl_cli.main.get_client", return_value=_client(synthesis_draft=remembered)):
+        result = CliRunner().invoke(main_app, ["synthesis", "remember", "a goal", *json_flag])
+
+    assert result.exit_code == 0
+
+
+def test_setup_exits_nonzero_when_integration_files_are_missing() -> None:
+    from sibyl_cli import local
+
+    with patch("sibyl_cli.setup.setup_agent_integration", return_value=False):
+        result = CliRunner().invoke(local.app, ["setup"])
+
+    assert result.exit_code == 1
+
+
+def test_update_exits_nonzero_when_a_component_fails() -> None:
+    from sibyl_cli import update as update_module
+
+    with (
+        patch.object(update_module, "update_cli", return_value=False),
+        patch.object(
+            update_module, "cli_update_available", return_value=("1.0.0", "2.0.0", True)
+        ),
+        patch.object(update_module, "get_server_version", return_value=None),
+        patch.object(update_module, "is_dev_mode", return_value=False),
+    ):
+        result = CliRunner().invoke(update_module.app, ["--cli", "--yes"])
+
+    assert result.exit_code == 1

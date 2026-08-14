@@ -2437,10 +2437,15 @@ def synthesis_remember_command(
                     scope_key=scope_key,
                     tags=_parse_csv_ids(tags),
                 )
+            artifact = cast("dict[str, object]", data.get("artifact") or {})
+            remembered = bool(artifact.get("remembered_memory_id"))
+
             if json_output:
-                print_json(data)
+                print_json_result(data, succeeded=remembered)
                 return
             _print_synthesis_remember(cast("dict[str, object]", data))
+            if not remembered:
+                raise typer.Exit(1)
         except SibylClientError as e:
             _handle_client_error(e)
 

@@ -247,7 +247,14 @@ def notify_pending_writes() -> None:
     count = pending_write_count()
     if count <= 0:
         return
-    err_console.print(f"[{ELECTRIC_YELLOW}]![/{ELECTRIC_YELLOW}] {pending_writes_summary(count)}")
+    try:
+        err_console.print(
+            f"[{ELECTRIC_YELLOW}]![/{ELECTRIC_YELLOW}] {pending_writes_summary(count)}"
+        )
+    except OSError:
+        # The notice runs from a finally block, so a closed or broken stderr
+        # must not replace the exit status the command already earned.
+        return
     # Claimed only once the line is out, so a queue we failed to read stays
     # unclaimed and a later caller can still report it.
     mark_pending_writes_reported()

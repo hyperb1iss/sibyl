@@ -299,3 +299,32 @@ def test_pending_writes_discard_read_like_exits_zero_when_nothing_matches(
     result = CliRunner().invoke(pending.app, ["discard", "--read-like"])
 
     assert result.exit_code == 0
+
+
+def test_pending_writes_discard_counts_a_repeated_id_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same id twice discards once; the second pass is not a miss."""
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    item = _create_pending()
+    write_id = str(item["id"])
+
+    result = CliRunner().invoke(pending.app, ["discard", write_id, write_id])
+
+    assert result.exit_code == 0
+    assert pending_writes.list_pending_writes() == []
+
+
+def test_pending_writes_discard_reports_what_it_removed_on_a_partial_match(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    item = _create_pending()
+
+    result = CliRunner().invoke(pending.app, ["discard", str(item["id"]), "deadbeef"])
+
+    assert result.exit_code == 1
+    assert "Discarded 1 pending write" in result.stdout
+    assert "No pending write matched 1" in result.stdout
