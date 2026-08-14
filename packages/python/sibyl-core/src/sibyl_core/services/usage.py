@@ -147,7 +147,11 @@ UPDATE raw_captures SET
         THEN last_used_at ELSE $last_used_at END,
     metadata.retrieval_count = math::max([retrieval_count ?? 0, $retrieval_count]),
     metadata.citation_count = math::max([citation_count ?? 0, $citation_count]),
-    metadata.misled_count = math::max([misled_count ?? 0, $misled_count])
+    metadata.misled_count = math::max([misled_count ?? 0, $misled_count]),
+    -- Same reason the graph stamp bumps: a caller holding expected_revision
+    -- rewrites the whole metadata bag, so an unannounced stamp lands inside
+    -- the window its fence was supposed to close.
+    revision = (revision ?? 0) + 1
 WHERE organization_id = $organization_id
     AND uuid = $item_id
 RETURN AFTER;
@@ -181,7 +185,12 @@ UPDATE entity SET
         THEN last_used_at ELSE $last_used_at END,
     attributes.retrieval_count = math::max([retrieval_count ?? 0, $retrieval_count]),
     attributes.citation_count = math::max([citation_count ?? 0, $citation_count]),
-    attributes.misled_count = math::max([misled_count ?? 0, $misled_count])
+    attributes.misled_count = math::max([misled_count ?? 0, $misled_count]),
+    -- A stamp is a real write, so it announces itself like one. Readers that
+    -- fence a later write on the revision they read (the snapshot fold, any
+    -- caller holding expected_revision) accept a stale read otherwise, and
+    -- overwrite the stamped values with whatever their read was carrying.
+    revision = (revision ?? 0) + 1
 WHERE group_id = $organization_id
     AND uuid = $item_id
 RETURN AFTER;

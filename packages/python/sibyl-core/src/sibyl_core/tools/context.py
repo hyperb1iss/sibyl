@@ -598,6 +598,11 @@ _ITEM_METADATA_KEYS = (
     "kind",
     "capture_mode",
     "capture_surface",
+    # Which artifact a remembered synthesis row is. capture_surface alone only
+    # says the row is synthesis output, so the render filter can refuse it but
+    # cannot tell it apart from any other artifact, and a caller naming the
+    # artifact it wants to build on would have nothing to match against.
+    "synthesis_artifact_id",
     "thread_id",
     "label",
     "project_id",

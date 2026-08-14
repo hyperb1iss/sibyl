@@ -1413,10 +1413,18 @@ async def update_entity(
                 created_source_id=entity_id,
             )
             if passage_result.errors:
-                log.warning(
+                # Raised rather than logged so the queue's retry semantics
+                # engage: returning success here would retire the job while
+                # stale spans of the previous body are still searchable, and
+                # nothing else would ever come back for them.
+                log.error(
                     "update_entity_passage_reprojection_failed",
                     entity_id=entity_id,
                     errors=passage_result.errors,
+                )
+                raise RuntimeError(
+                    f"passage reprojection incomplete for {entity_id}: "
+                    f"{'; '.join(passage_result.errors)}"
                 )
         elif result is not None and scope_bearing_entity_update(updates):
             # A scope-only edit leaves the cut valid but changes who may read

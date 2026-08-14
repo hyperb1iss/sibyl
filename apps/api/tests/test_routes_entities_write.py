@@ -1397,6 +1397,68 @@ async def test_delete_project_routes_through_runtime_project_record() -> None:
 
 
 @pytest.mark.asyncio
+async def test_delete_entity_keeps_the_parent_when_a_span_cannot_be_retired() -> None:
+    """A delete that cannot finish must stay retryable rather than half-happen.
+
+    Spans are derived and the parent is not, so retiring first costs only work a
+    reprojection can redo, while deleting the parent first and failing on a span
+    stranded it for good: the retry's own existence check would 404 on the
+    parent while the span went on serving the deleted text.
+    """
+    from sibyl_core.projection.passages import passage_entity_id
+
+    org = _org()
+    ctx = _ctx()
+    existing = _project_entity(name="Delete me", description="gone")
+    stranded = passage_entity_id("project_new", 1)
+
+    async def _delete(target_id: str) -> bool:
+        if target_id == stranded:
+            raise RuntimeError("permanently broken")
+        return True
+
+    delete_mock = AsyncMock(side_effect=_delete)
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing),
+            delete=delete_mock,
+        )
+    )
+
+    with (
+        patch("sibyl.locks.entity_lock", _locked_entity),
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock(return_value=runtime)
+        ),
+        patch("sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()),
+        patch(
+            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            AsyncMock(return_value={"project_new"}),
+        ),
+        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()) as broadcast,
+        patch("sibyl.api.routes.entities.delete_project_record", AsyncMock()) as delete_project,
+        patch("sibyl.api.routes.entities.log_audit_event", AsyncMock()) as audit_log,
+        pytest.raises(HTTPException) as raised,
+    ):
+        await delete_entity(
+            entity_id="project_new",
+            request=_request(),
+            org=org,
+            ctx=ctx,
+            content_session=None,
+        )
+
+    assert raised.value.status_code == 500
+    assert stranded in raised.value.detail
+    # The parent, its content record, its audit, and its broadcast all wait for
+    # a delete that actually finished.
+    assert "project_new" not in [call.args[0] for call in delete_mock.await_args_list]
+    delete_project.assert_not_awaited()
+    audit_log.assert_not_awaited()
+    broadcast.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_create_entity_binds_scoped_metadata_to_authenticated_principal() -> None:
     """Scoped graph rows bind to the caller's identity, not the payload's claim.
 
@@ -2070,6 +2132,46 @@ async def test_update_entity_nulls_a_withdrawn_plan_because_merge_cannot_delete(
     # The re-cut has to happen on the request path: the only other caller of the
     # reprojection is an arq job nothing enqueues.
     reproject.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_entity_reports_a_reprojection_that_left_stale_spans() -> None:
+    """A re-cut that stranded spans is not an update the caller can trust.
+
+    The body changed, so every span cut from the old one is stale. If some of
+    them survive the sweep they keep serving the previous revision through
+    search, and answering 200 tells the caller a re-cut happened that did not.
+    """
+    org = _org()
+    ctx = _ctx()
+    owner = str(ctx.user.id)
+    existing = _spanned_memory_entity(owner=owner)
+    updated = _spanned_memory_entity(owner=owner, content="a completely rewritten body")
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            get=AsyncMock(return_value=existing),
+            update=AsyncMock(return_value=updated),
+        ),
+        relationship_manager=SimpleNamespace(),
+    )
+
+    with _update_patches(runtime) as (reproject, _restamp):
+        reproject.return_value = SimpleNamespace(
+            errors=("stranded stale passages: passage_abc123",),
+            passages=2,
+        )
+        with pytest.raises(HTTPException) as raised:
+            await update_entity(
+                entity_id="decision_spanned",
+                update=EntityUpdate(content="a completely rewritten body"),
+                request=_request(),
+                org=org,
+                ctx=ctx,
+                content_session=None,
+            )
+
+    assert raised.value.status_code == 500
+    assert "passage_abc123" in raised.value.detail
 
 
 @pytest.mark.asyncio

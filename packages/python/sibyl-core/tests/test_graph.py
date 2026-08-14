@@ -11,6 +11,7 @@ import pytest
 
 import sibyl_core.services.graph as graph_module
 from sibyl_core.backends.surreal.connection import SurrealQueryError
+from sibyl_core.backends.surreal.records import coerce_datetime
 from sibyl_core.backends.surreal.schema import (
     ANALYZER_DEFINITIONS,
     EMBEDDING_DIM,
@@ -45,6 +46,11 @@ from sibyl_core.services.graph import (
     normalize_records,
     prepare_graph_schema,
     relationship_from_surreal_row,
+)
+from sibyl_core.services.usage import (
+    MemoryUsageItemKind,
+    MemoryUsageStamp,
+    _stamp_graph_entity,
 )
 
 
@@ -886,6 +892,569 @@ async def test_native_entity_manager_update_uses_server_side_merge() -> None:
     assert patch["modified_by"] == "nova"
     assert patch["status"] == "done"
     assert attributes["status"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_object_from_entries_resolves_a_duplicate_key_to_the_last_one() -> None:
+    """The upsert's attributes merge rests on this, and the docs do not state it.
+
+    SurrealQL has no object merge: no spread, no object addition, no
+    object::extend, and no object::remove. Closures cannot stand in either,
+    because a closure body here silently sees nothing but its own argument, so a
+    filter that reads an outer binding drops nothing and returns its input
+    unchanged. That leaves concatenating both entry lists and letting the later
+    entry win, which the object function reference documents as a conversion
+    without saying how duplicates resolve.
+
+    So it is pinned rather than assumed. If an engine ever resolves duplicates
+    to the first entry, this fails loudly here instead of silently inverting
+    every entity write into stale-value-wins.
+    """
+    client = SurrealGraphClient(group_id="org-from-entries", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+
+        merged = await client.execute_query(
+            """
+            RETURN object::from_entries(array::concat(
+                object::entries({ kept: "old", shared: "old" }),
+                object::entries({ shared: "new", added: "new" })
+            ));
+            """
+        )
+
+        assert merged == {"kept": "old", "shared": "new", "added": "new"}
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_a_later_write_does_not_erase_an_earlier_writers_keys() -> None:
+    """A write must not discard the keys it never knew about.
+
+    Reprojection and restore both rebuild an Entity from partial knowledge and
+    upsert it. While that assigned the attributes bag wholesale, whichever of
+    them wrote last erased the other's fields along with anything the original
+    write had carried.
+
+    This pins the merge semantics, not concurrency. Embedded URLs are clamped to
+    a single connection, so writes here serialize no matter how they are
+    dispatched, and the writers are sequential to say so honestly. The semantics
+    are what make the concurrent case safe on a pooled server, because the merge
+    happens inside the statement and leaves no window between a read and its
+    write, but nothing in this file exercises that.
+    """
+    client = SurrealGraphClient(group_id="org-disjoint-writers", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        def _writer(field: str, value: str | None) -> Entity:
+            return Entity(
+                id="decision_disjoint",
+                entity_type=EntityType.DECISION,
+                name="Contended decision",
+                organization_id=client.group_id,
+                metadata={field: value},
+            )
+
+        await manager.create_direct(
+            Entity(
+                id="decision_disjoint",
+                entity_type=EntityType.DECISION,
+                name="Contended decision",
+                organization_id=client.group_id,
+                metadata={"original_key": "written once", "alpha": "before", "beta": "before"},
+            )
+        )
+        await manager.create_direct(_writer("alpha", "from writer a"))
+        await manager.create_direct(_writer("beta", "from writer b"))
+
+        entity = await manager.get("decision_disjoint")
+
+        assert entity.metadata["alpha"] == "from writer a"
+        assert entity.metadata["beta"] == "from writer b"
+        assert entity.metadata["original_key"] == "written once"
+
+        # Preserving absent keys is only safe while removal has a way to be
+        # said: a key written as None is cleared and does not come back.
+        await manager.create_direct(_writer("original_key", None))
+        cleared = await manager.get("decision_disjoint")
+
+        assert "original_key" not in cleared.metadata
+        assert cleared.metadata["beta"] == "from writer b"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_removing_retrieval_keys_reaches_the_promoted_columns() -> None:
+    """A promoted key must obey the same removal rule as the rest of the bag.
+
+    Exact-match retrieval reads the column, not the metadata, so a removal that
+    stops at the bag leaves the retired key still matching queries. Absence
+    still means "this write does not speak to the keys", which is what lets a
+    reprojection rebuild an entity without stripping the writer's declaration.
+    """
+    client = SurrealGraphClient(group_id="org-retrieval-key-clear", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        def _note(metadata: dict[str, Any]) -> Entity:
+            return Entity(
+                id="note_retrieval_keys",
+                entity_type=EntityType.NOTE,
+                name="Note with an exact-match key",
+                organization_id=client.group_id,
+                metadata=metadata,
+            )
+
+        await manager.create_direct(_note({"retrieval_keys": ["ALPHA-1"]}))
+
+        # Absence does not speak to the keys, so they survive a partial rebuild.
+        await manager.create_direct(_note({"unrelated": "value"}))
+        assert (await manager.get("note_retrieval_keys")).metadata["retrieval_keys"] == ["ALPHA-1"]
+
+        await manager.create_direct(_note({"retrieval_keys": None}))
+        cleared = await manager.get("note_retrieval_keys")
+
+        assert "retrieval_keys" not in cleared.metadata
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT retrieval_keys, retrieval_keys_normalized
+                FROM entity
+                WHERE group_id = $group_id AND uuid = "note_retrieval_keys"
+                LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+        assert not rows[0]["retrieval_keys"]
+        assert not rows[0]["retrieval_keys_normalized"]
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_removing_a_metadata_key_keeps_it_gone_on_every_read_path() -> None:
+    """A key an update removes must not come back from a copy of the old state.
+
+    Surreal drops a field written as NONE, so the removal empties the flattened
+    slot. While a JSON snapshot of the same bag sat beside it, untouched by the
+    merge, every read filled the empty slot back in from the pre-update picture
+    and the removal was invisible to callers.
+    """
+    client = SurrealGraphClient(group_id="org-metadata-removal", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        await manager.create_direct(
+            Entity(
+                id="note_metadata_removal",
+                entity_type=EntityType.NOTE,
+                name="Note with a withdrawn key",
+                organization_id=client.group_id,
+                metadata={"kept_key": "still here", "withdrawn_key": "must not come back"},
+            )
+        )
+        await manager.update("note_metadata_removal", {"metadata": {"withdrawn_key": None}})
+
+        fetched = await manager.get("note_metadata_removal")
+        (many,) = await manager.get_many(["note_metadata_removal"])
+        listed = [
+            entity
+            for entity in await manager.list_by_type(EntityType.NOTE)
+            if entity.id == "note_metadata_removal"
+        ]
+        all_listed = [
+            entity for entity in await manager.list_all() if entity.id == "note_metadata_removal"
+        ]
+
+        for entity in (fetched, many, *listed, *all_listed):
+            assert entity.metadata.get("kept_key") == "still here"
+            assert "withdrawn_key" not in entity.metadata
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT attributes
+                FROM entity
+                WHERE group_id = $group_id AND uuid = "note_metadata_removal"
+                LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+        attributes = cast("dict[str, object]", rows[0]["attributes"])
+        assert attributes["kept_key"] == "still here"
+        assert "withdrawn_key" not in attributes
+        assert "metadata" not in attributes
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_a_write_heals_a_legacy_snapshot_instead_of_reading_around_it() -> None:
+    """A pre-flattening row must honor a removal, without losing snapshot-only keys.
+
+    Rows written before the flattened bag existed carry metadata only as the
+    JSON snapshot, and the read merges it. That merge is also how a removal gets
+    undone, because Surreal drops a field written as NONE and the snapshot then
+    answers for the empty slot. The write folds the snapshot down into the
+    flattened bag and clears it, so the removal sticks and nothing that lived
+    only in the snapshot goes with it.
+    """
+    client = SurrealGraphClient(group_id="org-legacy-snapshot", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        await manager.create_direct(
+            Entity(
+                id="note_legacy_snapshot",
+                entity_type=EntityType.NOTE,
+                name="Pre-flattening note",
+                organization_id=client.group_id,
+                metadata={"doomed_key": "resurrects", "moved_on": "new value"},
+            )
+        )
+        # Forge the pre-flattening shape: a snapshot holding a key that exists
+        # nowhere else, plus an older value for a key the flattened bag has.
+        await client.execute_query(
+            """
+            UPDATE entity SET
+                attributes.metadata = $snapshot,
+                attributes.doomed_key = NONE,
+                attributes.snapshot_only = NONE
+            WHERE group_id = $group_id AND uuid = "note_legacy_snapshot";
+            """,
+            group_id=client.group_id,
+            snapshot=json.dumps(
+                {
+                    "doomed_key": "resurrects",
+                    "snapshot_only": "lives nowhere else",
+                    "moved_on": "stale value",
+                }
+            ),
+        )
+
+        resurrected = await manager.get("note_legacy_snapshot")
+        assert resurrected.metadata["doomed_key"] == "resurrects"
+
+        await manager.create_direct(
+            Entity(
+                id="note_legacy_snapshot",
+                entity_type=EntityType.NOTE,
+                name="Pre-flattening note",
+                organization_id=client.group_id,
+                metadata={"doomed_key": None},
+            )
+        )
+
+        healed = await manager.get("note_legacy_snapshot")
+
+        assert "doomed_key" not in healed.metadata
+        assert healed.metadata["snapshot_only"] == "lives nowhere else"
+        assert healed.metadata["moved_on"] == "new value"
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT attributes
+                FROM entity
+                WHERE group_id = $group_id AND uuid = "note_legacy_snapshot"
+                LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+        attributes = cast("dict[str, object]", rows[0]["attributes"])
+        assert "metadata" not in attributes
+        assert attributes["snapshot_only"] == "lives nowhere else"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_a_patch_honors_a_removal_on_a_legacy_snapshot_row() -> None:
+    """The patch path removes keys too, so it needs the same fold as the upsert.
+
+    A patch clears a key by writing it as NONE, which Surreal drops, so on a
+    pre-flattening row the snapshot answers for the empty slot and the removal
+    silently does nothing.
+    """
+    client = SurrealGraphClient(group_id="org-legacy-patch", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        await manager.create_direct(
+            Entity(
+                id="note_legacy_patch",
+                entity_type=EntityType.NOTE,
+                name="Pre-flattening note",
+                organization_id=client.group_id,
+                metadata={"doomed_key": "resurrects"},
+            )
+        )
+        await client.execute_query(
+            """
+            UPDATE entity SET
+                attributes.metadata = $snapshot,
+                attributes.doomed_key = NONE,
+                attributes.snapshot_only = NONE
+            WHERE group_id = $group_id AND uuid = "note_legacy_patch";
+            """,
+            group_id=client.group_id,
+            snapshot=json.dumps(
+                {"doomed_key": "resurrects", "snapshot_only": "lives nowhere else"}
+            ),
+        )
+
+        await manager.update("note_legacy_patch", {"metadata": {"doomed_key": None}})
+        healed = await manager.get("note_legacy_patch")
+
+        assert "doomed_key" not in healed.metadata
+        assert healed.metadata["snapshot_only"] == "lives nowhere else"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_a_sentinel_clear_is_recognized_as_a_removal_by_the_snapshot_fold() -> None:
+    """A promoted column clears with a sentinel, and that still has to count.
+
+    Surreal reads an absent key and a null one as the same NONE, so a column
+    under preserve-on-absence cannot spell its removal with None; it sends a
+    sentinel the statement converts instead. A fold that only recognized None
+    saw an ordinary string, skipped the row, and the scope came back out of the
+    snapshot on the very next read.
+    """
+    client = SurrealGraphClient(group_id="org-sentinel-clear", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        await manager.create_direct(
+            Entity(
+                id="note_sentinel_clear",
+                entity_type=EntityType.NOTE,
+                name="Scoped pre-flattening note",
+                organization_id=client.group_id,
+                metadata={"memory_scope": "private", "principal_id": "owner-1"},
+            )
+        )
+        await client.execute_query(
+            """
+            UPDATE entity SET
+                attributes.metadata = $snapshot,
+                attributes.memory_scope = NONE,
+                attributes.principal_id = NONE,
+                memory_scope = NONE
+            WHERE group_id = $group_id AND uuid = "note_sentinel_clear";
+            """,
+            group_id=client.group_id,
+            snapshot=json.dumps({"memory_scope": "private", "principal_id": "owner-1"}),
+        )
+
+        await manager.create_direct(
+            Entity(
+                id="note_sentinel_clear",
+                entity_type=EntityType.NOTE,
+                name="Scoped pre-flattening note",
+                organization_id=client.group_id,
+                metadata={"memory_scope": CLEAR_MEMORY_SCOPE},
+            )
+        )
+        cleared = await manager.get("note_sentinel_clear")
+
+        assert cleared.metadata.get("memory_scope") is None
+        # Only the cleared key goes; the rest of the snapshot is folded down.
+        assert cleared.metadata["principal_id"] == "owner-1"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_a_writer_landing_mid_heal_is_not_overwritten_by_the_snapshot() -> None:
+    """The fold writes stale values, so it must refuse to land on a newer row.
+
+    Read, fold, write is not atomic, and everything the fold writes comes off a
+    picture of the row's past. A writer slipping between the read and the write
+    had its newer value replaced by that older one. The fence makes the write
+    refuse unless the row is still the one that was read, and the retry then
+    finds the newer value in the flattened bag and leaves it alone.
+    """
+    client = SurrealGraphClient(group_id="org-heal-race", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        await manager.create_direct(
+            Entity(
+                id="note_heal_race",
+                entity_type=EntityType.NOTE,
+                name="Contended pre-flattening note",
+                organization_id=client.group_id,
+                metadata={"contended": "old snapshot value", "doomed_key": "removed"},
+            )
+        )
+        await client.execute_query(
+            """
+            UPDATE entity SET
+                attributes.metadata = $snapshot,
+                attributes.contended = NONE,
+                attributes.doomed_key = NONE
+            WHERE group_id = $group_id AND uuid = "note_heal_race";
+            """,
+            group_id=client.group_id,
+            snapshot=json.dumps({"contended": "old snapshot value", "doomed_key": "removed"}),
+        )
+
+        original_execute = client.execute_query
+        landed: list[str] = []
+
+        async def _execute_with_interleaved_writer(query: str, **params: Any) -> Any:
+            # Fire once, after the fold has read the row and while it is about
+            # to write: exactly the window the fence exists to cover.
+            if "seen_revision" in query and not landed:
+                landed.append("yes")
+                await manager.create_direct(
+                    Entity(
+                        id="note_heal_race",
+                        entity_type=EntityType.NOTE,
+                        name="Contended pre-flattening note",
+                        organization_id=client.group_id,
+                        metadata={"contended": "new concurrent value"},
+                    )
+                )
+            return await original_execute(query, **params)
+
+        client.execute_query = _execute_with_interleaved_writer  # type: ignore[method-assign]
+        try:
+            await manager.update("note_heal_race", {"metadata": {"doomed_key": None}})
+        finally:
+            client.execute_query = original_execute  # type: ignore[method-assign]
+
+        healed = await manager.get("note_heal_race")
+
+        assert landed, "the interleaved writer never ran, so the race was not exercised"
+        assert healed.metadata["contended"] == "new concurrent value"
+        assert "doomed_key" not in healed.metadata
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_a_usage_stamp_landing_mid_heal_survives_the_snapshot_fold() -> None:
+    """A recall stamped mid-fold must not be rolled back to the snapshot's counts.
+
+    The fence only holds if every writer announces itself, and the usage stamp
+    is a writer: it rewrites the recall columns and their mirror inside the
+    attributes bag. A stamp that left revision alone was invisible to the
+    fence, so the fold's write still matched, and a pre-flattening row whose
+    recall stamps lived only in the JSON snapshot had a fresh recall replaced
+    by the stale one the snapshot was carrying.
+    """
+    client = SurrealGraphClient(group_id="org-heal-usage-race", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        stale_recall = "2026-01-09T08:00:00+00:00"
+        fresh_recall = datetime(2026, 8, 13, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+
+        await manager.create_direct(
+            Entity(
+                id="note_usage_race",
+                entity_type=EntityType.NOTE,
+                name="Recalled pre-flattening note",
+                organization_id=client.group_id,
+                metadata={
+                    "last_used_at": stale_recall,
+                    "retrieval_count": 1,
+                    "doomed_key": "removed",
+                },
+            )
+        )
+        # Forge the pre-flattening shape: the recall stamps exist only in the
+        # snapshot, so the fold is the thing that puts them in the bag.
+        await client.execute_query(
+            """
+            UPDATE entity SET
+                attributes.metadata = $snapshot,
+                attributes.last_used_at = NONE,
+                attributes.retrieval_count = NONE,
+                attributes.doomed_key = NONE
+            WHERE group_id = $group_id AND uuid = "note_usage_race";
+            """,
+            group_id=client.group_id,
+            snapshot=json.dumps(
+                {
+                    "last_used_at": stale_recall,
+                    "retrieval_count": 1,
+                    "doomed_key": "removed",
+                }
+            ),
+        )
+
+        original_execute = client.execute_query
+        landed: list[str] = []
+
+        async def _execute_with_interleaved_stamp(query: str, **params: Any) -> Any:
+            # Fire once, after the fold has read the row and while it is about
+            # to write: exactly the window the fence exists to cover.
+            if "seen_revision" in query and not landed:
+                landed.append("yes")
+                await _stamp_graph_entity(
+                    client,
+                    organization_id=client.group_id,
+                    stamp=MemoryUsageStamp(
+                        item_kind=MemoryUsageItemKind.GRAPH_ENTITY,
+                        item_id="note_usage_race",
+                        retrieval_count=7,
+                        citation_count=1,
+                        last_recalled_at=fresh_recall,
+                        last_used_at=fresh_recall,
+                    ),
+                )
+            return await original_execute(query, **params)
+
+        client.execute_query = _execute_with_interleaved_stamp  # type: ignore[method-assign]
+        try:
+            await manager.update("note_usage_race", {"metadata": {"doomed_key": None}})
+        finally:
+            client.execute_query = original_execute  # type: ignore[method-assign]
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT last_used_at, retrieval_count, attributes
+                FROM entity
+                WHERE group_id = $group_id AND uuid = "note_usage_race"
+                LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+        attributes = cast("dict[str, object]", rows[0]["attributes"])
+
+        assert landed, "the interleaved stamp never ran, so the race was not exercised"
+        assert rows[0]["retrieval_count"] == 7
+        assert coerce_datetime(rows[0]["last_used_at"]) == fresh_recall
+        assert attributes["retrieval_count"] == 7
+        assert coerce_datetime(attributes["last_used_at"]) == fresh_recall
+        assert "doomed_key" not in attributes
+        assert "metadata" not in attributes
+
+        healed = await manager.get("note_usage_race")
+        assert healed.metadata["retrieval_count"] == 7
+        assert coerce_datetime(healed.metadata["last_used_at"]) == fresh_recall
+    finally:
+        await client.close()
 
 
 @pytest.mark.asyncio
@@ -2521,6 +3090,10 @@ async def test_graph_filters_recheck_metadata_only_denormalized_fields() -> None
             "task_legacy_metadata_only",
             "task_legacy_archived_metadata_only",
         ):
+            # The shape of a row written before the flattened bag existed: no
+            # denormalized columns, no flattened keys, everything in the JSON
+            # snapshot. Stamped here rather than left over from create_direct,
+            # which no longer writes a snapshot for anything it stores.
             await client.execute_query(
                 """
                 UPDATE entity SET
@@ -2533,10 +3106,22 @@ async def test_graph_filters_recheck_metadata_only_denormalized_fields() -> None
                     attributes.status = NONE,
                     attributes.priority = NONE,
                     attributes.complexity = NONE,
-                    attributes.feature = NONE
+                    attributes.feature = NONE,
+                    attributes.metadata = $snapshot
                 WHERE uuid = $uuid;
                 """,
                 uuid=entity_id,
+                snapshot=json.dumps(
+                    {
+                        "project_id": "project_legacy",
+                        "status": (
+                            "archived" if entity_id.endswith("archived_metadata_only") else "doing"
+                        ),
+                        "priority": "high",
+                        "complexity": "simple",
+                        "feature": "legacy",
+                    }
+                ),
             )
 
         filtered = await entity_manager.list_by_type(
@@ -3092,7 +3677,11 @@ async def test_graph_writes_entities_and_relationships() -> None:
         assert rows[0]["project_id"] == "project_native"
         attributes = cast("dict[str, object]", rows[0]["attributes"])
         assert attributes["source_file"] == "raw_123"
-        assert attributes["metadata"]
+        # The flattened bag is the only copy: a JSON snapshot beside it could
+        # only ever go stale, since an update reaches the flattened keys and
+        # never the string.
+        assert attributes["project_id"] == "project_native"
+        assert "metadata" not in attributes
 
         relationships = normalize_records(
             await client.execute_query(

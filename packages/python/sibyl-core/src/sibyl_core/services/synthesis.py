@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import asdict, replace
 from typing import Any
 
@@ -132,6 +132,16 @@ SELF_FEEDING_CAPTURE_SURFACES = frozenset(
     }
 )
 MAX_EXPLICIT_NEIGHBORHOOD_IDS = 100
+
+
+def remembered_artifact_source_id(artifact_id: str) -> str:
+    """The source id a remembered artifact is stored under.
+
+    Derived rather than spelled out twice: the writer and the exemption that
+    has to recognize its output would otherwise be free to drift apart, and the
+    symptom would be a caller's own artifact id silently matching nothing.
+    """
+    return f"{artifact_id}:generated"
 
 
 async def default_search(**kwargs: Any) -> SearchResponse:
@@ -273,12 +283,60 @@ def _dedupe_sources(
     return deduped
 
 
-def _is_self_feeding_source(source: SynthesisSourceReference) -> bool:
-    metadata = source.metadata or {}
+def _is_self_feeding_metadata(metadata: Mapping[str, Any] | None) -> bool:
+    """Whether a candidate source is this pipeline's own prior output.
+
+    Keyed on metadata rather than on a source reference so the same rule can run
+    at plan time and again over raw context-pack items at materialize time,
+    which is the stage whose packs actually reach the renderer.
+    """
+    metadata = metadata or {}
     capture_surface = str(metadata.get("capture_surface") or "").strip().lower()
     if capture_surface in SELF_FEEDING_CAPTURE_SURFACES:
         return True
     return str(metadata.get("capture_mode") or "").strip().lower() == "synthesis"
+
+
+def _is_self_feeding_source(source: SynthesisSourceReference) -> bool:
+    return _is_self_feeding_metadata(source.metadata)
+
+
+def _requested_artifact_identities(request: SynthesisRequest) -> frozenset[str]:
+    """Every way of naming an artifact the caller asked to build on.
+
+    Only ``artifact_ids`` counts. The exemption exists so that synthesizing FROM
+    a chosen prior artifact stays possible, which is a statement about artifacts
+    and nothing else, and the other three lists hold ids that show up as the
+    lineage of derived rows. Letting them exempt anything meant naming a task
+    could whitelist an unrelated reflection whose ``source_id`` happened to be
+    that task.
+
+    An artifact answers to two names. ``remember_synthesis_artifact`` stores it
+    under a generated source id, so a caller holding the id the synthesis run
+    returned would otherwise match nothing at all; both forms are accepted, and
+    ``synthesis_artifact_id`` on the row itself is the direct one.
+    """
+    identities = frozenset(str(artifact_id) for artifact_id in request.artifact_ids if artifact_id)
+    return identities | frozenset(
+        remembered_artifact_source_id(artifact_id) for artifact_id in identities
+    )
+
+
+def _is_requested_artifact(
+    metadata: Mapping[str, Any],
+    *,
+    source_id: str,
+    item_id: str,
+    requested: frozenset[str],
+) -> bool:
+    if not requested:
+        return False
+    artifact_id = str(metadata.get("synthesis_artifact_id") or "")
+    return bool(
+        (artifact_id and artifact_id in requested)
+        or (source_id and source_id in requested)
+        or (item_id and item_id in requested)
+    )
 
 
 def _without_self_feeding_sources(
@@ -538,6 +596,7 @@ async def materialize_synthesis_section_packs(
         context_item_source_id,
     )
 
+    requested_artifacts = _requested_artifact_identities(run.request)
     materialized_packs: list[SynthesisSourcePack] = []
     outline_sections: list[SynthesisOutlineSection] = []
     materialization_gaps: list[SynthesisGap] = []
@@ -569,6 +628,22 @@ async def materialize_synthesis_section_packs(
             lifecycle_flags = context_item_lifecycle_flags(item)
             metadata = dict(item.metadata)
             project_id = context_item_project_id(item)
+            # The plan-stage filter runs over sources this stage then replaces
+            # wholesale, so without the same rule here a remembered handbook
+            # comes back through the context pack and becomes a source of its
+            # own successor. Counted as hidden: from the artifact's side it is
+            # a candidate the pack refused to render. Sources the caller named
+            # are exempt on both stages, because synthesizing FROM a chosen
+            # prior artifact is a deliberate request rather than recursion.
+            requested = _is_requested_artifact(
+                metadata,
+                source_id=source_id,
+                item_id=item.id,
+                requested=requested_artifacts,
+            )
+            if not requested and _is_self_feeding_metadata(metadata):
+                hidden_count += 1
+                continue
             if _context_item_is_hidden(
                 lifecycle_state,
                 lifecycle_flags,
@@ -924,7 +999,7 @@ async def remember_synthesis_artifact(
         if artifact.format is SynthesisArtifactFormat.MARKDOWN
         else json.dumps(artifact.json_payload, indent=2, sort_keys=True)
     )
-    source_id = f"{artifact.artifact_id}:generated"
+    source_id = remembered_artifact_source_id(artifact.artifact_id)
     memory = await remember_fn(
         organization_id=organization_id,
         principal_id=principal_id,

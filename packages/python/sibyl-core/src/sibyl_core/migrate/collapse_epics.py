@@ -43,6 +43,7 @@ from sibyl_core.services.graph import (
     _ENTITY_BULK_UPSERT_QUERY,
     _entity_from_row,
     _entity_record,
+    heal_entity_metadata_snapshots,
 )
 
 if TYPE_CHECKING:
@@ -217,7 +218,10 @@ async def _build_reverse_records(
         # Idempotent: a child whose parent pointer is already cleared is skipped.
         if not metadata.get("parent_task_id"):
             continue
-        metadata.pop("parent_task_id", None)
+        # None rather than popped: the upsert takes an absent key as "this write
+        # does not speak to it" and would leave the child pointing at the task
+        # this pass just turned back into an epic.
+        metadata["parent_task_id"] = None
         records.append(_record_with_metadata(child, metadata, group_id=group_id))
         children_repointed += 1
 
@@ -239,7 +243,10 @@ def _converted_task_record(epic: Entity, *, group_id: str) -> dict[str, object]:
 def _restored_epic_record(task: Entity, *, group_id: str) -> dict[str, object]:
     """Project a converted task back into an epic record, restoring its status."""
     metadata = dict(task.metadata or {})
-    original_status = str(metadata.pop(MIGRATED_FROM_EPIC_STATUS_KEY, "") or "")
+    original_status = str(metadata.get(MIGRATED_FROM_EPIC_STATUS_KEY) or "")
+    # None rather than popped, so the restored epic does not keep carrying the
+    # stash the forward pass left on it: the upsert preserves absent keys.
+    metadata[MIGRATED_FROM_EPIC_STATUS_KEY] = None
     metadata["status"] = _coerce_epic_status(original_status).value
     return _record_with_metadata(task, metadata, entity_type=EntityType.EPIC, group_id=group_id)
 
@@ -299,6 +306,10 @@ async def _apply_records(
     row is rewritten in place) and wraps it in ``BEGIN..COMMIT`` so a partial
     failure rolls back. ``$rows`` keeps the write fully parameter-bound.
     """
+    # The reverse pass clears keys, and driving the canonical upsert directly
+    # skips everything the write path does around it. On a pre-flattening row
+    # that meant the removed migration marker came straight back on the next read.
+    await heal_entity_metadata_snapshots(client, records, group_id=group_id)
     query = f"BEGIN TRANSACTION;\n{_ENTITY_BULK_UPSERT_QUERY}\nCOMMIT TRANSACTION;"
     result = await client.execute_query_raw(query, rows=records)
     direction = "reverse" if reverse else "forward"

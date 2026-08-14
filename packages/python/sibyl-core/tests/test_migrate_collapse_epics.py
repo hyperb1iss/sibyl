@@ -341,3 +341,60 @@ async def test_round_trip_preserves_epic_only_metadata() -> None:
     assert MIGRATED_FROM_EPIC_STATUS_KEY not in meta
 
     await client.close()
+
+
+@pytest.mark.asyncio
+async def test_reverse_drops_the_marker_on_a_pre_flattening_row() -> None:
+    """The rollback clears the marker, so a snapshot must not hand it back.
+
+    The migrations drive the canonical upsert themselves, so nothing the write
+    path does around it applied to them. On a row whose metadata lives only in
+    the JSON snapshot, that left the removed marker resurrecting on the next
+    read and the reverse pass permanently un-idempotent: it would keep selecting
+    the same row forever.
+    """
+    group_id = "00000000-0000-0000-0000-0000000000c1"
+    client, manager = await _make_graph(group_id)
+
+    epic = Epic(
+        id=f"epic_{uuid.uuid4().hex[:8]}",
+        name="Launch",
+        title="Launch",
+        project_id="project-9",
+        status=EpicStatus.COMPLETED,
+    )
+    await manager.create_direct(epic)
+    await collapse_epics_in_org(client, group_id=group_id, dry_run=False)
+
+    converted = await manager.get(epic.id)
+    # Forge the pre-flattening shape: metadata only in the JSON snapshot.
+    await client.execute_query(
+        """
+        UPDATE entity SET
+            attributes.metadata = $snapshot,
+            attributes.migrated_from_epic_status = NONE,
+            attributes.snapshot_only = NONE
+        WHERE group_id = $group_id AND uuid = $uuid;
+        """,
+        group_id=group_id,
+        uuid=epic.id,
+        snapshot=json.dumps(
+            {
+                MIGRATED_FROM_EPIC_STATUS_KEY: (converted.metadata or {}).get(
+                    MIGRATED_FROM_EPIC_STATUS_KEY
+                ),
+                "snapshot_only": "lives nowhere else",
+            }
+        ),
+    )
+
+    await collapse_epics_in_org(client, group_id=group_id, reverse=True, dry_run=False)
+
+    restored = await manager.get(epic.id)
+    meta = restored.metadata or {}
+
+    assert restored.entity_type is EntityType.EPIC
+    assert MIGRATED_FROM_EPIC_STATUS_KEY not in meta
+    assert meta.get("snapshot_only") == "lives nowhere else"
+
+    await client.close()

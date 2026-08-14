@@ -13,10 +13,10 @@ reader that finds a passage can always widen to the memory it came from.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass, field
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import structlog
 
@@ -32,9 +32,6 @@ from sibyl_core.memory_pipeline.spans import (
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.projection.slicing import HARD_MAX, Slice, render_slice, slice_prose
 from sibyl_core.tools.helpers import _generate_id
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 log = structlog.get_logger()
 
@@ -110,6 +107,28 @@ class PassageProjectionResult:
     created_passages: tuple[Entity, ...] = field(default_factory=tuple)
     created_relationships: tuple[Relationship, ...] = field(default_factory=tuple)
     errors: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class PassageRetirement:
+    """What one retire sweep managed to take down, and what it could not.
+
+    ``failed_indices`` is the whole point. A sweep that reports only a count
+    cannot be told apart from one that left spans of a deleted memory answering
+    searches, so the caller has no way to know its delete was incomplete.
+    """
+
+    source_id: str
+    retired: int = 0
+    failed_indices: tuple[int, ...] = field(default_factory=tuple)
+
+    @property
+    def complete(self) -> bool:
+        return not self.failed_indices
+
+    @property
+    def failed_passage_ids(self) -> tuple[str, ...]:
+        return tuple(passage_entity_id(self.source_id, index) for index in self.failed_indices)
 
 
 def passage_entity_id(source_id: str, passage_index: int) -> str:
@@ -405,7 +424,7 @@ async def reproject_entity_passages(
         created_source_id=source_id,
         generate_embeddings=generate_embeddings,
     )
-    retired = await _retire_passages_except(
+    retirement = await _retire_passages_except(
         entity_manager,
         source_id=source_id,
         kept_indices=frozenset(
@@ -414,12 +433,27 @@ async def reproject_entity_passages(
             if isinstance(index := passage.metadata.get("passage_index"), int)
         ),
     )
-    if retired:
+    if retirement.retired:
         log.info(
             "passage_projection_retired_stale",
             source_id=source_id,
-            retired=retired,
+            retired=retirement.retired,
             kept=result.passages,
+        )
+    if not retirement.complete:
+        log.error(
+            "passage_projection_retire_incomplete",
+            source_id=source_id,
+            stranded=retirement.failed_passage_ids,
+        )
+        # A stranded span holds the previous revision's text under a current id,
+        # so the projection did not fully happen and has to say so.
+        return replace(
+            result,
+            errors=(
+                *result.errors,
+                f"stranded stale passages: {', '.join(retirement.failed_passage_ids)}",
+            ),
         )
     return result
 
@@ -559,12 +593,13 @@ async def retire_entity_passages(
     *,
     entity_manager: Any,
     source_id: str,
-) -> int:
+) -> PassageRetirement:
     """Delete every span cut from one memory.
 
     For use when the memory itself is gone. A span left behind keeps serving
     the text of something the caller deleted, which is the one outcome a delete
-    must not produce.
+    must not produce, so the result says whether the sweep actually finished
+    rather than only how much of it succeeded.
     """
     return await _retire_passages_except(
         entity_manager,
@@ -578,7 +613,7 @@ async def _retire_passages_except(
     *,
     source_id: str,
     kept_indices: frozenset[int],
-) -> int:
+) -> PassageRetirement:
     """Delete every span of one memory that the current projection did not write.
 
     Keyed on the indices actually written rather than on how many were written.
@@ -586,26 +621,47 @@ async def _retire_passages_except(
     ``{0, 1, 3, 4}`` is not the same as one that wrote four contiguous spans, and
     counting would delete index 4, the span that had just been minted.
 
-    The walk stops once it is past every kept index and has found an absence,
-    which is where any previous run must have ended.
+    The walk does not stop at the first absence, and one failed delete does not
+    end it. An absence is not the end of the run: the oversize-leaf branch skips
+    an index it cannot store, so a hole sits between live spans, and a sweep that
+    read the hole as the end would leave every span past it serving the previous
+    revision's text under a current id. On the delete path there are no kept
+    indices at all, so index 0 being a hole would strand the whole set. Sweeping
+    the full range costs deletes that find nothing on a short memory, which is
+    the same trade ``restamp_entity_passage_scope`` already makes for the same
+    reason, and it is bounded by ``MAX_PASSAGES_PER_SOURCE``.
     """
     delete = getattr(entity_manager, "delete", None)
     if not callable(delete):
-        return 0
-    highest_kept = max(kept_indices, default=-1)
-    retired = 0
-    for index in range(MAX_PASSAGES_PER_SOURCE):
-        if index in kept_indices:
-            continue
-        try:
-            removed = await delete(passage_entity_id(source_id, index))
-        except Exception:
-            break
-        if removed:
-            retired += 1
-        elif index > highest_kept:
-            break
-    return retired
+        return PassageRetirement(source_id=source_id)
+
+    async def _sweep(indices: Sequence[int]) -> tuple[int, tuple[int, ...]]:
+        retired = 0
+        failed: list[int] = []
+        for index in indices:
+            try:
+                removed = await delete(passage_entity_id(source_id, index))
+            except Exception as exc:
+                log.warning(
+                    "passage_retire_delete_failed",
+                    source_id=source_id,
+                    passage_index=index,
+                    error_type=type(exc).__name__,
+                )
+                failed.append(index)
+                continue
+            if removed:
+                retired += 1
+        return retired, tuple(failed)
+
+    candidates = [index for index in range(MAX_PASSAGES_PER_SOURCE) if index not in kept_indices]
+    retired, failed = await _sweep(candidates)
+    if failed:
+        # A blip is the common case and a second pass is nearly free, since only
+        # the spans that raised are retried.
+        recovered, failed = await _sweep(failed)
+        retired += recovered
+    return PassageRetirement(source_id=source_id, retired=retired, failed_indices=failed)
 
 
 async def _create_passages(
@@ -743,6 +799,7 @@ __all__ = [
     "PASSAGE_SOURCE_TYPES",
     "SCOPE_BEARING_UPDATE_KEYS",
     "PassageProjectionResult",
+    "PassageRetirement",
     "entity_scope_stamps",
     "passage_entity_id",
     "plan_entity_passages",

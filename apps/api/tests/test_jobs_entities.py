@@ -14,6 +14,7 @@ from sibyl.jobs.entities import (
     create_learning_episode,
     create_learning_procedure,
     serialize_memory_policy_context,
+    update_entity,
 )
 from sibyl_core.auth import MemoryPolicyContext, OrganizationRole
 from sibyl_core.models.entities import (
@@ -832,3 +833,48 @@ class TestCreateLearningProcedureJob:
             "source_policy_surface",
             "task_id",
         }
+
+
+class TestUpdateEntityPassageReprojection:
+    @pytest.mark.asyncio
+    async def test_a_reprojection_that_stranded_spans_fails_the_job(self) -> None:
+        """Returning success would retire the job while stale spans stay searchable.
+
+        The body changed, so every span cut from the old one is stale. A sweep
+        that could not remove them all leaves the previous revision answering
+        searches, and nothing else comes back for it once the job is marked
+        done, so the failure has to reach the queue's retry semantics.
+        """
+        updated = Entity(
+            id="decision_1",
+            entity_type=EntityType.DECISION,
+            name="Rewritten decision",
+            organization_id="org-1",
+            content="a completely rewritten body",
+        )
+        runtime = SimpleNamespace(
+            entity_manager=SimpleNamespace(update=AsyncMock(return_value=updated)),
+            relationship_manager=SimpleNamespace(),
+        )
+        reproject = AsyncMock(
+            return_value=SimpleNamespace(
+                errors=("stranded stale passages: passage_abc123",),
+                passages=2,
+            )
+        )
+
+        with (
+            patch(
+                "sibyl.jobs.entities.get_surreal_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            patch("sibyl.jobs.entities.reproject_entity_passages", reproject),
+            pytest.raises(RuntimeError, match="passage_abc123"),
+        ):
+            await update_entity(
+                {},
+                entity_id="decision_1",
+                updates={"content": "a completely rewritten body"},
+                entity_type="decision",
+                group_id="org-1",
+            )

@@ -450,26 +450,147 @@ async def test_deleting_a_memory_retires_every_span_cut_from_it() -> None:
     """A span outliving its parent keeps serving text the caller deleted."""
     entity_manager = _ReprojectEntityManager(existing_indices={0, 1, 2, 3})
 
-    retired = await retire_entity_passages(
+    retirement = await retire_entity_passages(
         entity_manager=entity_manager,
         source_id=_SOURCE_ID,
     )
 
-    assert retired == 4
+    assert retirement.retired == 4
+    assert retirement.complete
     assert entity_manager.existing == set()
     assert entity_manager.deleted == [passage_entity_id(_SOURCE_ID, i) for i in range(4)]
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_memory_retires_spans_sitting_past_a_hole() -> None:
+    """The deleted memory's text must stop being served even when index 0 is absent.
+
+    An unbreakable oversize line is emitted as a slice and then skipped, so a
+    previous projection can leave the run starting at 1. A sweep that reads the
+    absence at 0 as the end of the run deletes nothing at all, and every span of
+    the deleted memory keeps answering searches under a current id.
+    """
+    entity_manager = _ReprojectEntityManager(existing_indices={1, 2, 3})
+
+    retirement = await retire_entity_passages(
+        entity_manager=entity_manager,
+        source_id=_SOURCE_ID,
+    )
+
+    assert retirement.retired == 3
+    assert retirement.complete
+    assert entity_manager.existing == set()
+
+
+@pytest.mark.asyncio
+async def test_reprojection_retires_stale_spans_sitting_past_a_hole() -> None:
+    """A body too short to project must still take its old spans down with it."""
+    entity_manager = _ReprojectEntityManager(existing_indices={1, 2})
+    relationship_manager = _RecordingRelationshipManager()
+
+    result = await reproject_entity_passages(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        source=_source(content="a short body now"),
+        group_id=_GROUP,
+        created_source_id=_SOURCE_ID,
+    )
+
+    assert result.passages == 0
+    assert entity_manager.existing == set()
+
+
+@pytest.mark.asyncio
+async def test_a_blip_on_one_span_neither_strands_the_sweep_nor_the_span() -> None:
+    """A transient failure is retried, so the common blip leaves nothing behind."""
+
+    class _FlakyEntityManager(_ReprojectEntityManager):
+        def __init__(self, existing_indices: set[int]) -> None:
+            super().__init__(existing_indices)
+            self.raised = False
+
+        async def delete(self, entity_id: str) -> bool:
+            if entity_id == passage_entity_id(_SOURCE_ID, 1) and not self.raised:
+                self.raised = True
+                raise RuntimeError("transport blip")
+            return await super().delete(entity_id)
+
+    entity_manager = _FlakyEntityManager(existing_indices={0, 1, 2})
+
+    retirement = await retire_entity_passages(
+        entity_manager=entity_manager,
+        source_id=_SOURCE_ID,
+    )
+
+    assert retirement.retired == 3
+    assert retirement.complete
+    assert entity_manager.existing == set()
+
+
+@pytest.mark.asyncio
+async def test_a_span_that_cannot_be_deleted_is_named_to_the_caller() -> None:
+    """A delete that could not finish must not be reportable as a delete.
+
+    The parent is already gone by the time the sweep runs, so a span left behind
+    keeps serving the deleted text with nothing to re-derive the failure from.
+    The caller gets the span ids rather than a count it cannot interpret.
+    """
+
+    class _BrokenEntityManager(_ReprojectEntityManager):
+        async def delete(self, entity_id: str) -> bool:
+            if entity_id == passage_entity_id(_SOURCE_ID, 1):
+                raise RuntimeError("permanently broken")
+            return await super().delete(entity_id)
+
+    entity_manager = _BrokenEntityManager(existing_indices={0, 1, 2})
+
+    retirement = await retire_entity_passages(
+        entity_manager=entity_manager,
+        source_id=_SOURCE_ID,
+    )
+
+    assert retirement.complete is False
+    assert retirement.failed_indices == (1,)
+    assert retirement.failed_passage_ids == (passage_entity_id(_SOURCE_ID, 1),)
+    assert entity_manager.existing == {1}
+
+
+@pytest.mark.asyncio
+async def test_reprojection_reports_a_stranded_stale_span_as_an_error() -> None:
+    """A stale span left standing means the reprojection did not fully happen."""
+
+    class _BrokenEntityManager(_ReprojectEntityManager):
+        async def delete(self, entity_id: str) -> bool:
+            if entity_id == passage_entity_id(_SOURCE_ID, 2):
+                raise RuntimeError("permanently broken")
+            return await super().delete(entity_id)
+
+    entity_manager = _BrokenEntityManager(existing_indices={1, 2})
+    relationship_manager = _RecordingRelationshipManager()
+
+    result = await reproject_entity_passages(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        source=_source(content="a short body now"),
+        group_id=_GROUP,
+        created_source_id=_SOURCE_ID,
+    )
+
+    assert result.errors
+    assert passage_entity_id(_SOURCE_ID, 2) in result.errors[0]
 
 
 @pytest.mark.asyncio
 async def test_retiring_a_memory_that_never_had_spans_is_a_no_op() -> None:
     entity_manager = _ReprojectEntityManager(existing_indices=set())
 
-    retired = await retire_entity_passages(
+    retirement = await retire_entity_passages(
         entity_manager=entity_manager,
         source_id=_SOURCE_ID,
     )
 
-    assert retired == 0
+    assert retirement.retired == 0
+    assert retirement.complete
     assert entity_manager.deleted == []
 
 
