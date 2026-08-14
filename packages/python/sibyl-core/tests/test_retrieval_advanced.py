@@ -3012,6 +3012,32 @@ class TestHybridSearch:
         assert result.metadata["keyword_boost_applied"] is True
 
     @pytest.mark.asyncio
+    async def test_hybrid_search_keyword_boost_matches_a_lone_consonant_y_noun(self) -> None:
+        """Snowball rewrites a terminal y to i, so the stem is not a substring.
+
+        "batteri" appears in neither "battery" nor "batterys", which a
+        substring probe would read as no hit at all. This entity shares
+        exactly one content word with the query, so nothing else can carry
+        the boost and the miss cannot hide behind a second match.
+        """
+        client = MockGraphClientForHybrid()
+        manager = MockEntityManagerForHybrid()
+
+        noisy = make_entity_for_test("noisy", description="travel receipt")
+        answer = make_entity_for_test("answer", description="a spare battery")
+        manager.search_results = [(noisy, 0.9), (answer, 0.8)]
+
+        result = await hybrid_search(
+            "batteries",
+            client,  # type: ignore[arg-type]
+            manager,  # type: ignore[arg-type]
+            config=HybridConfig(graph_weight=0, apply_temporal=False),
+        )
+
+        assert result.entities[0].id == "answer"
+        assert result.metadata["keyword_boost_applied"] is True
+
+    @pytest.mark.asyncio
     async def test_hybrid_search_keyword_boost_ignores_bookkeeping_metadata(self) -> None:
         """Keyword boost uses entity text, not system metadata labels."""
         client = MockGraphClientForHybrid()
