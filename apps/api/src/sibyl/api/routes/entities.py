@@ -5,6 +5,7 @@ Transparently handles both graph entities and document chunks.
 """
 
 import asyncio
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Annotated, Any
@@ -69,6 +70,7 @@ from sibyl_core.auth.memory_policy import (
     private_scope_granted_for,
     stamp_memory_scope_metadata,
 )
+from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.memory_pipeline.retrieval_keys import normalize_retrieval_keys
 from sibyl_core.memory_pipeline.structure import strip_structure_metadata
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
@@ -858,30 +860,33 @@ async def _declared_bulk_relationships(
     return relationships
 
 
-async def _suppression_reader_scope(
-    ctx: AuthContext,
-    related_to: list[str] | None,
-) -> tuple[set[str] | None, set[str] | None]:
-    """Read scope for the suppression gate, resolved only when one is declared.
+@dataclass(frozen=True, slots=True)
+class _ReaderScope:
+    """One snapshot of what a caller may read, taken before anything is written.
 
-    Resolving project membership costs a query, and the overwhelming majority
-    of writes declare no suppressing predicate at all, so an unconditional
-    lookup here would tax every create for a check it never runs.
+    Resolving membership per entry let a mid-request change make sibling order
+    matter, and re-resolving after persistence meant an auth-store failure
+    could raise with rows already in the graph.
     """
-    declarations = parse_relation_declarations(related_to)
-    if not any(
-        declaration.declared and declaration.relationship_type in SUPPRESSING_RELATIONSHIP_TYPES
-        for declaration in declarations
-    ):
-        return None, None
-    return await _accessible_project_ids_for_read(ctx), _reader_memory_grants(ctx)
+
+    user_id: str | None
+    accessible_projects: set[str]
+    memory_grants: set[str] | None
+
+
+async def _reader_scope(ctx: AuthContext) -> _ReaderScope:
+    return _ReaderScope(
+        user_id=_reader_user_id(ctx),
+        accessible_projects=await _accessible_project_ids_for_read(ctx),
+        memory_grants=_reader_memory_grants(ctx),
+    )
 
 
 async def _validate_related_to_targets_for_write(
     *,
-    ctx: AuthContext,
     entity_manager: Any,
     related_to: list[str] | None,
+    scope: _ReaderScope,
 ) -> None:
     """Resolve every link target and refuse the ones this caller cannot read.
 
@@ -889,13 +894,14 @@ async def _validate_related_to_targets_for_write(
     exist: same status, same message. Distinguishing them turns the link
     parameter into an existence oracle over other principals' private
     memories, since ids are guessable and a 404 would confirm absence.
+
+    Reading a row is the whole requirement. Naming an entity as an edge target
+    does not mutate it, so demanding write authority over it refused a member
+    who can retrieve a project's decisions from ever saying one was superseded,
+    which is exactly the person best placed to say it.
     """
     if not related_to:
         return
-
-    reader_user_id = _reader_user_id(ctx)
-    accessible_projects = await _accessible_project_ids_for_read(ctx)
-    memory_grants = _reader_memory_grants(ctx)
 
     checked_ids: set[str] = set()
     # A declared predicate rides on the same string as the id, so existence and
@@ -907,28 +913,23 @@ async def _validate_related_to_targets_for_write(
         checked_ids.add(related_id)
 
         not_found = HTTPException(status_code=404, detail=f"Related entity not found: {related_id}")
+        # Absence only. `EntityManager.get` signals a missing row with KeyError
+        # and other managers raise the typed error, while a store that is
+        # merely unreachable must surface as a 5xx: reporting a timeout as a
+        # 404 tells the client to stop retrying something that would succeed.
         try:
             related_entity = await entity_manager.get(related_id)
-        except Exception as exc:
+        except (EntityNotFoundError, KeyError) as exc:
             raise not_found from exc
         if related_entity is None:
             raise not_found
         if not _related_entity_visible(
             related_entity,
-            reader_user_id=reader_user_id,
-            accessible_projects=accessible_projects,
-            allowed_memory_scope_keys=memory_grants,
+            reader_user_id=scope.user_id,
+            accessible_projects=scope.accessible_projects,
+            allowed_memory_scope_keys=scope.memory_grants,
         ):
             raise not_found
-
-        related_project_id = _entity_read_project_id(related_entity)
-        if related_project_id is not None:
-            await verify_entity_project_access(
-                None,
-                ctx,
-                related_project_id,
-                required_role=ProjectRole.CONTRIBUTOR,
-            )
 
 
 def _entity_matches_project_filter(
@@ -1753,6 +1754,14 @@ async def create_entities_bulk(
     group_id = str(org.id)
     runtime = await get_entity_graph_runtime(group_id)
     verified_project_ids: set[str] = set()
+    # One snapshot of what this caller may read, taken before anything is
+    # written and reused for every entry. Resolving per entry let a membership
+    # change mid-request make sibling order matter, and re-resolving after
+    # persistence meant an auth-store failure could raise with rows already in
+    # the graph.
+    reader_scope = (
+        await _reader_scope(ctx) if any(entity.related_to for entity in batch.entities) else None
+    )
 
     for entity in batch.entities:
         _reject_unsupported_bulk_entry(entity)
@@ -1767,11 +1776,12 @@ async def create_entities_bulk(
                 require_existing_project=True,
             )
             verified_project_ids.add(project_id)
-        await _validate_related_to_targets_for_write(
-            ctx=ctx,
-            entity_manager=runtime.entity_manager,
-            related_to=entity.related_to,
-        )
+        if reader_scope is not None:
+            await _validate_related_to_targets_for_write(
+                entity_manager=runtime.entity_manager,
+                related_to=entity.related_to,
+                scope=reader_scope,
+            )
 
     now = datetime.now(UTC)
     principal_id = str(ctx.user.id) if ctx.user is not None else None
@@ -1790,12 +1800,7 @@ async def create_entities_bulk(
 
     # Read authority belongs to the caller, not to the batch. Passing the
     # accumulated `verified_project_ids` here made an edge's type depend on
-    # which unrelated siblings rode along in the same request. Resolved once
-    # per request, and only when some entry actually declares a suppression.
-    reader_projects, memory_grants = await _suppression_reader_scope(
-        ctx,
-        [target for entity in batch.entities for target in entity.related_to or ()],
-    )
+    # which unrelated siblings rode along in the same request.
     relationships: list[Relationship] = []
     for created_id, entity in zip(created_ids, batch.entities, strict=True):
         relationships.extend(
@@ -1804,8 +1809,8 @@ async def create_entities_bulk(
                 entity.related_to,
                 entity_manager=runtime.entity_manager,
                 principal_id=principal_id,
-                accessible_projects=reader_projects or set(),
-                allowed_memory_scope_keys=memory_grants,
+                accessible_projects=(reader_scope.accessible_projects if reader_scope else set()),
+                allowed_memory_scope_keys=(reader_scope.memory_grants if reader_scope else None),
                 now=now,
             )
         )
@@ -2208,11 +2213,6 @@ async def create_entity(
             require_existing_project=True,
         )
     runtime = await get_entity_graph_runtime(group_id)
-    await _validate_related_to_targets_for_write(
-        ctx=ctx,
-        entity_manager=runtime.entity_manager,
-        related_to=entity.related_to,
-    )
 
     # Use description as content fallback (frontend sends description, add() needs content)
     content = entity.content or entity.description or entity.name
@@ -2236,6 +2236,17 @@ async def create_entity(
         if replayed is not None:
             return replayed
 
+    # Target resolution runs only on the live path. A retry whose target was
+    # deleted or whose access was revoked since the first call must still
+    # return the response that first call stored, not a fresh 404.
+    reader_scope = await _reader_scope(ctx) if entity.related_to else None
+    if reader_scope is not None:
+        await _validate_related_to_targets_for_write(
+            entity_manager=runtime.entity_manager,
+            related_to=entity.related_to,
+            scope=reader_scope,
+        )
+
     authorized_principal_id = str(ctx.user.id) if ctx.user is not None else None
     authorized_scope_key = str(project) if project else None
     declared_memory_scope = request_metadata.get("memory_scope")
@@ -2255,9 +2266,6 @@ async def create_entity(
     # would drop the rehearsal receipt the caller asked for.
     is_sync = entity.entity_type.value == "project" or sync or bool(entity.probes)
 
-    suppression_projects, suppression_grants = await _suppression_reader_scope(
-        ctx, entity.related_to
-    )
     result = await _add_with_structure(
         title=entity.name,
         content=content,
@@ -2281,8 +2289,8 @@ async def create_entity(
         memory_scope=str(declared_memory_scope) if declared_memory_scope is not None else None,
         scope_key=authorized_scope_key,
         principal_id=authorized_principal_id,
-        accessible_projects=suppression_projects,
-        allowed_memory_scope_keys=suppression_grants,
+        accessible_projects=reader_scope.accessible_projects if reader_scope else None,
+        allowed_memory_scope_keys=reader_scope.memory_grants if reader_scope else None,
         retrieval_keys=entity.retrieval_keys,
         spans=[span.model_dump(exclude_none=True) for span in entity.spans]
         if entity.spans is not None
