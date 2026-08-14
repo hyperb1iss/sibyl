@@ -8,11 +8,13 @@ else. No graph expansion, no exact-key probe, no edge lanes, no query planning,
 no coverage re-rank, no fact frames, no temporal or freshness or project or
 active-task boosts, no synthesis.
 
-Every knob the machine tunes is a knob this arm refuses, so the constant below
-is the arm's only parameter and it stays at the RRF paper's default. If the arm
-wins, the deleted surface was not carrying the accuracy; if it loses, the loss
-localizes what the machine's remaining lanes actually buy. Adding a weight here
-would destroy that reading, because a tuned control measures nothing.
+Every ranking knob the machine tunes is a knob this arm refuses. Its fusion
+constant stays at the RRF paper's default and no caller can override it, and
+the only other constant sets how deep a lane reads, which changes what fusion
+is allowed to see rather than how fusion scores it. If the arm wins, the
+deleted surface was not carrying the accuracy; if it loses, the loss localizes
+what the machine's remaining lanes actually buy. Adding a weight here would
+destroy that reading, because a tuned control measures nothing.
 
 The lane readers are imported from ``retrieval.search`` rather than reimplemented
 so the race compares fusion and pack shape, not two different spellings of the
@@ -38,7 +40,6 @@ from sibyl_core.retrieval.search import (
     RetrievalPlan,
     RetrievalSignal,
     _candidate_allowed,
-    _candidate_limits_for_limit,
     _candidate_source_metadata,
     _candidate_source_result,
     _elapsed_ms,
@@ -64,6 +65,11 @@ log = structlog.get_logger()
 # constant rather than a parameter, because a per-request k would reintroduce
 # exactly the hand-weighting the arm is built to do without.
 NAIVE_RRF_K = 60.0
+
+# How much deeper than the answer each lane reads before fusion. Not a ranking
+# weight: it cannot reorder anything, it only stops fusion from being handed a
+# pool the caller's limit already truncated.
+NAIVE_LANE_OVERFETCH = 4
 
 NAIVE_RETRIEVAL_MODE = "naive"
 
@@ -126,10 +132,23 @@ async def naive_search(
     # and the race compares payload sizes instead of retrieval.
     if content_max_chars is not None:
         content_max_chars = max(0, min(int(content_max_chars), MAX_SEARCH_CONTENT_MAX_CHARS))
+    # Lanes read deeper than the answer, then fusion truncates. Clipping each
+    # lane to the caller's limit first is what makes fusion decorative at small
+    # limits: with limit=1 a row ranked second in both lanes, which is the row
+    # RRF exists to promote, is discarded before RRF ever sees it. The depth is
+    # bounded so a wide request cannot walk the whole table, and it is set on
+    # the three lanes directly rather than through the narrowing helper, which
+    # can only shrink a plan's budget and so could never widen a lane at all.
+    lane_depth = min(limit * NAIVE_LANE_OVERFETCH, MAX_RETRIEVAL_LIMIT)
     search_plan = naive_retrieval_plan(
         replace(
             plan,
-            candidate_limits=_candidate_limits_for_limit(plan.candidate_limits, limit),
+            candidate_limits=replace(
+                plan.candidate_limits,
+                node_fulltext=lane_depth,
+                episode_fulltext=lane_depth,
+                node_vector=lane_depth,
+            ),
         )
     )
     runtime = await _get_read_only_graph_runtime(search_plan.organization_id)
@@ -189,11 +208,11 @@ async def naive_search(
             strict=True,
         )
     ]
-    vector_metadata: dict[str, object] = {}
+    vector_fetch_state: VectorCandidateFetch | None = None
     vector_candidates: list[RetrievalCandidate] = []
     if isinstance(vector_fetch, VectorCandidateFetch):
+        vector_fetch_state = vector_fetch
         vector_candidates = list(vector_fetch.node_candidates)
-        vector_metadata = dict(vector_fetch.as_metadata())
         vector_source = _candidate_source_result(
             RetrievalSignal.NODE_VECTOR.value,
             vector_candidates,
@@ -228,6 +247,24 @@ async def naive_search(
         )
         for signal, candidates in source_lists
     ]
+    # Recomputed from the authorized rows, never snapshotted from the raw fetch.
+    # A count taken before the scope filter answers "does a row matching this
+    # query exist in this organization" for a caller who may read none of them,
+    # which is an existence oracle over private memories: empty results beside a
+    # non-zero candidate count is the leak. The response contract promises
+    # authorized diagnostics, so the diagnostics have to be built from the
+    # authorized set.
+    authorized_vector_count = len(
+        next(
+            (
+                candidates
+                for signal, candidates in filtered_lists
+                if signal is RetrievalSignal.NODE_VECTOR
+            ),
+            [],
+        )
+    )
+    vector_metadata = _authorized_vector_metadata(vector_fetch_state, authorized_vector_count)
     stage_timings_ms["candidate_filtering"] = _elapsed_ms(stage_started_at)
 
     stage_started_at = time.perf_counter()
@@ -270,6 +307,54 @@ async def naive_search(
     )
 
 
+def _authorized_vector_metadata(
+    fetch: VectorCandidateFetch | None,
+    authorized_count: int,
+) -> dict[str, object]:
+    """Vector-lane diagnostics describing only what this caller may read.
+
+    Health fields (requested, attempted, degraded, failures) describe the arm's
+    own execution and carry no row information, so they pass through. The count
+    and the status are rebuilt, because both are derived from the raw candidate
+    list and would otherwise report rows the caller was denied.
+    """
+
+    if fetch is None:
+        return {
+            "vector_status": "query_failed",
+            "vector_requested": True,
+            "vector_attempted": True,
+            "vector_degraded": True,
+            "vector_candidate_count": 0,
+        }
+    if not fetch.requested:
+        status = "not_requested"
+    elif fetch.reason is not None:
+        status = fetch.reason
+    elif fetch.failures and authorized_count:
+        status = "partial"
+    elif fetch.failures:
+        status = "query_failed"
+    elif not fetch.attempted:
+        status = "unavailable"
+    elif authorized_count == 0:
+        # "empty" whether the lane found nothing or found only rows this caller
+        # cannot read. Those two must be indistinguishable from outside.
+        status = "empty"
+    else:
+        status = "ok"
+    metadata: dict[str, object] = {
+        "vector_status": status,
+        "vector_requested": fetch.requested,
+        "vector_attempted": fetch.attempted,
+        "vector_degraded": fetch.degraded,
+        "vector_candidate_count": authorized_count,
+    }
+    if fetch.failures:
+        metadata["vector_failures"] = list(fetch.failures)
+    return metadata
+
+
 def fuse_naive_candidates(
     source_lists: Sequence[tuple[RetrievalSignal, Sequence[RetrievalCandidate]]],
     *,
@@ -281,22 +366,32 @@ def fuse_naive_candidates(
     A candidate's fused score is the sum of ``1 / (k + rank)`` over the lanes
     that returned it, and the lane's own score never enters. That is the whole
     ranking function.
+
+    Ties break on candidate id, ascending. RRF produces exact ties routinely
+    (two rows each returned at rank one by a different lane score identically),
+    and the shared merge helper sorts on score alone, so a tie would otherwise
+    resolve by the order the lanes happen to be passed in. That is a silent
+    lexical-lane priority: a real ranking preference, never declared, applied
+    only at a binding cutoff. Ordering by id instead is arbitrary but stated,
+    reproducible across runs, and independent of lane order.
     """
 
     ranked_lists = [
         [(candidate, candidate.score) for candidate in candidates]
         for _signal, candidates in source_lists
     ]
+    # Fused unlimited, then ordered, then truncated: truncating inside the
+    # helper would apply its lane-order tie-break before this one could run.
     fused = rrf_merge_with_metadata(
         ranked_lists,
         list_names=[signal.value for signal, _candidates in source_lists],
         k=k,
         dedup_key=lambda candidate: candidate.id,
-        limit=limit,
     )
+    fused.sort(key=lambda item: (-item[1], item[0].id))
     for _candidate, _score, metadata in fused:
         metadata["fusion_backend"] = "python_rrf"
-    return fused
+    return fused[:limit] if limit else fused
 
 
 def pack_naive_results(

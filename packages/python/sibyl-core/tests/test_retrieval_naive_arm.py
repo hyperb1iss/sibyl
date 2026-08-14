@@ -194,6 +194,45 @@ def test_fusion_records_which_lanes_found_each_row() -> None:
     assert metadata_by_id["a"]["sources"] == ["node_fulltext"]
 
 
+def test_ties_break_on_candidate_id_not_on_lane_order() -> None:
+    """An exact RRF tie must not be resolved by which lane was passed first.
+
+    Two rows each returned at rank one by a different lane score identically.
+    Sorting on score alone leaves a stable sort to pick the earlier lane, which
+    is a real ranking preference applied only at a binding cutoff and never
+    declared anywhere.
+    """
+
+    lexical = [_candidate("zzz_lexical")]
+    dense = [_candidate("aaa_dense")]
+
+    forward = fuse_naive_candidates(
+        [(RetrievalSignal.NODE_FULLTEXT, lexical), (RetrievalSignal.NODE_VECTOR, dense)],
+        limit=1,
+    )
+    reversed_lanes = fuse_naive_candidates(
+        [(RetrievalSignal.NODE_VECTOR, dense), (RetrievalSignal.NODE_FULLTEXT, lexical)],
+        limit=1,
+    )
+
+    assert forward[0][0].id == reversed_lanes[0][0].id == "aaa_dense"
+    assert forward[0][1] == reversed_lanes[0][1]
+
+
+def test_tie_order_is_stated_rather_than_incidental() -> None:
+    """Ascending id, all the way down, not just at the head."""
+
+    lanes = [
+        (RetrievalSignal.NODE_FULLTEXT, [_candidate("m")]),
+        (RetrievalSignal.EPISODE_FULLTEXT, [_candidate("a")]),
+        (RetrievalSignal.NODE_VECTOR, [_candidate("z")]),
+    ]
+
+    fused = fuse_naive_candidates(lanes, limit=10)
+
+    assert [candidate.id for candidate, _score, _metadata in fused] == ["a", "m", "z"]
+
+
 def test_fusion_truncates_to_the_requested_limit() -> None:
     lane = [_candidate(f"c{index}") for index in range(10)]
 
@@ -469,6 +508,111 @@ async def test_the_arm_withholds_a_row_the_reader_does_not_own(
     # The owner reaching it is what proves the row was retrievable at all, so
     # the withholding above is a scope decision rather than an empty lane.
     assert "private_to_someone_else" in {result.id for result in owner.results}
+
+
+@pytest.mark.asyncio
+async def test_vector_diagnostics_count_only_authorized_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Diagnostics must not answer "does a row I cannot read exist?".
+
+    A count taken before the scope filter turns an empty result set into an
+    existence oracle: zero results beside a non-zero candidate count tells an
+    unauthorized caller that a private row matched their query.
+    """
+
+    client, runtime = await _embedded_runtime(f"{ORG_ID}-diagnostics")
+    provider = _embedding_provider()
+    try:
+        await _seed_private_row(
+            client,
+            provider,
+            group_id=client.group_id,
+            owner="user-somebody-else",
+        )
+
+        async def fake_runtime(_organization_id: str, **_kwargs: object) -> Any:
+            return runtime
+
+        monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+
+        denied = await naive_search(
+            plan=_plan(query=CORPUS_QUERY, organization_id=client.group_id),
+            types=["session"],
+            limit=10,
+            embedding_provider=provider,
+        )
+        permitted = await naive_search(
+            plan=build_context_retrieval_plan(
+                query=CORPUS_QUERY,
+                organization_id=client.group_id,
+                facets=[ContextFacet.RECENT_MEMORY],
+                facet_types={ContextFacet.RECENT_MEMORY: ["session"]},
+                principal_id="user-somebody-else",
+                project=None,
+                accessible_projects=None,
+                limit=10,
+            ),
+            types=["session"],
+            limit=10,
+            embedding_provider=provider,
+        )
+    finally:
+        await client.close()
+
+    assert denied.results == []
+    assert denied.filters["vector_candidate_count"] == 0
+    # A lane that found only unreadable rows must be indistinguishable from a
+    # lane that found nothing at all.
+    assert denied.filters["vector_status"] == "empty"
+    assert denied.filters["naive_lane_counts"]["node_vector"] == 0
+    # The owner proves the row was there to be counted, so the zero above is a
+    # scope decision rather than an empty corpus.
+    assert permitted.filters["vector_candidate_count"] == 1
+    assert permitted.filters["vector_status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_lanes_read_deeper_than_the_limit_so_fusion_can_promote(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Clipping lanes to the answer size makes fusion decorative at small limits.
+
+    A row ranked second in both lanes is exactly what RRF exists to promote over
+    a row ranked first in one. If each lane is cut to the caller's limit before
+    fusion runs, that row is gone before it can win.
+    """
+
+    client, runtime = await _embedded_runtime(f"{ORG_ID}-overfetch")
+    provider = _embedding_provider()
+    try:
+        await _seed_corpus(client, provider, group_id=client.group_id)
+
+        async def fake_runtime(_organization_id: str, **_kwargs: object) -> Any:
+            return runtime
+
+        monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+
+        narrow = await naive_search(
+            plan=_plan(query=CORPUS_QUERY, organization_id=client.group_id, limit=1),
+            types=["session"],
+            limit=1,
+            embedding_provider=provider,
+        )
+        wide = await naive_search(
+            plan=_plan(query=CORPUS_QUERY, organization_id=client.group_id, limit=10),
+            types=["session"],
+            limit=10,
+            embedding_provider=provider,
+        )
+    finally:
+        await client.close()
+
+    assert len(narrow.results) == 1
+    assert any(count > 1 for count in narrow.filters["naive_lane_counts"].values())
+    # The one row a limit=1 request returns is the row full-pool fusion ranks
+    # first, which is the property clipping breaks.
+    assert narrow.results[0].id == wide.results[0].id
 
 
 @pytest.mark.asyncio
@@ -812,12 +956,20 @@ def test_the_arm_module_exposes_no_tunable_weights() -> None:
 
     assert tunables == set()
     # The module constants are the whole configuration surface, so enumerate
-    # them rather than pattern-matching names a future knob could dodge.
+    # them rather than pattern-matching names a future knob could dodge. Adding
+    # a name here is a deliberate act: NAIVE_LANE_OVERFETCH earns its place
+    # because it sets how deep a lane reads and cannot reorder anything, so it
+    # changes what fusion is allowed to see rather than how fusion scores it.
     assert {
         name
         for name in dir(naive_module)
         if name.isupper() and not name.startswith("_") and name != "TYPE_CHECKING"
-    } == {"NAIVE_RRF_K", "NAIVE_RETRIEVAL_MODE", "MAX_RETRIEVAL_LIMIT"}
+    } == {
+        "NAIVE_RRF_K",
+        "NAIVE_LANE_OVERFETCH",
+        "NAIVE_RETRIEVAL_MODE",
+        "MAX_RETRIEVAL_LIMIT",
+    }
 
 
 def test_no_caller_can_reweight_the_arm_per_request() -> None:
