@@ -33,7 +33,7 @@ classifiers = [
 
 dependencies = [
     # Sibyl Core Library with daemon/runtime extras
-    "sibyl-core[crawler,embeddings,graph,graphrag,llm]==1.2.1",
+    "sibyl-core[crawler,embeddings,graph,graphrag,llm]==1.2.2",
     # Core Framework
     "fastapi>=0.141.1",
     # mcp 2.0 removed FastMCP (the server surface sibyl builds on); migration tracked in a repo issue.
