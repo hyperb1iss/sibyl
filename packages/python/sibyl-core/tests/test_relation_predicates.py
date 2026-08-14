@@ -9,7 +9,9 @@ import pytest
 
 import sibyl_core.services.memory as memory_module
 import sibyl_core.tools.add as add_module
+from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.models.entities import Entity, EntityType, RelationshipType
+from sibyl_core.models.reflection import ReflectionCandidate
 from sibyl_core.models.relations import (
     DECLARABLE_RELATIONSHIP_PREDICATES,
     declared_relation_targets,
@@ -24,6 +26,7 @@ from sibyl_core.services.graph import (
     SurrealGraphClient,
     prepare_graph_schema,
 )
+from sibyl_core.services.surreal_content import MemoryScope
 from sibyl_core.tools.add import add
 
 VOCABULARY = ("supersedes", "contradicts", "requires", "supports", "decides")
@@ -488,3 +491,101 @@ class TestPromotionLinkTargets:
             raw_source_ids=[],
         )
         assert [rel.relationship_type for rel in relationships] == [RelationshipType.RELATED_TO]
+
+    @pytest.mark.asyncio
+    async def test_a_transient_store_failure_is_not_a_missing_target(self) -> None:
+        """An unreachable store must not masquerade as absence.
+
+        The receipt reports requested and created counts, so a swallowed
+        failure here reads as a promotion that was never asked to link
+        anything: complete, zero requested, zero failed. The error has to
+        surface instead.
+        """
+
+        class Unreachable:
+            async def get(self, entity_id: str) -> Entity:
+                raise TimeoutError("surreal unreachable")
+
+        with pytest.raises(TimeoutError):
+            await memory_module._linkable_related_targets(
+                runtime=SimpleNamespace(entity_manager=Unreachable()),
+                related_to=["supersedes:ep_target"],
+                principal_id="principal-a",
+                accessible_projects=set(),
+            )
+
+    @pytest.mark.asyncio
+    async def test_both_absence_signals_still_drop_the_target(self) -> None:
+        class Absent:
+            def __init__(self, error: Exception) -> None:
+                self.error = error
+
+            async def get(self, entity_id: str) -> Entity:
+                raise self.error
+
+        for error in (KeyError("ep_gone"), EntityNotFoundError("episode", "ep_gone")):
+            assert (
+                await memory_module._linkable_related_targets(
+                    runtime=SimpleNamespace(entity_manager=Absent(error)),
+                    related_to=["supersedes:ep_gone"],
+                    principal_id="principal-a",
+                    accessible_projects=set(),
+                )
+                == []
+            )
+
+    @pytest.mark.asyncio
+    async def test_nothing_is_persisted_when_resolution_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Resolution runs before the row lands, so the promotion writes nothing.
+
+        Resolving after `create_direct` left a persisted memory behind whenever
+        the store faltered mid-promotion, and the response still called that
+        complete.
+        """
+        created: list[Any] = []
+
+        class Runtime:
+            class entity_manager:
+                @staticmethod
+                async def create_direct(entity: Any) -> str:
+                    created.append(entity)
+                    return "decision_should_not_exist"
+
+                @staticmethod
+                async def get(entity_id: str) -> Entity:
+                    raise TimeoutError("surreal unreachable")
+
+            relationship_manager = SimpleNamespace()
+
+        monkeypatch.setattr(
+            memory_module,
+            "get_surreal_graph_runtime",
+            _always(Runtime()),
+        )
+
+        with pytest.raises(TimeoutError):
+            await memory_module.persist_reflection_candidate(
+                candidate=ReflectionCandidate(
+                    kind="decision",
+                    title="Decision: never lands",
+                    content="The store falls over while resolving link targets.",
+                    reason="covers the failure ordering",
+                    confidence=0.9,
+                    tags=["decision"],
+                ),
+                organization_id="org-transient",
+                principal_id="principal-a",
+                related_to=["supersedes:ep_target"],
+                memory_scope=MemoryScope.PRIVATE,
+            )
+
+        assert created == []
+
+
+def _always(value: Any) -> Any:
+    async def _factory(*_args: Any, **_kwargs: Any) -> Any:
+        return value
+
+    return _factory

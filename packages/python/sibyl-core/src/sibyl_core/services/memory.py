@@ -23,6 +23,7 @@ from sibyl_core.auth.memory_policy import (
     private_scope_granted_for,
     stamp_memory_scope_metadata,
 )
+from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.memory_pipeline.quality import normalize_memory_quality_metadata
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.reflection import (
@@ -386,6 +387,15 @@ async def persist_reflection_candidate(
             )
         }
     )
+    # Resolved before the row lands. A store that fails here fails the whole
+    # promotion rather than persisting a memory and then reporting a complete
+    # write that requested no edges at all.
+    linkable_related_to = await _linkable_related_targets(
+        runtime=runtime,
+        related_to=related_to,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+    )
     created_id = await runtime.entity_manager.create_direct(entity)
     native_write_path = _metadata_str(candidate.metadata, "native_write_path")
     if not native_write_path:
@@ -394,12 +404,7 @@ async def persist_reflection_candidate(
         created_id,
         project=project,
         source_id=source_id if link_source_entity else None,
-        related_to=await _linkable_related_targets(
-            runtime=runtime,
-            related_to=related_to,
-            principal_id=principal_id,
-            accessible_projects=accessible_projects,
-        ),
+        related_to=linkable_related_to,
         supersedes=superseded_ids,
         raw_source_ids=source_ids,
         native_write_path=native_write_path,
@@ -2874,9 +2879,12 @@ async def _authorized_superseded_entity_ids(
 ) -> list[str]:
     authorized_ids: list[str] = []
     for entity_id in _superseded_entity_ids(candidate.metadata):
+        # Absence only, for the same reason as the link targets: swallowing a
+        # transient failure here promotes a memory that reports success while
+        # the supersession it was written to record never happened.
         try:
             target_entity = await runtime.entity_manager.get(entity_id)
-        except Exception:
+        except (EntityNotFoundError, KeyError):
             continue
         if target_entity is None:
             continue
@@ -3264,9 +3272,12 @@ async def _linkable_related_targets(
     """
     linkable: list[str] = []
     for target_id in declared_relation_targets(list(related_to or ())):
+        # Absence only. A store that is merely unreachable must not read as a
+        # target that is not there, because dropping the edge silently is
+        # indistinguishable in the receipt from never having been asked for it.
         try:
             target = await runtime.entity_manager.get(target_id)
-        except Exception:
+        except (EntityNotFoundError, KeyError):
             continue
         if target is None:
             continue
