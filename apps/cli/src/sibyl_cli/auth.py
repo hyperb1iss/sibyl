@@ -83,6 +83,43 @@ def _login_credential_scope(context_name: str | None = None) -> str | None:
     return _current_credential_scope(context_name) or credential_scope(context_name, None)
 
 
+def _context_for_server(api_url: str) -> str | None:
+    """Find the configured context that points at this API URL, if any."""
+    from sibyl_cli import config_store
+
+    for ctx in config_store.list_contexts():
+        if normalize_api_url(f"{ctx.server_url}/api") == normalize_api_url(api_url):
+            return ctx.name
+    return None
+
+
+def _scope_for_login_target(
+    api_url: str,
+    *,
+    context_name: str | None,
+    explicit_target: bool,
+) -> str | None:
+    """Derive the credential scope from the server the login actually targets.
+
+    Credentials are keyed by server URL *and* scope, so a scope taken from the
+    ambient selection while the URL comes from an explicit argument produces a
+    key nothing reads back. An explicit target therefore defines its own scope.
+    """
+    if context_name:
+        return _login_credential_scope(context_name)
+    if not explicit_target:
+        return _current_credential_scope()
+
+    matched = _context_for_server(api_url)
+    ambient = _effective_context_name()
+    if ambient and ambient != matched:
+        warn(
+            f"Logging in to {api_url}, which is not the selected context "
+            f"'{ambient}'. Storing the credential for {matched or 'this server'}."
+        )
+    return _current_credential_scope(matched) if matched else None
+
+
 def _load_oauth_metadata(*, issuer_url: str, insecure: bool = False) -> dict:
     import httpx
 
@@ -801,7 +838,11 @@ def login_cmd(
     # Positional URL takes precedence over --server option
     effective_server = url.strip() if url.strip() else server
     api_url = _compute_api_url(effective_server, context_name=context)
-    scope = _login_credential_scope(context)
+    scope = _scope_for_login_target(
+        api_url,
+        context_name=context,
+        explicit_target=bool(effective_server),
+    )
 
     # Perform login
     _login_auto(

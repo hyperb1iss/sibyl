@@ -398,3 +398,68 @@ def test_auth_commands_follow_the_context_override_like_the_client(
     assert auth._compute_api_url(None) == "https://sibyl.example.com/api"
     assert auth._current_credential_scope() == "context:prod:org:acme"
     assert auth._compute_api_url(None) == SibylClient(context_name="prod").base_url
+
+
+def test_an_explicit_login_url_scopes_the_credential_to_that_server(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pin must not scope a credential for a server the pin does not name."""
+    from sibyl_cli import state
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(config_store.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(state, "_context_override", None)
+    monkeypatch.setattr(state, "_ignore_selection", False)
+    config_store.create_context("prod", "https://prod.example.com", org_slug="acme")
+    config_store.create_context("staging", "https://staging.example.com", set_active=True)
+    # A directory pin selects prod while the login names staging outright.
+    monkeypatch.setattr(config_store, "resolve_context_from_cwd", lambda: "prod")
+    monkeypatch.setattr(auth, "_login_auto", lambda **kwargs: calls.append(kwargs))
+
+    result = CliRunner().invoke(app, ["auth", "login", "https://staging.example.com"])
+
+    assert result.exit_code == 0
+    assert calls[0]["api_url"] == "https://staging.example.com/api"
+    # The scope follows the URL that was logged in to, not the pin.
+    assert calls[0]["credential_scope_name"] == "context:staging:org:default"
+    assert "not the selected context" in _plain(result.stdout)
+
+
+def test_an_explicit_url_with_no_matching_context_stores_unscoped(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl_cli import state
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(config_store.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(state, "_context_override", None)
+    monkeypatch.setattr(state, "_ignore_selection", False)
+    config_store.create_context("prod", "https://prod.example.com", set_active=True)
+    monkeypatch.setattr(auth, "_login_auto", lambda **kwargs: calls.append(kwargs))
+
+    result = CliRunner().invoke(app, ["auth", "login", "https://elsewhere.example.com"])
+
+    assert result.exit_code == 0
+    assert calls[0]["credential_scope_name"] is None
+
+
+def test_a_login_with_no_explicit_url_still_uses_the_selected_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl_cli import state
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(config_store.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(state, "_context_override", None)
+    monkeypatch.setattr(state, "_ignore_selection", False)
+    config_store.create_context("prod", "https://prod.example.com", org_slug="acme", set_active=True)
+    monkeypatch.setattr(auth, "_login_auto", lambda **kwargs: calls.append(kwargs))
+
+    result = CliRunner().invoke(app, ["auth", "login"])
+
+    assert result.exit_code == 0
+    assert calls[0]["api_url"] == "https://prod.example.com/api"
+    assert calls[0]["credential_scope_name"] == "context:prod:org:acme"
