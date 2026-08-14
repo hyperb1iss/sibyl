@@ -18,8 +18,12 @@ from sibyl_core.auth.memory_policy import (
     authorize_memory_reflect,
     authorize_memory_share,
     authorize_memory_write,
+    memory_metadata_read_allowed,
+    memory_row_project_id,
+    private_scope_granted_for,
     stamp_memory_scope_metadata,
 )
+from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.memory_pipeline.quality import normalize_memory_quality_metadata
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.reflection import (
@@ -36,6 +40,7 @@ from sibyl_core.models.reflection import (
     with_memory_lifecycle_metadata,
     with_reflection_finding_metadata,
 )
+from sibyl_core.models.relations import declared_relation_targets
 from sibyl_core.services.graph import get_surreal_graph_runtime
 from sibyl_core.services.memory_autonomy import reflection_autonomy_candidate_metadata
 from sibyl_core.services.surreal_content import (
@@ -382,6 +387,15 @@ async def persist_reflection_candidate(
             )
         }
     )
+    # Resolved before the row lands. A store that fails here fails the whole
+    # promotion rather than persisting a memory and then reporting a complete
+    # write that requested no edges at all.
+    linkable_related_to = await _linkable_related_targets(
+        runtime=runtime,
+        related_to=related_to,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+    )
     created_id = await runtime.entity_manager.create_direct(entity)
     native_write_path = _metadata_str(candidate.metadata, "native_write_path")
     if not native_write_path:
@@ -390,7 +404,7 @@ async def persist_reflection_candidate(
         created_id,
         project=project,
         source_id=source_id if link_source_entity else None,
-        related_to=related_to,
+        related_to=linkable_related_to,
         supersedes=superseded_ids,
         raw_source_ids=source_ids,
         native_write_path=native_write_path,
@@ -2620,6 +2634,74 @@ def _promoted_entity_write_allowed(
     return decision.allowed
 
 
+def suppression_target_visible(
+    target: Any,
+    *,
+    principal_id: str | None,
+    accessible_projects: Iterable[str] | None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
+) -> bool:
+    """May this principal declare that `target` is replaced or wrong?
+
+    The question is visibility, not write authority. Asserting a memory is
+    stale is a statement about a row the writer read, so the rule is the one
+    every read surface already enforces: you may suppress what you can see.
+    That blocks the attack worth blocking, another principal's private memory,
+    while leaving ordinary org-visible rows suppressible by the people who work
+    with them.
+
+    Write authority is the wrong test and was the first thing tried here.
+    `authorize_memory_write` refuses SHARED, ORGANIZATION, and PUBLIC outright
+    (`auth/memory_policy.py`, `scope_not_enabled`) because those scopes are not
+    writable destinations, and it reads an unstamped row as private-with-no-
+    owner. Gating on it disabled supersession for most of a real corpus and for
+    every row its own author created.
+    """
+    raw_metadata = getattr(target, "metadata", {})
+    metadata = raw_metadata if isinstance(raw_metadata, Mapping) else {}
+    return memory_metadata_read_allowed(
+        metadata,
+        principal_id=principal_id,
+        private_scope_granted=private_scope_granted_for(
+            allowed_memory_scope_keys, principal_id=principal_id
+        ),
+        accessible_projects=accessible_projects,
+        row_project_id=memory_row_project_id(
+            metadata,
+            entity_type=str(getattr(target, "entity_type", "") or ""),
+            entity_id=str(getattr(target, "id", "") or ""),
+        ),
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+    )
+
+
+async def declared_suppression_allowed(
+    *,
+    entity_manager: Any,
+    target_id: str,
+    principal_id: str | None,
+    accessible_projects: Iterable[str] | None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
+) -> bool:
+    """Load a declared suppression target and decide whether it may be claimed.
+
+    A target that does not exist and a target the writer cannot see get the
+    same answer, so the refusal cannot be read as evidence that a row is there.
+    """
+    try:
+        target = await entity_manager.get(target_id)
+    except Exception:
+        return False
+    if target is None:
+        return False
+    return suppression_target_visible(
+        target,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+    )
+
+
 def _temporal_invalidation_metadata(
     metadata: Mapping[str, object],
     *,
@@ -2797,9 +2879,12 @@ async def _authorized_superseded_entity_ids(
 ) -> list[str]:
     authorized_ids: list[str] = []
     for entity_id in _superseded_entity_ids(candidate.metadata):
+        # Absence only, for the same reason as the link targets: swallowing a
+        # transient failure here promotes a memory that reports success while
+        # the supersession it was written to record never happened.
         try:
             target_entity = await runtime.entity_manager.get(entity_id)
-        except Exception:
+        except (EntityNotFoundError, KeyError):
             continue
         if target_entity is None:
             continue
@@ -3164,6 +3249,47 @@ def _entity_from_candidate(
     )
 
 
+async def _linkable_related_targets(
+    *,
+    runtime: Any,
+    related_to: Sequence[str] | None,
+    principal_id: str | None,
+    accessible_projects: Iterable[str] | None,
+) -> list[str]:
+    """The declared link targets this principal is allowed to name.
+
+    Promotion reports how many relationships it requested and how many it
+    wrote, and the graph writer silently skips an edge whose endpoint does not
+    resolve. Those two facts together turn the link list into an existence
+    oracle: a guessed id that names a real row lands as a created edge, and one
+    that names nothing lands as a shortfall. Dropping targets this caller
+    cannot see collapses both answers into the same one, so the counts carry no
+    information about rows the caller was never allowed to know about.
+
+    Predicates are resolved to their target here as everywhere else, but
+    promotion still links untyped; `supersedes` on this path is minted only
+    from the authorized channel.
+    """
+    linkable: list[str] = []
+    for target_id in declared_relation_targets(list(related_to or ())):
+        # Absence only. A store that is merely unreachable must not read as a
+        # target that is not there, because dropping the edge silently is
+        # indistinguishable in the receipt from never having been asked for it.
+        try:
+            target = await runtime.entity_manager.get(target_id)
+        except (EntityNotFoundError, KeyError):
+            continue
+        if target is None:
+            continue
+        if suppression_target_visible(
+            target,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        ):
+            linkable.append(target_id)
+    return linkable
+
+
 def _relationships_for_promotion(
     entity_id: str,
     *,
@@ -3194,6 +3320,10 @@ def _relationships_for_promotion(
             )
         )
     excluded_targets = {entity_id, project, source_id}
+    # Targets arrive already resolved and already filtered to what the caller
+    # may see. SUPERSEDES on this path is minted only from `supersedes`, whose
+    # targets passed `_authorized_superseded_entity_ids`; honoring a predicate
+    # declared on the free `related_to` channel would route around that gate.
     for related_id in related_to or ():
         if related_id in excluded_targets:
             continue

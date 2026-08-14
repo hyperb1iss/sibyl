@@ -2,10 +2,12 @@
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
+from sibyl_core.auth.memory_policy import memory_metadata_read_allowed
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.services.graph_runtime import count_entities_by_type
 from sibyl_core.tools.core import (
@@ -979,3 +981,182 @@ class TestHelperFunctions:
         assert id1 == id2  # Same input = same output
         assert id1 != id3  # Different input = different output
         assert id1.startswith("task_")  # Has correct prefix
+
+
+class TestDeclaredPredicatesOnTheDefaultPath:
+    """The async enqueue is what most writes take, so it must carry the type."""
+
+    @staticmethod
+    def _target(entity_id: str, **metadata: Any) -> Entity:
+        return Entity(
+            id=entity_id,
+            entity_type=EntityType.DECISION,
+            name="Prior call",
+            description="",
+            content="the earlier decision",
+            metadata={"organization_id": TEST_ORG_ID, **metadata},
+        )
+
+    async def _enqueued_relationships(
+        self, ctx: Any, related_to: list[str], **add_kwargs: Any
+    ) -> dict[str, dict[str, Any]]:
+        queue_port = SimpleNamespace(
+            enqueue_create_entity=AsyncMock(return_value="create_entity:typed_123"),
+        )
+        with patch("sibyl_core.tools.add.get_queue_port", return_value=queue_port):
+            result = await add(
+                "Reconsidered pooling call",
+                "The newer decision about connection pooling.",
+                entity_type="decision",
+                related_to=related_to,
+                metadata={"organization_id": TEST_ORG_ID},
+                check_conflicts=False,
+                **add_kwargs,
+            )
+        assert result.success is True
+        relationships = queue_port.enqueue_create_entity.await_args.kwargs["relationships"]
+        return {rel["target_id"]: rel for rel in relationships}
+
+    @pytest.mark.asyncio
+    async def test_enqueued_relationships_keep_the_declared_predicate(self) -> None:
+        """A visible target keeps SUPERSEDES all the way into the queue payload."""
+        async with mock_tools() as ctx:
+            ctx.entity_manager.add_entity(self._target("decision_older"))
+            by_target = await self._enqueued_relationships(
+                ctx,
+                ["supersedes:decision_older", "decision_sibling"],
+                principal_id="principal-a",
+            )
+
+        assert by_target["decision_older"]["type"] == "SUPERSEDES"
+        assert by_target["decision_older"]["metadata"]["agent_declared"] is True
+        assert by_target["decision_sibling"]["type"] == "RELATED_TO"
+        assert "agent_declared" not in by_target["decision_sibling"]["metadata"]
+
+    @pytest.mark.asyncio
+    async def test_another_principals_private_target_downgrades_in_the_queue(self) -> None:
+        """The gate runs before the enqueue, so the refusal reaches the worker."""
+        async with mock_tools() as ctx:
+            ctx.entity_manager.add_entity(
+                self._target(
+                    "decision_theirs",
+                    memory_scope="private",
+                    principal_id="principal-b",
+                )
+            )
+            by_target = await self._enqueued_relationships(
+                ctx,
+                ["supersedes:decision_theirs"],
+                principal_id="principal-a",
+            )
+
+        assert by_target["decision_theirs"]["type"] == "RELATED_TO"
+        assert "agent_declared" not in by_target["decision_theirs"]["metadata"]
+
+    @pytest.mark.asyncio
+    async def test_org_visible_target_is_suppressible_by_any_member(self) -> None:
+        """An unstamped row is the ordinary corpus, and it must stay declarable.
+
+        Gating on write authority instead of visibility refused exactly this
+        case, which is most of what a real graph holds.
+        """
+        async with mock_tools() as ctx:
+            ctx.entity_manager.add_entity(self._target("decision_unstamped"))
+            by_target = await self._enqueued_relationships(
+                ctx,
+                ["supersedes:decision_unstamped"],
+                principal_id="principal-a",
+            )
+
+        assert by_target["decision_unstamped"]["type"] == "SUPERSEDES"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("scope", ["organization", "shared", "public", "team", "delegated"])
+    async def test_declarability_tracks_read_visibility(self, scope: str) -> None:
+        """Whatever a scope means for reading, it means the same for declaring.
+
+        These scopes are not enabled in `authorize_memory_read`, so no reader
+        can see such a row and no writer may call it superseded either. Pinning
+        the gate to the read answer rather than to a fixed verdict means the
+        day a scope is enabled, suppression follows it without an edit here.
+        """
+        metadata = {"organization_id": TEST_ORG_ID, "memory_scope": scope}
+        readable = memory_metadata_read_allowed(
+            metadata,
+            principal_id="principal-a",
+            private_scope_granted=True,
+            accessible_projects=set(),
+        )
+        async with mock_tools() as ctx:
+            ctx.entity_manager.add_entity(self._target(f"decision_{scope}", memory_scope=scope))
+            by_target = await self._enqueued_relationships(
+                ctx,
+                [f"supersedes:decision_{scope}"],
+                principal_id="principal-a",
+            )
+
+        declared = by_target[f"decision_{scope}"]["type"] == "SUPERSEDES"
+        assert declared is readable
+
+    @pytest.mark.asyncio
+    async def test_own_private_target_is_declarable(self) -> None:
+        async with mock_tools() as ctx:
+            ctx.entity_manager.add_entity(
+                self._target(
+                    "decision_mine",
+                    memory_scope="private",
+                    principal_id="principal-a",
+                )
+            )
+            by_target = await self._enqueued_relationships(
+                ctx,
+                ["supersedes:decision_mine"],
+                principal_id="principal-a",
+            )
+
+        assert by_target["decision_mine"]["type"] == "SUPERSEDES"
+
+    @pytest.mark.asyncio
+    async def test_absent_and_invisible_targets_are_indistinguishable(self) -> None:
+        """The downgrade must not tell a caller whether a guessed id exists."""
+        async with mock_tools() as ctx:
+            ctx.entity_manager.add_entity(
+                self._target(
+                    "decision_hidden",
+                    memory_scope="private",
+                    principal_id="principal-b",
+                )
+            )
+            hidden = await self._enqueued_relationships(
+                ctx, ["supersedes:decision_hidden"], principal_id="principal-a"
+            )
+            absent = await self._enqueued_relationships(
+                ctx, ["supersedes:decision_absent"], principal_id="principal-a"
+            )
+
+        assert hidden["decision_hidden"]["type"] == absent["decision_absent"]["type"]
+        assert hidden["decision_hidden"]["metadata"].keys() == (
+            absent["decision_absent"]["metadata"].keys()
+        )
+
+    @pytest.mark.asyncio
+    async def test_project_target_needs_the_callers_read_access(self) -> None:
+        async with mock_tools() as ctx:
+            ctx.entity_manager.add_entity(
+                self._target("decision_scoped", project_id="project_other")
+            )
+            refused = await self._enqueued_relationships(
+                ctx,
+                ["supersedes:decision_scoped"],
+                principal_id="principal-a",
+                accessible_projects=set(),
+            )
+            allowed = await self._enqueued_relationships(
+                ctx,
+                ["supersedes:decision_scoped"],
+                principal_id="principal-a",
+                accessible_projects={"project_other"},
+            )
+
+        assert refused["decision_scoped"]["type"] == "RELATED_TO"
+        assert allowed["decision_scoped"]["type"] == "SUPERSEDES"

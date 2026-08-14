@@ -1771,7 +1771,12 @@ def add_knowledge(
     related_to: str | None = typer.Option(
         None,
         "--related-to",
-        help="Comma-separated entity IDs to connect with RELATED_TO edges",
+        help=(
+            "Comma-separated entity IDs. A bare ID links untyped; prefix an ID "
+            "with supersedes:, contradicts:, requires:, supports:, or decides: "
+            "to declare what this memory does to that one (this memory is the "
+            "subject), which is what retrieval weights when it walks the graph"
+        ),
     ),
     task: str | None = typer.Option(
         None,
@@ -1891,7 +1896,12 @@ def capture_memory(
     related_to: str | None = typer.Option(
         None,
         "--related-to",
-        help="Comma-separated entity IDs to connect with RELATED_TO edges",
+        help=(
+            "Comma-separated entity IDs. A bare ID links untyped; prefix an ID "
+            "with supersedes:, contradicts:, requires:, supports:, or decides: "
+            "to declare what this memory does to that one (this memory is the "
+            "subject), which is what retrieval weights when it walks the graph"
+        ),
     ),
     task: str | None = typer.Option(
         None,
@@ -2014,7 +2024,12 @@ def note_alias(
     related_to: str | None = typer.Option(
         None,
         "--related-to",
-        help="Comma-separated entity IDs to connect with RELATED_TO edges",
+        help=(
+            "Comma-separated entity IDs. A bare ID links untyped; prefix an ID "
+            "with supersedes:, contradicts:, requires:, supports:, or decides: "
+            "to declare what this memory does to that one (this memory is the "
+            "subject), which is what retrieval weights when it walks the graph"
+        ),
     ),
     task: str | None = typer.Option(
         None,
@@ -3568,7 +3583,12 @@ def remember_memory(
     related_to: str | None = typer.Option(
         None,
         "--related-to",
-        help="Comma-separated entity IDs to connect with RELATED_TO edges",
+        help=(
+            "Comma-separated entity IDs. A bare ID links untyped; prefix an ID "
+            "with supersedes:, contradicts:, requires:, supports:, or decides: "
+            "to declare what this memory does to that one (this memory is the "
+            "subject), which is what retrieval weights when it walks the graph"
+        ),
     ),
     task: str | None = typer.Option(
         None,

@@ -10,12 +10,13 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from functools import wraps
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, cast
 from uuid import UUID, uuid4
 
 import structlog
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 
 from sibyl.api.context_audit import log_context_pack_audit, log_reflection_audit
 from sibyl.api.idempotency import (
@@ -55,6 +56,7 @@ from sibyl_core.auth.memory_policy import (
     stamp_memory_scope_metadata,
 )
 from sibyl_core.memory_pipeline.capture import MemoryCaptureRequest, MemoryCaptureService
+from sibyl_core.models.relations import DECLARABLE_PREDICATE_HELP
 from sibyl_core.services.surreal_content import (
     MemoryScope,
     get_raw_memory,
@@ -95,6 +97,9 @@ SynthesisOutputKind = Literal[
     "custom",
 ]
 SynthesisDepthKind = Literal["brief", "standard", "deep"]
+# The tool schema, not just the prose description, has to carry the predicate
+# vocabulary: a model picks parameter values from the schema it is handed.
+DeclaredRelatedTo = Annotated[list[str] | None, Field(description=DECLARABLE_PREDICATE_HELP)]
 SynthesisArtifactKind = Literal["markdown", "json"]
 
 MCP_ENTITY_PROJECT_POLICY_ACTIONS = {
@@ -787,6 +792,8 @@ async def _remember_mcp_memory(
             memory_scope=request.memory_scope,
             scope_key=request.scope_key,
             principal_id=request.principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
             retrieval_keys=list(request.retrieval_keys)
             if request.retrieval_keys is not None
             else None,
@@ -1180,6 +1187,10 @@ async def _add_mcp_entity(
         "memory_scope": authorized_scope,
         "scope_key": scope_key,
         "principal_id": ctx.user_id,
+        # A declared supersedes may only name a row this caller can read, so
+        # the gate gets the same scope resolution the rest of the request used.
+        "accessible_projects": accessible_projects,
+        "allowed_memory_scope_keys": ctx.api_key_memory_scope_keys,
     }
     if normalized_entity_type == "project":
         add_kwargs["sync"] = True
@@ -2480,7 +2491,7 @@ def _register_tools(mcp: FastMCP) -> None:
         category: str | None = None,
         languages: list[str] | None = None,
         tags: list[str] | None = None,
-        related_to: list[str] | None = None,
+        related_to: DeclaredRelatedTo = None,
         metadata: dict[str, Any] | None = None,
         # Task-specific parameters
         project: str | None = None,
@@ -2526,7 +2537,12 @@ def _register_tools(mcp: FastMCP) -> None:
             category: Category for organization (e.g., "debugging", "architecture")
             languages: Applicable programming languages
             tags: Searchable tags for discovery
-            related_to: IDs of related entities to link
+            related_to: IDs of related entities to link. A bare ID links
+                untyped; prefixing an ID with a predicate declares what this
+                memory does to that one and retrieval weights the declared
+                predicate: "supersedes:<id>", "contradicts:<id>",
+                "requires:<id>", "supports:<id>", "decides:<id>". The memory
+                being written is always the subject.
             metadata: Additional structured metadata (stored as JSON)
             project: Project ID (REQUIRED for tasks). Use explore(types=["project"]) to find projects.
             priority: Task priority - critical, high, medium (default), low, someday
@@ -2588,7 +2604,7 @@ def _register_tools(mcp: FastMCP) -> None:
         domain: str | None = None,
         project: str | None = None,
         tags: list[str] | None = None,
-        related_to: list[str] | None = None,
+        related_to: DeclaredRelatedTo = None,
         task_ids: list[str] | None = None,
         active_task: bool = True,
         metadata: dict[str, Any] | None = None,
@@ -2614,6 +2630,17 @@ def _register_tools(mcp: FastMCP) -> None:
         especially when it does not. A query containing one of these strings
         matches this memory exactly, case-insensitively. Up to 16 keys, 200
         characters each. Skip keys for a memory nobody would look up by name.
+
+        Say what this memory does to the ones it relates to. A bare ID in
+        related_to links untyped, but prefixing an ID with a predicate is read
+        by retrieval when it walks the graph, and the declared predicate is
+        what decides how strongly a neighbor gets pulled in:
+        related_to=["supersedes:ep_0a1b"] says this memory replaces that one,
+        and the same shape works for "contradicts:", "requires:",
+        "supports:" (this is evidence for that), and "decides:" (this settles
+        that). The memory you are writing is always the subject, so read it as
+        "this new memory supersedes ep_0a1b". Nothing else is a predicate: any
+        other prefix is treated as part of the ID and links untyped.
 
         You can describe the shape of what you are storing, and you know it
         better than any cutter reading it afterwards.

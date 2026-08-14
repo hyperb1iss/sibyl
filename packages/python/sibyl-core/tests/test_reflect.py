@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 from sibyl_core.tools.reflect import (
     reflect_memory,
@@ -333,6 +334,18 @@ async def test_reflect_memory_native_write_uses_policy_and_direct_graph(
         async def create_direct(self, entity):
             created_entities.append(entity)
             return entity.id
+
+        # Promotion links only targets it can resolve and the writer can see,
+        # so the declared link has to exist for the RELATED_TO edge to appear.
+        async def get(self, entity_id):
+            return Entity(
+                id=entity_id,
+                entity_type=EntityType.TASK,
+                name="Linked task",
+                description="",
+                content="",
+                metadata={"project_id": "project_123"},
+            )
 
     class FakeRelationshipManager:
         async def create_bulk(self, relationships):

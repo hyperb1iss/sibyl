@@ -181,6 +181,26 @@ RelationshipType.APPLIES_TO, REQUIRES, CONFLICTS_WITH, SUPERSEDES
 RelationshipType.BELONGS_TO, DEPENDS_ON, BLOCKS, REFERENCES
 ```
 
+### Predicates a writing agent can declare
+
+Most relationship types are minted by the system. Five are declarable by the agent doing the write,
+on the `related_to` channel of `add()`, the MCP `add` and `remember` tools, and `POST /entities`.
+Prefix a target id with the predicate: `related_to=["supersedes:ep_0a1b"]`. The memory being
+written is always the subject, so that entry reads "this new memory supersedes `ep_0a1b`" and mints
+`new -SUPERSEDES-> ep_0a1b`, which is the direction graph expansion walks.
+
+| Declaration    | Edge          | Reads as                                       |
+| -------------- | ------------- | ---------------------------------------------- |
+| `supersedes:`  | `SUPERSEDES`  | replaces the target; the target is now stale   |
+| `contradicts:` | `CONTRADICTS` | asserts the opposite of the target             |
+| `requires:`    | `REQUIRES`    | depends on the target being true or done first |
+| `supports:`    | `SUPPORTS`    | is evidence for the target's claim or decision |
+| `decides:`     | `DECIDES`     | settles the question the target raises         |
+
+A bare id still creates an untyped `RELATED_TO` edge, and any prefix outside this closed set is read
+as part of the id rather than rejected. Full semantics, direction rationale, and the rejected
+candidates live in `sibyl_core/models/relations.py`.
+
 ## Configuration
 
 ```bash

@@ -13,6 +13,7 @@ from sibyl_core.memory_pipeline.retrieval_keys import (
 from sibyl_core.memory_pipeline.spans import MAX_AGENT_SPANS, MAX_SPAN_LABEL_CHARS
 from sibyl_core.memory_pipeline.structure import MAX_PROBE_CHARS, MAX_PROBES_PER_MEMORY
 from sibyl_core.models.entities import EntityType
+from sibyl_core.models.relations import DECLARABLE_PREDICATE_HELP
 
 
 class MemorySpan(BaseModel):
@@ -81,7 +82,7 @@ class EntityCreate(EntityBase, MemoryStructureFields):
     )
     related_to: list[str] | None = Field(
         default=None,
-        description="Entity IDs to explicitly connect with RELATED_TO edges",
+        description=DECLARABLE_PREDICATE_HELP,
     )
     defer_embeddings: bool = Field(
         default=False,

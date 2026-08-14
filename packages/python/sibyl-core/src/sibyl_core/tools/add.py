@@ -1,6 +1,7 @@
 """Add tool for creating new knowledge in the Sibyl graph."""
 
 import inspect
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -29,6 +30,10 @@ from sibyl_core.models.entities import (
     Procedure,
     Relationship,
     RelationshipType,
+)
+from sibyl_core.models.relations import (
+    SUPPRESSING_RELATIONSHIP_TYPES,
+    parse_relation_declarations,
 )
 from sibyl_core.models.tasks import (
     Epic,
@@ -130,6 +135,69 @@ def _build_relationship(rel_data: dict[str, Any]) -> Relationship:
         relationship_type=RelationshipType(rel_data["type"]),
         metadata=rel_data.get("metadata", {}),
     )
+
+
+async def _declared_relationship_payloads(
+    entity_id: str,
+    related_to: Sequence[str] | None,
+    *,
+    entity_manager: Any = None,
+    principal_id: str | None = None,
+    accessible_projects: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Turn a `related_to` list into edge payloads, honoring declared predicates.
+
+    An undeclared entry keeps the exact id and RELATED_TO type it has always
+    had. A declared one carries its predicate into the relationship id too, so
+    an agent can both supersede and reference the same target without the two
+    edges colliding on a deterministic id.
+
+    A suppressing predicate is checked against its target first, because
+    retrieval demotes what one points at and a writer would otherwise be able
+    to bury a memory it cannot even read. A refusal downgrades that one edge to
+    RELATED_TO rather than failing the write: the link the agent asked for
+    still exists, and the claim it is not entitled to make does not. A target
+    that is absent and a target that is invisible are refused identically, so
+    the downgrade cannot be read as evidence a row exists.
+    """
+    payloads: list[dict[str, Any]] = []
+    for declaration in parse_relation_declarations(related_to):
+        relationship_type = declaration.relationship_type
+        declared = declaration.declared
+        if declared and relationship_type in SUPPRESSING_RELATIONSHIP_TYPES:
+            from sibyl_core.services.memory import declared_suppression_allowed
+
+            allowed = entity_manager is not None and await declared_suppression_allowed(
+                entity_manager=entity_manager,
+                target_id=declaration.target_id,
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
+            )
+            if not allowed:
+                log.info(
+                    "declared_suppression_downgraded",
+                    source_id=entity_id,
+                    target_id=declaration.target_id,
+                    predicate=relationship_type.value,
+                )
+                relationship_type = RelationshipType.RELATED_TO
+                declared = False
+
+        metadata: dict[str, Any] = {"created_at": datetime.now(UTC).isoformat()}
+        if declared:
+            metadata["agent_declared"] = True
+        payloads.append(
+            {
+                "id": f"rel_{entity_id}_{relationship_type.value.lower()}_{declaration.target_id}",
+                "source_id": entity_id,
+                "target_id": declaration.target_id,
+                "type": relationship_type.value,
+                "metadata": metadata,
+            }
+        )
+    return payloads
 
 
 def _accepts_keyword(function: Any, keyword: str) -> bool:
@@ -249,6 +317,10 @@ async def add(
     memory_scope: str | None = None,
     scope_key: str | None = None,
     principal_id: str | None = None,
+    # Read authority the calling surface already resolved, used to decide
+    # whether a declared suppression may name its target.
+    accessible_projects: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
     retrieval_keys: list[str] | None = None,
     # Structure the writing agent declares for its own memory
     spans: list[dict[str, Any]] | None = None,
@@ -285,7 +357,15 @@ async def add(
         category: Domain category (authentication, database, api, debugging, etc.).
         languages: Programming languages (python, typescript, rust, etc.).
         tags: Searchable tags for discovery.
-        related_to: Entity IDs to explicitly link (creates RELATED_TO edges).
+        related_to: Entity IDs to explicitly link. A bare ID creates an untyped
+              RELATED_TO edge. Prefixing an ID with a predicate from the closed
+              vocabulary declares what this memory does to that one, and
+              retrieval weights the declared predicate when it walks the graph:
+              "supersedes:<id>" (this replaces that), "contradicts:<id>",
+              "requires:<id>", "supports:<id>" (this is evidence for that),
+              "decides:<id>" (this settles that). The memory being written is
+              always the subject. Any other prefix is read as part of the ID
+              and links untyped, exactly as before.
         metadata: Additional structured data.
         project: Project ID (REQUIRED for tasks and epics, creates BELONGS_TO edge).
         epic: Epic ID for tasks (optional, creates BELONGS_TO edge).
@@ -307,6 +387,11 @@ async def add(
         memory_scope: Authorized audience for the row, resolved by the calling surface.
         scope_key: Authorized audience key (a verified project, never a payload value).
         principal_id: Authenticated author of the write.
+        accessible_projects: Projects this caller may read, resolved by the calling
+              surface. Decides whether a declared supersedes/contradicts may name a
+              project-scoped target; absent, only the written scope is assumed.
+        allowed_memory_scope_keys: Scope narrowing on the caller's credential, so a
+              key that cannot read private memory cannot declare against one either.
         retrieval_keys: Exact-match identifiers this entity answers to (error strings,
               symbols, config flags, aliases). Matched case-insensitively against
               identifier-shaped queries, so a key may name something the content
@@ -709,20 +794,26 @@ async def add(
                 ]
             )
 
-        # Generic RELATED_TO relationships
-        if related_to:
-            relationships_to_create.extend(
-                [
-                    {
-                        "id": f"rel_{entity_id}_related_to_{related_id}",
-                        "source_id": entity_id,
-                        "target_id": related_id,
-                        "type": "RELATED_TO",
-                        "metadata": {"created_at": datetime.now(UTC).isoformat()},
-                    }
-                    for related_id in related_to
-                ]
+        # Declared relationships. A bare id still collapses to RELATED_TO; a
+        # "<predicate>:<id>" entry from the closed vocabulary mints the edge
+        # type the graph expansion scorer actually weights.
+        relationships_to_create.extend(
+            await _declared_relationship_payloads(
+                entity_id,
+                related_to,
+                entity_manager=entity_manager,
+                principal_id=principal_id,
+                # The calling surface resolved these; a scope_key-derived guess
+                # would hide every project the caller can read but is not
+                # writing into, and read access is the question here.
+                accessible_projects=(
+                    accessible_projects
+                    if accessible_projects is not None
+                    else ({scope_key} if scope_key else set())
+                ),
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
             )
+        )
 
         # Sync mode: create entity + relationships immediately via Surreal
         if sync:
