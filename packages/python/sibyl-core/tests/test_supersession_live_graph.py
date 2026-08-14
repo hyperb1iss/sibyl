@@ -673,6 +673,61 @@ async def test_rows_projected_after_the_correction_are_born_retired(
 
 
 @pytest.mark.asyncio
+async def test_a_row_written_through_add_is_reachable_by_a_correction(
+    graph: _Runtime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The write path and the correction path have to agree on one key.
+
+    Correction resolves its targets by querying `attributes.raw_memory_id`,
+    and the graph writer strips that key from caller metadata because a caller
+    that could set it could nominate somebody else's row. The capture pipeline
+    stamps it and then calls that writer, so for a while every row written
+    this way named no capture and no correction could find it. This walks the
+    real writer, so a row that reaches the graph unnamed fails here.
+    """
+
+    import sibyl_core.tools.add as add_module
+
+    async def runtime_factory(_group_id: str, **_kwargs: object) -> _Runtime:
+        return graph
+
+    monkeypatch.setattr(add_module, "get_graph_runtime", runtime_factory)
+
+    response = await add_module.add(
+        title="Deploy to Fly",
+        content="we deploy to fly for hosting and it is written through the real writer",
+        entity_type="decision",
+        project=PROJECT_ID,
+        memory_scope="project",
+        scope_key=PROJECT_ID,
+        principal_id=PRINCIPAL,
+        check_conflicts=False,
+        sync=True,
+        generate_embeddings=False,
+        metadata={"organization_id": graph.group_id},
+        capture_provenance={"raw_memory_id": "raw-through-add"},
+    )
+    assert response.success and response.id
+
+    stored = await graph.entity_manager.get(response.id)
+    assert stored is not None
+    assert stored.metadata.get("raw_memory_id") == "raw-through-add", (
+        "the row has to name its capture or no correction can ever reach it"
+    )
+
+    before = _pack_ids(await _pack(graph, "deploy fly hosting written real writer"))
+    assert response.id in before
+
+    result = await _correct(graph, monkeypatch, raw_memory_id="raw-through-add")
+    assert result.applied
+    assert result.affected_entity_ids == [response.id]
+
+    after = _pack_ids(await _pack(graph, "deploy fly hosting written real writer"))
+    assert response.id not in after
+
+
+@pytest.mark.asyncio
 async def test_a_retired_row_cannot_seed_the_graph_walk(
     graph: _Runtime,
 ) -> None:
