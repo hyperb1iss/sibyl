@@ -11,6 +11,7 @@ import pytest
 
 import sibyl_core.services.graph as graph_module
 from sibyl_core.backends.surreal.connection import SurrealQueryError
+from sibyl_core.backends.surreal.records import coerce_datetime
 from sibyl_core.backends.surreal.schema import (
     ANALYZER_DEFINITIONS,
     EMBEDDING_DIM,
@@ -45,6 +46,11 @@ from sibyl_core.services.graph import (
     normalize_records,
     prepare_graph_schema,
     relationship_from_surreal_row,
+)
+from sibyl_core.services.usage import (
+    MemoryUsageItemKind,
+    MemoryUsageStamp,
+    _stamp_graph_entity,
 )
 
 
@@ -1338,6 +1344,115 @@ async def test_a_writer_landing_mid_heal_is_not_overwritten_by_the_snapshot() ->
         assert landed, "the interleaved writer never ran, so the race was not exercised"
         assert healed.metadata["contended"] == "new concurrent value"
         assert "doomed_key" not in healed.metadata
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_a_usage_stamp_landing_mid_heal_survives_the_snapshot_fold() -> None:
+    """A recall stamped mid-fold must not be rolled back to the snapshot's counts.
+
+    The fence only holds if every writer announces itself, and the usage stamp
+    is a writer: it rewrites the recall columns and their mirror inside the
+    attributes bag. A stamp that left revision alone was invisible to the
+    fence, so the fold's write still matched, and a pre-flattening row whose
+    recall stamps lived only in the JSON snapshot had a fresh recall replaced
+    by the stale one the snapshot was carrying.
+    """
+    client = SurrealGraphClient(group_id="org-heal-usage-race", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        stale_recall = "2026-01-09T08:00:00+00:00"
+        fresh_recall = datetime(2026, 8, 13, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+
+        await manager.create_direct(
+            Entity(
+                id="note_usage_race",
+                entity_type=EntityType.NOTE,
+                name="Recalled pre-flattening note",
+                organization_id=client.group_id,
+                metadata={
+                    "last_used_at": stale_recall,
+                    "retrieval_count": 1,
+                    "doomed_key": "removed",
+                },
+            )
+        )
+        # Forge the pre-flattening shape: the recall stamps exist only in the
+        # snapshot, so the fold is the thing that puts them in the bag.
+        await client.execute_query(
+            """
+            UPDATE entity SET
+                attributes.metadata = $snapshot,
+                attributes.last_used_at = NONE,
+                attributes.retrieval_count = NONE,
+                attributes.doomed_key = NONE
+            WHERE group_id = $group_id AND uuid = "note_usage_race";
+            """,
+            group_id=client.group_id,
+            snapshot=json.dumps(
+                {
+                    "last_used_at": stale_recall,
+                    "retrieval_count": 1,
+                    "doomed_key": "removed",
+                }
+            ),
+        )
+
+        original_execute = client.execute_query
+        landed: list[str] = []
+
+        async def _execute_with_interleaved_stamp(query: str, **params: Any) -> Any:
+            # Fire once, after the fold has read the row and while it is about
+            # to write: exactly the window the fence exists to cover.
+            if "seen_revision" in query and not landed:
+                landed.append("yes")
+                await _stamp_graph_entity(
+                    client,
+                    organization_id=client.group_id,
+                    stamp=MemoryUsageStamp(
+                        item_kind=MemoryUsageItemKind.GRAPH_ENTITY,
+                        item_id="note_usage_race",
+                        retrieval_count=7,
+                        citation_count=1,
+                        last_recalled_at=fresh_recall,
+                        last_used_at=fresh_recall,
+                    ),
+                )
+            return await original_execute(query, **params)
+
+        client.execute_query = _execute_with_interleaved_stamp  # type: ignore[method-assign]
+        try:
+            await manager.update("note_usage_race", {"metadata": {"doomed_key": None}})
+        finally:
+            client.execute_query = original_execute  # type: ignore[method-assign]
+
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT last_used_at, retrieval_count, attributes
+                FROM entity
+                WHERE group_id = $group_id AND uuid = "note_usage_race"
+                LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+        attributes = cast("dict[str, object]", rows[0]["attributes"])
+
+        assert landed, "the interleaved stamp never ran, so the race was not exercised"
+        assert rows[0]["retrieval_count"] == 7
+        assert coerce_datetime(rows[0]["last_used_at"]) == fresh_recall
+        assert attributes["retrieval_count"] == 7
+        assert coerce_datetime(attributes["last_used_at"]) == fresh_recall
+        assert "doomed_key" not in attributes
+        assert "metadata" not in attributes
+
+        healed = await manager.get("note_usage_race")
+        assert healed.metadata["retrieval_count"] == 7
+        assert coerce_datetime(healed.metadata["last_used_at"]) == fresh_recall
     finally:
         await client.close()
 

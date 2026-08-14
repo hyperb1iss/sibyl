@@ -633,3 +633,135 @@ async def test_raw_capture_stamp_update_is_monotonic() -> None:
         assert coerce_datetime(metadata["last_used_at"]) == base + timedelta(minutes=11)
     finally:
         await content_client.close()
+
+
+@pytest.mark.asyncio
+async def test_graph_entity_stamp_announces_itself_with_a_revision_bump() -> None:
+    """A stamp is a write, and every fence downstream reads revision to see it.
+
+    The snapshot fold and any caller holding expected_revision decide whether
+    their own stale read is still good by comparing the revision they saw. A
+    stamp that changed the recall fields without touching revision made both
+    of them accept a row that had moved on.
+    """
+    organization_id = "org-usage-revision"
+    graph_client = SurrealGraphClient(group_id=organization_id, url="memory://")
+    base = datetime(2026, 8, 13, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+
+    try:
+        await prepare_graph_schema(graph_client)
+        manager = EntityManager(graph_client, group_id=organization_id)
+        await manager.create_direct(
+            Entity(
+                id="entity-revision",
+                entity_type=EntityType.TASK,
+                name="Stamped usage entity",
+                organization_id=organization_id,
+                metadata={"status": "todo"},
+            )
+        )
+        before = await _entity_revision(graph_client, organization_id, "entity-revision")
+
+        await _stamp_graph_entity(
+            graph_client,
+            organization_id=organization_id,
+            stamp=MemoryUsageStamp(
+                item_kind=MemoryUsageItemKind.GRAPH_ENTITY,
+                item_id="entity-revision",
+                retrieval_count=7,
+                citation_count=1,
+                last_recalled_at=base,
+                last_used_at=base,
+            ),
+        )
+
+        after = await _entity_revision(graph_client, organization_id, "entity-revision")
+        assert after == before + 1
+    finally:
+        await graph_client.close()
+
+
+@pytest.mark.asyncio
+async def test_raw_capture_stamp_announces_itself_with_a_revision_bump() -> None:
+    """Same contract on the raw side, where expected_revision guards a full save.
+
+    A raw memory is saved by rewriting its whole metadata bag, so a stamp that
+    landed unannounced between the caller's read and that write was erased by
+    it, with the caller's revision check none the wiser.
+    """
+    organization_id = "org-usage-raw-revision"
+    content_client = SurrealContentClient(url="memory://")
+    base = datetime(2026, 8, 13, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+
+    try:
+        await bootstrap_content_schema(content_client, reset=True)
+        await content_client.execute_query(
+            """
+            CREATE raw_captures CONTENT {
+                uuid: "raw-revision",
+                organization_id: $organization_id,
+                source_id: "source-revision",
+                principal_id: "user-revision",
+                title: "Raw revision target",
+                raw_content: "raw revision target",
+                tags: [],
+                metadata: {},
+                provenance: {},
+                captured_at: $base,
+                created_at: $base,
+                revision: 1
+            };
+            """,
+            organization_id=organization_id,
+            base=base,
+        )
+
+        await record_memory_usage(
+            content_client,
+            [
+                MemoryUsageEvent(
+                    organization_id=organization_id,
+                    session_key="session-a",
+                    message_key="message-a",
+                    source_surface="context_pack",
+                    item_kind=MemoryUsageItemKind.RAW_CAPTURE,
+                    item_id="raw-revision",
+                    signal_type=MemoryUsageSignal.EXPOSURE,
+                    event_at=base,
+                )
+            ],
+        )
+
+        rows = normalize_records(
+            await content_client.execute_query(
+                """
+                SELECT revision, retrieval_count FROM raw_captures
+                WHERE organization_id = $organization_id AND uuid = "raw-revision"
+                LIMIT 1;
+                """,
+                organization_id=organization_id,
+            )
+        )
+        assert rows[0]["retrieval_count"] == 1
+        assert rows[0]["revision"] == 2
+    finally:
+        await content_client.close()
+
+
+async def _entity_revision(
+    graph_client: SurrealGraphClient,
+    organization_id: str,
+    uuid: str,
+) -> int:
+    rows = normalize_records(
+        await graph_client.execute_query(
+            """
+            SELECT revision FROM entity
+            WHERE group_id = $organization_id AND uuid = $uuid
+            LIMIT 1;
+            """,
+            organization_id=organization_id,
+            uuid=uuid,
+        )
+    )
+    return int(cast("int", rows[0]["revision"]))
