@@ -31,6 +31,7 @@ import sibyl_core.tools.context as context_module
 from sibyl_core.auth.memory_policy import stamp_memory_scope_metadata
 from sibyl_core.models.context import ContextFacet, ContextPack
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
+from sibyl_core.projection.memory import project_memory_entity
 from sibyl_core.projection.passages import project_entity_passages
 from sibyl_core.retrieval.search import build_context_retrieval_plan
 from sibyl_core.services.graph import (
@@ -567,6 +568,108 @@ async def test_spans_cut_after_the_correction_are_born_retired(
     served = _pack_ids(await _pack(graph, "interleaved passage body"))
     assert "raced-parent" not in served
     assert not (served & {span.id for span in projection.created_passages})
+
+
+_PROJECTION_BODY = (
+    "We migrated the Hetzner cluster to Talos Linux on 2026-03-01. "
+    "Bliss prefers Ratatui for terminal dashboards. "
+    "The Grafana dashboard now reads from Prometheus."
+)
+
+
+def _projection_parent(runtime: _Runtime, entity_id: str, raw_memory_id: str) -> Entity:
+    return Entity(
+        id=entity_id,
+        name="Migration session",
+        entity_type=EntityType.EPISODE,
+        description=_PROJECTION_BODY,
+        content=_PROJECTION_BODY,
+        organization_id=runtime.group_id,
+        project_id=PROJECT_ID,
+        metadata={
+            "memory_scope": "project",
+            "scope_key": PROJECT_ID,
+            "project_id": PROJECT_ID,
+            "raw_memory_id": raw_memory_id,
+        },
+    )
+
+
+async def _project(runtime: _Runtime, parent: Entity) -> tuple[str, ...]:
+    result = await project_memory_entity(
+        entity_manager=runtime.entity_manager,
+        relationship_manager=runtime.relationship_manager,
+        source=parent,
+        group_id=runtime.group_id,
+        generate_embeddings=False,
+    )
+    rows = (
+        *getattr(result, "created_projected_entities", ()),
+        *getattr(result, "created_projected_facts", ()),
+    )
+    return tuple(str(row.id) for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_correcting_a_memory_retires_the_entities_and_facts_projected_from_it(
+    graph: _Runtime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spans are not the only rows carrying a memory's text.
+
+    A projected entity copies the parent's candidate context and a projected
+    fact copies its span, and both inherit scope but not provenance, so the
+    correction's own query cannot see either. The cascade follows lineage
+    rather than type for exactly this reason.
+    """
+
+    parent = _projection_parent(graph, "projection-parent", "raw-projection-parent")
+    await graph.entity_manager.create_direct(parent)
+    projected = await _project(graph, parent)
+    assert projected, "the projection has to produce rows for this to mean anything"
+
+    before = _pack_ids(await _pack(graph, "Grafana dashboard reads from Prometheus"))
+    assert before & set(projected), "the projected rows have to be recallable first"
+
+    result = await _correct(graph, monkeypatch, raw_memory_id="raw-projection-parent")
+    assert result.applied
+    assert set(projected) <= set(result.affected_entity_ids)
+
+    for row_id in projected:
+        stored = await graph.entity_manager.get(row_id)
+        assert stored is not None
+        assert stored.metadata.get("excluded_from_recall") is True
+
+    after = _pack_ids(await _pack(graph, "Grafana dashboard reads from Prometheus"))
+    assert not (after & set(projected))
+
+
+@pytest.mark.asyncio
+async def test_rows_projected_after_the_correction_are_born_retired(
+    graph: _Runtime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same window the spans have, for the rows the other projection mints."""
+
+    parent = _projection_parent(graph, "late-projection-parent", "raw-late-projection")
+    await graph.entity_manager.create_direct(parent)
+
+    result = await _correct(graph, monkeypatch, raw_memory_id="raw-late-projection")
+    assert result.affected_entity_ids == ["late-projection-parent"], (
+        "nothing is projected yet, so the cascade has nothing to reach"
+    )
+
+    # The caller's copy predates the verdict, exactly as the worker's does.
+    projected = await _project(graph, parent)
+    assert projected
+
+    for row_id in projected:
+        stored = await graph.entity_manager.get(row_id)
+        assert stored is not None
+        assert stored.metadata.get("excluded_from_recall") is True
+
+    served = _pack_ids(await _pack(graph, "Grafana dashboard reads from Prometheus"))
+    assert not (served & set(projected))
 
 
 @pytest.mark.asyncio

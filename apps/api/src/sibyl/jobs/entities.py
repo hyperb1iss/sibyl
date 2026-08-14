@@ -468,24 +468,6 @@ async def create_entity(  # noqa: PLR0915
         else:
             entity = Episode.model_validate(entity_data)
 
-        # This payload was serialized before the job was queued, so anything
-        # that happened to the capture since then is invisible to it. A caller
-        # that corrected the memory it just wrote gets that verdict applied to
-        # a row that does not exist yet, and the row would otherwise be created
-        # recallable with the corrected text in it. The capture is re-read
-        # here, and the row is born carrying whatever the capture now says.
-        lifecycle_stamp = await projected_row_lifecycle_stamp(
-            organization_id=group_id,
-            metadata=entity.metadata,
-        )
-        if lifecycle_stamp:
-            object.__setattr__(entity, "metadata", {**(entity.metadata or {}), **lifecycle_stamp})
-            log.info(
-                "create_entity_born_retired",
-                entity_id=entity_data.get("id"),
-                lifecycle_state=lifecycle_stamp.get("lifecycle_state"),
-            )
-
         # Dedup-on-write: check for near-duplicates before creating.
         # If found, still create the entity (callers already have its ID),
         # but enrich the existing duplicate and log the match.
@@ -515,6 +497,26 @@ async def create_entity(  # noqa: PLR0915
                     deduplicated = True
             except Exception as e:
                 log.debug("dedup_on_write_check_skipped", error=str(e))
+
+        # Read immediately before the write, with no awaits in between. This
+        # payload was serialized before the job was queued, so anything that
+        # happened to the capture since then is invisible to it: a caller that
+        # corrected the memory it just wrote gets that verdict applied to a row
+        # that does not exist yet, and the row would otherwise be created
+        # recallable with the corrected text in it. The capture is the
+        # authority, and every await between reading it and writing the row is
+        # a window where a correction lands and finds nothing to stamp.
+        lifecycle_stamp = await projected_row_lifecycle_stamp(
+            organization_id=group_id,
+            metadata=entity.metadata,
+        )
+        if lifecycle_stamp:
+            object.__setattr__(entity, "metadata", {**(entity.metadata or {}), **lifecycle_stamp})
+            log.info(
+                "create_entity_born_retired",
+                entity_id=entity_data.get("id"),
+                lifecycle_state=lifecycle_stamp.get("lifecycle_state"),
+            )
 
         create_direct = getattr(entity_manager, "create_direct", None)
         if callable(create_direct):

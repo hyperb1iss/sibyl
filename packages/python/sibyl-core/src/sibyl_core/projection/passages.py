@@ -30,6 +30,10 @@ from sibyl_core.memory_pipeline.spans import (
     validate_agent_spans,
 )
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
+from sibyl_core.projection.inheritance import (
+    LIFECYCLE_METADATA_KEYS,
+    parent_lifecycle_as_stored,
+)
 from sibyl_core.projection.slicing import HARD_MAX, Slice, render_slice, slice_prose
 from sibyl_core.tools.helpers import _generate_id
 
@@ -87,17 +91,6 @@ _SCOPE_METADATA_KEYS = (
     "agent_id",
     "source_id",
     "raw_source_id",
-)
-
-# What a correction stamps onto a memory, which its spans have to carry or
-# they keep serving the retired body under their own ids.
-_LIFECYCLE_METADATA_KEYS = (
-    "lifecycle_state",
-    "lifecycle_flags",
-    "lifecycle_action",
-    "excluded_from_recall",
-    "superseded_by_source_id",
-    "duplicate_of_source_id",
 )
 
 # The subset of an entity update that changes who may read its spans. A caller
@@ -353,7 +346,7 @@ async def project_entity_passages(
     """
     source_id = created_source_id or source.id
     entities, relationships = plan_entity_passages(
-        await _parent_as_stored(entity_manager, source, source_id=source_id),
+        await parent_lifecycle_as_stored(entity_manager, source, source_id=source_id),
         source_id=source_id,
         group_id=group_id,
     )
@@ -809,42 +802,9 @@ def _inherited_scope_metadata(source: Entity) -> dict[str, object]:
     metadata = dict(source.metadata or {})
     return {
         key: metadata[key]
-        for key in (*_SCOPE_METADATA_KEYS, *_LIFECYCLE_METADATA_KEYS)
+        for key in (*_SCOPE_METADATA_KEYS, *LIFECYCLE_METADATA_KEYS)
         if key in metadata and metadata[key] is not None
     }
-
-
-async def _parent_as_stored(
-    entity_manager: Any,
-    source: Entity,
-    *,
-    source_id: str,
-) -> Entity:
-    """Re-read the parent's lifecycle, keeping the caller's body and scope.
-
-    Only the lifecycle keys are taken from storage. The body is deliberately
-    the caller's, because a re-projection cuts the text it was handed, and a
-    caller mid-update holds the newer copy.
-    """
-
-    get = getattr(entity_manager, "get", None)
-    if not callable(get):
-        return source
-    try:
-        stored = await get(source_id)
-    except Exception:
-        return source
-    stored_metadata = getattr(stored, "metadata", None) if stored is not None else None
-    if not isinstance(stored_metadata, Mapping):
-        return source
-    carried = {
-        key: stored_metadata[key]
-        for key in _LIFECYCLE_METADATA_KEYS
-        if key in stored_metadata and stored_metadata[key] is not None
-    }
-    if not carried:
-        return source
-    return source.model_copy(update={"metadata": {**(source.metadata or {}), **carried}})
 
 
 __all__ = [

@@ -93,11 +93,22 @@ def make_graph_runtime(
     entity_manager: Any | None = None,
     relationship_manager: Any | None = None,
 ) -> SimpleNamespace:
-    """Build a lightweight graph runtime for tool tests."""
+    """Build a lightweight graph runtime for tool tests.
+
+    Any manager passed in gets an async `get` unless the test defined one.
+    Projection reads a parent's stored lifecycle before deriving rows from it,
+    and that read fails closed rather than falling back to the caller's copy,
+    so a double whose `get` returns a non-awaitable now fails the write it is
+    standing in for. Real managers are async here; the doubles have to be too.
+    """
+
+    resolved_entity_manager = entity_manager if entity_manager is not None else MagicMock()
+    if not isinstance(getattr(resolved_entity_manager, "get", None), AsyncMock):
+        resolved_entity_manager.get = AsyncMock(return_value=None)
 
     return SimpleNamespace(
         client=client if client is not None else MagicMock(),
-        entity_manager=entity_manager if entity_manager is not None else MagicMock(),
+        entity_manager=resolved_entity_manager,
         relationship_manager=(
             relationship_manager if relationship_manager is not None else MagicMock()
         ),

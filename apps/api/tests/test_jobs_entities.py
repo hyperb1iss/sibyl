@@ -83,6 +83,11 @@ class TestCreateEntityJob:
         )
         entity_manager = MagicMock()
         entity_manager.create_direct = AsyncMock(return_value="pattern-123")
+        # Projection reads the stored parent's lifecycle before deriving rows
+        # from it, so the double has to answer `get` the way a real manager
+        # does. A bare MagicMock returns a non-awaitable and the read fails
+        # closed, which is the intended behavior on an unreadable parent.
+        entity_manager.get = AsyncMock(return_value=None)
         relationship_manager = MagicMock()
         relationship_manager.create_direct_bulk = AsyncMock(return_value=["rel-1"])
         relationship_manager.create = AsyncMock()

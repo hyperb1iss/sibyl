@@ -1811,16 +1811,21 @@ async def projected_row_lifecycle_stamp(
                 source_id=raw_source_id,
             )
     except Exception as exc:
-        # The projection is worth more than the stamp: a row that exists
-        # unstamped is reachable by the correction's own cascade the next time
-        # one runs, while a row that was never written is lost.
+        # Raised rather than swallowed. Writing the row anyway mints a fully
+        # recallable copy of text that may already be retired, and nothing
+        # comes back for it: the correction that would have stamped it has
+        # already run and found nothing. A raised failure leaves the write to
+        # be retried, which is recoverable in a way a silently active row is
+        # not.
         log.warning(
             "projected_row_lifecycle_lookup_failed",
             raw_memory_id=raw_memory_id,
             error_type=type(exc).__name__,
         )
-        return {}
+        raise
     if memory is None:
+        # An absent capture is not an unreadable one. Nothing was stamped on a
+        # row that does not exist, so there is no verdict to inherit.
         return {}
     stamp = graph_lifecycle_stamp(memory)
     if stamp:
@@ -1836,7 +1841,7 @@ _GRAPH_CORRECTION_LOOKUP_LIMIT = 64
 # Each corrected row can carry up to `MAX_PASSAGES_PER_SOURCE` spans, so the
 # span cap is the parent cap multiplied by that ceiling: a limit that bound
 # earlier would leave spans of a retired memory recallable.
-_GRAPH_CORRECTION_PASSAGE_LOOKUP_LIMIT = _GRAPH_CORRECTION_LOOKUP_LIMIT * MAX_PASSAGES_PER_SOURCE
+_GRAPH_CORRECTION_PROJECTION_LOOKUP_LIMIT = _GRAPH_CORRECTION_LOOKUP_LIMIT * MAX_PASSAGES_PER_SOURCE
 _CORRECTION_NATIVE_WRITE_PATH = "memory_correction"
 
 
@@ -1854,11 +1859,11 @@ class _CorrectionGraphTargets:
 
     authorized: list[str]
     refused: list[str]
-    passages: list[str] = field(default_factory=list)
+    projections: list[str] = field(default_factory=list)
 
     @property
     def stampable(self) -> list[str]:
-        return [*self.authorized, *self.passages]
+        return [*self.authorized, *self.projections]
 
 
 async def _correction_graph_entity_ids(
@@ -1984,7 +1989,7 @@ async def _correction_graph_entity_ids(
         )
         refused.append(entity_id)
 
-    passages = await _correction_passage_entity_ids(
+    projections = await _correction_projected_row_ids(
         runtime,
         organization_id=organization_id,
         memory=memory,
@@ -1996,7 +2001,9 @@ async def _correction_graph_entity_ids(
     return _CorrectionGraphTargets(
         authorized=authorized,
         refused=refused,
-        passages=[entity_id for entity_id in dict.fromkeys(passages) if entity_id not in known],
+        projections=[
+            entity_id for entity_id in dict.fromkeys(projections) if entity_id not in known
+        ],
     )
 
 
@@ -2040,7 +2047,7 @@ async def _readable_correction_targets(
     return readable
 
 
-async def _correction_passage_entity_ids(
+async def _correction_projected_row_ids(
     runtime: Any,
     *,
     organization_id: str,
@@ -2049,26 +2056,30 @@ async def _correction_passage_entity_ids(
     principal_id: str | None,
     accessible_projects: Iterable[str] | None,
 ) -> list[str]:
-    """Follow the correction down into the spans cut from the corrected rows.
+    """Follow the correction down into every row projected from the corrected rows.
 
-    A passage is an independently indexed copy of part of its parent's body
-    (`projection/passages.py`), and it inherits only the parent's scope keys,
-    never its provenance or its lifecycle. So the provenance query that finds
-    the parent cannot see the passage, and a correction that stopped at the
-    parent left every span of the retired text ranking and recallable: the
-    memory was retired and its own words kept being served.
+    Three projections mint rows carrying a parent memory's text: spans carry
+    its words verbatim (`projection/passages.py`), projected entities carry its
+    candidate context, and projected facts carry their span and content
+    (`projection/memory.py`). Each is independently indexed and independently
+    servable, and each inherits the parent's scope but not its provenance, so
+    the provenance query that finds the parent cannot see any of them. A
+    correction that stopped at the parent left the retired text ranking under
+    every projected id.
 
-    Lineage is the linkage rather than provenance, because it is the only one
-    a passage carries: the projection stamps `parent_entity_id` on every span
-    it mints, and `source_entity_id` alongside it, and passages written before
-    a given provenance rule still carry both. Matching either is what makes
-    historical spans reachable from a correction.
+    Lineage is the linkage rather than provenance, because it is the only one a
+    projected row carries: every projection stamps `source_entity_id`, spans
+    stamp `parent_entity_id` beside it, and rows written before any given
+    provenance rule still carry them. Matching either is what makes historical
+    projections reachable from a correction.
 
-    Nothing here relaxes authorization. The parents are rows this correction
-    was already authorized against, and each span is re-checked for
-    readability exactly like a projected row, because `parent_entity_id` is
-    not server-owned: a row that could be written can name a parent, and
-    naming one must not be enough to have somebody else's row retired.
+    Requiring `projection_kind` keeps this to rows claiming to be projections
+    at all, which is the narrowing the passage-only version got from its
+    entity-type filter. It is not the security boundary: the parents are rows
+    this correction was already authorized against, and each projected row is
+    re-checked for readability exactly like a provenance row, because neither
+    lineage nor `projection_kind` is server-owned and naming a parent must not
+    be enough to have somebody else's row retired.
     """
 
     parents = [str(parent_id) for parent_id in dict.fromkeys(parent_ids) if parent_id]
@@ -2080,15 +2091,14 @@ async def _correction_passage_entity_ids(
                 """
                 SELECT uuid FROM entity
                 WHERE group_id = $group_id
-                  AND entity_type = $passage_type
+                  AND attributes.projection_kind IS NOT NONE
                   AND (attributes.parent_entity_id IN $parent_ids
                        OR attributes.source_entity_id IN $parent_ids)
                 LIMIT $limit;
                 """,
                 group_id=str(organization_id),
-                passage_type=EntityType.PASSAGE.value,
                 parent_ids=parents,
-                limit=_GRAPH_CORRECTION_PASSAGE_LOOKUP_LIMIT,
+                limit=_GRAPH_CORRECTION_PROJECTION_LOOKUP_LIMIT,
             )
         )
     except Exception as exc:
@@ -2096,21 +2106,21 @@ async def _correction_passage_entity_ids(
         # failure here leaves the correction half-applied rather than undone.
         # Saying so is worth more than throwing away the half that landed.
         log.warning(
-            "memory_correction_passage_lookup_failed",
+            "memory_correction_projection_lookup_failed",
             source_id=memory.id,
             error_type=type(exc).__name__,
         )
         return []
-    passage_ids = [uuid for row in rows if (uuid := str(row.get("uuid") or ""))]
-    if not passage_ids:
+    projected_ids = [uuid for row in rows if (uuid := str(row.get("uuid") or ""))]
+    if not projected_ids:
         return []
     return await _readable_correction_targets(
         runtime,
-        entity_ids=[entity_id for entity_id in passage_ids if entity_id not in set(parents)],
+        entity_ids=[entity_id for entity_id in projected_ids if entity_id not in set(parents)],
         source_id=memory.id,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
-        log_event="memory_correction_passage_unreadable",
+        log_event="memory_correction_projection_unreadable",
     )
 
 
@@ -2208,8 +2218,8 @@ async def _project_correction_to_graph(
             source_id=memory.id,
             restored_entity_ids=applied,
         )
-    span_ids = set(targets.passages)
-    superseded_memories = [entity_id for entity_id in applied if entity_id not in span_ids]
+    projected_ids = set(targets.projections)
+    superseded_memories = [entity_id for entity_id in applied if entity_id not in projected_ids]
     if preview.action == "supersede" and replacement_source_id and superseded_memories:
         await _link_graph_supersession(
             runtime,
