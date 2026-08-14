@@ -528,7 +528,12 @@ async def test_supersede_writes_the_replacement_edge_in_the_direction_retrieval_
     runtime = _CorrectionGraphRuntime()
     seen_uuids = iter(["entity-old", "entity-new"])
 
-    async def execute_query(_query: str, **_params: object) -> list[dict[str, object]]:
+    async def execute_query(query: str, **_params: object) -> list[dict[str, object]]:
+        if "parent_entity_id" in query:
+            # This capture projected no passages, so the lineage cascade finds
+            # nothing. Answering it with a provenance row would hand the test a
+            # span that was never cut.
+            return []
         return [{"uuid": next(seen_uuids)}]
 
     runtime.execute_query = execute_query  # type: ignore[method-assign]

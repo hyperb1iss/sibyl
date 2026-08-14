@@ -25,6 +25,7 @@ from sibyl_core.auth.memory_policy import (
 )
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.memory_pipeline.quality import normalize_memory_quality_metadata
+from sibyl_core.memory_pipeline.spans import MAX_PASSAGES_PER_SOURCE
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.reflection import (
     MemoryLifecycle,
@@ -1770,6 +1771,10 @@ async def apply_memory_correction(
 
 
 _GRAPH_CORRECTION_LOOKUP_LIMIT = 64
+# Each corrected row can carry up to `MAX_PASSAGES_PER_SOURCE` spans, so the
+# span cap is the parent cap multiplied by that ceiling: a limit that bound
+# earlier would leave spans of a retired memory recallable.
+_GRAPH_CORRECTION_PASSAGE_LOOKUP_LIMIT = _GRAPH_CORRECTION_LOOKUP_LIMIT * MAX_PASSAGES_PER_SOURCE
 _CORRECTION_NATIVE_WRITE_PATH = "memory_correction"
 
 
@@ -1866,34 +1871,14 @@ async def _correction_graph_entity_ids(
     # write, lose access, then correct your own capture to retire it". A
     # genuine projection inherits its capture's audience, so this refuses no
     # legitimate target.
-    projected: list[str] = []
-    for entity_id in dict.fromkeys(projected_ids):
-        try:
-            row = await runtime.entity_manager.get(entity_id)
-        except Exception:
-            continue
-        if row is None:
-            continue
-        row_metadata = getattr(row, "metadata", None)
-        # `private_scope_granted` says only that this principal may hold
-        # private memories at all; ownership is still checked inside, so a
-        # private row belonging to somebody else is refused either way. The
-        # correction route has already authorized this principal against the
-        # capture, so the grant is not the thing under test here.
-        if not memory_metadata_read_allowed(
-            row_metadata,
-            principal_id=principal_id,
-            private_scope_granted=principal_id is not None,
-            accessible_projects=accessible_projects,
-            row_project_id=memory_row_project_id(row_metadata),
-        ):
-            log.warning(
-                "memory_correction_graph_provenance_unreadable",
-                source_id=memory.id,
-                entity_id=entity_id,
-            )
-            continue
-        projected.append(entity_id)
+    projected = await _readable_correction_targets(
+        runtime,
+        entity_ids=projected_ids,
+        source_id=memory.id,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        log_event="memory_correction_graph_provenance_unreadable",
+    )
 
     # Declared ids come off caller-writable capture metadata, so the refused
     # list is caller-chosen input echoed back. A row that does not exist and a
@@ -1923,7 +1908,133 @@ async def _correction_graph_entity_ids(
             entity_id=entity_id,
         )
         refused.append(entity_id)
-    return _CorrectionGraphTargets(authorized=authorized, refused=refused)
+
+    passages = await _correction_passage_entity_ids(
+        runtime,
+        organization_id=organization_id,
+        memory=memory,
+        parent_ids=authorized,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+    )
+    return _CorrectionGraphTargets(
+        authorized=list(dict.fromkeys([*authorized, *passages])),
+        refused=refused,
+    )
+
+
+async def _readable_correction_targets(
+    runtime: Any,
+    *,
+    entity_ids: Sequence[str],
+    source_id: str,
+    principal_id: str | None,
+    accessible_projects: Iterable[str] | None,
+    log_event: str,
+) -> list[str]:
+    """Keep the rows a correction found that this principal can still read.
+
+    `private_scope_granted` says only that this principal may hold private
+    memories at all; ownership is still checked inside, so a private row
+    belonging to somebody else is refused either way. The correction route has
+    already authorized this principal against the capture, so the grant is not
+    the thing under test here.
+    """
+
+    readable: list[str] = []
+    for entity_id in dict.fromkeys(entity_ids):
+        try:
+            row = await runtime.entity_manager.get(entity_id)
+        except Exception:
+            continue
+        if row is None:
+            continue
+        row_metadata = getattr(row, "metadata", None)
+        if not memory_metadata_read_allowed(
+            row_metadata,
+            principal_id=principal_id,
+            private_scope_granted=principal_id is not None,
+            accessible_projects=accessible_projects,
+            row_project_id=memory_row_project_id(row_metadata),
+        ):
+            log.warning(log_event, source_id=source_id, entity_id=entity_id)
+            continue
+        readable.append(entity_id)
+    return readable
+
+
+async def _correction_passage_entity_ids(
+    runtime: Any,
+    *,
+    organization_id: str,
+    memory: RawMemory,
+    parent_ids: Sequence[str],
+    principal_id: str | None,
+    accessible_projects: Iterable[str] | None,
+) -> list[str]:
+    """Follow the correction down into the spans cut from the corrected rows.
+
+    A passage is an independently indexed copy of part of its parent's body
+    (`projection/passages.py`), and it inherits only the parent's scope keys,
+    never its provenance or its lifecycle. So the provenance query that finds
+    the parent cannot see the passage, and a correction that stopped at the
+    parent left every span of the retired text ranking and recallable: the
+    memory was retired and its own words kept being served.
+
+    Lineage is the linkage rather than provenance, because it is the only one
+    a passage carries: the projection stamps `parent_entity_id` on every span
+    it mints, and `source_entity_id` alongside it, and passages written before
+    a given provenance rule still carry both. Matching either is what makes
+    historical spans reachable from a correction.
+
+    Nothing here relaxes authorization. The parents are rows this correction
+    was already authorized against, and each span is re-checked for
+    readability exactly like a projected row, because `parent_entity_id` is
+    not server-owned: a row that could be written can name a parent, and
+    naming one must not be enough to have somebody else's row retired.
+    """
+
+    parents = [str(parent_id) for parent_id in dict.fromkeys(parent_ids) if parent_id]
+    if not parents:
+        return []
+    try:
+        rows = normalize_records(
+            await runtime.client.execute_query(
+                """
+                SELECT uuid FROM entity
+                WHERE group_id = $group_id
+                  AND entity_type = $passage_type
+                  AND (attributes.parent_entity_id IN $parent_ids
+                       OR attributes.source_entity_id IN $parent_ids)
+                LIMIT $limit;
+                """,
+                group_id=str(organization_id),
+                passage_type=EntityType.PASSAGE.value,
+                parent_ids=parents,
+                limit=_GRAPH_CORRECTION_PASSAGE_LOOKUP_LIMIT,
+            )
+        )
+    except Exception as exc:
+        # The parent has already been stamped by the time this runs, so a
+        # failure here leaves the correction half-applied rather than undone.
+        # Saying so is worth more than throwing away the half that landed.
+        log.warning(
+            "memory_correction_passage_lookup_failed",
+            source_id=memory.id,
+            error_type=type(exc).__name__,
+        )
+        return []
+    passage_ids = [uuid for row in rows if (uuid := str(row.get("uuid") or ""))]
+    if not passage_ids:
+        return []
+    return await _readable_correction_targets(
+        runtime,
+        entity_ids=[entity_id for entity_id in passage_ids if entity_id not in set(parents)],
+        source_id=memory.id,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        log_event="memory_correction_passage_unreadable",
+    )
 
 
 def _correction_graph_metadata(
