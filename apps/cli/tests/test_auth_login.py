@@ -463,3 +463,55 @@ def test_a_login_with_no_explicit_url_still_uses_the_selected_context(
     assert result.exit_code == 0
     assert calls[0]["api_url"] == "https://prod.example.com/api"
     assert calls[0]["credential_scope_name"] == "context:prod:org:acme"
+
+
+def test_a_shared_server_scopes_the_login_to_the_selected_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two contexts, one server: config order must not decide whose token this is."""
+    from sibyl_cli import state
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(config_store.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(state, "_context_override", None)
+    monkeypatch.setattr(state, "_ignore_selection", False)
+    config_store.create_context("alpha", "https://shared.example.com", org_slug="alpha-org")
+    config_store.create_context(
+        "beta", "https://shared.example.com", org_slug="beta-org", set_active=True
+    )
+    monkeypatch.setattr(auth, "_login_auto", lambda **kwargs: calls.append(kwargs))
+
+    result = CliRunner().invoke(app, ["auth", "login", "https://shared.example.com"])
+
+    assert result.exit_code == 0
+    # The scope the next command reads back, not whichever context sorts first.
+    assert calls[0]["credential_scope_name"] == auth._current_credential_scope()
+    assert calls[0]["credential_scope_name"] == "context:beta:org:beta-org"
+    # The selected context agrees with the URL, so there is nothing to warn about.
+    assert "not the selected context" not in _plain(result.stdout)
+
+
+def test_a_shared_server_the_selection_does_not_name_demands_disambiguation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Guessing between two candidate credentials would overwrite one of them."""
+    from sibyl_cli import state
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(config_store.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(state, "_context_override", None)
+    monkeypatch.setattr(state, "_ignore_selection", False)
+    config_store.create_context("alpha", "https://shared.example.com", org_slug="alpha-org")
+    config_store.create_context("beta", "https://shared.example.com", org_slug="beta-org")
+    config_store.create_context("local", "http://localhost:3334", set_active=True)
+    monkeypatch.setattr(auth, "_login_auto", lambda **kwargs: calls.append(kwargs))
+
+    result = CliRunner().invoke(app, ["auth", "login", "https://shared.example.com"])
+
+    assert result.exit_code == 1
+    assert calls == []
+    plain = _plain(result.stdout)
+    assert "alpha" in plain
+    assert "beta" in plain

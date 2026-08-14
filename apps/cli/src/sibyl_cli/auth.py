@@ -83,14 +83,37 @@ def _login_credential_scope(context_name: str | None = None) -> str | None:
     return _current_credential_scope(context_name) or credential_scope(context_name, None)
 
 
-def _context_for_server(api_url: str) -> str | None:
-    """Find the configured context that points at this API URL, if any."""
+def _contexts_for_server(api_url: str) -> list[str]:
     from sibyl_cli import config_store
 
-    for ctx in config_store.list_contexts():
-        if normalize_api_url(f"{ctx.server_url}/api") == normalize_api_url(api_url):
-            return ctx.name
-    return None
+    target = normalize_api_url(api_url)
+    return [
+        ctx.name
+        for ctx in config_store.list_contexts()
+        if normalize_api_url(f"{ctx.server_url}/api") == target
+    ]
+
+
+def _context_for_server(api_url: str) -> str | None:
+    """Find the configured context that points at this API URL, if any.
+
+    Several contexts can share one server and differ only by org, so config
+    order must not decide which credential a login overwrites. The selected
+    context wins whenever it points at the target; otherwise an ambiguous
+    server is a question for the user, not a guess.
+    """
+    matches = _contexts_for_server(api_url)
+    if not matches:
+        return None
+
+    selected = _effective_context_name()
+    if selected and selected in matches:
+        return selected
+    if len(matches) > 1:
+        error(f"{api_url} is configured by more than one context: {', '.join(sorted(matches))}.")
+        info("Name the one to log in to: sibyl -C <name> auth login")
+        raise typer.Exit(1)
+    return matches[0]
 
 
 def _scope_for_login_target(
