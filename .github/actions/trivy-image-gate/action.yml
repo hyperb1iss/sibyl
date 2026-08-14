@@ -47,6 +47,13 @@ runs:
     # ignore-unfixed keeps the gate actionable: an advisory with no released
     # fix cannot be cleared by anything this repository does, and blocking on
     # one would only teach people to bypass the gate.
+    #
+    # trivyignores names the suppression file explicitly. Trivy otherwise
+    # reads whatever `.trivyignore` happens to sit in the working directory,
+    # which would let an untracked or unreviewed file silence this gate. The
+    # committed file carries the exception policy, CI rescans whenever it
+    # changes, and the action fails outright if the path is missing, so
+    # deleting it cannot quietly restore the implicit behaviour.
     - name: "◆ Trivy CVE gate"
       uses: aquasecurity/trivy-action@v0.36.0
       env:
@@ -58,3 +65,4 @@ runs:
         vuln-type: os,library
         severity: HIGH,CRITICAL
         ignore-unfixed: true
+        trivyignores: .trivyignore

@@ -1026,12 +1026,21 @@ jobs:
           manifest.
           EOF
 
-      - name: "◆ Update release with install instructions"
+      # Promotion, not just decoration. Release creates the version as a
+      # pre-release that is not "latest"; this job runs only after the images
+      # passed their scan, were signed and pushed, and every package shipped,
+      # so this is the first moment the version is true. A publish that fails
+      # anywhere upstream leaves the pre-release standing and never promotes
+      # it, which is what stops a broken distribution from presenting itself
+      # as the current version.
+      - name: "◆ Update release and promote it to latest"
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.tag }}
           fail_on_unmatched_files: true
           body_path: release-body.md
+          prerelease: false
+          make_latest: true
           files: |
             release-assets/*
 

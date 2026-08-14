@@ -1,0 +1,28 @@
+# Trivy vulnerability exceptions for the images this repository publishes.
+#
+# This file is deliberately empty, and an empty file is the correct steady
+# state. It exists so that suppression has an owner and a paper trail: Trivy
+# reads a file of this name from the working directory by default, so without
+# a committed one an untracked file could silence the image gate with nobody
+# accountable for it. Every image scan in this repository is pointed at this
+# exact path through .github/actions/trivy-image-gate, and the scan itself
+# runs whenever this file changes, so an entry can never land unscanned.
+#
+# Policy for adding an entry:
+#
+#   1. Fixing the advisory comes first. Bump the dependency, or remove the
+#      component. The msgpack and setuptools advisories that prompted this
+#      gate were fixed by deleting pip from the api runtime image, not by
+#      being listed here.
+#   2. An entry requires its own pull request, reviewed on the security
+#      question alone rather than bundled into a feature branch.
+#   3. Each entry carries the advisory ID, the reason no fix is possible
+#      today, the exposure that makes it acceptable, and an expiry date.
+#      Trivy honours an expiry with `exp:` on the entry.
+#   4. An entry without an expiry date is not an exception, it is a
+#      permanent regression, and it does not belong here.
+#
+# Format, one advisory per line:
+#
+#   CVE-2000-0000 exp:2026-01-01
+#   # why no fix exists, what the exposure is, who accepted it

@@ -578,6 +578,13 @@ tasks:
       - .github/workflows/release.yml
       - .github/workflows/publish.yml
       - .github/workflows/publish-dogfood-images.yml
+      # The image CVE gate is shared by release, publish and CI, and this task
+      # asserts the three stay in agreement. Without these the cache would
+      # report a stale green after the gate itself changed.
+      - .github/workflows/ci.yml
+      - .github/workflows/image-cve-gate.yml
+      - .github/actions/trivy-image-gate/action.yml
+      - .trivyignore
       - moon.yml
 
   python-package-build:
