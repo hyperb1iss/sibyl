@@ -565,6 +565,14 @@ async def _default_related_items_batch(
                 if entity_project is not None and entity_project not in accessible_projects:
                     continue
 
+            # The same gate the singular lane runs, for the same reason: related
+            # items ride inside an admitted item, so the admission filter never
+            # sees them. `compile_context` picks this batch lane whenever the
+            # default related function is in play, which makes it the lane
+            # production actually reads through.
+            if not graph_metadata_recallable(getattr(entity, "metadata", None)):
+                continue
+
             source_id = str(getattr(relationship, "source_id", ""))
             support_content = _related_source_content(
                 entity,
