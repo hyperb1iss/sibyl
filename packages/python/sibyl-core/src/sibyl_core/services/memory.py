@@ -24,6 +24,7 @@ from sibyl_core.auth.memory_policy import (
     stamp_memory_scope_metadata,
 )
 from sibyl_core.errors import EntityNotFoundError
+from sibyl_core.memory_pipeline.lifecycle import graph_lifecycle_stamp
 from sibyl_core.memory_pipeline.quality import normalize_memory_quality_metadata
 from sibyl_core.memory_pipeline.spans import MAX_PASSAGES_PER_SOURCE
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
@@ -1768,6 +1769,67 @@ async def apply_memory_correction(
         affected_entity_ids=affected_entity_ids,
         refused_entity_ids=refused_entity_ids,
     )
+
+
+async def projected_row_lifecycle_stamp(
+    *,
+    organization_id: str,
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Read the current verdict for the capture a row is about to be projected from.
+
+    The correction write-through can only stamp rows that exist when it runs.
+    Graph writes are queued, so the rows a capture projects into can be created
+    minutes after the capture was corrected, from a payload serialized before
+    the correction existed. Reading the capture back at creation time is what
+    closes that window: `raw_captures` is the row the correction mutated, and
+    it is already correct by the time the worker gets here.
+
+    One indexed read per projected row, on the write path only. Nothing on the
+    recall path consults this, because the stamp it returns is exactly what
+    the recall gate already reads off the row.
+
+    Empty whenever the capture is unknown, unreadable, or still recallable, so
+    the caller can merge it unconditionally.
+    """
+
+    fields = metadata if isinstance(metadata, Mapping) else {}
+    raw_memory_id = _metadata_str(fields, "raw_memory_id")
+    raw_source_id = _metadata_str(fields, "raw_source_id")
+    if not raw_memory_id and not raw_source_id:
+        return {}
+    try:
+        memory = None
+        if raw_memory_id:
+            memory = await get_raw_memory(
+                organization_id=str(organization_id),
+                memory_id=raw_memory_id,
+            )
+        if memory is None and raw_source_id:
+            memory = await get_raw_memory_by_source_id(
+                organization_id=str(organization_id),
+                source_id=raw_source_id,
+            )
+    except Exception as exc:
+        # The projection is worth more than the stamp: a row that exists
+        # unstamped is reachable by the correction's own cascade the next time
+        # one runs, while a row that was never written is lost.
+        log.warning(
+            "projected_row_lifecycle_lookup_failed",
+            raw_memory_id=raw_memory_id,
+            error_type=type(exc).__name__,
+        )
+        return {}
+    if memory is None:
+        return {}
+    stamp = graph_lifecycle_stamp(memory)
+    if stamp:
+        log.info(
+            "projected_row_born_retired",
+            raw_memory_id=memory.id,
+            lifecycle_state=stamp.get("lifecycle_state"),
+        )
+    return dict(stamp)
 
 
 _GRAPH_CORRECTION_LOOKUP_LIMIT = 64

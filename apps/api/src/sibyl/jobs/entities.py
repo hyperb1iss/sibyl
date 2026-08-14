@@ -27,6 +27,7 @@ from sibyl_core.projection import (
     scope_bearing_entity_update,
 )
 from sibyl_core.services.graph import get_surreal_graph_runtime
+from sibyl_core.services.memory import projected_row_lifecycle_stamp
 from sibyl_core.services.surreal_content import MemoryScope
 from sibyl_core.tasks.distillation import build_learning_episode, build_learning_procedure
 
@@ -466,6 +467,24 @@ async def create_entity(  # noqa: PLR0915
             entity = Procedure.model_validate(entity_data)
         else:
             entity = Episode.model_validate(entity_data)
+
+        # This payload was serialized before the job was queued, so anything
+        # that happened to the capture since then is invisible to it. A caller
+        # that corrected the memory it just wrote gets that verdict applied to
+        # a row that does not exist yet, and the row would otherwise be created
+        # recallable with the corrected text in it. The capture is re-read
+        # here, and the row is born carrying whatever the capture now says.
+        lifecycle_stamp = await projected_row_lifecycle_stamp(
+            organization_id=group_id,
+            metadata=entity.metadata,
+        )
+        if lifecycle_stamp:
+            object.__setattr__(entity, "metadata", {**(entity.metadata or {}), **lifecycle_stamp})
+            log.info(
+                "create_entity_born_retired",
+                entity_id=entity_data.get("id"),
+                lifecycle_state=lifecycle_stamp.get("lifecycle_state"),
+            )
 
         # Dedup-on-write: check for near-duplicates before creating.
         # If found, still create the entity (callers already have its ID),

@@ -523,6 +523,53 @@ async def test_correcting_a_memory_takes_its_passages_out_of_the_pack(
 
 
 @pytest.mark.asyncio
+async def test_spans_cut_after_the_correction_are_born_retired(
+    graph: _Runtime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The window between writing a memory and cutting it into spans.
+
+    Projection is two writes, not one. A correction that lands between them
+    stamps the parent and finds no spans to cascade to, and the projection then
+    cuts spans from the caller's copy of the parent, which predates the
+    verdict. Reading the parent back at cut time is what closes it.
+    """
+
+    parent = _entity(
+        graph,
+        "raced-parent",
+        "Deploy to Fly",
+        _passage_body("interleaved"),
+        raw_memory_id="raw-raced-parent",
+    )
+    await graph.entity_manager.create_direct(parent)
+
+    result = await _correct(graph, monkeypatch, raw_memory_id="raw-raced-parent")
+    assert result.applied
+    assert result.affected_entity_ids == ["raced-parent"], (
+        "no spans exist yet, so the cascade has nothing to reach"
+    )
+
+    # The caller's copy is the pre-correction one, exactly as the worker holds
+    # it: the correction happened in another process and never touched it.
+    projection = await project_entity_passages(
+        entity_manager=graph.entity_manager,
+        relationship_manager=graph.relationship_manager,
+        source=parent,
+        group_id=graph.group_id,
+        generate_embeddings=False,
+    )
+    assert projection.passages >= 2, "the spans have to exist for the test to mean anything"
+    for span in projection.created_passages:
+        assert span.metadata.get("excluded_from_recall") is True
+        assert span.metadata.get("lifecycle_state") == "contested"
+
+    served = _pack_ids(await _pack(graph, "interleaved passage body"))
+    assert "raced-parent" not in served
+    assert not (served & {span.id for span in projection.created_passages})
+
+
+@pytest.mark.asyncio
 async def test_a_retired_row_cannot_seed_the_graph_walk(
     graph: _Runtime,
 ) -> None:

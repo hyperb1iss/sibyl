@@ -89,9 +89,24 @@ _SCOPE_METADATA_KEYS = (
     "raw_source_id",
 )
 
+# What a correction stamps onto a memory, which its spans have to carry or
+# they keep serving the retired body under their own ids.
+_LIFECYCLE_METADATA_KEYS = (
+    "lifecycle_state",
+    "lifecycle_flags",
+    "lifecycle_action",
+    "excluded_from_recall",
+    "superseded_by_source_id",
+    "duplicate_of_source_id",
+)
+
 # The subset of an entity update that changes who may read its spans. A caller
 # that sees any of these in an update must refresh the spans' inherited stamps
-# even though the body, and therefore the cut, is unchanged.
+# even though the body, and therefore the cut, is unchanged. Lifecycle keys are
+# deliberately absent: the restamp walk writes scope stamps only, so listing
+# them here would fire a trigger that reads every span and fixes nothing. A
+# lifecycle change reaches existing spans through the correction cascade
+# instead (`services/memory.py`).
 SCOPE_BEARING_UPDATE_KEYS = frozenset(_SCOPE_METADATA_KEYS)
 
 
@@ -328,10 +343,17 @@ async def project_entity_passages(
     not there yet is how the operational-experience projection silently dropped
     every PART_OF it created and never self-healed, so the ordering here is
     load-bearing: entities first, then the edges that point at them.
+
+    The parent is read back rather than trusted as passed, because the caller's
+    copy can be older than the row. Both this projection and a correction can
+    be in flight at once: the correction stamps the parent, finds no spans
+    because none exist yet, and this then cuts spans from an in-memory object
+    that predates the verdict. Spans born from the stored row instead inherit
+    whatever lifecycle the parent is actually carrying.
     """
     source_id = created_source_id or source.id
     entities, relationships = plan_entity_passages(
-        source,
+        await _parent_as_stored(entity_manager, source, source_id=source_id),
         source_id=source_id,
         group_id=group_id,
     )
@@ -772,19 +794,57 @@ def _summary(content: str) -> str:
 
 
 def _inherited_scope_metadata(source: Entity) -> dict[str, object]:
-    """Carry the parent's scope onto every passage.
+    """Carry the parent's scope and lifecycle onto every passage.
 
     A passage that loses ``memory_scope``/``scope_key`` either leaks past the
     boundary its parent sits behind or vanishes from the packs that filter on
     it. Inheriting verbatim keeps the span exactly as reachable as the memory
     it was cut from, and no more.
+
+    Lifecycle inherits for the same reason and is the sharper half: a span is
+    an independently indexed copy of the parent's own words, so a span of a
+    retired memory that reads as active serves the retired text under a row id
+    the retirement never named.
     """
     metadata = dict(source.metadata or {})
     return {
         key: metadata[key]
-        for key in _SCOPE_METADATA_KEYS
+        for key in (*_SCOPE_METADATA_KEYS, *_LIFECYCLE_METADATA_KEYS)
         if key in metadata and metadata[key] is not None
     }
+
+
+async def _parent_as_stored(
+    entity_manager: Any,
+    source: Entity,
+    *,
+    source_id: str,
+) -> Entity:
+    """Re-read the parent's lifecycle, keeping the caller's body and scope.
+
+    Only the lifecycle keys are taken from storage. The body is deliberately
+    the caller's, because a re-projection cuts the text it was handed, and a
+    caller mid-update holds the newer copy.
+    """
+
+    get = getattr(entity_manager, "get", None)
+    if not callable(get):
+        return source
+    try:
+        stored = await get(source_id)
+    except Exception:
+        return source
+    stored_metadata = getattr(stored, "metadata", None) if stored is not None else None
+    if not isinstance(stored_metadata, Mapping):
+        return source
+    carried = {
+        key: stored_metadata[key]
+        for key in _LIFECYCLE_METADATA_KEYS
+        if key in stored_metadata and stored_metadata[key] is not None
+    }
+    if not carried:
+        return source
+    return source.model_copy(update={"metadata": {**(source.metadata or {}), **carried}})
 
 
 __all__ = [
