@@ -389,11 +389,11 @@ def link_graph(
             _handle_client_error(e)
             return
 
-        if json_out:
-            print_json(response)
-            return
-
         status = response.get("status", "unknown")
+
+        if json_out:
+            print_json_result(response, succeeded=status != "error")
+            return
 
         if status == "dry_run":
             sources_processed = response.get("sources_processed", [])

@@ -150,6 +150,12 @@ def discard_writes(
         except ValueError as exc:
             error(str(exc))
             raise typer.Exit(code=1) from exc
+
+    # A named id that matched nothing is a refusal, not an empty result: the
+    # caller asked for a specific write and the queue still holds it.
+    if not read_like and removed < len(selected):
+        error(f"No pending write matched {len(selected) - removed} of the given IDs")
+        raise typer.Exit(code=1)
     success(f"Discarded {removed} pending write{'s' if removed != 1 else ''}")
 
 

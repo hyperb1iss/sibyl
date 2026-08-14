@@ -663,7 +663,7 @@ def update_epic(
                 error(
                     "No fields to update. Use --status, --priority, --title, --assignee, or --tags"
                 )
-                return
+                raise typer.Exit(1)
 
             resolved_id = await _resolve_epic_id(client, epic_id)
 

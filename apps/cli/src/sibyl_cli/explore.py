@@ -105,7 +105,7 @@ def explore_traverse(
     """Multi-hop graph traversal from an entity. Default: table output."""
     if depth < 1 or depth > 3:
         error("Depth must be between 1 and 3")
-        return
+        raise typer.Exit(1)
 
     @run_async
     async def _traverse() -> None:
@@ -175,7 +175,7 @@ def explore_dependencies(
     """Show task dependency graph with topological ordering. Default: table output."""
     if not entity_id and not project:
         error("Must specify either entity_id or --project")
-        return
+        raise typer.Exit(1)
 
     @run_async
     async def _deps() -> None:

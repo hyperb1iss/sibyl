@@ -317,3 +317,55 @@ def test_task_update_exits_nonzero_when_no_fields_are_given(resolved_ids: None) 
 
     assert result.exit_code == 1
     assert "No fields to update" in result.stdout
+
+
+@pytest.mark.parametrize("json_flag", [[], ["--json"]])
+def test_crawl_link_graph_agrees_across_renderers_on_an_error(json_flag: list[str]) -> None:
+    """Fixing one renderer and not the other is how the health blocker happened."""
+    from sibyl_cli import crawl
+
+    failed = {"status": "error", "error": "extraction blew up"}
+
+    with patch("sibyl_cli.crawl.get_client", return_value=_client(link_graph=failed)):
+        result = CliRunner().invoke(crawl.app, ["link-graph", "src_1", *json_flag])
+
+    assert result.exit_code == 1
+
+
+@pytest.mark.parametrize("json_flag", [[], ["--json"]])
+def test_crawl_link_graph_exits_zero_when_it_completes(json_flag: list[str]) -> None:
+    from sibyl_cli import crawl
+
+    done = {"status": "complete", "entities_created": 0, "relationships_created": 0}
+
+    with patch("sibyl_cli.crawl.get_client", return_value=_client(link_graph=done)):
+        result = CliRunner().invoke(crawl.app, ["link-graph", "src_1", *json_flag])
+
+    assert result.exit_code == 0
+
+
+def test_epic_update_exits_nonzero_when_no_fields_are_given(resolved_ids: None) -> None:
+    """The twin of the task update site, in a file this branch already edits."""
+    with patch("sibyl_cli.epic.get_client", return_value=_client()):
+        result = CliRunner().invoke(epic.app, ["update", "epic_123"])
+
+    assert result.exit_code == 1
+    assert "No fields to update" in result.stdout
+
+
+def test_explore_traverse_exits_nonzero_on_an_out_of_range_depth() -> None:
+    from sibyl_cli import explore
+
+    result = CliRunner().invoke(explore.app, ["traverse", "entity_1", "--depth", "9"])
+
+    assert result.exit_code == 1
+    assert "Depth must be between 1 and 3" in result.stdout
+
+
+def test_explore_dependencies_exits_nonzero_without_a_target() -> None:
+    from sibyl_cli import explore
+
+    result = CliRunner().invoke(explore.app, ["dependencies"])
+
+    assert result.exit_code == 1
+    assert "Must specify either" in result.stdout

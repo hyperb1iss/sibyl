@@ -259,3 +259,43 @@ def test_pending_writes_flush_failure_summary_names_both_classes(
     assert "1 replayed, 1 failed" in result.stdout
     assert "safe to flush again" in result.stdout
     assert "flush again shortly" in result.stdout
+
+
+def test_pending_writes_discard_exits_nonzero_when_an_id_matches_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A named id that matched nothing is a refusal, and the write is still queued."""
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    _create_pending()
+
+    result = CliRunner().invoke(pending.app, ["discard", "deadbeef"])
+
+    assert result.exit_code == 1
+    assert len(pending_writes.list_pending_writes()) == 1
+
+
+def test_pending_writes_discard_exits_zero_when_it_removes_what_was_named(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    item = _create_pending()
+
+    result = CliRunner().invoke(pending.app, ["discard", str(item["id"])])
+
+    assert result.exit_code == 0
+    assert pending_writes.list_pending_writes() == []
+
+
+def test_pending_writes_discard_read_like_exits_zero_when_nothing_matches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No read-like leftovers is an empty result, not a refusal."""
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    _create_pending()
+
+    result = CliRunner().invoke(pending.app, ["discard", "--read-like"])
+
+    assert result.exit_code == 0

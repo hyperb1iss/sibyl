@@ -244,13 +244,13 @@ def notify_pending_writes() -> None:
 
     if _pending_writes_reported:
         return
-    # Claim the report before printing, so a caller reachable from more than
-    # one entry point cannot emit the same line twice.
-    mark_pending_writes_reported()
     count = pending_write_count()
     if count <= 0:
         return
     err_console.print(f"[{ELECTRIC_YELLOW}]![/{ELECTRIC_YELLOW}] {pending_writes_summary(count)}")
+    # Claimed only once the line is out, so a queue we failed to read stays
+    # unclaimed and a later caller can still report it.
+    mark_pending_writes_reported()
 
 
 def print_db_hint() -> None:
