@@ -6,7 +6,11 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from sibyl_core.query_anchors import normalize_keyword_token, normalize_keyword_tokens
+from sibyl_core.query_anchors import (
+    is_derivational_form,
+    normalize_keyword_token,
+    normalize_keyword_tokens,
+)
 
 _TOKEN_PATTERN = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9'-]{1,}")
 _SPAN_SPLIT_PATTERN = re.compile(r"(?<=[.!?])\s+|\n+")
@@ -38,6 +42,11 @@ _SERVICE_USE_PATTERN = re.compile(
     r"[A-Z0-9][A-Za-z0-9&'.-]{2,}(?:\s+[A-Z0-9][A-Za-z0-9&'.-]{2,}){0,3}\b"
 )
 
+# Function words are matched as written, never by stem: folding the list
+# would turn each entry into its whole family and swallow content words
+# (differ would take difference, assist would take assistance). Countable
+# nouns therefore carry their plural explicitly. "using" is absent on
+# purpose, since it carries the use action.
 _STOPWORDS = {
     "about",
     "after",
@@ -48,6 +57,7 @@ _STOPWORDS = {
     "any",
     "are",
     "assistant",
+    "assistants",
     "been",
     "before",
     "can",
@@ -70,17 +80,21 @@ _STOPWORDS = {
     "me",
     "mine",
     "month",
+    "months",
     "more",
     "much",
     "my",
     "name",
+    "names",
     "need",
+    "needs",
     "new",
     "on",
     "or",
     "our",
     "out",
     "recent",
+    "recently",
     "some",
     "that",
     "the",
@@ -90,20 +104,19 @@ _STOPWORDS = {
     "to",
     "up",
     "user",
+    "users",
     "was",
     "week",
+    "weeks",
     "what",
     "when",
     "which",
     "who",
     "with",
     "year",
+    "years",
     "you",
 }
-# Matched both ways: as written, so an entry only silences the word it spells,
-# and by stem, so its own plural cannot slip past the entry that lists it.
-# "using" is deliberately absent from both, since it carries the use action.
-_STOPWORD_STEMS = normalize_keyword_tokens(_STOPWORDS)
 
 # Every group is written in surface English and stemmed at import, so a term
 # covers its own inflections. Irregular pasts (bought, got, went) survive
@@ -133,7 +146,9 @@ _ACTION_TERMS: dict[str, frozenset[str]] = {
     "profile": normalize_keyword_tokens(
         {"field", "focus", "profession", "research", "role", "specialty"}
     ),
-    "repair": normalize_keyword_tokens({"fix", "repair", "replace", "service"}),
+    # "service" is out: stemming collapses the noun into the verb, so every
+    # mention of a service would read as a repair.
+    "repair": normalize_keyword_tokens({"fix", "repair", "replace"}),
     "use": normalize_keyword_tokens(
         {
             "choose",
@@ -248,10 +263,11 @@ def _frame_from_span(span: str, *, query: bool) -> FactFrame | None:
     if not terms:
         return None
 
+    sense_terms = frozenset(_salient_terms(span, senses_only=True))
     action_source = _QUERY_ACTION_TERMS if query else _ACTION_TERMS
-    actions = set(_labels_for_terms(terms, action_source))
+    actions = set(_labels_for_terms(sense_terms, action_source))
     categories: set[str] = set()
-    relations = set(_labels_for_terms(terms, _RELATION_TERMS))
+    relations = set(_labels_for_terms(sense_terms, _RELATION_TERMS))
     lowered = span.lower()
 
     if _PREFERENCE_PATTERN.search(span):
@@ -344,14 +360,16 @@ def _labels_for_terms(
             yield label
 
 
-def _salient_terms(text: str) -> list[str]:
+def _salient_terms(text: str, *, senses_only: bool = False) -> list[str]:
     terms: list[str] = []
     seen: set[str] = set()
     for raw_token in _TOKEN_PATTERN.findall(text.lower()):
         if raw_token in _STOPWORDS:
             continue
+        if senses_only and is_derivational_form(raw_token):
+            continue
         token = normalize_keyword_token(raw_token)
-        if token in _STOPWORD_STEMS or token in seen or len(token) < 2:
+        if token in seen or len(token) < 2:
             continue
         seen.add(token)
         terms.append(token)

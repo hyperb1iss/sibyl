@@ -25,6 +25,9 @@ _FEEDBACK_STOPWORDS = {
     "transcript",
     "user",
 }
+# Harness noise is written singular and tested by stem, so the plural of an
+# entry cannot walk past the entry that lists it.
+_FEEDBACK_STOPWORD_STEMS = frozenset(normalize_keyword_token(term) for term in _FEEDBACK_STOPWORDS)
 _STRUCTURAL_COUNTER_PATTERN = re.compile(
     r"^[A-Za-z][\w ]* \d+(?: part \d+/\d+)?$",
     re.I,
@@ -370,7 +373,7 @@ def _rank_feedback_terms(
                 term
                 for term in extract_keywords(_feedback_text(document))
                 if normalize_keyword_token(term) not in excluded_terms
-                and term not in _FEEDBACK_STOPWORDS
+                and normalize_keyword_token(term) not in _FEEDBACK_STOPWORD_STEMS
                 and _is_feedback_term(term)
             )
         )
