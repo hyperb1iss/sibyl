@@ -367,6 +367,9 @@ _ARTIFACT_TYPE_TERMS = normalize_keyword_tokens(
         "story",
     }
 )
+# "progression" is absent: it stems to "progress", which would make any memory
+# reporting progress on something read as a song section. "chord" already
+# carries the musical sense the entry was there for.
 _ARTIFACT_SECTION_TERMS = normalize_keyword_tokens(
     {
         "bridge",
@@ -379,7 +382,6 @@ _ARTIFACT_SECTION_TERMS = normalize_keyword_tokens(
         "instruction",
         "intro",
         "outro",
-        "progression",
         "section",
         "step",
         "verse",
@@ -413,8 +415,8 @@ _MEMORY_EVIDENCE_PATTERNS = (
 # Each group is one action in base form; stemming at import covers the regular
 # inflections, so only irregular pasts (bought, got, built, sold, set) and
 # genuinely distinct derivations (subscription) need their own entry.
-_ACTION_EVIDENCE_GROUPS = (
-    normalize_keyword_tokens(
+_ACTION_EVIDENCE_GROUP_SURFACES = (
+    frozenset(
         {
             "acquire",
             "bought",
@@ -427,14 +429,22 @@ _ACTION_EVIDENCE_GROUPS = (
     ),
     # "set" is out: it stems together with the settings/sets noun family, so a
     # query about deployment settings would read as an assembly action.
-    normalize_keyword_tokens({"assemble", "build", "built", "install"}),
-    normalize_keyword_tokens({"donate", "sell", "sold"}),
-    normalize_keyword_tokens({"fix", "repair", "replace"}),
-    normalize_keyword_tokens({"attend", "join", "participate"}),
-    normalize_keyword_tokens({"present"}),
-    normalize_keyword_tokens({"volunteer"}),
-    normalize_keyword_tokens({"register", "subscribe", "subscription"}),
-    normalize_keyword_tokens({"rely", "use"}),
+    frozenset({"assemble", "build", "built", "install"}),
+    frozenset({"donate", "sell", "sold"}),
+    frozenset({"fix", "repair", "replace"}),
+    frozenset({"attend", "join", "participate"}),
+    frozenset({"present"}),
+    frozenset({"volunteer"}),
+    frozenset({"register", "subscribe", "subscription"}),
+    frozenset({"rely", "use"}),
+)
+
+_ACTION_EVIDENCE_GROUPS = tuple(
+    normalize_keyword_tokens(group) for group in _ACTION_EVIDENCE_GROUP_SURFACES
+)
+# Words this module lists are vocabulary, not derivations, whatever they end in.
+_SENSE_VOCABULARY: frozenset[str] = frozenset(
+    term for group in _ACTION_EVIDENCE_GROUP_SURFACES for term in group
 )
 
 
@@ -700,6 +710,7 @@ def _query_frame_score(
     memory_token_set: set[str],
     primary_text: str,
     memory_text: str,
+    evidence_sense_tokens: set[str],
 ) -> float:
     evidence_tokens = token_set | primary_token_set | memory_token_set
     evidence_text = " ".join(part for part in (memory_text, primary_text) if part)
@@ -730,7 +741,7 @@ def _query_frame_score(
     ) and _RECURRING_FREQUENCY_EVIDENCE_PATTERN.search(evidence_text):
         score = max(score, 0.82)
 
-    action_score = _action_evidence_score(query, evidence_tokens)
+    action_score = _action_evidence_score(query, evidence_sense_tokens)
     if action_score > 0.0:
         score = max(score, action_score)
 
@@ -747,7 +758,7 @@ def _query_frame_score(
 
 
 def _action_evidence_score(query: str, evidence_tokens: set[str]) -> float:
-    query_tokens = set(sense_tokens_from_text(query))
+    query_tokens = set(sense_tokens_from_text(query, vocabulary=_SENSE_VOCABULARY))
     query_action_groups = [group for group in _ACTION_EVIDENCE_GROUPS if query_tokens & group]
     if not query_action_groups:
         return 0.0
@@ -833,9 +844,15 @@ def rank_by_query_coverage[T](
             bool,
         ]
     ] = []
+    sense_tokens_by_id: dict[str, set[str]] = {}
     for candidate in candidates:
         text = candidate.text
         tokens = keyword_tokens_from_text(text)
+        # Primary and memory text are both cut from this text, so one pass over
+        # it covers every evidence token a sense group is allowed to see.
+        sense_tokens_by_id[candidate.stable_id] = set(
+            sense_tokens_from_text(text, vocabulary=_SENSE_VOCABULARY)
+        )
         primary_text_raw, has_primary_text = _extract_query_focus_text(query, text)
         primary_text = primary_text_raw.lower()
         primary_tokens = keyword_tokens_from_text(primary_text) if has_primary_text else []
@@ -959,6 +976,7 @@ def rank_by_query_coverage[T](
             memory_token_set=memory_token_set,
             primary_text=primary_text,
             memory_text=memory_text,
+            evidence_sense_tokens=sense_tokens_by_id[candidate.stable_id],
         )
         fact_frame_score = score_fact_frame_match_for_query(
             query_fact_frames,

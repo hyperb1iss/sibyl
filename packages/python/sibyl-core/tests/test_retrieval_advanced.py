@@ -26,6 +26,7 @@ from sibyl_core.models.entities import Entity, EntityType, Relationship, Relatio
 from sibyl_core.query_anchors import (
     explicit_query_anchor_proximity_score,
     keyword_tokens_from_text,
+    sense_tokens_from_text,
 )
 from sibyl_core.retrieval.candidates import CandidateKind, RetrievalCandidate
 from sibyl_core.retrieval.dedup import (
@@ -1007,6 +1008,9 @@ def test_recurring_frequency_frame_needs_a_cadence_in_the_evidence() -> None:
             memory_token_set=set(),
             primary_text=text,
             memory_text="",
+            evidence_sense_tokens=set(
+                sense_tokens_from_text(text, vocabulary=query_ranking_module._SENSE_VOCABULARY)
+            ),
         )
 
     assert frame_score("i run the offsite backup every two weeks.") == 0.82
