@@ -1745,6 +1745,12 @@ def _phrase_matches_line(phrase: str, line: str) -> bool:
     when Snowball rewrites a terminal y: "categori" is absent from "category".
     Comparing whole tokens reaches both spellings, and the literal check keeps
     every match the substring probe already made.
+
+    The fold includes graded adjectives, so "fastest route" also reaches a line
+    saying "the fast route". That fold is banned on the query path, where it
+    costs a fulltext match against an index that does not stem comparatives.
+    Here both sides are plain page text and never meet an index, so widening
+    to the base adjective only finds more of the state the question is about.
     """
     if phrase in line:
         return True
