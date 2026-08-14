@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 import httpx
 import typer
 
-from sibyl_cli import config_store
+from sibyl_cli import config_store, state
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
     ELECTRIC_YELLOW,
@@ -530,6 +530,19 @@ async def collect_doctor_checks(
     *, timeout: float, write_test: bool, skip_agent: bool = False
 ) -> list[DoctorCheck]:
     checks, context = _load_config_context()
+    if state.context_selection_ignored():
+        # The selection the user asked for does not exist. Every probe below
+        # would be aimed at the active context instead, which is a different
+        # server than the one being diagnosed, so this stays on the filesystem.
+        checks.append(
+            DoctorCheck(
+                "context-selection",
+                "fail",
+                "The selected context does not exist, so server probes were skipped.",
+                "Run 'sibyl config context list', then re-run doctor with a known context.",
+            )
+        )
+        context = None
     if context is not None:
         health = await _check_public_health(context, timeout)
         checks.append(health)

@@ -18,6 +18,24 @@ def set_context_override(context_name: str | None) -> None:
     _context_override = context_name
 
 
+_command_path: tuple[str, ...] = ()
+
+
+def set_command_path(path: tuple[str, ...]) -> None:
+    """Record the exact subcommand path click resolved for this invocation.
+
+    Click hands the root callback only the first name, so `context` cannot be
+    told apart from `config context list` there, and the two have opposite
+    blast radii: one talks to the server, the other edits a local file.
+    """
+    global _command_path
+    _command_path = path
+
+
+def command_path() -> tuple[str, ...]:
+    return _command_path
+
+
 _ignore_selection = False
 
 

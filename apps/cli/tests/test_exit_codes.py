@@ -7,6 +7,7 @@ set is a successful answer and must not.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -540,12 +541,142 @@ def test_a_broken_selection_still_lets_you_repair_it(
     _contexts(tmp_path, monkeypatch)
     monkeypatch.setattr(state, "_ignore_selection", False)
 
-    result = CliRunner().invoke(main_app, ["-C", "stagingg", "context", "list"])
+    with patch("sibyl_cli.context.get_client") as get:
+        result = CliRunner().invoke(main_app, ["-C", "stagingg", "config", "context", "list"])
 
     # The repair command runs; the broken selection is dropped, not enforced.
+    assert result.exit_code == 0
     assert "does not exist; ignoring it" in result.stdout
     assert "Unknown context" not in result.stdout
     assert state.context_selection_ignored()
+    # Recovery reads the config file. It must never reach a server, because the
+    # only server left to reach is the one the user did not select.
+    get.assert_not_called()
+
+
+def test_the_recall_command_is_not_a_repair_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`sibyl context <goal>` fetches a pack; it shares a word with the config group."""
+    from sibyl_cli import state
+
+    _contexts(tmp_path, monkeypatch)
+    monkeypatch.setattr(state, "_ignore_selection", False)
+
+    with patch("sibyl_cli.main.get_client") as get:
+        result = CliRunner().invoke(main_app, ["-C", "stagingg", "context", "list"])
+
+    assert result.exit_code == 1
+    assert "Unknown context 'stagingg'" in result.stdout
+    get.assert_not_called()
+    assert not state.context_selection_ignored()
+
+
+def test_pack_is_not_a_repair_command_either(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The context group holds one networked leaf, and it does not inherit recovery."""
+    from sibyl_cli import state
+
+    _contexts(tmp_path, monkeypatch)
+    monkeypatch.setattr(state, "_ignore_selection", False)
+
+    with patch("sibyl_cli.context.get_client") as get:
+        result = CliRunner().invoke(main_app, ["-C", "stagingg", "config", "context", "pack"])
+
+    assert result.exit_code == 1
+    assert "Unknown context 'stagingg'" in result.stdout
+    get.assert_not_called()
+
+
+def test_doctor_drops_to_local_checks_when_the_selection_is_broken(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Probing the active context would diagnose a server the user never named."""
+    from sibyl_cli import state
+
+    _contexts(tmp_path, monkeypatch)
+    monkeypatch.setattr(state, "_ignore_selection", False)
+    probes: list[str] = []
+
+    class _NoNetwork:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> _NoNetwork:
+            return self
+
+        async def __aexit__(self, *args: Any) -> bool:
+            return False
+
+        async def get(self, url: str, *args: Any, **kwargs: Any) -> None:
+            probes.append(url)
+            raise AssertionError(f"doctor probed {url} after dropping the selection")
+
+    with (
+        patch("sibyl_cli.doctor.httpx.AsyncClient", _NoNetwork),
+        patch("sibyl_cli.doctor.get_client") as get,
+    ):
+        result = CliRunner().invoke(main_app, ["-C", "stagingg", "doctor", "--json"])
+
+    assert result.exit_code == 1
+    assert probes == []
+    get.assert_not_called()
+
+    payload = json.loads(result.stdout[result.stdout.index("{") :])
+    names = {check["name"]: check["status"] for check in payload["checks"]}
+    assert names["context-selection"] == "fail"
+    # None of the probes that would have been aimed at the active context ran.
+    assert not {"health", "port", "write"} & set(names)
+
+
+def test_every_recovery_leaf_is_a_real_command_that_never_opens_a_connection() -> None:
+    """The carve-out is only safe while its members stay on the filesystem."""
+    import inspect
+
+    import typer
+    from typer.main import get_command
+
+    from sibyl_cli import main as main_module
+
+    root = get_command(main_app)
+    for path in sorted(main_module._CONTEXT_REPAIR_COMMANDS):
+        command = root
+        for name in path:
+            lookup = getattr(command, "get_command", None)
+            assert lookup is not None, f"{path} walks through a leaf at '{name}'"
+            command = lookup(typer.Context(command), name)
+            assert command is not None, f"{path} names a command that does not exist"
+
+        if path == ("doctor",):
+            # doctor probes servers by trade; it drops to filesystem checks when
+            # the selection is broken, which the doctor test above pins.
+            continue
+
+        source = inspect.getsource(inspect.unwrap(command.callback))
+        assert "get_client(" not in source and "SibylClient(" not in source, (
+            f"{path} is on the recovery allowlist but opens a connection, so a "
+            "dropped selection would retarget it at the active context."
+        )
+
+
+def test_an_option_before_a_repair_leaf_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unresolvable command path gets no recovery privilege, only refusal."""
+    from sibyl_cli import state
+
+    _contexts(tmp_path, monkeypatch)
+    monkeypatch.setattr(state, "_ignore_selection", False)
+
+    result = CliRunner().invoke(main_app, ["-C", "stagingg", "contexts", "--json", "list"])
+
+    assert result.exit_code == 1
+    assert "Unknown context 'stagingg'" in result.stdout
 
 
 def test_the_resolver_itself_refuses_to_fall_through(

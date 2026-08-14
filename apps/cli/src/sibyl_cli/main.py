@@ -18,6 +18,7 @@ from uuid import UUID
 
 import typer
 from rich.markup import escape
+from typer.core import TyperGroup
 
 from sibyl_cli import config_store, state
 from sibyl_cli.archive import app as archive_app
@@ -108,9 +109,44 @@ def version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
+def _resolve_command_path(group: Any, ctx: Any, args: list[str]) -> tuple[str, ...]:
+    """Walk the command tree as far as the arguments unambiguously reach.
+
+    Resolution stops at the first token that is not a subcommand of the group
+    reached so far, which leaves an option-interleaved invocation with a short
+    path. Callers treat a short path as unrecognized, so the ambiguity fails
+    closed rather than granting a leaf's privileges to its group.
+    """
+    path: list[str] = []
+    command = group
+    for arg in args:
+        lookup = getattr(command, "get_command", None)
+        if lookup is None:
+            break
+        sub = lookup(ctx, arg)
+        if sub is None:
+            break
+        path.append(getattr(sub, "name", None) or arg)
+        command = sub
+    return tuple(path)
+
+
+class SibylRootGroup(TyperGroup):
+    """Records the resolved subcommand path before any callback runs."""
+
+    def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
+        rest = super().parse_args(ctx, args)
+        protected = getattr(ctx, "_protected_args", None)
+        if protected is None:
+            protected = getattr(ctx, "protected_args", [])
+        state.set_command_path(_resolve_command_path(self, ctx, [*protected, *ctx.args]))
+        return rest
+
+
 # Main app
 app = typer.Typer(
     name="sibyl",
+    cls=SibylRootGroup,
     help="Sibyl - Oracle of Development Wisdom (CLI Client)",
     add_completion=False,
     no_args_is_help=False,
@@ -1371,12 +1407,38 @@ def _handle_client_error(e: SibylClientError) -> None:
 # ============================================================================
 
 
-# These repair or inspect the context configuration, so they have to keep
-# working while the selection is broken. Everything else stops.
-_CONTEXT_REPAIR_COMMANDS = frozenset({"context", "init", "config", "doctor"})
+# Leaves whose whole subject is the local config file. None of them opens a
+# connection, so dropping a broken selection cannot retarget anything. Groups
+# never appear here: `sibyl context` is the network recall command and
+# `sibyl config context pack` fetches a pack, while `sibyl config context list`
+# reads a TOML file, so the privilege belongs to the leaf and not to the name
+# it shares with a group.
+_LOCAL_CONTEXT_LEAVES = (
+    "list",
+    "show",
+    "create",
+    "use",
+    "update",
+    "delete",
+    "link",
+    "unlink",
+    "clear",
+)
+_LOCAL_CONFIG_LEAVES = ("init", "show", "get", "set", "path", "reset", "edit")
+_CONTEXT_REPAIR_COMMANDS = frozenset(
+    [
+        ("init",),
+        # doctor stays reachable because it is what you run when the selection
+        # is broken, and it drops to filesystem checks once that happens.
+        ("doctor",),
+        *[("config", leaf) for leaf in _LOCAL_CONFIG_LEAVES],
+        *[("config", "context", leaf) for leaf in _LOCAL_CONTEXT_LEAVES],
+        *[("contexts", leaf) for leaf in _LOCAL_CONTEXT_LEAVES],
+    ]
+)
 
 
-def _reject_unknown_context(ctx: typer.Context) -> None:
+def _reject_unknown_context() -> None:
     """Stop before any command logic when the selected context does not exist."""
     try:
         selection = config_store.explicit_context_selection()
@@ -1389,7 +1451,7 @@ def _reject_unknown_context(ctx: typer.Context) -> None:
         # Config is unreadable, so there is nothing to validate against. The
         # resolver still refuses to fall through if a name is used later.
         return
-    if ctx.invoked_subcommand in _CONTEXT_REPAIR_COMMANDS:
+    if state.command_path() in _CONTEXT_REPAIR_COMMANDS:
         warn(f"Selected context '{name}' ({source}) does not exist; ignoring it.")
         state.ignore_context_selection()
         return
@@ -1431,7 +1493,7 @@ def main_callback(
     if context:
         set_context_override(context)
 
-    _reject_unknown_context(ctx)
+    _reject_unknown_context()
     _emit_command_marker(ctx)
 
     # Show help if no command
