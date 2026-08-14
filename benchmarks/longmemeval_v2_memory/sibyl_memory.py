@@ -3452,27 +3452,6 @@ class SibylLiveApiMemory(Memory):
             "agentic_traversal",
             DEFAULT_AGENTIC_TRAVERSAL,
         )
-        if self.retrieval_mode == "naive":
-            # Both of these issue their own retrieval outside the arm: the typed
-            # stream makes a second pack request pinned to fast, and agentic
-            # traversal widens the pool with model-driven follow-up searches. A
-            # run carrying either would report the arm's name over a pool the
-            # arm did not produce, so the conflict fails loudly here rather than
-            # silently at read time.
-            conflicting = [
-                name
-                for name, enabled in (
-                    ("typed_stream_retrieval", self.typed_stream_retrieval),
-                    ("agentic_traversal", self.agentic_traversal),
-                )
-                if enabled
-            ]
-            if conflicting:
-                msg = (
-                    "retrieval_mode=naive is the control arm and cannot run with "
-                    f"{', '.join(sorted(conflicting))}: disable them to race the arm"
-                )
-                raise ValueError(msg)
         self.traversal_widening_rounds = _param_int(
             memory_params,
             "traversal_widening_rounds",
@@ -3547,6 +3526,44 @@ class SibylLiveApiMemory(Memory):
                 "weight*1.0 to a zero-coverage candidate, and past 1.0 it can outvote "
                 "genuine vocabulary winners instead of rescuing the uncovered tail"
             )
+        if self.retrieval_mode == "naive":
+            # Both of these issue their own retrieval outside the arm: the typed
+            # stream makes a second pack request pinned to fast, and agentic
+            # traversal widens the pool with model-driven follow-up searches. A
+            # run carrying either would report the arm's name over a pool the
+            # arm did not produce, so the conflict fails loudly here rather than
+            # silently at read time.
+            # Two families. The first retrieves outside the arm entirely. The
+            # second reshapes what the arm returned, and under naive the client
+            # renders the server's candidates verbatim, so every one of these is
+            # inert by construction. They still refuse rather than being
+            # silently ignored: a screen that passes a reshaping flag believes
+            # it is tuning something, and a flag that reads as applied while
+            # doing nothing is how an arm ends up described wrongly in a
+            # writeup. Only flags whose shipped default is already inert appear
+            # here, so a plain naive run needs no extra arguments.
+            conflicting = [
+                name
+                for name, enabled in (
+                    ("typed_stream_retrieval", self.typed_stream_retrieval),
+                    ("agentic_traversal", self.agentic_traversal),
+                    ("state_part_refinement", self.state_part_refinement),
+                    ("neighbor_stitch_spread", self.neighbor_stitch_spread),
+                    ("neighbor_support_exempt", self.neighbor_support_exempt),
+                    ("neighbor_trajectory_preserving", self.neighbor_trajectory_preserving),
+                    ("source_evidence_bundling", self.source_evidence_bundling),
+                    ("state_part_completion_items", self.state_part_completion_items),
+                    ("neighbor_support_overflow_items", self.neighbor_support_overflow_items),
+                    ("semantic_prior_rescue_weight", self.semantic_prior_rescue_weight),
+                )
+                if enabled
+            ]
+            if conflicting:
+                msg = (
+                    "retrieval_mode=naive is the control arm and cannot run with "
+                    f"{', '.join(sorted(conflicting))}: disable them to race the arm"
+                )
+                raise ValueError(msg)
         self.typed_pool = _param_str(memory_params, "typed_pool", DEFAULT_TYPED_POOL)
         if self.typed_pool not in SUPPORTED_TYPED_POOLS:
             raise ValueError(f"typed_pool must be one of {sorted(SUPPORTED_TYPED_POOLS)}")
@@ -4549,6 +4566,8 @@ class SibylLiveApiMemory(Memory):
             "state_part_completion_items",
             DEFAULT_STATE_PART_COMPLETION_ITEMS,
         )
+        if getattr(self, "retrieval_mode", DEFAULT_RETRIEVAL_MODE) == "naive":
+            return self._render_naive_verbatim_context(query=query, results=results)
         assembled_results, assembly_metadata = assemble_context_results(
             results,
             chunk_catalog=chunk_catalog,
@@ -4674,6 +4693,59 @@ class SibylLiveApiMemory(Memory):
         self._query_local.retrieval_trace = build_retrieval_trace(
             evidence_set,
             max_items=rendered_item_ceiling,
+            max_chars_per_item=self.max_context_chars_per_item,
+            context_budget=context_budget,
+        )
+        return memory_context
+
+    def _render_naive_verbatim_context(
+        self,
+        *,
+        query: str,
+        results: list[dict[str, object]],
+    ) -> str:
+        """Render the arm's own candidates, in the arm's own order, and nothing else.
+
+        The arm's claim is that its fused, packed ordering is what the reader
+        sees, so the client-side stages have to be off rather than configured
+        small. Assembly performs diversity selection, trajectory refinement, and
+        catalog-neighbor expansion; composition performs typed reservation,
+        support overflow, and semantic-prior rescue. With neighbor stitching at
+        its shipped default of two, one returned row renders as three, and the
+        screen would be scoring a client-side expansion of the arm rather than
+        the arm.
+
+        Pack items are dropped here too. Under the arm they are the same rows
+        the evidence lane already ranked, so merging them would render a row
+        twice and reintroduce a selection step the arm does not have.
+        """
+
+        evidence_set = list(results[: max(1, self.max_context_items)])
+        assembly_metadata: dict[str, object] = {
+            "naive_verbatim_render": True,
+            "naive_server_candidate_count": len(results),
+            "naive_rendered_count": len(evidence_set),
+            "naive_bypassed_stages": [
+                "assemble_context_results",
+                "compile_operational_evidence_set",
+            ],
+        }
+        memory_context, context_budget = render_memory_context(
+            evidence_set,
+            query=query,
+            max_items=len(evidence_set),
+            max_chars_per_item=self.max_context_chars_per_item,
+            max_total_chars=getattr(
+                self,
+                "max_context_total_chars",
+                DEFAULT_CONTEXT_TOTAL_CHARS,
+            ),
+        )
+        assembly_metadata["context_budget"] = context_budget
+        self._query_local.search_metadata["adapter_assembly"] = assembly_metadata
+        self._query_local.retrieval_trace = build_retrieval_trace(
+            evidence_set,
+            max_items=len(evidence_set),
             max_chars_per_item=self.max_context_chars_per_item,
             context_budget=context_budget,
         )

@@ -7302,3 +7302,119 @@ def test_the_arm_is_replayable_onto_a_loaded_corpus() -> None:
     module = _load_runner_module()
 
     assert "retrieval_mode" in module.LOADED_MEMORY_RUNTIME_KEYS
+
+
+def _naive_render_stub(module: ModuleType, *, max_items: int = 8) -> Any:
+    """A memory adapter positioned for the render path, with no network in __init__."""
+
+    memory = object.__new__(module.SibylLiveApiMemory)
+    memory.max_context_items = max_items
+    memory.max_context_chars_per_item = 4_000
+    memory.retrieval_mode = "naive"
+    memory._query_local = SimpleNamespace(search_metadata={}, retrieval_trace=None)
+    return memory
+
+
+def _chunk_result(trajectory: str, index: int) -> dict[str, object]:
+    # The stitcher keys on these exact metadata names; anything else silently
+    # fails to match the catalog and the expansion this guards against never
+    # fires, which would leave the assertion below passing over nothing.
+    return {
+        "id": f"{trajectory}-{index}",
+        "name": f"chunk {index}",
+        "content": f"content for chunk {index}",
+        "score": 0.5,
+        "metadata": {
+            "longmemeval_v2_trajectory_id": trajectory,
+            "longmemeval_v2_chunk_index": index,
+        },
+    }
+
+
+def test_the_arm_renders_exactly_the_candidates_the_server_returned() -> None:
+    """Membership and order must survive the client untouched.
+
+    Client-side assembly expands a hit into its catalog neighbours, with
+    stitching on by default, so one returned row can render as three. A screen
+    reading that render would be scoring a client-side expansion of the arm
+    rather than the arm.
+    """
+
+    module = _load_memory_module()
+    memory = _naive_render_stub(module)
+    memory._chunk_catalog = {
+        "traj-a": {index: _chunk_result("traj-a", index) for index in (0, 1, 2)}
+    }
+    server_results = [_chunk_result("traj-a", 1)]
+
+    rendered = memory._render_naive_verbatim_context(query="q", results=server_results)
+
+    assembly = memory._query_local.search_metadata["adapter_assembly"]
+    rendered_ids = [item["entity_id"] for item in assembly["context_budget"]["items"]]
+    assert rendered_ids == ["traj-a-1"]
+    assert len(rendered) == 1
+    assert assembly["naive_verbatim_render"] is True
+    assert assembly["naive_server_candidate_count"] == 1
+    assert assembly["naive_rendered_count"] == 1
+    assert assembly["naive_bypassed_stages"] == [
+        "assemble_context_results",
+        "compile_operational_evidence_set",
+    ]
+
+    # The contrast that makes the assertion above mean something: handed the
+    # same single result and the same catalog, the client-side stage the arm
+    # bypasses turns one row into three.
+    expanded, _metadata = module.assemble_context_results(
+        server_results,
+        chunk_catalog=memory._chunk_catalog,
+        max_items=8,
+        max_chunks_per_trajectory=module.DEFAULT_MAX_CHUNKS_PER_TRAJECTORY,
+        neighbor_stitch_items=module.DEFAULT_NEIGHBOR_STITCH_ITEMS,
+        neighbor_stitch_span=module.DEFAULT_NEIGHBOR_STITCH_SPAN,
+        query="q",
+    )
+    assert [row.get("id") for row in expanded] == ["traj-a-1", "traj-a-0", "traj-a-2"]
+
+
+def test_the_arm_preserves_server_order_and_caps_at_max_items() -> None:
+    max_items = 2
+    module = _load_memory_module()
+    memory = _naive_render_stub(module, max_items=max_items)
+    memory._chunk_catalog = {}
+    server_results = [_chunk_result("traj-a", index) for index in (5, 3, 9, 1)]
+
+    rendered = memory._render_naive_verbatim_context(query="q", results=server_results)
+
+    # The arm already ranked these; the client neither reorders nor reselects.
+    assembly = memory._query_local.search_metadata["adapter_assembly"]
+    rendered_ids = [item["entity_id"] for item in assembly["context_budget"]["items"]]
+    assert rendered_ids == ["traj-a-5", "traj-a-3"]
+    assert len(rendered) == max_items
+
+
+def test_the_arm_refuses_every_client_side_reshaping_flag() -> None:
+    """A flag that reads as applied while doing nothing misdescribes the run."""
+
+    module = _load_memory_module()
+    reshaping = (
+        ("typed_stream_retrieval", True),
+        ("agentic_traversal", True),
+        ("state_part_refinement", True),
+        ("neighbor_stitch_spread", True),
+        ("neighbor_support_exempt", True),
+        ("neighbor_trajectory_preserving", True),
+        ("source_evidence_bundling", True),
+        ("state_part_completion_items", 2),
+        ("neighbor_support_overflow_items", 2),
+        ("semantic_prior_rescue_weight", 0.5),
+    )
+    for name, value in reshaping:
+        with pytest.raises(ValueError, match="control arm"):
+            module.SibylLiveApiMemory(
+                {
+                    "allow_localhost": True,
+                    "project_id": "project_test",
+                    "retrieval_mode": "naive",
+                    name: value,
+                }
+            )
