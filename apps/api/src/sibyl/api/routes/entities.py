@@ -2436,10 +2436,21 @@ async def update_entity(
                     created_source_id=entity_id,
                 )
                 if passage_result.errors:
-                    log.warning(
+                    # The update landed, but stale spans of the previous body
+                    # are still being served, so reporting a clean update would
+                    # be reporting a re-cut that did not happen.
+                    log.error(
                         "update_entity_passage_reprojection_failed",
                         entity_id=entity_id,
                         errors=passage_result.errors,
+                    )
+                    raise HTTPException(
+                        status_code=500,
+                        detail=(
+                            "Entity updated, but its passages were not fully re-cut "
+                            "and stale spans still serve the previous revision: "
+                            f"{'; '.join(passage_result.errors)}"
+                        ),
                     )
             elif entity_scope_stamps(existing) != entity_scope_stamps(updated):
                 # The body did not change, so the cut is still valid, but the
@@ -2563,23 +2574,14 @@ async def delete_entity(
             # private memory, so deletion clears the same gate a read does.
             await _require_entity_scope_visible(ctx, existing, project_id=project_id)
 
-            if existing.entity_type == EntityType.PROJECT:
-                await log_audit_event(
-                    action="project.delete",
-                    user_id=ctx.user.id,
-                    organization_id=org.id,
-                    request=request,
-                    details={"project_id": existing.id, "name": existing.name},
-                )
-
-            # Delete from graph
-            success = await runtime.entity_manager.delete(entity_id)
-            if not success:
-                raise HTTPException(status_code=500, detail="Delete failed")
-
-            # Spans are derived, so they outlive nothing. Left behind they would
-            # keep serving the text of a memory the caller deleted, which is the
-            # one outcome a delete must not produce.
+            # Spans first, parent second. Spans are derived, so retiring them
+            # while the memory still exists costs nothing that a reprojection
+            # cannot rebuild, and it keeps this whole route re-enterable: a
+            # failure here leaves the parent in place, so retrying the delete
+            # finds it and resumes. Deleting the parent first and failing here
+            # instead stranded the spans permanently, because the retry's own
+            # existence check would 404 on the parent that was already gone
+            # while the spans went on serving the deleted text.
             retirement = await retire_entity_passages(
                 entity_manager=runtime.entity_manager,
                 source_id=entity_id,
@@ -2591,10 +2593,6 @@ async def delete_entity(
                     retired=retirement.retired,
                 )
             if not retirement.complete:
-                # The parent is already gone, so there is nothing to roll back to
-                # and no honest way to report plain success: these spans are still
-                # searchable and still hold the deleted text. Named individually so
-                # the retry has a target rather than a memory id to re-derive from.
                 log.error(
                     "entity_delete_passages_stranded",
                     entity_id=entity_id,
@@ -2603,15 +2601,31 @@ async def delete_entity(
                 raise HTTPException(
                     status_code=500,
                     detail=(
-                        "Entity deleted, but these passages still serve its text "
-                        f"and must be retried: {', '.join(retirement.failed_passage_ids)}"
+                        "Delete aborted: these passages still serve the memory's "
+                        "text and could not be retired, so the memory was kept. "
+                        f"Retry the delete: {', '.join(retirement.failed_passage_ids)}"
                     ),
                 )
+
+            # Delete from graph
+            success = await runtime.entity_manager.delete(entity_id)
+            if not success:
+                raise HTTPException(status_code=500, detail="Delete failed")
 
             if existing.entity_type == EntityType.PROJECT:
                 await delete_project_record(
                     organization_id=org.id,
                     graph_project_id=existing.id,
+                )
+                # Audited after the record is gone, not before: an audit written
+                # ahead of the work claims a deletion that a later failure on
+                # this route never performed.
+                await log_audit_event(
+                    action="project.delete",
+                    user_id=ctx.user.id,
+                    organization_id=org.id,
+                    request=request,
+                    details={"project_id": existing.id, "name": existing.name},
                 )
 
             # Broadcast deletion event (scoped to org)
