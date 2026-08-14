@@ -2659,6 +2659,68 @@ class TestNaiveRetrievalArm:
             arm.assert_not_awaited()
             assert compile_context.await_args.kwargs["naive_retrieval"] is False
 
+    @pytest.mark.asyncio
+    async def test_the_arm_refuses_a_machine_knob_it_cannot_honour(self) -> None:
+        """Half-applied is worse than refused: the run would look configured.
+
+        knn_type_overfetch tunes the machine's typed vector read. The pack plan
+        and the evidence plan read it from different places, so under the arm a
+        request setting it got it applied to one half of its own pack and
+        dropped from the other, and the arm has no such stage in either case.
+        """
+
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        for payload in (
+            {"knn_type_overfetch": 17},
+            {"evidence_overfetch": 17},
+        ):
+            evidence = self._evidence("naive")
+            if "evidence_overfetch" in payload:
+                evidence["knn_type_overfetch"] = payload["evidence_overfetch"]
+                request = ContextPackRequest(goal="ship faster", evidence=evidence)
+            else:
+                request = ContextPackRequest(
+                    goal="ship faster",
+                    evidence=evidence,
+                    knn_type_overfetch=payload["knn_type_overfetch"],
+                )
+            with (
+                patch(
+                    "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                    AsyncMock(return_value=["proj_1"]),
+                ),
+                patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
+                patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+                pytest.raises(HTTPException) as excinfo,
+            ):
+                await context_pack(request=request, org=org, ctx=_ctx())
+
+            assert excinfo.value.status_code == 400
+            assert "knn_type_overfetch" in str(excinfo.value.detail)
+
+    @pytest.mark.asyncio
+    async def test_the_machine_still_accepts_the_knob(self) -> None:
+        """The refusal is scoped to the arm."""
+
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        compile_context = AsyncMock(return_value=_pack())
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", compile_context),
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+        ):
+            await context_pack(
+                request=ContextPackRequest(goal="ship faster", knn_type_overfetch=17),
+                org=org,
+                ctx=_ctx(),
+            )
+
+        assert compile_context.await_args.kwargs["knn_type_overfetch"] == 17
+
     def test_the_arm_is_off_unless_a_request_names_it(self) -> None:
         assert ContextPackRequest(goal="x").evidence is None
         assert ContextPackRequest(goal="x", evidence={}).evidence.retrieval_mode == "fast"

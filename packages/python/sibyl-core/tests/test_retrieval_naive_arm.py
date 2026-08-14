@@ -964,12 +964,7 @@ def test_the_arm_module_exposes_no_tunable_weights() -> None:
         name
         for name in dir(naive_module)
         if name.isupper() and not name.startswith("_") and name != "TYPE_CHECKING"
-    } == {
-        "NAIVE_RRF_K",
-        "NAIVE_LANE_OVERFETCH",
-        "NAIVE_RETRIEVAL_MODE",
-        "MAX_RETRIEVAL_LIMIT",
-    }
+    } == {"NAIVE_RRF_K", "NAIVE_RETRIEVAL_MODE", "MAX_RETRIEVAL_LIMIT"}
 
 
 def test_no_caller_can_reweight_the_arm_per_request() -> None:
@@ -1140,3 +1135,169 @@ async def test_the_arm_suppresses_active_work_enrichment(
     # The machine still enriches, so the suppression above is the arm's doing
     # rather than a request shape that never reached the lookup.
     assert active_calls == [PROJECT_ID]
+
+
+# ---------------------------------------------------------------------------
+# Round-two hardening: lane depth, lane failure, and what the response discloses
+# ---------------------------------------------------------------------------
+
+
+def test_a_deep_cross_lane_agreement_survives_the_default_limit() -> None:
+    """The boundary a limit-scaled overfetch leaves alive.
+
+    At the bench's default limit of 12, reading four times the limit stops each
+    lane at 48. A row ranked 49 in both lanes scores 2/(60+49), which beats the
+    1/(60+1) of a row ranked first in one lane, so fusion should promote it and
+    a 48-row pool would discard it first. Reading to the ceiling removes the
+    class rather than moving it.
+    """
+
+    deep_rank = 49
+    lexical = [_candidate(f"filler_lex_{index}") for index in range(deep_rank - 1)]
+    dense = [_candidate(f"filler_vec_{index}") for index in range(deep_rank - 1)]
+    lexical.append(_candidate("agreed_deep"))
+    dense.append(_candidate("agreed_deep"))
+
+    fused = fuse_naive_candidates(
+        [(RetrievalSignal.NODE_FULLTEXT, lexical), (RetrievalSignal.NODE_VECTOR, dense)],
+        limit=1,
+    )
+
+    assert fused[0][0].id == "agreed_deep"
+    assert fused[0][1] == pytest.approx(2 / (NAIVE_RRF_K + deep_rank))
+    assert fused[0][1] > 1 / (NAIVE_RRF_K + 1)
+
+
+@pytest.mark.asyncio
+async def test_every_lane_reads_to_the_ceiling_whatever_the_caller_asked_for(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    depths: list[int] = []
+
+    async def recording_fulltext(**kwargs: Any) -> list[RetrievalCandidate]:
+        depths.append(int(kwargs["limit"]))
+        return []
+
+    async def recording_vector(**kwargs: Any) -> Any:
+        depths.append(int(kwargs["plan"].candidate_limits.node_vector))
+        from sibyl_core.retrieval.candidates import VectorCandidateFetch
+
+        return VectorCandidateFetch(
+            node_candidates=[], edge_candidates=[], requested=True, attempted=True
+        )
+
+    class Runtime:
+        client = object()
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> Any:
+        return Runtime()
+
+    monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(naive_module, "_node_fulltext_candidates", recording_fulltext)
+    monkeypatch.setattr(naive_module, "_episode_fulltext_candidates", recording_fulltext)
+    monkeypatch.setattr(naive_module, "_vector_candidate_sources_detailed", recording_vector)
+
+    await naive_search(plan=_plan(query=CORPUS_QUERY, limit=1), limit=1)
+
+    assert depths and set(depths) == {search_module.MAX_RETRIEVAL_LIMIT}
+
+
+@pytest.mark.asyncio
+async def test_a_dead_lane_fails_the_request_instead_of_thinning_the_pack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A thin pack scores as a recall miss and blames the arm for an outage."""
+
+    async def dead_lane(**_kwargs: object) -> list[RetrievalCandidate]:
+        raise RuntimeError("fulltext lane is down")
+
+    client, runtime = await _embedded_runtime(f"{ORG_ID}-deadlane")
+    provider = _embedding_provider()
+    try:
+        await _seed_corpus(client, provider, group_id=client.group_id)
+
+        async def fake_runtime(_organization_id: str, **_kwargs: object) -> Any:
+            return runtime
+
+        monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+        monkeypatch.setattr(naive_module, "_node_fulltext_candidates", dead_lane)
+
+        with pytest.raises(RuntimeError, match="fulltext lane is down"):
+            await naive_search(
+                plan=_plan(query=CORPUS_QUERY, organization_id=client.group_id),
+                types=["session"],
+                limit=10,
+                embedding_provider=provider,
+            )
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_a_degraded_vector_lane_fails_the_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Coming back degraded is still not having run."""
+
+    from sibyl_core.retrieval.candidates import VectorCandidateFetch
+
+    async def degraded_vector(**_kwargs: object) -> VectorCandidateFetch:
+        return VectorCandidateFetch(
+            node_candidates=[],
+            edge_candidates=[],
+            requested=True,
+            attempted=True,
+            failures=("node_vector:TimeoutError",),
+        )
+
+    class Runtime:
+        client = object()
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> Any:
+        return Runtime()
+
+    async def empty_lane(**_kwargs: object) -> list[RetrievalCandidate]:
+        return []
+
+    monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(naive_module, "_node_fulltext_candidates", empty_lane)
+    monkeypatch.setattr(naive_module, "_episode_fulltext_candidates", empty_lane)
+    monkeypatch.setattr(naive_module, "_vector_candidate_sources_detailed", degraded_vector)
+
+    with pytest.raises(RuntimeError, match="vector lane degraded"):
+        await naive_search(plan=_plan(query=CORPUS_QUERY), limit=10)
+
+
+@pytest.mark.asyncio
+async def test_the_response_publishes_no_stage_timings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Durations measured before the scope filter are a timing oracle.
+
+    The candidate fetch runs before authorization, so a caller who may read
+    none of the matches could still separate "nothing matched" from "matches
+    exist but are not yours" by timing repeated queries. The counts were
+    rebuilt from the authorized set for that reason; the clock would put the
+    signal straight back.
+    """
+
+    client, runtime = await _embedded_runtime(f"{ORG_ID}-timings")
+    provider = _embedding_provider()
+    try:
+        await _seed_corpus(client, provider, group_id=client.group_id)
+
+        async def fake_runtime(_organization_id: str, **_kwargs: object) -> Any:
+            return runtime
+
+        monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+        response = await naive_search(
+            plan=_plan(query=CORPUS_QUERY, organization_id=client.group_id),
+            types=["session"],
+            limit=10,
+            embedding_provider=provider,
+        )
+    finally:
+        await client.close()
+
+    assert "stage_timings_ms" not in response.filters
+    assert not [key for key in response.filters if "timing" in key or key.endswith("_ms")]

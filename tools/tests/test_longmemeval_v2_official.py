@@ -7350,8 +7350,7 @@ def test_the_arm_renders_exactly_the_candidates_the_server_returned() -> None:
     rendered = memory._render_naive_verbatim_context(query="q", results=server_results)
 
     assembly = memory._query_local.search_metadata["adapter_assembly"]
-    rendered_ids = [item["entity_id"] for item in assembly["context_budget"]["items"]]
-    assert rendered_ids == ["traj-a-1"]
+    assert assembly["naive_rendered_ids"] == ["traj-a-1"]
     assert len(rendered) == 1
     assert assembly["naive_verbatim_render"] is True
     assert assembly["naive_server_candidate_count"] == 1
@@ -7359,6 +7358,7 @@ def test_the_arm_renders_exactly_the_candidates_the_server_returned() -> None:
     assert assembly["naive_bypassed_stages"] == [
         "assemble_context_results",
         "compile_operational_evidence_set",
+        "render_memory_context",
     ]
 
     # The contrast that makes the assertion above mean something: handed the
@@ -7376,20 +7376,27 @@ def test_the_arm_renders_exactly_the_candidates_the_server_returned() -> None:
     assert [row.get("id") for row in expanded] == ["traj-a-1", "traj-a-0", "traj-a-2"]
 
 
-def test_the_arm_preserves_server_order_and_caps_at_max_items() -> None:
-    max_items = 2
+def test_the_arm_renders_every_candidate_not_just_max_items() -> None:
+    """max_items is a machine selection stage, so it must not cut the arm's pack."""
+
     module = _load_memory_module()
-    memory = _naive_render_stub(module, max_items=max_items)
+    memory = _naive_render_stub(module, max_items=2)
     memory._chunk_catalog = {}
     server_results = [_chunk_result("traj-a", index) for index in (5, 3, 9, 1)]
 
     rendered = memory._render_naive_verbatim_context(query="q", results=server_results)
 
-    # The arm already ranked these; the client neither reorders nor reselects.
+    # The arm already ranked these; the client neither reorders, reselects, nor
+    # drops the tail to satisfy an item count.
     assembly = memory._query_local.search_metadata["adapter_assembly"]
-    rendered_ids = [item["entity_id"] for item in assembly["context_budget"]["items"]]
-    assert rendered_ids == ["traj-a-5", "traj-a-3"]
-    assert len(rendered) == max_items
+    assert assembly["naive_rendered_ids"] == [
+        "traj-a-5",
+        "traj-a-3",
+        "traj-a-9",
+        "traj-a-1",
+    ]
+    assert len(rendered) == len(server_results)
+    assert assembly["naive_dropped_count"] == 0
 
 
 def test_the_arm_refuses_every_client_side_reshaping_flag() -> None:
@@ -7468,3 +7475,91 @@ def test_the_arm_conflict_message_names_every_offending_setting() -> None:
         "semantic_prior_rescue_weight",
         "typed_stream_retrieval",
     ]
+
+
+def test_the_arm_renders_bodies_whole_rather_than_slicing_them() -> None:
+    """Query-aware slicing rewrites the evidence the arm chose to show."""
+
+    module = _load_memory_module()
+    memory = _naive_render_stub(module)
+    memory._chunk_catalog = {}
+    body = ("unique-token " + ("filler sentence about something else. " * 200)).strip()
+    result = _chunk_result("traj-a", 1)
+    result["content"] = body
+
+    rendered = memory._render_naive_verbatim_context(query="unique-token", results=[result])
+
+    assert len(rendered) == 1
+    # The whole body survives, not a query-selected excerpt of it.
+    assert body in rendered[0]["value"]
+
+
+def test_the_arm_keeps_empty_bodied_candidates_in_the_pack() -> None:
+    """Dropping a row is a selection decision the arm did not make."""
+
+    module = _load_memory_module()
+    memory = _naive_render_stub(module)
+    memory._chunk_catalog = {}
+    empty = _chunk_result("traj-a", 2)
+    empty["content"] = ""
+    results = [_chunk_result("traj-a", 1), empty, _chunk_result("traj-a", 3)]
+
+    rendered = memory._render_naive_verbatim_context(query="q", results=results)
+
+    assembly = memory._query_local.search_metadata["adapter_assembly"]
+    assert assembly["naive_rendered_ids"] == ["traj-a-1", "traj-a-2", "traj-a-3"]
+    assert len(rendered) == len(results)
+
+
+def test_the_arm_truncates_whole_candidates_from_the_tail_and_stamps_it() -> None:
+    """A short pack has to be auditable, and it drops rows rather than slicing."""
+
+    module = _load_memory_module()
+    memory = _naive_render_stub(module)
+    memory._chunk_catalog = {}
+    memory.max_context_total_chars = 1_200
+    results = []
+    for index in range(6):
+        row = _chunk_result("traj-a", index)
+        row["content"] = f"body {index} " + ("x" * 400)
+        results.append(row)
+
+    rendered = memory._render_naive_verbatim_context(query="q", results=results)
+
+    assembly = memory._query_local.search_metadata["adapter_assembly"]
+    assert 0 < len(rendered) < len(results)
+    # The survivors are a prefix of the server's order, never a re-selection.
+    assert assembly["naive_rendered_ids"] == [f"traj-a-{index}" for index in range(len(rendered))]
+    assert assembly["naive_tail_truncated_from_rank"] == len(rendered) + 1
+    assert assembly["naive_dropped_count"] == len(results) - len(rendered)
+    # Every rendered body is whole; truncation removed rows, not text.
+    for index, item in enumerate(rendered):
+        assert ("x" * 400) in item["value"], f"item {index} was sliced"
+
+
+def test_the_arm_refuses_settings_for_stages_it_bypasses() -> None:
+    module = _load_memory_module()
+    runner_defaults = {
+        "neighbor_stitch_items": module.DEFAULT_NEIGHBOR_STITCH_ITEMS,
+        "neighbor_stitch_span": module.DEFAULT_NEIGHBOR_STITCH_SPAN,
+        "max_chunks_per_trajectory": module.DEFAULT_MAX_CHUNKS_PER_TRAJECTORY,
+        "context_expansion_max_ratio": module.DEFAULT_CONTEXT_EXPANSION_MAX_RATIO,
+        "evidence_composition_mode": module.DEFAULT_EVIDENCE_COMPOSITION_MODE,
+        "typed_reservation_items": None,
+        "knn_type_overfetch": module.DEFAULT_KNN_TYPE_OVERFETCH,
+    }
+
+    # The runner writes every key on every run, so the defaults it ships must
+    # not refuse or no naive screen could start.
+    assert module._naive_arm_conflicts(dict(runner_defaults)) == []
+
+    for name, value in (
+        ("neighbor_stitch_items", 3),
+        ("neighbor_stitch_span", 2),
+        ("max_chunks_per_trajectory", 4),
+        ("context_expansion_max_ratio", 2.0),
+        ("evidence_composition_mode", "reserved_support"),
+        ("typed_reservation_items", 3),
+        ("knn_type_overfetch", 17),
+    ):
+        assert module._naive_arm_conflicts({**runner_defaults, name: value}) == [name]

@@ -3189,6 +3189,21 @@ _NAIVE_CONFLICTING_NUMERIC_PARAMS = (
     ("state_part_completion_items", DEFAULT_STATE_PART_COMPLETION_ITEMS),
     ("neighbor_support_overflow_items", DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS),
     ("semantic_prior_rescue_weight", DEFAULT_SEMANTIC_PRIOR_RESCUE_WEIGHT),
+    ("knn_type_overfetch", DEFAULT_KNN_TYPE_OVERFETCH),
+)
+# Settings configuring stages the naive render bypasses outright. Their shipped
+# defaults are not inert, and the runner writes every key into memory_params
+# whether or not the operator named it, so neither truthiness nor presence
+# separates intent from boilerplate. A value differing from the default is the
+# operator asking for behaviour this run will not have, which is what refuses.
+# A plain naive run therefore still needs no extra arguments.
+_NAIVE_BYPASSED_STAGE_PARAMS = (
+    ("neighbor_stitch_items", DEFAULT_NEIGHBOR_STITCH_ITEMS),
+    ("neighbor_stitch_span", DEFAULT_NEIGHBOR_STITCH_SPAN),
+    ("max_chunks_per_trajectory", DEFAULT_MAX_CHUNKS_PER_TRAJECTORY),
+    ("context_expansion_max_ratio", DEFAULT_CONTEXT_EXPANSION_MAX_RATIO),
+    ("evidence_composition_mode", DEFAULT_EVIDENCE_COMPOSITION_MODE),
+    ("typed_reservation_items", None),
 )
 
 
@@ -3204,6 +3219,11 @@ def _naive_arm_conflicts(memory_params: dict[str, object]) -> list[str]:
         name
         for name, default in _NAIVE_CONFLICTING_NUMERIC_PARAMS
         if _param_float(memory_params, name, float(default)) > 0
+    )
+    conflicts.extend(
+        name
+        for name, default in _NAIVE_BYPASSED_STAGE_PARAMS
+        if (value := memory_params.get(name)) is not None and value != default
     )
     return sorted(conflicts)
 
@@ -4722,53 +4742,65 @@ class SibylLiveApiMemory(Memory):
         *,
         query: str,
         results: list[dict[str, object]],
-    ) -> str:
-        """Render the arm's own candidates, in the arm's own order, and nothing else.
+    ) -> list[MemoryContextItem]:
+        """Render every server candidate, in the server's order, bodies whole.
 
         The arm's claim is that its fused, packed ordering is what the reader
-        sees, so the client-side stages have to be off rather than configured
-        small. Assembly performs diversity selection, trajectory refinement, and
-        catalog-neighbor expansion; composition performs typed reservation,
-        support overflow, and semantic-prior rescue. With neighbor stitching at
-        its shipped default of two, one returned row renders as three, and the
-        screen would be scoring a client-side expansion of the arm rather than
-        the arm.
+        sees, so nothing here may re-select, reorder, or rewrite. The shared
+        renderer is not usable for that: it caps membership at max_items, drops
+        rows whose content is empty, allocates a per-candidate character budget,
+        and rewrites long bodies into query-aware slices. Each of those is a
+        machine stage, and together they turned twelve server candidates into
+        eight sliced ones.
 
-        Pack items are dropped here too. Under the arm they are the same rows
-        the evidence lane already ranked, so merging them would render a row
-        twice and reintroduce a selection step the arm does not have.
+        The one bound kept is the reader's total context. When the pack exceeds
+        it, whole candidates are dropped from the tail, never sliced, and the
+        drop is stamped in the receipt so a short data point is auditable rather
+        than mysterious.
         """
 
-        evidence_set = list(results[: max(1, self.max_context_items)])
+        max_total_chars = max(
+            1,
+            getattr(self, "max_context_total_chars", DEFAULT_CONTEXT_TOTAL_CHARS),
+        )
+        context: list[MemoryContextItem] = []
+        rendered: list[dict[str, object]] = []
+        spent = 0
+        truncated_from_rank: int | None = None
+        for rank, result in enumerate(results, start=1):
+            header = _memory_context_header(rank, result)
+            content = _stripped_str(result.get("content"))
+            content = annotate_inventory_completeness(content, result.get("metadata"))
+            value = header + "\n\n" + content
+            if context and spent + len(value) > max_total_chars:
+                truncated_from_rank = rank
+                break
+            context.append({"type": "text", "value": value})
+            rendered.append(result)
+            spent += len(value)
         assembly_metadata: dict[str, object] = {
             "naive_verbatim_render": True,
             "naive_server_candidate_count": len(results),
-            "naive_rendered_count": len(evidence_set),
+            "naive_rendered_count": len(rendered),
+            "naive_rendered_chars": spent,
+            "naive_context_char_cap": max_total_chars,
+            "naive_tail_truncated_from_rank": truncated_from_rank,
+            "naive_dropped_count": len(results) - len(rendered),
             "naive_bypassed_stages": [
                 "assemble_context_results",
                 "compile_operational_evidence_set",
+                "render_memory_context",
             ],
+            "naive_rendered_ids": [_stripped_str(row.get("id")) for row in rendered],
         }
-        memory_context, context_budget = render_memory_context(
-            evidence_set,
-            query=query,
-            max_items=len(evidence_set),
-            max_chars_per_item=self.max_context_chars_per_item,
-            max_total_chars=getattr(
-                self,
-                "max_context_total_chars",
-                DEFAULT_CONTEXT_TOTAL_CHARS,
-            ),
-        )
-        assembly_metadata["context_budget"] = context_budget
         self._query_local.search_metadata["adapter_assembly"] = assembly_metadata
         self._query_local.retrieval_trace = build_retrieval_trace(
-            evidence_set,
-            max_items=len(evidence_set),
+            rendered,
+            max_items=len(rendered),
             max_chars_per_item=self.max_context_chars_per_item,
-            context_budget=context_budget,
+            context_budget={"items": [], "naive_verbatim_render": True},
         )
-        return memory_context
+        return context
 
     def _traversal_llm_client(self) -> object:
         if self._openai_traversal_client is None:

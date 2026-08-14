@@ -66,11 +66,6 @@ log = structlog.get_logger()
 # exactly the hand-weighting the arm is built to do without.
 NAIVE_RRF_K = 60.0
 
-# How much deeper than the answer each lane reads before fusion. Not a ranking
-# weight: it cannot reorder anything, it only stops fusion from being handed a
-# pool the caller's limit already truncated.
-NAIVE_LANE_OVERFETCH = 4
-
 NAIVE_RETRIEVAL_MODE = "naive"
 
 
@@ -132,14 +127,15 @@ async def naive_search(
     # and the race compares payload sizes instead of retrieval.
     if content_max_chars is not None:
         content_max_chars = max(0, min(int(content_max_chars), MAX_SEARCH_CONTENT_MAX_CHARS))
-    # Lanes read deeper than the answer, then fusion truncates. Clipping each
-    # lane to the caller's limit first is what makes fusion decorative at small
-    # limits: with limit=1 a row ranked second in both lanes, which is the row
-    # RRF exists to promote, is discarded before RRF ever sees it. The depth is
-    # bounded so a wide request cannot walk the whole table, and it is set on
-    # the three lanes directly rather than through the narrowing helper, which
-    # can only shrink a plan's budget and so could never widen a lane at all.
-    lane_depth = min(limit * NAIVE_LANE_OVERFETCH, MAX_RETRIEVAL_LIMIT)
+    # Every lane reads to the ceiling, whatever the caller asked for. A depth
+    # scaled off the limit leaves a boundary class alive: at the default limit
+    # of 12 a four-times pool stops at 48, so a row ranked 49 in both lanes
+    # still outscores a single lane's rank one and is still clipped before
+    # fusion sees it. Fifty rows per lane is cheap, kills that class outright,
+    # and removes a number somebody would otherwise be tempted to tune. The
+    # depth is set on the three lanes directly rather than through the
+    # narrowing helper, which can only shrink a plan's budget.
+    lane_depth = MAX_RETRIEVAL_LIMIT
     search_plan = naive_retrieval_plan(
         replace(
             plan,
@@ -188,41 +184,44 @@ async def naive_search(
         search_plan,
         signals=(RetrievalSignal.NODE_VECTOR,) if node_sources_allowed else (),
     )
+    # No return_exceptions here, deliberately. The machine degrades to its
+    # surviving lanes because a partial answer beats none for a user. The arm is
+    # not answering a user, it is producing a measurement, and a run whose
+    # lexical lane died returns a thin pack that the benchmark scores as a
+    # recall miss rather than an error. That silently attributes an outage to
+    # the arm's ranking. A failed data point can be excluded and rerun; a
+    # degraded one that looks healthy cannot be found later.
     lexical_gathered, vector_fetch = await asyncio.gather(
-        asyncio.gather(*(task for _signal, task in lexical_tasks), return_exceptions=True),
+        asyncio.gather(*(task for _signal, task in lexical_tasks)),
         _vector_candidate_sources_detailed(
             client=client,
             plan=vector_plan,
             search_filter=search_filter,
             embedding_provider=embedding_provider,
-            # A lane that raises degrades the arm to its other lane rather than
-            # failing the request, matching how the machine treats a dead lane.
         ),
-        return_exceptions=True,
     )
     lexical_sources = [
         _candidate_source_result(signal.value, result)
-        for (signal, _task), result in zip(
-            lexical_tasks,
-            lexical_gathered if isinstance(lexical_gathered, list) else [None, None],
-            strict=True,
-        )
+        for (signal, _task), result in zip(lexical_tasks, lexical_gathered, strict=True)
     ]
-    vector_fetch_state: VectorCandidateFetch | None = None
-    vector_candidates: list[RetrievalCandidate] = []
-    if isinstance(vector_fetch, VectorCandidateFetch):
-        vector_fetch_state = vector_fetch
-        vector_candidates = list(vector_fetch.node_candidates)
-        vector_source = _candidate_source_result(
-            RetrievalSignal.NODE_VECTOR.value,
-            vector_candidates,
+    # A lane that came back degraded rather than raising is still a lane that
+    # did not run, so it fails the request for the same reason.
+    if vector_fetch.failures or vector_fetch.reason:
+        msg = (
+            "naive retrieval vector lane degraded "
+            f"(reason={vector_fetch.reason!r}, failures={list(vector_fetch.failures)})"
         )
-    else:
-        log.warning(
-            "naive_retrieval_vector_source_failed",
-            error_type=type(vector_fetch).__name__,
-        )
-        vector_source = _candidate_source_result(RetrievalSignal.NODE_VECTOR.value, vector_fetch)
+        raise RuntimeError(msg)
+    degraded_lexical = [source.source for source in lexical_sources if source.failure is not None]
+    if degraded_lexical:
+        msg = f"naive retrieval lexical lanes degraded: {', '.join(sorted(degraded_lexical))}"
+        raise RuntimeError(msg)
+    vector_fetch_state: VectorCandidateFetch | None = vector_fetch
+    vector_candidates = list(vector_fetch.node_candidates)
+    vector_source = _candidate_source_result(
+        RetrievalSignal.NODE_VECTOR.value,
+        vector_candidates,
+    )
     stage_timings_ms["candidates"] = _elapsed_ms(stage_started_at)
 
     stage_started_at = time.perf_counter()
@@ -280,6 +279,19 @@ async def naive_search(
     )
     stage_timings_ms["pack"] = _elapsed_ms(stage_started_at)
     stage_timings_ms["total"] = _elapsed_ms(search_started_at)
+    # Logged, never returned. Per-stage durations are measured across the
+    # candidate fetch, which runs before the scope filter, so a caller who may
+    # read none of the matches can still tell "nothing matched" from "matches
+    # exist but are not yours" by timing repeated queries. The counts were
+    # rebuilt from the authorized set for exactly that reason and the clock
+    # would have put the same signal back. Constant-time stages are not
+    # achievable here, so the honest fix is not to publish them.
+    log.info(
+        "naive_retrieval_complete",
+        organization_id=search_plan.organization_id,
+        result_count=len(results),
+        stage_timings_ms=stage_timings_ms,
+    )
 
     return SearchResponse(
         results=results,
@@ -299,7 +311,6 @@ async def naive_search(
             **_candidate_source_metadata([*lexical_sources, vector_source]),
             **vector_metadata,
             **pack_receipt,
-            "stage_timings_ms": stage_timings_ms,
         },
         graph_count=len([result for result in results if result.result_origin == "graph"]),
         document_count=0,

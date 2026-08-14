@@ -135,6 +135,35 @@ def _naive_retrieval_selected(request: ContextPackRequest) -> bool:
     return request.evidence is not None and request.evidence.retrieval_mode == "naive"
 
 
+def _reject_machine_knobs_under_the_arm(request: ContextPackRequest) -> None:
+    """Refuse settings the arm cannot honour, rather than half-applying them.
+
+    `knn_type_overfetch` tunes how deep the machine's typed vector read walks
+    around the HNSW bracket. The arm has no typed overfetch stage, and the pack
+    plan and the evidence plan would read the field from different places, so a
+    request setting it got it applied to one half of its own pack and dropped
+    from the other. A knob that lands on half a request is worse than a knob
+    that is refused: the run looks configured and is not.
+    """
+
+    if not _naive_retrieval_selected(request):
+        return
+    assert request.evidence is not None
+    requested = {
+        "knn_type_overfetch": request.knn_type_overfetch,
+        "evidence.knn_type_overfetch": request.evidence.knn_type_overfetch,
+    }
+    offenders = sorted(name for name, value in requested.items() if value)
+    if offenders:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"retrieval_mode=naive cannot honour {', '.join(offenders)}: "
+                "the control arm runs no typed overfetch stage"
+            ),
+        )
+
+
 async def _execute_naive_context_evidence_search(
     request: ContextPackRequest,
     *,
@@ -924,6 +953,7 @@ async def context_pack(
             project=request.project,
         )
         retrieval_goal = normalize_retrieval_question(request.goal)
+        _reject_machine_knobs_under_the_arm(request)
 
         async def compile_pack() -> ContextPack:
             return await compile_context(
