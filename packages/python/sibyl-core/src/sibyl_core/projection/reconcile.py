@@ -270,9 +270,7 @@ async def _reconcile_row(
             if revision is None:
                 # Every write is fenced, so a row that cannot supply a revision
                 # cannot be written from here.
-                return await _force_exclusion(
-                    entity_manager, row_id, operation, organization_id
-                )
+                return await _force_exclusion(entity_manager, row_id, operation, organization_id)
             applied, fenced_out = await _write_stamp(
                 entity_manager,
                 row_id,
