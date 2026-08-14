@@ -2031,6 +2031,66 @@ async def test_correction_receipt_names_the_graph_rows_it_retired() -> None:
         "entity:entity-1",
         "entity:entity-2",
     ]
+    assert response.recall_impact["graph_entity_ids"] == ["entity-1", "entity-2"]
+    assert "refused_entity_ids" not in response.recall_impact
+    assert "partially_applied" not in response.recall_impact
+
+
+@pytest.mark.asyncio
+async def test_a_partially_applied_correction_says_so_in_recall_impact() -> None:
+    """`applied: true` with a refused target must not read as a complete write."""
+
+    org = _org()
+    memory = _memory(id="memory-1", organization_id=str(org.id), source_id="source-1")
+    updated = _memory(
+        id="memory-1",
+        organization_id=str(org.id),
+        source_id="source-1",
+        review_state="pending",
+    )
+    preview = MemoryCorrectionPreview(
+        allowed=True,
+        source_id="memory-1",
+        action="mark_wrong",
+        reason="wrong",
+        target_lifecycle_state="contested",
+        target_lifecycle_flags=[],
+        affected_source_ids=["memory-1"],
+        affected_derived_ids=[],
+        reversible=True,
+        recall_impact={"excluded_from_recall": True},
+        synthesis_impact={"excluded_from_synthesis": True},
+        audit_action="memory.correction.mark_wrong",
+    )
+    updated.revision = 2
+    result = MemoryCorrectionResult(
+        applied=True,
+        preview=preview,
+        updated_memory=updated,
+        affected_entity_ids=["entity-own"],
+        refused_entity_ids=["entity-victim"],
+    )
+
+    with (
+        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch(
+            "sibyl.api.routes.memory.apply_memory_correction",
+            AsyncMock(return_value=result),
+        ),
+        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()),
+    ):
+        response = await apply_memory_correction_route(
+            "memory-1",
+            MemoryCorrectionRequest(action="mark_wrong", reason="wrong"),
+            http_request=_http_request(),
+            org=org,
+            ctx=_ctx(org_role=OrganizationRole.OWNER),
+        )
+
+    assert response.applied is True
+    assert response.recall_impact["graph_entity_ids"] == ["entity-own"]
+    assert response.recall_impact["refused_entity_ids"] == ["entity-victim"]
+    assert response.recall_impact["partially_applied"] is True
 
 
 @pytest.mark.asyncio

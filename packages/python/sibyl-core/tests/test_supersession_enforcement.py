@@ -868,8 +868,8 @@ async def test_a_truncated_supersession_check_says_so_in_the_receipt(
 
     monkeypatch.setattr(search_module, "_SUPERSESSION_LOOKUP_LIMIT", 2)
 
-    async def empty_lookup(*_args: object, **_kwargs: object) -> set[str]:
-        return set()
+    async def empty_lookup(*_args: object, **_kwargs: object) -> tuple[set[str], int]:
+        return set(), 0
 
     monkeypatch.setattr(search_module, "_superseded_candidate_uuids", empty_lookup)
 
@@ -903,8 +903,8 @@ async def test_a_truncated_supersession_check_says_so_in_the_receipt(
 async def test_an_untruncated_check_carries_no_truncation_receipt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def empty_lookup(*_args: object, **_kwargs: object) -> set[str]:
-        return set()
+    async def empty_lookup(*_args: object, **_kwargs: object) -> tuple[set[str], int]:
+        return set(), 0
 
     monkeypatch.setattr(search_module, "_superseded_candidate_uuids", empty_lookup)
 
@@ -977,3 +977,151 @@ def test_an_active_state_never_rescues_a_flagged_or_genuinely_duplicate_row() ->
         )
         is False
     )
+
+
+@pytest.mark.parametrize(
+    "scope_metadata",
+    [
+        pytest.param({"memory_scope": "organization"}, id="organization"),
+        pytest.param({"memory_scope": "public"}, id="public"),
+        pytest.param({"memory_scope": "shared"}, id="shared"),
+        pytest.param({"memory_scope": "team", "scope_key": "team-a"}, id="team"),
+        pytest.param({}, id="legacy-no-scope"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_correction_reaches_projected_rows_at_every_scope(
+    monkeypatch: pytest.MonkeyPatch,
+    scope_metadata: dict[str, Any],
+) -> None:
+    """The projected half of the candidate set carries no write check, deliberately.
+
+    `authorize_memory_write` refuses SHARED, ORGANIZATION, and PUBLIC
+    outright, refuses TEAM without `accessible_teams`, and refuses a row with
+    no scope metadata. Promotion makes rows visible at ORGANIZATION and
+    PUBLIC, so guarding rows resolved through the server-stamped
+    `attributes.raw_memory_id` would disable the write-through for most of a
+    real corpus: the capture would retire while the graph row kept ranking.
+    """
+
+    memory = _raw_capture(id="source-1")
+    runtime = _CorrectionGraphRuntime()
+
+    async def execute_query(_query: str, **_params: object) -> list[dict[str, object]]:
+        return [{"uuid": "entity-projected"}]
+
+    async def get(entity_id: str) -> Any:
+        return SimpleNamespace(id=entity_id, created_by=None, metadata=dict(scope_metadata))
+
+    runtime.execute_query = execute_query  # type: ignore[method-assign]
+    runtime.get = get  # type: ignore[method-assign]
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> _CorrectionGraphRuntime:
+        return runtime
+
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+    monkeypatch.setattr(
+        memory_module,
+        "save_raw_memory",
+        AsyncMock(side_effect=lambda updated, **_kwargs: updated),
+    )
+    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+
+    result = await memory_module.apply_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="mark_wrong",
+    )
+
+    assert result.applied
+    assert result.affected_entity_ids == ["entity-projected"]
+    assert result.refused_entity_ids == []
+    _entity_id, stamped = runtime.updates[0]
+    assert graph_metadata_recallable(stamped) is False
+
+
+@pytest.mark.asyncio
+async def test_a_refused_target_is_reported_rather_than_silently_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A partial write must not answer like a complete one."""
+
+    memory = _raw_capture(
+        id="source-1",
+        metadata={
+            "capture_surface": "reflection_candidate",
+            "promoted_entity_id": "entity-victim",
+        },
+    )
+    runtime = _CorrectionGraphRuntime(foreign=frozenset({"entity-victim"}))
+
+    async def execute_query(_query: str, **_params: object) -> list[dict[str, object]]:
+        return [{"uuid": "entity-own"}]
+
+    runtime.execute_query = execute_query  # type: ignore[method-assign]
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> _CorrectionGraphRuntime:
+        return runtime
+
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+    monkeypatch.setattr(
+        memory_module,
+        "save_raw_memory",
+        AsyncMock(side_effect=lambda updated, **_kwargs: updated),
+    )
+    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+
+    result = await memory_module.apply_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="mark_wrong",
+    )
+
+    assert result.affected_entity_ids == ["entity-own"]
+    assert result.refused_entity_ids == ["entity-victim"]
+
+
+@pytest.mark.asyncio
+async def test_the_row_cap_is_detected_even_when_dedup_hides_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One retired row can carry many inbound edges, so rows bind before uuids do."""
+
+    monkeypatch.setattr(search_module, "_SUPERSESSION_LOOKUP_LIMIT", 4)
+
+    async def saturated_lookup(*_args: object, **_kwargs: object) -> tuple[set[str], int]:
+        # Four rows read, all pointing at the same retired row.
+        return {"entity-retired"}, 4
+
+    monkeypatch.setattr(search_module, "_superseded_candidate_uuids", saturated_lookup)
+
+    _surviving, metadata = await search_module._apply_supersession_gate(
+        client=_SupersessionGraphClient(),
+        group_id="org-123",
+        source_lists=[
+            (
+                RetrievalSignal.NODE_FULLTEXT,
+                [
+                    RetrievalCandidate(
+                        id="entity-retired",
+                        type="decision",
+                        name="retired",
+                        content="body",
+                        score=1.0,
+                        source=None,
+                        metadata={},
+                        project_id="project_123",
+                    )
+                ],
+            )
+        ],
+    )
+
+    gate = metadata["supersession_gate"]
+    assert gate["truncated"] is True
+    assert gate["edge_rows_read"] == 4
+    assert gate["total_candidates"] == 1

@@ -859,11 +859,17 @@ async def _superseded_candidate_uuids(
     *,
     group_id: str,
     uuids: Sequence[str],
-) -> set[str]:
-    """Resolve which of these candidates something else declared it replaced."""
+) -> tuple[set[str], int]:
+    """Resolve which of these candidates something else declared it replaced.
+
+    The row count comes back alongside the set because dedup destroys the
+    only evidence that the row cap bound: one retired row can carry several
+    inbound edges, so 300 candidates can produce more than 512 rows and still
+    dedup to a handful of uuids.
+    """
 
     if not uuids:
-        return set()
+        return set(), 0
     rows = await _execute_query_records(
         client,
         """
@@ -879,7 +885,7 @@ async def _superseded_candidate_uuids(
         group_id=group_id,
         limit=_SUPERSESSION_LOOKUP_LIMIT,
     )
-    return {uuid for row in rows if (uuid := _string_value(row.get("uuid")))}
+    return {uuid for row in rows if (uuid := _string_value(row.get("uuid")))}, len(rows)
 
 
 async def _apply_supersession_gate(
@@ -924,9 +930,10 @@ async def _apply_supersession_gate(
     # before the candidate cap does. Neither is reachable at current pool
     # sizes, and neither may pass silently if it ever becomes reachable.
     truncated = len(node_uuids) > _SUPERSESSION_LOOKUP_LIMIT
+    edge_rows = 0
     if node_uuids:
         try:
-            superseded = await _superseded_candidate_uuids(
+            superseded, edge_rows = await _superseded_candidate_uuids(
                 client,
                 group_id=group_id,
                 uuids=node_uuids[:_SUPERSESSION_LOOKUP_LIMIT],
@@ -953,10 +960,11 @@ async def _apply_supersession_gate(
         "superseded_dropped": edge_dropped,
         "superseded_uuids": sorted(superseded),
     }
-    if truncated or len(superseded) >= _SUPERSESSION_LOOKUP_LIMIT:
+    if truncated or edge_rows >= _SUPERSESSION_LOOKUP_LIMIT:
         receipt["truncated"] = True
         receipt["checked_candidates"] = min(len(node_uuids), _SUPERSESSION_LOOKUP_LIMIT)
         receipt["total_candidates"] = len(node_uuids)
+        receipt["edge_rows_read"] = edge_rows
     if lookup_failed is not None:
         receipt["lookup_error_type"] = lookup_failed
     return surviving, {"supersession_gate": receipt}

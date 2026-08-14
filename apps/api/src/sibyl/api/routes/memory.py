@@ -907,12 +907,24 @@ def _correction_result_response(
     *,
     receipt: MutationReceipt | None = None,
 ) -> MemoryCorrectionResponse:
-    return _correction_response(
+    response = _correction_response(
         result.preview,
         applied=result.applied,
         updated_memory=result.updated_memory,
         receipt=receipt,
     )
+    if not result.applied:
+        return response
+    # recall_impact is a claim about what recall will now do, so the graph
+    # outcome belongs in it. A correction that reached the capture but not
+    # every row the capture named is a partial write, and answering
+    # `applied: true` with nothing else said would read as a complete one.
+    recall_impact = dict(response.recall_impact)
+    recall_impact["graph_entity_ids"] = list(result.affected_entity_ids)
+    if result.refused_entity_ids:
+        recall_impact["refused_entity_ids"] = list(result.refused_entity_ids)
+        recall_impact["partially_applied"] = True
+    return response.model_copy(update={"recall_impact": recall_impact})
 
 
 def _metadata_str_list(value: object) -> list[str]:

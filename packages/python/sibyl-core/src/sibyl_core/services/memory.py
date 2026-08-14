@@ -176,6 +176,11 @@ class MemoryCorrectionResult:
     # The graph rows the correction actually reached. Empty is a real answer:
     # a capture with no projection has nothing on the retrieval lane to gate.
     affected_entity_ids: list[str] = field(default_factory=list)
+    # Rows the capture named that this principal may not write. A correction
+    # with a non-empty list here applied to the capture but not to everything
+    # the capture claimed, and saying so is the difference between a partial
+    # write and a silent no-op.
+    refused_entity_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1746,7 +1751,7 @@ async def apply_memory_correction(
     if preview.action == "supersede" and canonical_replacement_source_id is not None:
         save_kwargs["superseded_by_memory_id"] = canonical_replacement_source_id
     saved = await save_raw_memory(updated, **save_kwargs)
-    affected_entity_ids = await _project_correction_to_graph(
+    affected_entity_ids, refused_entity_ids = await _project_correction_to_graph(
         organization_id=organization_id,
         memory=saved,
         preview=preview,
@@ -1760,10 +1765,19 @@ async def apply_memory_correction(
         preview=preview,
         updated_memory=saved,
         affected_entity_ids=affected_entity_ids,
+        refused_entity_ids=refused_entity_ids,
     )
 
 
 _GRAPH_CORRECTION_LOOKUP_LIMIT = 64
+
+
+@dataclass(frozen=True, slots=True)
+class _CorrectionGraphTargets:
+    """Graph rows a correction may stamp, and the ones it was refused."""
+
+    authorized: list[str]
+    refused: list[str]
 
 
 async def _correction_graph_entity_ids(
@@ -1773,7 +1787,7 @@ async def _correction_graph_entity_ids(
     memory: RawMemory,
     principal_id: str | None,
     accessible_projects: Iterable[str] | None,
-) -> list[str]:
+) -> _CorrectionGraphTargets:
     """Find the graph rows projected from this capture.
 
     Two sources, because the two write paths record the link in opposite
@@ -1791,18 +1805,31 @@ async def _correction_graph_entity_ids(
     declares exactly one affected capture. Matching the group key would let a
     correction on one memory stamp the projections of its siblings.
 
-    Every candidate is then re-authorized against the correcting principal.
-    The metadata half of the candidate set is caller-reachable: `promoted_
-    entity_id` and friends are read straight off the capture's metadata bag,
-    and capture metadata is pass-through rather than a whitelist, so a caller
-    could otherwise name somebody else's entity, correct their own capture,
-    and retire a row they cannot write. The reflection path guards its
-    supersession targets exactly this way
-    (`_authorized_superseded_entity_ids`), and this is the same guard on the
-    same class of danger.
+    The two halves are guarded differently, because they differ in who
+    authored them.
+
+    The query half is server-authoritative. `raw_memory_id` is assigned from
+    the completed raw write and overwrites anything the caller stamped
+    (`memory_pipeline/capture.py:137-138`), so a row it returns is a
+    projection of the very capture `preview_memory_correction` just
+    authorized this principal to correct. Re-authorizing it would not add
+    safety, and it would subtract enormously: `authorize_memory_write` refuses
+    SHARED, ORGANIZATION, and PUBLIC outright, refuses TEAM without
+    `accessible_teams`, and refuses a row carrying no scope metadata at all.
+    Promotion makes rows visible at ORGANIZATION and PUBLIC, so guarding this
+    half would silently disable the write-through for most of a real corpus:
+    the capture would retire while the graph row kept ranking, which is the
+    exact defect this whole change exists to kill.
+
+    The metadata half is caller-reachable and keeps the guard.
+    `promoted_entity_id` and friends are read straight off the capture's
+    metadata bag, and capture metadata is pass-through rather than a
+    whitelist, so without a check a caller could name somebody else's entity,
+    correct their own capture, and retire a row they cannot write. The
+    reflection path guards its supersession targets exactly this way
+    (`_authorized_superseded_entity_ids`).
     """
 
-    candidate_ids = list(_correction_derived_ids(memory))
     rows = normalize_records(
         await runtime.client.execute_query(
             """
@@ -1816,13 +1843,16 @@ async def _correction_graph_entity_ids(
             limit=_GRAPH_CORRECTION_LOOKUP_LIMIT,
         )
     )
-    for row in rows:
-        uuid = str(row.get("uuid") or "")
-        if uuid:
-            candidate_ids.append(uuid)
+    projected = [uuid for row in rows if (uuid := str(row.get("uuid") or ""))]
+    declared = [
+        entity_id
+        for entity_id in _correction_derived_ids(memory)
+        if entity_id and entity_id not in set(projected)
+    ]
 
-    authorized: list[str] = []
-    for entity_id in dict.fromkeys(value for value in candidate_ids if value):
+    refused: list[str] = []
+    authorized: list[str] = list(dict.fromkeys(projected))
+    for entity_id in dict.fromkeys(declared):
         try:
             target = await runtime.entity_manager.get(entity_id)
         except Exception:
@@ -1839,9 +1869,10 @@ async def _correction_graph_entity_ids(
                 source_id=memory.id,
                 entity_id=entity_id,
             )
+            refused.append(entity_id)
             continue
         authorized.append(entity_id)
-    return authorized
+    return _CorrectionGraphTargets(authorized=authorized, refused=refused)
 
 
 def _correction_graph_metadata(
@@ -1878,7 +1909,7 @@ async def _project_correction_to_graph(
     accessible_projects: Iterable[str] | None,
     replacement_source_id: str | None,
     duplicate_of_source_id: str | None,
-) -> list[str]:
+) -> tuple[list[str], list[str]]:
     """Carry a correction across to the rows retrieval actually ranks.
 
     Correction used to stop at `raw_captures`. The projected entity kept its
@@ -1891,7 +1922,7 @@ async def _project_correction_to_graph(
 
     try:
         runtime = await get_surreal_graph_runtime(str(organization_id))
-        entity_ids = await _correction_graph_entity_ids(
+        targets = await _correction_graph_entity_ids(
             runtime,
             organization_id=organization_id,
             memory=memory,
@@ -1904,7 +1935,8 @@ async def _project_correction_to_graph(
             source_id=memory.id,
             error_type=type(exc).__name__,
         )
-        return []
+        return [], []
+    entity_ids = targets.authorized
 
     updates = _correction_graph_metadata(
         preview,
@@ -1939,7 +1971,7 @@ async def _project_correction_to_graph(
             replacement_source_id=replacement_source_id,
             superseded_entity_ids=applied,
         )
-    return applied
+    return applied, list(targets.refused)
 
 
 async def _link_graph_supersession(
@@ -1965,13 +1997,14 @@ async def _link_graph_supersession(
         )
         if replacement is None:
             return
-        replacement_entity_ids = await _correction_graph_entity_ids(
+        replacement_targets = await _correction_graph_entity_ids(
             runtime,
             organization_id=organization_id,
             memory=replacement,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
         )
+        replacement_entity_ids = replacement_targets.authorized
     except Exception as exc:
         log.warning(
             "memory_correction_replacement_lookup_failed",
