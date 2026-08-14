@@ -467,3 +467,109 @@ def test_project_relink_exits_nonzero_when_nothing_matches() -> None:
         result = CliRunner().invoke(project_module.app, ["relink"])
 
     assert result.exit_code == 1
+
+
+def _contexts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from sibyl_cli import config_store, state
+
+    monkeypatch.setattr(config_store.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(state, "_context_override", None)
+    monkeypatch.setattr(state, "_ignore_selection", False)
+    config_store.create_context("production", "https://prod.example.com", set_active=True)
+    config_store.create_context("staging", "https://staging.example.com")
+
+
+def test_a_misspelled_context_flag_never_falls_back_to_the_active_one(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`-C stagingg` with production active must not mutate production."""
+    from sibyl_cli import task as task_module
+
+    _contexts(tmp_path, monkeypatch)
+    client = _client(create_task={"success": True, "task_id": "t1"})
+
+    with patch("sibyl_cli.task.get_client", return_value=client) as get:
+        result = CliRunner().invoke(
+            main_app,
+            ["-C", "stagingg", "task", "create", "--title", "x", "--project", "p"],
+        )
+
+    assert result.exit_code == 1
+    assert "Unknown context 'stagingg'" in result.stdout
+    assert "production" in result.stdout
+    get.assert_not_called()
+    _ = task_module
+
+
+def test_a_misspelled_context_env_var_is_also_a_hard_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _contexts(tmp_path, monkeypatch)
+    monkeypatch.setenv("SIBYL_CONTEXT", "stagingg")
+
+    result = CliRunner().invoke(main_app, ["task", "list"])
+
+    assert result.exit_code == 1
+    assert "SIBYL_CONTEXT" in result.stdout
+
+
+def test_a_directory_pin_at_a_deleted_context_is_a_hard_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl_cli import config_store
+
+    _contexts(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_store, "resolve_context_from_cwd", lambda: "deleted-ctx")
+
+    result = CliRunner().invoke(main_app, ["task", "list"])
+
+    assert result.exit_code == 1
+    assert "directory pin" in result.stdout
+
+
+def test_a_broken_selection_still_lets_you_repair_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hard-erroring every command would strand the user with no way back."""
+    from sibyl_cli import state
+
+    _contexts(tmp_path, monkeypatch)
+    monkeypatch.setattr(state, "_ignore_selection", False)
+
+    result = CliRunner().invoke(main_app, ["-C", "stagingg", "context", "list"])
+
+    # The repair command runs; the broken selection is dropped, not enforced.
+    assert "does not exist; ignoring it" in result.stdout
+    assert "Unknown context" not in result.stdout
+    assert state.context_selection_ignored()
+
+
+def test_the_resolver_itself_refuses_to_fall_through(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The guard lives in the resolver, not only in the callback."""
+    from sibyl_cli import config_store
+    from sibyl_cli.client import resolve_api_base_url
+
+    _contexts(tmp_path, monkeypatch)
+
+    with pytest.raises(config_store.UnknownContextError):
+        resolve_api_base_url("stagingg")
+
+
+def test_an_unknown_context_never_inherits_the_active_tls_setting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl_cli import config_store
+    from sibyl_cli.client import SibylClient
+
+    _contexts(tmp_path, monkeypatch)
+
+    with pytest.raises(config_store.UnknownContextError):
+        SibylClient(context_name="stagingg")

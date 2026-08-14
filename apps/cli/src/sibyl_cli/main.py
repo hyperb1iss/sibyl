@@ -19,7 +19,7 @@ from uuid import UUID
 import typer
 from rich.markup import escape
 
-from sibyl_cli import config_store
+from sibyl_cli import config_store, state
 from sibyl_cli.archive import app as archive_app
 from sibyl_cli.auth import app as auth_app
 from sibyl_cli.auth import clear_token_cmd as logout_cmd
@@ -1371,6 +1371,39 @@ def _handle_client_error(e: SibylClientError) -> None:
 # ============================================================================
 
 
+# These repair or inspect the context configuration, so they have to keep
+# working while the selection is broken. Everything else stops.
+_CONTEXT_REPAIR_COMMANDS = frozenset({"context", "init", "config", "doctor"})
+
+
+def _reject_unknown_context(ctx: typer.Context) -> None:
+    """Stop before any command logic when the selected context does not exist."""
+    try:
+        selection = config_store.explicit_context_selection()
+        if selection is None:
+            return
+        name, source = selection
+        if config_store.get_context(name) is not None:
+            return
+    except (OSError, RuntimeError):
+        # Config is unreadable, so there is nothing to validate against. The
+        # resolver still refuses to fall through if a name is used later.
+        return
+    if ctx.invoked_subcommand in _CONTEXT_REPAIR_COMMANDS:
+        warn(f"Selected context '{name}' ({source}) does not exist; ignoring it.")
+        state.ignore_context_selection()
+        return
+
+    known = [c.name for c in config_store.list_contexts()]
+    error(f"Unknown context '{name}' selected by {source}.")
+    if known:
+        info(f"Known contexts: {', '.join(known)}")
+        info("Switch with: sibyl context use <name>")
+    else:
+        info("No contexts are configured. Create one with: sibyl init")
+    raise typer.Exit(1)
+
+
 @app.callback(invoke_without_command=True)
 def main_callback(
     ctx: typer.Context,
@@ -1398,6 +1431,7 @@ def main_callback(
     if context:
         set_context_override(context)
 
+    _reject_unknown_context(ctx)
     _emit_command_marker(ctx)
 
     # Show help if no command
@@ -3974,6 +4008,10 @@ def main() -> None:
     """CLI entry point."""
     try:
         app()
+    except config_store.UnknownContextError as exc:
+        # Backstop for any resolver reached without passing the root callback.
+        error(str(exc))
+        raise typer.Exit(1) from exc
     finally:
         notify_pending_writes()
 

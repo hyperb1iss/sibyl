@@ -18,6 +18,23 @@ def set_context_override(context_name: str | None) -> None:
     _context_override = context_name
 
 
+_ignore_selection = False
+
+
+def ignore_context_selection() -> None:
+    """Drop a broken context selection for the rest of this invocation.
+
+    The commands that repair a context have to keep working while the selection
+    is broken, and they cannot do that if every resolver raises on the name.
+    """
+    global _ignore_selection
+    _ignore_selection = True
+
+
+def context_selection_ignored() -> bool:
+    return _ignore_selection
+
+
 def get_context_override() -> str | None:
     """Get the current context override.
 
@@ -26,6 +43,8 @@ def get_context_override() -> str | None:
     2. SIBYL_CONTEXT environment variable
     3. None (use active context from config)
     """
+    if _ignore_selection:
+        return None
     if _context_override:
         return _context_override
 

@@ -71,12 +71,14 @@ def resolve_api_base_url(context_name: str | None = None) -> str:
     # Lazy import to avoid circular dependency
     from sibyl_cli import config_store
 
-    # 1. If explicit context provided, use that
+    # 1. If explicit context provided, use that. A named context that does not
+    #    exist stops the command rather than falling through, because falling
+    #    through retargets the request at whatever server is active.
     if context_name:
+        config_store.require_known_context(context_name)
         ctx = config_store.get_context(context_name)
         if ctx:
             return f"{ctx.server_url}/api"
-        # Context not found - fall through to other options
 
     # 2. Try active context
     ctx = config_store.get_active_context()
@@ -375,6 +377,7 @@ class SibylClient:
         from sibyl_cli import config_store
 
         if context_name:
+            config_store.require_known_context(context_name)
             ctx = config_store.get_context(context_name)
             if ctx:
                 return ctx.insecure

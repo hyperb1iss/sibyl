@@ -709,6 +709,57 @@ def delete_context(name: str) -> bool:
     return True
 
 
+class UnknownContextError(Exception):
+    """An explicitly selected context does not exist.
+
+    Selecting a context by name is a statement about which server to touch, so
+    a name that resolves to nothing must stop the command. Falling back to the
+    active context would silently retarget the write at whatever server happens
+    to be active, which is how a typo in `-C staging` reaches production.
+    """
+
+    def __init__(self, name: str, source: str = "--context") -> None:
+        self.name = name
+        self.source = source
+        self.known = [ctx.name for ctx in list_contexts()]
+        known = ", ".join(self.known) if self.known else "none configured"
+        super().__init__(f"Unknown context '{name}' (from {source}). Known contexts: {known}.")
+
+
+def require_known_context(name: str | None, source: str = "--context") -> None:
+    """Reject an explicitly named context that does not exist."""
+    if name and get_context(name) is None:
+        raise UnknownContextError(name, source)
+
+
+def explicit_context_selection() -> tuple[str, str] | None:
+    """Return the explicitly selected context and where the selection came from."""
+    from sibyl_cli.state import get_context_override
+
+    if override := get_context_override():
+        return override, _override_source()
+    if pinned := resolve_context_from_cwd():
+        return pinned, "directory pin"
+    return None
+
+
+def _override_source() -> str:
+    """Name the surface the override came from.
+
+    Typer fills the --context parameter from SIBYL_CONTEXT, so the stored
+    override cannot tell them apart; argv can.
+    """
+    import os
+    import sys
+
+    for arg in sys.argv[1:]:
+        if arg in {"-C", "--context"} or arg.startswith("--context="):
+            return "--context"
+    if os.environ.get("SIBYL_CONTEXT", "").strip():
+        return "SIBYL_CONTEXT"
+    return "--context"
+
+
 def resolve_context_name() -> str | None:
     """Resolve the effective context name across all selection inputs.
 
@@ -719,7 +770,10 @@ def resolve_context_name() -> str | None:
 
     Returns None in legacy mode (no context configured or selected).
     """
-    from sibyl_cli.state import get_context_override
+    from sibyl_cli.state import context_selection_ignored, get_context_override
+
+    if context_selection_ignored():
+        return get_active_context_name()
 
     override = get_context_override()
     if override:
