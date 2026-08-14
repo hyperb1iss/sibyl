@@ -7418,3 +7418,53 @@ def test_the_arm_refuses_every_client_side_reshaping_flag() -> None:
                     name: value,
                 }
             )
+
+
+def test_the_arm_conflict_guard_does_not_depend_on_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A configuration conflict is a property of the configuration.
+
+    agentic_traversal is separately gated on an OpenAI key being exported. With
+    the guard sitting beside the flags it names, that key check ran first, so
+    naive-plus-traversal refused with a "control arm" error only on a machine
+    that happened to export a key and reported an unrelated missing-key error
+    everywhere else. CI has no key, so the guard was untested exactly where it
+    mattered.
+    """
+
+    module = _load_memory_module()
+    for variable in ("OPENAI_API_KEY", "SIBYL_OPENAI_API_KEY"):
+        monkeypatch.delenv(variable, raising=False)
+
+    with pytest.raises(ValueError, match="control arm"):
+        module.SibylLiveApiMemory(
+            {
+                "allow_localhost": True,
+                "project_id": "project_test",
+                "retrieval_mode": "naive",
+                "agentic_traversal": True,
+            }
+        )
+
+
+def test_the_arm_conflict_message_names_every_offending_setting() -> None:
+    module = _load_memory_module()
+
+    conflicts = module._naive_arm_conflicts(
+        {
+            "agentic_traversal": True,
+            "typed_stream_retrieval": True,
+            "semantic_prior_rescue_weight": 0.5,
+            "neighbor_stitch_items": 2,
+        }
+    )
+
+    # Sorted so the message is stable, and neighbor_stitch_items is absent
+    # because its shipped default is already non-zero: listing it would refuse
+    # every plain naive run.
+    assert conflicts == [
+        "agentic_traversal",
+        "semantic_prior_rescue_weight",
+        "typed_stream_retrieval",
+    ]

@@ -129,11 +129,12 @@ DEFAULT_EVIDENCE_COMPOSITION_MODE = "shared_relevance"
 EVIDENCE_COMPOSITION_MODES = frozenset({"reserved_support", "shared_relevance"})
 DEFAULT_SOURCE_EVIDENCE_BUNDLING = False
 DEFAULT_RETRIEVAL_MODE = "fast"
+NAIVE_RETRIEVAL_MODE = "naive"
 # `naive` is the 1.3 Phase 0 control arm: BM25 plus dense KNN plus plain RRF
 # plus a tight pack, served with no traversal, synthesis, query planning, or
 # coverage ranking. It is a server-side mode, so selecting it here changes what
 # the pack and evidence come back holding, not how this adapter composes them.
-RETRIEVAL_MODES = frozenset({"accurate", "fast", "naive"})
+RETRIEVAL_MODES = frozenset({"accurate", "fast", NAIVE_RETRIEVAL_MODE})
 DEFAULT_TYPED_STREAM_RETRIEVAL = False
 DEFAULT_TYPED_STREAM_LIMIT = 8
 # The distilled-note lane, retrieved on its own request. It is not the raw
@@ -3167,6 +3168,46 @@ def load_api_credentials_file(path: Path) -> dict[str, str]:
     return credentials
 
 
+# Settings that would leave the naive arm's name on a run the arm did not
+# produce. The first two retrieve outside the arm entirely; the rest reshape
+# what it returned, and under naive the client renders the server's candidates
+# verbatim so every one of them is inert. They refuse rather than being ignored:
+# a screen that passes one believes it is tuning something, and a flag that
+# reads as applied while doing nothing is how an arm ends up described wrongly
+# in a writeup. Every entry ships an inert default, so a plain naive run needs
+# no extra arguments.
+_NAIVE_CONFLICTING_BOOL_PARAMS = (
+    ("typed_stream_retrieval", DEFAULT_TYPED_STREAM_RETRIEVAL),
+    ("agentic_traversal", DEFAULT_AGENTIC_TRAVERSAL),
+    ("state_part_refinement", DEFAULT_STATE_PART_REFINEMENT),
+    ("neighbor_stitch_spread", DEFAULT_NEIGHBOR_STITCH_SPREAD),
+    ("neighbor_support_exempt", DEFAULT_NEIGHBOR_SUPPORT_EXEMPT),
+    ("neighbor_trajectory_preserving", DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING),
+    ("source_evidence_bundling", DEFAULT_SOURCE_EVIDENCE_BUNDLING),
+)
+_NAIVE_CONFLICTING_NUMERIC_PARAMS = (
+    ("state_part_completion_items", DEFAULT_STATE_PART_COMPLETION_ITEMS),
+    ("neighbor_support_overflow_items", DEFAULT_NEIGHBOR_SUPPORT_OVERFLOW_ITEMS),
+    ("semantic_prior_rescue_weight", DEFAULT_SEMANTIC_PRIOR_RESCUE_WEIGHT),
+)
+
+
+def _naive_arm_conflicts(memory_params: dict[str, object]) -> list[str]:
+    """Names of the requested settings the control arm cannot honour."""
+
+    conflicts = [
+        name
+        for name, default in _NAIVE_CONFLICTING_BOOL_PARAMS
+        if _param_bool(memory_params, name, default)
+    ]
+    conflicts.extend(
+        name
+        for name, default in _NAIVE_CONFLICTING_NUMERIC_PARAMS
+        if _param_float(memory_params, name, float(default)) > 0
+    )
+    return sorted(conflicts)
+
+
 @register_memory
 class SibylLiveApiMemory(Memory):
     memory_type = "sibyl_live_api"
@@ -3404,6 +3445,22 @@ class SibylLiveApiMemory(Memory):
                 f"expected one of {sorted(RETRIEVAL_MODES)}"
             )
             raise ValueError(msg)
+        # Fired here, immediately after the mode is validated, rather than
+        # beside the flags it names. Those are assigned further down and one of
+        # them sits behind an environment check for an API key, so a guard
+        # placed there refuses a naive-plus-traversal run only on a machine that
+        # happens to export the key and reports an unrelated missing-key error
+        # everywhere else. A configuration conflict is a property of the
+        # configuration, so it is read straight from the parameters and answers
+        # the same way on every machine.
+        if self.retrieval_mode == NAIVE_RETRIEVAL_MODE:
+            conflicting = _naive_arm_conflicts(memory_params)
+            if conflicting:
+                msg = (
+                    "retrieval_mode=naive is the control arm and cannot run with "
+                    f"{', '.join(conflicting)}: disable them to race the arm"
+                )
+                raise ValueError(msg)
         self.retrieval_max_planned_queries = _param_int(
             memory_params,
             "retrieval_max_planned_queries",
@@ -3526,44 +3583,6 @@ class SibylLiveApiMemory(Memory):
                 "weight*1.0 to a zero-coverage candidate, and past 1.0 it can outvote "
                 "genuine vocabulary winners instead of rescuing the uncovered tail"
             )
-        if self.retrieval_mode == "naive":
-            # Both of these issue their own retrieval outside the arm: the typed
-            # stream makes a second pack request pinned to fast, and agentic
-            # traversal widens the pool with model-driven follow-up searches. A
-            # run carrying either would report the arm's name over a pool the
-            # arm did not produce, so the conflict fails loudly here rather than
-            # silently at read time.
-            # Two families. The first retrieves outside the arm entirely. The
-            # second reshapes what the arm returned, and under naive the client
-            # renders the server's candidates verbatim, so every one of these is
-            # inert by construction. They still refuse rather than being
-            # silently ignored: a screen that passes a reshaping flag believes
-            # it is tuning something, and a flag that reads as applied while
-            # doing nothing is how an arm ends up described wrongly in a
-            # writeup. Only flags whose shipped default is already inert appear
-            # here, so a plain naive run needs no extra arguments.
-            conflicting = [
-                name
-                for name, enabled in (
-                    ("typed_stream_retrieval", self.typed_stream_retrieval),
-                    ("agentic_traversal", self.agentic_traversal),
-                    ("state_part_refinement", self.state_part_refinement),
-                    ("neighbor_stitch_spread", self.neighbor_stitch_spread),
-                    ("neighbor_support_exempt", self.neighbor_support_exempt),
-                    ("neighbor_trajectory_preserving", self.neighbor_trajectory_preserving),
-                    ("source_evidence_bundling", self.source_evidence_bundling),
-                    ("state_part_completion_items", self.state_part_completion_items),
-                    ("neighbor_support_overflow_items", self.neighbor_support_overflow_items),
-                    ("semantic_prior_rescue_weight", self.semantic_prior_rescue_weight),
-                )
-                if enabled
-            ]
-            if conflicting:
-                msg = (
-                    "retrieval_mode=naive is the control arm and cannot run with "
-                    f"{', '.join(sorted(conflicting))}: disable them to race the arm"
-                )
-                raise ValueError(msg)
         self.typed_pool = _param_str(memory_params, "typed_pool", DEFAULT_TYPED_POOL)
         if self.typed_pool not in SUPPORTED_TYPED_POOLS:
             raise ValueError(f"typed_pool must be one of {sorted(SUPPORTED_TYPED_POOLS)}")
@@ -4566,7 +4585,7 @@ class SibylLiveApiMemory(Memory):
             "state_part_completion_items",
             DEFAULT_STATE_PART_COMPLETION_ITEMS,
         )
-        if getattr(self, "retrieval_mode", DEFAULT_RETRIEVAL_MODE) == "naive":
+        if getattr(self, "retrieval_mode", DEFAULT_RETRIEVAL_MODE) == NAIVE_RETRIEVAL_MODE:
             return self._render_naive_verbatim_context(query=query, results=results)
         assembled_results, assembly_metadata = assemble_context_results(
             results,
