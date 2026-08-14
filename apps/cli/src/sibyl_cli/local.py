@@ -429,6 +429,7 @@ def stop(
         success("Sibyl stopped")
     else:
         error("Failed to stop Sibyl")
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -572,5 +573,6 @@ def setup(
         print_prompt_snippet()
         return
 
-    if setup_agent_integration():
-        print_prompt_snippet()
+    if not setup_agent_integration():
+        raise typer.Exit(1)
+    print_prompt_snippet()

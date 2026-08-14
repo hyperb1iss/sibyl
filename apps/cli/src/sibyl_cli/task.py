@@ -29,6 +29,7 @@ from sibyl_cli.common import (
     info,
     pagination_hint,
     print_json,
+    print_json_result,
     print_mutation_receipt,
     resolve_content_input,
     run_async,
@@ -46,16 +47,6 @@ app = typer.Typer(
 
 # Use centralized handler from common.py
 _handle_client_error = handle_client_error
-
-
-def _output_response(response: dict, json_out: bool, success_msg: str | None = None) -> None:
-    """Output response as JSON or table message."""
-    if json_out:
-        print_json(response)
-    elif success_msg and response.get("success"):
-        success(success_msg)
-    elif not response.get("success"):
-        error(f"Failed: {response.get('message', 'Unknown error')}")
 
 
 def _normalize_created_task_response(
@@ -572,7 +563,7 @@ def start_task(
             response = await client.start_task(resolved_id, assignee, **revision_kwargs)
 
             if json_out:
-                print_json(response)
+                print_json_result(response, succeeded=bool(response.get("success")))
                 return
 
             if response.get("success"):
@@ -587,6 +578,7 @@ def start_task(
                 _display_task_panel(entity)
             else:
                 error(f"Failed to start task: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -621,7 +613,7 @@ def block_task(
             response = await client.block_task(resolved_id, reason, **revision_kwargs)
 
             if json_out:
-                print_json(response)
+                print_json_result(response, succeeded=bool(response.get("success")))
                 return
 
             if response.get("success"):
@@ -629,6 +621,7 @@ def block_task(
                 print_mutation_receipt(response)
             else:
                 error(f"Failed to block task: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -662,7 +655,7 @@ def unblock_task(
             response = await client.unblock_task(resolved_id, **revision_kwargs)
 
             if json_out:
-                print_json(response)
+                print_json_result(response, succeeded=bool(response.get("success")))
                 return
 
             if response.get("success"):
@@ -670,6 +663,7 @@ def unblock_task(
                 print_mutation_receipt(response)
             else:
                 error(f"Failed to unblock task: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -716,7 +710,7 @@ def submit_review(
             )
 
             if json_out:
-                print_json(response)
+                print_json_result(response, succeeded=bool(response.get("success")))
                 return
 
             if response.get("success"):
@@ -724,6 +718,7 @@ def submit_review(
                 print_mutation_receipt(response)
             else:
                 error(f"Failed to submit for review: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -796,7 +791,7 @@ def complete_task(
             )
 
             if json_out:
-                print_json(response)
+                print_json_result(response, succeeded=bool(response.get("success")))
                 return
 
             if response.get("success"):
@@ -813,6 +808,7 @@ def complete_task(
                     )
             else:
                 error(f"Failed to complete task: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -1029,7 +1025,10 @@ def create_task(
             )
 
             if json_out:
-                print_json(normalized_response)
+                print_json_result(
+                    normalized_response,
+                    succeeded=bool(response.get("success") or normalized_response.get("id")),
+                )
                 return
 
             task_id = normalized_response.get("id")
@@ -1042,6 +1041,7 @@ def create_task(
                     info(f"Dependencies: {', '.join(dep_list)}")
             else:
                 error(f"Failed to create task: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -1121,7 +1121,7 @@ def update_task(
                     "--description, --assignee, --epic, --feature, --tags, --tech, "
                     "--add-dep, or --remove-dep"
                 )
-                return
+                raise typer.Exit(1)
 
             resolved_id = await _resolve_task_id(client, task_id)
             assignees = [assignee] if assignee else None
@@ -1151,7 +1151,7 @@ def update_task(
             )
 
             if json_out:
-                print_json(response)
+                print_json_result(response, succeeded=bool(response.get("success")))
                 return
 
             if response.get("success"):
@@ -1160,6 +1160,7 @@ def update_task(
                 info(f"Fields: {', '.join(response.get('data', {}).keys())}")
             else:
                 error(f"Failed to update task: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -1236,14 +1237,20 @@ def add_note(
             )
 
             if json_out:
-                print_json(response)
+                print_json_result(
+                    response,
+                    succeeded=bool(response.get("id") or response.get("success")),
+                )
                 return
 
             if response.get("id"):
                 success(f"Note added: {response['id']}")
                 print_mutation_receipt(response)
+            elif response.get("success"):
+                success(f"Note added to task: {resolved_id}")
             else:
                 error("Failed to add note")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)

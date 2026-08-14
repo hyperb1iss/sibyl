@@ -36,6 +36,8 @@ if TYPE_CHECKING:
 
 # Shared console instance (for styled output only, NOT for JSON)
 console = Console(width=160) if not sys.stdout.isatty() else Console()
+# Second console for notices that must never land in a --json pipe.
+err_console = Console(stderr=True, width=160) if not sys.stderr.isatty() else Console(stderr=True)
 DEFAULT_CONTENT_FILE_MAX_SIZE = 1_048_576
 CONTENT_FILE_BINARY_CHECK_BYTES = 8192
 
@@ -63,6 +65,17 @@ def print_json(data: object) -> None:
 
     clean_data = _strip_embeddings(data)
     print(json.dumps(clean_data, indent=2, default=str, ensure_ascii=False))
+
+
+def print_json_result(data: object, *, succeeded: bool) -> None:
+    """Emit a machine-readable result and let a refusal reach the exit status.
+
+    Agents and CI call --json, so a refused write has to move $? on this path
+    too and not only in the table renderer.
+    """
+    print_json(data)
+    if not succeeded:
+        raise typer.Exit(1)
 
 
 def print_mutation_receipt(response: Mapping[str, object]) -> None:
@@ -198,6 +211,60 @@ def info(message: str) -> None:
 def hint(message: str) -> None:
     """Print a hint message."""
     console.print(f"[{ELECTRIC_YELLOW}]Hint:[/{ELECTRIC_YELLOW}] {message}")
+
+
+def pending_writes_summary(count: int) -> str:
+    plural = "s" if count != 1 else ""
+    return (
+        f"{count} write{plural} buffered locally and not saved on the server. "
+        "Run 'sibyl pending-writes flush' to replay them."
+    )
+
+
+_pending_writes_reported = False
+
+
+def mark_pending_writes_reported() -> None:
+    """Claim the queue report for a command that already made it.
+
+    `sibyl health`, `sibyl doctor`, `pending-writes list` and `flush` all render
+    the queue themselves, so the end-of-command notice would repeat them
+    verbatim. `discard` deliberately does not claim it, because it can leave the
+    queue untouched and the notice is then the only thing that says so.
+    """
+    global _pending_writes_reported
+    _pending_writes_reported = True
+
+
+def notify_pending_writes() -> None:
+    """Warn on stderr when writes are sitting in the local buffer.
+
+    Runs at the end of every command, including the ones that just filled
+    the buffer, so a queued write is never silent.
+
+    Nothing in here may change the outcome. It runs from a finally block, so
+    any exception that escapes replaces the status the command already earned,
+    and a decorative notice turning a success into a failure is worse than no
+    notice at all. Rich reports a closed stream as ValueError and converts a
+    broken pipe into SystemExit, so neither an OSError guard nor a plain
+    `except Exception` is enough on its own.
+    """
+    from sibyl_cli.pending_writes import pending_write_count
+
+    if _pending_writes_reported:
+        return
+    try:
+        count = pending_write_count()
+        if count <= 0:
+            return
+        err_console.print(
+            f"[{ELECTRIC_YELLOW}]![/{ELECTRIC_YELLOW}] {pending_writes_summary(count)}"
+        )
+    except (Exception, SystemExit):
+        return
+    # Claimed only once the line is out, so a queue we failed to read stays
+    # unclaimed and a later caller can still report it.
+    mark_pending_writes_reported()
 
 
 def print_db_hint() -> None:

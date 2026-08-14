@@ -22,6 +22,7 @@ from sibyl_cli.common import (
     handle_client_error,
     info,
     print_json,
+    print_json_result,
     run_async,
     success,
 )
@@ -481,7 +482,7 @@ def create_epic(
             )
 
             if json_out:
-                print_json(response)
+                print_json_result(response, succeeded=bool(response.get("id")))
                 return
 
             if response.get("id"):
@@ -490,6 +491,7 @@ def create_epic(
                     info(f"Lead: {assignee}")
             else:
                 error("Failed to create epic")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -522,13 +524,17 @@ def start_epic(
             response = await client.update_entity(resolved_id, metadata=metadata)
 
             if json_out:
-                print_json(response)
+                print_json_result(
+                    response,
+                    succeeded=bool(response.get("success") or response.get("id")),
+                )
                 return
 
             if response.get("success") or response.get("id"):
                 success(f"Epic started: {epic_id}")
             else:
                 error(f"Failed to start epic: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -563,7 +569,10 @@ def complete_epic(
             response = await client.update_entity(resolved_id, metadata=metadata)
 
             if json_out:
-                print_json(response)
+                print_json_result(
+                    response,
+                    succeeded=bool(response.get("success") or response.get("id")),
+                )
                 return
 
             if response.get("success") or response.get("id"):
@@ -572,6 +581,7 @@ def complete_epic(
                     info("Learnings captured")
             else:
                 error(f"Failed to complete epic: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -605,13 +615,17 @@ def archive_epic(
             response = await client.update_entity(resolved_id, metadata=metadata)
 
             if json_out:
-                print_json(response)
+                print_json_result(
+                    response,
+                    succeeded=bool(response.get("success") or response.get("id")),
+                )
                 return
 
             if response.get("success") or response.get("id"):
                 success(f"Epic archived: {resolved_id}")
             else:
                 error(f"Failed to archive epic: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -649,7 +663,7 @@ def update_epic(
                 error(
                     "No fields to update. Use --status, --priority, --title, --assignee, or --tags"
                 )
-                return
+                raise typer.Exit(1)
 
             resolved_id = await _resolve_epic_id(client, epic_id)
 
@@ -675,7 +689,10 @@ def update_epic(
             response = await client.update_entity(resolved_id, **updates)
 
             if json_out:
-                print_json(response)
+                print_json_result(
+                    response,
+                    succeeded=bool(response.get("success") or response.get("id")),
+                )
                 return
 
             if response.get("success") or response.get("id"):
@@ -683,6 +700,7 @@ def update_epic(
                 info(f"Fields: {', '.join(updates.keys())}")
             else:
                 error(f"Failed to update epic: {response.get('message', 'Unknown error')}")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)

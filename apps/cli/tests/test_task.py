@@ -420,7 +420,9 @@ def test_task_complete_json_preserves_api_policy_metadata(
         ],
     )
 
-    assert result.exit_code == 0
+    # A denied completion is a failure on --json too, and the payload still
+    # carries the policy metadata a caller needs to act on it.
+    assert result.exit_code == 1
     payload = json.loads(result.stdout)
     assert payload["data"]["policy_reason"] == "unverified_membership"
 

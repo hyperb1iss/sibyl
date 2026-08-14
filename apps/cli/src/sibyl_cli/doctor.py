@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 import httpx
 import typer
 
-from sibyl_cli import config_store
+from sibyl_cli import config_store, state
 from sibyl_cli.client import SibylClientError, get_client
 from sibyl_cli.common import (
     ELECTRIC_YELLOW,
@@ -498,6 +498,24 @@ def _check_agent_prompt_content() -> DoctorCheck:
     )
 
 
+def _check_pending_writes() -> DoctorCheck:
+    """Surface the local write buffer, where refused writes accumulate unseen."""
+    from sibyl_cli.common import mark_pending_writes_reported
+    from sibyl_cli.pending_writes import pending_write_count, pending_writes_dir
+
+    mark_pending_writes_reported()
+    count = pending_write_count()
+    if not count:
+        return DoctorCheck("pending-writes", "pass", "No writes are buffered locally.")
+    plural = "s" if count != 1 else ""
+    return DoctorCheck(
+        "pending-writes",
+        "warn",
+        f"{count} write{plural} buffered locally and not saved on the server.",
+        f"Replay with 'sibyl pending-writes flush'; queued at {pending_writes_dir()}.",
+    )
+
+
 def collect_agent_checks() -> list[DoctorCheck]:
     """Filesystem-only checks: skill stub, hooks, and CLAUDE.md content."""
     return [
@@ -512,6 +530,19 @@ async def collect_doctor_checks(
     *, timeout: float, write_test: bool, skip_agent: bool = False
 ) -> list[DoctorCheck]:
     checks, context = _load_config_context()
+    if state.context_selection_ignored():
+        # The selection the user asked for does not exist. Every probe below
+        # would be aimed at the active context instead, which is a different
+        # server than the one being diagnosed, so this stays on the filesystem.
+        checks.append(
+            DoctorCheck(
+                "context-selection",
+                "fail",
+                "The selected context does not exist, so server probes were skipped.",
+                "Run 'sibyl config context list', then re-run doctor with a known context.",
+            )
+        )
+        context = None
     if context is not None:
         health = await _check_public_health(context, timeout)
         checks.append(health)
@@ -526,6 +557,7 @@ async def collect_doctor_checks(
                 )
             )
         checks.append(await _check_write_probe(write_test))
+    checks.append(_check_pending_writes())
     if not skip_agent:
         checks.extend(collect_agent_checks())
     return checks

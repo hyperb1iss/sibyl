@@ -18,8 +18,9 @@ from uuid import UUID
 
 import typer
 from rich.markup import escape
+from typer.core import TyperGroup
 
-from sibyl_cli import config_store
+from sibyl_cli import config_store, state
 from sibyl_cli.archive import app as archive_app
 from sibyl_cli.auth import app as auth_app
 from sibyl_cli.auth import clear_token_cmd as logout_cmd
@@ -34,7 +35,11 @@ from sibyl_cli.common import (
     error,
     handle_client_error,
     info,
+    mark_pending_writes_reported,
+    notify_pending_writes,
+    pending_writes_summary,
     print_json,
+    print_json_result,
     print_mutation_receipt,
     resolve_content_input,
     run_async,
@@ -74,6 +79,7 @@ from sibyl_cli.memory_display import (
 )
 from sibyl_cli.org import app as org_app
 from sibyl_cli.pending import app as pending_writes_app
+from sibyl_cli.pending_writes import pending_write_count, pending_write_status
 from sibyl_cli.project import app as project_app
 from sibyl_cli.project_refs import resolve_project_reference
 from sibyl_cli.session import app as session_app
@@ -103,9 +109,44 @@ def version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
+def _resolve_command_path(group: Any, ctx: Any, args: list[str]) -> tuple[str, ...]:
+    """Walk the command tree as far as the arguments unambiguously reach.
+
+    Resolution stops at the first token that is not a subcommand of the group
+    reached so far, which leaves an option-interleaved invocation with a short
+    path. Callers treat a short path as unrecognized, so the ambiguity fails
+    closed rather than granting a leaf's privileges to its group.
+    """
+    path: list[str] = []
+    command = group
+    for arg in args:
+        lookup = getattr(command, "get_command", None)
+        if lookup is None:
+            break
+        sub = lookup(ctx, arg)
+        if sub is None:
+            break
+        path.append(getattr(sub, "name", None) or arg)
+        command = sub
+    return tuple(path)
+
+
+class SibylRootGroup(TyperGroup):
+    """Records the resolved subcommand path before any callback runs."""
+
+    def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
+        rest = super().parse_args(ctx, args)
+        protected = getattr(ctx, "_protected_args", None)
+        if protected is None:
+            protected = getattr(ctx, "protected_args", [])
+        state.set_command_path(_resolve_command_path(self, ctx, [*protected, *ctx.args]))
+        return rest
+
+
 # Main app
 app = typer.Typer(
     name="sibyl",
+    cls=SibylRootGroup,
     help="Sibyl - Oracle of Development Wisdom (CLI Client)",
     add_completion=False,
     no_args_is_help=False,
@@ -1346,7 +1387,7 @@ def _handle_client_error(e: SibylClientError) -> None:
             f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl auth login[/bold {NEON_CYAN}]   [dim]Log in[/dim]"
         )
         console.print(
-            f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl auth signup[/bold {NEON_CYAN}]  [dim]Create account[/dim]"
+            f"    [{NEON_CYAN}]›[/{NEON_CYAN}] [bold {NEON_CYAN}]sibyl auth local-signup[/bold {NEON_CYAN}]  [dim]Create a local account[/dim]"
         )
         console.print()
     elif e.status_code == 403:
@@ -1364,6 +1405,65 @@ def _handle_client_error(e: SibylClientError) -> None:
 # ============================================================================
 # Global callback for context override
 # ============================================================================
+
+
+# Leaves whose whole subject is the local config file. None of them opens a
+# connection, so dropping a broken selection cannot retarget anything. Groups
+# never appear here: `sibyl context` is the network recall command and
+# `sibyl config context pack` fetches a pack, while `sibyl config context list`
+# reads a TOML file, so the privilege belongs to the leaf and not to the name
+# it shares with a group.
+_LOCAL_CONTEXT_LEAVES = (
+    "list",
+    "show",
+    "create",
+    "use",
+    "update",
+    "delete",
+    "link",
+    "unlink",
+    "clear",
+)
+_LOCAL_CONFIG_LEAVES = ("init", "show", "get", "set", "path", "reset", "edit")
+_CONTEXT_REPAIR_COMMANDS = frozenset(
+    [
+        ("init",),
+        # doctor stays reachable because it is what you run when the selection
+        # is broken, and it drops to filesystem checks once that happens.
+        ("doctor",),
+        *[("config", leaf) for leaf in _LOCAL_CONFIG_LEAVES],
+        *[("config", "context", leaf) for leaf in _LOCAL_CONTEXT_LEAVES],
+        *[("contexts", leaf) for leaf in _LOCAL_CONTEXT_LEAVES],
+    ]
+)
+
+
+def _reject_unknown_context() -> None:
+    """Stop before any command logic when the selected context does not exist."""
+    try:
+        selection = config_store.explicit_context_selection()
+        if selection is None:
+            return
+        name, source = selection
+        if config_store.get_context(name) is not None:
+            return
+    except (OSError, RuntimeError):
+        # Config is unreadable, so there is nothing to validate against. The
+        # resolver still refuses to fall through if a name is used later.
+        return
+    if state.command_path() in _CONTEXT_REPAIR_COMMANDS:
+        warn(f"Selected context '{name}' ({source}) does not exist; ignoring it.")
+        state.ignore_context_selection()
+        return
+
+    known = [c.name for c in config_store.list_contexts()]
+    error(f"Unknown context '{name}' selected by {source}.")
+    if known:
+        info(f"Known contexts: {', '.join(known)}")
+        info("Switch with: sibyl context use <name>")
+    else:
+        info("No contexts are configured. Create one with: sibyl init")
+    raise typer.Exit(1)
 
 
 @app.callback(invoke_without_command=True)
@@ -1393,6 +1493,7 @@ def main_callback(
     if context:
         set_context_override(context)
 
+    _reject_unknown_context()
     _emit_command_marker(ctx)
 
     # Show help if no command
@@ -1481,6 +1582,16 @@ def _print_version_lines(data: dict[str, object]) -> None:
         warn(f"Server is newer than this CLI ({server_text} > {current}) — run `sibyl update`.")
 
 
+def _print_pending_write_health() -> None:
+    """Report the local write buffer, the queue a failed write lands in."""
+    mark_pending_writes_reported()
+    count = pending_write_count()
+    if count:
+        warn(pending_writes_summary(count))
+    else:
+        console.print("  [dim]Pending writes: 0[/dim]")
+
+
 @app.command()
 def health(
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
@@ -1493,13 +1604,19 @@ def health(
             async with get_client() as client:
                 data = await client.get("/health")
 
-                if json_output:
-                    print_json(data)
-                    return
                 status = data.get("status", "unknown")
                 server = data.get("server_name", "sibyl")
+                healthy = status == "healthy"
 
-                if status == "healthy":
+                if json_output:
+                    mark_pending_writes_reported()
+                    print_json_result(
+                        {**data, "pending_writes": pending_write_status()},
+                        succeeded=healthy,
+                    )
+                    return
+
+                if healthy:
                     success(f"{server} is healthy")
                     _print_version_lines(data)
                     if counts := data.get("counts"):
@@ -1509,6 +1626,10 @@ def health(
                         )
                 else:
                     error(f"{server} is unhealthy: {status}")
+
+                _print_pending_write_health()
+
+                if not healthy:
                     raise typer.Exit(1)
         except SibylClientError as e:
             _handle_client_error(e)
@@ -2089,7 +2210,10 @@ def note_alias(
                         author or "",
                     )
                     if json_output:
-                        print_json(response)
+                        print_json_result(
+                            response,
+                            succeeded=bool(response.get("id") or response.get("success")),
+                        )
                         return
                     note_id = response.get("id")
                     if note_id:
@@ -2098,6 +2222,7 @@ def note_alias(
                         success(f"Note added to task: {resolved_id}")
                     else:
                         error("Failed to add note")
+                        raise typer.Exit(1)
                     return
 
                 parsed_tags = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
@@ -2343,10 +2468,15 @@ def synthesis_verify_command(
         try:
             async with get_client() as client:
                 data = await client.synthesis_draft(**options, output_format="json")
+            verification = cast("dict[str, object]", data.get("verification") or {})
+            passed = str(verification.get("status") or "unknown") == "pass"
+
             if json_output:
-                print_json(data)
+                print_json_result(data, succeeded=passed)
                 return
             _print_synthesis_verification(cast("dict[str, object]", data))
+            if not passed:
+                raise typer.Exit(1)
         except SibylClientError as e:
             _handle_client_error(e)
 
@@ -2423,10 +2553,15 @@ def synthesis_remember_command(
                     scope_key=scope_key,
                     tags=_parse_csv_ids(tags),
                 )
+            artifact = cast("dict[str, object]", data.get("artifact") or {})
+            remembered = bool(artifact.get("remembered_memory_id"))
+
             if json_output:
-                print_json(data)
+                print_json_result(data, succeeded=remembered)
                 return
             _print_synthesis_remember(cast("dict[str, object]", data))
+            if not remembered:
+                raise typer.Exit(1)
         except SibylClientError as e:
             _handle_client_error(e)
 
@@ -3958,7 +4093,14 @@ def version() -> None:
 
 def main() -> None:
     """CLI entry point."""
-    app()
+    try:
+        app()
+    except config_store.UnknownContextError as exc:
+        # Backstop for any resolver reached without passing the root callback.
+        error(str(exc))
+        raise typer.Exit(1) from exc
+    finally:
+        notify_pending_writes()
 
 
 if __name__ == "__main__":

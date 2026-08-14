@@ -7,8 +7,8 @@ from time import time
 
 from sibyl_cli.auth_store import credential_scope, read_server_credentials
 from sibyl_cli.config_store import (
-    get_active_context,
     get_effective_server_url,
+    resolve_effective_context,
     resolve_project_from_cwd,
 )
 
@@ -38,7 +38,7 @@ def _auth_status(
 
 
 def quick_context_payload() -> dict[str, object]:
-    active = get_active_context()
+    active = resolve_effective_context()
     linked_project = resolve_project_from_cwd()
     server_url = active.server_url if active else get_effective_server_url()
     effective_project = linked_project or (active.default_project if active else None)

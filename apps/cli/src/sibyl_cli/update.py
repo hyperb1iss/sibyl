@@ -140,7 +140,7 @@ def get_server_version() -> str | None:
     try:
         from sibyl_cli import config_store
 
-        base_url = config_store.get_server_url()
+        base_url = config_store.get_effective_server_url()
     except Exception:
         return None
     if not base_url:
@@ -250,8 +250,9 @@ def update_cli() -> bool:
         # Get new version
         new_version = get_current_cli_version()
         success(f"CLI updated to {new_version}")
-        sync_skills_after_cli_update()
-        return True
+        # The binary landed but its skills did not, so the command as a whole
+        # did not do what it said it would.
+        return sync_skills_after_cli_update()
     else:
         error("Failed to update CLI")
         if result.stderr:
@@ -507,9 +508,11 @@ def update(
             success("Skills refreshed")
         else:
             warn("Skills refresh had issues")
+            all_success = False
 
     console.print()
     if all_success:
         success("Update complete!")
     else:
         warn("Update completed with some issues")
+        raise typer.Exit(1)

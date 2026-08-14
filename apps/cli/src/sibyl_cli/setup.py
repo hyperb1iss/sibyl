@@ -326,6 +326,8 @@ def setup_agent_integration(verbose: bool = True) -> bool:
         )
         console.print()
 
+    hooks_installed = True
+
     # Determine source - prefer dev symlinks, fall back to package data
     repo_dir = find_sibyl_repo()
     data_dir = get_package_data_dir()
@@ -346,9 +348,15 @@ def setup_agent_integration(verbose: bool = True) -> bool:
 
         # Install hooks
         if install_hooks_symlink(repo_dir):
-            if configure_claude_hooks() and verbose:
-                success("Installed Claude Code hooks")
+            if configure_claude_hooks():
+                if verbose:
+                    success("Installed Claude Code hooks")
+            else:
+                hooks_installed = False
+                if verbose:
+                    warn("Could not configure Claude Code hooks")
         else:
+            hooks_installed = False
             if verbose:
                 warn("Could not find hooks in repo")
 
@@ -363,9 +371,15 @@ def setup_agent_integration(verbose: bool = True) -> bool:
 
         # Install hooks
         if install_hooks_copy(data_dir):
-            if configure_claude_hooks() and verbose:
-                success("Installed Claude Code hooks")
+            if configure_claude_hooks():
+                if verbose:
+                    success("Installed Claude Code hooks")
+            else:
+                hooks_installed = False
+                if verbose:
+                    warn("Could not configure Claude Code hooks")
         else:
+            hooks_installed = False
             if verbose:
                 warn("No embedded hooks found in package")
 
@@ -379,14 +393,23 @@ def setup_agent_integration(verbose: bool = True) -> bool:
 
     if verbose:
         console.print()
-        success("Sibyl integration setup complete!")
+        if hooks_installed:
+            success("Sibyl integration setup complete!")
+        else:
+            # Claiming completion under a warning that hooks are missing is the
+            # same untruth as exiting 0 on a refusal, one layer up.
+            warn("Sibyl skills installed; hooks were not.")
         console.print()
-        console.print(f"  [{NEON_CYAN}]Claude Code:[/{NEON_CYAN}]  Skills and hooks installed")
+        claude_line = "Skills and hooks installed" if hooks_installed else "Skills installed only"
+        console.print(f"  [{NEON_CYAN}]Claude Code:[/{NEON_CYAN}]  {claude_line}")
         console.print(f"  [{NEON_CYAN}]Codex CLI:[/{NEON_CYAN}]    Skills installed (no hooks)")
         console.print()
-        console.print(f"[{CORAL}]Restart Claude Code to activate hooks.[/{CORAL}]")
+        if hooks_installed:
+            console.print(f"[{CORAL}]Restart Claude Code to activate hooks.[/{CORAL}]")
 
-    return True
+    # Hooks are half of what this command installs, so a run that skipped them
+    # is not a success its caller can report as one.
+    return hooks_installed
 
 
 def print_prompt_snippet() -> None:

@@ -524,27 +524,31 @@ Using legacy server.url from config
 
 ## Context Priority
 
-When resolving project context, the CLI checks in this order:
+When resolving which context a command runs against, the CLI checks in this order:
 
 1. `--context` / `-C` global flag (highest priority)
 2. `SIBYL_CONTEXT` environment variable
-3. Active context's default project
-4. Path-based project link (from current directory)
+3. Directory pin (`sibyl config context link`)
+4. Active context (`sibyl config context use`)
+
+Every one of these takes a context **name**, never a project ID, and a name with no matching context
+stops the command. Nothing falls back to the active context, so a typo cannot send a write to the
+wrong server.
 
 ### Override with Flag
 
 ```bash
-# Use different project for one command
-sibyl --context proj_other task list
-sibyl -C proj_other task list
+# Run one command against another context
+sibyl --context staging task list
+sibyl -C staging task list
 ```
 
 ### Override with Environment
 
 ```bash
-# Use different project for shell session
-export SIBYL_CONTEXT=proj_other
-sibyl task list  # Uses proj_other
+# Use another context for the shell session
+export SIBYL_CONTEXT=staging
+sibyl task list  # Runs against staging
 ```
 
 ---
@@ -586,8 +590,8 @@ sibyl config context create ci \
   --org "$SIBYL_ORG" \
   --use
 
-# Or use environment variable
-export SIBYL_CONTEXT=proj_ci
+# Or select the context by name, without making it active
+export SIBYL_CONTEXT=ci
 sibyl task list --status todo
 ```
 

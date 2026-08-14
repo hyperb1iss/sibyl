@@ -117,6 +117,22 @@ def list_pending_writes() -> list[dict[str, Any]]:
     return writes
 
 
+def pending_write_count() -> int:
+    """Count queued writes without parsing them.
+
+    Runs after every command, so it stays a directory listing, and an
+    unreadable or undeterminable home never turns a successful command into
+    a failing one. Path.home() raises RuntimeError when it cannot resolve.
+    """
+    try:
+        root = pending_writes_dir()
+        if not root.exists():
+            return 0
+        return sum(1 for _ in root.glob("*.json"))
+    except (OSError, RuntimeError):
+        return 0
+
+
 def delete_pending_write(write_id: str) -> bool:
     try:
         path = resolve_pending_write_path(write_id)

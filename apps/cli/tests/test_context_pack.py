@@ -74,7 +74,7 @@ def _context_pack() -> dict:
 @patch("sibyl_cli.context_quick.read_server_credentials")
 @patch("sibyl_cli.context_quick.resolve_project_from_cwd", return_value="project_linked")
 @patch(
-    "sibyl_cli.context_quick.get_active_context",
+    "sibyl_cli.context_quick.resolve_effective_context",
     return_value=Context(
         name="local",
         server_url="http://localhost:3334",
@@ -83,7 +83,7 @@ def _context_pack() -> dict:
     ),
 )
 def test_context_quick_json_returns_flat_local_status(
-    mock_get_active_context: MagicMock,
+    mock_resolve_effective_context: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
     mock_read_server_credentials: MagicMock,
 ) -> None:
@@ -103,7 +103,7 @@ def test_context_quick_json_returns_flat_local_status(
     assert payload["project_source"] == "linked"
     assert payload["auth"] == "valid"
     assert payload["auth_expires_in"] > 0
-    mock_get_active_context.assert_called_once_with()
+    mock_resolve_effective_context.assert_called_once_with()
     mock_resolve_project_from_cwd.assert_called_once_with()
     mock_read_server_credentials.assert_called_once_with(
         "http://localhost:3334/api",
@@ -114,9 +114,9 @@ def test_context_quick_json_returns_flat_local_status(
 @patch("sibyl_cli.context_quick.read_server_credentials", return_value={})
 @patch("sibyl_cli.context_quick.resolve_project_from_cwd", return_value=None)
 @patch("sibyl_cli.context_quick.get_effective_server_url", return_value="http://localhost:3334")
-@patch("sibyl_cli.context_quick.get_active_context", return_value=None)
+@patch("sibyl_cli.context_quick.resolve_effective_context", return_value=None)
 def test_context_quick_without_context_reports_missing_auth(
-    mock_get_active_context: MagicMock,
+    mock_resolve_effective_context: MagicMock,
     mock_get_effective_server_url: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
     mock_read_server_credentials: MagicMock,
@@ -128,7 +128,7 @@ def test_context_quick_without_context_reports_missing_auth(
     assert "Project:" in result.stdout
     assert "not linked" in result.stdout
     assert "missing" in result.stdout
-    mock_get_active_context.assert_called_once_with()
+    mock_resolve_effective_context.assert_called_once_with()
     mock_get_effective_server_url.assert_called_once_with()
     mock_resolve_project_from_cwd.assert_called_once_with()
     mock_read_server_credentials.assert_called_once_with(

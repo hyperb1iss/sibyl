@@ -53,7 +53,7 @@ def resolve_host_context() -> HostContext | None:
     ctx = (
         config_store.get_context(context_name)
         if context_name
-        else config_store.get_active_context()
+        else config_store.resolve_effective_context()
     )
     if ctx is None:
         return None

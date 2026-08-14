@@ -9,7 +9,16 @@ import typer
 
 from sibyl_cli.auth_store import normalize_api_url
 from sibyl_cli.client import SibylClient, SibylClientError, _is_read_like_post
-from sibyl_cli.common import console, create_table, error, print_json, run_async, success, warn
+from sibyl_cli.common import (
+    console,
+    create_table,
+    error,
+    mark_pending_writes_reported,
+    print_json,
+    run_async,
+    success,
+    warn,
+)
 from sibyl_cli.pending_writes import (
     delete_pending_write,
     increment_attempts,
@@ -81,6 +90,7 @@ def list_writes(
     json_output: Annotated[bool, typer.Option("--json", "-j", help="Output JSON")] = False,
 ) -> None:
     """List buffered writes without printing sensitive payload bodies."""
+    mark_pending_writes_reported()
     summaries = [_summary(item) for item in list_pending_writes()]
     if json_output:
         print_json({"pending_writes": summaries})
@@ -131,16 +141,28 @@ def discard_writes(
     if not selected:
         success("No pending writes matched")
         return
+    # Deduplicated, since the same id named twice discards once and the second
+    # pass would otherwise count as a miss.
+    selected = list(dict.fromkeys(selected))
     removed = 0
+    missed = 0
     for write_id in selected:
         try:
             if delete_pending_write(write_id):
                 removed += 1
                 record_pending_metric("discarded")
+            else:
+                missed += 1
         except ValueError as exc:
             error(str(exc))
             raise typer.Exit(code=1) from exc
+
     success(f"Discarded {removed} pending write{'s' if removed != 1 else ''}")
+    # A named id that matched nothing is a refusal, not an empty result: the
+    # caller asked for a specific write and the queue still holds it.
+    if not read_like and missed:
+        error(f"No pending write matched {missed} of the given IDs")
+        raise typer.Exit(code=1)
 
 
 @app.command("flush")
@@ -151,6 +173,7 @@ def flush_writes(
     ] = None,
 ) -> None:
     """Replay buffered writes."""
+    mark_pending_writes_reported()
     try:
         selected = _selected_writes(write_ids or [])
     except (FileNotFoundError, ValueError) as exc:

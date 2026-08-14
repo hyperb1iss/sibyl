@@ -21,7 +21,12 @@ from sibyl_cli.auth_store import (
     read_server_credentials,
     set_tokens,
 )
-from sibyl_cli.client import SibylClient, SibylClientError, get_client
+from sibyl_cli.client import (
+    SibylClient,
+    SibylClientError,
+    get_client,
+    resolve_api_base_url,
+)
 from sibyl_cli.common import error, info, print_json, run_async, success, warn
 
 app = typer.Typer(help="Authentication and credentials")
@@ -40,28 +45,33 @@ def _pkce_s256(code_verifier: str) -> str:
     return base64.urlsafe_b64encode(sha256).decode("utf-8").rstrip("=")
 
 
-def _compute_api_url(server: str | None) -> str:
+def _effective_context_name(context_name: str | None = None) -> str | None:
+    """Resolve the context every other command would use for this invocation."""
+    from sibyl_cli import config_store
+
+    return context_name or config_store.resolve_context_name()
+
+
+def _compute_api_url(server: str | None, *, context_name: str | None = None) -> str:
+    """Resolve the server an auth command should act on.
+
+    An explicit --server/URL wins; everything else defers to the client's
+    resolver, so the token lands under the key later commands read back.
+    """
     if server and server.strip():
         raw = server.strip().rstrip("/")
         if raw.endswith("/api"):
             return normalize_api_url(raw)
         return normalize_api_url(raw + "/api")
 
-    env_api_url = os.environ.get("SIBYL_API_URL", "").strip()
-    if env_api_url:
-        return normalize_api_url(env_api_url)
-
-    return normalize_api_url(SibylClient().base_url)
+    return normalize_api_url(resolve_api_base_url(_effective_context_name(context_name)))
 
 
 def _current_credential_scope(context_name: str | None = None) -> str | None:
     from sibyl_cli import config_store
 
-    ctx = (
-        config_store.get_context(context_name)
-        if context_name
-        else config_store.get_active_context()
-    )
+    resolved = _effective_context_name(context_name)
+    ctx = config_store.get_context(resolved) if resolved else None
     if ctx is None:
         return None
     return credential_scope(ctx.name, ctx.org_slug)
@@ -71,6 +81,66 @@ def _login_credential_scope(context_name: str | None = None) -> str | None:
     if not context_name:
         return _current_credential_scope()
     return _current_credential_scope(context_name) or credential_scope(context_name, None)
+
+
+def _contexts_for_server(api_url: str) -> list[str]:
+    from sibyl_cli import config_store
+
+    target = normalize_api_url(api_url)
+    return [
+        ctx.name
+        for ctx in config_store.list_contexts()
+        if normalize_api_url(f"{ctx.server_url}/api") == target
+    ]
+
+
+def _context_for_server(api_url: str) -> str | None:
+    """Find the configured context that points at this API URL, if any.
+
+    Several contexts can share one server and differ only by org, so config
+    order must not decide which credential a login overwrites. The selected
+    context wins whenever it points at the target; otherwise an ambiguous
+    server is a question for the user, not a guess.
+    """
+    matches = _contexts_for_server(api_url)
+    if not matches:
+        return None
+
+    selected = _effective_context_name()
+    if selected and selected in matches:
+        return selected
+    if len(matches) > 1:
+        error(f"{api_url} is configured by more than one context: {', '.join(sorted(matches))}.")
+        info("Name the one to log in to: sibyl -C <name> auth login")
+        raise typer.Exit(1)
+    return matches[0]
+
+
+def _scope_for_login_target(
+    api_url: str,
+    *,
+    context_name: str | None,
+    explicit_target: bool,
+) -> str | None:
+    """Derive the credential scope from the server the login actually targets.
+
+    Credentials are keyed by server URL *and* scope, so a scope taken from the
+    ambient selection while the URL comes from an explicit argument produces a
+    key nothing reads back. An explicit target therefore defines its own scope.
+    """
+    if context_name:
+        return _login_credential_scope(context_name)
+    if not explicit_target:
+        return _current_credential_scope()
+
+    matched = _context_for_server(api_url)
+    ambient = _effective_context_name()
+    if ambient and ambient != matched:
+        warn(
+            f"Logging in to {api_url}, which is not the selected context "
+            f"'{ambient}'. Storing the credential for {matched or 'this server'}."
+        )
+    return _current_credential_scope(matched) if matched else None
 
 
 def _load_oauth_metadata(*, issuer_url: str, insecure: bool = False) -> dict:
@@ -655,7 +725,7 @@ def status_cmd() -> None:
     """Show auth status for the current context."""
     from sibyl_cli import config_store
 
-    ctx = config_store.get_active_context()
+    ctx = config_store.resolve_effective_context()
     api_url = _compute_api_url(None)
     scope = _current_credential_scope()
     creds = read_server_credentials(api_url, credential_scope=scope)
@@ -790,8 +860,12 @@ def login_cmd(
     """
     # Positional URL takes precedence over --server option
     effective_server = url.strip() if url.strip() else server
-    api_url = _compute_api_url(effective_server)
-    scope = _login_credential_scope(context)
+    api_url = _compute_api_url(effective_server, context_name=context)
+    scope = _scope_for_login_target(
+        api_url,
+        context_name=context,
+        explicit_target=bool(effective_server),
+    )
 
     # Perform login
     _login_auto(

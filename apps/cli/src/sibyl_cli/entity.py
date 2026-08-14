@@ -20,6 +20,7 @@ from sibyl_cli.common import (
     handle_client_error,
     info,
     print_json,
+    print_json_result,
     run_async,
     success,
     truncate,
@@ -114,7 +115,7 @@ def list_entities(
     if entity_type not in ENTITY_TYPES:
         error(f"Invalid entity type: {entity_type}")
         info(f"Valid types: {', '.join(ENTITY_TYPES)}")
-        return
+        raise typer.Exit(1)
 
     @run_async
     async def _list() -> None:
@@ -228,7 +229,7 @@ def create_entity(
     if entity_type not in ENTITY_TYPES:
         error(f"Invalid entity type: {entity_type}")
         info(f"Valid types: {', '.join(ENTITY_TYPES)}")
-        return
+        raise typer.Exit(1)
 
     @run_async
     async def _create() -> None:
@@ -251,7 +252,7 @@ def create_entity(
 
             # JSON output (default)
             if json_out:
-                print_json(response)
+                print_json_result(response, succeeded=bool(response.get("id")))
                 return
 
             # Table output
@@ -259,6 +260,7 @@ def create_entity(
                 success(f"Entity created: {response['id']}")
             else:
                 error("Failed to create entity")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)

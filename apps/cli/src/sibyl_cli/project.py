@@ -23,6 +23,7 @@ from sibyl_cli.common import (
     handle_client_error,
     info,
     print_json,
+    print_json_result,
     run_async,
     success,
     truncate,
@@ -265,7 +266,7 @@ def create_project(
 
             # JSON output (default)
             if json_out:
-                print_json(response)
+                print_json_result(response, succeeded=bool(response.get("id")))
                 return
 
             # Table output
@@ -273,6 +274,7 @@ def create_project(
                 success(f"Project created: {response['id']}")
             else:
                 error("Failed to create project")
+                raise typer.Exit(1)
 
         except SibylClientError as e:
             _handle_client_error(e)
@@ -442,7 +444,7 @@ def relink_project(
                         for project in projects[:10]:
                             console.print(f"  - {project.get('id')}  {project.get('name', '')}")
                     info("Run: sibyl project relink --id <project>")
-                    return
+                    raise typer.Exit(1)
 
             set_path_mapping(target_path, selected_id, context=context_name)
             success(f"Relinked [{NEON_CYAN}]{target_path}[/{NEON_CYAN}]")

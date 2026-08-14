@@ -56,6 +56,37 @@ def test_stream_logs_uses_resolved_client_url_and_token(
 
     import asyncio
 
-    asyncio.run(_stream_logs(client, None, None))
+    # The stream ends only when the server or the network ends it, so a
+    # supervised follow that loses its connection has to exit nonzero.
+    with pytest.raises(typer.Exit) as exc:
+        asyncio.run(_stream_logs(client, None, None))
 
+    assert exc.value.exit_code == 1
     assert connect_urls == ["wss://sibyl.example/api/logs/stream?token=scoped-access-token"]
+
+
+def test_stream_logs_exits_nonzero_when_the_connection_drops(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A dropped stream must not look like a clean finish to a supervisor."""
+    monkeypatch.setitem(
+        sys.modules,
+        "websockets",
+        SimpleNamespace(
+            connect=lambda _url: _FakeWebSocket(),
+            ConnectionClosed=_FakeConnectionClosed,
+        ),
+    )
+    client = SimpleNamespace(base_url="https://sibyl.example/api", auth_token="tok")
+
+    import asyncio
+
+    with pytest.raises(typer.Exit) as exc:
+        asyncio.run(_stream_logs(client, None, None))
+
+    assert exc.value.exit_code == 1
+    out = capsys.readouterr().out
+    assert "Connection closed" in out
+    # The broad handler below must not relabel the clean exit.
+    assert "WebSocket error" not in out

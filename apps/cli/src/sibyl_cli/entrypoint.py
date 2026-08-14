@@ -18,13 +18,20 @@ def _is_quick_context_invocation(argv: list[str]) -> bool:
 
 
 def main() -> None:
-    if _is_quick_context_invocation(sys.argv):
-        from sibyl_cli.context_quick import quick_context_payload, render_quick_context
+    # The notice lives at the console-script boundary because the fast path
+    # below never reaches sibyl_cli.main, and agent hooks take that path.
+    from sibyl_cli.common import notify_pending_writes
 
-        json_out = "--json" in sys.argv or "-j" in sys.argv
-        render_quick_context(quick_context_payload(), json_out=json_out)
-        return
+    try:
+        if _is_quick_context_invocation(sys.argv):
+            from sibyl_cli.context_quick import quick_context_payload, render_quick_context
 
-    from sibyl_cli.main import main as cli_main
+            json_out = "--json" in sys.argv or "-j" in sys.argv
+            render_quick_context(quick_context_payload(), json_out=json_out)
+            return
 
-    cli_main()
+        from sibyl_cli.main import main as cli_main
+
+        cli_main()
+    finally:
+        notify_pending_writes()

@@ -24,11 +24,11 @@ class _FakeClientContext:
 @patch(
     "sibyl_cli.session.get_current_context", return_value=("project_123", "/Users/bliss/dev/sibyl")
 )
-@patch("sibyl_cli.session.get_active_context")
+@patch("sibyl_cli.session.resolve_effective_context")
 @patch("sibyl_cli.session.get_client")
 def test_session_bundle_json_packages_context_tasks_and_memories(
     mock_get_client: MagicMock,
-    mock_get_active_context: MagicMock,
+    mock_resolve_effective_context: MagicMock,
     mock_get_current_context: MagicMock,
     mock_get_effective_project: MagicMock,
     mock_get_effective_server_url: MagicMock,
@@ -36,7 +36,7 @@ def test_session_bundle_json_packages_context_tasks_and_memories(
     context = MagicMock()
     context.name = "local"
     context.org_slug = "hyper"
-    mock_get_active_context.return_value = context
+    mock_resolve_effective_context.return_value = context
 
     mock_client = MagicMock()
     mock_client.get_entity = AsyncMock(
@@ -143,11 +143,11 @@ def test_session_bundle_json_packages_context_tasks_and_memories(
 @patch(
     "sibyl_cli.session.get_current_context", return_value=("project_123", "/Users/bliss/dev/sibyl")
 )
-@patch("sibyl_cli.session.get_active_context")
+@patch("sibyl_cli.session.resolve_effective_context")
 @patch("sibyl_cli.session.get_client")
 def test_session_bundle_json_blends_raw_memory(
     mock_get_client: MagicMock,
-    mock_get_active_context: MagicMock,
+    mock_resolve_effective_context: MagicMock,
     mock_get_current_context: MagicMock,
     mock_get_effective_project: MagicMock,
     mock_get_effective_server_url: MagicMock,
@@ -155,7 +155,7 @@ def test_session_bundle_json_blends_raw_memory(
     context = MagicMock()
     context.name = "local"
     context.org_slug = "hyper"
-    mock_get_active_context.return_value = context
+    mock_resolve_effective_context.return_value = context
 
     mock_client = MagicMock()
     mock_client.get_entity = AsyncMock(return_value={"id": "project_123", "name": "Sibyl"})
@@ -223,11 +223,11 @@ def test_session_bundle_json_blends_raw_memory(
 @patch(
     "sibyl_cli.session.get_current_context", return_value=("project_123", "/Users/bliss/dev/sibyl")
 )
-@patch("sibyl_cli.session.get_active_context")
+@patch("sibyl_cli.session.resolve_effective_context")
 @patch("sibyl_cli.session.get_client")
 def test_session_bundle_dedupes_same_memory_with_different_ids(
     mock_get_client: MagicMock,
-    mock_get_active_context: MagicMock,
+    mock_resolve_effective_context: MagicMock,
     mock_get_current_context: MagicMock,
     mock_get_effective_project: MagicMock,
     mock_get_effective_server_url: MagicMock,
@@ -235,7 +235,7 @@ def test_session_bundle_dedupes_same_memory_with_different_ids(
     context = MagicMock()
     context.name = "local"
     context.org_slug = "hyper"
-    mock_get_active_context.return_value = context
+    mock_resolve_effective_context.return_value = context
 
     mock_client = MagicMock()
     mock_client.get_entity = AsyncMock(return_value={"id": "project_123", "name": "Sibyl"})
@@ -282,11 +282,11 @@ def test_session_bundle_dedupes_same_memory_with_different_ids(
 @patch("sibyl_cli.session.get_effective_server_url", return_value="http://localhost:3334")
 @patch("sibyl_cli.session.get_effective_project", return_value=None)
 @patch("sibyl_cli.session.get_current_context", return_value=(None, None))
-@patch("sibyl_cli.session.get_active_context", return_value=None)
+@patch("sibyl_cli.session.resolve_effective_context", return_value=None)
 @patch("sibyl_cli.session.get_client")
 def test_session_bundle_without_project_guides_user_to_link_one(
     mock_get_client: MagicMock,
-    mock_get_active_context: MagicMock,
+    mock_resolve_effective_context: MagicMock,
     mock_get_current_context: MagicMock,
     mock_get_effective_project: MagicMock,
     mock_get_effective_server_url: MagicMock,
@@ -324,11 +324,11 @@ def test_session_bundle_without_project_guides_user_to_link_one(
 @patch(
     "sibyl_cli.session.get_current_context", return_value=("project_123", "/Users/bliss/dev/sibyl")
 )
-@patch("sibyl_cli.session.get_active_context")
+@patch("sibyl_cli.session.resolve_effective_context")
 @patch("sibyl_cli.session.get_client")
 def test_session_bundle_renders_human_output(
     mock_get_client: MagicMock,
-    mock_get_active_context: MagicMock,
+    mock_resolve_effective_context: MagicMock,
     mock_get_current_context: MagicMock,
     mock_get_effective_project: MagicMock,
     mock_get_effective_server_url: MagicMock,
@@ -336,7 +336,7 @@ def test_session_bundle_renders_human_output(
     context = MagicMock()
     context.name = "local"
     context.org_slug = "hyper"
-    mock_get_active_context.return_value = context
+    mock_resolve_effective_context.return_value = context
 
     mock_client = MagicMock()
     mock_client.get_entity = AsyncMock(return_value={"id": "project_123", "name": "Sibyl"})
