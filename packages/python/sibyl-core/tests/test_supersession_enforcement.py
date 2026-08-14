@@ -1559,3 +1559,137 @@ async def test_only_the_server_channel_can_put_provenance_on_a_written_row(
     assert (await write(capture_provenance={"raw_memory_id": "real-capture"})).success
     stamped = written[-1]["metadata"]
     assert stamped["raw_memory_id"] == "real-capture", "the server channel has to survive"
+
+
+@pytest.mark.asyncio
+async def test_the_lineage_walk_pages_past_a_single_query_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One parent can carry more projected rows than one page holds.
+
+    Spans alone go to `MAX_PASSAGES_PER_SOURCE` per parent, and projected
+    entities and facts land beside them, so a fixed multiplier is a guess that
+    goes stale the moment any projection widens. A walk that stopped at one
+    page would leave the overflow servable, which is the whole defect being
+    fixed, just quieter.
+    """
+
+    page_size = memory_module._GRAPH_CORRECTION_PROJECTION_PAGE_SIZE
+    total = page_size + 7
+    all_ids = [f"projected-{index:05d}" for index in range(total)]
+    cursors: list[str] = []
+
+    class _Runtime:
+        def __init__(self) -> None:
+            self.client = self
+            self.entity_manager = self
+
+        async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+            if "parent_entity_id" not in query:
+                return [{"uuid": "parent-1"}]
+            cursor = str(params.get("cursor") or "")
+            cursors.append(cursor)
+            after = [row_id for row_id in all_ids if row_id > cursor]
+            return [{"uuid": row_id} for row_id in after[:page_size]]
+
+        async def get(self, entity_id: str) -> Any:
+            return SimpleNamespace(
+                id=entity_id,
+                created_by="user-1",
+                metadata={"memory_scope": "private", "principal_id": "user-1"},
+            )
+
+    runtime = _Runtime()
+    memory = _raw_capture()
+
+    targets = await memory_module._correction_graph_entity_ids(
+        runtime,
+        organization_id="org-1",
+        memory=memory,
+        principal_id="user-1",
+        accessible_projects=None,
+    )
+
+    assert len(cursors) > 1, "one page cannot cover a parent's whole projection"
+    assert len(targets.projections) == total
+    assert targets.projections[-1] == all_ids[-1]
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_verdict_retires_the_row_instead_of_poisoning_the_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A store that cannot be reached must not decide by default.
+
+    Raising looks like the safe answer and is not: the local broker records a
+    failed job as COMPLETE with an error and then suppresses the same
+    deterministic job id, so an exception is a poison pill rather than a retry.
+    Leaving the row servable is worse still, because nobody comes back for it.
+    The row is excluded and flagged instead, which is visible and reversible.
+    """
+
+    from sibyl_core.projection.reconcile import (
+        RECONCILE_MAX_ATTEMPTS,
+        RECONCILE_PENDING_KEY,
+        reconcile_with_capture,
+    )
+
+    attempts: list[int] = []
+    stamped: list[tuple[str, dict[str, Any]]] = []
+
+    async def exploding_lookup(**_kwargs: object) -> Any:
+        attempts.append(1)
+        msg = "content store unreachable"
+        raise ConnectionError(msg)
+
+    monkeypatch.setattr(memory_module, "get_raw_memory", exploding_lookup)
+    monkeypatch.setattr("asyncio.sleep", AsyncMock())
+
+    class _Manager:
+        async def update(self, entity_id: str, updates: dict[str, Any]) -> object:
+            stamped.append((entity_id, dict(updates["metadata"])))
+            return object()
+
+    outcome = await reconcile_with_capture(
+        _Manager(),
+        organization_id="org-1",
+        metadata={"raw_memory_id": "raw-1"},
+        row_ids=["row-1"],
+        applied_stamp={},
+    )
+
+    assert len(attempts) == RECONCILE_MAX_ATTEMPTS, "transient failures are retried, bounded"
+    assert outcome.unverified == 1
+    assert stamped == [("row-1", {"excluded_from_recall": True, RECONCILE_PENDING_KEY: True})]
+    assert graph_metadata_recallable(stamped[0][1]) is False
+
+
+@pytest.mark.asyncio
+async def test_an_absent_parent_is_not_treated_as_an_unreadable_one() -> None:
+    """The real manager raises KeyError for a row that is not there.
+
+    Nothing was stamped on a row that does not exist, so there is no verdict to
+    inherit and nothing to fail over. Treating absence as failure would retire
+    every projection whose parent had not been written yet.
+    """
+
+    from sibyl_core.models.entities import Entity, EntityType
+    from sibyl_core.projection.inheritance import parent_lifecycle_as_stored
+
+    class _Manager:
+        async def get(self, entity_id: str) -> Any:
+            raise KeyError(entity_id)
+
+    source = Entity(
+        id="child-1",
+        name="Child",
+        entity_type=EntityType.NOTE,
+        description="body",
+        content="body",
+        organization_id="org-1",
+        metadata={"memory_scope": "project"},
+    )
+
+    resolved = await parent_lifecycle_as_stored(_Manager(), source, source_id="missing-parent")
+
+    assert resolved is source

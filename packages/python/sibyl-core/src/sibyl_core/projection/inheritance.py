@@ -62,12 +62,12 @@ async def parent_lifecycle_as_stored(
     a re-projection derives from the text it was handed and a caller mid-update
     holds the newer copy.
 
-    A read that fails raises rather than falling back to the caller's copy.
-    Deriving rows from a lifecycle nobody could verify is how an unstamped,
-    fully recallable copy of retired text gets minted, and no later correction
-    is guaranteed to come back for it: the correction that would have stamped
-    these rows has already run. Failing here leaves the job to be retried,
-    which is recoverable in a way a silently active row is not.
+    A read that fails raises, and the caller decides. This is the pre-write
+    half of a bracket: the post-write pass in `projection/reconcile.py` reads
+    the same verdict again after the rows commit and refuses to leave an
+    unverified row servable, so a caller that cannot read the parent here does
+    not have to choose between poisoning its job and minting a recallable copy
+    of possibly-retired text.
 
     A parent that is simply absent is not a failure. Nothing has been stamped
     on a row that does not exist, so there is no verdict to inherit.
@@ -76,7 +76,14 @@ async def parent_lifecycle_as_stored(
     get = getattr(entity_manager, "get", None)
     if not callable(get):
         return source
-    stored = await get(source_id)
+    try:
+        stored = await get(source_id)
+    except KeyError:
+        # The real manager raises this for a row that is not there
+        # (`services/graph.py`). An absent parent is not an unreadable one:
+        # nothing was stamped on a row that does not exist, so there is no
+        # verdict to inherit and nothing to fail over.
+        return source
     stored_metadata = getattr(stored, "metadata", None) if stored is not None else None
     if not isinstance(stored_metadata, Mapping):
         if stored is not None:

@@ -26,7 +26,6 @@ from sibyl_core.auth.memory_policy import (
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.memory_pipeline.lifecycle import graph_lifecycle_stamp
 from sibyl_core.memory_pipeline.quality import normalize_memory_quality_metadata
-from sibyl_core.memory_pipeline.spans import MAX_PASSAGES_PER_SOURCE
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.reflection import (
     MemoryLifecycle,
@@ -1841,7 +1840,12 @@ _GRAPH_CORRECTION_LOOKUP_LIMIT = 64
 # Each corrected row can carry up to `MAX_PASSAGES_PER_SOURCE` spans, so the
 # span cap is the parent cap multiplied by that ceiling: a limit that bound
 # earlier would leave spans of a retired memory recallable.
-_GRAPH_CORRECTION_PROJECTION_LOOKUP_LIMIT = _GRAPH_CORRECTION_LOOKUP_LIMIT * MAX_PASSAGES_PER_SOURCE
+# One parent can carry `MAX_PASSAGES_PER_SOURCE` spans plus its projected
+# entities and facts, so a single fixed multiplier is a guess that goes stale
+# the moment any projection widens. The walk pages instead, and the page cap
+# exists only so a pathological corpus cannot hold the write open forever.
+_GRAPH_CORRECTION_PROJECTION_PAGE_SIZE = 512
+_GRAPH_CORRECTION_PROJECTION_MAX_PAGES = 64
 _CORRECTION_NATIVE_WRITE_PATH = "memory_correction"
 
 
@@ -2085,22 +2089,44 @@ async def _correction_projected_row_ids(
     parents = [str(parent_id) for parent_id in dict.fromkeys(parent_ids) if parent_id]
     if not parents:
         return []
+    rows: list[dict[str, Any]] = []
+    cursor = ""
     try:
-        rows = normalize_records(
-            await runtime.client.execute_query(
-                """
-                SELECT uuid FROM entity
-                WHERE group_id = $group_id
-                  AND attributes.projection_kind IS NOT NONE
-                  AND (attributes.parent_entity_id IN $parent_ids
-                       OR attributes.source_entity_id IN $parent_ids)
-                LIMIT $limit;
-                """,
-                group_id=str(organization_id),
-                parent_ids=parents,
-                limit=_GRAPH_CORRECTION_PROJECTION_LOOKUP_LIMIT,
+        for page in range(_GRAPH_CORRECTION_PROJECTION_MAX_PAGES):
+            batch = normalize_records(
+                await runtime.client.execute_query(
+                    """
+                    SELECT uuid FROM entity
+                    WHERE group_id = $group_id
+                      AND attributes.projection_kind IS NOT NONE
+                      AND uuid > $cursor
+                      AND (attributes.parent_entity_id IN $parent_ids
+                           OR attributes.source_entity_id IN $parent_ids)
+                    ORDER BY uuid
+                    LIMIT $limit;
+                    """,
+                    group_id=str(organization_id),
+                    parent_ids=parents,
+                    cursor=cursor,
+                    limit=_GRAPH_CORRECTION_PROJECTION_PAGE_SIZE,
+                )
             )
-        )
+            rows.extend(batch)
+            if len(batch) < _GRAPH_CORRECTION_PROJECTION_PAGE_SIZE:
+                break
+            cursor = str(batch[-1].get("uuid") or "")
+            if not cursor:
+                break
+            if page + 1 >= _GRAPH_CORRECTION_PROJECTION_MAX_PAGES:
+                # Only reachable on a corpus far past anything this walk was
+                # sized for, and a silent stop here leaves projected rows of a
+                # retired memory servable, so it is said out loud.
+                log.warning(
+                    "memory_correction_projection_walk_truncated",
+                    source_id=memory.id,
+                    parents=len(parents),
+                    rows=len(rows),
+                )
     except Exception as exc:
         # The parent has already been stamped by the time this runs, so a
         # failure here leaves the correction half-applied rather than undone.

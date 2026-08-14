@@ -292,3 +292,58 @@ async def test_an_uncorrected_capture_still_projects_a_recallable_row(
     # cover the whole body suppresses the fat parent on purpose, so their
     # presence is what says this content is recallable.
     assert {item_id for item_id in served if item_id.startswith("passage")}
+
+
+@pytest.mark.asyncio
+async def test_a_correction_landing_inside_the_write_still_retires_the_row(
+    graph: _Runtime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The interval a pre-write read can never cover.
+
+    The insert is an await. A correction can retire the capture and run its
+    cascade while that insert is in flight: the cascade finds no row, the
+    pre-write read already returned the old verdict, and the stale row commits
+    behind both. Only a pass that runs after the row exists can see it, which
+    is why the write is bracketed rather than preceded.
+
+    The correction is injected inside the `create_direct` await, which is the
+    only place it can land to reproduce this.
+    """
+
+    import sibyl_core.services.memory as memory_module
+
+    capture = _corrected_capture(metadata={})
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=capture))
+
+    original_create = graph.entity_manager.create_direct
+    corrected: dict[str, bool] = {}
+
+    async def create_direct_with_correction(entity: Any, **kwargs: Any) -> str:
+        created = await original_create(entity, **kwargs)
+        if not corrected:
+            # Mid-flight: the memory is corrected while the row is being
+            # written, so the correction's own cascade cannot see it.
+            corrected["done"] = True
+            monkeypatch.setattr(
+                memory_module,
+                "get_raw_memory",
+                AsyncMock(return_value=_corrected_capture()),
+            )
+        return created
+
+    monkeypatch.setattr(
+        graph.entity_manager, "create_direct", create_direct_with_correction, raising=False
+    )
+
+    result = await _run_create_entity(graph, monkeypatch)
+    parent_id = result["entity_id"]
+    assert corrected, "the correction has to have landed inside the write"
+
+    stored = await graph.entity_manager.get(parent_id)
+    assert stored is not None
+    assert stored.metadata.get("excluded_from_recall") is True
+    assert stored.metadata.get("lifecycle_state") == "contested"
+
+    served = await _served_ids(graph, "fly hosting rollout body")
+    assert parent_id not in served

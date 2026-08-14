@@ -26,8 +26,8 @@ from sibyl_core.projection import (
     restamp_entity_passages,
     scope_bearing_entity_update,
 )
+from sibyl_core.projection.reconcile import prewrite_capture_stamp, reconcile_with_capture
 from sibyl_core.services.graph import get_surreal_graph_runtime
-from sibyl_core.services.memory import projected_row_lifecycle_stamp
 from sibyl_core.services.surreal_content import MemoryScope
 from sibyl_core.tasks.distillation import build_learning_episode, build_learning_procedure
 
@@ -506,7 +506,7 @@ async def create_entity(  # noqa: PLR0915
         # recallable with the corrected text in it. The capture is the
         # authority, and every await between reading it and writing the row is
         # a window where a correction lands and finds nothing to stamp.
-        lifecycle_stamp = await projected_row_lifecycle_stamp(
+        lifecycle_stamp, _lifecycle_verified = await prewrite_capture_stamp(
             organization_id=group_id,
             metadata=entity.metadata,
         )
@@ -528,6 +528,20 @@ async def create_entity(  # noqa: PLR0915
             "create_entity_graph_created",
             entity_id=created_id,
             entity_type=entity_type,
+        )
+
+        # The write itself is the last interleaving point a pre-write read
+        # cannot cover: a correction can retire the capture and run its cascade
+        # while this insert is still in flight, find no row, and let the stale
+        # row commit behind it. Reading the verdict once more now closes that
+        # interval, and an unreadable verdict leaves the row excluded rather
+        # than servable.
+        await reconcile_with_capture(
+            entity_manager,
+            organization_id=group_id,
+            metadata=entity.metadata,
+            row_ids=[created_id],
+            applied_stamp=lifecycle_stamp,
         )
 
         relationship_manager = runtime.relationship_manager

@@ -16,8 +16,10 @@ from sibyl_core.models.entities import Entity, EntityType, Relationship, Relatio
 from sibyl_core.models.memory_extraction import ExtractedMemoryEntity
 from sibyl_core.projection.inheritance import (
     LIFECYCLE_METADATA_KEYS,
+    inherited_lifecycle_metadata,
     parent_lifecycle_as_stored,
 )
+from sibyl_core.projection.reconcile import reconcile_with_parent
 from sibyl_core.retrieval.dedup import DedupConfig, EntityDeduplicator
 from sibyl_core.retrieval.fact_frames import FactFrame, extract_evidence_fact_frames
 from sibyl_core.tools.helpers import _generate_id
@@ -535,6 +537,29 @@ async def _persist_projection_batch(
         source_id: tuple(link.entity_id for link in links)
         for source_id, links in resolved_links_by_source_id.items()
     }
+
+    # The parent can be corrected while these rows are being written, and that
+    # interval is the one no pre-write read reaches: the correction's cascade
+    # runs before the rows exist, finds nothing, and the stale rows commit
+    # behind it. The stamp each row was built with is compared against the
+    # parent as it stands now, and the rows are restamped if it moved.
+    for source_id, row_ids in resolved_entity_ids_by_source_id.items():
+        if not row_ids:
+            continue
+        planned = next(
+            (
+                projected_by_id[link.entity_id].metadata
+                for link in projected_entity_links_by_source_id.get(source_id, ())
+                if link.entity_id in projected_by_id
+            ),
+            None,
+        )
+        await reconcile_with_parent(
+            entity_manager,
+            source_id=source_id,
+            row_ids=row_ids,
+            applied_stamp=inherited_lifecycle_metadata(planned),
+        )
     relationship_count = 0
     created_projection_relationships: tuple[Relationship, ...] = ()
     if relationships:
