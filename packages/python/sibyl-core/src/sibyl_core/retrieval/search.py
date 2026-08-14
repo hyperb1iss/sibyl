@@ -498,6 +498,35 @@ async def context_search(
         )
 
     stage_started_at = time.perf_counter()
+    direct_lists = [
+        (RetrievalSignal.RAW_LEXICAL, raw_candidates),
+        (RetrievalSignal.NODE_FULLTEXT, graph_candidate_lists[0]),
+        (RetrievalSignal.EPISODE_FULLTEXT, graph_candidate_lists[1]),
+        (RetrievalSignal.EDGE_FULLTEXT, graph_candidate_lists[2]),
+        (RetrievalSignal.EXACT_KEY, graph_candidate_lists[3]),
+        (RetrievalSignal.NODE_VECTOR, vector_candidate_lists[0]),
+        (RetrievalSignal.EDGE_VECTOR, vector_candidate_lists[1]),
+    ]
+    direct_lists = [
+        (signal, [candidate for candidate in candidates if candidate_authorized(candidate)])
+        for signal, candidates in direct_lists
+    ]
+    # The gate runs before the walk, not only before fusion. A retired row is
+    # dropped from the answer either way, but seeding the expansion from it
+    # still routes recall through its edges: its neighbours pass their own
+    # checks and come back, so a corrected memory keeps steering what the
+    # reader sees through rows that were never corrected. That holds for every
+    # lane that can propose a seed, exact-key probes included, which is why the
+    # gate moved ahead of seed selection rather than being repeated inside one
+    # lane.
+    direct_lists, direct_supersession_metadata = await _apply_supersession_gate(
+        client=client,
+        group_id=search_plan.organization_id,
+        source_lists=direct_lists,
+    )
+    stage_timings_ms["candidate_filtering"] = _elapsed_ms(stage_started_at)
+
+    stage_started_at = time.perf_counter()
     graph_expansion_source = await _gather_graph_expansion_source(
         _graph_expansion_candidates(
             client=client,
@@ -513,9 +542,9 @@ async def context_search(
             # of which lane proposed it.
             seed_candidates=[
                 candidate
-                for source in [*graph_candidate_lists, *vector_candidate_lists]
-                for candidate in source
-                if candidate_authorized(candidate)
+                for signal, candidates in direct_lists
+                if signal is not RetrievalSignal.RAW_LEXICAL
+                for candidate in candidates
             ],
             limit=search_plan.candidate_limits.graph_expansion,
         )
@@ -529,24 +558,24 @@ async def context_search(
         extra_failures=raw_failures,
     )
 
-    source_lists = [
-        (RetrievalSignal.RAW_LEXICAL, raw_candidates),
-        (RetrievalSignal.NODE_FULLTEXT, graph_candidate_lists[0]),
-        (RetrievalSignal.EPISODE_FULLTEXT, graph_candidate_lists[1]),
-        (RetrievalSignal.EDGE_FULLTEXT, graph_candidate_lists[2]),
-        (RetrievalSignal.EXACT_KEY, graph_candidate_lists[3]),
-        (RetrievalSignal.NODE_VECTOR, vector_candidate_lists[0]),
-        (RetrievalSignal.EDGE_VECTOR, vector_candidate_lists[1]),
-        (RetrievalSignal.GRAPH_EXPANSION, graph_expansion_candidates),
-    ]
-    filtered_lists = [
-        (signal, [candidate for candidate in candidates if candidate_authorized(candidate)])
-        for signal, candidates in source_lists
-    ]
-    filtered_lists, supersession_metadata = await _apply_supersession_gate(
+    expansion_lists, expansion_supersession_metadata = await _apply_supersession_gate(
         client=client,
         group_id=search_plan.organization_id,
-        source_lists=filtered_lists,
+        source_lists=[
+            (
+                RetrievalSignal.GRAPH_EXPANSION,
+                [
+                    candidate
+                    for candidate in graph_expansion_candidates
+                    if candidate_authorized(candidate)
+                ],
+            )
+        ],
+    )
+    filtered_lists = [*direct_lists, *expansion_lists]
+    supersession_metadata = _merged_supersession_metadata(
+        direct_supersession_metadata,
+        expansion_supersession_metadata,
     )
     # Counted after the scope filter, never before. A pre-filter count answers
     # "does any memory in this organization declare the string I just sent",
@@ -564,7 +593,10 @@ async def context_search(
     temporal_target = resolve_temporal_reference(search_plan.query, datetime.now(UTC))
     fusion_backend = fusion_backend_from_env()
     fusion_failures: list[CandidateSourceFailure] = []
-    stage_timings_ms["candidate_filtering"] = _elapsed_ms(stage_started_at)
+    # Filtering now happens on both sides of the walk, so the stage adds up
+    # rather than overwriting: reading one half as the whole would understate
+    # the stage by whatever the pre-seed gate cost.
+    stage_timings_ms["candidate_filtering"] += _elapsed_ms(stage_started_at)
 
     stage_started_at = time.perf_counter()
     fusion = await _fuse_candidates_for_plan(
@@ -873,11 +905,12 @@ async def _superseded_candidate_uuids(
     rows = await _execute_query_records(
         client,
         """
-        SELECT target_id AS uuid, source_id AS superseder, created_at
+        SELECT uuid, target_id, source_id, created_at
         FROM relates_to
         WHERE name = $predicate
           AND target_id IN $uuids
           AND group_id = $group_id
+        ORDER BY created_at, uuid
         LIMIT $limit;
         """,
         predicate=_SUPERSEDES_PREDICATE,
@@ -897,15 +930,30 @@ def _resolve_superseded(rows: Sequence[Mapping[str, object]]) -> set[str]:
     would retire both endpoints and black out the pair, so the newest edge
     wins: it is the most recent statement about that pair, and the older
     edge in the opposite direction is treated as replaced by it.
+
+    "Newest" has to be a total order or the winner becomes a function of the
+    order the rows arrived in, which is a property of the query planner rather
+    than of the data: the same two edges then retire A on one run and B on the
+    next. The ordering key is therefore `(created_at, edge uuid)`, compared
+    strictly, so equal timestamps resolve on the edge id instead of on
+    whichever row the engine handed over last.
+
+    `created_at` is stamped by whichever process wrote the edge
+    (`models/entities.py`), so two writers with skewed clocks can order a
+    causally later edge first. Skew of exactly the resolution of the stamp
+    lands on the edge-id tie-breaker; larger skew inverts the pair. Both
+    outcomes are stable and identical on every replica, which is the property
+    recall needs: one of the two rows survives, and every reader agrees on
+    which.
     """
 
     retired: set[str] = set()
-    edges: list[tuple[str, str, str]] = []
+    edges: list[tuple[str, str, tuple[str, str]]] = []
     for row in rows:
-        target = _string_value(row.get("uuid"))
+        target = _string_value(row.get("target_id"))
         if not target:
             continue
-        source = _string_value(row.get("superseder"))
+        source = _string_value(row.get("source_id"))
         if target == source:
             # A row cannot replace itself. Honoring it would retire a live row
             # on a statement that says nothing.
@@ -915,16 +963,20 @@ def _resolve_superseded(rows: Sequence[Mapping[str, object]]) -> set[str]:
             # replaced; it just cannot take part in resolving a cycle.
             retired.add(target)
             continue
-        edges.append((target, source, _edge_sort_key(row.get("created_at"))))
+        sort_key = (
+            _edge_sort_key(row.get("created_at")),
+            _string_value(row.get("uuid")) or "",
+        )
+        edges.append((target, source, sort_key))
 
-    newest_between: dict[tuple[str, str], tuple[str, str, str]] = {}
+    newest_between: dict[tuple[str, str], tuple[str, str, tuple[str, str]]] = {}
     for edge in edges:
-        target, source, _created = edge
+        target, source, sort_key = edge
         pair = (target, source) if target < source else (source, target)
         current = newest_between.get(pair)
-        if current is None or edge[2] >= current[2]:
+        if current is None or sort_key > current[2]:
             newest_between[pair] = edge
-    retired.update(target for target, _source, _created in newest_between.values())
+    retired.update(target for target, _source, _sort_key in newest_between.values())
     return retired
 
 
@@ -1014,6 +1066,42 @@ async def _apply_supersession_gate(
     if lookup_failed is not None:
         receipt["lookup_error_type"] = lookup_failed
     return surviving, {"supersession_gate": receipt}
+
+
+def _merged_supersession_metadata(
+    *receipts: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Fold the gate's passes into the one receipt a caller reads.
+
+    The gate runs twice per search, once before the graph walk is seeded and
+    once on what the walk brought back, and a receipt that reported only the
+    second pass would say a corrected row was never dropped. Counts add, uuid
+    sets union, and any pass that truncated or failed its edge lookup makes the
+    whole receipt say so: a reader checking whether the gate was complete
+    cannot be told yes because one of two passes was.
+    """
+
+    merged: dict[str, Any] = {
+        "lifecycle_dropped": 0,
+        "superseded_dropped": 0,
+        "superseded_uuids": [],
+    }
+    uuids: set[str] = set()
+    for receipt in receipts:
+        gate = receipt.get("supersession_gate")
+        if not isinstance(gate, Mapping):
+            continue
+        merged["lifecycle_dropped"] += int(gate.get("lifecycle_dropped") or 0)
+        merged["superseded_dropped"] += int(gate.get("superseded_dropped") or 0)
+        uuids.update(str(value) for value in gate.get("superseded_uuids") or ())
+        if gate.get("truncated"):
+            merged["truncated"] = True
+            for key in ("checked_candidates", "total_candidates", "edge_rows_read"):
+                merged[key] = int(merged.get(key) or 0) + int(gate.get(key) or 0)
+        if gate.get("lookup_error_type"):
+            merged["lookup_error_type"] = gate["lookup_error_type"]
+    merged["superseded_uuids"] = sorted(uuids)
+    return {"supersession_gate": merged}
 
 
 def _candidate_limits_for_limit(

@@ -70,7 +70,16 @@ class _SupersessionGraphClient:
             return []
         if "FROM relates_to" in query and "target_id IN $uuids" in query:
             targets = set(params.get("uuids") or ())
-            return [{"uuid": SUPERSEDED_ID}] if SUPERSEDED_ID in targets else []
+            if SUPERSEDED_ID not in targets:
+                return []
+            return [
+                {
+                    "uuid": f"rel_{SUCCESSOR_ID}_supersedes_{SUPERSEDED_ID}",
+                    "target_id": SUPERSEDED_ID,
+                    "source_id": SUCCESSOR_ID,
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                }
+            ]
         if "FROM relates_to" in query:
             sources = set(params.get("source_uuids") or ())
             if SUCCESSOR_ID not in sources:
@@ -1144,7 +1153,8 @@ async def test_the_row_cap_is_detected_even_when_dedup_hides_it(
 def test_a_self_supersession_retires_nothing() -> None:
     """A row replacing itself says nothing, and must not black itself out."""
 
-    assert search_module._resolve_superseded([{"uuid": "a", "superseder": "a"}]) == set()
+    rows = [{"uuid": "edge-1", "target_id": "a", "source_id": "a"}]
+    assert search_module._resolve_superseded(rows) == set()
 
 
 def test_a_supersession_cycle_retires_only_the_newest_edges_target() -> None:
@@ -1157,17 +1167,58 @@ def test_a_supersession_cycle_retires_only_the_newest_edges_target() -> None:
 
     retired = search_module._resolve_superseded(
         [
-            {"uuid": "B", "superseder": "A", "created_at": "2026-01-01T00:00:00+00:00"},
-            {"uuid": "A", "superseder": "B", "created_at": "2026-02-01T00:00:00+00:00"},
+            {
+                "uuid": "edge-a-supersedes-b",
+                "target_id": "B",
+                "source_id": "A",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            },
+            {
+                "uuid": "edge-b-supersedes-a",
+                "target_id": "A",
+                "source_id": "B",
+                "created_at": "2026-02-01T00:00:00+00:00",
+            },
         ]
     )
     assert retired == {"A"}
 
 
+def test_cycle_resolution_does_not_depend_on_the_order_rows_arrive_in() -> None:
+    """The winner is a property of the edges, not of the query planner.
+
+    Row order out of Surreal is not contractual, so a resolver that let the
+    last row win would retire A on one run and B on the next from the same two
+    edges. Equal timestamps are the case that exposes it, because then only
+    the tie-breaker decides.
+    """
+
+    stamped = "2026-03-01T00:00:00+00:00"
+    rows = [
+        {
+            "uuid": "edge-0001",
+            "target_id": "B",
+            "source_id": "A",
+            "created_at": stamped,
+        },
+        {
+            "uuid": "edge-0002",
+            "target_id": "A",
+            "source_id": "B",
+            "created_at": stamped,
+        },
+    ]
+
+    forward = search_module._resolve_superseded(rows)
+    reverse = search_module._resolve_superseded(list(reversed(rows)))
+
+    assert forward == reverse == {"A"}
+
+
 def test_an_edge_with_no_recorded_source_still_retires_its_target() -> None:
     """Cycle resolution is a refinement, not a way to escape the gate."""
 
-    assert search_module._resolve_superseded([{"uuid": "old"}]) == {"old"}
+    assert search_module._resolve_superseded([{"target_id": "old"}]) == {"old"}
 
 
 @pytest.mark.asyncio
