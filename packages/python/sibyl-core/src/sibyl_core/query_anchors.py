@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import re
+import threading
 import unicodedata
 from collections.abc import Container, Iterable
+from functools import lru_cache
+from typing import Any
 
 import snowballstemmer
 
@@ -13,7 +16,24 @@ import snowballstemmer
 # MATCHES operator runs the query string through that same chain. Normalizing
 # Python-side with the identical Snowball English algorithm is what keeps the
 # coverage ranker looking for the term the fulltext lane actually matched.
-_STEMMER = snowballstemmer.stemmer("english")
+#
+# A Snowball stemmer holds the word under analysis in mutable instance state, so
+# two threads sharing one instance overwrite each other's buffer and get back a
+# stem of the other thread's word or an IndexError off the end of it. Coverage
+# ranking is dispatched through asyncio.to_thread on both retrieval paths, which
+# makes that concurrency ordinary rather than exotic, so each thread gets its
+# own stemmer. Per-thread instances stay cheap and leave the hot path
+# uncontended, which a lock around a shared instance would not.
+_STEMMER_STATE = threading.local()
+
+
+def _stemmer() -> Any:
+    stemmer = getattr(_STEMMER_STATE, "instance", None)
+    if stemmer is None:
+        stemmer = snowballstemmer.stemmer("english")
+        _STEMMER_STATE.instance = stemmer
+    return stemmer
+
 
 # Snowball is an inflectional stemmer and leaves graded adjectives alone: not
 # one of the pairs below unifies under it (faster stays faster while fast stays
@@ -77,6 +97,7 @@ _GRADED_ADJECTIVE_ALIASES = {
     "younger": "young",
     "youngest": "young",
 }
+_TEXT_TOKEN_PATTERN = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9'-]{2,}")
 _EXPLICIT_ANCHOR_PATTERN = re.compile(
     r"`(?P<backtick>[^`\n]{1,160})`"
     r'|"(?P<double>[^"\n]{1,160})"'
@@ -89,13 +110,18 @@ def _fold_ascii(token: str) -> str:
     return "".join(char for char in decomposed if not unicodedata.combining(char))
 
 
+# Ranking stems every token of every candidate, and candidate text repeats its
+# vocabulary heavily, so the same handful of surface forms is stemmed thousands
+# of times per search. The mapping is pure, which makes a bounded cache the
+# whole of the fix; the bound keeps user text from growing it without limit.
+@lru_cache(maxsize=1 << 16)
 def normalize_keyword_token(token: str) -> str:
     token = _fold_ascii(token.strip("'\"").lower())
     if token.endswith("'s"):
         token = token[:-2]
     elif token.endswith("'"):
         token = token[:-1]
-    return _STEMMER.stemWord(_GRADED_ADJECTIVE_ALIASES.get(token, token))
+    return _stemmer().stemWord(_GRADED_ADJECTIVE_ALIASES.get(token, token))
 
 
 def normalize_keyword_tokens(tokens: Iterable[str]) -> frozenset[str]:
@@ -131,16 +157,34 @@ def sense_tokens_from_text(text: str, *, vocabulary: Container[str] = frozenset(
     """Tokens eligible to match a verb-sense group, derivations excluded."""
     return [
         normalize_keyword_token(token)
-        for token in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9'-]{2,}", text.lower())
+        for token in _TEXT_TOKEN_PATTERN.findall(text.lower())
         if not is_derivational_form(token, vocabulary=vocabulary)
     ]
 
 
 def keyword_tokens_from_text(text: str) -> list[str]:
-    return [
-        normalize_keyword_token(token)
-        for token in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9'-]{2,}", text.lower())
-    ]
+    return [normalize_keyword_token(token) for token in _TEXT_TOKEN_PATTERN.findall(text.lower())]
+
+
+def keyword_and_sense_tokens_from_text(
+    text: str,
+    *,
+    vocabulary: Container[str] = frozenset(),
+) -> tuple[list[str], list[str]]:
+    """Both token views of one text, from one traversal.
+
+    The two views read the same tokens and normalize them the same way, and
+    differ only in the derived forms the sense view drops, so a caller that
+    wants both should not walk a fifty-thousand-character candidate twice.
+    """
+    keyword_tokens: list[str] = []
+    sense_tokens: list[str] = []
+    for surface in _TEXT_TOKEN_PATTERN.findall(text.lower()):
+        normalized = normalize_keyword_token(surface)
+        keyword_tokens.append(normalized)
+        if not is_derivational_form(surface, vocabulary=vocabulary):
+            sense_tokens.append(normalized)
+    return keyword_tokens, sense_tokens
 
 
 def extract_explicit_query_anchors(query: str) -> tuple[tuple[str, ...], ...]:

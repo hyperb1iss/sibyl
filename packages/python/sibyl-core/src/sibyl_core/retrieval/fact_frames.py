@@ -275,11 +275,12 @@ def _extract_fact_frames(text: str, *, query: bool) -> tuple[FactFrame, ...]:
 
 
 def _frame_from_span(span: str, *, query: bool) -> FactFrame | None:
-    terms = frozenset(_salient_terms(span))
+    span_terms, span_sense_terms = _salient_and_sense_terms(span)
+    terms = frozenset(span_terms)
     if not terms:
         return None
 
-    sense_terms = frozenset(_salient_terms(span, senses_only=True))
+    sense_terms = frozenset(span_sense_terms)
     action_source = _QUERY_ACTION_TERMS if query else _ACTION_TERMS
     actions = set(_labels_for_terms(sense_terms, action_source))
     categories: set[str] = set()
@@ -376,20 +377,33 @@ def _labels_for_terms(
             yield label
 
 
-def _salient_terms(text: str, *, senses_only: bool = False) -> list[str]:
+def _salient_and_sense_terms(text: str) -> tuple[list[str], list[str]]:
+    """Both term views of a span, from one traversal.
+
+    Every frame wants the plain terms and the sense terms, and the spans are
+    cut from candidate text that runs to fifty thousand characters, so reading
+    the span twice to apply one extra filter is work nobody needs. The two
+    views dedupe separately, exactly as two passes would: the sense view never
+    sees the derived forms, so they cannot claim a slot in it.
+    """
     terms: list[str] = []
+    sense_terms: list[str] = []
     seen: set[str] = set()
+    sense_seen: set[str] = set()
     for raw_token in _TOKEN_PATTERN.findall(text.lower()):
         if raw_token in _STOPWORDS:
             continue
-        if senses_only and is_derivational_form(raw_token, vocabulary=_SENSE_VOCABULARY):
-            continue
         token = normalize_keyword_token(raw_token)
-        if token in seen or len(token) < 2:
+        if len(token) < 2:
             continue
-        seen.add(token)
-        terms.append(token)
-    return terms
+        if token not in seen:
+            seen.add(token)
+            terms.append(token)
+        if token in sense_seen or is_derivational_form(raw_token, vocabulary=_SENSE_VOCABULARY):
+            continue
+        sense_seen.add(token)
+        sense_terms.append(token)
+    return terms, sense_terms
 
 
 def _overlap(left: frozenset[str], right: frozenset[str]) -> float:

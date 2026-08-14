@@ -15,6 +15,7 @@ from sibyl_core.query_anchors import (
 )
 from sibyl_core.query_anchors import (
     extract_explicit_query_anchors,
+    keyword_and_sense_tokens_from_text,
     keyword_tokens_from_text,
     normalize_keyword_token,
     normalize_keyword_tokens,
@@ -847,12 +848,13 @@ def rank_by_query_coverage[T](
     sense_tokens_by_id: dict[str, set[str]] = {}
     for candidate in candidates:
         text = candidate.text
-        tokens = keyword_tokens_from_text(text)
         # Primary and memory text are both cut from this text, so one pass over
         # it covers every evidence token a sense group is allowed to see.
-        sense_tokens_by_id[candidate.stable_id] = set(
-            sense_tokens_from_text(text, vocabulary=_SENSE_VOCABULARY)
+        tokens, sense_tokens = keyword_and_sense_tokens_from_text(
+            text,
+            vocabulary=_SENSE_VOCABULARY,
         )
+        sense_tokens_by_id[candidate.stable_id] = set(sense_tokens)
         primary_text_raw, has_primary_text = _extract_query_focus_text(query, text)
         primary_text = primary_text_raw.lower()
         primary_tokens = keyword_tokens_from_text(primary_text) if has_primary_text else []

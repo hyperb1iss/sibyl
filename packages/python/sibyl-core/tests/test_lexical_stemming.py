@@ -11,6 +11,8 @@ quietly grow back.
 from __future__ import annotations
 
 import re
+import sys
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from surrealdb import AsyncSurreal
@@ -23,7 +25,10 @@ from sibyl_core.backends.surreal.schema import ANALYZER_DEFINITIONS, NODE_DEFINI
 from sibyl_core.query_anchors import (
     _GRADED_ADJECTIVE_ALIASES,
     is_derivational_form,
+    keyword_and_sense_tokens_from_text,
+    keyword_tokens_from_text,
     normalize_keyword_token,
+    sense_tokens_from_text,
 )
 from sibyl_core.retrieval.fact_frames import (
     _SENSE_VOCABULARY,
@@ -205,3 +210,94 @@ def test_family_still_reads_as_a_relative() -> None:
     for text in ("that was really useful", "a playful puppy", "the attendant helped"):
         frames = extract_evidence_fact_frames(text)
         assert not (frames and frames[0].actions), text
+
+
+def _distinct_inflected_words(count: int) -> list[str]:
+    """Words no two of which are equal, so every one reaches the stemmer.
+
+    Normalization is memoized, and a cache hit never touches the stemmer, so a
+    word list that repeats itself would test the cache instead of the thing
+    that races.
+    """
+    bases = (
+        "polic",
+        "compan",
+        "univers",
+        "categor",
+        "librar",
+        "factor",
+        "memor",
+        "stor",
+        "quer",
+        "entr",
+    )
+    suffixes = ("ies", "y", "ical", "ising", "ised", "isation", "ially", "iest")
+    words = [
+        f"{base}{suffix}{index}"
+        for index in range(count // (len(bases) * len(suffixes)) + 1)
+        for base in bases
+        for suffix in suffixes
+    ]
+    return words[:count]
+
+
+def test_normalization_survives_concurrent_callers() -> None:
+    """One stemmer per thread, because Snowball keeps the word in the instance.
+
+    Coverage ranking is dispatched through asyncio.to_thread on both retrieval
+    paths, so several threads normalize at once as a matter of course. A
+    Snowball stemmer holds the word under analysis in mutable instance state,
+    and threads sharing one instance read each other's buffer: a shared
+    stemmer returns another word's stem, or indexes off the end of a word that
+    changed under it.
+    """
+    words = _distinct_inflected_words(24_000)
+    reference = {word: normalize_keyword_token(word) for word in words}
+    # The reference pass filled the cache, so clear it: the threaded pass has
+    # to reach the stemmer for the check to mean anything.
+    normalize_keyword_token.cache_clear()
+
+    workers = 16
+    slices = [words[index::workers] for index in range(workers)]
+
+    def normalize_slice(slice_words: list[str]) -> list[tuple[str, str]]:
+        return [(word, normalize_keyword_token(word)) for word in slice_words]
+
+    # Switching more often than the 5ms default lands the interleavings that
+    # corrupt a shared stemmer inside a test-sized run.
+    previous_interval = sys.getswitchinterval()
+    sys.setswitchinterval(0.000005)
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            observed = [pair for result in pool.map(normalize_slice, slices) for pair in result]
+    finally:
+        sys.setswitchinterval(previous_interval)
+        normalize_keyword_token.cache_clear()
+
+    assert len(observed) == len(words)
+    wrong = [(word, stem) for word, stem in observed if stem != reference[word]]
+    assert wrong == []
+
+
+def test_one_traversal_yields_both_token_views() -> None:
+    """Ranking reads a candidate once, and reads exactly what two passes read.
+
+    Every candidate needs the ordinary tokens and the sense tokens, and the
+    texts run to fifty thousand characters, so the combined reader exists to
+    stem them once. It earns that only by agreeing with the separate readers
+    token for token.
+    """
+    text = (
+        "user: I volunteered at the shelter and completely rebuilt their "
+        "policies for adoption. assistant: The attendants said the families "
+        "were useful references. user: My family attended the meetings."
+    )
+    tokens, sense_tokens = keyword_and_sense_tokens_from_text(
+        text,
+        vocabulary=_SENSE_VOCABULARY,
+    )
+
+    assert tokens == keyword_tokens_from_text(text)
+    assert sense_tokens == sense_tokens_from_text(text, vocabulary=_SENSE_VOCABULARY)
+    # The two views differ, or the sense filter would not be doing anything.
+    assert len(sense_tokens) < len(tokens)
