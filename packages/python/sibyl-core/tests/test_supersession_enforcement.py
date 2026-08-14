@@ -576,6 +576,65 @@ async def test_supersede_writes_the_replacement_edge_in_the_direction_retrieval_
 
 
 @pytest.mark.asyncio
+async def test_a_span_takes_the_stamp_but_never_the_supersession_edge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The two halves of a correction reach different rows.
+
+    A span has to leave recall with its parent, so it takes the lifecycle
+    stamp. It must not take an edge: "this row replaced that one" is a claim a
+    writer made about a memory, and minting it once per span would assert a
+    replacement nobody declared, on up to `MAX_PASSAGES_PER_SOURCE` rows.
+    """
+
+    memory = _raw_capture(id="source-1")
+    replacement = _raw_capture(id="replacement-1", title="Deploy to Hetzner")
+    runtime = _CorrectionGraphRuntime()
+    seen_uuids = iter(["entity-old", "entity-new"])
+
+    async def execute_query(query: str, **_params: object) -> list[dict[str, object]]:
+        if "parent_entity_id" in query:
+            return [{"uuid": "passage-of-entity-old"}]
+        return [{"uuid": next(seen_uuids)}]
+
+    runtime.execute_query = execute_query  # type: ignore[method-assign]
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> _CorrectionGraphRuntime:
+        return runtime
+
+    monkeypatch.setattr(
+        memory_module,
+        "get_raw_memory",
+        AsyncMock(side_effect=[memory, replacement, memory]),
+    )
+    monkeypatch.setattr(
+        memory_module,
+        "get_raw_memory_by_source_id",
+        AsyncMock(return_value=replacement),
+    )
+    monkeypatch.setattr(
+        memory_module,
+        "save_raw_memory",
+        AsyncMock(side_effect=lambda updated, **_kwargs: updated),
+    )
+    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+
+    result = await memory_module.apply_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="supersede",
+        replacement_source_id="replacement-1",
+    )
+
+    assert result.applied
+    assert result.affected_entity_ids == ["entity-old", "passage-of-entity-old"]
+    stamped = {entity_id for entity_id, _updates in runtime.updates}
+    assert stamped == {"entity-old", "passage-of-entity-old"}
+    assert [edge.target_id for edge in runtime.relationships] == ["entity-old"]
+
+
+@pytest.mark.asyncio
 async def test_restore_clears_the_graph_stamp_it_wrote(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1780,10 +1780,23 @@ _CORRECTION_NATIVE_WRITE_PATH = "memory_correction"
 
 @dataclass(frozen=True, slots=True)
 class _CorrectionGraphTargets:
-    """Graph rows a correction may stamp, and the ones it was refused."""
+    """Graph rows a correction may stamp, and the ones it was refused.
+
+    Spans are held apart from the memories they were cut from because the two
+    take different halves of the correction. Both get the lifecycle stamp, so
+    both leave recall. Only a memory gets a supersession edge: "this row
+    replaced that one" is a claim a writer made about a memory, and minting it
+    once per span would assert a replacement nobody declared, on up to
+    `MAX_PASSAGES_PER_SOURCE` rows per correction.
+    """
 
     authorized: list[str]
     refused: list[str]
+    passages: list[str] = field(default_factory=list)
+
+    @property
+    def stampable(self) -> list[str]:
+        return [*self.authorized, *self.passages]
 
 
 async def _correction_graph_entity_ids(
@@ -1917,9 +1930,11 @@ async def _correction_graph_entity_ids(
         principal_id=principal_id,
         accessible_projects=accessible_projects,
     )
+    known = set(authorized)
     return _CorrectionGraphTargets(
-        authorized=list(dict.fromkeys([*authorized, *passages])),
+        authorized=authorized,
         refused=refused,
+        passages=[entity_id for entity_id in dict.fromkeys(passages) if entity_id not in known],
     )
 
 
@@ -2098,7 +2113,7 @@ async def _project_correction_to_graph(
             error_type=type(exc).__name__,
         )
         return [], []
-    entity_ids = targets.authorized
+    entity_ids = targets.stampable
 
     updates = _correction_graph_metadata(
         preview,
@@ -2131,14 +2146,16 @@ async def _project_correction_to_graph(
             source_id=memory.id,
             restored_entity_ids=applied,
         )
-    if preview.action == "supersede" and replacement_source_id and applied:
+    span_ids = set(targets.passages)
+    superseded_memories = [entity_id for entity_id in applied if entity_id not in span_ids]
+    if preview.action == "supersede" and replacement_source_id and superseded_memories:
         await _link_graph_supersession(
             runtime,
             organization_id=organization_id,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             replacement_source_id=replacement_source_id,
-            superseded_entity_ids=applied,
+            superseded_entity_ids=superseded_memories,
         )
     return applied, list(targets.refused)
 
