@@ -3508,6 +3508,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyjwt" },
+    { name = "snowballstemmer" },
     { name = "structlog" },
 ]
 
@@ -3572,6 +3573,7 @@ requires-dist = [
     { name = "python-louvain", marker = "extra == 'runtime'", specifier = ">=0.16" },
     { name = "sentence-transformers", marker = "extra == 'reranking'", specifier = ">=5.6.1" },
     { name = "sentence-transformers", marker = "extra == 'runtime'", specifier = ">=5.6.1" },
+    { name = "snowballstemmer", specifier = ">=2.2" },
     { name = "structlog", specifier = ">=24.0" },
     { name = "surrealdb", marker = "extra == 'graph'", specifier = ">=2.0.0,<3.0" },
     { name = "surrealdb", marker = "extra == 'runtime'", specifier = ">=2.0.0,<3.0" },

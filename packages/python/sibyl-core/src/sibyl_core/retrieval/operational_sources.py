@@ -12,7 +12,7 @@ from sibyl_core.auth.memory_policy import (
 )
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.projection import MANIFEST_STATE_COMPLETE, operational_experience_manifest_id
-from sibyl_core.retrieval.query_ranking import extract_keywords
+from sibyl_core.retrieval.query_ranking import extract_keyword_stems
 
 PASSAGE_PROJECTION_KIND = "passage"
 RAW_OBSERVATION_PROJECTION_KIND = "raw_observation"
@@ -302,7 +302,7 @@ def select_operational_source_span(
 
     observation_groups = _unit_groups(inventory.raw_observations)
     entity_terms, group_terms = _source_discriminative_terms(observation_groups)
-    query_terms = frozenset(extract_keywords(query))
+    query_terms = frozenset(extract_keyword_stems(query))
     query_term_weights = _query_term_weights(query_terms, group_terms)
     candidate_windows = _candidate_windows(
         observation_groups,
@@ -500,7 +500,7 @@ def _source_discriminative_terms(
         common_lines = set.intersection(*group_lines)
     entity_terms = {
         entity_id: frozenset(
-            extract_keywords(
+            extract_keyword_stems(
                 "\n".join(line for line in lines if line.casefold() not in common_lines)
             )
         )

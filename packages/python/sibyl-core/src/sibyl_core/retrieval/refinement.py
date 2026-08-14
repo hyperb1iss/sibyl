@@ -7,8 +7,8 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
-from sibyl_core.query_anchors import extract_explicit_query_anchors
-from sibyl_core.retrieval.query_ranking import extract_keywords
+from sibyl_core.query_anchors import extract_explicit_anchor_phrases, normalize_keyword_token
+from sibyl_core.retrieval.query_ranking import extract_keyword_stems, extract_keywords
 
 MAX_FEEDBACK_DOCUMENTS = 8
 MAX_REFINEMENT_QUERIES = 3
@@ -25,6 +25,9 @@ _FEEDBACK_STOPWORDS = {
     "transcript",
     "user",
 }
+# Harness noise is written singular and tested by stem, so the plural of an
+# entry cannot walk past the entry that lists it.
+_FEEDBACK_STOPWORD_STEMS = frozenset(normalize_keyword_token(term) for term in _FEEDBACK_STOPWORDS)
 _STRUCTURAL_COUNTER_PATTERN = re.compile(
     r"^[A-Za-z][\w ]* \d+(?: part \d+/\d+)?$",
     re.I,
@@ -150,12 +153,14 @@ def plan_deterministic_refinement_queries(
         return []
 
     question_terms = extract_keywords(question)
-    question_term_set = set(question_terms)
+    # Exclusion is a membership test, so it folds: a feedback term the question
+    # already asks about in another inflection is not a new term.
+    question_term_set = set(extract_keyword_stems(question))
     seen = {query.casefold() for query in seen_queries}
     seen.add(question.casefold())
     planned: list[DeterministicRefinementQuery] = []
 
-    explicit_anchors = extract_explicit_query_anchors(question)
+    explicit_anchors = extract_explicit_anchor_phrases(question)
     for candidate in _structural_refinement_queries(
         question,
         explicit_anchors=explicit_anchors,
@@ -367,8 +372,8 @@ def _rank_feedback_terms(
             dict.fromkeys(
                 term
                 for term in extract_keywords(_feedback_text(document))
-                if term not in excluded_terms
-                and term not in _FEEDBACK_STOPWORDS
+                if normalize_keyword_token(term) not in excluded_terms
+                and normalize_keyword_token(term) not in _FEEDBACK_STOPWORD_STEMS
                 and _is_feedback_term(term)
             )
         )

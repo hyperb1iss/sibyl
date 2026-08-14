@@ -454,7 +454,7 @@ class _ExplicitAnchorSearchClient:
     async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
         self.calls.append((query, params))
         search_query = params.get("search_query")
-        if search_query == "report related link":
+        if search_query == "report related links":
             return [
                 self._row(
                     "partial-anchor",
@@ -1298,7 +1298,7 @@ async def test_native_entity_manager_rescues_full_explicit_anchor_candidate() ->
         for statement, params in client.calls
         if params.get("_query_label") == "entity.search.fulltext_explicit_anchors"
     )
-    assert anchor_call["search_query"] == "report related link"
+    assert anchor_call["search_query"] == "report related links"
     assert "AND content @AND@ $search_query" in anchor_query
 
 

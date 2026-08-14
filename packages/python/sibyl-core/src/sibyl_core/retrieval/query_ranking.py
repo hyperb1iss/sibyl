@@ -15,8 +15,11 @@ from sibyl_core.query_anchors import (
 )
 from sibyl_core.query_anchors import (
     extract_explicit_query_anchors,
+    keyword_and_sense_tokens_from_text,
     keyword_tokens_from_text,
     normalize_keyword_token,
+    normalize_keyword_tokens,
+    sense_tokens_from_text,
 )
 from sibyl_core.retrieval.fact_frames import (
     FactFrame,
@@ -136,6 +139,13 @@ _KEYWORD_STOPWORDS = {
     "you",
     "your",
 }
+# Query scaffolding is matched as written, before stemming. Folding the list
+# first would turn each entry into its whole morphological family, and several
+# of those families hold real content words: provided reaches provider,
+# compared reaches comparison, referring reaches reference. The stemmed view
+# exists only for callers that have already lost the surface form.
+_KEYWORD_STOPWORD_STEMS = normalize_keyword_tokens(_KEYWORD_STOPWORDS)
+_TRANSCRIPT_SPEAKER_TERMS = normalize_keyword_tokens({"assistant", "user"})
 _RANK_WEIGHT = 0.95
 _PRIOR_WEIGHT = 0.04
 _OVERLAP_WEIGHT = 0.30
@@ -184,51 +194,53 @@ _CLUSTER_AFFINITY_MAX_ORIGINAL_RANK = 40
 _CLUSTER_ANCHOR_MIN_SIGNAL = 0.5
 _CLUSTER_SIGNAL_WEIGHT = 2.1
 _SIGNAL_DOMINANCE_INSERT_MARGIN = 0.20
-_CLUSTER_AFFINITY_STOPWORDS = {
-    "actually",
-    "all",
-    "around",
-    "back",
-    "bit",
-    "but",
-    "could",
-    "definitely",
-    "give",
-    "great",
-    "had",
-    "help",
-    "just",
-    "know",
-    "make",
-    "maybe",
-    "not",
-    "now",
-    "out",
-    "really",
-    "same",
-    "seem",
-    "since",
-    "still",
-    "sure",
-    "tell",
-    "thank",
-    "thanks",
-    "their",
-    "them",
-    "there",
-    "these",
-    "thing",
-    "things",
-    "though",
-    "thought",
-    "time",
-    "today",
-    "try",
-    "trying",
-    "want",
-    "way",
-    "well",
-}
+_CLUSTER_AFFINITY_STOPWORDS = normalize_keyword_tokens(
+    {
+        "actually",
+        "all",
+        "around",
+        "back",
+        "bit",
+        "but",
+        "could",
+        "definitely",
+        "give",
+        "great",
+        "had",
+        "help",
+        "just",
+        "know",
+        "make",
+        "maybe",
+        "not",
+        "now",
+        "out",
+        "really",
+        "same",
+        "seem",
+        "since",
+        "still",
+        "sure",
+        "tell",
+        "thank",
+        "thanks",
+        "their",
+        "them",
+        "there",
+        "these",
+        "thing",
+        "things",
+        "though",
+        "thought",
+        "time",
+        "today",
+        "try",
+        "trying",
+        "want",
+        "way",
+        "well",
+    }
+)
 
 _EVIDENCE_SET_QUERY_PATTERN = re.compile(
     r"\b(how many|how much|total number|number of|count of|order of|sequence of)\b",
@@ -244,47 +256,49 @@ _RECOMMENDATION_QUERY_PATTERN = re.compile(
     r"\b(recommend|suggest|advice|tips?|ideas?|choose|should i)\b",
     re.IGNORECASE,
 )
-_PREFERENCE_QUERY_TERMS = {
-    "advice",
-    "advic",
-    "choose",
-    "idea",
-    "inspiration",
-    "recommend",
-    "recommendation",
-    "suggest",
-    "suggestion",
-    "tip",
-}
-_PREFERENCE_QUERY_SCAFFOLDING_TERMS = {
-    "advice",
-    "advic",
-    "choose",
-    "excited",
-    "extra",
-    "feel",
-    "feeling",
-    "find",
-    "getting",
-    "good",
-    "got",
-    "having",
-    "idea",
-    "interesting",
-    "look",
-    "looking",
-    "lately",
-    "might",
-    "new",
-    "recommend",
-    "recommendation",
-    "something",
-    "suggest",
-    "suggestion",
-    "think",
-    "tip",
-    "trouble",
-}
+_PREFERENCE_QUERY_TERMS = normalize_keyword_tokens(
+    {
+        "advice",
+        "choose",
+        "idea",
+        "inspiration",
+        "recommend",
+        "recommendation",
+        "suggest",
+        "suggestion",
+        "tip",
+    }
+)
+_PREFERENCE_QUERY_SCAFFOLDING_TERMS = normalize_keyword_tokens(
+    {
+        "advice",
+        "choose",
+        "excited",
+        "extra",
+        "feel",
+        "feeling",
+        "find",
+        "getting",
+        "good",
+        "got",
+        "having",
+        "idea",
+        "interesting",
+        "look",
+        "looking",
+        "lately",
+        "might",
+        "new",
+        "recommend",
+        "recommendation",
+        "something",
+        "suggest",
+        "suggestion",
+        "think",
+        "tip",
+        "trouble",
+    }
+)
 _GENERIC_ASSISTANT_PATTERNS = (
     re.compile(r"\bas an ai\b"),
     re.compile(r"\bi (?:can|cannot|can't) (?:help|assist)\b"),
@@ -340,34 +354,40 @@ _GENERATED_ARTIFACT_OUTPUT_PATTERN = re.compile(
     r"instructions?|steps?|def |class |```)\b",
     re.IGNORECASE,
 )
-_ARTIFACT_TYPE_TERMS = {
-    "code",
-    "email",
-    "letter",
-    "outline",
-    "plan",
-    "poem",
-    "recipe",
-    "script",
-    "song",
-    "story",
-}
-_ARTIFACT_SECTION_TERMS = {
-    "bridge",
-    "chorus",
-    "chord",
-    "class",
-    "draft",
-    "function",
-    "ingredient",
-    "instruction",
-    "intro",
-    "outro",
-    "progression",
-    "section",
-    "step",
-    "verse",
-}
+_ARTIFACT_TYPE_TERMS = normalize_keyword_tokens(
+    {
+        "code",
+        "email",
+        "letter",
+        "outline",
+        "plan",
+        "poem",
+        "recipe",
+        "script",
+        "song",
+        "story",
+    }
+)
+# "progression" is absent: it stems to "progress", which would make any memory
+# reporting progress on something read as a song section. "chord" already
+# carries the musical sense the entry was there for.
+_ARTIFACT_SECTION_TERMS = normalize_keyword_tokens(
+    {
+        "bridge",
+        "chorus",
+        "chord",
+        "class",
+        "draft",
+        "function",
+        "ingredient",
+        "instruction",
+        "intro",
+        "outro",
+        "section",
+        "step",
+        "verse",
+    }
+)
 _MEMORY_EVIDENCE_PATTERNS = (
     re.compile(r"\bby the way\b"),
     re.compile(r"\bi(?:'m| am) \d{1,3}\b"),
@@ -393,30 +413,39 @@ _MEMORY_EVIDENCE_PATTERNS = (
     ),
     re.compile(r"\bmy (?:current|new|old|previous|favorite|preferred|usual|go-to)\b"),
 )
-_ACTION_EVIDENCE_GROUPS = (
+# Each group is one action in base form; stemming at import covers the regular
+# inflections, so only irregular pasts (bought, got, built, sold, set) and
+# genuinely distinct derivations (subscription) need their own entry.
+_ACTION_EVIDENCE_GROUP_SURFACES = (
     frozenset(
         {
             "acquire",
-            "acquired",
             "bought",
             "buy",
             "got",
             "invest",
-            "invested",
             "order",
-            "ordered",
             "purchase",
-            "purchased",
         }
     ),
-    frozenset({"assemble", "build", "built", "install", "installed", "set"}),
-    frozenset({"donate", "donated", "sell", "sold"}),
-    frozenset({"fix", "repair", "repaired", "replace", "replaced", "service", "serviced"}),
-    frozenset({"attend", "join", "joined", "participate", "participated"}),
+    # "set" is out: it stems together with the settings/sets noun family, so a
+    # query about deployment settings would read as an assembly action.
+    frozenset({"assemble", "build", "built", "install"}),
+    frozenset({"donate", "sell", "sold"}),
+    frozenset({"fix", "repair", "replace"}),
+    frozenset({"attend", "join", "participate"}),
     frozenset({"present"}),
     frozenset({"volunteer"}),
-    frozenset({"register", "registered", "subscribe", "subscription"}),
-    frozenset({"rely", "use", "used", "using"}),
+    frozenset({"register", "subscribe", "subscription"}),
+    frozenset({"rely", "use"}),
+)
+
+_ACTION_EVIDENCE_GROUPS = tuple(
+    normalize_keyword_tokens(group) for group in _ACTION_EVIDENCE_GROUP_SURFACES
+)
+# Words this module lists are vocabulary, not derivations, whatever they end in.
+_SENSE_VOCABULARY: frozenset[str] = frozenset(
+    term for group in _ACTION_EVIDENCE_GROUP_SURFACES for term in group
 )
 
 
@@ -463,7 +492,7 @@ def _build_query_coverage_context(
     *,
     temporal_target: datetime | None,
 ) -> _QueryCoverageQueryContext:
-    keywords = extract_keywords(query)
+    keywords = extract_keyword_stems(query)
     is_preference_query = _is_preference_query(query, set(keywords))
     if is_preference_query:
         focused_keywords = [
@@ -606,17 +635,33 @@ def rank_items_by_query_coverage[T](
     return [(ranked.item, ranked.score) for ranked in ranking.ranked], ranking.changed, False
 
 
-def extract_keywords(query: str) -> list[str]:
-    tokens = re.findall(r"[a-zA-Z0-9][a-zA-Z0-9'-]{2,}", query.lower())
-    keywords: list[str] = []
+def _keyword_stream(query: str) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
     seen: set[str] = set()
-    for token in tokens:
-        token = normalize_keyword_token(token)
-        if token in _KEYWORD_STOPWORDS or token in seen:
+    for raw in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9'-]{2,}", query.lower()):
+        if raw in _KEYWORD_STOPWORDS:
             continue
-        keywords.append(token)
-        seen.add(token)
-    return keywords
+        stem = normalize_keyword_token(raw)
+        if stem in seen:
+            continue
+        seen.add(stem)
+        pairs.append((raw.strip("'\""), stem))
+    return pairs
+
+
+def extract_keywords(query: str) -> list[str]:
+    """Content words as the query spells them.
+
+    Callers that hand these back to a search engine, probe them against raw
+    text, or show them to a reader need the surface form; folding belongs on
+    the comparison side, where extract_keyword_stems supplies it.
+    """
+    return [surface for surface, _stem in _keyword_stream(query)]
+
+
+def extract_keyword_stems(query: str) -> list[str]:
+    """Content words folded onto the same stems the fulltext indexes store."""
+    return [stem for _surface, stem in _keyword_stream(query)]
 
 
 def extract_primary_text_from_text(text: str) -> tuple[str, bool]:
@@ -666,6 +711,7 @@ def _query_frame_score(
     memory_token_set: set[str],
     primary_text: str,
     memory_text: str,
+    evidence_sense_tokens: set[str],
 ) -> float:
     evidence_tokens = token_set | primary_token_set | memory_token_set
     evidence_text = " ".join(part for part in (memory_text, primary_text) if part)
@@ -696,7 +742,7 @@ def _query_frame_score(
     ) and _RECURRING_FREQUENCY_EVIDENCE_PATTERN.search(evidence_text):
         score = max(score, 0.82)
 
-    action_score = _action_evidence_score(query, evidence_tokens)
+    action_score = _action_evidence_score(query, evidence_sense_tokens)
     if action_score > 0.0:
         score = max(score, action_score)
 
@@ -713,7 +759,7 @@ def _query_frame_score(
 
 
 def _action_evidence_score(query: str, evidence_tokens: set[str]) -> float:
-    query_tokens = set(keyword_tokens_from_text(query))
+    query_tokens = set(sense_tokens_from_text(query, vocabulary=_SENSE_VOCABULARY))
     query_action_groups = [group for group in _ACTION_EVIDENCE_GROUPS if query_tokens & group]
     if not query_action_groups:
         return 0.0
@@ -799,9 +845,16 @@ def rank_by_query_coverage[T](
             bool,
         ]
     ] = []
+    sense_tokens_by_id: dict[str, set[str]] = {}
     for candidate in candidates:
         text = candidate.text
-        tokens = keyword_tokens_from_text(text)
+        # Primary and memory text are both cut from this text, so one pass over
+        # it covers every evidence token a sense group is allowed to see.
+        tokens, sense_tokens = keyword_and_sense_tokens_from_text(
+            text,
+            vocabulary=_SENSE_VOCABULARY,
+        )
+        sense_tokens_by_id[candidate.stable_id] = set(sense_tokens)
         primary_text_raw, has_primary_text = _extract_query_focus_text(query, text)
         primary_text = primary_text_raw.lower()
         primary_tokens = keyword_tokens_from_text(primary_text) if has_primary_text else []
@@ -925,6 +978,7 @@ def rank_by_query_coverage[T](
             memory_token_set=memory_token_set,
             primary_text=primary_text,
             memory_text=memory_text,
+            evidence_sense_tokens=sense_tokens_by_id[candidate.stable_id],
         )
         fact_frame_score = score_fact_frame_match_for_query(
             query_fact_frames,
@@ -1235,10 +1289,10 @@ def _cluster_affinity_tokens(tokens: set[str]) -> set[str]:
         token
         for token in tokens
         if len(token) > 2
-        and token not in _KEYWORD_STOPWORDS
+        and token not in _KEYWORD_STOPWORD_STEMS
         and token not in _PREFERENCE_QUERY_SCAFFOLDING_TERMS
         and token not in _CLUSTER_AFFINITY_STOPWORDS
-        and token not in {"assistant", "user"}
+        and token not in _TRANSCRIPT_SPEAKER_TERMS
     }
 
 

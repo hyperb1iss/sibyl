@@ -21,10 +21,11 @@ from sibyl_core.models.entities import Entity
 from sibyl_core.query_anchors import (
     explicit_query_anchor_score,
     extract_explicit_query_anchors,
+    keyword_tokens_from_text,
 )
 from sibyl_core.retrieval.fusion import rrf_merge_with_metadata
 from sibyl_core.retrieval.query_ranking import (
-    extract_keywords,
+    extract_keyword_stems,
     extract_primary_text_from_text,
     generic_assistant_marker_count,
     rank_items_by_query_coverage,
@@ -84,7 +85,7 @@ def _resolve_group_id(entity_manager: Any, group_id: str | None) -> str:
 
 
 def _extract_keywords(query: str) -> list[str]:
-    return extract_keywords(query)
+    return extract_keyword_stems(query)
 
 
 def _entity_text(entity: Any) -> str:
@@ -135,8 +136,12 @@ def _apply_keyword_boost(
     boosted_results: list[tuple[Any, float]] = []
     applied = False
     for entity, score in results:
-        entity_text = _entity_text(entity)
-        hit_count = sum(1 for keyword in keywords if keyword in entity_text)
+        # Stems are compared as whole tokens, never as substrings of the raw
+        # text: Snowball rewrites a terminal y to i, so "batteri" appears in
+        # neither "battery" nor any prefix of it, and a substring probe would
+        # silently lose every noun in that class.
+        entity_tokens = set(keyword_tokens_from_text(_entity_text(entity)))
+        hit_count = sum(1 for keyword in keywords if keyword in entity_tokens)
         if hit_count:
             applied = True
             score *= 1.0 + min(0.75, 0.3 * (hit_count / len(keywords)))

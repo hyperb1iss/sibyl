@@ -36,6 +36,9 @@ dependencies = [
     # Async & HTTP
     "anyio>=4.14.2",
     "httpx>=0.27",
+    # Lexical normalization; must stay the same Snowball English implementation
+    # the SurrealDB fulltext analyzers run, or the ranker and the index disagree
+    "snowballstemmer>=2.2",
     # Logging
     "structlog>=24.0",
     # Environment

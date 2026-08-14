@@ -54,7 +54,7 @@ from sibyl_core.models.tasks import (
 from sibyl_core.query_anchors import (
     explicit_query_anchor_proximity_score,
     explicit_query_anchor_score,
-    extract_explicit_query_anchors,
+    extract_explicit_anchor_phrases,
 )
 from sibyl_core.services import graph_client as _graph_client
 from sibyl_core.services.graph_search import (
@@ -163,10 +163,10 @@ _ENTITY_SEARCH_FIELDS = ",\n                       ".join(
 
 
 def _build_explicit_anchor_search_query(query: str) -> str:
-    anchors = extract_explicit_query_anchors(query)
-    if len(anchors) < 2:
+    phrases = extract_explicit_anchor_phrases(query)
+    if len(phrases) < 2:
         return ""
-    return build_fulltext_query(" ".join(token for anchor in anchors for token in anchor))
+    return build_fulltext_query(" ".join(token for phrase in phrases for token in phrase))
 
 
 def _entity_explicit_anchor_score(query: str, entity: Entity) -> float:

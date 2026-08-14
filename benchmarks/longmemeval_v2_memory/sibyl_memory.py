@@ -21,6 +21,8 @@ from typing import TypeVar
 from urllib.parse import urlparse
 from uuid import uuid4
 
+from functools import lru_cache
+
 import httpx
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,6 +41,10 @@ from sibyl_core.models import EntityType, OperationalExperience  # noqa: E402
 from sibyl_core.projection import project_operational_experience  # noqa: E402
 from sibyl_core.retrieval.operational_evidence import (  # noqa: E402
     TYPED_NOTE_RESERVATION_ITEMS,
+)
+from sibyl_core.query_anchors import (  # noqa: E402
+    normalize_keyword_token,
+    normalize_keyword_tokens,
 )
 from sibyl_core.retrieval.query_ranking import (  # noqa: E402
     QueryCoverageCandidate,
@@ -302,6 +308,12 @@ _QUERY_FOCUS_STOPWORDS = frozenset(
         "what",
         "which",
     }
+)
+# UI nouns are written singular and matched by stem, so a query saying "labels"
+# or "columns" is filtered by the entry that spells one.
+_QUERY_FOCUS_STOPWORD_STEMS = normalize_keyword_tokens(_QUERY_FOCUS_STOPWORDS)
+_QUERY_FOCUS_TERM_STOPWORD_STEMS = _QUERY_FOCUS_STOPWORD_STEMS | normalize_keyword_tokens(
+    {"list", "page"}
 )
 _QUERY_UI_ROLE_PATTERNS = (
     (
@@ -1668,7 +1680,9 @@ def _query_focus_phrases(query: str) -> tuple[str, ...]:
     for match in _QUERY_TARGET_FOCUS_PATTERN.finditer(focused_query):
         phrase = str(match.group("phrase") or "").strip()
         tokens = re.findall(r"[\w-]+", phrase.casefold())
-        if not tokens or all(token in _QUERY_FOCUS_STOPWORDS for token in tokens):
+        if not tokens or all(
+            normalize_keyword_token(token) in _QUERY_FOCUS_STOPWORD_STEMS for token in tokens
+        ):
             continue
         phrase_count = len(phrases)
         add_phrase(phrase)
@@ -1681,9 +1695,12 @@ def _query_focus_phrases(query: str) -> tuple[str, ...]:
     target_queries = [query for query in structural_queries if query.facet == "target"]
     for structural_query in target_queries:
         for term in structural_query.added_terms:
-            if term.casefold() in {*_QUERY_FOCUS_STOPWORDS, "list", "page"}:
+            stem = normalize_keyword_token(term)
+            if stem in _QUERY_FOCUS_TERM_STOPWORD_STEMS:
                 continue
-            add_phrase(term)
+            # Focus phrases are substring-matched against page text, so the
+            # folded form is the one that reaches both spellings of a noun.
+            add_phrase(stem)
     if not target_focus_added and not target_queries:
         for structural_query in structural_queries:
             if structural_query.facet != "focus_clause":
@@ -1691,7 +1708,8 @@ def _query_focus_phrases(query: str) -> tuple[str, ...]:
             structural_terms = [
                 token
                 for token in re.findall(r"[A-Za-z][\w-]*", structural_query.query)
-                if token.casefold() not in _QUERY_FOCUS_STOPWORDS and token.casefold() not in seen
+                if normalize_keyword_token(token) not in _QUERY_FOCUS_STOPWORD_STEMS
+                and token.casefold() not in seen
             ]
             if len(structural_terms) < 2:
                 continue
@@ -1708,6 +1726,42 @@ def _query_ui_roles(query: str) -> tuple[str, ...]:
             continue
         roles.extend(marker for marker in markers if marker not in roles)
     return tuple(roles)
+
+
+@lru_cache(maxsize=8192)
+def _line_stems(line: str) -> tuple[str, ...]:
+    return tuple(normalize_keyword_token(token) for token in re.findall(r"[\w-]+", line))
+
+
+@lru_cache(maxsize=8192)
+def _phrase_stems(phrase: str) -> tuple[str, ...]:
+    return tuple(normalize_keyword_token(token) for token in re.findall(r"[\w-]+", phrase))
+
+
+def _phrase_matches_line(phrase: str, line: str) -> bool:
+    """Literal match first, then the same phrase compared stem by stem.
+
+    Focus phrases are folded, and a fold is not a substring of what it covers
+    when Snowball rewrites a terminal y: "categori" is absent from "category".
+    Comparing whole tokens reaches both spellings, and the literal check keeps
+    every match the substring probe already made.
+
+    The fold includes graded adjectives, so "fastest route" also reaches a line
+    saying "the fast route". That fold is banned on the query path, where it
+    costs a fulltext match against an index that does not stem comparatives.
+    Here both sides are plain page text and never meet an index, so widening
+    to the base adjective only finds more of the state the question is about.
+    """
+    if phrase in line:
+        return True
+    wanted = _phrase_stems(phrase)
+    if not wanted:
+        return False
+    haystack = _line_stems(line)
+    span = len(wanted)
+    return any(
+        haystack[start : start + span] == wanted for start in range(len(haystack) - span + 1)
+    )
 
 
 def _query_structured_signal(query: str, text: str) -> tuple[int, int, int, int, int]:
@@ -1727,7 +1781,9 @@ def _query_structured_signal(query: str, text: str) -> tuple[int, int, int, int,
     matched_phrase_priority = 0
     for phrase_index, phrase in enumerate(focus_phrases, start=1):
         phrase_line_indices = {
-            line_index for line_index, line in enumerate(lines) if phrase in line
+            line_index
+            for line_index, line in enumerate(lines)
+            if _phrase_matches_line(phrase, line)
         }
         nearby_role_lines = {
             role_line_index
@@ -1979,7 +2035,7 @@ def _query_slice_candidates(
         window_starts = set(range(body_start, state_end, stride_lines))
         for line_index in range(body_start, state_end):
             line = lines[line_index].casefold()
-            if not any(phrase in line for phrase in focus_phrases):
+            if not any(_phrase_matches_line(phrase, line) for phrase in focus_phrases):
                 continue
             anchored_start = max(
                 body_start,
@@ -2039,7 +2095,7 @@ def _query_structured_section_candidates(
     candidates: list[dict[str, object]] = []
     for focus_line in range(body_start, state_end):
         normalized_line = lines[focus_line].casefold()
-        if not any(phrase in normalized_line for phrase in focus_phrases):
+        if not any(_phrase_matches_line(phrase, normalized_line) for phrase in focus_phrases):
             continue
         section_marker = re.search(
             r"\b(?:button|group|heading|legend|list|menu|region|tablist)\b",

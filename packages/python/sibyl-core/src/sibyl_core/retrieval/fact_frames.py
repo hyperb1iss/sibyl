@@ -6,6 +6,12 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from sibyl_core.query_anchors import (
+    is_derivational_form,
+    normalize_keyword_token,
+    normalize_keyword_tokens,
+)
+
 _TOKEN_PATTERN = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9'-]{1,}")
 _SPAN_SPLIT_PATTERN = re.compile(r"(?<=[.!?])\s+|\n+")
 _FIRST_PERSON_PATTERN = re.compile(r"\b(?:i|i'm|i've|i'd|me|my|mine|we|our)\b", re.I)
@@ -36,6 +42,11 @@ _SERVICE_USE_PATTERN = re.compile(
     r"[A-Z0-9][A-Za-z0-9&'.-]{2,}(?:\s+[A-Z0-9][A-Za-z0-9&'.-]{2,}){0,3}\b"
 )
 
+# Function words are matched as written, never by stem: folding the list
+# would turn each entry into its whole family and swallow content words
+# (differ would take difference, assist would take assistance). Countable
+# nouns therefore carry their plural explicitly. "using" is absent on
+# purpose, since it carries the use action.
 _STOPWORDS = {
     "about",
     "after",
@@ -46,6 +57,7 @@ _STOPWORDS = {
     "any",
     "are",
     "assistant",
+    "assistants",
     "been",
     "before",
     "can",
@@ -73,7 +85,9 @@ _STOPWORDS = {
     "much",
     "my",
     "name",
+    "names",
     "need",
+    "needs",
     "new",
     "on",
     "or",
@@ -90,7 +104,7 @@ _STOPWORDS = {
     "to",
     "up",
     "user",
-    "using",
+    "users",
     "was",
     "week",
     "weeks",
@@ -100,59 +114,23 @@ _STOPWORDS = {
     "who",
     "with",
     "year",
+    "years",
     "you",
 }
 
-_NORMALIZED_TOKEN_ALIASES = {
-    "acquired": "acquire",
-    "acquiring": "acquire",
-    "assembled": "assemble",
-    "assembling": "assemble",
-    "attended": "attend",
-    "attending": "attend",
-    "bought": "buy",
-    "classes": "class",
-    "completed": "complete",
-    "finishing": "finish",
-    "fixed": "fix",
-    "fixing": "fix",
-    "got": "get",
-    "listened": "listen",
-    "listening": "listen",
-    "ordered": "order",
-    "ordering": "order",
-    "participated": "participate",
-    "participating": "participate",
-    "picked": "pick",
-    "played": "play",
-    "playing": "play",
-    "presented": "present",
-    "presenting": "present",
-    "purchased": "purchase",
-    "purchasing": "purchase",
-    "read": "read",
-    "relying": "rely",
-    "researched": "research",
-    "researching": "research",
-    "serviced": "repair",
-    "servicing": "repair",
-    "studied": "study",
-    "studying": "study",
-    "subscribed": "subscribe",
-    "using": "use",
-    "visited": "visit",
-    "visiting": "visit",
-    "volunteered": "volunteer",
-    "volunteering": "volunteer",
-    "watching": "watch",
-}
-
-_ACTION_TERMS: dict[str, frozenset[str]] = {
+# Every group is written in surface English and stemmed at import, so a term
+# covers its own inflections. Irregular pasts (bought, got, went) survive
+# stemming unchanged and are therefore listed beside the verb they belong to,
+# and "service" sits under repair because that is a sense mapping the stemmer
+# has no opinion about.
+_ACTION_TERM_SURFACES: dict[str, frozenset[str]] = {
     "acquire": frozenset(
         {
             "acquire",
+            "bought",
             "buy",
             "get",
+            "got",
             "invest",
             "order",
             "pick",
@@ -164,6 +142,8 @@ _ACTION_TERMS: dict[str, frozenset[str]] = {
     "create": frozenset({"build", "compose", "create", "draft", "generate", "make", "write"}),
     "present": frozenset({"present", "presentation"}),
     "profile": frozenset({"field", "focus", "profession", "research", "role", "specialty"}),
+    # "service" is out: stemming collapses the noun into the verb, so every
+    # mention of a service would read as a repair.
     "repair": frozenset({"fix", "repair", "replace"}),
     "use": frozenset(
         {
@@ -181,8 +161,8 @@ _ACTION_TERMS: dict[str, frozenset[str]] = {
     "volunteer": frozenset({"volunteer"}),
 }
 
-_QUERY_ACTION_TERMS: dict[str, frozenset[str]] = {
-    **_ACTION_TERMS,
+_QUERY_ACTION_TERM_SURFACES: dict[str, frozenset[str]] = {
+    **_ACTION_TERM_SURFACES,
     "recommend": frozenset(
         {
             "recommend",
@@ -191,7 +171,9 @@ _QUERY_ACTION_TERMS: dict[str, frozenset[str]] = {
     ),
 }
 
-_RELATION_TERMS: dict[str, frozenset[str]] = {
+_RELATIVE_TERM = normalize_keyword_token("relative")
+
+_RELATION_TERM_SURFACES: dict[str, frozenset[str]] = {
     "friend": frozenset({"colleague", "coworker", "friend", "partner", "roommate"}),
     "relative": frozenset(
         {
@@ -215,6 +197,26 @@ _RELATION_TERMS: dict[str, frozenset[str]] = {
         }
     ),
 }
+
+
+_ACTION_TERMS: dict[str, frozenset[str]] = {
+    label: normalize_keyword_tokens(terms) for label, terms in _ACTION_TERM_SURFACES.items()
+}
+_QUERY_ACTION_TERMS: dict[str, frozenset[str]] = {
+    label: normalize_keyword_tokens(terms) for label, terms in _QUERY_ACTION_TERM_SURFACES.items()
+}
+_RELATION_TERMS: dict[str, frozenset[str]] = {
+    label: normalize_keyword_tokens(terms) for label, terms in _RELATION_TERM_SURFACES.items()
+}
+# A word this file actually lists is a vocabulary word, whatever it ends in, so
+# the derivational guard must never strip it: "family" is the relative group's
+# own entry and only looks like an adverb.
+_SENSE_VOCABULARY: frozenset[str] = frozenset(
+    term
+    for source in (_QUERY_ACTION_TERM_SURFACES, _RELATION_TERM_SURFACES)
+    for terms in source.values()
+    for term in terms
+)
 
 
 @dataclass(frozen=True)
@@ -273,14 +275,16 @@ def _extract_fact_frames(text: str, *, query: bool) -> tuple[FactFrame, ...]:
 
 
 def _frame_from_span(span: str, *, query: bool) -> FactFrame | None:
-    terms = frozenset(_salient_terms(span))
+    span_terms, span_sense_terms = _salient_and_sense_terms(span)
+    terms = frozenset(span_terms)
     if not terms:
         return None
 
+    sense_terms = frozenset(span_sense_terms)
     action_source = _QUERY_ACTION_TERMS if query else _ACTION_TERMS
-    actions = set(_labels_for_terms(terms, action_source))
+    actions = set(_labels_for_terms(sense_terms, action_source))
     categories: set[str] = set()
-    relations = set(_labels_for_terms(terms, _RELATION_TERMS))
+    relations = set(_labels_for_terms(sense_terms, _RELATION_TERMS))
     lowered = span.lower()
 
     if _PREFERENCE_PATTERN.search(span):
@@ -297,7 +301,7 @@ def _frame_from_span(span: str, *, query: bool) -> FactFrame | None:
     if query and re.search(r"\b(?:what|which|name)\b[^?]{0,100}\bservice\b", lowered):
         categories.add("service")
         actions.add("use")
-    if query and "relative" in terms:
+    if query and _RELATIVE_TERM in terms:
         relations.add("relative")
     if _RECENCY_PATTERN.search(span):
         relations.add("recency")
@@ -373,35 +377,33 @@ def _labels_for_terms(
             yield label
 
 
-def _salient_terms(text: str) -> list[str]:
+def _salient_and_sense_terms(text: str) -> tuple[list[str], list[str]]:
+    """Both term views of a span, from one traversal.
+
+    Every frame wants the plain terms and the sense terms, and the spans are
+    cut from candidate text that runs to fifty thousand characters, so reading
+    the span twice to apply one extra filter is work nobody needs. The two
+    views dedupe separately, exactly as two passes would: the sense view never
+    sees the derived forms, so they cannot claim a slot in it.
+    """
     terms: list[str] = []
+    sense_terms: list[str] = []
     seen: set[str] = set()
+    sense_seen: set[str] = set()
     for raw_token in _TOKEN_PATTERN.findall(text.lower()):
-        token = _normalize_token(raw_token)
-        if token in _STOPWORDS or token in seen or len(token) < 2:
+        if raw_token in _STOPWORDS:
             continue
-        seen.add(token)
-        terms.append(token)
-    return terms
-
-
-def _normalize_token(token: str) -> str:
-    token = token.strip("'\"")
-    if token.endswith("'s"):
-        token = token[:-2]
-    elif token.endswith("'"):
-        token = token[:-1]
-    if token in _NORMALIZED_TOKEN_ALIASES:
-        return _NORMALIZED_TOKEN_ALIASES[token]
-    if len(token) > 4 and token.endswith("ies"):
-        return f"{token[:-3]}y"
-    if len(token) > 4 and token.endswith(("ches", "shes", "xes", "zes")):
-        return token[:-2]
-    if len(token) > 4 and token.endswith(("ces", "ses")):
-        return token[:-1]
-    if len(token) > 3 and token.endswith("s") and not token.endswith(("is", "ous", "ss", "us")):
-        return token[:-1]
-    return token
+        token = normalize_keyword_token(raw_token)
+        if len(token) < 2:
+            continue
+        if token not in seen:
+            seen.add(token)
+            terms.append(token)
+        if token in sense_seen or is_derivational_form(raw_token, vocabulary=_SENSE_VOCABULARY):
+            continue
+        sense_seen.add(token)
+        sense_terms.append(token)
+    return terms, sense_terms
 
 
 def _overlap(left: frozenset[str], right: frozenset[str]) -> float:
