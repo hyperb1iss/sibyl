@@ -200,8 +200,15 @@ async def _stream_logs(
 
                     _print_entry(entry)
                 except websockets.ConnectionClosed:
+                    # A supervisor cannot tell a finished follow from a dropped
+                    # one unless the exit status says so, and this stream only
+                    # ends when the server or the network ends it.
                     error("Connection closed")
-                    break
+                    raise typer.Exit(1) from None
+    except typer.Exit:
+        # typer.Exit is a RuntimeError subclass, so the handler below would
+        # swallow it and relabel a clean exit as a WebSocket error.
+        raise
     except asyncio.CancelledError:
         console.print("\n[dim]Stream stopped[/dim]")
     except Exception as e:

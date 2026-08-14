@@ -573,3 +573,85 @@ def test_an_unknown_context_never_inherits_the_active_tls_setting(
 
     with pytest.raises(config_store.UnknownContextError):
         SibylClient(context_name="stagingg")
+
+
+@pytest.mark.parametrize("json_flag", [[], ["--json"]])
+def test_synthesis_verify_exits_nonzero_when_verification_fails(json_flag: list[str]) -> None:
+    """Five sweep rounds passed over this one; it reports a verdict AND a failure."""
+    failed = {"verification": {"status": "gaps", "gap_count": 3, "gaps": []}}
+
+    with patch("sibyl_cli.main.get_client", return_value=_client(synthesis_draft=failed)):
+        result = CliRunner().invoke(main_app, ["synthesis", "verify", "a goal", *json_flag])
+
+    assert result.exit_code == 1
+
+
+@pytest.mark.parametrize("json_flag", [[], ["--json"]])
+def test_synthesis_verify_exits_zero_when_verification_passes(json_flag: list[str]) -> None:
+    passed = {"verification": {"status": "pass", "source_count": 4, "gaps": []}}
+
+    with patch("sibyl_cli.main.get_client", return_value=_client(synthesis_draft=passed)):
+        result = CliRunner().invoke(main_app, ["synthesis", "verify", "a goal", *json_flag])
+
+    assert result.exit_code == 0
+
+
+def test_setup_reports_failure_when_hooks_cannot_be_configured(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Against the real function, not a mock of it: the previous test mocked the
+    whole of setup_agent_integration, so its broken branch never ran."""
+    from sibyl_cli import setup as setup_module
+
+    monkeypatch.setattr(setup_module, "find_sibyl_repo", lambda: tmp_path)
+    monkeypatch.setattr(setup_module, "install_skills_symlink", lambda _d: (1, 0))
+    monkeypatch.setattr(setup_module, "install_hooks_symlink", lambda _d: True)
+    monkeypatch.setattr(setup_module, "configure_claude_hooks", lambda: False)
+
+    assert setup_module.setup_agent_integration(verbose=False) is False
+
+
+def test_setup_reports_failure_when_hooks_are_absent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl_cli import setup as setup_module
+
+    monkeypatch.setattr(setup_module, "find_sibyl_repo", lambda: tmp_path)
+    monkeypatch.setattr(setup_module, "install_skills_symlink", lambda _d: (1, 0))
+    monkeypatch.setattr(setup_module, "install_hooks_symlink", lambda _d: False)
+
+    assert setup_module.setup_agent_integration(verbose=False) is False
+
+
+def test_setup_reports_success_when_everything_lands(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl_cli import setup as setup_module
+
+    monkeypatch.setattr(setup_module, "find_sibyl_repo", lambda: tmp_path)
+    monkeypatch.setattr(setup_module, "install_skills_symlink", lambda _d: (1, 0))
+    monkeypatch.setattr(setup_module, "install_hooks_symlink", lambda _d: True)
+    monkeypatch.setattr(setup_module, "configure_claude_hooks", lambda: True)
+
+    assert setup_module.setup_agent_integration(verbose=False) is True
+
+
+def test_update_skills_propagates_a_failed_hook_setup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`sibyl update --skills --yes` reported complete success with hooks absent."""
+    from sibyl_cli import setup as setup_module
+    from sibyl_cli import update as update_module
+
+    monkeypatch.setattr(setup_module, "find_sibyl_repo", lambda: tmp_path)
+    monkeypatch.setattr(setup_module, "install_skills_symlink", lambda _d: (1, 0))
+    monkeypatch.setattr(setup_module, "install_hooks_symlink", lambda _d: False)
+    monkeypatch.setattr(update_module, "is_dev_mode", lambda: False)
+
+    result = CliRunner().invoke(update_module.app, ["--skills", "--yes"])
+
+    assert result.exit_code == 1

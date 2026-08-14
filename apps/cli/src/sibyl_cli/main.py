@@ -2391,10 +2391,15 @@ def synthesis_verify_command(
         try:
             async with get_client() as client:
                 data = await client.synthesis_draft(**options, output_format="json")
+            verification = cast("dict[str, object]", data.get("verification") or {})
+            passed = str(verification.get("status") or "unknown") == "pass"
+
             if json_output:
-                print_json(data)
+                print_json_result(data, succeeded=passed)
                 return
             _print_synthesis_verification(cast("dict[str, object]", data))
+            if not passed:
+                raise typer.Exit(1)
         except SibylClientError as e:
             _handle_client_error(e)
 
