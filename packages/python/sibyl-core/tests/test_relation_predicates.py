@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+import sibyl_core.services.memory as memory_module
 import sibyl_core.tools.add as add_module
 from sibyl_core.models.entities import Entity, EntityType, RelationshipType
 from sibyl_core.models.relations import (
@@ -406,3 +408,83 @@ async def test_suppressing_predicate_at_another_principals_memory_is_refused(
     assert row["name"] == "RELATED_TO"
     assert row["source_id"] == created_id
     assert "agent_declared" not in row["attributes"]
+
+
+class TestPromotionLinkTargets:
+    """Promotion reports edge counts, so its link list must not leak existence.
+
+    `persist_reflection_candidate` returns how many relationships it requested
+    and how many it wrote, and the graph writer silently skips an edge whose
+    endpoint does not resolve. A target that exists therefore lands as a
+    created edge and one that does not lands as a shortfall, which reads a
+    guessed id back to the caller unless invisible and absent collapse to the
+    same answer.
+    """
+
+    @staticmethod
+    def _runtime(rows: dict[str, Entity]) -> Any:
+        class Manager:
+            async def get(self, entity_id: str) -> Entity:
+                if entity_id not in rows:
+                    raise KeyError(entity_id)
+                return rows[entity_id]
+
+        return SimpleNamespace(entity_manager=Manager())
+
+    @staticmethod
+    def _row(entity_id: str, **metadata: Any) -> Entity:
+        return Entity(
+            id=entity_id,
+            entity_type=EntityType.EPISODE,
+            name="Prior",
+            description="",
+            content="",
+            metadata=metadata,
+        )
+
+    @pytest.mark.asyncio
+    async def test_invisible_and_absent_targets_both_drop_out(self) -> None:
+        hidden = self._row("ep_hidden", memory_scope="private", principal_id="principal-b")
+        runtime = self._runtime({"ep_hidden": hidden})
+
+        invisible = await memory_module._linkable_related_targets(
+            runtime=runtime,
+            related_to=["supersedes:ep_hidden"],
+            principal_id="principal-a",
+            accessible_projects=set(),
+        )
+        absent = await memory_module._linkable_related_targets(
+            runtime=runtime,
+            related_to=["supersedes:ep_absent"],
+            principal_id="principal-a",
+            accessible_projects=set(),
+        )
+        assert invisible == absent == []
+
+    @pytest.mark.asyncio
+    async def test_a_visible_target_still_links(self) -> None:
+        runtime = self._runtime({"ep_visible": self._row("ep_visible")})
+        linkable = await memory_module._linkable_related_targets(
+            runtime=runtime,
+            related_to=["supersedes:ep_visible", "ep_visible"],
+            principal_id="principal-a",
+            accessible_projects=set(),
+        )
+        assert linkable == ["ep_visible", "ep_visible"]
+
+    def test_promotion_still_links_untyped(self) -> None:
+        """The predicate is resolved to its target and then discarded here.
+
+        SUPERSEDES on the promotion path is minted only from the authorized
+        `supersedes` channel, so honoring a predicate declared on the free
+        `related_to` list would route around that gate.
+        """
+        relationships = memory_module._relationships_for_promotion(
+            "ep_new",
+            project=None,
+            source_id=None,
+            related_to=["ep_visible"],
+            supersedes=[],
+            raw_source_ids=[],
+        )
+        assert [rel.relationship_type for rel in relationships] == [RelationshipType.RELATED_TO]

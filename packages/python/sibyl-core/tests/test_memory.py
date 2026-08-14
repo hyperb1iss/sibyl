@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.models.reflection import (
     ReflectionCandidate,
     memory_lifecycle_from_metadata,
@@ -1385,7 +1386,22 @@ async def test_persist_reflection_candidate_reports_partial_relationship_writes(
         tags=["reflection", "decision"],
     )
 
-    entity_manager = SimpleNamespace(create_direct=AsyncMock(return_value="decision_partial"))
+    async def get_related(entity_id):
+        # Promotion drops targets it cannot resolve, so a partial-write receipt
+        # needs both declared links to be real and visible rows.
+        return Entity(
+            id=entity_id,
+            entity_type=EntityType.EPISODE,
+            name="Linked memory",
+            description="",
+            content="",
+            metadata={"memory_scope": "private", "principal_id": "user-1"},
+        )
+
+    entity_manager = SimpleNamespace(
+        create_direct=AsyncMock(return_value="decision_partial"),
+        get=AsyncMock(side_effect=get_related),
+    )
 
     async def create_relationships(relationships):
         return (1, len(relationships) - 1)

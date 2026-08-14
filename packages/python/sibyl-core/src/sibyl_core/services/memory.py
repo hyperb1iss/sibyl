@@ -394,7 +394,12 @@ async def persist_reflection_candidate(
         created_id,
         project=project,
         source_id=source_id if link_source_entity else None,
-        related_to=related_to,
+        related_to=await _linkable_related_targets(
+            runtime=runtime,
+            related_to=related_to,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        ),
         supersedes=superseded_ids,
         raw_source_ids=source_ids,
         native_write_path=native_write_path,
@@ -3236,6 +3241,44 @@ def _entity_from_candidate(
     )
 
 
+async def _linkable_related_targets(
+    *,
+    runtime: Any,
+    related_to: Sequence[str] | None,
+    principal_id: str | None,
+    accessible_projects: Iterable[str] | None,
+) -> list[str]:
+    """The declared link targets this principal is allowed to name.
+
+    Promotion reports how many relationships it requested and how many it
+    wrote, and the graph writer silently skips an edge whose endpoint does not
+    resolve. Those two facts together turn the link list into an existence
+    oracle: a guessed id that names a real row lands as a created edge, and one
+    that names nothing lands as a shortfall. Dropping targets this caller
+    cannot see collapses both answers into the same one, so the counts carry no
+    information about rows the caller was never allowed to know about.
+
+    Predicates are resolved to their target here as everywhere else, but
+    promotion still links untyped; `supersedes` on this path is minted only
+    from the authorized channel.
+    """
+    linkable: list[str] = []
+    for target_id in declared_relation_targets(list(related_to or ())):
+        try:
+            target = await runtime.entity_manager.get(target_id)
+        except Exception:
+            continue
+        if target is None:
+            continue
+        if suppression_target_visible(
+            target,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        ):
+            linkable.append(target_id)
+    return linkable
+
+
 def _relationships_for_promotion(
     entity_id: str,
     *,
@@ -3266,11 +3309,11 @@ def _relationships_for_promotion(
             )
         )
     excluded_targets = {entity_id, project, source_id}
-    # Promotion resolves a declared predicate down to its target id and links
-    # untyped. SUPERSEDES on this path is minted only from `supersedes`, whose
+    # Targets arrive already resolved and already filtered to what the caller
+    # may see. SUPERSEDES on this path is minted only from `supersedes`, whose
     # targets passed `_authorized_superseded_entity_ids`; honoring a predicate
     # declared on the free `related_to` channel would route around that gate.
-    for related_id in declared_relation_targets(list(related_to or ())):
+    for related_id in related_to or ():
         if related_id in excluded_targets:
             continue
         relationships.append(
