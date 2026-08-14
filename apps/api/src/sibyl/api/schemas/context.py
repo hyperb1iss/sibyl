@@ -45,13 +45,17 @@ class ContextEvidenceRequest(BaseModel):
         default=False,
         description="Include authorized evidence ranking diagnostics",
     )
-    retrieval_mode: Literal["fast", "accurate"] = Field(
+    retrieval_mode: Literal["fast", "accurate", "naive"] = Field(
         default="fast",
         description=(
-            "Use one search (fast) or deterministic multi-step evidence refinement "
-            "(accurate). DEPRECATED: accurate measured lower accuracy at 2.5x the "
-            "latency of fast at full benchmark scale and will be removed in a "
-            "future release; requests selecting it are served but warned."
+            "Use one search (fast), deterministic multi-step evidence refinement "
+            "(accurate), or the naive-strong control arm (naive). DEPRECATED: "
+            "accurate measured lower accuracy at 2.5x the latency of fast at full "
+            "benchmark scale and will be removed in a future release; requests "
+            "selecting it are served but warned. EXPERIMENTAL: naive is the 1.3 "
+            "Phase 0 control arm (BM25 + dense KNN + plain RRF + a tight pack, "
+            "with no traversal, synthesis, query planning, or coverage ranking) "
+            "and it governs the whole pack, not the evidence block alone."
         ),
     )
     max_planned_queries: int = Field(

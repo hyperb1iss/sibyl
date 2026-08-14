@@ -203,22 +203,30 @@ Compiles a structured context pack for an agent goal. This is the REST equivalen
 Setting the optional `evidence` object runs an enhanced source-evidence search alongside context
 compilation:
 
-| Field                           | Type     | Default       | Description                                                     |
-| ------------------------------- | -------- | ------------- | --------------------------------------------------------------- |
-| `types`                         | string[] | `["session"]` | Entity types to include in the evidence pool                    |
-| `limit`                         | integer  | 24            | Maximum evidence results (1-50)                                 |
-| `max_results_per_source`        | integer  | -             | In accurate mode, prefer source-diverse evidence first (1-50)   |
-| `content_max_chars`             | integer  | 500           | Maximum content characters per evidence result (0-50000)        |
-| `include_retrieval_diagnostics` | boolean  | false         | Include authorized evidence ranking diagnostics                 |
-| `retrieval_mode`                | string   | `fast`        | `fast` (one search) or `accurate` (deprecated, see below)       |
-| `max_planned_queries`           | integer  | 3             | Maximum feedback searches across accurate-mode refinement (1-3) |
-| `reserve_distilled_notes`       | boolean  | true          | Reserve a typed lane for distilled operational notes            |
+| Field                           | Type     | Default       | Description                                                       |
+| ------------------------------- | -------- | ------------- | ----------------------------------------------------------------- |
+| `types`                         | string[] | `["session"]` | Entity types to include in the evidence pool                      |
+| `limit`                         | integer  | 24            | Maximum evidence results (1-50)                                   |
+| `max_results_per_source`        | integer  | -             | In accurate mode, prefer source-diverse evidence first (1-50)     |
+| `content_max_chars`             | integer  | 500           | Maximum content characters per evidence result (0-50000)          |
+| `include_retrieval_diagnostics` | boolean  | false         | Include authorized evidence ranking diagnostics                   |
+| `retrieval_mode`                | string   | `fast`        | `fast` (one search), `accurate` (deprecated), `naive` (see below) |
+| `max_planned_queries`           | integer  | 3             | Maximum feedback searches across accurate-mode refinement (1-3)   |
+| `reserve_distilled_notes`       | boolean  | true          | Reserve a typed lane for distilled operational notes              |
 
 ::: warning `retrieval_mode=accurate` is deprecated Measured at full benchmark scale, accurate mode
 returned lower accuracy than `fast` at 2.5x the latency, so it is scheduled for removal. Requests
 selecting it are still served; the server logs a deprecation warning and the evidence response
 carries a `retrieval_mode_deprecated` filter naming the replacement. Use `fast`, the default, which
 also makes `max_results_per_source` and `max_planned_queries` irrelevant. :::
+
+::: warning `retrieval_mode=naive` is an experiment, not a product mode Selecting `naive` swaps the
+whole pack onto the naive-strong control arm: BM25 fulltext plus dense KNN, fused with plain
+reciprocal-rank fusion, packed to `char_budget` with no synthesis, no graph traversal, no query
+planning, and no coverage ranking. It exists to measure what the full retrieval pipeline is worth
+and carries no compatibility promise. The mode governs the pack's own sections as well as the
+evidence block, suppresses the related-item walk, and forces `reserve_distilled_notes` off. Evidence
+responses stamp `retrieval_arm: naive`. :::
 
 The response is a context pack with `sections`, `total_items`, `usage_metadata`, `usage_hint`, and a
 rendered `markdown` field. When evidence retrieval was requested, the response also carries an

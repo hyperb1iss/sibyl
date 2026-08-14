@@ -3,6 +3,7 @@
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import asdict
 from typing import Any, cast
 
 import structlog
@@ -126,6 +127,99 @@ def _context_evidence_request(
         record_exposure=(request.record_exposure and not request.evidence.reserve_distilled_notes),
         knn_type_overfetch=request.evidence.knn_type_overfetch,
     )
+
+
+def _naive_retrieval_selected(request: ContextPackRequest) -> bool:
+    """Whether this request selected the 1.3 Phase 0 control arm."""
+
+    return request.evidence is not None and request.evidence.retrieval_mode == "naive"
+
+
+def _reject_machine_knobs_under_the_arm(request: ContextPackRequest) -> None:
+    """Refuse settings the arm cannot honour, rather than half-applying them.
+
+    `knn_type_overfetch` tunes how deep the machine's typed vector read walks
+    around the HNSW bracket. The arm has no typed overfetch stage, and the pack
+    plan and the evidence plan would read the field from different places, so a
+    request setting it got it applied to one half of its own pack and dropped
+    from the other. A knob that lands on half a request is worse than a knob
+    that is refused: the run looks configured and is not.
+    """
+
+    if not _naive_retrieval_selected(request):
+        return
+    assert request.evidence is not None
+    requested = {
+        "knn_type_overfetch": request.knn_type_overfetch,
+        "evidence.knn_type_overfetch": request.evidence.knn_type_overfetch,
+    }
+    offenders = sorted(name for name, value in requested.items() if value)
+    if offenders:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"retrieval_mode=naive cannot honour {', '.join(offenders)}: "
+                "the control arm runs no typed overfetch stage"
+            ),
+        )
+
+
+async def _execute_naive_context_evidence_search(
+    request: ContextPackRequest,
+    *,
+    query: str,
+    org: AuthOrganization,
+    ctx: AuthContext,
+    accessible_projects: set[str] | None,
+    embedding_provider: Any,
+) -> SearchResponse:
+    """Serve evidence from the naive-strong arm instead of the enhanced pipeline.
+
+    The plan is built by the same constructor the machine uses, so scope
+    filtering, API-key memory grants, and project authorization are identical
+    across arms and only the retrieval lanes differ. That is the property the
+    race depends on: a control arm that also relaxed authorization would be
+    reading a different corpus rather than running a simpler pipeline.
+    """
+
+    assert request.evidence is not None
+    from sibyl_core.models.context import ContextFacet
+    from sibyl_core.retrieval.naive import naive_search
+    from sibyl_core.retrieval.search import build_context_retrieval_plan
+
+    plan = build_context_retrieval_plan(
+        query=query,
+        organization_id=str(org.id),
+        facets=[ContextFacet.RECENT_MEMORY],
+        facet_types={ContextFacet.RECENT_MEMORY: list(request.evidence.types)},
+        principal_id=ctx.user_id,
+        project=request.project,
+        accessible_projects=accessible_projects,
+        agent_id=request.agent_id,
+        limit=request.evidence.limit,
+        allowed_memory_scope_keys=(
+            set(ctx.api_key_memory_scope_keys)
+            if ctx.api_key_memory_scope_keys is not None
+            else None
+        ),
+    )
+    try:
+        result = await naive_search(
+            plan=plan,
+            types=request.evidence.types,
+            limit=request.evidence.limit,
+            include_content=True,
+            embedding_provider=embedding_provider,
+            char_budget=request.evidence.char_budget,
+            content_max_chars=request.evidence.content_max_chars,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise RuntimeError("naive context evidence retrieval failed") from exc
+    # The arm returns the core retrieval dataclass; the route contract is the
+    # API schema, converted the same way the enhanced path converts it.
+    return SearchResponse(**asdict(result))
 
 
 def _distilled_context_evidence_request(
@@ -701,7 +795,18 @@ async def _compile_context_with_evidence(
     typed_outcome: tuple[SearchResponse | None, str | None] = (None, None)
     with capture_embedding_usage(embedding_provider) as embedding_usage:
         pack_task = asyncio.create_task(compile_pack())
-        if request.evidence.retrieval_mode == "accurate":
+        if request.evidence.retrieval_mode == "naive":
+            evidence_task = asyncio.create_task(
+                _execute_naive_context_evidence_search(
+                    request,
+                    query=retrieval_goal,
+                    org=org,
+                    ctx=ctx,
+                    accessible_projects=accessible_projects,
+                    embedding_provider=embedding_provider,
+                )
+            )
+        elif request.evidence.retrieval_mode == "accurate":
             # A5 deprecation (measured at full benchmark scale: lower accuracy
             # AND 2.5x latency vs fast). Served for one release, warned, then
             # removed together with the planner unless A3 adopts it.
@@ -728,6 +833,10 @@ async def _compile_context_with_evidence(
                     embedding_usage=embedding_usage,
                 )
             )
+        # The reserved distilled-notes lane is a second typed retrieval plus a
+        # composition step, so it belongs to the machine the arm is measured
+        # against. Under the arm it stays off whatever the request asked for,
+        # rather than quietly reintroducing the surface being tested.
         typed_task = (
             asyncio.create_task(
                 _execute_distilled_context_evidence_search(
@@ -739,6 +848,7 @@ async def _compile_context_with_evidence(
                 )
             )
             if request.evidence.reserve_distilled_notes
+            and request.evidence.retrieval_mode != "naive"
             else None
         )
         try:
@@ -767,6 +877,35 @@ async def _compile_context_with_evidence(
                 "planned_queries": [],
                 "query_count": 1,
             }
+        )
+    if request.evidence.retrieval_mode == "naive":
+        # The arm runs one search and no planner, so it reports the same
+        # planner receipt fast does. Consumers that key off planner_status stay
+        # correct without learning a third shape.
+        evidence_response.filters.update(
+            {
+                "retrieval_mode": "naive",
+                "retrieval_arm": "naive",
+                "planner_status": "not_requested",
+                "planned_queries": [],
+                "query_count": 1,
+                "reserve_distilled_notes": False,
+            }
+        )
+    if request.evidence.retrieval_mode == "naive" and request.record_exposure:
+        # The enhanced path stamps exposure inside the search it runs, which the
+        # arm does not use. Stamped here instead, so a run under the arm leaves
+        # the same receipts and exposure analysis can compare the two arms
+        # rather than reading the arm as a run that surfaced nothing.
+        from sibyl_core.tools.usage_exposure import annotate_search_result_exposures
+
+        evidence_response.filters["usage_exposure"] = await annotate_search_result_exposures(
+            evidence_response.results,
+            organization_id=str(org.id),
+            principal_id=ctx.user_id,
+            project_id=request.project,
+            source_surface="context_pack_evidence",
+            request_metadata={"agent_id": request.agent_id} if request.agent_id else None,
         )
     if typed_task is not None:
         typed_response, typed_error = typed_outcome
@@ -814,6 +953,7 @@ async def context_pack(
             project=request.project,
         )
         retrieval_goal = normalize_retrieval_question(request.goal)
+        _reject_machine_knobs_under_the_arm(request)
 
         async def compile_pack() -> ContextPack:
             return await compile_context(
@@ -833,6 +973,7 @@ async def context_pack(
                 audit=request.audit,
                 record_exposure=request.record_exposure,
                 knn_type_overfetch=request.knn_type_overfetch,
+                naive_retrieval=_naive_retrieval_selected(request),
                 allowed_memory_scope_keys=set(ctx.api_key_memory_scope_keys)
                 if ctx.api_key_memory_scope_keys is not None
                 else None,

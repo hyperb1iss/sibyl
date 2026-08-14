@@ -1484,17 +1484,31 @@ async def _compile_native_sections(
     per_facet_limit: int,
     raw_memory_recall_fn: RawMemoryRecallFn,
     audit: bool = False,
+    naive_retrieval: bool = False,
 ) -> list[ContextSection]:
     search_limit = min(50, max(limit, per_facet_limit * len(facets)))
-    response = await context_search(
-        plan=plan,
-        types=_types_for_facets(facets),
-        facet=ContextFacet.RECENT_MEMORY if ContextFacet.RECENT_MEMORY in facets else None,
-        limit=search_limit,
-        include_content=True,
-        embedding_provider=configured_embedding_provider(),
-        raw_memory_recall_fn=raw_memory_recall_fn,
-    )
+    facet = ContextFacet.RECENT_MEMORY if ContextFacet.RECENT_MEMORY in facets else None
+    if naive_retrieval:
+        from sibyl_core.retrieval.naive import naive_search
+
+        response = await naive_search(
+            plan=plan,
+            types=_types_for_facets(facets),
+            facet=facet,
+            limit=search_limit,
+            include_content=True,
+            embedding_provider=configured_embedding_provider(),
+        )
+    else:
+        response = await context_search(
+            plan=plan,
+            types=_types_for_facets(facets),
+            facet=facet,
+            limit=search_limit,
+            include_content=True,
+            embedding_provider=configured_embedding_provider(),
+            raw_memory_recall_fn=raw_memory_recall_fn,
+        )
     return _sections_from_response(response, facets=facets, audit=audit)
 
 
@@ -1521,8 +1535,14 @@ async def compile_context(
     allowed_memory_scope_keys: set[str] | None = None,
     record_exposure: bool = True,
     knn_type_overfetch: int = 0,
+    naive_retrieval: bool = False,
 ) -> ContextPack:
-    """Build a small, structured context pack for an agent goal."""
+    """Build a small, structured context pack for an agent goal.
+
+    `naive_retrieval` swaps the 8-lane retrieval for the naive-strong control
+    arm and drops the one-hop related-item walk, so a pack compiled under the
+    arm carries no graph traversal at all. It is off unless a caller selects it.
+    """
 
     goal = goal.strip()
     if not goal:
@@ -1562,8 +1582,22 @@ async def compile_context(
             per_facet_limit=per_facet_limit,
             raw_memory_recall_fn=raw_memory_recall_fn,
             audit=audit,
+            naive_retrieval=naive_retrieval,
         )
     except Exception as exc:
+        if naive_retrieval:
+            # The machine is the arm's fallback everywhere else in this
+            # function, which under the arm means a failed naive run returns
+            # eight-lane contents wearing the arm's label. A race whose labels
+            # can be wrong measures nothing, and a degraded arm silently
+            # scoring the machine's recall is the worst version of that. Fail
+            # the request instead: a missing data point is recoverable, a
+            # mislabelled one poisons the comparison.
+            log.warning(
+                "naive_retrieval_failed",
+                error_type=type(exc).__name__,
+            )
+            raise
         retrieval_failed = True
         log.warning(
             "context_native_search_failed",
@@ -1572,6 +1606,10 @@ async def compile_context(
 
     if (
         ContextFacet.ACTIVE_WORK in facets
+        # Active work is its own retrieval, reaching the graph through a
+        # separate list query and merging straight into the pack. Under the arm
+        # it would put rows the arm never ranked in front of the reader.
+        and not naive_retrieval
         and project
         and _active_work_project_allowed(
             project=project,
@@ -1618,7 +1656,9 @@ async def compile_context(
             limit,
             per_facet_limit=per_facet_limit,
         )
-    if include_related and normalized_layer is not ContextLayer.WAKE:
+    # Related items are a one-hop graph walk, which is exactly the surface the
+    # naive arm exists to measure the absence of.
+    if include_related and not naive_retrieval and normalized_layer is not ContextLayer.WAKE:
         related_projects = (
             set(plan.accessible_projects) if plan.accessible_projects is not None else None
         )

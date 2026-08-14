@@ -2415,3 +2415,319 @@ def test_retrieval_mode_schema_documents_the_deprecation() -> None:
 
     description = ContextEvidenceRequest.model_fields["retrieval_mode"].description
     assert "DEPRECATED" in description
+
+
+class TestNaiveRetrievalArm:
+    """The 1.3 Phase 0 control arm: selectable, off by default, and total."""
+
+    @staticmethod
+    def _evidence(mode: str) -> dict[str, Any]:
+        return {"retrieval_mode": mode, "types": ["session"], "limit": 5}
+
+    @staticmethod
+    def _arm_response() -> Any:
+        """What the arm actually hands back: the core dataclass, not the schema."""
+
+        from sibyl_core.tools.responses import (
+            SearchResponse as CoreSearchResponse,
+            SearchResult as CoreSearchResult,
+        )
+
+        return CoreSearchResponse(
+            results=[
+                CoreSearchResult(
+                    id="span_1",
+                    type="session",
+                    name="span_1",
+                    content="verbatim span",
+                    score=0.02,
+                    result_origin="graph",
+                )
+            ],
+            total=1,
+            query="ship faster",
+            filters={"retrieval_mode": "naive", "retrieval_arm": "naive"},
+            graph_count=1,
+            limit=5,
+        )
+
+    @pytest.mark.asyncio
+    async def test_selecting_naive_routes_evidence_to_the_arm(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        arm = AsyncMock(return_value=self._arm_response())
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
+            patch("sibyl_core.retrieval.naive.naive_search", arm),
+            patch(
+                "sibyl.api.routes.search.execute_search_request",
+                AsyncMock(side_effect=AssertionError("the arm must not reach the machine")),
+            ),
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+        ):
+            response = await context_pack(
+                request=ContextPackRequest(
+                    goal="ship faster",
+                    evidence=self._evidence("naive"),
+                ),
+                org=org,
+                ctx=_ctx(),
+            )
+
+        arm.assert_awaited_once()
+        assert response.evidence is not None
+        assert response.evidence.filters["retrieval_mode"] == "naive"
+        assert response.evidence.filters["retrieval_arm"] == "naive"
+        # The arm runs one search and no planner, so it reports the planner
+        # receipt fast reports rather than inventing a third shape.
+        assert response.evidence.filters["planner_status"] == "not_requested"
+        assert response.evidence.filters["query_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_the_arm_governs_the_pack_not_only_the_evidence_block(self) -> None:
+        """A pack still compiled by the machine would contaminate the race."""
+
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        compile_context = AsyncMock(return_value=_pack())
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", compile_context),
+            patch(
+                "sibyl_core.retrieval.naive.naive_search",
+                AsyncMock(return_value=self._arm_response()),
+            ),
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+        ):
+            await context_pack(
+                request=ContextPackRequest(
+                    goal="ship faster",
+                    evidence=self._evidence("naive"),
+                ),
+                org=org,
+                ctx=_ctx(),
+            )
+
+        assert compile_context.await_args.kwargs["naive_retrieval"] is True
+
+    @pytest.mark.asyncio
+    async def test_the_arm_turns_off_the_reserved_distilled_notes_lane(self) -> None:
+        """The reserved typed lane is machine surface, so the arm suppresses it."""
+
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        distilled = AsyncMock(return_value=(None, None))
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
+            patch(
+                "sibyl_core.retrieval.naive.naive_search",
+                AsyncMock(return_value=self._arm_response()),
+            ),
+            patch(
+                "sibyl.api.routes.context._execute_distilled_context_evidence_search",
+                distilled,
+            ),
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+        ):
+            response = await context_pack(
+                request=ContextPackRequest(
+                    goal="ship faster",
+                    # Explicitly requested, and still suppressed: the arm's
+                    # composition is fixed, not negotiable per request.
+                    evidence={**self._evidence("naive"), "reserve_distilled_notes": True},
+                ),
+                org=org,
+                ctx=_ctx(),
+            )
+
+        distilled.assert_not_awaited()
+        assert response.evidence is not None
+        assert response.evidence.filters["reserve_distilled_notes"] is False
+
+    @pytest.mark.asyncio
+    async def test_the_arm_still_records_exposure(self) -> None:
+        """Exposure receipts must exist under both arms or they cannot be compared."""
+
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        exposure = AsyncMock(return_value={"status": "stamped", "item_count": 1})
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
+            patch(
+                "sibyl_core.retrieval.naive.naive_search",
+                AsyncMock(return_value=self._arm_response()),
+            ),
+            patch("sibyl_core.tools.usage_exposure.annotate_search_result_exposures", exposure),
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+        ):
+            response = await context_pack(
+                request=ContextPackRequest(
+                    goal="ship faster",
+                    evidence=self._evidence("naive"),
+                    record_exposure=True,
+                ),
+                org=org,
+                ctx=_ctx(),
+            )
+
+        exposure.assert_awaited_once()
+        assert exposure.await_args.kwargs["source_surface"] == "context_pack_evidence"
+        assert response.evidence is not None
+        assert response.evidence.filters["usage_exposure"] == {
+            "status": "stamped",
+            "item_count": 1,
+        }
+
+    @pytest.mark.asyncio
+    async def test_the_arm_honors_a_request_that_declines_exposure(self) -> None:
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        exposure = AsyncMock(side_effect=AssertionError("exposure recorded against the request"))
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
+            patch(
+                "sibyl_core.retrieval.naive.naive_search",
+                AsyncMock(return_value=self._arm_response()),
+            ),
+            patch("sibyl_core.tools.usage_exposure.annotate_search_result_exposures", exposure),
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+        ):
+            await context_pack(
+                request=ContextPackRequest(
+                    goal="ship faster",
+                    evidence=self._evidence("naive"),
+                    record_exposure=False,
+                ),
+                org=org,
+                ctx=_ctx(),
+            )
+
+        exposure.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_the_default_path_never_reaches_the_arm(self) -> None:
+        """The hard invariant: an unselected arm is an unreachable arm."""
+
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        arm = AsyncMock(side_effect=AssertionError("the default path reached the naive arm"))
+        compile_context = AsyncMock(return_value=_pack())
+        machine = AsyncMock(return_value=_search_response("ship faster", ("evidence_1", 0.9)))
+
+        # Every mode other than naive, not just the default: the branch that
+        # routes to the arm is an elif chain, so the third mode is the one a
+        # careless reordering would break.
+        for evidence in (None, self._evidence("fast"), self._evidence("accurate")):
+            with (
+                patch(
+                    "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                    AsyncMock(return_value=["proj_1"]),
+                ),
+                patch("sibyl_core.tools.context.compile_context", compile_context),
+                patch("sibyl_core.retrieval.naive.naive_search", arm),
+                patch("sibyl.api.routes.search.execute_search_request", machine),
+                patch(
+                    "sibyl.api.routes.context.plan_deterministic_refinement_queries",
+                    return_value=[],
+                ),
+                patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+            ):
+                await context_pack(
+                    request=ContextPackRequest(goal="ship faster", evidence=evidence),
+                    org=org,
+                    ctx=_ctx(),
+                )
+
+            arm.assert_not_awaited()
+            assert compile_context.await_args.kwargs["naive_retrieval"] is False
+
+    @pytest.mark.asyncio
+    async def test_the_arm_refuses_a_machine_knob_it_cannot_honour(self) -> None:
+        """Half-applied is worse than refused: the run would look configured.
+
+        knn_type_overfetch tunes the machine's typed vector read. The pack plan
+        and the evidence plan read it from different places, so under the arm a
+        request setting it got it applied to one half of its own pack and
+        dropped from the other, and the arm has no such stage in either case.
+        """
+
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        for payload in (
+            {"knn_type_overfetch": 17},
+            {"evidence_overfetch": 17},
+        ):
+            evidence = self._evidence("naive")
+            if "evidence_overfetch" in payload:
+                evidence["knn_type_overfetch"] = payload["evidence_overfetch"]
+                request = ContextPackRequest(goal="ship faster", evidence=evidence)
+            else:
+                request = ContextPackRequest(
+                    goal="ship faster",
+                    evidence=evidence,
+                    knn_type_overfetch=payload["knn_type_overfetch"],
+                )
+            with (
+                patch(
+                    "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                    AsyncMock(return_value=["proj_1"]),
+                ),
+                patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
+                patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+                pytest.raises(HTTPException) as excinfo,
+            ):
+                await context_pack(request=request, org=org, ctx=_ctx())
+
+            assert excinfo.value.status_code == 400
+            assert "knn_type_overfetch" in str(excinfo.value.detail)
+
+    @pytest.mark.asyncio
+    async def test_the_machine_still_accepts_the_knob(self) -> None:
+        """The refusal is scoped to the arm."""
+
+        org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+        compile_context = AsyncMock(return_value=_pack())
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", compile_context),
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+        ):
+            await context_pack(
+                request=ContextPackRequest(goal="ship faster", knn_type_overfetch=17),
+                org=org,
+                ctx=_ctx(),
+            )
+
+        assert compile_context.await_args.kwargs["knn_type_overfetch"] == 17
+
+    def test_the_arm_is_off_unless_a_request_names_it(self) -> None:
+        assert ContextPackRequest(goal="x").evidence is None
+        assert ContextPackRequest(goal="x", evidence={}).evidence.retrieval_mode == "fast"
+
+    def test_retrieval_mode_schema_documents_the_control_arm(self) -> None:
+        from sibyl.api.schemas.context import ContextEvidenceRequest
+
+        field = ContextEvidenceRequest.model_fields["retrieval_mode"]
+        assert "naive" in str(field.annotation)
+        assert "EXPERIMENTAL" in field.description
