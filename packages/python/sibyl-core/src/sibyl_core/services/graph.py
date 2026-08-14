@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import Iterable, Mapping, MutableMapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
@@ -225,6 +225,17 @@ def _rescue_explicit_anchor_candidate(
 # saying nothing about scope at all. Interpolated into the upsert rather than
 # bound, so no execution site can forget to pass it.
 CLEAR_MEMORY_SCOPE = "__clear_memory_scope__"
+# Every value that means "remove this key" rather than "set it to this". A plain
+# None is the usual spelling; a promoted column cannot use it, because Surreal
+# reads an absent key and a null one as the same NONE and the upsert's
+# preserve-on-absence would keep the old value, so those carry a sentinel the
+# statement converts. Anything that teaches the write path a new way to say
+# "clear" belongs here, or the snapshot fold stops recognizing it as a removal.
+CLEAR_SENTINEL_VALUES = frozenset({CLEAR_MEMORY_SCOPE})
+# Bounded because contention on one row is the signal, not something to wait out:
+# a row this contended is being rewritten anyway, and looping forever inside a
+# write path would hold the caller's own write open indefinitely.
+_MAX_SNAPSHOT_HEAL_ATTEMPTS = 5
 
 _ENTITY_BULK_UPSERT_QUERY = f"""
 INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
@@ -568,10 +579,10 @@ class EntityManager:
         patch = _entity_update_patch(updates, updated_at=datetime.now(UTC))
         # A patch removes a key by writing it as NONE, which Surreal drops, so on
         # a pre-flattening row the snapshot would answer for the empty slot and
-        # undo the removal. The fold rides on this patch rather than chasing it.
+        # undo the removal. Healed before this write rather than after it.
         patch_attributes = patch.get("attributes")
-        if isinstance(patch_attributes, MutableMapping):
-            await _apply_legacy_snapshot_folds(
+        if isinstance(patch_attributes, Mapping):
+            await _heal_metadata_snapshots_for_write(
                 self._client,
                 {entity_id: patch_attributes},
                 group_id=self._group_id,
@@ -2840,7 +2851,7 @@ async def _replace_entity(
 ) -> SurrealRecord:
     _enforce_entity_content_limit([entity])
     record = _entity_record(entity, group_id=group_id)
-    await _fold_snapshots_into_records(client, [record], group_id=group_id)
+    await heal_entity_metadata_snapshots(client, [record], group_id=group_id)
     try:
         result = await _execute_replace_entities_with_schema_retry(client, [record])
     except Exception as exc:
@@ -2870,7 +2881,7 @@ async def _replace_entities_bulk(
     records = [_entity_record(entity, group_id=group_id) for entity in entities]
     if not records:
         return []
-    await _fold_snapshots_into_records(client, records, group_id=group_id)
+    await heal_entity_metadata_snapshots(client, records, group_id=group_id)
     try:
         result = await _execute_replace_entities_with_schema_retry(client, records)
     except Exception as exc:
@@ -2882,72 +2893,147 @@ async def _replace_entities_bulk(
     return normalize_records(result)
 
 
-async def _fold_snapshots_into_records(
+async def heal_entity_metadata_snapshots(
     client: SurrealGraphClient,
     records: Sequence[SurrealRecord],
     *,
     group_id: str,
 ) -> None:
-    """Fold pending snapshots into the attributes bag of each record about to be written."""
-    payloads: dict[str, MutableMapping[str, object]] = {}
-    for record in records:
-        uuid = str(record.get("uuid") or "")
-        attributes = record.get("attributes")
-        if uuid and isinstance(attributes, MutableMapping):
-            payloads[uuid] = attributes
-    await _apply_legacy_snapshot_folds(client, payloads, group_id=group_id)
+    """Normalize any pre-flattening row these records are about to overwrite.
+
+    Every path that writes entity rows calls this first, including the two
+    migrations that drive the canonical upsert themselves. Those are the writers
+    that clear keys on rollback, so they are the ones that most need it.
+    """
+    await _heal_metadata_snapshots_for_write(
+        client,
+        {
+            uuid: attributes
+            for record in records
+            if (uuid := str(record.get("uuid") or ""))
+            and isinstance(attributes := record.get("attributes"), Mapping)
+        },
+        group_id=group_id,
+    )
 
 
-async def _apply_legacy_snapshot_folds(
+async def _heal_metadata_snapshots_for_write(
     client: SurrealGraphClient,
-    written_attributes: Mapping[str, MutableMapping[str, object]],
+    payloads: Mapping[str, Mapping[str, object]],
     *,
     group_id: str,
 ) -> None:
-    """Fold a pre-flattening row's snapshot into the write that is about to happen.
+    """Fold a pre-flattening row's snapshot into its flattened bag, before the write.
 
     A row written before the flattened bag existed carries its metadata only as
     the JSON snapshot, so the read merges one where it finds one. That merge is
     also how a removal gets undone: Surreal drops a field written as NONE, and
-    the snapshot then answers for the empty slot, so a rollback that clears a
-    key on such a row reads back unchanged.
+    the snapshot then answers for the empty slot, so a write that clears a key
+    on such a row reads back unchanged.
 
     Clearing the snapshot alone would delete whatever lives only inside it, and
     SurrealQL cannot parse JSON (``type::object``, ``parse::json``, and the
-    object cast all reject a string), so the fold cannot be expressed in the
-    statement. It is computed here and mutated into the caller's own attributes
-    payload, so it rides on the single write the caller was already making.
-    Doing it afterwards instead, as a second update, left a window where the
-    key was resurrected and let a stale fold land on top of a newer concurrent
-    write.
+    object cast all reject a string), so the fold cannot be expressed inside the
+    caller's statement.
 
-    Precedence matches the read exactly. A key the flattened bag already holds
-    keeps its newer value, and a key this write names (including one set to None
-    to remove it) is left to the write, which is what makes the removal stick
-    rather than come back out of the snapshot.
+    It runs as its own fenced write beforehand instead. That ordering is what
+    makes it safe: folding the snapshot down and dropping it changes nothing a
+    reader can observe, since those values are exactly what the read was already
+    merging, so no window between this and the caller's write can show anything
+    new. What the caller's write then finds is an ordinary flattened row, where
+    a removal is just a removal.
 
-    Only a write that removes something can be undone this way, so only those
-    are probed. A write that empties no slot reads the same with the snapshot
-    still on the row, because the read merges it either way. Ordinary writes
-    therefore cost nothing at all: neither the record builder nor the patch
-    builder emits a None for a key the caller did not explicitly clear.
+    Only a write that clears something can be undone by a snapshot, so only
+    those rows are probed, and ordinary writes cost nothing.
     """
-    uuids = [
-        uuid
-        for uuid, payload in written_attributes.items()
-        if uuid and any(value is None for value in payload.values())
-    ]
+    uuids = [uuid for uuid, payload in payloads.items() if uuid and _clears_a_key(payload)]
     if not uuids:
         return
     carriers = await _rows_with_metadata_snapshots(client, uuids, group_id=group_id)
-    for uuid, (attributes, snapshot) in carriers.items():
-        payload = written_attributes[uuid]
-        for key, value in _snapshot_without_owned_keys(snapshot).items():
-            if key in attributes or key in payload:
-                continue
-            payload[key] = value
-        # None clears the snapshot the same way any other removal clears a key.
-        payload["metadata"] = None
+    for uuid in carriers:
+        await _heal_one_metadata_snapshot(client, uuid, group_id=group_id)
+
+
+def _clears_a_key(payload: Mapping[str, object]) -> bool:
+    """Whether this payload removes a key rather than only setting keys.
+
+    Both spellings count. Most removals are a plain None, but a column promoted
+    out of the bag cannot say it that way: an absent key and a null one are the
+    same value to Surreal, and both mean "this write does not speak to it", so
+    those keys carry a sentinel the upsert turns into NONE. A probe that only
+    knew about None saw the sentinel as an ordinary string and skipped the row.
+    """
+    return any(
+        value is None or (isinstance(value, str) and value in CLEAR_SENTINEL_VALUES)
+        for value in payload.values()
+    )
+
+
+async def _heal_one_metadata_snapshot(
+    client: SurrealGraphClient,
+    uuid: str,
+    *,
+    group_id: str,
+) -> None:
+    """Fold one row's snapshot into its flattened bag under an optimistic fence.
+
+    Read, fold, write is not atomic, and the values being written are by
+    definition stale: they came off a snapshot of the row's pre-flattening past.
+    Without a fence a writer landing between the read and the write had its
+    newer value overwritten by that stale one. Every real writer bumps
+    ``revision``, so the write refuses to land unless the row is still the one
+    that was read, and a refusal means re-reading and folding again, by which
+    point the newer value sits in the flattened bag and is no longer folded at
+    all.
+    """
+    for _ in range(_MAX_SNAPSHOT_HEAL_ATTEMPTS):
+        row = await _select_one(
+            client,
+            """
+            SELECT uuid, revision, attributes
+            FROM entity
+            WHERE group_id = $group_id AND uuid = $uuid
+            LIMIT 1;
+            """,
+            group_id=group_id,
+            uuid=uuid,
+        )
+        if row is None:
+            return
+        attributes = row.get("attributes")
+        if not isinstance(attributes, Mapping):
+            return
+        snapshot = _parsed_metadata_snapshot(attributes.get("metadata"))
+        if snapshot is None:
+            return
+        patch: dict[str, object] = {
+            key: value
+            for key, value in _snapshot_without_owned_keys(snapshot).items()
+            if key not in attributes
+        }
+        # None drops the snapshot the same way any other removal drops a key.
+        patch["metadata"] = None
+        applied = normalize_records(
+            await client.execute_query(
+                """
+                UPDATE entity MERGE { attributes: $patch }
+                WHERE group_id = $group_id
+                    AND uuid = $uuid
+                    AND revision = $seen_revision
+                RETURN AFTER;
+                """,
+                group_id=group_id,
+                uuid=uuid,
+                patch=patch,
+                seen_revision=row.get("revision"),
+            )
+        )
+        if applied:
+            return
+    raise RuntimeError(
+        f"metadata snapshot for {uuid} could not be folded under contention "
+        f"after {_MAX_SNAPSHOT_HEAL_ATTEMPTS} attempts; the write was not attempted"
+    )
 
 
 async def _rows_with_metadata_snapshots(

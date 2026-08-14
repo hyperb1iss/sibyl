@@ -43,6 +43,7 @@ from sibyl_core.services.graph import (
     _ENTITY_BULK_UPSERT_QUERY,
     _entity_from_row,
     _entity_record,
+    heal_entity_metadata_snapshots,
 )
 
 if TYPE_CHECKING:
@@ -305,6 +306,10 @@ async def _apply_records(
     row is rewritten in place) and wraps it in ``BEGIN..COMMIT`` so a partial
     failure rolls back. ``$rows`` keeps the write fully parameter-bound.
     """
+    # The reverse pass clears keys, and driving the canonical upsert directly
+    # skips everything the write path does around it. On a pre-flattening row
+    # that meant the removed migration marker came straight back on the next read.
+    await heal_entity_metadata_snapshots(client, records, group_id=group_id)
     query = f"BEGIN TRANSACTION;\n{_ENTITY_BULK_UPSERT_QUERY}\nCOMMIT TRANSACTION;"
     result = await client.execute_query_raw(query, rows=records)
     direction = "reverse" if reverse else "forward"

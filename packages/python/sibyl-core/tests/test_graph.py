@@ -1218,6 +1218,131 @@ async def test_a_patch_honors_a_removal_on_a_legacy_snapshot_row() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_sentinel_clear_is_recognized_as_a_removal_by_the_snapshot_fold() -> None:
+    """A promoted column clears with a sentinel, and that still has to count.
+
+    Surreal reads an absent key and a null one as the same NONE, so a column
+    under preserve-on-absence cannot spell its removal with None; it sends a
+    sentinel the statement converts instead. A fold that only recognized None
+    saw an ordinary string, skipped the row, and the scope came back out of the
+    snapshot on the very next read.
+    """
+    client = SurrealGraphClient(group_id="org-sentinel-clear", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        await manager.create_direct(
+            Entity(
+                id="note_sentinel_clear",
+                entity_type=EntityType.NOTE,
+                name="Scoped pre-flattening note",
+                organization_id=client.group_id,
+                metadata={"memory_scope": "private", "principal_id": "owner-1"},
+            )
+        )
+        await client.execute_query(
+            """
+            UPDATE entity SET
+                attributes.metadata = $snapshot,
+                attributes.memory_scope = NONE,
+                attributes.principal_id = NONE,
+                memory_scope = NONE
+            WHERE group_id = $group_id AND uuid = "note_sentinel_clear";
+            """,
+            group_id=client.group_id,
+            snapshot=json.dumps({"memory_scope": "private", "principal_id": "owner-1"}),
+        )
+
+        await manager.create_direct(
+            Entity(
+                id="note_sentinel_clear",
+                entity_type=EntityType.NOTE,
+                name="Scoped pre-flattening note",
+                organization_id=client.group_id,
+                metadata={"memory_scope": CLEAR_MEMORY_SCOPE},
+            )
+        )
+        cleared = await manager.get("note_sentinel_clear")
+
+        assert cleared.metadata.get("memory_scope") is None
+        # Only the cleared key goes; the rest of the snapshot is folded down.
+        assert cleared.metadata["principal_id"] == "owner-1"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_a_writer_landing_mid_heal_is_not_overwritten_by_the_snapshot() -> None:
+    """The fold writes stale values, so it must refuse to land on a newer row.
+
+    Read, fold, write is not atomic, and everything the fold writes comes off a
+    picture of the row's past. A writer slipping between the read and the write
+    had its newer value replaced by that older one. The fence makes the write
+    refuse unless the row is still the one that was read, and the retry then
+    finds the newer value in the flattened bag and leaves it alone.
+    """
+    client = SurrealGraphClient(group_id="org-heal-race", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        await manager.create_direct(
+            Entity(
+                id="note_heal_race",
+                entity_type=EntityType.NOTE,
+                name="Contended pre-flattening note",
+                organization_id=client.group_id,
+                metadata={"contended": "old snapshot value", "doomed_key": "removed"},
+            )
+        )
+        await client.execute_query(
+            """
+            UPDATE entity SET
+                attributes.metadata = $snapshot,
+                attributes.contended = NONE,
+                attributes.doomed_key = NONE
+            WHERE group_id = $group_id AND uuid = "note_heal_race";
+            """,
+            group_id=client.group_id,
+            snapshot=json.dumps({"contended": "old snapshot value", "doomed_key": "removed"}),
+        )
+
+        original_execute = client.execute_query
+        landed: list[str] = []
+
+        async def _execute_with_interleaved_writer(query: str, **params: Any) -> Any:
+            # Fire once, after the fold has read the row and while it is about
+            # to write: exactly the window the fence exists to cover.
+            if "seen_revision" in query and not landed:
+                landed.append("yes")
+                await manager.create_direct(
+                    Entity(
+                        id="note_heal_race",
+                        entity_type=EntityType.NOTE,
+                        name="Contended pre-flattening note",
+                        organization_id=client.group_id,
+                        metadata={"contended": "new concurrent value"},
+                    )
+                )
+            return await original_execute(query, **params)
+
+        client.execute_query = _execute_with_interleaved_writer  # type: ignore[method-assign]
+        try:
+            await manager.update("note_heal_race", {"metadata": {"doomed_key": None}})
+        finally:
+            client.execute_query = original_execute  # type: ignore[method-assign]
+
+        healed = await manager.get("note_heal_race")
+
+        assert landed, "the interleaved writer never ran, so the race was not exercised"
+        assert healed.metadata["contended"] == "new concurrent value"
+        assert "doomed_key" not in healed.metadata
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_native_entity_upsert_preserves_creator_and_updates_modifier() -> None:
     client = SurrealGraphClient(group_id="org-native-actor-upsert", url="memory://")
     try:

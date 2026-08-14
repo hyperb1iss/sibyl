@@ -55,6 +55,7 @@ from sibyl_core.services.graph import (
     CLEAR_MEMORY_SCOPE,
     _entity_from_row,
     _entity_record,
+    heal_entity_metadata_snapshots,
 )
 
 if TYPE_CHECKING:
@@ -581,6 +582,10 @@ async def _apply(
 ) -> None:
     """Persist one batch inside a transaction so a partial batch cannot land."""
     records = [_entity_record(entity, group_id=group_id) for entity in entities]
+    # The reverse pass clears keys, and driving the canonical upsert directly
+    # skips everything the write path does around it. On a pre-flattening row
+    # that meant the removal was undone by the snapshot the moment it was read.
+    await heal_entity_metadata_snapshots(client, records, group_id=group_id)
     query = f"BEGIN TRANSACTION;\n{_ENTITY_BULK_UPSERT_QUERY}\nCOMMIT TRANSACTION;"
     result = await client.execute_query_raw(query, rows=records)
     raise_on_error(result, query=f"scope_backfill:{operation}:{group_id}")
