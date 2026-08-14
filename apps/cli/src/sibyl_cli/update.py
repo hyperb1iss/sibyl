@@ -140,7 +140,7 @@ def get_server_version() -> str | None:
     try:
         from sibyl_cli import config_store
 
-        base_url = config_store.get_server_url()
+        base_url = config_store.get_effective_server_url()
     except Exception:
         return None
     if not base_url:

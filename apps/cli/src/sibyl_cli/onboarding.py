@@ -193,5 +193,5 @@ def needs_onboarding() -> bool:
     if not config_store.config_exists():
         return True
 
-    url = config_store.get_server_url()
+    url = config_store.get_effective_server_url()
     return not url or url == config_store.DEFAULT_CONFIG["server"]["url"]

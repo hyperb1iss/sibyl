@@ -22,7 +22,7 @@ console = Console()
 
 
 def _org_credential_scope(org_slug: str | None) -> str | None:
-    ctx = config_store.get_active_context()
+    ctx = config_store.resolve_effective_context()
     if ctx is None:
         return None
     return credential_scope(ctx.name, org_slug or ctx.org_slug)

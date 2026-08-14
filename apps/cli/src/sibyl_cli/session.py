@@ -21,10 +21,10 @@ from sibyl_cli.common import (
     run_async,
 )
 from sibyl_cli.config_store import (
-    get_active_context,
     get_current_context,
     get_effective_project,
     get_effective_server_url,
+    resolve_effective_context,
 )
 from sibyl_core.session_bundle import (
     derive_query,
@@ -96,7 +96,7 @@ async def _build_session_bundle(
     memory_limit: int,
     all_projects: bool,
 ) -> dict[str, Any]:
-    active_context = get_active_context()
+    active_context = resolve_effective_context()
     linked_project, matched_path = get_current_context()
     effective_project = None if all_projects else get_effective_project()
     server_url = get_effective_server_url()

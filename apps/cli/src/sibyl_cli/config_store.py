@@ -797,18 +797,18 @@ def resolve_effective_context() -> Context | None:
 def get_effective_server_url() -> str:
     """Get the effective server URL.
 
-    Priority:
-    1. Effective context's server_url (override > directory pin > active)
-    2. Legacy server.url config
-    3. Default localhost
+    Delegates to the single resolver in ``client`` and strips the ``/api``
+    suffix, so callers that want a display URL cannot drift from the URL
+    requests are actually sent to. Resolving here independently is what left
+    this function blind to SIBYL_API_URL.
 
     Returns:
         Server URL to use.
     """
-    context = resolve_effective_context()
-    if context:
-        return context.server_url
-    return get_server_url()
+    from sibyl_cli.client import resolve_api_base_url
+
+    api_url = resolve_api_base_url(resolve_context_name())
+    return api_url.rstrip("/").removesuffix("/api") or api_url
 
 
 def get_effective_project() -> str | None:
