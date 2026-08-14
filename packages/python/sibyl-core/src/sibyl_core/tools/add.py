@@ -144,6 +144,7 @@ async def _declared_relationship_payloads(
     entity_manager: Any = None,
     principal_id: str | None = None,
     accessible_projects: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Turn a `related_to` list into edge payloads, honoring declared predicates.
 
@@ -152,12 +153,13 @@ async def _declared_relationship_payloads(
     an agent can both supersede and reference the same target without the two
     edges colliding on a deterministic id.
 
-    A suppressing predicate is authorized against its target first, because
-    retrieval demotes what one points at and an unauthorized writer would
-    otherwise be able to bury a memory it cannot even write. A refusal
-    downgrades that one edge to RELATED_TO rather than failing the write: the
-    link the agent asked for still exists, and the claim it is not entitled to
-    make does not.
+    A suppressing predicate is checked against its target first, because
+    retrieval demotes what one points at and a writer would otherwise be able
+    to bury a memory it cannot even read. A refusal downgrades that one edge to
+    RELATED_TO rather than failing the write: the link the agent asked for
+    still exists, and the claim it is not entitled to make does not. A target
+    that is absent and a target that is invisible are refused identically, so
+    the downgrade cannot be read as evidence a row exists.
     """
     payloads: list[dict[str, Any]] = []
     for declaration in parse_relation_declarations(related_to):
@@ -171,6 +173,7 @@ async def _declared_relationship_payloads(
                 target_id=declaration.target_id,
                 principal_id=principal_id,
                 accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
             )
             if not allowed:
                 log.info(
@@ -314,6 +317,10 @@ async def add(
     memory_scope: str | None = None,
     scope_key: str | None = None,
     principal_id: str | None = None,
+    # Read authority the calling surface already resolved, used to decide
+    # whether a declared suppression may name its target.
+    accessible_projects: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
     retrieval_keys: list[str] | None = None,
     # Structure the writing agent declares for its own memory
     spans: list[dict[str, Any]] | None = None,
@@ -380,6 +387,11 @@ async def add(
         memory_scope: Authorized audience for the row, resolved by the calling surface.
         scope_key: Authorized audience key (a verified project, never a payload value).
         principal_id: Authenticated author of the write.
+        accessible_projects: Projects this caller may read, resolved by the calling
+              surface. Decides whether a declared supersedes/contradicts may name a
+              project-scoped target; absent, only the written scope is assumed.
+        allowed_memory_scope_keys: Scope narrowing on the caller's credential, so a
+              key that cannot read private memory cannot declare against one either.
         retrieval_keys: Exact-match identifiers this entity answers to (error strings,
               symbols, config flags, aliases). Matched case-insensitively against
               identifier-shaped queries, so a key may name something the content
@@ -791,10 +803,15 @@ async def add(
                 related_to,
                 entity_manager=entity_manager,
                 principal_id=principal_id,
-                # Same reader the write was authorized as, matching the
-                # duplicate check above: a project write may supersede inside
-                # its own project and nothing here widens beyond that.
-                accessible_projects={scope_key} if scope_key else set(),
+                # The calling surface resolved these; a scope_key-derived guess
+                # would hide every project the caller can read but is not
+                # writing into, and read access is the question here.
+                accessible_projects=(
+                    accessible_projects
+                    if accessible_projects is not None
+                    else ({scope_key} if scope_key else set())
+                ),
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
             )
         )
 

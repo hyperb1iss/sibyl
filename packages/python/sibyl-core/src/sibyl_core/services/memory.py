@@ -18,6 +18,9 @@ from sibyl_core.auth.memory_policy import (
     authorize_memory_reflect,
     authorize_memory_share,
     authorize_memory_write,
+    memory_metadata_read_allowed,
+    memory_row_project_id,
+    private_scope_granted_for,
     stamp_memory_scope_metadata,
 )
 from sibyl_core.memory_pipeline.quality import normalize_memory_quality_metadata
@@ -2621,21 +2624,59 @@ def _promoted_entity_write_allowed(
     return decision.allowed
 
 
+def suppression_target_visible(
+    target: Any,
+    *,
+    principal_id: str | None,
+    accessible_projects: Iterable[str] | None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
+) -> bool:
+    """May this principal declare that `target` is replaced or wrong?
+
+    The question is visibility, not write authority. Asserting a memory is
+    stale is a statement about a row the writer read, so the rule is the one
+    every read surface already enforces: you may suppress what you can see.
+    That blocks the attack worth blocking, another principal's private memory,
+    while leaving ordinary org-visible rows suppressible by the people who work
+    with them.
+
+    Write authority is the wrong test and was the first thing tried here.
+    `authorize_memory_write` refuses SHARED, ORGANIZATION, and PUBLIC outright
+    (`auth/memory_policy.py`, `scope_not_enabled`) because those scopes are not
+    writable destinations, and it reads an unstamped row as private-with-no-
+    owner. Gating on it disabled supersession for most of a real corpus and for
+    every row its own author created.
+    """
+    raw_metadata = getattr(target, "metadata", {})
+    metadata = raw_metadata if isinstance(raw_metadata, Mapping) else {}
+    return memory_metadata_read_allowed(
+        metadata,
+        principal_id=principal_id,
+        private_scope_granted=private_scope_granted_for(
+            allowed_memory_scope_keys, principal_id=principal_id
+        ),
+        accessible_projects=accessible_projects,
+        row_project_id=memory_row_project_id(
+            metadata,
+            entity_type=str(getattr(target, "entity_type", "") or ""),
+            entity_id=str(getattr(target, "id", "") or ""),
+        ),
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+    )
+
+
 async def declared_suppression_allowed(
     *,
     entity_manager: Any,
     target_id: str,
     principal_id: str | None,
     accessible_projects: Iterable[str] | None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
 ) -> bool:
-    """May this principal declare that `target_id` is replaced or wrong?
+    """Load a declared suppression target and decide whether it may be claimed.
 
-    A suppressing predicate is a claim about a memory the writer does not own,
-    and retrieval acts on it by demoting what it points at, so the answer is
-    the same one reflection promotion already asks before it mints SUPERSEDES:
-    private targets need their owner, scoped targets need write access. A
-    caller that cannot answer (no project scope resolved) fails closed, and the
-    write surface downgrades the edge rather than refusing the memory.
+    A target that does not exist and a target the writer cannot see get the
+    same answer, so the refusal cannot be read as evidence that a row is there.
     """
     try:
         target = await entity_manager.get(target_id)
@@ -2643,10 +2684,11 @@ async def declared_suppression_allowed(
         return False
     if target is None:
         return False
-    return _promoted_entity_write_allowed(
-        entity=target,
+    return suppression_target_visible(
+        target,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
 
 

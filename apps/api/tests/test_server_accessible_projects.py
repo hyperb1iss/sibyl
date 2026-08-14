@@ -483,6 +483,11 @@ async def test_remember_mcp_memory_scopes_project_metadata() -> None:
         memory_scope="project",
         scope_key="project-a",
         principal_id=ctx.user_id,
+        # The suppression gate answers "may this writer see the row it calls
+        # stale", so it reads the same scope resolution as the rest of the
+        # request rather than re-deriving one.
+        accessible_projects={"project-a"},
+        allowed_memory_scope_keys=None,
         # This capture declares no exact-match keys, and None says exactly that,
         # so the write preserves whatever keys the row already carries.
         retrieval_keys=None,
@@ -763,6 +768,8 @@ async def test_add_mcp_entity_scopes_project_metadata() -> None:
         memory_scope=None,
         scope_key="project-a",
         principal_id=ctx.user_id,
+        accessible_projects={"project-a"},
+        allowed_memory_scope_keys=None,
     )
 
 

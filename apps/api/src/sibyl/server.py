@@ -792,6 +792,8 @@ async def _remember_mcp_memory(
             memory_scope=request.memory_scope,
             scope_key=request.scope_key,
             principal_id=request.principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
             retrieval_keys=list(request.retrieval_keys)
             if request.retrieval_keys is not None
             else None,
@@ -1185,6 +1187,10 @@ async def _add_mcp_entity(
         "memory_scope": authorized_scope,
         "scope_key": scope_key,
         "principal_id": ctx.user_id,
+        # A declared supersedes may only name a row this caller can read, so
+        # the gate gets the same scope resolution the rest of the request used.
+        "accessible_projects": accessible_projects,
+        "allowed_memory_scope_keys": ctx.api_key_memory_scope_keys,
     }
     if normalized_entity_type == "project":
         add_kwargs["sync"] = True
