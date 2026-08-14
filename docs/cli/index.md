@@ -163,11 +163,16 @@ sibyl task list --csv > tasks.csv            # CSV export
 
 ## Environment Variables
 
-| Variable             | Description                | Example                     |
-| -------------------- | -------------------------- | --------------------------- |
-| `SIBYL_CONTEXT`      | Override project context   | `proj_abc123`               |
-| `SIBYL_API_URL`      | Server URL (legacy)        | `http://localhost:3334/api` |
-| `SIBYL_ACCESS_TOKEN` | Auth token (rarely needed) | `eyJhbG...`                 |
+| Variable             | Description                       | Example                     |
+| -------------------- | --------------------------------- | --------------------------- |
+| `SIBYL_CONTEXT`      | Named context (server/org bundle) | `prod`                      |
+| `SIBYL_API_URL`      | Server URL (legacy)               | `http://localhost:3334/api` |
+| `SIBYL_ACCESS_TOKEN` | Auth token (rarely needed)        | `eyJhbG...`                 |
+
+`SIBYL_CONTEXT` names a context created with `sibyl config context create`, not a project ID. A name
+with no matching context is a hard error: the command stops instead of quietly running against the
+active context, so a typo in a CI variable can never write to the wrong server. Scope a command to a
+project with `--project` instead.
 
 `SIBYL_API_URL` is a legacy fallback, not an override. Server selection resolves in this order, and
 `sibyl auth login` follows the same order as every other command so a login always writes its token
@@ -211,14 +216,16 @@ org_slug = "myorg"
 default_project = "proj_main"
 ```
 
-### Context Priority
+### Project Priority
 
-When resolving project context, the CLI checks in this order:
+When resolving which project a command scopes to, the CLI checks in this order:
 
-1. `--context` / `-C` flag (highest priority)
-2. `SIBYL_CONTEXT` environment variable
-3. Active context's default project
-4. Path-based project link (from the current directory)
+1. `--project` flag (highest priority)
+2. Path-based project link (from the current directory)
+3. `default_project` on the selected context
+
+`--context` / `-C` and `SIBYL_CONTEXT` select the context, which decides the server and org. The
+project comes from the list above.
 
 ## Common Patterns
 

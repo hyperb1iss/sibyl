@@ -287,8 +287,8 @@ sibyl task list --status todo  # Only shows tasks for linked project
 ### Context Priority
 
 1. `--project` flag (highest)
-2. `SIBYL_CONTEXT` environment variable
-3. Linked directory context
+2. Linked directory context
+3. `default_project` on the selected context
 4. No filter (shows all tasks)
 
 ### Bypassing Context

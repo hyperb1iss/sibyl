@@ -169,8 +169,8 @@ To repair a stale link after a directory moves, use `sibyl project relink`.
 When determining project context:
 
 1. `--project` flag (highest priority)
-2. `SIBYL_CONTEXT` environment variable
-3. Linked directory
+2. Linked directory
+3. `default_project` on the selected context
 4. No context (shows all)
 
 ### Bypassing Context
@@ -179,8 +179,8 @@ When determining project context:
 # See all tasks regardless of context
 sibyl task list --all
 
-# Override context for one command
-sibyl --context proj_xyz task list
+# Scope one command to another project
+sibyl --project proj_xyz task list
 ```
 
 ## Task Organization

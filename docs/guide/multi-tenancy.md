@@ -193,16 +193,17 @@ sibyl org switch my-org
 sibyl task list  # Lists tasks in my-org
 ```
 
-### Per-Command Project Override
+### Per-Command Context Override
 
-The `--context` flag and `SIBYL_CONTEXT` override the active **project** for a single command, not
-the organization. Switch organizations with `sibyl org switch`.
+The `--context` flag and `SIBYL_CONTEXT` select a named **context** for a single command, which
+carries that context's server and org. Scope to a project with `--project`, and switch the active
+organization inside one server with `sibyl org switch`.
 
 ```bash
-# Override project context for a single command
-sibyl --context proj_xyz task list
+# Run a single command against another context
+sibyl --context staging task list
 # Or
-SIBYL_CONTEXT=proj_xyz sibyl task list
+SIBYL_CONTEXT=staging sibyl task list
 ```
 
 ## Auth Schema
