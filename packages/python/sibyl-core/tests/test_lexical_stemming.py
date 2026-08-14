@@ -20,7 +20,15 @@ from sibyl_core.backends.surreal.content_schema import (
     CONTENT_SCHEMA_DEFINITIONS,
 )
 from sibyl_core.backends.surreal.schema import ANALYZER_DEFINITIONS, NODE_DEFINITIONS
-from sibyl_core.query_anchors import _GRADED_ADJECTIVE_ALIASES, normalize_keyword_token
+from sibyl_core.query_anchors import (
+    _GRADED_ADJECTIVE_ALIASES,
+    is_derivational_form,
+    normalize_keyword_token,
+)
+from sibyl_core.retrieval.fact_frames import (
+    _SENSE_VOCABULARY,
+    extract_evidence_fact_frames,
+)
 
 _ANALYZER_SOURCES = f"{ANALYZER_DEFINITIONS}\n{CONTENT_ANALYZER_DEFINITIONS}"
 _INDEX_SOURCES = f"{NODE_DEFINITIONS}\n{CONTENT_SCHEMA_DEFINITIONS}"
@@ -168,3 +176,32 @@ async def test_graded_adjectives_are_the_gap_the_stemmer_leaves() -> None:
         assert await stem(inflected) == await stem(base) == normalize_keyword_token(inflected)
 
     await db.close()
+
+
+def test_a_listed_vocabulary_word_is_never_treated_as_a_derivation() -> None:
+    """Membership decides before the suffix rule does.
+
+    Snowball folds derivations onto their verb, so sense groups must ignore
+    "useful" and "playful". English nouns end the same way, though, and
+    "family" is the relative group's own entry, so a bare suffix rule silently
+    stopped a memory about family from reading as one.
+    """
+    assert is_derivational_form("useful") is True
+    assert is_derivational_form("playful") is True
+    assert is_derivational_form("completely") is True
+
+    for word in ("family", "supply", "assembly"):
+        assert is_derivational_form(word, vocabulary={word}) is False
+    assert is_derivational_form("family", vocabulary=_SENSE_VOCABULARY) is False
+    # "friendly" is not listed anywhere, so it stays out of the friend relation.
+    assert is_derivational_form("friendly", vocabulary=_SENSE_VOCABULARY) is True
+
+
+def test_family_still_reads_as_a_relative() -> None:
+    for text in ("I visited my family", "I visited my families"):
+        frames = extract_evidence_fact_frames(text)
+        assert frames and "relative" in frames[0].relations, text
+
+    for text in ("that was really useful", "a playful puppy", "the attendant helped"):
+        frames = extract_evidence_fact_frames(text)
+        assert not (frames and frames[0].actions), text

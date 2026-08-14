@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Iterable
+from collections.abc import Container, Iterable
 
 import snowballstemmer
 
@@ -111,19 +111,28 @@ def normalize_keyword_tokens(tokens: Iterable[str]) -> frozenset[str]:
 # so "completely" reaches complete, "useful" and "playful" reach use and play.
 # Those are adverbs and adjectives, not the act, and a sense group that admits
 # them fires on text about nothing of the kind.
-_DERIVATIONAL_SUFFIXES = ("ly", "ful")
+_DERIVATIONAL_SUFFIXES = ("ly", "ful", "ant", "ants", "ment", "ments")
 
 
-def is_derivational_form(token: str) -> bool:
+def is_derivational_form(token: str, *, vocabulary: Container[str] = frozenset()) -> bool:
+    """Whether a token only shares a verb's stem by derivation.
+
+    Membership decides first: a suffix cannot tell a derived adverb from a word
+    the vocabulary lists in its own right, and English is full of nouns that
+    end this way ("family", "supply", "assembly"). Only a token the vocabulary
+    does not know is judged by its ending.
+    """
+    if token in vocabulary:
+        return False
     return len(token) > 5 and token.endswith(_DERIVATIONAL_SUFFIXES)
 
 
-def sense_tokens_from_text(text: str) -> list[str]:
+def sense_tokens_from_text(text: str, *, vocabulary: Container[str] = frozenset()) -> list[str]:
     """Tokens eligible to match a verb-sense group, derivations excluded."""
     return [
         normalize_keyword_token(token)
         for token in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9'-]{2,}", text.lower())
-        if not is_derivational_form(token)
+        if not is_derivational_form(token, vocabulary=vocabulary)
     ]
 
 

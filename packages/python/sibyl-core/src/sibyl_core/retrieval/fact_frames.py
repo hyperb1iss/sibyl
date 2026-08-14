@@ -123,8 +123,8 @@ _STOPWORDS = {
 # stemming unchanged and are therefore listed beside the verb they belong to,
 # and "service" sits under repair because that is a sense mapping the stemmer
 # has no opinion about.
-_ACTION_TERMS: dict[str, frozenset[str]] = {
-    "acquire": normalize_keyword_tokens(
+_ACTION_TERM_SURFACES: dict[str, frozenset[str]] = {
+    "acquire": frozenset(
         {
             "acquire",
             "bought",
@@ -137,19 +137,15 @@ _ACTION_TERMS: dict[str, frozenset[str]] = {
             "purchase",
         }
     ),
-    "attend": normalize_keyword_tokens({"attend", "join", "participate", "visit", "went"}),
-    "complete": normalize_keyword_tokens({"complete", "finish"}),
-    "create": normalize_keyword_tokens(
-        {"build", "compose", "create", "draft", "generate", "make", "write"}
-    ),
-    "present": normalize_keyword_tokens({"present", "presentation"}),
-    "profile": normalize_keyword_tokens(
-        {"field", "focus", "profession", "research", "role", "specialty"}
-    ),
+    "attend": frozenset({"attend", "join", "participate", "visit", "went"}),
+    "complete": frozenset({"complete", "finish"}),
+    "create": frozenset({"build", "compose", "create", "draft", "generate", "make", "write"}),
+    "present": frozenset({"present", "presentation"}),
+    "profile": frozenset({"field", "focus", "profession", "research", "role", "specialty"}),
     # "service" is out: stemming collapses the noun into the verb, so every
     # mention of a service would read as a repair.
-    "repair": normalize_keyword_tokens({"fix", "repair", "replace"}),
-    "use": normalize_keyword_tokens(
+    "repair": frozenset({"fix", "repair", "replace"}),
+    "use": frozenset(
         {
             "choose",
             "follow",
@@ -162,12 +158,12 @@ _ACTION_TERMS: dict[str, frozenset[str]] = {
             "watch",
         }
     ),
-    "volunteer": normalize_keyword_tokens({"volunteer"}),
+    "volunteer": frozenset({"volunteer"}),
 }
 
-_QUERY_ACTION_TERMS: dict[str, frozenset[str]] = {
-    **_ACTION_TERMS,
-    "recommend": normalize_keyword_tokens(
+_QUERY_ACTION_TERM_SURFACES: dict[str, frozenset[str]] = {
+    **_ACTION_TERM_SURFACES,
+    "recommend": frozenset(
         {
             "recommend",
             "suggest",
@@ -177,9 +173,9 @@ _QUERY_ACTION_TERMS: dict[str, frozenset[str]] = {
 
 _RELATIVE_TERM = normalize_keyword_token("relative")
 
-_RELATION_TERMS: dict[str, frozenset[str]] = {
-    "friend": normalize_keyword_tokens({"colleague", "coworker", "friend", "partner", "roommate"}),
-    "relative": normalize_keyword_tokens(
+_RELATION_TERM_SURFACES: dict[str, frozenset[str]] = {
+    "friend": frozenset({"colleague", "coworker", "friend", "partner", "roommate"}),
+    "relative": frozenset(
         {
             "aunt",
             "brother",
@@ -201,6 +197,26 @@ _RELATION_TERMS: dict[str, frozenset[str]] = {
         }
     ),
 }
+
+
+_ACTION_TERMS: dict[str, frozenset[str]] = {
+    label: normalize_keyword_tokens(terms) for label, terms in _ACTION_TERM_SURFACES.items()
+}
+_QUERY_ACTION_TERMS: dict[str, frozenset[str]] = {
+    label: normalize_keyword_tokens(terms) for label, terms in _QUERY_ACTION_TERM_SURFACES.items()
+}
+_RELATION_TERMS: dict[str, frozenset[str]] = {
+    label: normalize_keyword_tokens(terms) for label, terms in _RELATION_TERM_SURFACES.items()
+}
+# A word this file actually lists is a vocabulary word, whatever it ends in, so
+# the derivational guard must never strip it: "family" is the relative group's
+# own entry and only looks like an adverb.
+_SENSE_VOCABULARY: frozenset[str] = frozenset(
+    term
+    for source in (_QUERY_ACTION_TERM_SURFACES, _RELATION_TERM_SURFACES)
+    for terms in source.values()
+    for term in terms
+)
 
 
 @dataclass(frozen=True)
@@ -366,7 +382,7 @@ def _salient_terms(text: str, *, senses_only: bool = False) -> list[str]:
     for raw_token in _TOKEN_PATTERN.findall(text.lower()):
         if raw_token in _STOPWORDS:
             continue
-        if senses_only and is_derivational_form(raw_token):
+        if senses_only and is_derivational_form(raw_token, vocabulary=_SENSE_VOCABULARY):
             continue
         token = normalize_keyword_token(raw_token)
         if token in seen or len(token) < 2:
