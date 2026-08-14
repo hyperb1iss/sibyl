@@ -61,8 +61,13 @@ RELEASE_WORKFLOW_REQUIRED_FRAGMENTS = (
     "[^[:space:]]",
     'echo "::error::Git-Iris generated empty release notes; refusing to create a release."\n'
     "            exit 1",
-    "prerelease: false",
-    "make_latest: true",
+    # The release object is born as a pre-release that is not "latest".
+    # Publish promotes it once distribution actually succeeded, which
+    # test_release_is_promoted_only_after_publish_succeeds pins end to end.
+    "prerelease: true",
+    "make_latest: false",
+    "uses: ./.github/workflows/image-cve-gate.yml",
+    "needs: image-cve-gate",
     "RELEASE_NOTES_CONTENT",
     "printf '%s\\n' \"$RELEASE_NOTES_CONTENT\"",
 )
@@ -171,6 +176,109 @@ def _publish_workflow() -> str:
 
 def _dogfood_image_workflow() -> str:
     return (REPO_ROOT / ".github/workflows/publish-dogfood-images.yml").read_text(encoding="utf-8")
+
+
+def test_image_cve_gate_is_shared_by_every_caller() -> None:
+    # Two HIGH advisories reached v1.2.1 because the only image scan ran in
+    # publish, after release had already created the tag and the release
+    # object. The gate now runs in three places, and the whole value of that
+    # depends on the three asking the same question, so the configuration
+    # lives in one composite action and every caller delegates to it.
+    action = (REPO_ROOT / ".github/actions/trivy-image-gate/action.yml").read_text(encoding="utf-8")
+
+    assert "aquasecurity/trivy-action@v0.36.0" in action
+    assert "format: cyclonedx" in action
+    assert "severity: HIGH,CRITICAL" in action
+    assert 'exit-code: "1"' in action
+    assert "vuln-type: os,library" in action
+    assert "ignore-unfixed: true" in action
+    # Trivy reads a .trivyignore from the working directory unless told
+    # otherwise, so the suppression file is named explicitly. Without this an
+    # untracked file could silence every gate with nobody accountable.
+    assert "trivyignores: .trivyignore" in action
+    assert (REPO_ROOT / ".trivyignore").is_file()
+
+    reusable = (REPO_ROOT / ".github/workflows/image-cve-gate.yml").read_text(encoding="utf-8")
+
+    assert "uses: ./.github/actions/trivy-image-gate" in reusable
+    assert "workflow_call:" in reusable
+    # Built into the local daemon, never pushed, so the gate needs no registry
+    # credentials and is safe to run on a pull request from a fork.
+    assert "load: true" in reusable
+    assert "push: false" in reusable
+    assert "fromJSON(inputs.images)" in reusable
+    assert "fromJSON(inputs.platforms)" in reusable
+
+    release = (REPO_ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    # The release job may not begin until the gate is green, which is the
+    # single property that stops a scan verdict from postdating a release.
+    assert "uses: ./.github/workflows/image-cve-gate.yml" in release
+    assert "needs: image-cve-gate" in release
+    # Publish ships both architectures, so the pre-tag gate covers both.
+    assert 'platforms: \'["amd64", "arm64"]\'' in release
+    assert 'images: \'["api", "web"]\'' in release
+
+    ci = (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+    assert "uses: ./.github/workflows/image-cve-gate.yml" in ci
+    assert "images: ${{ needs.changes.outputs.image_scan_matrix }}" in ci
+    # Adding a suppression must run the scan it would suppress.
+    assert ".trivyignore" in ci
+
+
+def test_release_is_promoted_only_after_publish_succeeds() -> None:
+    # A release object created before distribution is a claim the pipeline has
+    # not yet earned. Release creates the version as a pre-release that is not
+    # "latest"; only the final publish job, which runs after the images are
+    # scanned, signed and pushed and every package has shipped, promotes it.
+    release = (REPO_ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    assert "prerelease: true" in release
+    assert "make_latest: false" in release
+
+    publish = _publish_workflow()
+
+    assert "needs: [python, homebrew, aur, docker-sign, helm-publish]" in publish
+
+    # Order is the property, not coexistence. action-gh-release updates
+    # release metadata before it uploads assets, and its post-upload finalize
+    # step returns immediately for a non-draft release, so a single call that
+    # both promotes and uploads promotes first. A failed upload would then
+    # leave a full, latest release with assets missing. Promotion therefore
+    # has to be its own final step that carries no files at all.
+    steps = cast(
+        "list[dict[str, Any]]",
+        yaml.safe_load(publish)["jobs"]["release"]["steps"],
+    )
+    gh_release_steps = [
+        (index, step)
+        for index, step in enumerate(steps)
+        if str(step.get("uses", "")).startswith("softprops/action-gh-release")
+    ]
+    # Exactly two: one that attaches evidence, one that promotes. A third
+    # would mean another release mutation nobody accounted for.
+    expected_release_mutations = 2
+    assert len(gh_release_steps) == expected_release_mutations
+
+    (upload_index, upload_step), (promote_index, promote_step) = gh_release_steps
+    upload_with = upload_step.get("with", {})
+    promote_with = promote_step.get("with", {})
+
+    # The step carrying assets must leave the pre-release status untouched.
+    assert upload_with.get("files")
+    assert upload_with.get("prerelease") is True
+    assert upload_with.get("make_latest") is False
+
+    # The promoting step must carry nothing that can fail after the flip.
+    assert "files" not in promote_with
+    assert promote_with.get("prerelease") is False
+    assert promote_with.get("make_latest") is True
+    assert promote_index > upload_index
+
+    # Nothing may run after promotion, so a late failure cannot strand a
+    # release that already presents itself as current.
+    assert promote_index == len(steps) - 1
 
 
 def test_published_images_can_name_their_own_version() -> None:
@@ -286,10 +394,11 @@ def test_publish_workflow_attaches_docker_and_release_evidence() -> None:
     assert "docker-security:" in workflow
     assert "fail-fast: false" in workflow
     assert "docker-sign:" in workflow
-    assert "aquasecurity/trivy-action@v0.36.0" in workflow
+    # The Trivy configuration itself moved into the shared composite action,
+    # so publish is checked for delegating to it rather than for inlining it.
+    # test_image_cve_gate_is_shared_by_every_caller owns the configuration.
+    assert "uses: ./.github/actions/trivy-image-gate" in workflow
     assert "sigstore/cosign-installer@v4.1.2" in workflow
-    assert "format: cyclonedx" in workflow
-    assert "severity: HIGH,CRITICAL" in workflow
     assert "cosign sign --yes" in workflow
     assert "Upload Cosign receipt" in workflow
     assert "Download Python distributions" in workflow

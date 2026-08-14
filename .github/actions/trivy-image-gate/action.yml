@@ -1,0 +1,68 @@
+name: Trivy image gate
+description: >-
+  Fail on fixed HIGH or CRITICAL advisories in a container image, optionally emitting a CycloneDX
+  inventory of the same image alongside the verdict.
+
+# One definition of "the image is clean", shared by every workflow that asks
+# the question. CI asks it on a pull request, Release asks it before a release
+# object exists, and Publish asks it again of the pushed digest. Copies would
+# drift, and a gate that differs between the pre-merge check and the release
+# check is a gate that lets something through.
+
+inputs:
+  image-ref:
+    description: Image reference to analyse, by tag or by digest.
+    required: true
+  platform:
+    description: >-
+      Platform to select from a multi-platform reference, as linux/amd64. Leave empty for a
+      reference that carries exactly one image, such as a locally built one; Trivy then reads it
+      as-is.
+    required: false
+    default: ""
+  sbom-output:
+    description: >-
+      Path to write a CycloneDX inventory to. Empty skips the inventory, which is what the pre-merge
+      and pre-release gates want: they build an image purely to interrogate it and then discard it,
+      so only images that reach a registry need a durable bill of materials.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    # Trivy caches its vulnerability database by default (the action's `cache`
+    # input is already 'true'), so repeated calls within a run reuse one copy.
+    - name: "◆ Generate Trivy SBOM"
+      if: ${{ inputs.sbom-output != '' }}
+      uses: aquasecurity/trivy-action@v0.36.0
+      env:
+        TRIVY_PLATFORM: ${{ inputs.platform }}
+      with:
+        image-ref: ${{ inputs.image-ref }}
+        format: cyclonedx
+        output: ${{ inputs.sbom-output }}
+        scanners: vuln
+
+    # ignore-unfixed keeps the gate actionable: an advisory with no released
+    # fix cannot be cleared by anything this repository does, and blocking on
+    # one would only teach people to bypass the gate.
+    #
+    # trivyignores names the suppression file explicitly. Trivy otherwise
+    # reads whatever `.trivyignore` happens to sit in the working directory,
+    # which would let an untracked or unreviewed file silence this gate. The
+    # committed file carries the exception policy, CI rescans whenever it
+    # changes, and the action fails outright if the path is missing, so
+    # deleting it cannot quietly restore the implicit behaviour.
+    - name: "◆ Trivy CVE gate"
+      uses: aquasecurity/trivy-action@v0.36.0
+      env:
+        TRIVY_PLATFORM: ${{ inputs.platform }}
+      with:
+        image-ref: ${{ inputs.image-ref }}
+        format: table
+        exit-code: "1"
+        vuln-type: os,library
+        severity: HIGH,CRITICAL
+        ignore-unfixed: true
+        trivyignores: .trivyignore

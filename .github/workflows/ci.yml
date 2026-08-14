@@ -32,11 +32,14 @@ jobs:
       runtime_changed: ${{ steps.classify.outputs.runtime_changed }}
       web_changed: ${{ steps.classify.outputs.web_changed }}
       ci_changed: ${{ steps.classify.outputs.ci_changed }}
+      image_changed: ${{ steps.classify.outputs.image_changed }}
+      image_scan_matrix: ${{ steps.classify.outputs.image_scan_matrix }}
       run_static: ${{ steps.classify.outputs.run_static }}
       run_build: ${{ steps.classify.outputs.run_build }}
       run_tests: ${{ steps.classify.outputs.run_tests }}
       run_e2e: ${{ steps.classify.outputs.run_e2e }}
       run_storybook: ${{ steps.classify.outputs.run_storybook }}
+      run_image_scan: ${{ steps.classify.outputs.run_image_scan }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -83,6 +86,9 @@ jobs:
           runtime_changed=false
           web_changed=false
           ci_changed=false
+          image_changed=false
+          api_image_changed=false
+          web_image_changed=false
 
           for file in "${changed_files[@]}"; do
             [[ -z "$file" ]] && continue
@@ -112,8 +118,34 @@ jobs:
             esac
 
             case "$file" in
-              .github/workflows/ci.yml|.github/workflows/nightly-regression.yml|.github/actions/*)
+              .github/workflows/ci.yml|.github/workflows/nightly-regression.yml|.github/workflows/image-cve-gate.yml|.github/actions/*)
                 ci_changed=true
+                ;;
+            esac
+
+            # Dependency and image sources matched no other case here: the
+            # lockfile, the root manifest, and the Dockerfiles all sit outside
+            # apps/, so a bump that pulled in a vulnerable transitive
+            # dependency used to run no tests and no scan whatsoever. A base
+            # image bump is a Dockerfile edit and lands here too, which is the
+            # path the msgpack and setuptools advisories arrived by.
+            #
+            # Attributed per image so the scan builds what the change can
+            # actually reach. The first matching arm wins, so the specific
+            # per-image inputs are listed ahead of the shared ones.
+            case "$file" in
+              apps/api/Dockerfile|uv.lock|pyproject.toml|apps/api/pyproject.toml|packages/python/sibyl-core/pyproject.toml)
+                api_image_changed=true
+                ;;
+              apps/web/Dockerfile|package.json|apps/web/package.json|pnpm-lock.yaml|apps/web/pnpm-lock.yaml)
+                web_image_changed=true
+                ;;
+              # Shared or unattributable image inputs reach both images, and so
+              # does the suppression file, so an exception can never be added
+              # without the scan it would suppress running on the same commit.
+              Dockerfile|*/Dockerfile|*/pyproject.toml|.dockerignore|*/.dockerignore|.trivyignore)
+                api_image_changed=true
+                web_image_changed=true
                 ;;
             esac
 
@@ -134,11 +166,33 @@ jobs:
             ci_changed=true
           fi
 
+          # A change to the gate itself, or to the workflows around it, is not
+          # attributable to one image, so it proves itself against both.
+          if [[ "$ci_changed" == true || ${#changed_files[@]} -eq 0 ]]; then
+            api_image_changed=true
+            web_image_changed=true
+          fi
+
+          if [[ "$api_image_changed" == true || "$web_image_changed" == true ]]; then
+            image_changed=true
+            runtime_changed=true
+          fi
+
+          image_scan_matrix='[]'
+          if [[ "$api_image_changed" == true && "$web_image_changed" == true ]]; then
+            image_scan_matrix='["api", "web"]'
+          elif [[ "$api_image_changed" == true ]]; then
+            image_scan_matrix='["api"]'
+          elif [[ "$web_image_changed" == true ]]; then
+            image_scan_matrix='["web"]'
+          fi
+
           run_static=false
           run_build=false
           run_tests=false
           run_e2e=false
           run_storybook=false
+          run_image_scan=false
 
           if [[ "$docs_changed" == true || "$hooks_changed" == true || "$infra_changed" == true || "$skills_changed" == true || "$runtime_changed" == true || "$ci_changed" == true ]]; then
             run_static=true
@@ -154,6 +208,10 @@ jobs:
             run_storybook=true
           fi
 
+          if [[ "$image_scan_matrix" != "[]" ]]; then
+            run_image_scan=true
+          fi
+
           {
             echo "docs_changed=$docs_changed"
             echo "hooks_changed=$hooks_changed"
@@ -162,11 +220,14 @@ jobs:
             echo "runtime_changed=$runtime_changed"
             echo "web_changed=$web_changed"
             echo "ci_changed=$ci_changed"
+            echo "image_changed=$image_changed"
+            echo "image_scan_matrix=$image_scan_matrix"
             echo "run_static=$run_static"
             echo "run_build=$run_build"
             echo "run_tests=$run_tests"
             echo "run_e2e=$run_e2e"
             echo "run_storybook=$run_storybook"
+            echo "run_image_scan=$run_image_scan"
           } >> "$GITHUB_OUTPUT"
 
           {
@@ -185,6 +246,7 @@ jobs:
             echo "- tests: $run_tests"
             echo "- e2e: $run_e2e"
             echo "- storybook: $run_storybook"
+            echo "- image scan: $run_image_scan $image_scan_matrix"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Catches shipped-dependency CVEs at review time. The image scan in publish
@@ -250,6 +312,33 @@ jobs:
               sys.exit(1)
           print(f"No new high or critical advisories. {len(set(waived))} tracked.")
           PY
+
+  # The dependency audit above reads Node manifests. This reads an image,
+  # which is the only place a base-image advisory is visible at all: msgpack
+  # and setuptools reached a tagged release through pip's vendored set in the
+  # Python base image, named in no manifest this repository owns. Same gate
+  # the release and publish workflows run, so a merge cannot introduce
+  # something a release would later refuse to ship.
+  #
+  # Scans whichever images the change can actually reach, api, web, or both,
+  # from the matrix the classifier derived. The Node audit above reads web's
+  # manifests but cannot see packages inherited from its runtime base image,
+  # so a web Dockerfile change has to build and scan the web image itself.
+  #
+  # amd64 only, unlike the release gate, which covers both architectures. The
+  # dependency mistake this catches is almost always architecture independent,
+  # and pre-merge latency is worth more here than the last few percent of
+  # coverage that the release gate then supplies before anything ships.
+  image-cve-scan:
+    name: Image CVE Scan (amd64)
+    needs: changes
+    if: needs.changes.outputs.run_image_scan == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/image-cve-gate.yml
+    with:
+      images: ${{ needs.changes.outputs.image_scan_matrix }}
+      platforms: '["amd64"]'
 
   static:
     name: Static Checks

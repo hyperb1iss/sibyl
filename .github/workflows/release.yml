@@ -35,8 +35,37 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # =========================================================================
+  # Image CVE gate: prove the shipped images are clean before a release exists
+  #
+  # Publish scans images too, but publish is dispatched by the last step of
+  # this workflow, so its verdict lands after the tag and the release object
+  # are already public. v1.2.1 is what that ordering costs: the scan failed on
+  # two HIGH advisories that a released version could no longer be recalled
+  # for. Running the gate here means a dirty image stops the release before
+  # anything is named, and the publish-time scan stays where it is as the
+  # second line of defence over the artifacts that actually get distributed.
+  #
+  # The scan reads the dispatched SHA rather than the tagged commit. The only
+  # thing between them is the version bump, which the release job proves
+  # touches nothing but generated pins, so the image contents are identical.
+  # =========================================================================
+  image-cve-gate:
+    name: "◆ Image CVE gate"
+    uses: ./.github/workflows/image-cve-gate.yml
+    permissions:
+      contents: read
+    with:
+      # Every image and every architecture publish ships. Scanning only amd64
+      # would let an arm64-only OS package advisory through, and the base
+      # image package sets genuinely differ per architecture. Each builds on
+      # its own native runner, so this costs wall time rather than emulation.
+      images: '["api", "web"]'
+      platforms: '["amd64", "arm64"]'
+
   release:
     name: Release
+    needs: image-cve-gate
     runs-on: ubuntu-latest
     timeout-minutes: 75
 
@@ -402,6 +431,21 @@ jobs:
           git push origin HEAD:${{ github.ref_name }}
           git push origin "v${{ steps.version.outputs.version }}"
 
+      # Created as a pre-release that is explicitly not "latest", and promoted
+      # to a full release by the last job of the publish workflow, once the
+      # images are scanned, signed and pushed and every package is out.
+      #
+      # The gate above scans an image built from this SHA, but publish rebuilds
+      # from floating inputs (the base image tag, uv:latest, live apt
+      # repositories), so the bytes it ships are not the bytes that were
+      # scanned here. That gap is real and is closed by promoting the exact
+      # scanned digests instead of rebuilding, which is a publish rework. Until
+      # then the staged visibility is what bounds the damage: a release whose
+      # distribution fails never presents itself as the version to install.
+      #
+      # Draft would hide it more thoroughly, but a draft release has no tag
+      # association, and publish reads this release back by tag to preserve its
+      # notes. A pre-release keeps that read working.
       - name: "◆ Create GitHub Release"
         if: ${{ !inputs.dry_run }}
         uses: softprops/action-gh-release@v3
@@ -409,8 +453,8 @@ jobs:
           tag_name: v${{ steps.version.outputs.version }}
           name: v${{ steps.version.outputs.version }}
           body: ${{ steps.release_notes.outputs.content }}
-          prerelease: false
-          make_latest: true
+          prerelease: true
+          make_latest: false
 
       - name: "◇ Trigger publish"
         if: ${{ !inputs.dry_run }}
