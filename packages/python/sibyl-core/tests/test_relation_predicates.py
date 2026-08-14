@@ -62,6 +62,38 @@ class TestParsing:
         assert declaration.relationship_type is RelationshipType.RELATED_TO
         assert declaration.declared is False
 
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "requires:a:b",
+            "supersedes:has space",
+            "supports:   ",
+        ],
+    )
+    def test_implausible_remainder_is_not_a_target(self, value: str) -> None:
+        """A prefix only splits when what follows could be a single id.
+
+        Otherwise a stray URL or a mistyped entry gets torn into a predicate
+        and a fragment, and the link silently points somewhere it was never
+        asked to point.
+        """
+        declaration = parse_relation_declaration(value)
+        assert declaration.target_id == value.strip()
+        assert declaration.relationship_type is RelationshipType.RELATED_TO
+        assert declaration.declared is False
+
+    def test_an_id_spelled_like_a_declaration_is_read_as_one(self) -> None:
+        """The one ambiguity syntax cannot settle, pinned so it stays known.
+
+        `Entity.id` is an unconstrained string and restore validates whatever a
+        backup carries, so `supersedes:legacy` is a representable id. Nothing
+        in Sibyl mints that shape, and telling it apart from a declaration
+        needs the store rather than the string.
+        """
+        declaration = parse_relation_declaration("supersedes:legacy")
+        assert declaration.relationship_type is RelationshipType.SUPERSEDES
+        assert declaration.target_id == "legacy"
+
     def test_blank_entries_are_dropped(self) -> None:
         assert parse_relation_declarations(["", "   ", "ep_0a1b2c3d4e5f"]) == [
             parse_relation_declaration("ep_0a1b2c3d4e5f")
