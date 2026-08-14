@@ -558,6 +558,14 @@ jobs:
         image: [api, web]
         platform: [amd64, arm64]
     steps:
+      # This job analyses a registry digest rather than the working tree, but
+      # the gate it runs is a local action, so the definition has to be on
+      # disk for it to resolve.
+      - name: "◆ Checkout"
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+
       - name: "△ Extract version from tag"
         id: version
         run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
@@ -588,27 +596,29 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: "◆ Generate Trivy SBOM"
-        uses: aquasecurity/trivy-action@v0.36.0
-        env:
-          # Trivy resolves a remote index to linux/amd64 unless told otherwise,
-          # and it does not infer the platform from the host it runs on. A
-          # push-by-digest reference is a single-platform index, so scanning
-          # the arm64 digest without this asks for an amd64 child that is not
-          # there and fails before reading a package. The action exposes no
-          # platform input; trivy derives TRIVY_PLATFORM from its own flag.
-          TRIVY_PLATFORM: linux/${{ matrix.platform }}
+      # The SBOM and the verdict come from one shared action, so the scan that
+      # runs here is the scan that ran on the pull request and on the release
+      # candidate. Trivy resolves a remote index to linux/amd64 unless told
+      # otherwise, and it does not infer the platform from the host it runs
+      # on. A push-by-digest reference is a single-platform index, so scanning
+      # the arm64 digest without naming the platform asks for an amd64 child
+      # that is not there and fails before reading a package.
+      - name: "◆ Trivy SBOM and CVE gate"
+        uses: ./.github/actions/trivy-image-gate
         with:
           image-ref: >-
             ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}@${{
             steps.digest.outputs.ref }}
-          format: cyclonedx
-          output:
+          platform: linux/${{ matrix.platform }}
+          sbom-output:
             sibyl-${{ matrix.image }}-${{ matrix.platform }}-${{ steps.version.outputs.version
             }}.cdx.json
-          scanners: vuln
 
+      # The inventory is written before the verdict and uploaded regardless of
+      # it. A failing gate is exactly when someone needs to read what is in
+      # the image, so the evidence must outlive the failure.
       - name: "► Upload SBOM"
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
           name:
@@ -619,20 +629,6 @@ jobs:
             }}.cdx.json
           if-no-files-found: error
           retention-days: 90
-
-      - name: "◆ Trivy CVE gate"
-        uses: aquasecurity/trivy-action@v0.36.0
-        env:
-          TRIVY_PLATFORM: linux/${{ matrix.platform }}
-        with:
-          image-ref: >-
-            ${{ env.GHCR_REGISTRY }}/${{ github.repository_owner }}/sibyl-${{ matrix.image }}@${{
-            steps.digest.outputs.ref }}
-          format: table
-          exit-code: "1"
-          vuln-type: os,library
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
 
   # =========================================================================
   # Docker: keyless Sigstore signatures for the scanned multi-arch images

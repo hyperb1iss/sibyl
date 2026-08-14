@@ -32,11 +32,13 @@ jobs:
       runtime_changed: ${{ steps.classify.outputs.runtime_changed }}
       web_changed: ${{ steps.classify.outputs.web_changed }}
       ci_changed: ${{ steps.classify.outputs.ci_changed }}
+      image_changed: ${{ steps.classify.outputs.image_changed }}
       run_static: ${{ steps.classify.outputs.run_static }}
       run_build: ${{ steps.classify.outputs.run_build }}
       run_tests: ${{ steps.classify.outputs.run_tests }}
       run_e2e: ${{ steps.classify.outputs.run_e2e }}
       run_storybook: ${{ steps.classify.outputs.run_storybook }}
+      run_image_scan: ${{ steps.classify.outputs.run_image_scan }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -83,6 +85,7 @@ jobs:
           runtime_changed=false
           web_changed=false
           ci_changed=false
+          image_changed=false
 
           for file in "${changed_files[@]}"; do
             [[ -z "$file" ]] && continue
@@ -112,8 +115,21 @@ jobs:
             esac
 
             case "$file" in
-              .github/workflows/ci.yml|.github/workflows/nightly-regression.yml|.github/actions/*)
+              .github/workflows/ci.yml|.github/workflows/nightly-regression.yml|.github/workflows/image-cve-gate.yml|.github/actions/*)
                 ci_changed=true
+                ;;
+            esac
+
+            # Dependency and image sources matched no other case here: the
+            # lockfile, the root manifest, and the Dockerfiles all sit outside
+            # apps/, so a bump that pulled in a vulnerable transitive
+            # dependency used to run no tests and no scan whatsoever. A base
+            # image bump is a Dockerfile edit and lands here too, which is the
+            # path the msgpack and setuptools advisories arrived by.
+            case "$file" in
+              uv.lock|pyproject.toml|*/pyproject.toml|Dockerfile|*/Dockerfile|.dockerignore|*/.dockerignore)
+                image_changed=true
+                runtime_changed=true
                 ;;
             esac
 
@@ -132,6 +148,7 @@ jobs:
             runtime_changed=true
             web_changed=true
             ci_changed=true
+            image_changed=true
           fi
 
           run_static=false
@@ -139,6 +156,7 @@ jobs:
           run_tests=false
           run_e2e=false
           run_storybook=false
+          run_image_scan=false
 
           if [[ "$docs_changed" == true || "$hooks_changed" == true || "$infra_changed" == true || "$skills_changed" == true || "$runtime_changed" == true || "$ci_changed" == true ]]; then
             run_static=true
@@ -154,6 +172,10 @@ jobs:
             run_storybook=true
           fi
 
+          if [[ "$image_changed" == true || "$ci_changed" == true ]]; then
+            run_image_scan=true
+          fi
+
           {
             echo "docs_changed=$docs_changed"
             echo "hooks_changed=$hooks_changed"
@@ -162,11 +184,13 @@ jobs:
             echo "runtime_changed=$runtime_changed"
             echo "web_changed=$web_changed"
             echo "ci_changed=$ci_changed"
+            echo "image_changed=$image_changed"
             echo "run_static=$run_static"
             echo "run_build=$run_build"
             echo "run_tests=$run_tests"
             echo "run_e2e=$run_e2e"
             echo "run_storybook=$run_storybook"
+            echo "run_image_scan=$run_image_scan"
           } >> "$GITHUB_OUTPUT"
 
           {
@@ -185,6 +209,7 @@ jobs:
             echo "- tests: $run_tests"
             echo "- e2e: $run_e2e"
             echo "- storybook: $run_storybook"
+            echo "- image scan: $run_image_scan"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Catches shipped-dependency CVEs at review time. The image scan in publish
@@ -250,6 +275,27 @@ jobs:
               sys.exit(1)
           print(f"No new high or critical advisories. {len(set(waived))} tracked.")
           PY
+
+  # The dependency audit above reads Node manifests. This reads an image,
+  # which is the only place a base-image advisory is visible at all: msgpack
+  # and setuptools reached a tagged release through pip's vendored set in the
+  # Python base image, named in no manifest this repository owns. Same gate
+  # the release and publish workflows run, so a merge cannot introduce
+  # something a release would later refuse to ship.
+  #
+  # The api image only. Its Python and OS surface is the half no pre-merge
+  # check reaches today, whereas the web image's shipped packages are already
+  # audited above, and building both here would double the wait on every
+  # dependency pull request to re-ask a question already answered.
+  image-cve-scan:
+    name: Image CVE Scan
+    needs: changes
+    if: needs.changes.outputs.run_image_scan == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/image-cve-gate.yml
+    with:
+      images: '["api"]'
 
   static:
     name: Static Checks

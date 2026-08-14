@@ -35,8 +35,30 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # =========================================================================
+  # Image CVE gate: prove the shipped images are clean before a release exists
+  #
+  # Publish scans images too, but publish is dispatched by the last step of
+  # this workflow, so its verdict lands after the tag and the release object
+  # are already public. v1.2.1 is what that ordering costs: the scan failed on
+  # two HIGH advisories that a released version could no longer be recalled
+  # for. Running the gate here means a dirty image stops the release before
+  # anything is named, and the publish-time scan stays where it is as the
+  # second line of defence over the artifacts that actually get distributed.
+  #
+  # The scan reads the dispatched SHA rather than the tagged commit. The only
+  # thing between them is the version bump, which the release job proves
+  # touches nothing but generated pins, so the image contents are identical.
+  # =========================================================================
+  image-cve-gate:
+    name: "◆ Image CVE gate"
+    uses: ./.github/workflows/image-cve-gate.yml
+    permissions:
+      contents: read
+
   release:
     name: Release
+    needs: image-cve-gate
     runs-on: ubuntu-latest
     timeout-minutes: 75
 
