@@ -873,7 +873,7 @@ async def _superseded_candidate_uuids(
     rows = await _execute_query_records(
         client,
         """
-        SELECT target_id AS uuid
+        SELECT target_id AS uuid, source_id AS superseder, created_at
         FROM relates_to
         WHERE name = $predicate
           AND target_id IN $uuids
@@ -885,7 +885,53 @@ async def _superseded_candidate_uuids(
         group_id=group_id,
         limit=_SUPERSESSION_LOOKUP_LIMIT,
     )
-    return {uuid for row in rows if (uuid := _string_value(row.get("uuid")))}, len(rows)
+    return _resolve_superseded(rows), len(rows)
+
+
+def _resolve_superseded(rows: Sequence[Mapping[str, object]]) -> set[str]:
+    """Decide which endpoints an edge set actually retires.
+
+    Two shapes have to be handled before a target can be trusted as retired.
+    A self-edge says a row replaced itself, which retires nothing and would
+    otherwise black out a live row. A cycle (A supersedes B, B supersedes A)
+    would retire both endpoints and black out the pair, so the newest edge
+    wins: it is the most recent statement about that pair, and the older
+    edge in the opposite direction is treated as replaced by it.
+    """
+
+    retired: set[str] = set()
+    edges: list[tuple[str, str, str]] = []
+    for row in rows:
+        target = _string_value(row.get("uuid"))
+        if not target:
+            continue
+        source = _string_value(row.get("superseder"))
+        if target == source:
+            # A row cannot replace itself. Honoring it would retire a live row
+            # on a statement that says nothing.
+            continue
+        if not source:
+            # An edge with no recorded source still says this row was
+            # replaced; it just cannot take part in resolving a cycle.
+            retired.add(target)
+            continue
+        edges.append((target, source, _edge_sort_key(row.get("created_at"))))
+
+    newest_between: dict[tuple[str, str], tuple[str, str, str]] = {}
+    for edge in edges:
+        target, source, _created = edge
+        pair = (target, source) if target < source else (source, target)
+        current = newest_between.get(pair)
+        if current is None or edge[2] >= current[2]:
+            newest_between[pair] = edge
+    retired.update(target for target, _source, _created in newest_between.values())
+    return retired
+
+
+def _edge_sort_key(value: object) -> str:
+    if isinstance(value, datetime):
+        return value.astimezone(UTC).isoformat()
+    return _string_value(value) or ""
 
 
 async def _apply_supersession_gate(

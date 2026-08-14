@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
 
+from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
 from sibyl_core.models.entities import Entity, EntityType, RelationshipType
 from sibyl_core.tools.helpers import (
     VALID_ENTITY_TYPES,
@@ -665,6 +666,11 @@ async def _explore_related(
     results = []
     for entity, relationship in raw_results:
         if scope_guard is not None and not scope_guard(entity):
+            continue
+        # Synthesis sources its neighborhood through this lane, so a corrected
+        # or superseded row reached a rendered handbook as a cited source
+        # without ever passing pack admission.
+        if not graph_metadata_recallable(getattr(entity, "metadata", None)):
             continue
 
         # RBAC: Filter by accessible projects

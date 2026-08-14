@@ -980,28 +980,38 @@ def test_an_active_state_never_rescues_a_flagged_or_genuinely_duplicate_row() ->
 
 
 @pytest.mark.parametrize(
-    "scope_metadata",
+    ("scope_metadata", "reachable"),
     [
-        pytest.param({"memory_scope": "organization"}, id="organization"),
-        pytest.param({"memory_scope": "public"}, id="public"),
-        pytest.param({"memory_scope": "shared"}, id="shared"),
-        pytest.param({"memory_scope": "team", "scope_key": "team-a"}, id="team"),
-        pytest.param({}, id="legacy-no-scope"),
+        pytest.param({}, True, id="legacy-no-scope"),
+        pytest.param({"memory_scope": "private", "principal_id": "user-1"}, True, id="private-own"),
+        pytest.param({"memory_scope": "project", "scope_key": "proj-1"}, True, id="project-member"),
+        pytest.param(
+            {"memory_scope": "private", "principal_id": "user-2"}, False, id="private-other"
+        ),
+        pytest.param(
+            {"memory_scope": "project", "scope_key": "proj-9"}, False, id="project-outsider"
+        ),
     ],
 )
 @pytest.mark.asyncio
-async def test_correction_reaches_projected_rows_at_every_scope(
+async def test_a_correction_retires_only_projected_rows_it_can_still_see(
     monkeypatch: pytest.MonkeyPatch,
     scope_metadata: dict[str, Any],
+    reachable: bool,
 ) -> None:
-    """The projected half of the candidate set carries no write check, deliberately.
+    """Provenance is server-owned now, but rows written before that are not.
 
-    `authorize_memory_write` refuses SHARED, ORGANIZATION, and PUBLIC
-    outright, refuses TEAM without `accessible_teams`, and refuses a row with
-    no scope metadata. Promotion makes rows visible at ORGANIZATION and
-    PUBLIC, so guarding rows resolved through the server-stamped
-    `attributes.raw_memory_id` would disable the write-through for most of a
-    real corpus: the capture would retire while the graph row kept ranking.
+    `raw_memory_id` was patchable until this branch, so a row can carry a
+    planted capture id. The attack is to plant it on a row you can write, lose
+    access, then correct your own capture to retire it. Requiring that the
+    projected row still be readable by the correcting principal closes that
+    without refusing anything legitimate, because a genuine projection
+    inherits its capture's audience.
+
+    The reachable cases are the ones that can actually be served: read
+    authorization admits private, project, and the legacy fail-open, while
+    organization, shared, and public all reach `scope_not_enabled`
+    (`migrate/scope_backfill.py:70-79`), so no servable row carries them.
     """
 
     memory = _raw_capture(id="source-1")
@@ -1032,14 +1042,18 @@ async def test_correction_reaches_projected_rows_at_every_scope(
         organization_id="org-1",
         source_id="source-1",
         principal_id="user-1",
+        accessible_projects={"proj-1"},
         action="mark_wrong",
     )
 
     assert result.applied
-    assert result.affected_entity_ids == ["entity-projected"]
-    assert result.refused_entity_ids == []
-    _entity_id, stamped = runtime.updates[0]
-    assert graph_metadata_recallable(stamped) is False
+    if reachable:
+        assert result.affected_entity_ids == ["entity-projected"]
+        _entity_id, stamped = runtime.updates[0]
+        assert graph_metadata_recallable(stamped) is False
+    else:
+        assert result.affected_entity_ids == []
+        assert runtime.updates == []
 
 
 @pytest.mark.asyncio
@@ -1125,3 +1139,163 @@ async def test_the_row_cap_is_detected_even_when_dedup_hides_it(
     assert gate["truncated"] is True
     assert gate["edge_rows_read"] == 4
     assert gate["total_candidates"] == 1
+
+
+def test_a_self_supersession_retires_nothing() -> None:
+    """A row replacing itself says nothing, and must not black itself out."""
+
+    assert search_module._resolve_superseded([{"uuid": "a", "superseder": "a"}]) == set()
+
+
+def test_a_supersession_cycle_retires_only_the_newest_edges_target() -> None:
+    """Mutual supersession must not black out both rows.
+
+    A supersedes B, then B supersedes A. Retiring every inbound target would
+    leave the reader with neither row, which is strictly worse than the
+    pre-branch behavior of serving both.
+    """
+
+    retired = search_module._resolve_superseded(
+        [
+            {"uuid": "B", "superseder": "A", "created_at": "2026-01-01T00:00:00+00:00"},
+            {"uuid": "A", "superseder": "B", "created_at": "2026-02-01T00:00:00+00:00"},
+        ]
+    )
+    assert retired == {"A"}
+
+
+def test_an_edge_with_no_recorded_source_still_retires_its_target() -> None:
+    """Cycle resolution is a refinement, not a way to escape the gate."""
+
+    assert search_module._resolve_superseded([{"uuid": "old"}]) == {"old"}
+
+
+@pytest.mark.asyncio
+async def test_restore_deletes_the_supersession_edge_the_correction_minted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Clearing the stamp is not enough while the gate reads the edge.
+
+    The admission gate retires any row carrying an inbound SUPERSEDES edge, so
+    a restore that left the edge behind would leave the row excluded forever
+    and make the correction irreversible in practice.
+    """
+
+    memory = _raw_capture(
+        id="source-1",
+        review_state="superseded",
+        metadata={
+            "capture_surface": "reflection_candidate",
+            "lifecycle_state": "superseded",
+            "superseded_by_source_id": "replacement-1",
+        },
+    )
+    runtime = _CorrectionGraphRuntime()
+    deletes: list[tuple[str, dict[str, Any]]] = []
+
+    async def execute_query(query: str, **params: object) -> list[dict[str, object]]:
+        if query.strip().startswith("DELETE"):
+            deletes.append((query, dict(params)))
+            return []
+        return [{"uuid": "entity-old"}]
+
+    runtime.execute_query = execute_query  # type: ignore[method-assign]
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> _CorrectionGraphRuntime:
+        return runtime
+
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+    monkeypatch.setattr(
+        memory_module,
+        "save_raw_memory",
+        AsyncMock(side_effect=lambda updated, **_kwargs: updated),
+    )
+    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+
+    result = await memory_module.apply_memory_correction(
+        organization_id="org-1",
+        source_id="source-1",
+        principal_id="user-1",
+        action="restore",
+    )
+
+    assert result.applied
+    assert result.affected_entity_ids == ["entity-old"]
+    assert len(deletes) == 1
+    query, params = deletes[0]
+    assert "relates_to" in query
+    assert params["target_ids"] == ["entity-old"]
+    assert params["predicate"] == "SUPERSEDES"
+    # Only edges this path wrote are removed; a reflection-promoted
+    # supersession is a different claim that restore has no opinion about.
+    assert params["write_path"] == memory_module._CORRECTION_NATIVE_WRITE_PATH
+    assert params["group_id"] == "org-1"
+    _entity_id, stamped = runtime.updates[0]
+    assert graph_metadata_recallable(stamped) is True
+
+
+@pytest.mark.asyncio
+async def test_a_missing_id_and_a_denied_id_are_reported_identically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`refused_entity_ids` echoes caller-chosen input, so it must not disclose existence.
+
+    Capture metadata is caller-writable, so a caller can name any id. If a
+    nonexistent id were dropped while an existing-but-denied id came back in
+    the refused list, the difference would answer "does this row exist" for
+    rows outside the caller's scope, one guess at a time.
+    """
+
+    async def run(named_id: str, *, exists: bool) -> list[str]:
+        memory = _raw_capture(
+            id="source-1",
+            metadata={
+                "capture_surface": "reflection_candidate",
+                "promoted_entity_id": named_id,
+            },
+        )
+        runtime = _CorrectionGraphRuntime(foreign=frozenset({named_id}))
+
+        async def execute_query(_query: str, **_params: object) -> list[dict[str, object]]:
+            return []
+
+        async def get(entity_id: str) -> Any:
+            if not exists:
+                return None
+            return SimpleNamespace(
+                id=entity_id,
+                created_by="user-intruder",
+                metadata={"memory_scope": "private", "principal_id": "user-intruder"},
+            )
+
+        runtime.execute_query = execute_query  # type: ignore[method-assign]
+        runtime.get = get  # type: ignore[method-assign]
+
+        async def fake_runtime(_org: str, **_kwargs: object) -> _CorrectionGraphRuntime:
+            return runtime
+
+        monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+        monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+        monkeypatch.setattr(
+            memory_module,
+            "save_raw_memory",
+            AsyncMock(side_effect=lambda updated, **_kwargs: updated),
+        )
+        monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+
+        result = await memory_module.apply_memory_correction(
+            organization_id="org-1",
+            source_id="source-1",
+            principal_id="user-1",
+            action="mark_wrong",
+        )
+        assert result.applied
+        assert result.affected_entity_ids == []
+        return result.refused_entity_ids
+
+    denied = await run("entity-exists-denied", exists=True)
+    missing = await run("entity-does-not-exist", exists=False)
+
+    assert denied == ["entity-exists-denied"]
+    assert missing == ["entity-does-not-exist"]

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import asdict, replace
 from typing import Any
 
@@ -15,7 +15,10 @@ from sibyl_core.auth.memory_policy import (
     private_scope_granted_for,
 )
 from sibyl_core.embeddings.providers import configured_embedding_provider
-from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
+from sibyl_core.memory_pipeline.lifecycle import (
+    GRAPH_RECALL_EXCLUSION_KEYS,
+    graph_metadata_recallable,
+)
 from sibyl_core.models.context import (
     ContextFacet,
     ContextIntent,
@@ -483,6 +486,12 @@ async def _default_related_items(
             if entity_project is not None and entity_project not in accessible_projects:
                 continue
 
+        # Related items ride along inside an admitted item rather than as
+        # section items of their own, so the admission filter never sees them.
+        # A retired neighbour would otherwise reach the reader as the body of
+        # somebody else's row.
+        if not graph_metadata_recallable(getattr(entity, "metadata", None)):
+            continue
         related.append(
             ContextRelatedItem(
                 id=str(entity.id),
@@ -1363,12 +1372,31 @@ def _sections_from_response(
     ]
 
 
+_LIFECYCLE_ADMISSION_KEYS = (
+    "lifecycle_state",
+    "lifecycle_flags",
+    "review_state",
+    *GRAPH_RECALL_EXCLUSION_KEYS,
+)
 _ACTIVE_WORK_LOOKUP_STATUSES = "doing,blocked,review"
 _ACTIVE_WORK_LOOKUP_LIMIT = 5
 
 
 def _enum_value(value: Any) -> str:
     return str(getattr(value, "value", value))
+
+
+def _lifecycle_metadata(metadata: Any) -> dict[str, Any]:
+    """Project just the fields admission reads, for lanes that rebuild metadata."""
+
+    if not isinstance(metadata, Mapping):
+        return {}
+    carried: dict[str, Any] = {}
+    for key in _LIFECYCLE_ADMISSION_KEYS:
+        value = metadata.get(key)
+        if value is not None and value != "" and value != [] and value != {}:
+            carried[key] = value
+    return carried
 
 
 def _item_from_active_entity(entity: Any) -> ContextItem:
@@ -1386,6 +1414,11 @@ def _item_from_active_entity(entity: Any) -> ContextItem:
         "active_lookup": True,
         "status": status,
         "priority": _enum_value(getattr(entity, "priority", "") or ""),
+        # This lane rebuilds item metadata from the entity rather than
+        # projecting a search result, so anything not named here is invisible
+        # to admission. The lifecycle keys have to be carried explicitly or a
+        # corrected task walks straight past the filter into the pack.
+        **_lifecycle_metadata(getattr(entity, "metadata", None)),
     }
     # Tasks invert the usual relationship: Task.set_entity_fields seeds content
     # from description at creation and the update path never rewrites it, so

@@ -1770,6 +1770,7 @@ async def apply_memory_correction(
 
 
 _GRAPH_CORRECTION_LOOKUP_LIMIT = 64
+_CORRECTION_NATIVE_WRITE_PATH = "memory_correction"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1851,35 +1852,72 @@ async def _correction_graph_entity_ids(
             limit=_GRAPH_CORRECTION_LOOKUP_LIMIT,
         )
     )
-    projected = [uuid for row in rows if (uuid := str(row.get("uuid") or ""))]
+    projected_ids = [uuid for row in rows if (uuid := str(row.get("uuid") or ""))]
     declared = [
         entity_id
         for entity_id in _correction_derived_ids(memory)
-        if entity_id and entity_id not in set(projected)
+        if entity_id and entity_id not in set(projected_ids)
     ]
 
-    refused: list[str] = []
-    authorized: list[str] = list(dict.fromkeys(projected))
-    for entity_id in dict.fromkeys(declared):
+    # Provenance is server-owned as of `SERVER_OWNED_METADATA_KEYS`, but rows
+    # written before that could carry a planted `raw_memory_id`, and nothing
+    # rewrites history. So a projected row must still be one this principal
+    # can currently see: that is what stops "plant the id on a row you can
+    # write, lose access, then correct your own capture to retire it". A
+    # genuine projection inherits its capture's audience, so this refuses no
+    # legitimate target.
+    projected: list[str] = []
+    for entity_id in dict.fromkeys(projected_ids):
         try:
-            target = await runtime.entity_manager.get(entity_id)
+            row = await runtime.entity_manager.get(entity_id)
         except Exception:
             continue
-        if target is None:
+        if row is None:
             continue
-        if not _promoted_entity_write_allowed(
-            entity=target,
+        row_metadata = getattr(row, "metadata", None)
+        if not memory_metadata_read_allowed(
+            row_metadata,
             principal_id=principal_id,
+            private_scope_granted=principal_id is not None,
             accessible_projects=accessible_projects,
+            row_project_id=memory_row_project_id(row_metadata),
         ):
             log.warning(
-                "memory_correction_graph_target_refused",
+                "memory_correction_graph_provenance_unreadable",
                 source_id=memory.id,
                 entity_id=entity_id,
             )
-            refused.append(entity_id)
             continue
-        authorized.append(entity_id)
+        projected.append(entity_id)
+
+    # Declared ids come off caller-writable capture metadata, so the refused
+    # list is caller-chosen input echoed back. A row that does not exist and a
+    # row that exists but is denied must therefore be reported identically: any
+    # difference between the two turns a guessed id into an existence probe for
+    # rows outside this principal's scope.
+    refused: list[str] = []
+    authorized: list[str] = list(projected)
+    for entity_id in dict.fromkeys(declared):
+        allowed = False
+        try:
+            target = await runtime.entity_manager.get(entity_id)
+        except Exception:
+            target = None
+        if target is not None:
+            allowed = _promoted_entity_write_allowed(
+                entity=target,
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
+            )
+        if allowed:
+            authorized.append(entity_id)
+            continue
+        log.warning(
+            "memory_correction_graph_target_refused",
+            source_id=memory.id,
+            entity_id=entity_id,
+        )
+        refused.append(entity_id)
     return _CorrectionGraphTargets(authorized=authorized, refused=refused)
 
 
@@ -1970,6 +2008,13 @@ async def _project_correction_to_graph(
         if updated is not None:
             applied.append(entity_id)
 
+    if preview.action == "restore" and applied:
+        await _unlink_graph_supersession(
+            runtime,
+            organization_id=organization_id,
+            source_id=memory.id,
+            restored_entity_ids=applied,
+        )
     if preview.action == "supersede" and replacement_source_id and applied:
         await _link_graph_supersession(
             runtime,
@@ -1980,6 +2025,47 @@ async def _project_correction_to_graph(
             superseded_entity_ids=applied,
         )
     return applied, list(targets.refused)
+
+
+async def _unlink_graph_supersession(
+    runtime: Any,
+    *,
+    organization_id: str,
+    source_id: str,
+    restored_entity_ids: Sequence[str],
+) -> None:
+    """Remove the supersession edges a correction minted, so restore can undo.
+
+    Clearing the lifecycle stamp is not enough on its own. The admission gate
+    retires any row carrying an inbound SUPERSEDES edge, so a restored row
+    whose edge survived stays excluded forever, and a supersede/restore
+    /counter-supersede sequence would black out both rows. Only edges this
+    correction path wrote are removed: a supersession asserted by reflection
+    promotion is a different claim and restore has no opinion about it.
+    """
+
+    if not restored_entity_ids:
+        return
+    try:
+        await runtime.client.execute_query(
+            """
+            DELETE FROM relates_to
+            WHERE group_id = $group_id
+              AND name = $predicate
+              AND target_id IN $target_ids
+              AND attributes.native_write_path = $write_path;
+            """,
+            group_id=str(organization_id),
+            predicate=RelationshipType.SUPERSEDES.value,
+            target_ids=list(restored_entity_ids),
+            write_path=_CORRECTION_NATIVE_WRITE_PATH,
+        )
+    except Exception as exc:
+        log.warning(
+            "memory_correction_supersedes_unlink_failed",
+            source_id=source_id,
+            error_type=type(exc).__name__,
+        )
 
 
 async def _link_graph_supersession(
@@ -2033,7 +2119,7 @@ async def _link_graph_supersession(
                         superseded_entity_id,
                         RelationshipType.SUPERSEDES,
                         metadata={
-                            "native_write_path": "memory_correction",
+                            "native_write_path": _CORRECTION_NATIVE_WRITE_PATH,
                             "replacement_reason": "memory_correction_supersede",
                             "replacement_source_id": replacement_source_id,
                             "created_by": principal_id,

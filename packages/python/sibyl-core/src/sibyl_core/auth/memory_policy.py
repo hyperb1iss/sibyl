@@ -28,6 +28,21 @@ MEMORY_OWNER_METADATA_KEYS = frozenset(
     }
 )
 
+# Capture provenance. These name the raw row a graph row was projected from,
+# and the correction write-through resolves its targets by querying them, so a
+# payload that can set them can nominate any row it can currently write to be
+# retired later by a correction on an unrelated capture. The server stamps
+# them from the completed raw write after this strip runs
+# (`memory_pipeline/capture.py`), so no legitimate writer supplies them.
+MEMORY_PROVENANCE_METADATA_KEYS = frozenset(
+    {
+        "raw_memory_id",
+        "raw_source_id",
+    }
+)
+
+SERVER_OWNED_METADATA_KEYS = MEMORY_OWNER_METADATA_KEYS | MEMORY_PROVENANCE_METADATA_KEYS
+
 
 class MemoryPolicyAction(StrEnum):
     READ = "read"
@@ -692,11 +707,14 @@ def stamp_memory_scope_metadata(
     never name the principal or project a row reads as. A declared scope with
     no authorized owner keeps the scope and loses the owner, which fails the
     read check closed rather than falling back to the payload.
+
+    Capture provenance goes the same way, because the correction write-through
+    resolves the rows it retires by querying those keys.
     """
     stamped = {
         key: value
         for key, value in (metadata or {}).items()
-        if key not in MEMORY_OWNER_METADATA_KEYS
+        if key not in SERVER_OWNED_METADATA_KEYS
     }
     scope = _coerce_scope(memory_scope) if memory_scope is not None else None
     if scope is None:
@@ -719,6 +737,8 @@ def stamp_memory_scope_metadata(
 
 __all__ = [
     "MEMORY_OWNER_METADATA_KEYS",
+    "MEMORY_PROVENANCE_METADATA_KEYS",
+    "SERVER_OWNED_METADATA_KEYS",
     "MemoryPolicyAction",
     "MemoryPolicyDecision",
     "authorize_memory_read",
