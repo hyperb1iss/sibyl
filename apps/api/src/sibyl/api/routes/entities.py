@@ -825,7 +825,7 @@ async def _declared_bulk_relationships(
 
     Bulk mints its own edges rather than routing through `add()`, so it repeats
     the same authorization: an edge retrieval demotes on cannot be aimed at a
-    memory this caller could not write. A refusal downgrades that edge to
+    memory this caller cannot read. A refusal downgrades that edge to
     RELATED_TO rather than failing the batch.
     """
     relationships: list[Relationship] = []
