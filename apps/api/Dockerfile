@@ -42,6 +42,18 @@ ARG SIBYL_GIT_DIRTY=false
 RUN groupadd --gid 10001 sibyl && \
     useradd --uid 10001 --gid 10001 --shell /bin/bash --create-home sibyl
 
+# The base image ships pip only to bootstrap installs. Nothing here runs it:
+# the application lives in /app/.venv, which uv builds without pip. What pip
+# does contribute is its vendored dependency set, declared in
+# pip/_vendor/vendor.txt and read by scanners as image contents, which is how
+# msgpack and setuptools advisories reached a release that depends on
+# neither. The final import check fails the build if a future base image
+# reinstates pip somewhere this does not reach.
+RUN site_packages="$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" && \
+    rm -rf "${site_packages}/pip" "${site_packages}"/pip-*.dist-info && \
+    rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.* && \
+    ! python -c "import pip" 2>/dev/null
+
 WORKDIR /app
 
 # Copy virtual environment from builder
