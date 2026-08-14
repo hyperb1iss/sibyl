@@ -383,3 +383,50 @@ def test_a_write_payload_cannot_supply_capture_provenance() -> None:
     assert "raw_source_id" not in stamped
     assert stamped["principal_id"] == PRINCIPAL
     assert stamped["note"] == "kept"
+
+
+@pytest.mark.asyncio
+async def test_capture_overwrites_planted_provenance_with_the_real_write() -> None:
+    """The strip must neutralize planting without breaking the writer that needs it.
+
+    Provenance is what the correction write-through resolves its targets by,
+    so it has to be unforgeable, and it also has to still be there or the
+    write-through finds nothing. Capture stamps both keys from the completed
+    raw write after the strip runs, which satisfies both at once.
+    """
+
+    from sibyl_core.memory_pipeline.capture import MemoryCaptureRequest, MemoryCaptureService
+    from sibyl_core.models.memory_scope import MemoryScope
+
+    seen: dict[str, Any] = {}
+
+    async def raw_writer(_request: Any) -> dict[str, Any]:
+        return {"id": "raw-real", "source_id": "source-real"}
+
+    async def graph_writer(_request: Any, graph_metadata: Any) -> dict[str, Any]:
+        seen.update(graph_metadata)
+        return {"id": "entity-1"}
+
+    service = MemoryCaptureService(
+        remember_raw_memory=raw_writer,
+        create_graph_entity=graph_writer,
+    )
+    await service.capture(
+        MemoryCaptureRequest(
+            content="capture provenance body",
+            title="Capture provenance",
+            entity_type="note",
+            memory_scope=MemoryScope.PRIVATE,
+            scope_key=None,
+            principal_id=PRINCIPAL,
+            metadata={
+                "raw_memory_id": "planted-victim-capture",
+                "raw_source_id": "planted-victim-source",
+                "unrelated": "kept",
+            },
+        )
+    )
+
+    assert seen["raw_memory_id"] == "raw-real"
+    assert seen["raw_source_id"] == "source-real"
+    assert seen["unrelated"] == "kept"
