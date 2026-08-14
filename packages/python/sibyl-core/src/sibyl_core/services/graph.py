@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
@@ -566,6 +566,16 @@ class EntityManager:
             raise ValueError("expected_revision must be at least 1")
 
         patch = _entity_update_patch(updates, updated_at=datetime.now(UTC))
+        # A patch removes a key by writing it as NONE, which Surreal drops, so on
+        # a pre-flattening row the snapshot would answer for the empty slot and
+        # undo the removal. The fold rides on this patch rather than chasing it.
+        patch_attributes = patch.get("attributes")
+        if isinstance(patch_attributes, MutableMapping):
+            await _apply_legacy_snapshot_folds(
+                self._client,
+                {entity_id: patch_attributes},
+                group_id=self._group_id,
+            )
         mirror_content = "description" in updates and "content" not in updates
         rows = await _execute_graph_transaction(
             self._client,
@@ -2830,6 +2840,7 @@ async def _replace_entity(
 ) -> SurrealRecord:
     _enforce_entity_content_limit([entity])
     record = _entity_record(entity, group_id=group_id)
+    await _fold_snapshots_into_records(client, [record], group_id=group_id)
     try:
         result = await _execute_replace_entities_with_schema_retry(client, [record])
     except Exception as exc:
@@ -2839,7 +2850,6 @@ async def _replace_entity(
         await prepare_graph_schema(client)
         result = await _execute_replace_entities_with_schema_retry(client, [record])
     rows = normalize_records(result)
-    await _heal_legacy_metadata_snapshots(client, rows, [record], group_id=group_id)
     if rows:
         return rows[0]
     stored = await _select_one(
@@ -2860,6 +2870,7 @@ async def _replace_entities_bulk(
     records = [_entity_record(entity, group_id=group_id) for entity in entities]
     if not records:
         return []
+    await _fold_snapshots_into_records(client, records, group_id=group_id)
     try:
         result = await _execute_replace_entities_with_schema_retry(client, records)
     except Exception as exc:
@@ -2868,19 +2879,32 @@ async def _replace_entities_bulk(
         mark_graph_schema_dirty(client.group_id)
         await prepare_graph_schema(client)
         result = await _execute_replace_entities_with_schema_retry(client, records)
-    rows = normalize_records(result)
-    await _heal_legacy_metadata_snapshots(client, rows, records, group_id=group_id)
-    return rows
+    return normalize_records(result)
 
 
-async def _heal_legacy_metadata_snapshots(
+async def _fold_snapshots_into_records(
     client: SurrealGraphClient,
-    rows: Sequence[Mapping[str, object]],
     records: Sequence[SurrealRecord],
     *,
     group_id: str,
 ) -> None:
-    """Fold a pre-flattening row's snapshot into its flattened bag, once, on write.
+    """Fold pending snapshots into the attributes bag of each record about to be written."""
+    payloads: dict[str, MutableMapping[str, object]] = {}
+    for record in records:
+        uuid = str(record.get("uuid") or "")
+        attributes = record.get("attributes")
+        if uuid and isinstance(attributes, MutableMapping):
+            payloads[uuid] = attributes
+    await _apply_legacy_snapshot_folds(client, payloads, group_id=group_id)
+
+
+async def _apply_legacy_snapshot_folds(
+    client: SurrealGraphClient,
+    written_attributes: Mapping[str, MutableMapping[str, object]],
+    *,
+    group_id: str,
+) -> None:
+    """Fold a pre-flattening row's snapshot into the write that is about to happen.
 
     A row written before the flattened bag existed carries its metadata only as
     the JSON snapshot, so the read merges one where it finds one. That merge is
@@ -2889,55 +2913,106 @@ async def _heal_legacy_metadata_snapshots(
     key on such a row reads back unchanged.
 
     Clearing the snapshot alone would delete whatever lives only inside it, and
-    SurrealQL cannot parse JSON, so the fold cannot happen in the statement.
-    It happens here instead, against the post-write state the upsert already
-    returned: no extra query, and a row that has no snapshot costs nothing. A
-    healed row never needs healing again.
+    SurrealQL cannot parse JSON (``type::object``, ``parse::json``, and the
+    object cast all reject a string), so the fold cannot be expressed in the
+    statement. It is computed here and mutated into the caller's own attributes
+    payload, so it rides on the single write the caller was already making.
+    Doing it afterwards instead, as a second update, left a window where the
+    key was resurrected and let a stale fold land on top of a newer concurrent
+    write.
 
     Precedence matches the read exactly. A key the flattened bag already holds
-    keeps its newer value, and a key this write named (including one it set to
-    None to remove) is left to the write, which is what makes the removal stick
+    keeps its newer value, and a key this write names (including one set to None
+    to remove it) is left to the write, which is what makes the removal stick
     rather than come back out of the snapshot.
+
+    Only a write that removes something can be undone this way, so only those
+    are probed. A write that empties no slot reads the same with the snapshot
+    still on the row, because the read merges it either way. Ordinary writes
+    therefore cost nothing at all: neither the record builder nor the patch
+    builder emits a None for a key the caller did not explicitly clear.
     """
-    inputs = {
-        str(record.get("uuid")): record.get("attributes")
-        for record in records
-        if record.get("uuid")
-    }
-    for row in rows:
+    uuids = [
+        uuid
+        for uuid, payload in written_attributes.items()
+        if uuid and any(value is None for value in payload.values())
+    ]
+    if not uuids:
+        return
+    carriers = await _rows_with_metadata_snapshots(client, uuids, group_id=group_id)
+    for uuid, (attributes, snapshot) in carriers.items():
+        payload = written_attributes[uuid]
+        for key, value in _snapshot_without_owned_keys(snapshot).items():
+            if key in attributes or key in payload:
+                continue
+            payload[key] = value
+        # None clears the snapshot the same way any other removal clears a key.
+        payload["metadata"] = None
+
+
+async def _rows_with_metadata_snapshots(
+    client: SurrealGraphClient,
+    uuids: Sequence[str],
+    *,
+    group_id: str,
+) -> dict[str, tuple[Mapping[str, object], dict[str, object]]]:
+    """The rows among ``uuids`` still carrying a JSON metadata snapshot.
+
+    Probed in two passes because the first one is the one that always runs: it
+    projects the snapshot field alone, so the common answer (nobody has one)
+    costs a handful of indexed lookups returning almost nothing. Only a row that
+    really is pre-flattening pays for its full attributes bag, and only until it
+    is healed.
+    """
+    probed = normalize_records(
+        await client.execute_query(
+            # `uuid IN $list` is never index-served, so each uuid gets its own
+            # indexed lookup. The closure body may reference nothing but its own
+            # argument: any other binding silently evaluates to nothing on at
+            # least one engine, so the group guard is applied to the returned
+            # rows instead (uuid is unique table-wide).
+            """
+            RETURN $uuids.map(|$u|
+                (SELECT uuid, group_id, attributes.metadata AS snapshot FROM entity
+                 WHERE uuid = $u LIMIT 1)[0]
+            );
+            """,
+            uuids=list(dict.fromkeys(uuids)),
+        )
+    )
+    carriers = [
+        uuid
+        for row in probed
+        if str(row.get("group_id") or "") == group_id
+        and _parsed_metadata_snapshot(row.get("snapshot")) is not None
+        and (uuid := str(row.get("uuid") or ""))
+    ]
+    if not carriers:
+        return {}
+    hydrated = normalize_records(
+        await client.execute_query(
+            """
+            RETURN $uuids.map(|$u|
+                (SELECT uuid, group_id, attributes FROM entity
+                 WHERE uuid = $u LIMIT 1)[0]
+            );
+            """,
+            uuids=carriers,
+        )
+    )
+    resolved: dict[str, tuple[Mapping[str, object], dict[str, object]]] = {}
+    for row in hydrated:
         uuid = str(row.get("uuid") or "")
         attributes = row.get("attributes")
-        if not uuid or not isinstance(attributes, Mapping):
+        if not uuid or str(row.get("group_id") or "") != group_id:
             continue
-        raw_snapshot = attributes.get("metadata")
-        snapshot = _parsed_metadata_snapshot(raw_snapshot)
+        if not isinstance(attributes, Mapping):
+            continue
+        snapshot = _parsed_metadata_snapshot(attributes.get("metadata"))
         if snapshot is None:
             continue
-        written = inputs.get(uuid)
-        written_keys = set(written) if isinstance(written, Mapping) else set()
-        folded = {
-            key: value
-            for key, value in _snapshot_without_owned_keys(snapshot).items()
-            if key not in attributes and key not in written_keys
-        }
-        # None clears the snapshot the same way any other removal clears a key.
-        patch: dict[str, object] = {**folded, "metadata": None}
-        try:
-            await client.execute_query(
-                """
-                UPDATE entity MERGE { attributes: $patch }
-                WHERE group_id = $group_id AND uuid = $uuid;
-                """,
-                group_id=group_id,
-                uuid=uuid,
-                patch=patch,
-            )
-        except Exception as exc:
-            log.warning(
-                "entity_metadata_snapshot_heal_failed",
-                entity_id=uuid,
-                error_type=type(exc).__name__,
-            )
+        resolved[uuid] = (attributes, snapshot)
+    return resolved
 
 
 def _parsed_metadata_snapshot(raw: object) -> dict[str, object] | None:

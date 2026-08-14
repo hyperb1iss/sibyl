@@ -1173,6 +1173,51 @@ async def test_a_write_heals_a_legacy_snapshot_instead_of_reading_around_it() ->
 
 
 @pytest.mark.asyncio
+async def test_a_patch_honors_a_removal_on_a_legacy_snapshot_row() -> None:
+    """The patch path removes keys too, so it needs the same fold as the upsert.
+
+    A patch clears a key by writing it as NONE, which Surreal drops, so on a
+    pre-flattening row the snapshot answers for the empty slot and the removal
+    silently does nothing.
+    """
+    client = SurrealGraphClient(group_id="org-legacy-patch", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+
+        await manager.create_direct(
+            Entity(
+                id="note_legacy_patch",
+                entity_type=EntityType.NOTE,
+                name="Pre-flattening note",
+                organization_id=client.group_id,
+                metadata={"doomed_key": "resurrects"},
+            )
+        )
+        await client.execute_query(
+            """
+            UPDATE entity SET
+                attributes.metadata = $snapshot,
+                attributes.doomed_key = NONE,
+                attributes.snapshot_only = NONE
+            WHERE group_id = $group_id AND uuid = "note_legacy_patch";
+            """,
+            group_id=client.group_id,
+            snapshot=json.dumps(
+                {"doomed_key": "resurrects", "snapshot_only": "lives nowhere else"}
+            ),
+        )
+
+        await manager.update("note_legacy_patch", {"metadata": {"doomed_key": None}})
+        healed = await manager.get("note_legacy_patch")
+
+        assert "doomed_key" not in healed.metadata
+        assert healed.metadata["snapshot_only"] == "lives nowhere else"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_native_entity_upsert_preserves_creator_and_updates_modifier() -> None:
     client = SurrealGraphClient(group_id="org-native-actor-upsert", url="memory://")
     try:
