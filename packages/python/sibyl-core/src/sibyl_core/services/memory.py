@@ -1821,6 +1821,14 @@ async def _correction_graph_entity_ids(
     the capture would retire while the graph row kept ranking, which is the
     exact defect this whole change exists to kill.
 
+    One subtlety, because it reads like a hole and is not: the promotion path
+    builds entity metadata by spreading the candidate bag, so a promoted row's
+    `raw_memory_id` can carry a caller-supplied value rather than a stamped
+    one. Planting somebody else's capture id there only arranges for the row
+    to be retired when THAT capture is corrected, and the row in question is
+    the planter's own. Reaching a foreign row requires stamping this capture's
+    id onto it, which needs the write access the attack is trying to obtain.
+
     The metadata half is caller-reachable and keeps the guard.
     `promoted_entity_id` and friends are read straight off the capture's
     metadata bag, and capture metadata is pass-through rather than a
