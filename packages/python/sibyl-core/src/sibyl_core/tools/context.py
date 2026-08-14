@@ -1585,6 +1585,19 @@ async def compile_context(
             naive_retrieval=naive_retrieval,
         )
     except Exception as exc:
+        if naive_retrieval:
+            # The machine is the arm's fallback everywhere else in this
+            # function, which under the arm means a failed naive run returns
+            # eight-lane contents wearing the arm's label. A race whose labels
+            # can be wrong measures nothing, and a degraded arm silently
+            # scoring the machine's recall is the worst version of that. Fail
+            # the request instead: a missing data point is recoverable, a
+            # mislabelled one poisons the comparison.
+            log.warning(
+                "naive_retrieval_failed",
+                error_type=type(exc).__name__,
+            )
+            raise
         retrieval_failed = True
         log.warning(
             "context_native_search_failed",
@@ -1593,6 +1606,10 @@ async def compile_context(
 
     if (
         ContextFacet.ACTIVE_WORK in facets
+        # Active work is its own retrieval, reaching the graph through a
+        # separate list query and merging straight into the pack. Under the arm
+        # it would put rows the arm never ranked in front of the reader.
+        and not naive_retrieval
         and project
         and _active_work_project_allowed(
             project=project,

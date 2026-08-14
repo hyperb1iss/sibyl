@@ -994,3 +994,149 @@ def test_no_caller_can_reweight_the_arm_per_request() -> None:
     }
     source = inspect.getsource(naive_module.naive_search)
     assert "fuse_naive_candidates(filtered_lists, limit=limit)" in source
+
+
+# ---------------------------------------------------------------------------
+# The arm governs the whole pack, and never hands off to the machine
+# ---------------------------------------------------------------------------
+
+
+def _machine_search_response(query: str) -> Any:
+    from sibyl_core.tools.responses import SearchResponse, SearchResult
+
+    return SearchResponse(
+        results=[
+            SearchResult(
+                id="machine_row",
+                type="note",
+                name="machine row",
+                content="this came from the eight-lane machine",
+                score=0.9,
+                result_origin="graph",
+            )
+        ],
+        total=1,
+        query=query,
+        filters={},
+        graph_count=1,
+        limit=10,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_failed_arm_raises_instead_of_serving_machine_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mislabelled data point is worse than a missing one.
+
+    Every other retrieval failure in compile_context falls back to the machine.
+    Under the arm that fallback would return eight-lane contents wearing the
+    arm's label, and a race whose labels can be wrong measures nothing.
+    """
+
+    from sibyl_core.tools import context as context_module
+
+    machine_calls: list[str] = []
+
+    async def exploding_arm(**_kwargs: object) -> Any:
+        raise RuntimeError("naive arm is down")
+
+    async def machine_search(**kwargs: object) -> Any:
+        machine_calls.append(str(kwargs.get("query")))
+        return _machine_search_response(str(kwargs.get("query")))
+
+    monkeypatch.setattr(context_module, "_compile_native_sections", exploding_arm)
+
+    with pytest.raises(RuntimeError, match="naive arm is down"):
+        await context_module.compile_context(
+            goal=CORPUS_QUERY,
+            organization_id=f"{ORG_ID}-failure",
+            principal_id=PRINCIPAL_ID,
+            naive_retrieval=True,
+            search_fn=machine_search,
+            record_exposure=False,
+            include_related=False,
+        )
+
+    assert machine_calls == []
+
+
+@pytest.mark.asyncio
+async def test_the_machine_still_falls_back_when_the_arm_is_not_selected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fail-loud rule is scoped to the arm and must not change the default."""
+
+    from sibyl_core.tools import context as context_module
+
+    machine_calls: list[str] = []
+
+    async def exploding_native(**_kwargs: object) -> Any:
+        raise RuntimeError("native retrieval is down")
+
+    async def machine_search(**kwargs: object) -> Any:
+        machine_calls.append(str(kwargs.get("query")))
+        return _machine_search_response(str(kwargs.get("query")))
+
+    monkeypatch.setattr(context_module, "_compile_native_sections", exploding_native)
+
+    pack = await context_module.compile_context(
+        goal=CORPUS_QUERY,
+        organization_id=f"{ORG_ID}-fallback",
+        principal_id=PRINCIPAL_ID,
+        search_fn=machine_search,
+        record_exposure=False,
+        include_related=False,
+    )
+
+    assert len(machine_calls) == 1
+    assert [item.id for section in pack.sections for item in section.items] == ["machine_row"]
+
+
+@pytest.mark.asyncio
+async def test_the_arm_suppresses_active_work_enrichment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Active work is a separate retrieval, so the arm must not inherit it."""
+
+    from sibyl_core.tools import context as context_module
+
+    active_calls: list[str] = []
+
+    async def empty_sections(**_kwargs: object) -> list[Any]:
+        return []
+
+    async def active_work(**kwargs: object) -> list[Any]:
+        active_calls.append(str(kwargs.get("project")))
+        return []
+
+    monkeypatch.setattr(context_module, "_compile_native_sections", empty_sections)
+
+    await context_module.compile_context(
+        goal=CORPUS_QUERY,
+        organization_id=f"{ORG_ID}-active",
+        principal_id=PRINCIPAL_ID,
+        project=PROJECT_ID,
+        accessible_projects={PROJECT_ID},
+        intent="build",
+        naive_retrieval=True,
+        active_work_fn=active_work,
+        record_exposure=False,
+        include_related=False,
+    )
+    assert active_calls == []
+
+    await context_module.compile_context(
+        goal=CORPUS_QUERY,
+        organization_id=f"{ORG_ID}-active",
+        principal_id=PRINCIPAL_ID,
+        project=PROJECT_ID,
+        accessible_projects={PROJECT_ID},
+        intent="build",
+        active_work_fn=active_work,
+        record_exposure=False,
+        include_related=False,
+    )
+    # The machine still enriches, so the suppression above is the arm's doing
+    # rather than a request shape that never reached the lookup.
+    assert active_calls == [PROJECT_ID]
