@@ -138,8 +138,8 @@ Auth, organizations, configuration, and operations.
 These options are available on the root command:
 
 ```bash
-sibyl --context <project_id_or_name> <command>   # Override project context
-sibyl -C <project_id_or_name> <command>          # Short form
+sibyl --context <context_name> <command>         # Override the server/org context
+sibyl -C <context_name> <command>                # Short form
 sibyl --version                                  # Show CLI version
 sibyl -V                                         # Short form
 ```
