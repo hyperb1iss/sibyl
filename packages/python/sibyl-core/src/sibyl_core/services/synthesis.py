@@ -134,6 +134,16 @@ SELF_FEEDING_CAPTURE_SURFACES = frozenset(
 MAX_EXPLICIT_NEIGHBORHOOD_IDS = 100
 
 
+def remembered_artifact_source_id(artifact_id: str) -> str:
+    """The source id a remembered artifact is stored under.
+
+    Derived rather than spelled out twice: the writer and the exemption that
+    has to recognize its output would otherwise be free to drift apart, and the
+    symptom would be a caller's own artifact id silently matching nothing.
+    """
+    return f"{artifact_id}:generated"
+
+
 async def default_search(**kwargs: Any) -> SearchResponse:
     from sibyl_core.tools.search import search
 
@@ -291,23 +301,41 @@ def _is_self_feeding_source(source: SynthesisSourceReference) -> bool:
     return _is_self_feeding_metadata(source.metadata)
 
 
-def _explicitly_requested_ids(request: SynthesisRequest) -> frozenset[str]:
-    """Every id the caller named, in the same four lists ``plan_synthesis`` reads.
+def _requested_artifact_identities(request: SynthesisRequest) -> frozenset[str]:
+    """Every way of naming an artifact the caller asked to build on.
 
-    These are the sources the self-feeding rule exempts. Naming a prior artifact
-    is a request to synthesize from it, not the recursion the rule exists to
-    stop, and the exemption has to hold at materialize too or the stage that
-    actually builds the packs would drop what the caller asked for.
+    Only ``artifact_ids`` counts. The exemption exists so that synthesizing FROM
+    a chosen prior artifact stays possible, which is a statement about artifacts
+    and nothing else, and the other three lists hold ids that show up as the
+    lineage of derived rows. Letting them exempt anything meant naming a task
+    could whitelist an unrelated reflection whose ``source_id`` happened to be
+    that task.
+
+    An artifact answers to two names. ``remember_synthesis_artifact`` stores it
+    under a generated source id, so a caller holding the id the synthesis run
+    returned would otherwise match nothing at all; both forms are accepted, and
+    ``synthesis_artifact_id`` on the row itself is the direct one.
     """
-    return frozenset(
-        str(source_id)
-        for source_id in (
-            *request.entity_ids,
-            *request.decision_ids,
-            *request.task_ids,
-            *request.artifact_ids,
-        )
-        if source_id
+    identities = frozenset(str(artifact_id) for artifact_id in request.artifact_ids if artifact_id)
+    return identities | frozenset(
+        remembered_artifact_source_id(artifact_id) for artifact_id in identities
+    )
+
+
+def _is_requested_artifact(
+    metadata: Mapping[str, Any],
+    *,
+    source_id: str,
+    item_id: str,
+    requested: frozenset[str],
+) -> bool:
+    if not requested:
+        return False
+    artifact_id = str(metadata.get("synthesis_artifact_id") or "")
+    return bool(
+        (artifact_id and artifact_id in requested)
+        or (source_id and source_id in requested)
+        or (item_id and item_id in requested)
     )
 
 
@@ -568,7 +596,7 @@ async def materialize_synthesis_section_packs(
         context_item_source_id,
     )
 
-    requested_ids = _explicitly_requested_ids(run.request)
+    requested_artifacts = _requested_artifact_identities(run.request)
     materialized_packs: list[SynthesisSourcePack] = []
     outline_sections: list[SynthesisOutlineSection] = []
     materialization_gaps: list[SynthesisGap] = []
@@ -607,7 +635,12 @@ async def materialize_synthesis_section_packs(
             # a candidate the pack refused to render. Sources the caller named
             # are exempt on both stages, because synthesizing FROM a chosen
             # prior artifact is a deliberate request rather than recursion.
-            requested = source_id in requested_ids or item.id in requested_ids
+            requested = _is_requested_artifact(
+                metadata,
+                source_id=source_id,
+                item_id=item.id,
+                requested=requested_artifacts,
+            )
             if not requested and _is_self_feeding_metadata(metadata):
                 hidden_count += 1
                 continue
@@ -966,7 +999,7 @@ async def remember_synthesis_artifact(
         if artifact.format is SynthesisArtifactFormat.MARKDOWN
         else json.dumps(artifact.json_payload, indent=2, sort_keys=True)
     )
-    source_id = f"{artifact.artifact_id}:generated"
+    source_id = remembered_artifact_source_id(artifact.artifact_id)
     memory = await remember_fn(
         organization_id=organization_id,
         principal_id=principal_id,

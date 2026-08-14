@@ -31,6 +31,7 @@ from sibyl_core.services.synthesis import (
     materialize_synthesis_section_packs,
     plan_synthesis,
     remember_synthesis_artifact,
+    remembered_artifact_source_id,
 )
 from sibyl_core.tools.responses import SearchResponse, SearchResult
 
@@ -898,6 +899,157 @@ async def test_materialize_keeps_a_prior_artifact_the_caller_asked_for() -> None
     pack = materialized.source_packs[0]
 
     assert pack.source_ids == ["source:prior_handbook"]
+    assert pack.hidden_count == 1
+
+
+@pytest.mark.asyncio
+async def test_materialize_exempts_an_artifact_named_by_its_returned_id() -> None:
+    """The id a synthesis run hands back must be the id that works.
+
+    A remembered artifact is stored under a generated source id, so a caller
+    holding the artifact id the run returned matches neither the row's source id
+    nor its item id, and the artifact it asked to build on gets dropped as
+    self-feeding.
+    """
+
+    async def fake_search(**kwargs: Any) -> SearchResponse:
+        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+
+    run = await plan_synthesis(
+        SynthesisRequest(
+            goal="Build on the handbook I just generated",
+            artifact_ids=["artifact_9f3c"],
+            required_sections=[SynthesisSectionRequest(title="Evidence")],
+        ),
+        organization_id="org-123",
+        search_fn=fake_search,
+        related_fn=_empty_related,
+    )
+
+    remembered_source_id = remembered_artifact_source_id("artifact_9f3c")
+
+    async def fake_context(**kwargs: Any) -> ContextPack:
+        return ContextPack(
+            goal=kwargs["goal"],
+            intent=ContextIntent.RESEARCH,
+            query=kwargs["goal"],
+            domain=None,
+            project=None,
+            sections=[
+                ContextSection(
+                    facet=ContextFacet.RECENT_MEMORY,
+                    title="Recent Memory",
+                    items=[
+                        ContextItem(
+                            id=f"raw_memory:{remembered_source_id}",
+                            type="raw_memory",
+                            name="The handbook the caller named",
+                            content="Deliberately requested handbook text.",
+                            score=0.99,
+                            facet=ContextFacet.RECENT_MEMORY,
+                            reason="named by the caller",
+                            source=remembered_source_id,
+                            metadata={
+                                "source_id": remembered_source_id,
+                                "capture_surface": "synthesis_artifact",
+                                "synthesis_artifact_id": "artifact_9f3c",
+                            },
+                        )
+                    ],
+                )
+            ],
+            total_items=1,
+        )
+
+    materialized = await materialize_synthesis_section_packs(
+        run,
+        organization_id="org-123",
+        principal_id="user-123",
+        context_fn=fake_context,
+        allowed_memory_scope_keys=None,
+    )
+    pack = materialized.source_packs[0]
+
+    assert pack.source_ids == [remembered_source_id]
+    assert pack.hidden_count == 0
+
+
+@pytest.mark.asyncio
+async def test_materialize_does_not_let_a_named_task_whitelist_a_reflection() -> None:
+    """The exemption is about artifacts, so only artifact ids may grant it.
+
+    Derived rows carry the id they were distilled from as their lineage, so a
+    flat set of every requested id let naming a task exempt an unrelated
+    reflection that happened to descend from it.
+    """
+
+    async def fake_search(**kwargs: Any) -> SearchResponse:
+        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+
+    run = await plan_synthesis(
+        SynthesisRequest(
+            goal="Report on the migration task",
+            task_ids=["task_migration"],
+            required_sections=[SynthesisSectionRequest(title="Evidence")],
+        ),
+        organization_id="org-123",
+        search_fn=fake_search,
+        related_fn=_empty_related,
+    )
+
+    async def fake_context(**kwargs: Any) -> ContextPack:
+        return ContextPack(
+            goal=kwargs["goal"],
+            intent=ContextIntent.RESEARCH,
+            query=kwargs["goal"],
+            domain=None,
+            project=None,
+            sections=[
+                ContextSection(
+                    facet=ContextFacet.RECENT_MEMORY,
+                    title="Recent Memory",
+                    items=[
+                        ContextItem(
+                            id="raw_memory:reflection_on_task",
+                            type="raw_memory",
+                            name="Reflection distilled from the task",
+                            content="Reflection text must not feed itself.",
+                            score=0.99,
+                            facet=ContextFacet.RECENT_MEMORY,
+                            reason="lineage collision",
+                            source="task_migration",
+                            metadata={
+                                "source_id": "task_migration",
+                                "capture_surface": "reflection_candidate",
+                            },
+                        ),
+                        ContextItem(
+                            id="raw_memory:ground_truth",
+                            type="raw_memory",
+                            name="Ground truth memory",
+                            content="Ground truth text.",
+                            score=0.5,
+                            facet=ContextFacet.RECENT_MEMORY,
+                            reason="underlying memory",
+                            source="source:ground_truth",
+                            metadata={"source_id": "source:ground_truth"},
+                        ),
+                    ],
+                )
+            ],
+            total_items=2,
+        )
+
+    materialized = await materialize_synthesis_section_packs(
+        run,
+        organization_id="org-123",
+        principal_id="user-123",
+        context_fn=fake_context,
+        allowed_memory_scope_keys=None,
+    )
+    pack = materialized.source_packs[0]
+
+    assert pack.source_ids == ["source:ground_truth"]
     assert pack.hidden_count == 1
 
 
