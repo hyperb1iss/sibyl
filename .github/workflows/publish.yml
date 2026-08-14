@@ -1026,21 +1026,21 @@ jobs:
           manifest.
           EOF
 
-      # Promotion, not just decoration. Release creates the version as a
-      # pre-release that is not "latest"; this job runs only after the images
-      # passed their scan, were signed and pushed, and every package shipped,
-      # so this is the first moment the version is true. A publish that fails
-      # anywhere upstream leaves the pre-release standing and never promotes
-      # it, which is what stops a broken distribution from presenting itself
-      # as the current version.
-      - name: "◆ Update release and promote it to latest"
+      # Assets first, still as a pre-release. Uploading and promoting in one
+      # call would promote first: action-gh-release updates release metadata
+      # before it touches assets, and its post-upload finalize step returns
+      # immediately for a release that is not a draft, so it cannot undo
+      # anything. A failed upload would therefore leave a release already
+      # marked full and latest with assets missing, which is the exact
+      # looks-successful state this pipeline exists to prevent.
+      - name: "► Attach release evidence"
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.tag }}
           fail_on_unmatched_files: true
           body_path: release-body.md
-          prerelease: false
-          make_latest: true
+          prerelease: true
+          make_latest: false
           files: |
             release-assets/*
 
@@ -1068,3 +1068,17 @@ jobs:
             echo "- \`sibyl/sibyl --version ${{ steps.version.outputs.version }}\`"
             echo "- \`sibyl/sibyl-surrealdb --version ${{ steps.version.outputs.version }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # The last thing the pipeline does, and the only thing that carries no
+      # files. Release created this version as a pre-release that is not
+      # "latest"; every gate, every signature, every package and every asset
+      # is already in place by the time this runs, so flipping the two flags
+      # is the first moment the version is true rather than a claim. Anything
+      # failing before this point leaves the pre-release standing, which is
+      # visible, installable on purpose, and never presented as current.
+      - name: "◆ Promote release to latest"
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ inputs.tag }}
+          prerelease: false
+          make_latest: true

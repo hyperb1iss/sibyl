@@ -239,9 +239,46 @@ def test_release_is_promoted_only_after_publish_succeeds() -> None:
 
     publish = _publish_workflow()
 
-    assert "prerelease: false" in publish
-    assert "make_latest: true" in publish
     assert "needs: [python, homebrew, aur, docker-sign, helm-publish]" in publish
+
+    # Order is the property, not coexistence. action-gh-release updates
+    # release metadata before it uploads assets, and its post-upload finalize
+    # step returns immediately for a non-draft release, so a single call that
+    # both promotes and uploads promotes first. A failed upload would then
+    # leave a full, latest release with assets missing. Promotion therefore
+    # has to be its own final step that carries no files at all.
+    steps = cast(
+        "list[dict[str, Any]]",
+        yaml.safe_load(publish)["jobs"]["release"]["steps"],
+    )
+    gh_release_steps = [
+        (index, step)
+        for index, step in enumerate(steps)
+        if str(step.get("uses", "")).startswith("softprops/action-gh-release")
+    ]
+    # Exactly two: one that attaches evidence, one that promotes. A third
+    # would mean another release mutation nobody accounted for.
+    expected_release_mutations = 2
+    assert len(gh_release_steps) == expected_release_mutations
+
+    (upload_index, upload_step), (promote_index, promote_step) = gh_release_steps
+    upload_with = upload_step.get("with", {})
+    promote_with = promote_step.get("with", {})
+
+    # The step carrying assets must leave the pre-release status untouched.
+    assert upload_with.get("files")
+    assert upload_with.get("prerelease") is True
+    assert upload_with.get("make_latest") is False
+
+    # The promoting step must carry nothing that can fail after the flip.
+    assert "files" not in promote_with
+    assert promote_with.get("prerelease") is False
+    assert promote_with.get("make_latest") is True
+    assert promote_index > upload_index
+
+    # Nothing may run after promotion, so a late failure cannot strand a
+    # release that already presents itself as current.
+    assert promote_index == len(steps) - 1
 
 
 def test_published_images_can_name_their_own_version() -> None:
