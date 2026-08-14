@@ -1748,3 +1748,106 @@ async def test_a_walk_that_hits_its_ceiling_reports_a_partial_correction(
 
     assert targets.truncated is True
     assert len(targets.projections) == page_size * max_pages
+
+
+@pytest.mark.asyncio
+async def test_failed_row_reads_never_produce_an_unfenced_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run of failed reads must not end in a write that fences on nothing.
+
+    The schedule: the row read fails until its retries are gone, a correction
+    lands during those failures, and the read then recovers. A pass that
+    treated "no revision" as "write unfenced" would put its own stale verdict
+    over the correction that arrived while it was blind.
+    """
+
+    from sibyl_core.projection.reconcile import reconcile_with_capture
+
+    newer = {"lifecycle_state": "active", "excluded_from_recall": False}
+    reads: list[int] = []
+    writes: list[dict[str, Any]] = []
+
+    class _Manager:
+        async def get(self, entity_id: str) -> Any:
+            reads.append(1)
+            if len(reads) <= 4:
+                msg = "graph unreachable"
+                raise ConnectionError(msg)
+            # The correction landed while the reads were failing.
+            return SimpleNamespace(id=entity_id, metadata=dict(newer), revision=7)
+
+        async def update(
+            self,
+            entity_id: str,
+            updates: dict[str, Any],
+            *,
+            expected_revision: int | None = None,
+        ) -> object:
+            writes.append({"revision": expected_revision, **dict(updates["metadata"])})
+            return object()
+
+    async def stale_verdict(**_kwargs: object) -> dict[str, Any]:
+        return {"lifecycle_state": "contested", "excluded_from_recall": True}
+
+    monkeypatch.setattr("sibyl_core.services.memory.projected_row_lifecycle_stamp", stale_verdict)
+    monkeypatch.setattr("asyncio.sleep", AsyncMock())
+
+    await reconcile_with_capture(
+        _Manager(),
+        organization_id="org-1",
+        metadata={"raw_memory_id": "raw-1"},
+        row_ids=["row-1"],
+    )
+
+    assert writes == [], "a pass that could not read the row must not write to it"
+
+
+@pytest.mark.asyncio
+async def test_a_transient_write_failure_is_retried_rather_than_escaping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stamp write gets the same bounded retry the verdict read gets.
+
+    An exception escaping to the job is not a retry: the local broker records
+    the job COMPLETE with an error and then suppresses its deterministic id, so
+    a momentary blip on the write would be as permanent as a poisoned job.
+    """
+
+    from sibyl_core.projection.reconcile import reconcile_with_capture
+
+    attempts: list[int | None] = []
+
+    class _Manager:
+        async def get(self, entity_id: str) -> Any:
+            return SimpleNamespace(id=entity_id, metadata={}, revision=3)
+
+        async def update(
+            self,
+            entity_id: str,
+            updates: dict[str, Any],
+            *,
+            expected_revision: int | None = None,
+        ) -> object:
+            attempts.append(expected_revision)
+            if len(attempts) == 1:
+                msg = "graph unreachable"
+                raise ConnectionError(msg)
+            return object()
+
+    async def verdict(**_kwargs: object) -> dict[str, Any]:
+        return {"lifecycle_state": "contested", "excluded_from_recall": True}
+
+    monkeypatch.setattr("sibyl_core.services.memory.projected_row_lifecycle_stamp", verdict)
+    monkeypatch.setattr("asyncio.sleep", AsyncMock())
+
+    outcome = await reconcile_with_capture(
+        _Manager(),
+        organization_id="org-1",
+        metadata={"raw_memory_id": "raw-1"},
+        row_ids=["row-1"],
+    )
+
+    assert len(attempts) == 2, "the first failure is retried rather than raised"
+    assert attempts == [3, 3], "and the retry still carries the fence"
+    assert outcome.restamped == 1

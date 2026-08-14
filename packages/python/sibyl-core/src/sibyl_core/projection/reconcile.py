@@ -151,37 +151,61 @@ def _revision_conflict(exc: BaseException) -> bool:
     return type(exc).__name__ == "RevisionConflictError"
 
 
-async def _fenced_update(
+async def _write_stamp(
     entity_manager: Any,
     row_id: str,
     patch: Mapping[str, Any],
     *,
-    expected_revision: int | None,
+    expected_revision: int,
 ) -> tuple[bool, bool]:
-    """Apply one patch under the row's revision fence.
+    """Apply one patch under the row's revision fence, retrying transient failures.
 
     Returns (applied, fenced_out). A fenced-out write is not a failure: it says
     somebody else wrote this row first, and the caller re-reads so the later
     writer wins rather than this one.
+
+    `expected_revision` is required rather than optional. An unfenced write is
+    not a degraded mode of this function, it is the bug this module exists to
+    prevent, so there is no argument shape that produces one.
+
+    Transient failures are retried here rather than raised, for the same reason
+    the reads are: a raised exception from a projection job is recorded by the
+    local broker as a completed-with-error result and then suppresses the same
+    deterministic job id, which is a poison pill rather than a retry. Exhaustion
+    returns `(False, False)` and the caller decides.
     """
 
     update = getattr(entity_manager, "update", None)
     if not callable(update):
         return False, False
-    try:
-        if expected_revision is None:
-            result = await update(row_id, {"metadata": dict(patch)})
-        else:
+    for attempt in range(1, RECONCILE_MAX_ATTEMPTS + 1):
+        try:
             result = await update(
                 row_id,
                 {"metadata": dict(patch)},
                 expected_revision=expected_revision,
             )
-    except Exception as exc:
-        if _revision_conflict(exc):
-            return False, True
-        raise
-    return result is not None, False
+        except Exception as exc:
+            if _revision_conflict(exc):
+                return False, True
+            if attempt >= RECONCILE_MAX_ATTEMPTS:
+                log.warning(
+                    "lifecycle_reconciliation_write_unavailable",
+                    entity_id=row_id,
+                    attempts=attempt,
+                    error_type=type(exc).__name__,
+                )
+                return False, False
+            log.warning(
+                "lifecycle_reconciliation_write_retry",
+                entity_id=row_id,
+                attempt=attempt,
+                error_type=type(exc).__name__,
+            )
+            await asyncio.sleep(RECONCILE_RETRY_BASE_SECONDS * attempt)
+            continue
+        return result is not None, False
+    return False, False
 
 
 async def _read_row(entity_manager: Any, row_id: str) -> tuple[Any, bool]:
@@ -225,7 +249,13 @@ async def _reconcile_row(
 
     for _attempt in range(RECONCILE_FENCE_ATTEMPTS):
         row, row_read = await _read_row(entity_manager, row_id)
-        if row_read and row is None:
+        if not row_read:
+            # The row could not be read, so there is no revision to fence on and
+            # no safe write from here. An unfenced write at this point is how a
+            # run of failed reads ends up overwriting a correction that landed
+            # while they were failing.
+            return await _force_exclusion(entity_manager, row_id, operation, organization_id)
+        if row is None:
             # The row is gone. Nothing to reconcile and nothing to fail over.
             return "missing"
         metadata = _row_metadata(row)
@@ -237,7 +267,13 @@ async def _reconcile_row(
                 # Somebody authoritative already wrote a verdict onto this row,
                 # so an unread capture does not make it unverified.
                 return "unchanged"
-            applied, fenced_out = await _fenced_update(
+            if revision is None:
+                # Every write is fenced, so a row that cannot supply a revision
+                # cannot be written from here.
+                return await _force_exclusion(
+                    entity_manager, row_id, operation, organization_id
+                )
+            applied, fenced_out = await _write_stamp(
                 entity_manager,
                 row_id,
                 _UNVERIFIED_STAMP,
@@ -263,8 +299,12 @@ async def _reconcile_row(
             patch.update(_CLEARED_MARKER)
         if not patch:
             return "unchanged"
+        if revision is None:
+            # The row needs a write and cannot be fenced, which is the one
+            # combination this pass refuses to resolve by writing anyway.
+            return await _force_exclusion(entity_manager, row_id, operation, organization_id)
 
-        applied, fenced_out = await _fenced_update(
+        applied, fenced_out = await _write_stamp(
             entity_manager,
             row_id,
             patch,
@@ -306,19 +346,26 @@ async def _force_exclusion(
     """
 
     for attempt in range(1, RECONCILE_MAX_ATTEMPTS + 1):
-        row, _row_read = await _read_row(entity_manager, row_id)
-        if row is None and attempt > 1:
+        row, row_read = await _read_row(entity_manager, row_id)
+        if row_read and row is None:
             return "missing"
         metadata = _row_metadata(row)
         if inherited_lifecycle_metadata(metadata):
             # A verdict landed while this pass was losing its fences.
             return "unchanged"
-        applied, _fenced_out = await _fenced_update(
-            entity_manager,
-            row_id,
-            _UNVERIFIED_STAMP,
-            expected_revision=_row_revision(row),
-        )
+        revision = _row_revision(row)
+        applied = False
+        if revision is not None:
+            # Fenced here too. This write is a safety floor rather than a
+            # verdict, so losing to somebody who actually knows the verdict is
+            # the outcome to want, and the next pass around re-reads and sees
+            # their write.
+            applied, _fenced_out = await _write_stamp(
+                entity_manager,
+                row_id,
+                _UNVERIFIED_STAMP,
+                expected_revision=revision,
+            )
         if applied:
             log.warning(
                 "lifecycle_reconciliation_row_unverified",
