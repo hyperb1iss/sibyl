@@ -580,10 +580,14 @@ def test_causal_report_loaders_accept_paid_artifact_shapes(tmp_path: Path) -> No
 
 def test_ci_runs_benchmark_gate_for_benchmark_only_changes() -> None:
     workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml").read_text()
-    runtime_case = next(
+    # More than one case arm routes a path to the runtime suite, so match on
+    # any of them rather than the first: reading only the first made this
+    # assertion depend on the order the arms happen to be written in.
+    runtime_cases = [
         block.split("esac", maxsplit=1)[0]
         for block in workflow.split('case "$file" in')[1:]
         if "runtime_changed=true" in block.split("esac", maxsplit=1)[0]
-    )
+    ]
 
-    assert "benchmarks/*" in runtime_case
+    assert runtime_cases
+    assert any("benchmarks/*" in case for case in runtime_cases)
