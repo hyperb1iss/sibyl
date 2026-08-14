@@ -6,22 +6,32 @@ actually persisted, or the admission lanes that rebuild item metadata from an
 entity rather than from a search result. These tests write real rows and real
 `relates_to` edges through the production managers and then read them back
 through `context_search` and `compile_context`.
+
+`compile_context` is the entry an agent actually reaches, and it is not a thin
+wrapper: it picks the batch related-items lane, runs the active-work lookup,
+asks for passages alongside every facet type, and applies its own admission
+filter. Lanes tested one helper down have already shipped a hole the pack lane
+still had, so the bypass tests here call the pack.
 """
 
 from __future__ import annotations
 
 import uuid as uuid_module
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
 
 import sibyl_core.retrieval.search as search_module
+import sibyl_core.services.memory as memory_module
 import sibyl_core.tools.context as context_module
 from sibyl_core.auth.memory_policy import stamp_memory_scope_metadata
-from sibyl_core.models.context import ContextFacet
+from sibyl_core.models.context import ContextFacet, ContextPack
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
+from sibyl_core.projection.passages import project_entity_passages
 from sibyl_core.retrieval.search import build_context_retrieval_plan
 from sibyl_core.services.graph import (
     EntityManager,
@@ -29,6 +39,7 @@ from sibyl_core.services.graph import (
     SurrealGraphClient,
     prepare_graph_schema,
 )
+from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 
 PROJECT_ID = "proj-supersession"
 PRINCIPAL = "user-supersession"
@@ -65,8 +76,73 @@ async def graph(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[_Runtime]:
     monkeypatch.setattr(search_module, "get_surreal_graph_runtime", runtime_factory)
     monkeypatch.setattr(context_module, "get_surreal_graph_runtime", runtime_factory)
     monkeypatch.setattr(context_module, "get_graph_runtime", runtime_factory, raising=False)
+    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", runtime_factory)
+    # No embedding provider in the embedded harness. Left alone, building one
+    # can raise inside the native lane, and `compile_context` answers an
+    # exception by falling back to a different search path, which would leave
+    # every assertion below passing without the lane under test ever running.
+    monkeypatch.setattr(context_module, "configured_embedding_provider", lambda: None)
     yield runtime
     await client.close()
+
+
+async def _no_fallback(**_kwargs: object) -> list[Any]:
+    """Make the pack's degraded path loud instead of silently substituting.
+
+    `compile_context` swallows a native retrieval failure and recompiles
+    through `search_fn`. A test that let it would assert against a lane it was
+    not written for and pass while the real one was broken.
+    """
+
+    raise AssertionError("compile_context fell back to the non-native search path")
+
+
+async def _no_active_work(**_kwargs: object) -> list[Any]:
+    return []
+
+
+async def _no_raw_memories(**_kwargs: object) -> list[Any]:
+    """The raw-capture store is not wired up here; the graph lanes are."""
+
+    return []
+
+
+async def _pack(
+    runtime: _Runtime,
+    goal: str,
+    *,
+    include_related: bool = False,
+    active_work_fn: Any = _no_active_work,
+) -> ContextPack:
+    """Build a pack the way the MCP surface does."""
+
+    return await context_module.compile_context(
+        goal,
+        intent="build",
+        project=PROJECT_ID,
+        accessible_projects={PROJECT_ID},
+        principal_id=PRINCIPAL,
+        organization_id=runtime.group_id,
+        include_related=include_related,
+        related_limit=5,
+        search_fn=_no_fallback,
+        raw_memory_recall_fn=_no_raw_memories,
+        active_work_fn=active_work_fn,
+        record_exposure=False,
+    )
+
+
+def _pack_ids(pack: ContextPack) -> set[str]:
+    return {item.id for section in pack.sections for item in section.items}
+
+
+def _related_ids(pack: ContextPack) -> set[str]:
+    return {
+        related.id
+        for section in pack.sections
+        for item in section.items
+        for related in item.related or ()
+    }
 
 
 def _entity(runtime: _Runtime, uuid: str, name: str, content: str, **metadata: Any) -> Entity:
@@ -122,7 +198,7 @@ async def _search(runtime: _Runtime, query: str) -> Any:
         facet=ContextFacet.DECISIONS,
         limit=10,
         include_content=True,
-        raw_memory_recall_fn=lambda **_kwargs: [],
+        raw_memory_recall_fn=_no_raw_memories,
     )
 
 
@@ -254,7 +330,12 @@ async def test_deleting_the_edge_restores_the_row_to_recall(graph: _Runtime) -> 
 async def test_the_active_work_lane_cannot_smuggle_a_retired_task_into_a_pack(
     graph: _Runtime,
 ) -> None:
-    """This lane rebuilds item metadata from the entity, so it needs its own carry."""
+    """This lane rebuilds item metadata from the entity, so it needs its own carry.
+
+    Driven through `compile_context` with the production active-work lookup, so
+    the lookup query, the item builder and the admission filter are all the
+    ones a pack really runs.
+    """
 
     live = Entity(
         id="task-live",
@@ -287,39 +368,23 @@ async def test_the_active_work_lane_cannot_smuggle_a_retired_task_into_a_pack(
     await graph.entity_manager.create_direct(live)
     await graph.entity_manager.create_direct(retired)
 
-    # Load the rows back out of the graph so the item builder sees exactly what
-    # production hands it, then run the real builder and the real admission
-    # filter. The lookup query itself is not what this lane got wrong: the
-    # builder was rebuilding item metadata from scratch and dropping the
-    # lifecycle fields, so admission had nothing to read.
-    loaded = [
-        await graph.entity_manager.get("task-live"),
-        await graph.entity_manager.get("task-retired"),
-    ]
-    items = [context_module._item_from_active_entity(entity) for entity in loaded]
-    carried = {item.id: item.metadata for item in items}
-    assert carried["task-retired"].get("excluded_from_recall") is True
-    assert carried["task-retired"].get("lifecycle_state") == "contested"
-    assert "excluded_from_recall" not in carried["task-live"]
+    pack = await _pack(graph, "live task body", active_work_fn=None)
 
-    sections = context_module._drop_retired_items(
-        [
-            context_module.ContextSection(
-                facet=ContextFacet.ACTIVE_WORK,
-                title="Active work",
-                items=items,
-            )
-        ]
-    )
-    served = [item.id for section in sections for item in section.items]
-    assert served == ["task-live"]
+    served = _pack_ids(pack)
+    assert "task-live" in served, "the live task proves the lane ran at all"
+    assert "task-retired" not in served
 
 
 @pytest.mark.asyncio
 async def test_the_related_item_lane_does_not_attach_a_retired_neighbour(
     graph: _Runtime,
 ) -> None:
-    """Related items ride inside an admitted item, so admission never sees them."""
+    """Related items ride inside an admitted item, so admission never sees them.
+
+    Read through `compile_context`, which is what selects the batch lane. The
+    singular helper had the gate while the batch one did not, so a test that
+    called the helper directly reported a lane nothing in production reads.
+    """
 
     await graph.entity_manager.create_direct(
         _entity(graph, "seed-row", "Seed Row", "seed row hosting body")
@@ -349,15 +414,280 @@ async def test_the_related_item_lane_does_not_attach_a_retired_neighbour(
             )
         )
 
-    related = await context_module._default_related_items(
-        entity_id="seed-row",
-        organization_id=graph.group_id,
-        accessible_projects={PROJECT_ID},
-        principal_id=PRINCIPAL,
-        limit=5,
+    pack = await _pack(graph, "seed row hosting body", include_related=True)
+
+    assert "seed-row" in _pack_ids(pack)
+    attached = _related_ids(pack)
+    assert "neighbour-live" in attached, "the live neighbour proves the lane ran at all"
+    assert "neighbour-retired" not in attached
+
+
+def _passage_body(topic: str) -> str:
+    """A body long enough that the production cutter really slices it."""
+
+    return "\n\n".join(
+        f"## {topic} section {index}\n\n" + f"{topic} passage body line {index} " * 40
+        for index in range(4)
     )
 
-    assert [item.id for item in related] == ["neighbour-live"]
+
+async def _correct(
+    graph: _Runtime,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    raw_memory_id: str,
+    action: str = "mark_wrong",
+) -> Any:
+    """Run the production correction with only the raw-capture store stubbed.
+
+    The graph half is entirely live: target resolution, the lineage cascade and
+    the metadata stamp all run against real rows through the real managers,
+    which is where the passage hole was.
+    """
+
+    memory = RawMemory(
+        id=raw_memory_id,
+        organization_id=graph.group_id,
+        source_id=f"source-{raw_memory_id}",
+        principal_id=PRINCIPAL,
+        memory_scope=MemoryScope.PRIVATE,
+        scope_key=None,
+        review_state="pending",
+        entity_type="decision",
+        title="Deploy to Fly",
+        raw_content="We decided to deploy to fly.io.",
+        tags=["decision"],
+        metadata={},
+        provenance={},
+        capture_surface="reflection_candidate",
+    )
+    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+    monkeypatch.setattr(
+        memory_module,
+        "save_raw_memory",
+        AsyncMock(side_effect=lambda updated, **_kwargs: updated),
+    )
+    return await memory_module.apply_memory_correction(
+        organization_id=graph.group_id,
+        source_id=memory.source_id,
+        principal_id=PRINCIPAL,
+        action=action,
+        accessible_projects=[PROJECT_ID],
+    )
+
+
+@pytest.mark.asyncio
+async def test_correcting_a_memory_takes_its_passages_out_of_the_pack(
+    graph: _Runtime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A correction has to reach the spans cut from the corrected body.
+
+    A passage is an independently indexed copy of part of its parent, and it
+    inherits scope but neither provenance nor lifecycle. So the correction's
+    provenance query cannot see it, and a correction that stopped at the parent
+    retired the memory while its own words kept ranking.
+    """
+
+    parent = _entity(
+        graph,
+        "passage-parent",
+        "Deploy to Fly",
+        _passage_body("hetzner"),
+        raw_memory_id="raw-passage-parent",
+    )
+    await graph.entity_manager.create_direct(parent)
+    projection = await project_entity_passages(
+        entity_manager=graph.entity_manager,
+        relationship_manager=graph.relationship_manager,
+        source=parent,
+        group_id=graph.group_id,
+        generate_embeddings=False,
+    )
+    assert projection.passages >= 2, "the falsifier needs real spans to survive"
+    passage_ids = {entity.id for entity in projection.created_passages}
+
+    before = _pack_ids(await _pack(graph, "hetzner passage body"))
+    assert passage_ids & before, "the spans have to be recallable before the correction"
+
+    result = await _correct(graph, monkeypatch, raw_memory_id="raw-passage-parent")
+
+    assert result.applied
+    assert "passage-parent" in result.affected_entity_ids
+    assert passage_ids <= set(result.affected_entity_ids)
+
+    after = _pack_ids(await _pack(graph, "hetzner passage body"))
+    assert "passage-parent" not in after
+    assert not (passage_ids & after)
+
+
+@pytest.mark.asyncio
+async def test_a_retired_row_cannot_seed_the_graph_walk(
+    graph: _Runtime,
+) -> None:
+    """Dropping a retired row from the answer is not the same as not walking it.
+
+    The neighbour passes its own admission check, so a walk seeded from a
+    retired row still routes recall through a memory a writer has retired. The
+    live control row is what makes the exclusion mean something: without it a
+    walk that never ran would pass this test.
+    """
+
+    for prefix, extra in (("live", {}), ("dead", {"excluded_from_recall": True})):
+        await graph.entity_manager.create_direct(
+            _entity(
+                graph,
+                f"{prefix}-seed",
+                f"{prefix.title()} Seed",
+                f"{prefix} seed expansion hosting body",
+                lifecycle_state="contested" if extra else "active",
+                **extra,
+            )
+        )
+        await graph.entity_manager.create_direct(
+            _entity(
+                graph,
+                f"{prefix}-neighbour",
+                f"{prefix.title()} Neighbour",
+                f"{prefix} unrelated aardvark subject matter",
+            )
+        )
+        await graph.relationship_manager.create(
+            Relationship(
+                id=f"rel_{prefix}_seed_neighbour",
+                source_id=f"{prefix}-seed",
+                target_id=f"{prefix}-neighbour",
+                relationship_type=RelationshipType.RELATED_TO,
+                organization_id=graph.group_id,
+                metadata={},
+            )
+        )
+
+    served = _pack_ids(await _pack(graph, "seed expansion hosting body"))
+
+    assert "live-seed" in served
+    assert "live-neighbour" in served, "the walk has to run for the exclusion to mean anything"
+    assert "dead-seed" not in served
+    assert "dead-neighbour" not in served
+
+
+@pytest.mark.asyncio
+async def test_an_exact_key_hit_on_a_retired_row_cannot_seed_the_walk(
+    graph: _Runtime,
+) -> None:
+    """The exact-key lane picks its seed from the caller's own query text.
+
+    That makes it the lane where seeding off a retired row is most reachable: a
+    caller who knows the key gets the retired row's neighbourhood back without
+    the retired row ever being served.
+    """
+
+    # Every row's vocabulary is disjoint from every other row's, and from both
+    # probe keys. A shared word would let the lexical lane return the neighbour
+    # on its own, and the test would then pass while the seed gate did nothing.
+    rows = (
+        ("live", "quartz-9001", "Quartz Anchor", "Mirrored Neighbour", "mirrored cabinet", {}),
+        (
+            "dead",
+            "velvet-4242",
+            "Lantern Anchor",
+            "Harbour Neighbour",
+            "harbour ferry timetable",
+            {"excluded_from_recall": True},
+        ),
+    )
+    for prefix, key, anchor_name, neighbour_name, neighbour_body, extra in rows:
+        await graph.entity_manager.create_direct(
+            _entity(
+                graph,
+                f"{prefix}-keyed",
+                anchor_name,
+                f"{key} anchor row",
+                retrieval_keys=[key],
+                lifecycle_state="contested" if extra else "active",
+                **extra,
+            )
+        )
+        await graph.entity_manager.create_direct(
+            _entity(
+                graph,
+                f"{prefix}-keyed-neighbour",
+                neighbour_name,
+                neighbour_body,
+            )
+        )
+        await graph.relationship_manager.create(
+            Relationship(
+                id=f"rel_{prefix}_keyed_neighbour",
+                source_id=f"{prefix}-keyed",
+                target_id=f"{prefix}-keyed-neighbour",
+                relationship_type=RelationshipType.RELATED_TO,
+                organization_id=graph.group_id,
+                metadata={},
+            )
+        )
+
+    live_served = _pack_ids(await _pack(graph, "quartz-9001"))
+    assert "live-keyed" in live_served, "the probe has to fire for the exclusion to mean anything"
+    assert "live-keyed-neighbour" in live_served, "and the walk has to reach the neighbour"
+
+    dead_served = _pack_ids(await _pack(graph, "velvet-4242"))
+    assert "dead-keyed" not in dead_served
+    assert "dead-keyed-neighbour" not in dead_served
+
+
+@pytest.mark.asyncio
+async def test_a_real_supersession_cycle_resolves_the_same_way_in_either_order(
+    graph: _Runtime,
+) -> None:
+    """Which row survives a mutual supersession is a property of the edges.
+
+    Row order out of Surreal is not contractual, so a resolver that let the
+    last row win would retire one row on this run and the other on the next,
+    from data that never changed. Both edges are stamped at the same instant
+    here, which is the case where only the tie-breaker decides.
+    """
+
+    stamped = datetime(2026, 3, 1, tzinfo=UTC)
+    for row_id in ("tie-a", "tie-b"):
+        await graph.entity_manager.create_direct(
+            _entity(graph, row_id, row_id.title(), f"{row_id} tie hosting decision")
+        )
+    for survivor, retired in (("tie-a", "tie-b"), ("tie-b", "tie-a")):
+        await graph.relationship_manager.create(
+            Relationship(
+                id=f"rel_{survivor}_supersedes_{retired}",
+                source_id=survivor,
+                target_id=retired,
+                relationship_type=RelationshipType.SUPERSEDES,
+                organization_id=graph.group_id,
+                metadata={"native_write_path": "memory_correction"},
+                created_at=stamped,
+            )
+        )
+
+    rows = await search_module._execute_query_records(
+        graph.client,
+        """
+        SELECT uuid, target_id, source_id, created_at
+        FROM relates_to
+        WHERE name = 'SUPERSEDES'
+          AND target_id IN $uuids
+          AND group_id = $group_id
+        ORDER BY created_at, uuid;
+        """,
+        uuids=["tie-a", "tie-b"],
+        group_id=graph.group_id,
+    )
+    assert len(rows) == 2, "both directions of the cycle must be on the table"
+    forward = search_module._resolve_superseded(rows)
+    reverse = search_module._resolve_superseded(list(reversed(rows)))
+    assert forward == reverse
+    assert len(forward) == 1
+
+    served = _pack_ids(await _pack(graph, "tie hosting decision"))
+    assert served & {"tie-a", "tie-b"} == {"tie-a", "tie-b"} - forward
 
 
 def test_a_write_payload_cannot_supply_capture_provenance() -> None:
