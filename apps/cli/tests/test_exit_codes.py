@@ -424,3 +424,46 @@ def test_update_exits_nonzero_when_a_component_fails() -> None:
         result = CliRunner().invoke(update_module.app, ["--cli", "--yes"])
 
     assert result.exit_code == 1
+
+
+def test_update_exits_nonzero_when_only_the_skills_refresh_fails() -> None:
+    """A failure reported through warn() and a discarded bool is still a failure."""
+    from sibyl_cli import update as update_module
+
+    with (
+        patch.object(update_module, "is_dev_mode", return_value=False),
+        patch.object(update_module, "update_skills", return_value=False),
+    ):
+        result = CliRunner().invoke(update_module.app, ["--skills", "--yes"])
+
+    assert result.exit_code == 1
+
+
+def test_update_cli_reports_a_failed_skill_sync(monkeypatch: pytest.MonkeyPatch) -> None:
+    """update_cli returned True even when the skills it installs never landed."""
+    from sibyl_cli import update as update_module
+
+    completed = MagicMock()
+    completed.returncode = 0
+
+    with (
+        patch.object(update_module.subprocess, "run", return_value=completed),
+        patch.object(update_module, "get_current_cli_version", return_value="2.0.0"),
+        patch.object(update_module, "sync_skills_after_cli_update", return_value=False),
+    ):
+        assert update_module.update_cli() is False
+
+
+def test_project_relink_exits_nonzero_when_nothing_matches() -> None:
+    """relink exists to repair a link; repairing nothing is a refusal."""
+    from sibyl_cli import project as project_module
+
+    client = _client(list_projects={"projects": []})
+
+    with (
+        patch("sibyl_cli.project.get_client", return_value=client),
+        patch("sibyl_cli.project.set_path_mapping"),
+    ):
+        result = CliRunner().invoke(project_module.app, ["relink"])
+
+    assert result.exit_code == 1

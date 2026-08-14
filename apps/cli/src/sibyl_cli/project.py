@@ -444,7 +444,7 @@ def relink_project(
                         for project in projects[:10]:
                             console.print(f"  - {project.get('id')}  {project.get('name', '')}")
                     info("Run: sibyl project relink --id <project>")
-                    return
+                    raise typer.Exit(1)
 
             set_path_mapping(target_path, selected_id, context=context_name)
             success(f"Relinked [{NEON_CYAN}]{target_path}[/{NEON_CYAN}]")

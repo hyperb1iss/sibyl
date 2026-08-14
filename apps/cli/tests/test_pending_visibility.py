@@ -296,3 +296,25 @@ def test_the_notice_prints_only_once_per_process(
         entrypoint.main()
 
     assert capsys.readouterr().err.count("2 writes buffered locally") == 1
+
+
+def test_a_broken_stderr_cannot_change_the_exit_status(
+    sandbox_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rich reports a closed stream as ValueError and a broken pipe as SystemExit."""
+    _buffer(1)
+
+    for boom in (
+        ValueError("I/O operation on closed file"),
+        SystemExit(1),
+        BrokenPipeError(),
+    ):
+
+        def explode(*_args: object, **_kwargs: object) -> None:
+            raise boom
+
+        monkeypatch.setattr(common, "_pending_writes_reported", False)
+        monkeypatch.setattr(common.err_console, "print", explode)
+
+        common.notify_pending_writes()

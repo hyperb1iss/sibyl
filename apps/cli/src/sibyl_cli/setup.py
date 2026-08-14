@@ -326,6 +326,8 @@ def setup_agent_integration(verbose: bool = True) -> bool:
         )
         console.print()
 
+    hooks_installed = True
+
     # Determine source - prefer dev symlinks, fall back to package data
     repo_dir = find_sibyl_repo()
     data_dir = get_package_data_dir()
@@ -349,6 +351,7 @@ def setup_agent_integration(verbose: bool = True) -> bool:
             if configure_claude_hooks() and verbose:
                 success("Installed Claude Code hooks")
         else:
+            hooks_installed = False
             if verbose:
                 warn("Could not find hooks in repo")
 
@@ -366,6 +369,7 @@ def setup_agent_integration(verbose: bool = True) -> bool:
             if configure_claude_hooks() and verbose:
                 success("Installed Claude Code hooks")
         else:
+            hooks_installed = False
             if verbose:
                 warn("No embedded hooks found in package")
 
@@ -379,7 +383,12 @@ def setup_agent_integration(verbose: bool = True) -> bool:
 
     if verbose:
         console.print()
-        success("Sibyl integration setup complete!")
+        if hooks_installed:
+            success("Sibyl integration setup complete!")
+        else:
+            # Claiming completion under a warning that hooks are missing is the
+            # same untruth as exiting 0 on a refusal, one layer up.
+            warn("Sibyl skills installed; hooks were not.")
         console.print()
         console.print(f"  [{NEON_CYAN}]Claude Code:[/{NEON_CYAN}]  Skills and hooks installed")
         console.print(f"  [{NEON_CYAN}]Codex CLI:[/{NEON_CYAN}]    Skills installed (no hooks)")

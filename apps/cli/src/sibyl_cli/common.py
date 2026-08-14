@@ -227,8 +227,10 @@ _pending_writes_reported = False
 def mark_pending_writes_reported() -> None:
     """Claim the queue report for a command that already made it.
 
-    `sibyl health`, `sibyl doctor`, and the pending-writes group all render the
-    queue themselves, so the end-of-command notice would repeat them verbatim.
+    `sibyl health`, `sibyl doctor`, `pending-writes list` and `flush` all render
+    the queue themselves, so the end-of-command notice would repeat them
+    verbatim. `discard` deliberately does not claim it, because it can leave the
+    queue untouched and the notice is then the only thing that says so.
     """
     global _pending_writes_reported
     _pending_writes_reported = True
@@ -239,21 +241,26 @@ def notify_pending_writes() -> None:
 
     Runs at the end of every command, including the ones that just filled
     the buffer, so a queued write is never silent.
+
+    Nothing in here may change the outcome. It runs from a finally block, so
+    any exception that escapes replaces the status the command already earned,
+    and a decorative notice turning a success into a failure is worse than no
+    notice at all. Rich reports a closed stream as ValueError and converts a
+    broken pipe into SystemExit, so neither an OSError guard nor a plain
+    `except Exception` is enough on its own.
     """
     from sibyl_cli.pending_writes import pending_write_count
 
     if _pending_writes_reported:
         return
-    count = pending_write_count()
-    if count <= 0:
-        return
     try:
+        count = pending_write_count()
+        if count <= 0:
+            return
         err_console.print(
             f"[{ELECTRIC_YELLOW}]![/{ELECTRIC_YELLOW}] {pending_writes_summary(count)}"
         )
-    except OSError:
-        # The notice runs from a finally block, so a closed or broken stderr
-        # must not replace the exit status the command already earned.
+    except (Exception, SystemExit):
         return
     # Claimed only once the line is out, so a queue we failed to read stays
     # unclaimed and a later caller can still report it.

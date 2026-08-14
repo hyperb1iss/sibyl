@@ -112,7 +112,9 @@ def test_project_relink_requires_explicit_id_for_ambiguous_matches() -> None:
     ):
         result = CliRunner().invoke(app, ["relink", "--path", "/tmp/hypercolor"])
 
-    assert result.exit_code == 0
+    # relink exists to write a mapping; refusing to write one is a failure,
+    # and the candidate list is the remediation rather than the result.
+    assert result.exit_code == 1
     assert "Multiple accessible projects matched" in result.stdout
     assert "project_123" in result.stdout
     assert "project_456" in result.stdout
