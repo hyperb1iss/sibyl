@@ -1875,6 +1875,11 @@ async def _correction_graph_entity_ids(
         if row is None:
             continue
         row_metadata = getattr(row, "metadata", None)
+        # `private_scope_granted` says only that this principal may hold
+        # private memories at all; ownership is still checked inside, so a
+        # private row belonging to somebody else is refused either way. The
+        # correction route has already authorized this principal against the
+        # capture, so the grant is not the thing under test here.
         if not memory_metadata_read_allowed(
             row_metadata,
             principal_id=principal_id,
