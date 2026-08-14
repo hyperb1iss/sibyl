@@ -1414,3 +1414,101 @@ async def test_a_missing_id_and_a_denied_id_are_reported_identically(
 
     assert denied == ["entity-exists-denied"]
     assert missing == ["entity-does-not-exist"]
+
+
+@pytest.mark.asyncio
+async def test_a_synchronous_create_reconciles_the_capture_before_writing_the_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The queued path is not the only projection boundary.
+
+    Sync creation runs after the capture is already durable, so a correction
+    can land in between there too. The window is narrower than the worker's,
+    not absent, and an unstamped row does not heal itself: the correction that
+    would have stamped it has already run.
+    """
+
+    import sibyl_core.tools.add as add_module
+    from sibyl_core.models.entities import Entity, EntityType
+
+    monkeypatch.setattr(
+        memory_module,
+        "get_raw_memory",
+        AsyncMock(
+            return_value=_raw_capture(
+                id="raw-corrected",
+                metadata={"lifecycle_state": "contested", "lifecycle_action": "mark_wrong"},
+            )
+        ),
+    )
+
+    written: list[Entity] = []
+
+    class _Manager:
+        async def create_direct(self, entity: Entity, *, generate_embedding: bool = True) -> str:
+            written.append(entity)
+            return entity.id
+
+    entity = Entity(
+        id="sync-row",
+        name="Deploy to Fly",
+        entity_type=EntityType.DECISION,
+        description="we deploy to fly",
+        content="we deploy to fly",
+        organization_id="org-1",
+        metadata={"raw_memory_id": "raw-corrected"},
+    )
+
+    created_id = await add_module._create_entity_record(
+        _Manager(),
+        entity,
+        generate_embeddings=False,
+        organization_id="org-1",
+    )
+
+    assert created_id == "sync-row"
+    assert written[0].metadata["excluded_from_recall"] is True
+    assert written[0].metadata["lifecycle_state"] == "contested"
+    assert graph_metadata_recallable(written[0].metadata) is False
+
+
+@pytest.mark.asyncio
+async def test_a_synchronous_create_reads_nothing_for_a_row_with_no_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Most rows this path writes were never projected from a capture.
+
+    No correction can ever name them, so charging every such write a capture
+    read would buy nothing.
+    """
+
+    import sibyl_core.tools.add as add_module
+    from sibyl_core.models.entities import Entity, EntityType
+
+    lookup = AsyncMock(side_effect=AssertionError("no capture read should happen"))
+    monkeypatch.setattr(memory_module, "get_raw_memory", lookup)
+
+    class _Manager:
+        async def create_direct(self, entity: Entity, *, generate_embedding: bool = True) -> str:
+            return entity.id
+
+    entity = Entity(
+        id="plain-row",
+        name="Plain",
+        entity_type=EntityType.DECISION,
+        description="plain body",
+        content="plain body",
+        organization_id="org-1",
+        metadata={},
+    )
+
+    assert (
+        await add_module._create_entity_record(
+            _Manager(),
+            entity,
+            generate_embeddings=False,
+            organization_id="org-1",
+        )
+        == "plain-row"
+    )
+    lookup.assert_not_awaited()

@@ -47,6 +47,7 @@ from sibyl_core.models.tasks import (
 from sibyl_core.projection import project_entity_passages, project_memory_entity
 from sibyl_core.runtime_ports import get_queue_port
 from sibyl_core.services.graph import get_surreal_graph_runtime
+from sibyl_core.services.memory import projected_row_lifecycle_stamp
 from sibyl_core.tools.helpers import (
     MAX_CONTENT_LENGTH,
     MAX_TITLE_LENGTH,
@@ -216,7 +217,24 @@ async def _create_entity_record(
     entity: Entity,
     *,
     generate_embeddings: bool,
+    organization_id: str | None = None,
 ) -> str:
+    # The same reconciliation the queued path does at the worker, for the same
+    # reason: the capture is written before this runs and can be corrected in
+    # between, and the row would otherwise be created recallable carrying text
+    # a writer has already retired. The window is narrow here rather than
+    # absent, and an unstamped row is not self-healing. Nothing is read for an
+    # entity that carries no capture provenance, which is every entity this
+    # path creates that no correction can ever name.
+    if organization_id:
+        stamp = await projected_row_lifecycle_stamp(
+            organization_id=organization_id,
+            metadata=entity.metadata,
+        )
+        if stamp:
+            object.__setattr__(entity, "metadata", {**(entity.metadata or {}), **stamp})
+            log.info("add_entity_born_retired", entity_id=entity.id)
+
     create_direct = getattr(entity_manager, "create_direct", None)
     if inspect.iscoroutinefunction(create_direct):
         if _accepts_keyword(create_direct, "generate_embedding"):
@@ -822,6 +840,7 @@ async def add(
                 entity_manager,
                 entity,
                 generate_embeddings=generate_embeddings,
+                organization_id=org_id,
             )
 
             await _create_relationships_bulk(
@@ -1003,6 +1022,7 @@ async def add(
                 entity_manager,
                 entity,
                 generate_embeddings=generate_embeddings,
+                organization_id=org_id,
             )
 
             await _create_relationships_bulk(
