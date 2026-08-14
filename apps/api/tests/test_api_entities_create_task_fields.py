@@ -5,7 +5,11 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-from sibyl.api.routes.entities import _declared_bulk_relationships, create_entity
+from sibyl.api.routes.entities import (
+    _declared_bulk_relationships,
+    _validate_related_to_targets_for_write,
+    create_entity,
+)
 from sibyl.api.schemas import EntityCreate
 from sibyl_core.auth import ProjectRole
 from sibyl_core.models.entities import EntityType, RelationshipType
@@ -228,6 +232,7 @@ class TestBulkDeclaredRelationships:
             entity_manager=self._entity_manager("principal-a"),
             principal_id="principal-a",
             accessible_projects=set(),
+            allowed_memory_scope_keys=None,
             now=now,
         )
         assert rel.id == "rel_ep_new_related_to_ep_old"
@@ -242,6 +247,7 @@ class TestBulkDeclaredRelationships:
             entity_manager=self._entity_manager("principal-a"),
             principal_id="principal-a",
             accessible_projects=set(),
+            allowed_memory_scope_keys=None,
             now=datetime(2026, 8, 13, tzinfo=UTC),
         )
         assert rel.id == "rel_ep_new_supersedes_ep_old"
@@ -256,8 +262,137 @@ class TestBulkDeclaredRelationships:
             entity_manager=self._entity_manager("principal-b"),
             principal_id="principal-a",
             accessible_projects=set(),
+            allowed_memory_scope_keys=None,
             now=datetime(2026, 8, 13, tzinfo=UTC),
         )
         assert rel.id == "rel_ep_new_related_to_ep_old"
         assert rel.relationship_type is RelationshipType.RELATED_TO
         assert "agent_declared" not in rel.metadata
+
+
+class TestRelatedToExistenceOracle:
+    """A guessable id must not reveal whether a hidden row is there.
+
+    `entity_manager.get` resolves by id inside the org namespace and does not
+    filter by scope, so without a visibility check the route answered 404 for
+    an absent target and 201 for another principal's private one.
+    """
+
+    @staticmethod
+    def _ctx() -> MagicMock:
+        ctx = MagicMock()
+        ctx.user = MagicMock()
+        ctx.user.id = uuid4()
+        ctx.api_key_memory_scope_keys = None
+        return ctx
+
+    @staticmethod
+    def _private_row(owner: str) -> MagicMock:
+        entity = MagicMock()
+        entity.entity_type = EntityType.DECISION
+        entity.id = "decision_hidden"
+        entity.project_id = None
+        entity.metadata = {"memory_scope": "private", "principal_id": owner}
+        return entity
+
+    async def _status_for(self, target: object) -> int:
+        ctx = self._ctx()
+        manager = MagicMock()
+        manager.get = AsyncMock(return_value=target)
+        with patch(
+            "sibyl.api.routes.entities._accessible_project_ids_for_read",
+            AsyncMock(return_value=set()),
+        ):
+            try:
+                await _validate_related_to_targets_for_write(
+                    ctx=ctx,
+                    entity_manager=manager,
+                    related_to=["supersedes:decision_hidden"],
+                )
+            except HTTPException as exc:
+                return exc.status_code
+        return 201
+
+    @pytest.mark.asyncio
+    async def test_hidden_row_answers_exactly_like_an_absent_one(self) -> None:
+        hidden = await self._status_for(self._private_row("someone-else"))
+        absent = await self._status_for(None)
+        assert hidden == absent == 404
+
+    @pytest.mark.asyncio
+    async def test_a_visible_row_still_passes(self) -> None:
+        ctx = self._ctx()
+        visible = MagicMock()
+        visible.entity_type = EntityType.DECISION
+        visible.id = "decision_hidden"
+        visible.project_id = None
+        visible.metadata = {}
+        manager = MagicMock()
+        manager.get = AsyncMock(return_value=visible)
+        with patch(
+            "sibyl.api.routes.entities._accessible_project_ids_for_read",
+            AsyncMock(return_value=set()),
+        ):
+            await _validate_related_to_targets_for_write(
+                ctx=ctx,
+                entity_manager=manager,
+                related_to=["supersedes:decision_hidden"],
+            )
+
+
+class TestBulkBatchComposition:
+    """An edge's type must not depend on which siblings rode along."""
+
+    @staticmethod
+    def _manager(project_id: str) -> MagicMock:
+        target = MagicMock()
+        target.entity_type = EntityType.DECISION
+        target.id = "decision_scoped"
+        target.project_id = project_id
+        target.metadata = {"project_id": project_id}
+        manager = MagicMock()
+        manager.get = AsyncMock(return_value=target)
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_reader_projects_decide_not_the_batch(self) -> None:
+        """Read authority belongs to the caller, so both runs must agree.
+
+        The union of verified source projects used to be threaded here, which
+        made an A-to-B suppression type itself only when an unrelated B-scoped
+        sibling happened to be in the same request.
+        """
+        manager = self._manager("project_b")
+        alone = await _declared_bulk_relationships(
+            "ep_new",
+            ["supersedes:decision_scoped"],
+            entity_manager=manager,
+            principal_id="principal-a",
+            accessible_projects=set(),
+            allowed_memory_scope_keys=None,
+            now=datetime(2026, 8, 13, tzinfo=UTC),
+        )
+        with_sibling = await _declared_bulk_relationships(
+            "ep_new",
+            ["supersedes:decision_scoped"],
+            entity_manager=manager,
+            principal_id="principal-a",
+            accessible_projects=set(),
+            allowed_memory_scope_keys=None,
+            now=datetime(2026, 8, 13, tzinfo=UTC),
+        )
+        assert alone[0].relationship_type is with_sibling[0].relationship_type
+        assert alone[0].relationship_type is RelationshipType.RELATED_TO
+
+    @pytest.mark.asyncio
+    async def test_a_project_the_caller_reads_is_declarable(self) -> None:
+        rels = await _declared_bulk_relationships(
+            "ep_new",
+            ["supersedes:decision_scoped"],
+            entity_manager=self._manager("project_b"),
+            principal_id="principal-a",
+            accessible_projects={"project_b"},
+            allowed_memory_scope_keys=None,
+            now=datetime(2026, 8, 13, tzinfo=UTC),
+        )
+        assert rels[0].relationship_type is RelationshipType.SUPERSEDES

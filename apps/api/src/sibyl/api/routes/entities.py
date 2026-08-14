@@ -818,6 +818,7 @@ async def _declared_bulk_relationships(
     entity_manager: Any,
     principal_id: str | None,
     accessible_projects: set[str],
+    allowed_memory_scope_keys: set[str] | None,
     now: datetime,
 ) -> list[Relationship]:
     """Build a bulk entry's edges, honoring and authorizing declared predicates.
@@ -837,6 +838,7 @@ async def _declared_bulk_relationships(
                 target_id=declaration.target_id,
                 principal_id=principal_id,
                 accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
             )
             if not allowed:
                 relationship_type = RelationshipType.RELATED_TO
@@ -856,32 +858,68 @@ async def _declared_bulk_relationships(
     return relationships
 
 
+async def _suppression_reader_scope(
+    ctx: AuthContext,
+    related_to: list[str] | None,
+) -> tuple[set[str] | None, set[str] | None]:
+    """Read scope for the suppression gate, resolved only when one is declared.
+
+    Resolving project membership costs a query, and the overwhelming majority
+    of writes declare no suppressing predicate at all, so an unconditional
+    lookup here would tax every create for a check it never runs.
+    """
+    declarations = parse_relation_declarations(related_to)
+    if not any(
+        declaration.declared and declaration.relationship_type in SUPPRESSING_RELATIONSHIP_TYPES
+        for declaration in declarations
+    ):
+        return None, None
+    return await _accessible_project_ids_for_read(ctx), _reader_memory_grants(ctx)
+
+
 async def _validate_related_to_targets_for_write(
     *,
     ctx: AuthContext,
     entity_manager: Any,
     related_to: list[str] | None,
 ) -> None:
+    """Resolve every link target and refuse the ones this caller cannot read.
+
+    A target the caller cannot see answers exactly like a target that does not
+    exist: same status, same message. Distinguishing them turns the link
+    parameter into an existence oracle over other principals' private
+    memories, since ids are guessable and a 404 would confirm absence.
+    """
     if not related_to:
         return
 
+    reader_user_id = _reader_user_id(ctx)
+    accessible_projects = await _accessible_project_ids_for_read(ctx)
+    memory_grants = _reader_memory_grants(ctx)
+
     checked_ids: set[str] = set()
     # A declared predicate rides on the same string as the id, so existence and
-    # project access are checked against the target the edge will actually point
-    # at rather than against "supersedes:ent_0a1b".
+    # access are checked against the target the edge will actually point at
+    # rather than against "supersedes:ent_0a1b".
     for related_id in declared_relation_targets(related_to):
         if related_id in checked_ids:
             continue
         checked_ids.add(related_id)
 
+        not_found = HTTPException(status_code=404, detail=f"Related entity not found: {related_id}")
         try:
             related_entity = await entity_manager.get(related_id)
         except Exception as exc:
-            raise HTTPException(
-                status_code=404, detail=f"Related entity not found: {related_id}"
-            ) from exc
+            raise not_found from exc
         if related_entity is None:
-            raise HTTPException(status_code=404, detail=f"Related entity not found: {related_id}")
+            raise not_found
+        if not _related_entity_visible(
+            related_entity,
+            reader_user_id=reader_user_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=memory_grants,
+        ):
+            raise not_found
 
         related_project_id = _entity_read_project_id(related_entity)
         if related_project_id is not None:
@@ -1750,6 +1788,14 @@ async def create_entities_bulk(
         for entity, created_id in zip(entities, created_ids, strict=True)
     ]
 
+    # Read authority belongs to the caller, not to the batch. Passing the
+    # accumulated `verified_project_ids` here made an edge's type depend on
+    # which unrelated siblings rode along in the same request. Resolved once
+    # per request, and only when some entry actually declares a suppression.
+    reader_projects, memory_grants = await _suppression_reader_scope(
+        ctx,
+        [target for entity in batch.entities for target in entity.related_to or ()],
+    )
     relationships: list[Relationship] = []
     for created_id, entity in zip(created_ids, batch.entities, strict=True):
         relationships.extend(
@@ -1758,7 +1804,8 @@ async def create_entities_bulk(
                 entity.related_to,
                 entity_manager=runtime.entity_manager,
                 principal_id=principal_id,
-                accessible_projects=verified_project_ids,
+                accessible_projects=reader_projects or set(),
+                allowed_memory_scope_keys=memory_grants,
                 now=now,
             )
         )
@@ -2208,6 +2255,9 @@ async def create_entity(
     # would drop the rehearsal receipt the caller asked for.
     is_sync = entity.entity_type.value == "project" or sync or bool(entity.probes)
 
+    suppression_projects, suppression_grants = await _suppression_reader_scope(
+        ctx, entity.related_to
+    )
     result = await _add_with_structure(
         title=entity.name,
         content=content,
@@ -2231,6 +2281,8 @@ async def create_entity(
         memory_scope=str(declared_memory_scope) if declared_memory_scope is not None else None,
         scope_key=authorized_scope_key,
         principal_id=authorized_principal_id,
+        accessible_projects=suppression_projects,
+        allowed_memory_scope_keys=suppression_grants,
         retrieval_keys=entity.retrieval_keys,
         spans=[span.model_dump(exclude_none=True) for span in entity.spans]
         if entity.spans is not None
