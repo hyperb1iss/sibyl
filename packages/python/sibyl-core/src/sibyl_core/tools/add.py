@@ -1,13 +1,14 @@
 """Add tool for creating new knowledge in the Sibyl graph."""
 
 import inspect
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
 import structlog
 
 from sibyl_core.auth.memory_policy import (
+    server_provenance_metadata,
     stamp_memory_scope_metadata,
 )
 from sibyl_core.embeddings.providers import configured_embedding_provider
@@ -344,6 +345,8 @@ async def add(
     spans: list[dict[str, Any]] | None = None,
     atomic: bool = False,
     probes: list[str] | None = None,
+    # Server-stamped provenance, never caller input. See below.
+    capture_provenance: Mapping[str, Any] | None = None,
 ) -> AddResponse:
     """Add new knowledge to the Sibyl knowledge graph.
 
@@ -579,6 +582,17 @@ async def add(
             ),
             **structure_metadata(structure),
         }
+        # Re-attached after the strip, and only from the dedicated argument.
+        # The capture pipeline stamps provenance from the completed raw write
+        # and then calls this function, whose strip drops exactly those keys,
+        # so a row written through capture reached the graph naming no capture
+        # at all: the correction write-through could not find it and the
+        # projection boundary had nothing to re-read. Passing it inside
+        # `metadata` cannot work and must not, because that bag is caller
+        # input; passing it here is a statement by the server about a raw write
+        # it just completed, and no caller-facing surface forwards this
+        # argument.
+        full_metadata.update(server_provenance_metadata(capture_provenance))
         if project:
             full_metadata["project_id"] = project
         # Every graph write funnels through here, so this is where a declaration

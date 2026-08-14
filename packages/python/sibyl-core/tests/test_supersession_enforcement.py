@@ -1512,3 +1512,50 @@ async def test_a_synchronous_create_reads_nothing_for_a_row_with_no_provenance(
         == "plain-row"
     )
     lookup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_only_the_server_channel_can_put_provenance_on_a_written_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Provenance has to be unforgeable and it has to arrive, which pull apart.
+
+    A caller that could set `raw_memory_id` could nominate any row it can write
+    to be retired by a correction on an unrelated capture, so the graph writer
+    strips it from caller metadata. The capture pipeline stamps it from the
+    completed raw write and then calls that same writer, so without a channel
+    that survives the strip the authoritative id never reaches the row and both
+    the correction write-through and the projection boundary lose their only
+    link back to the capture.
+    """
+
+    import sibyl_core.tools.add as add_module
+
+    written: list[dict[str, Any]] = []
+
+    class _Queue:
+        async def enqueue_create_entity(
+            self, *, entity_data: dict[str, Any], **_kwargs: object
+        ) -> str:
+            written.append(dict(entity_data))
+            return "job-1"
+
+    monkeypatch.setattr(add_module, "get_queue_port", lambda: _Queue())
+
+    async def write(**kwargs: Any) -> Any:
+        return await add_module.add(
+            title="Deploy",
+            content="we deploy to fly",
+            entity_type="note",
+            check_conflicts=False,
+            metadata={"organization_id": "org-1", "raw_memory_id": "victim-capture"},
+            **kwargs,
+        )
+
+    assert (await write()).success
+    planted = written[-1]["metadata"]
+    assert "raw_memory_id" not in planted, "caller metadata cannot name a capture"
+
+    assert (await write(capture_provenance={"raw_memory_id": "real-capture"})).success
+    stamped = written[-1]["metadata"]
+    assert stamped["raw_memory_id"] == "real-capture", "the server channel has to survive"

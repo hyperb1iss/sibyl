@@ -14,15 +14,15 @@ about what an agent can recall, not about which keys a dict carries.
 from __future__ import annotations
 
 import uuid as uuid_module
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
 
+import sibyl_core.tools.add as add_module
 from sibyl.jobs.entities import create_entity
-from sibyl_core.models.entities import EntityType, Pattern
 from sibyl_core.services.graph import (
     EntityManager,
     RelationshipManager,
@@ -96,30 +96,73 @@ def _corrected_capture(**overrides: Any) -> RawMemory:
     return RawMemory(**values)
 
 
-def _queued_payload(group_id: str) -> dict[str, Any]:
-    """The job payload as it was serialized, before the correction existed."""
+class _RecordingQueue:
+    """Stands in for arq, keeping the payload `add()` actually serialized."""
+
+    def __init__(self) -> None:
+        self.payloads: list[dict[str, Any]] = []
+
+    async def enqueue_create_entity(
+        self,
+        *,
+        entity_id: str,
+        entity_data: Mapping[str, Any],
+        entity_type: str,
+        group_id: str,
+        relationships: Any = None,
+        auto_link_params: Mapping[str, Any] | None = None,
+        generate_embeddings: bool = True,
+    ) -> str:
+        self.payloads.append(dict(entity_data))
+        return f"job-{entity_id}"
+
+    async def enqueue_entity_embedding_backfill(self, **_kwargs: object) -> str:
+        return "job-backfill"
+
+
+async def _queued_payload(monkeypatch: pytest.MonkeyPatch, group_id: str) -> dict[str, Any]:
+    """The payload the real `add()` puts on the queue, not one built by hand.
+
+    Building it by hand is how the first version of this test hid a defect that
+    made the whole reconciliation inert: `add()` strips server-owned keys from
+    caller metadata, and the capture pipeline stamps provenance before calling
+    it, so the queued payload named no capture at all. A test that supplies
+    provenance itself proves nothing about the path that has to supply it.
+    """
 
     body = "\n\n".join(
         f"## Fly section {index}\n\n" + f"fly hosting rollout body line {index} " * 40
         for index in range(4)
     )
-    entity = Pattern(
-        id="raced-parent",
-        name="Deploy to Fly",
-        entity_type=EntityType.PATTERN,
-        description="fly hosting rollout",
+    queue = _RecordingQueue()
+    monkeypatch.setattr(add_module, "get_queue_port", lambda: queue)
+
+    response = await add_module.add(
+        title="Deploy to Fly",
         content=body,
-        organization_id=group_id,
-        project_id=PROJECT_ID,
+        entity_type="pattern",
+        project=PROJECT_ID,
+        memory_scope="project",
+        scope_key=PROJECT_ID,
+        principal_id=PRINCIPAL,
+        check_conflicts=False,
+        # Exactly what the capture pipeline hands the graph writer: the raw
+        # ids on the dedicated argument, and a metadata bag that also carries
+        # them and gets them stripped.
         metadata={
-            "memory_scope": "project",
-            "scope_key": PROJECT_ID,
-            "project_id": PROJECT_ID,
+            "organization_id": group_id,
+            "raw_memory_id": RAW_MEMORY_ID,
+            "raw_source_id": "source-corrected-capture",
+        },
+        capture_provenance={
             "raw_memory_id": RAW_MEMORY_ID,
             "raw_source_id": "source-corrected-capture",
         },
     )
-    return entity.model_dump(mode="json")
+
+    assert response.success
+    assert len(queue.payloads) == 1, "the write has to have gone through the queue"
+    return queue.payloads[0]
 
 
 async def _no_raw_memories(**_kwargs: object) -> list[Any]:
@@ -150,7 +193,14 @@ async def _served_ids(runtime: _Runtime, goal: str) -> set[str]:
     return {item.id for section in pack.sections for item in section.items}
 
 
-async def _run_create_entity(runtime: _Runtime) -> dict[str, Any]:
+async def _run_create_entity(
+    runtime: _Runtime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, Any]:
+    payload = await _queued_payload(monkeypatch, runtime.group_id)
+    assert payload["metadata"].get("raw_memory_id") == RAW_MEMORY_ID, (
+        "the queued payload has to name the capture, or the worker has nothing to read"
+    )
     with (
         patch("sibyl.jobs.entities._safe_broadcast", AsyncMock()),
         patch("sibyl.jobs.pending.clear_pending", AsyncMock()),
@@ -175,7 +225,7 @@ async def _run_create_entity(runtime: _Runtime) -> dict[str, Any]:
     ):
         return await create_entity(
             {},
-            _queued_payload(runtime.group_id),
+            payload,
             "pattern",
             runtime.group_id,
             generate_embeddings=True,
@@ -203,16 +253,16 @@ async def test_a_row_projected_after_its_capture_was_corrected_is_born_retired(
         AsyncMock(return_value=_corrected_capture()),
     )
 
-    result = await _run_create_entity(graph)
-    assert result["entity_id"] == "raced-parent"
+    result = await _run_create_entity(graph, monkeypatch)
+    parent_id = result["entity_id"]
 
-    stored = await graph.entity_manager.get("raced-parent")
+    stored = await graph.entity_manager.get(result["entity_id"])
     assert stored is not None, "the row is still written; it is written retired"
     assert stored.metadata.get("excluded_from_recall") is True
     assert stored.metadata.get("lifecycle_state") == "contested"
 
     served = await _served_ids(graph, "fly hosting rollout body")
-    assert "raced-parent" not in served
+    assert parent_id not in served
     assert not {item_id for item_id in served if item_id.startswith("passage")}
 
 
@@ -235,7 +285,7 @@ async def test_an_uncorrected_capture_still_projects_a_recallable_row(
         AsyncMock(return_value=_corrected_capture(metadata={})),
     )
 
-    await _run_create_entity(graph)
+    await _run_create_entity(graph, monkeypatch)
 
     served = await _served_ids(graph, "fly hosting rollout body")
     # The spans are the memory's presence in the pack: a projection whose spans

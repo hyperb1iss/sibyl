@@ -12,7 +12,7 @@ from uuid import uuid4
 import structlog
 from pydantic import ValidationError
 
-from sibyl_core.auth.memory_policy import stamp_memory_scope_metadata
+from sibyl_core.auth.memory_policy import server_provenance_metadata, stamp_memory_scope_metadata
 from sibyl_core.config import settings
 from sibyl_core.migrate.legacy_graph_archive import (
     episode_from_payload as _episode_from_payload,
@@ -573,11 +573,20 @@ def _normalized_backup_metadata(metadata: Any) -> dict[str, Any]:
 
     A restore rebuilds entities from a request body, so it is the one write
     path whose owner triple is not resolved from an authenticated caller. It
-    keeps the ownership the backup recorded — losing that would make a restore
-    cycle destroy every private memory's owner — but it may not introduce
+    keeps the ownership the backup recorded (losing that would make a restore
+    cycle destroy every private memory's owner) but it may not introduce
     shapes no write can produce: a private row carrying a second owner channel
     in scope_key, or owner fields with no scope at all, which reads as
     org-visible while looking owned.
+
+    Capture provenance is carried over for the same reason ownership is. It
+    names the raw capture a row was projected from, and a correction resolves
+    its targets by querying it, so a restored row that lost it is a row no
+    future correction can reach: the memory retires and its restored graph copy
+    keeps ranking. The strip exists to stop a caller from planting the key on
+    somebody else's row, and a backup is the server's own record of a write it
+    already performed rather than a caller naming a row, which is the same
+    distinction that lets the capture pipeline re-attach it.
     """
     fields = dict(metadata) if isinstance(metadata, dict) else {}
     scope = fields.get("memory_scope")
@@ -590,12 +599,14 @@ def _normalized_backup_metadata(metadata: Any) -> dict[str, Any]:
         # survives, so a row owned only through scope_key stays readable by
         # its owner instead of becoming readable by nobody.
         principal_id = principal_id or scope_key
-    return stamp_memory_scope_metadata(
+    stamped = stamp_memory_scope_metadata(
         fields,
         memory_scope=scope,
         scope_key=scope_key,
         principal_id=principal_id,
     )
+    stamped.update(server_provenance_metadata(fields))
+    return stamped
 
 
 def _entity_from_backup_data(entity_data: dict[str, Any]) -> Entity:

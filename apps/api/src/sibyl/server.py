@@ -53,6 +53,7 @@ from sibyl_core.auth.memory_policy import (
     MemoryPolicyAction,
     MemoryPolicyDecision,
     authorize_memory_write,
+    server_provenance_metadata,
     stamp_memory_scope_metadata,
 )
 from sibyl_core.memory_pipeline.capture import MemoryCaptureRequest, MemoryCaptureService
@@ -788,6 +789,14 @@ async def _remember_mcp_memory(
             tags=list(request.tags) if request.tags is not None else None,
             related_to=list(request.related_to) if request.related_to is not None else None,
             metadata=dict(graph_metadata),
+            # The graph writer strips server-owned keys from `metadata`,
+            # because that bag is caller input everywhere else it is used. The
+            # capture pipeline stamped these two from the raw write it just
+            # completed, so they travel in the argument that survives the
+            # strip; without it the row reaches the graph naming no capture,
+            # and both the correction write-through and the projection
+            # boundary lose the only link back.
+            capture_provenance=server_provenance_metadata(graph_metadata),
             project=project,
             memory_scope=request.memory_scope,
             scope_key=request.scope_key,

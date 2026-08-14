@@ -694,6 +694,31 @@ def memory_metadata_read_allowed(
     }
 
 
+def server_provenance_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Lift the server-stamped provenance out of a bag before it is stripped.
+
+    Provenance names the capture a graph row was projected from, which is how a
+    correction finds that row and how the projection boundary reads the
+    capture's current verdict. It is server-owned precisely because a caller
+    that could set it could nominate any row it can write to be retired by a
+    correction on an unrelated capture, so `stamp_memory_scope_metadata` drops
+    it from every incoming bag.
+
+    The capture pipeline is not an incoming bag. It stamps these keys itself
+    from the completed raw write, and the strip runs again downstream, so
+    without a channel that survives it the authoritative ids never reach the
+    row. This is that channel: read the keys here, pass them separately, and
+    re-attach them after the strip.
+    """
+
+    fields = metadata if isinstance(metadata, Mapping) else {}
+    return {
+        key: fields[key]
+        for key in MEMORY_PROVENANCE_METADATA_KEYS
+        if fields.get(key) not in (None, "")
+    }
+
+
 def stamp_memory_scope_metadata(
     metadata: Mapping[str, Any] | None,
     *,
@@ -749,5 +774,6 @@ __all__ = [
     "memory_row_project_id",
     "memory_scope_policy_key",
     "private_scope_granted_for",
+    "server_provenance_metadata",
     "stamp_memory_scope_metadata",
 ]
