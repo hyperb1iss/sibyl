@@ -889,13 +889,54 @@ async def test_native_entity_manager_update_uses_server_side_merge() -> None:
 
 
 @pytest.mark.asyncio
-async def test_two_writers_touching_disjoint_metadata_keys_both_survive() -> None:
+async def test_object_from_entries_resolves_a_duplicate_key_to_the_last_one() -> None:
+    """The upsert's attributes merge rests on this, and the docs do not state it.
+
+    SurrealQL has no object merge: no spread, no object addition, no
+    object::extend, and no object::remove. Closures cannot stand in either,
+    because a closure body here silently sees nothing but its own argument, so a
+    filter that reads an outer binding drops nothing and returns its input
+    unchanged. That leaves concatenating both entry lists and letting the later
+    entry win, which the object function reference documents as a conversion
+    without saying how duplicates resolve.
+
+    So it is pinned rather than assumed. If an engine ever resolves duplicates
+    to the first entry, this fails loudly here instead of silently inverting
+    every entity write into stale-value-wins.
+    """
+    client = SurrealGraphClient(group_id="org-from-entries", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+
+        merged = await client.execute_query(
+            """
+            RETURN object::from_entries(array::concat(
+                object::entries({ kept: "old", shared: "old" }),
+                object::entries({ shared: "new", added: "new" })
+            ));
+            """
+        )
+
+        assert merged == {"kept": "old", "shared": "new", "added": "new"}
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_a_later_write_does_not_erase_an_earlier_writers_keys() -> None:
     """A write must not discard the keys it never knew about.
 
     Reprojection and restore both rebuild an Entity from partial knowledge and
     upsert it. While that assigned the attributes bag wholesale, whichever of
     them wrote last erased the other's fields along with anything the original
     write had carried.
+
+    This pins the merge semantics, not concurrency. Embedded URLs are clamped to
+    a single connection, so writes here serialize no matter how they are
+    dispatched, and the writers are sequential to say so honestly. The semantics
+    are what make the concurrent case safe on a pooled server, because the merge
+    happens inside the statement and leaves no window between a read and its
+    write, but nothing in this file exercises that.
     """
     client = SurrealGraphClient(group_id="org-disjoint-writers", url="memory://")
     try:
@@ -920,10 +961,8 @@ async def test_two_writers_touching_disjoint_metadata_keys_both_survive() -> Non
                 metadata={"original_key": "written once", "alpha": "before", "beta": "before"},
             )
         )
-        await asyncio.gather(
-            manager.create_direct(_writer("alpha", "from writer a")),
-            manager.create_direct(_writer("beta", "from writer b")),
-        )
+        await manager.create_direct(_writer("alpha", "from writer a"))
+        await manager.create_direct(_writer("beta", "from writer b"))
 
         entity = await manager.get("decision_disjoint")
 
