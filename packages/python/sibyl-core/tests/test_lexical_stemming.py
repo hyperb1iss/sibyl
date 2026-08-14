@@ -90,8 +90,13 @@ async def test_python_normalization_matches_the_engine_analyzer() -> None:
     )
     assert graded == ["fastest", "strongest"]
 
-    # Accent folding matches the analyzer's ascii filter. The token patterns
-    # feeding this function are ASCII-only, so only a direct caller reaches it.
+    # normalize_keyword_token folds accents the way the analyzer's ascii filter
+    # does, checked here at the function boundary only. It is NOT end-to-end
+    # parity: every tokenizer feeding this function matches ASCII characters
+    # only, so an accented word is split before it ever arrives, and no
+    # production path reaches the branch below. Widening those patterns is a
+    # separate change; as it stands the text is under-tokenized rather than
+    # mismatched, which fails safe.
     accented = await db.query(
         "RETURN search::analyze('content_analyzer', $text);", {"text": "café naïve Zürich"}
     )
