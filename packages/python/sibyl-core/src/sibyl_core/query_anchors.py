@@ -107,6 +107,26 @@ def normalize_keyword_tokens(tokens: Iterable[str]) -> frozenset[str]:
     return frozenset(normalize_keyword_token(token) for token in tokens)
 
 
+# Snowball is inflectional and folds derivations onto the verb they came from,
+# so "completely" reaches complete, "useful" and "playful" reach use and play.
+# Those are adverbs and adjectives, not the act, and a sense group that admits
+# them fires on text about nothing of the kind.
+_DERIVATIONAL_SUFFIXES = ("ly", "ful")
+
+
+def is_derivational_form(token: str) -> bool:
+    return len(token) > 5 and token.endswith(_DERIVATIONAL_SUFFIXES)
+
+
+def sense_tokens_from_text(text: str) -> list[str]:
+    """Tokens eligible to match a verb-sense group, derivations excluded."""
+    return [
+        normalize_keyword_token(token)
+        for token in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9'-]{2,}", text.lower())
+        if not is_derivational_form(token)
+    ]
+
+
 def keyword_tokens_from_text(text: str) -> list[str]:
     return [
         normalize_keyword_token(token)

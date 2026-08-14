@@ -18,6 +18,7 @@ from sibyl_core.query_anchors import (
     keyword_tokens_from_text,
     normalize_keyword_token,
     normalize_keyword_tokens,
+    sense_tokens_from_text,
 )
 from sibyl_core.retrieval.fact_frames import (
     FactFrame,
@@ -428,7 +429,7 @@ _ACTION_EVIDENCE_GROUPS = (
     # query about deployment settings would read as an assembly action.
     normalize_keyword_tokens({"assemble", "build", "built", "install"}),
     normalize_keyword_tokens({"donate", "sell", "sold"}),
-    normalize_keyword_tokens({"fix", "repair", "replace", "service"}),
+    normalize_keyword_tokens({"fix", "repair", "replace"}),
     normalize_keyword_tokens({"attend", "join", "participate"}),
     normalize_keyword_tokens({"present"}),
     normalize_keyword_tokens({"volunteer"}),
@@ -746,7 +747,7 @@ def _query_frame_score(
 
 
 def _action_evidence_score(query: str, evidence_tokens: set[str]) -> float:
-    query_tokens = set(keyword_tokens_from_text(query))
+    query_tokens = set(sense_tokens_from_text(query))
     query_action_groups = [group for group in _ACTION_EVIDENCE_GROUPS if query_tokens & group]
     if not query_action_groups:
         return 0.0
