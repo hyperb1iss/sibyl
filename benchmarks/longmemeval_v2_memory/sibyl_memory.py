@@ -21,6 +21,8 @@ from typing import TypeVar
 from urllib.parse import urlparse
 from uuid import uuid4
 
+from functools import lru_cache
+
 import httpx
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1726,6 +1728,36 @@ def _query_ui_roles(query: str) -> tuple[str, ...]:
     return tuple(roles)
 
 
+@lru_cache(maxsize=8192)
+def _line_stems(line: str) -> tuple[str, ...]:
+    return tuple(normalize_keyword_token(token) for token in re.findall(r"[\w-]+", line))
+
+
+@lru_cache(maxsize=8192)
+def _phrase_stems(phrase: str) -> tuple[str, ...]:
+    return tuple(normalize_keyword_token(token) for token in re.findall(r"[\w-]+", phrase))
+
+
+def _phrase_matches_line(phrase: str, line: str) -> bool:
+    """Literal match first, then the same phrase compared stem by stem.
+
+    Focus phrases are folded, and a fold is not a substring of what it covers
+    when Snowball rewrites a terminal y: "categori" is absent from "category".
+    Comparing whole tokens reaches both spellings, and the literal check keeps
+    every match the substring probe already made.
+    """
+    if phrase in line:
+        return True
+    wanted = _phrase_stems(phrase)
+    if not wanted:
+        return False
+    haystack = _line_stems(line)
+    span = len(wanted)
+    return any(
+        haystack[start : start + span] == wanted for start in range(len(haystack) - span + 1)
+    )
+
+
 def _query_structured_signal(query: str, text: str) -> tuple[int, int, int, int, int]:
     focus_phrases = tuple(phrase.casefold() for phrase in _query_focus_phrases(query))
     roles = _query_ui_roles(query)
@@ -1743,7 +1775,9 @@ def _query_structured_signal(query: str, text: str) -> tuple[int, int, int, int,
     matched_phrase_priority = 0
     for phrase_index, phrase in enumerate(focus_phrases, start=1):
         phrase_line_indices = {
-            line_index for line_index, line in enumerate(lines) if phrase in line
+            line_index
+            for line_index, line in enumerate(lines)
+            if _phrase_matches_line(phrase, line)
         }
         nearby_role_lines = {
             role_line_index
@@ -1995,7 +2029,7 @@ def _query_slice_candidates(
         window_starts = set(range(body_start, state_end, stride_lines))
         for line_index in range(body_start, state_end):
             line = lines[line_index].casefold()
-            if not any(phrase in line for phrase in focus_phrases):
+            if not any(_phrase_matches_line(phrase, line) for phrase in focus_phrases):
                 continue
             anchored_start = max(
                 body_start,
@@ -2055,7 +2089,7 @@ def _query_structured_section_candidates(
     candidates: list[dict[str, object]] = []
     for focus_line in range(body_start, state_end):
         normalized_line = lines[focus_line].casefold()
-        if not any(phrase in normalized_line for phrase in focus_phrases):
+        if not any(_phrase_matches_line(phrase, normalized_line) for phrase in focus_phrases):
             continue
         section_marker = re.search(
             r"\b(?:button|group|heading|legend|list|menu|region|tablist)\b",
