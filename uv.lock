@@ -2722,7 +2722,7 @@ wheels = [
 
 [[package]]
 name = "pydantic-ai-slim"
-version = "2.29.0"
+version = "2.30.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2734,9 +2734,9 @@ dependencies = [
     { name = "pydantic-graph" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6d/47/9ea38824b27efae7d19a34e2288697e0a84aa5cdd8c119ac85d030395ea3/pydantic_ai_slim-2.29.0.tar.gz", hash = "sha256:a5de25ebf8cf50187fe71be101e318e18e8ed469e5d8d1551d92b81ded1e3e99", size = 1197221, upload-time = "2026-08-13T04:16:29.027Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6b/79/3f171b7e52d01d214110d4aca35376f05507f7ac3db87461ae5bb1eb4baa/pydantic_ai_slim-2.30.0.tar.gz", hash = "sha256:d7619f28f11b5a035047229bbdf67047fc755c27b01be5d6f36672be117625b7", size = 1212033, upload-time = "2026-08-14T03:17:03.521Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a1/42/fda259cd11f88eb0ce7e54ee6a29011c0dd6a0af474403a2bb32d5dddb79/pydantic_ai_slim-2.29.0-py3-none-any.whl", hash = "sha256:cb5f5b7a941715b7f8894baae48ac178a603bdcf729726535964eaec25b07eb1", size = 1414034, upload-time = "2026-08-13T04:16:22.19Z" },
+    { url = "https://files.pythonhosted.org/packages/8c/7e/ef2eb753013b0f128a0d1f2aa8e9fd17ab1d918cd7bb0897829a64117242/pydantic_ai_slim-2.30.0-py3-none-any.whl", hash = "sha256:0125bd525f0ff24127ff62c9da9b7a530b58110ce5c84fc8a1dce5c35e7565bd", size = 1429302, upload-time = "2026-08-14T03:16:56.267Z" },
 ]
 
 [package.optional-dependencies]
@@ -2809,7 +2809,7 @@ wheels = [
 
 [[package]]
 name = "pydantic-graph"
-version = "2.29.0"
+version = "2.30.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2818,9 +2818,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/99/a4/364964ff4ca90fac651ffc969e04d75941389a39009fa2e950379bbcec93/pydantic_graph-2.29.0.tar.gz", hash = "sha256:078d2d7ab53ffb695e1a66c2a741880c88fef36611004736bf7313f8a5ec4465", size = 45180, upload-time = "2026-08-13T04:16:30.94Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/b8/557b040138ae5d5fdf8afec655e0e9cc0493ed674221dd301e0466245053/pydantic_graph-2.30.0.tar.gz", hash = "sha256:9bf43c1e2785598399b4679a2837173c0e3018c8167d86c2f99713685e4ba845", size = 45177, upload-time = "2026-08-14T03:17:05.894Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6f/d5/9a7e31a4895904c5d81989069630c47b7ef28d07256ae7ce1b8cda9964d1/pydantic_graph-2.29.0-py3-none-any.whl", hash = "sha256:afc81688c9abca9e93c4f7b81dd1112e8a7a8d4d41514413bd8d2c674bd2dfa1", size = 52661, upload-time = "2026-08-13T04:16:24.994Z" },
+    { url = "https://files.pythonhosted.org/packages/a2/76/7afc039ff5e34a08c6acc862818e1a7ee389862c892fcfb49b4e4c0d1d50/pydantic_graph-2.30.0-py3-none-any.whl", hash = "sha256:8282c1091fc03f2d4f40e83ab7ca09e3c117df6b645bbd6cd433561a8064e361", size = 52661, upload-time = "2026-08-14T03:16:59.508Z" },
 ]
 
 [[package]]
@@ -3565,8 +3565,8 @@ requires-dist = [
     { name = "mistune", marker = "extra == 'runtime'", specifier = ">=3.3.4" },
     { name = "packaging", specifier = ">=26.0" },
     { name = "pydantic", specifier = ">=2.0" },
-    { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], marker = "extra == 'llm'", specifier = ">=2.26.0,<3" },
-    { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], marker = "extra == 'runtime'", specifier = ">=2.26.0,<3" },
+    { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], marker = "extra == 'llm'", specifier = ">=2.30.0,<3" },
+    { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], marker = "extra == 'runtime'", specifier = ">=2.30.0,<3" },
     { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "pyjwt", specifier = ">=2.10" },
     { name = "python-louvain", marker = "extra == 'graphrag'", specifier = ">=0.16" },
@@ -3583,7 +3583,7 @@ provides-extras = ["crawler", "embeddings", "graph", "graphrag", "llm", "reranki
 [package.metadata.requires-dev]
 dev = [
     { name = "numpy", specifier = ">=2.5.1" },
-    { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], specifier = ">=2.26.0,<3" },
+    { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], specifier = ">=2.30.0,<3" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
