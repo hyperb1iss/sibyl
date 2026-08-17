@@ -37,7 +37,7 @@ dependencies = [
     # Core Framework
     "fastapi>=0.141.1",
     # mcp 2.0 removed FastMCP (the server surface sibyl builds on); migration tracked in a repo issue.
-    "mcp>=1.29.0,<2",
+    "mcp>=2.0.0,<3",
     "starlette>=1.4.1",
     "uvicorn[standard]>=0.52.1",
     # Database (server-only)
