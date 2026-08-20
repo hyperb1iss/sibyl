@@ -18,7 +18,7 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 from sibyl.auth.context import AuthContext
-from sibyl.server import McpContext
+from sibyl.mcp_tools.context import McpContext
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole
 
 DEFAULT_ORG_ID = UUID("00000000-0000-0000-0000-000000000111")

@@ -7,25 +7,33 @@ from uuid import UUID, uuid4
 
 import pytest
 
-import sibyl.server as server_module
 from sibyl.auth.api_key_common import api_key_memory_scope_key
-from sibyl.server import (
+from sibyl.mcp_tools import context as mcp_context_module, management as management_module
+from sibyl.mcp_tools.context import (
     McpContext,
-    _add_mcp_entity,
+    get_accessible_projects as _get_accessible_projects,
+    get_context as _get_mcp_context,
+    require_context as _require_mcp_context,
+    resolve_project_scope as _resolve_mcp_project_scope,
+)
+from sibyl.mcp_tools.management import (
     _authorize_mcp_manage_action,
-    _authorize_mcp_memory_write,
-    _compile_mcp_context_pack,
-    _get_accessible_projects,
-    _get_mcp_context,
     _manage_mcp_action,
     _manage_memory_correction,
     _manage_workflow_transition,
+)
+from sibyl.mcp_tools.memory import (
+    _add_mcp_entity,
     _reflect_mcp_memory,
     _remember_mcp_memory,
-    _require_mcp_context,
-    _require_owner_mcp_context,
-    _resolve_mcp_capture_links,
-    _resolve_mcp_project_scope,
+)
+from sibyl.mcp_tools.observability import require_owner_context as _require_owner_mcp_context
+from sibyl.mcp_tools.policy import (
+    authorize_memory_write_request as _authorize_mcp_memory_write,
+    resolve_capture_links as _resolve_mcp_capture_links,
+)
+from sibyl.mcp_tools.retrieval import compile_context_pack as _compile_mcp_context_pack
+from sibyl.mcp_tools.synthesis import (
     _synthesis_mcp_draft,
     _synthesis_mcp_plan,
     _synthesis_mcp_verify,
@@ -85,7 +93,7 @@ async def test_accessible_projects_intersects_with_api_key_scope() -> None:
     )
     resolve_projects = AsyncMock(return_value={"project-b"})
 
-    with patch("sibyl.server.resolve_accessible_project_graph_ids", resolve_projects):
+    with patch("sibyl.mcp_tools.context.resolve_accessible_project_graph_ids", resolve_projects):
         result = await _get_accessible_projects(ctx)
 
     assert result == {"project-b"}
@@ -101,7 +109,7 @@ async def test_accessible_projects_intersects_with_api_key_scope() -> None:
 async def test_accessible_projects_returns_empty_when_user_disappears() -> None:
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["api:read"])
     with patch(
-        "sibyl.server.resolve_accessible_project_graph_ids",
+        "sibyl.mcp_tools.context.resolve_accessible_project_graph_ids",
         AsyncMock(return_value=set()),
     ):
         result = await _get_accessible_projects(ctx)
@@ -113,7 +121,9 @@ async def test_accessible_projects_returns_empty_when_user_disappears() -> None:
 async def test_resolve_mcp_project_scope_filters_unscoped_reads() -> None:
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
 
-    with patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})):
+    with patch(
+        "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+    ):
         result = await _resolve_mcp_project_scope(ctx, project=None)
 
     assert result == {"project-a"}
@@ -123,7 +133,9 @@ async def test_resolve_mcp_project_scope_filters_unscoped_reads() -> None:
 async def test_resolve_mcp_project_scope_allows_explicit_accessible_project() -> None:
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
 
-    with patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})):
+    with patch(
+        "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+    ):
         result = await _resolve_mcp_project_scope(ctx, project="project-a")
 
     assert result == {"project-a"}
@@ -133,7 +145,7 @@ async def test_resolve_mcp_project_scope_allows_explicit_accessible_project() ->
 async def test_resolve_mcp_project_scope_returns_explicit_project_for_unfiltered_context() -> None:
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
 
-    with patch("sibyl.server._get_accessible_projects", AsyncMock(return_value=None)):
+    with patch("sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value=None)):
         result = await _resolve_mcp_project_scope(ctx, project="project-a")
 
     assert result == {"project-a"}
@@ -144,7 +156,9 @@ async def test_resolve_mcp_project_scope_rejects_inaccessible_project() -> None:
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
 
     with (
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         pytest.raises(ValueError, match="Project access denied: project-b"),
     ):
         await _resolve_mcp_project_scope(ctx, project="project-b")
@@ -155,7 +169,9 @@ async def test_resolve_mcp_project_scope_requires_project_for_restricted_writes(
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
 
     with (
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         pytest.raises(ValueError, match="Project is required"),
     ):
         await _resolve_mcp_project_scope(
@@ -171,9 +187,9 @@ async def test_compile_mcp_context_pack_audits_render_receipt() -> None:
     compile_context = AsyncMock(return_value=_context_pack())
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
         patch(
-            "sibyl.server._resolve_mcp_project_scope",
+            "sibyl.mcp_tools.context.resolve_project_scope",
             AsyncMock(return_value={"project-a"}),
         ) as resolve_scope,
         patch("sibyl_core.tools.core.compile_context", compile_context),
@@ -224,8 +240,10 @@ async def test_compile_mcp_context_pack_denies_api_key_memory_scope_mismatch() -
     )
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._resolve_mcp_project_scope", AsyncMock(return_value={"project-b"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.resolve_project_scope", AsyncMock(return_value={"project-b"})
+        ),
         pytest.raises(ValueError, match="api_key_memory_space_denied"),
     ):
         await _compile_mcp_context_pack(
@@ -252,9 +270,9 @@ async def test_compile_mcp_context_pack_allows_unscoped_project_memory_grant() -
     compile_context = AsyncMock(return_value=_context_pack())
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
         patch(
-            "sibyl.server._resolve_mcp_project_scope",
+            "sibyl.mcp_tools.context.resolve_project_scope",
             AsyncMock(return_value={"project-a", "project-b"}),
         ) as resolve_scope,
         patch("sibyl_core.tools.core.compile_context", compile_context),
@@ -287,8 +305,10 @@ async def test_synthesis_mcp_plan_scopes_accessible_projects() -> None:
     synthesis_plan = AsyncMock(return_value={"run_id": "synthesis:1"})
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         patch("sibyl_core.tools.core.synthesis_plan", synthesis_plan),
     ):
         result = await _synthesis_mcp_plan(
@@ -328,8 +348,10 @@ async def test_synthesis_mcp_verify_returns_verified_run() -> None:
     synthesis_verify = AsyncMock(return_value={"verification": {"status": "pass"}})
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         patch("sibyl_core.tools.core.synthesis_verify", synthesis_verify),
     ):
         result = await _synthesis_mcp_verify(goal="Verify roadmap", project="project-a")
@@ -347,8 +369,10 @@ async def test_synthesis_mcp_draft_authorizes_remembered_artifact() -> None:
     )
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         patch("sibyl_core.tools.core.synthesis_draft", synthesis_draft),
     ):
         result = await _synthesis_mcp_draft(
@@ -378,8 +402,10 @@ async def test_synthesis_mcp_draft_denies_inaccessible_remember_scope() -> None:
     synthesis_draft = AsyncMock()
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         patch("sibyl_core.tools.core.synthesis_draft", synthesis_draft),
         pytest.raises(ValueError, match="Project access denied: project-b"),
     ):
@@ -403,15 +429,17 @@ async def test_remember_mcp_memory_scopes_project_metadata() -> None:
     )
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         patch("sibyl_core.tools.core.add", add),
         patch("sibyl_core.services.surreal_content.remember_raw_memory", remember_raw),
         patch(
             "sibyl_core.tools.core.explore",
             AsyncMock(return_value=SimpleNamespace(entities=[])),
         ),
-        patch("sibyl.server._validate_mcp_relationship_targets", AsyncMock()),
+        patch("sibyl.mcp_tools.policy.validate_relationship_targets_for_caller", AsyncMock()),
     ):
         result = await _remember_mcp_memory(
             title="Use scoped memory",
@@ -533,10 +561,12 @@ async def test_remember_mcp_memory_replays_idempotent_receipt() -> None:
     }
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         patch("sibyl_core.tools.core.add", add),
-        patch("sibyl.server._validate_mcp_relationship_targets", AsyncMock()),
+        patch("sibyl.mcp_tools.policy.validate_relationship_targets_for_caller", AsyncMock()),
         patch("sibyl_core.services.surreal_content.remember_raw_memory", remember_raw),
         patch(
             "sibyl_core.tools.core.explore",
@@ -567,14 +597,16 @@ async def test_remember_mcp_memory_replays_idempotent_receipt() -> None:
     remember_raw.reset_mock()
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         patch(
             "sibyl.persistence.content_runtime.get_api_idempotency_record",
             AsyncMock(return_value=saved_record),
         ),
         patch("sibyl_core.tools.core.add", add),
-        patch("sibyl.server._validate_mcp_relationship_targets", AsyncMock()),
+        patch("sibyl.mcp_tools.policy.validate_relationship_targets_for_caller", AsyncMock()),
         patch("sibyl_core.services.surreal_content.remember_raw_memory", remember_raw),
     ):
         replayed = await _remember_mcp_memory(**kwargs)
@@ -674,8 +706,8 @@ async def test_authorize_mcp_team_correction_resolves_team_scope_from_ids() -> N
     resolve_teams = AsyncMock(return_value={"team-a"})
 
     with (
-        patch("sibyl.server.get_raw_memory", AsyncMock(return_value=memory)),
-        patch("sibyl.server.resolve_accessible_team_scope_keys", resolve_teams),
+        patch("sibyl.mcp_tools.management.get_raw_memory", AsyncMock(return_value=memory)),
+        patch("sibyl.mcp_tools.management.resolve_accessible_team_scope_keys", resolve_teams),
     ):
         decision = await _authorize_mcp_manage_action(
             ctx=ctx,
@@ -724,10 +756,12 @@ async def test_add_mcp_entity_scopes_project_metadata() -> None:
     metadata = {"source": "test"}
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         patch("sibyl_core.tools.core.add", add),
-        patch("sibyl.server._validate_mcp_relationship_targets", AsyncMock()),
+        patch("sibyl.mcp_tools.policy.validate_relationship_targets_for_caller", AsyncMock()),
     ):
         result = await _add_mcp_entity(
             title="Wire MCP add policy",
@@ -792,10 +826,10 @@ async def test_add_mcp_entity_creates_project_record_for_projects() -> None:
     add = AsyncMock(return_value={"success": True, "id": "project_123"})
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value=None)),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value=None)),
         patch("sibyl_core.tools.core.add", add),
-        patch("sibyl.server.create_project_record", AsyncMock()) as create_project,
+        patch("sibyl.mcp_tools.memory.create_project_record", AsyncMock()) as create_project,
     ):
         result = await _add_mcp_entity(
             title="Sibyl",
@@ -833,8 +867,10 @@ async def test_add_mcp_entity_requires_project_for_restricted_credentials() -> N
     add = AsyncMock()
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         patch("sibyl_core.tools.core.add", add),
         pytest.raises(ValueError, match="Project is required"),
     ):
@@ -865,8 +901,10 @@ async def test_add_mcp_entity_clamps_conflict_threshold_floor_for_mcp_callers() 
     add = AsyncMock(return_value={"success": True, "id": "task_123"})
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         patch("sibyl_core.tools.core.add", add),
     ):
         await _add_mcp_entity(
@@ -902,7 +940,7 @@ async def test_add_mcp_entity_denies_missing_actor_with_policy_reason() -> None:
     add = AsyncMock()
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
         patch("sibyl_core.tools.core.add", add),
         pytest.raises(ValueError, match="principal_mismatch"),
     ):
@@ -963,8 +1001,10 @@ async def test_manage_mcp_complete_task_routes_through_workflow_service() -> Non
     save_idempotency = AsyncMock(side_effect=lambda _session, *, record: record)
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         patch(
             "sibyl_core.services.graph.get_surreal_graph_runtime",
             AsyncMock(return_value=runtime),
@@ -1041,9 +1081,13 @@ async def test_manage_mcp_complete_task_routes_through_workflow_service() -> Non
     transition.reset_mock()
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
-        patch("sibyl.server._authorize_mcp_manage_action", AsyncMock(return_value=None)),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
+        patch(
+            "sibyl.mcp_tools.management._authorize_mcp_manage_action", AsyncMock(return_value=None)
+        ),
         patch(
             "sibyl.persistence.content_runtime.get_api_idempotency_record",
             AsyncMock(return_value=saved_record),
@@ -1089,12 +1133,12 @@ async def test_manage_memory_correction_returns_audited_receipt() -> None:
     )
 
     with (
-        patch("sibyl.server.get_raw_memory", AsyncMock(return_value=memory)),
+        patch("sibyl.mcp_tools.management.get_raw_memory", AsyncMock(return_value=memory)),
         patch(
             "sibyl_core.services.memory.apply_memory_correction",
             AsyncMock(return_value=result),
         ) as apply_correction,
-        patch("sibyl.server.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.mcp_tools.management.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await _manage_memory_correction(
             ctx=ctx,
@@ -1160,8 +1204,10 @@ async def test_manage_mcp_complete_task_records_cited_memories() -> None:
     )
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         patch(
             "sibyl_core.services.graph.get_surreal_graph_runtime",
             AsyncMock(return_value=runtime),
@@ -1232,8 +1278,8 @@ async def test_manage_mcp_project_id_action_allows_admin_scope() -> None:
     manage = AsyncMock(return_value={"success": True, "action": "prioritize"})
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value=None)),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value=None)),
         patch("sibyl_core.services.graph.get_surreal_graph_runtime", AsyncMock()) as runtime,
         patch("sibyl_core.tools.manage.manage", manage),
     ):
@@ -1273,8 +1319,10 @@ async def test_manage_mcp_action_denies_inaccessible_task_project() -> None:
     runtime = SimpleNamespace(entity_manager=entity_manager)
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         patch(
             "sibyl_core.services.graph.get_surreal_graph_runtime",
             AsyncMock(return_value=runtime),
@@ -1306,7 +1354,7 @@ async def test_manage_mcp_action_denies_missing_actor_with_policy_reason() -> No
     runtime = SimpleNamespace(entity_manager=entity_manager)
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
         patch(
             "sibyl_core.services.graph.get_surreal_graph_runtime",
             AsyncMock(return_value=runtime),
@@ -1333,12 +1381,14 @@ async def test_remember_mcp_memory_links_single_active_project_task() -> None:
     explore = AsyncMock(return_value=SimpleNamespace(entities=[SimpleNamespace(id="task_active")]))
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         patch("sibyl_core.tools.core.add", add),
         patch("sibyl_core.services.surreal_content.remember_raw_memory", remember_raw),
         patch("sibyl_core.tools.core.explore", explore),
-        patch("sibyl.server._validate_mcp_relationship_targets", AsyncMock()),
+        patch("sibyl.mcp_tools.policy.validate_relationship_targets_for_caller", AsyncMock()),
     ):
         await _remember_mcp_memory(
             title="Use scoped memory",
@@ -1479,10 +1529,12 @@ async def test_reflect_mcp_memory_links_single_active_task_when_persisting() -> 
     explore = AsyncMock(return_value=SimpleNamespace(entities=[SimpleNamespace(id="task_active")]))
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         patch("sibyl_core.tools.core.reflect_memory", reflect_memory),
-        patch("sibyl.server._validate_mcp_relationship_targets", AsyncMock()),
+        patch("sibyl.mcp_tools.policy.validate_relationship_targets_for_caller", AsyncMock()),
         patch("sibyl_core.tools.core.explore", explore),
         patch("sibyl.api.context_audit.log_memory_audit_event", AsyncMock()) as audit,
     ):
@@ -1536,8 +1588,10 @@ async def test_reflect_mcp_memory_records_cited_memories() -> None:
     )
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         patch("sibyl_core.tools.core.reflect_memory", AsyncMock(return_value=pack)),
         patch(
             "sibyl_core.tools.core.explore", AsyncMock(return_value=SimpleNamespace(entities=[]))
@@ -1577,8 +1631,10 @@ async def test_reflect_mcp_memory_persist_enforces_api_key_memory_scope() -> Non
     )
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-b"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-b"})
+        ),
         patch("sibyl_core.tools.core.reflect_memory", AsyncMock()) as reflect_memory,
         pytest.raises(ValueError, match="api_key_memory_space_denied"),
     ):
@@ -1602,9 +1658,13 @@ async def test_get_mcp_context_uses_legacy_api_key_auth() -> None:
     )
 
     with (
-        patch("sibyl.server.get_access_token", return_value=SimpleNamespace(token=raw)),
-        patch("sibyl.server.authenticate_api_key", AsyncMock(return_value=auth)) as authenticate,
-        patch("sibyl.server.resolve_org_role", AsyncMock(return_value="member")) as resolve_role,
+        patch("sibyl.mcp_tools.context.get_access_token", return_value=SimpleNamespace(token=raw)),
+        patch(
+            "sibyl.mcp_tools.context.authenticate_api_key", AsyncMock(return_value=auth)
+        ) as authenticate,
+        patch(
+            "sibyl.mcp_tools.context.resolve_org_role", AsyncMock(return_value="member")
+        ) as resolve_role,
     ):
         result = await _get_mcp_context()
 
@@ -1628,7 +1688,7 @@ async def test_get_mcp_context_uses_legacy_api_key_auth() -> None:
 async def test_require_mcp_context_allows_current_writer_roles(role: str) -> None:
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), org_role=role)
 
-    with patch("sibyl.server._get_mcp_context", AsyncMock(return_value=ctx)):
+    with patch("sibyl.mcp_tools.context.get_context", AsyncMock(return_value=ctx)):
         assert await _require_mcp_context(write=True) is ctx
 
 
@@ -1638,7 +1698,7 @@ async def test_require_mcp_context_denies_non_writer_roles(role: str | None) -> 
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), org_role=role)
 
     with (
-        patch("sibyl.server._get_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.mcp_tools.context.get_context", AsyncMock(return_value=ctx)),
         pytest.raises(ValueError, match="organization_write_forbidden"),
     ):
         await _require_mcp_context(write=True)
@@ -1673,13 +1733,15 @@ async def test_remember_refuses_hidden_target_before_reservation_or_write(target
     add = AsyncMock()
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         patch(
             "sibyl_core.services.graph.get_surreal_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
-        patch("sibyl.server.reserve_idempotency_record", reserve),
+        patch("sibyl.mcp_tools.memory.reserve_idempotency_record", reserve),
         patch("sibyl_core.services.surreal_content.remember_raw_memory", remember_raw),
         patch("sibyl_core.tools.core.add", add),
         pytest.raises(ValueError, match="Related entity not found: decision_hidden"),
@@ -1709,7 +1771,7 @@ async def test_get_mcp_context_resolves_org_role_live_ignoring_stale_claim() -> 
     raw = "jwt.with.stale.owner.claim"
 
     with (
-        patch("sibyl.server.get_access_token", return_value=SimpleNamespace(token=raw)),
+        patch("sibyl.mcp_tools.context.get_access_token", return_value=SimpleNamespace(token=raw)),
         patch(
             "sibyl.auth.jwt.verify_access_token",
             return_value={
@@ -1720,7 +1782,7 @@ async def test_get_mcp_context_resolves_org_role_live_ignoring_stale_claim() -> 
             },
         ),
         patch(
-            "sibyl.server.resolve_org_role",
+            "sibyl.mcp_tools.context.resolve_org_role",
             AsyncMock(return_value="member"),
         ) as resolve_role,
     ):
@@ -1740,7 +1802,7 @@ async def test_get_mcp_context_drops_role_when_membership_revoked() -> None:
     raw = "jwt.with.stale.admin.claim"
 
     with (
-        patch("sibyl.server.get_access_token", return_value=SimpleNamespace(token=raw)),
+        patch("sibyl.mcp_tools.context.get_access_token", return_value=SimpleNamespace(token=raw)),
         patch(
             "sibyl.auth.jwt.verify_access_token",
             return_value={
@@ -1751,7 +1813,7 @@ async def test_get_mcp_context_drops_role_when_membership_revoked() -> None:
             },
         ),
         patch(
-            "sibyl.server.resolve_org_role",
+            "sibyl.mcp_tools.context.resolve_org_role",
             AsyncMock(return_value=None),
         ) as resolve_role,
     ):
@@ -1768,7 +1830,7 @@ async def test_require_owner_mcp_context_uses_legacy_owner_check() -> None:
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()))
 
     with patch(
-        "sibyl.server.has_owner_membership",
+        "sibyl.mcp_tools.observability.has_owner_membership",
         AsyncMock(return_value=True),
     ) as has_owner:
         await _require_owner_mcp_context(ctx)
@@ -1782,7 +1844,7 @@ async def test_require_owner_mcp_context_rejects_non_owner() -> None:
 
     with (
         patch(
-            "sibyl.server.has_owner_membership",
+            "sibyl.mcp_tools.observability.has_owner_membership",
             AsyncMock(return_value=False),
         ),
         pytest.raises(ValueError, match="OWNER role required for log access"),
@@ -1802,8 +1864,8 @@ async def test_add_mcp_entity_scopes_a_projectless_add_to_the_caller() -> None:
     add = AsyncMock(return_value={"success": True, "id": "episode_123"})
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value=None)),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value=None)),
         patch("sibyl_core.tools.core.add", add),
     ):
         await _add_mcp_entity(
@@ -1836,10 +1898,10 @@ async def test_add_mcp_entity_leaves_work_items_unscoped() -> None:
     add = AsyncMock(return_value={"success": True, "id": "project_123"})
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value=None)),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value=None)),
         patch("sibyl_core.tools.core.add", add),
-        patch("sibyl.server.create_project_record", AsyncMock()),
+        patch("sibyl.mcp_tools.memory.create_project_record", AsyncMock()),
     ):
         await _add_mcp_entity(
             title="Sibyl",
@@ -1875,8 +1937,10 @@ async def test_add_mcp_entity_leaves_a_project_task_unscoped() -> None:
     add = AsyncMock(return_value={"success": True, "id": "task_123"})
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         patch("sibyl_core.tools.core.add", add),
     ):
         await _add_mcp_entity(
@@ -1906,10 +1970,10 @@ async def test_add_mcp_entity_leaves_a_project_task_unscoped() -> None:
 def _mcp_tool(name: str):
     from mcp.server import MCPServer
 
-    from sibyl.server import _register_tools
+    from sibyl.mcp_tools.registration import register_tools
 
     mcp = MCPServer("scope-tests")
-    _register_tools(mcp)
+    register_tools(mcp)
     return mcp._tool_manager.get_tool(name).fn
 
 
@@ -1931,8 +1995,11 @@ async def test_mcp_explore_authorizes_graph_navigation_as_the_caller() -> None:
     )
 
     with (
-        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects",
+            AsyncMock(return_value={"project-a"}),
+        ),
         patch("sibyl_core.tools.core.explore", core_explore),
     ):
         await _mcp_tool("explore")(mode="list", types=["decision"])
@@ -2048,17 +2115,17 @@ async def test_manage_dispatch_does_not_mutate_a_foreign_private_target() -> Non
                 "sibyl_core.services.graph.get_surreal_graph_runtime",
                 AsyncMock(return_value=runtime),
             ),
-            patch.object(server_module, "_require_mcp_context", AsyncMock(return_value=ctx)),
+            patch.object(mcp_context_module, "require_context", AsyncMock(return_value=ctx)),
             patch.object(
-                server_module,
-                "_get_accessible_projects",
+                mcp_context_module,
+                "get_accessible_projects",
                 AsyncMock(return_value={"project-shared"}),
             ),
-            patch.object(server_module, "_manage_workflow_transition", _spy_transition),
-            patch.object(server_module, "reserve_idempotency_record", _spy_reserve),
+            patch.object(management_module, "_manage_workflow_transition", _spy_transition),
+            patch.object(management_module, "reserve_idempotency_record", _spy_reserve),
         ):
             try:
-                await server_module._manage_mcp_action(
+                await management_module._manage_mcp_action(
                     action="complete_task",
                     entity_id="task_target",
                     data={"idempotency_key": idempotency_key} if idempotency_key else {},

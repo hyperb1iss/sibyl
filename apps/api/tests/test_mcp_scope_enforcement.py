@@ -14,16 +14,18 @@ from sibyl.auth.mcp_auth import (
     mcp_scopes_allow,
 )
 from sibyl.auth.mcp_oauth import SibylMcpOAuthProvider
-from sibyl.server import (
+from sibyl.mcp_tools.context import (
     McpContext,
-    _add_mcp_entity,
-    _get_mcp_context,
-    _manage_mcp_action,
-    _optional_mcp_org_id,
-    _remember_mcp_memory,
-    _require_mcp_context,
-    _synthesis_mcp_draft,
+    get_context as _get_mcp_context,
+    optional_org_id as _optional_mcp_org_id,
+    require_context as _require_mcp_context,
 )
+from sibyl.mcp_tools.management import _manage_mcp_action
+from sibyl.mcp_tools.memory import (
+    _add_mcp_entity,
+    _remember_mcp_memory,
+)
+from sibyl.mcp_tools.synthesis import _synthesis_mcp_draft
 
 
 def _api_key_ctx(scopes: list[str] | None) -> McpContext:
@@ -133,7 +135,7 @@ def test_insufficient_scope_message_names_the_missing_scope() -> None:
 async def test_require_mcp_context_refuses_write_for_read_only_key() -> None:
     ctx = _api_key_ctx(["mcp", "api:read"])
 
-    with patch("sibyl.server._get_mcp_context", AsyncMock(return_value=ctx)):
+    with patch("sibyl.mcp_tools.context.get_context", AsyncMock(return_value=ctx)):
         assert await _require_mcp_context() is ctx
         with pytest.raises(ValueError, match="api:write"):
             await _require_mcp_context(write=True)
@@ -143,7 +145,7 @@ async def test_require_mcp_context_refuses_write_for_read_only_key() -> None:
 async def test_require_mcp_context_allows_write_for_legacy_mcp_key() -> None:
     ctx = _api_key_ctx(["mcp"])
 
-    with patch("sibyl.server._get_mcp_context", AsyncMock(return_value=ctx)):
+    with patch("sibyl.mcp_tools.context.get_context", AsyncMock(return_value=ctx)):
         assert await _require_mcp_context(write=True) is ctx
 
 
@@ -154,7 +156,7 @@ async def test_require_mcp_context_keeps_legacy_scopeless_keys_working(
 ) -> None:
     ctx = _api_key_ctx(scopes)
 
-    with patch("sibyl.server._get_mcp_context", AsyncMock(return_value=ctx)):
+    with patch("sibyl.mcp_tools.context.get_context", AsyncMock(return_value=ctx)):
         assert await _require_mcp_context() is ctx
         assert await _require_mcp_context(write=True) is ctx
 
@@ -163,7 +165,7 @@ async def test_require_mcp_context_keeps_legacy_scopeless_keys_working(
 async def test_require_mcp_context_allows_write_for_granular_write_key() -> None:
     ctx = _api_key_ctx(["mcp", "api:write"])
 
-    with patch("sibyl.server._get_mcp_context", AsyncMock(return_value=ctx)):
+    with patch("sibyl.mcp_tools.context.get_context", AsyncMock(return_value=ctx)):
         assert await _require_mcp_context(write=True) is ctx
 
 
@@ -174,7 +176,7 @@ async def test_require_mcp_context_refuses_keys_without_mcp_scope(
 ) -> None:
     ctx = _api_key_ctx(scopes)
 
-    with patch("sibyl.server._get_mcp_context", AsyncMock(return_value=ctx)):
+    with patch("sibyl.mcp_tools.context.get_context", AsyncMock(return_value=ctx)):
         with pytest.raises(ValueError, match="Expected mcp"):
             await _require_mcp_context()
         with pytest.raises(ValueError, match="Expected mcp"):
@@ -190,7 +192,7 @@ async def test_require_mcp_context_leaves_user_sessions_ungated() -> None:
         org_role="member",
     )
 
-    with patch("sibyl.server._get_mcp_context", AsyncMock(return_value=ctx)):
+    with patch("sibyl.mcp_tools.context.get_context", AsyncMock(return_value=ctx)):
         assert await _require_mcp_context(write=True) is ctx
 
 
@@ -201,7 +203,7 @@ async def test_remember_refuses_read_only_key_without_writing() -> None:
     remember_raw = AsyncMock()
 
     with (
-        patch("sibyl.server._get_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.mcp_tools.context.get_context", AsyncMock(return_value=ctx)),
         patch("sibyl_core.tools.core.add", add),
         patch("sibyl_core.services.surreal_content.remember_raw_memory", remember_raw),
         pytest.raises(ValueError, match="api:write"),
@@ -226,7 +228,7 @@ async def test_add_refuses_read_only_key_without_writing() -> None:
     add = AsyncMock()
 
     with (
-        patch("sibyl.server._get_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.mcp_tools.context.get_context", AsyncMock(return_value=ctx)),
         patch("sibyl_core.tools.core.add", add),
         pytest.raises(ValueError, match="api:write"),
     ):
@@ -257,7 +259,7 @@ async def test_manage_refuses_read_only_key_without_writing() -> None:
     manage = AsyncMock()
 
     with (
-        patch("sibyl.server._get_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.mcp_tools.context.get_context", AsyncMock(return_value=ctx)),
         patch("sibyl_core.tools.manage.manage", manage),
         pytest.raises(ValueError, match="api:write"),
     ):
@@ -272,9 +274,9 @@ async def test_manage_refuses_read_only_key_when_idempotency_key_is_present() ->
     manage = AsyncMock()
 
     with (
-        patch("sibyl.server._get_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.mcp_tools.context.get_context", AsyncMock(return_value=ctx)),
         patch("sibyl_core.tools.manage.manage", manage),
-        patch("sibyl.server.idempotency_lock") as lock,
+        patch("sibyl.mcp_tools.idempotency.idempotency_lock") as lock,
         pytest.raises(ValueError, match="api:write"),
     ):
         await _manage_mcp_action(
@@ -293,8 +295,10 @@ async def test_synthesis_draft_gates_only_the_remembering_variant() -> None:
     draft = AsyncMock(return_value={"success": True})
 
     with (
-        patch("sibyl.server._get_mcp_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.server._resolve_mcp_project_scope", AsyncMock(return_value={"project-a"})),
+        patch("sibyl.mcp_tools.context.get_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.resolve_project_scope", AsyncMock(return_value={"project-a"})
+        ),
         patch("sibyl_core.tools.core.synthesis_draft", draft),
     ):
         assert await _synthesis_mcp_draft(goal="ship faster", project="project-a") == {
@@ -308,7 +312,7 @@ async def test_synthesis_draft_gates_only_the_remembering_variant() -> None:
 
 @pytest.mark.asyncio
 async def test_health_org_lookup_stays_anonymous_without_a_credential() -> None:
-    with patch("sibyl.server._get_mcp_context", AsyncMock(return_value=None)):
+    with patch("sibyl.mcp_tools.context.get_context", AsyncMock(return_value=None)):
         assert await _optional_mcp_org_id() is None
 
 
@@ -317,11 +321,11 @@ async def test_health_org_lookup_applies_the_read_gate() -> None:
     allowed = _api_key_ctx(["mcp", "api:read"])
     refused = _api_key_ctx(["billing:admin"])
 
-    with patch("sibyl.server._get_mcp_context", AsyncMock(return_value=allowed)):
+    with patch("sibyl.mcp_tools.context.get_context", AsyncMock(return_value=allowed)):
         assert await _optional_mcp_org_id() == allowed.org_id
 
     with (
-        patch("sibyl.server._get_mcp_context", AsyncMock(return_value=refused)),
+        patch("sibyl.mcp_tools.context.get_context", AsyncMock(return_value=refused)),
         pytest.raises(ValueError, match="Expected mcp"),
     ):
         await _optional_mcp_org_id()
@@ -376,8 +380,11 @@ async def test_get_mcp_context_marks_api_keys_and_not_user_sessions() -> None:
     )
 
     with (
-        patch("sibyl.server.get_access_token", return_value=SimpleNamespace(token="sk_live_x")),
-        patch("sibyl.server.authenticate_api_key", AsyncMock(return_value=auth)),
+        patch(
+            "sibyl.mcp_tools.context.get_access_token",
+            return_value=SimpleNamespace(token="sk_live_x"),
+        ),
+        patch("sibyl.mcp_tools.context.authenticate_api_key", AsyncMock(return_value=auth)),
     ):
         key_ctx = await _get_mcp_context()
 
@@ -386,12 +393,15 @@ async def test_get_mcp_context_marks_api_keys_and_not_user_sessions() -> None:
     assert key_ctx.scopes == ["mcp", "api:read"]
 
     with (
-        patch("sibyl.server.get_access_token", return_value=SimpleNamespace(token="jwt.token")),
+        patch(
+            "sibyl.mcp_tools.context.get_access_token",
+            return_value=SimpleNamespace(token="jwt.token"),
+        ),
         patch(
             "sibyl.auth.jwt.verify_access_token",
             return_value={"org": str(uuid4()), "sub": str(uuid4()), "scopes": ["mcp"]},
         ),
-        patch("sibyl.server.resolve_org_role", AsyncMock(return_value="member")),
+        patch("sibyl.mcp_tools.context.resolve_org_role", AsyncMock(return_value="member")),
     ):
         user_ctx = await _get_mcp_context()
 
