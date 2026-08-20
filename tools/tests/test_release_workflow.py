@@ -233,9 +233,7 @@ def test_image_cve_gate_is_shared_by_every_caller() -> None:
 
 
 def test_ci_e2e_build_is_materialized_and_frontend_readiness_fails_closed() -> None:
-    workflow = yaml.safe_load(
-        (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    )
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
     steps = workflow["jobs"]["e2e"]["steps"]
     steps_by_name = {step.get("name"): step for step in steps}
 
@@ -246,9 +244,7 @@ def test_ci_e2e_build_is_materialized_and_frontend_readiness_fails_closed() -> N
     start_script = steps_by_name["Start frontend server"]["run"]
     assert "web_pid=$!" in start_script
     assert 'kill -0 "$web_pid"' in start_script
-    assert start_script.rstrip().endswith(
-        "curl -fsS http://localhost:3337 > /dev/null"
-    )
+    assert start_script.rstrip().endswith("curl -fsS http://localhost:3337 > /dev/null")
 
 
 def test_release_is_promoted_only_after_publish_succeeds() -> None:
