@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 from mcp import ClientSession
-from mcp.client.streamable_http import streamable_http_client
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
 from tools.baselines.common import (
     CASE_FILE_ORDER,
@@ -39,18 +39,18 @@ async def execute_mcp_case(
 
     kind = case["kind"]
     if kind == "mcp_list_tools":
-        return (await mcp_session.list_tools()).model_dump(mode="json")
+        return (await mcp_session.list_tools()).model_dump(mode="json", by_alias=True)
     if kind == "mcp_list_resources":
-        return (await mcp_session.list_resources()).model_dump(mode="json")
+        return (await mcp_session.list_resources()).model_dump(mode="json", by_alias=True)
     if kind == "mcp_tool":
         return (
             await mcp_session.call_tool(
                 case["tool"],
                 case.get("arguments"),
             )
-        ).model_dump(mode="json")
+        ).model_dump(mode="json", by_alias=True)
     if kind == "mcp_resource":
-        return (await mcp_session.read_resource(case["uri"])).model_dump(mode="json")
+        return (await mcp_session.read_resource(case["uri"])).model_dump(mode="json", by_alias=True)
 
     raise ValueError(f"Unsupported MCP baseline case kind: {kind}")
 
@@ -181,9 +181,9 @@ async def replay_all(
 
             current_token = await ensure_token()
             transport_client = await stack.enter_async_context(
-                httpx.AsyncClient(timeout=30.0, headers=auth_headers(current_token))
+                create_mcp_http_client(headers=auth_headers(current_token))
             )
-            read_stream, write_stream, _ = await stack.enter_async_context(
+            read_stream, write_stream = await stack.enter_async_context(
                 streamable_http_client(mcp_url, http_client=transport_client)
             )
             mcp_session = await stack.enter_async_context(ClientSession(read_stream, write_stream))

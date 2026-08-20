@@ -9,7 +9,8 @@ This guide covers advanced configuration of Sibyl's MCP (Model Context Protocol)
 
 ## Server Architecture
 
-Sibyl's MCP server is built on FastMCP and integrates with the main Starlette application:
+Sibyl's MCP server uses the Python SDK's `MCPServer` and mounts its streamable HTTP app in the main
+Starlette application:
 
 ```mermaid
 flowchart LR
@@ -151,13 +152,13 @@ sibyl auth api-key create --name "MCP Client" --scopes mcp
 
 ### Core Settings
 
-| Variable            | Default                 | Description                                    |
-| ------------------- | ----------------------- | ---------------------------------------------- |
-| `SIBYL_SERVER_HOST` | `localhost`             | Host to bind to                                |
-| `SIBYL_SERVER_PORT` | `3334`                  | Port to listen on                              |
-| `SIBYL_PUBLIC_URL`  | `http://localhost:3337` | Public base URL for OAuth callbacks/redirects  |
-| `SIBYL_SERVER_URL`  | -                       | Override API base URL (defaults to public_url) |
-| `SIBYL_SERVER_NAME` | `sibyl`                 | Server name in MCP responses                   |
+| Variable            | Default                 | Description                                   |
+| ------------------- | ----------------------- | --------------------------------------------- |
+| `SIBYL_SERVER_HOST` | `localhost`             | Host to bind to                               |
+| `SIBYL_SERVER_PORT` | `3334`                  | Port to listen on                             |
+| `SIBYL_PUBLIC_URL`  | `http://localhost:3337` | Public base URL for OAuth callbacks/redirects |
+| `SIBYL_SERVER_URL`  | -                       | Public API and MCP origin behind a proxy      |
+| `SIBYL_SERVER_NAME` | `sibyl`                 | Server name in MCP responses                  |
 
 ### Authentication Settings
 
@@ -166,6 +167,11 @@ sibyl auth api-key create --name "MCP Client" --scopes mcp
 | `SIBYL_JWT_SECRET`                  | -       | JWT signing secret (required for auth) |
 | `SIBYL_ACCESS_TOKEN_EXPIRE_MINUTES` | `60`    | Access token TTL in minutes            |
 | `SIBYL_MCP_AUTH_MODE`               | `auto`  | Auth mode: auto, on, off               |
+
+Sibyl validates MCP `Host` and `Origin` headers to prevent DNS rebinding. Set `SIBYL_SERVER_URL` to
+the public API origin when a loopback-bound daemon sits behind a Host-preserving proxy (for example,
+`https://sibyl.example.com`). The configured frontend origin, server origin, bind address, and
+loopback origins remain allowed.
 
 ### GitHub OAuth (Optional)
 
@@ -201,13 +207,13 @@ The MCP server is constructed in `server.py` and registers 13 tools: `search`, `
 [Agents & MCP](./claude-code.md) for what each one does.
 
 ```python
-mcp = FastMCP(
+mcp = MCPServer(
     settings.server_name,
-    host=host,
-    port=port,
-    stateless_http=False,  # Maintain session state
     auth=auth_settings,
+    auth_server_provider=auth_server_provider,
 )
+
+mcp_app = mcp.streamable_http_app(host=host, stateless_http=False)
 
 @mcp.tool()
 async def search(...) -> dict:

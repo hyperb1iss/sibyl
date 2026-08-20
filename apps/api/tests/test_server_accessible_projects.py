@@ -1904,11 +1904,11 @@ async def test_add_mcp_entity_leaves_a_project_task_unscoped() -> None:
 
 
 def _mcp_tool(name: str):
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server import MCPServer
 
     from sibyl.server import _register_tools
 
-    mcp = FastMCP("scope-tests")
+    mcp = MCPServer("scope-tests")
     _register_tools(mcp)
     return mcp._tool_manager.get_tool(name).fn
 

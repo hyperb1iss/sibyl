@@ -186,7 +186,7 @@ The following noisy loggers are suppressed to WARNING level:
 - `uvicorn.error`
 - `httpx`, `httpcore`
 - `arq.worker`, `arq.jobs`
-- `mcp`, `fastmcp`
+- `mcp`
 
 ### Access Logging
 

@@ -1,4 +1,4 @@
-"""MCP Server definition using FastMCP with streamable-http transport.
+"""MCP server definition using MCPServer with streamable HTTP transport.
 
 Exposes 13 tools and 2 resources:
 - Tools: search, explore, context, expand_neighbors, fetch_slice, remember,
@@ -14,8 +14,8 @@ from typing import Annotated, Any, Literal, cast
 from uuid import UUID, uuid4
 
 import structlog
+from mcp.server import MCPServer
 from mcp.server.auth.middleware.auth_context import get_access_token
-from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
 from sibyl.api.context_audit import log_context_pack_audit, log_reflection_audit
@@ -1903,18 +1903,11 @@ async def _require_owner_mcp_context(ctx: McpContext) -> None:
         raise ValueError("OWNER role required for log access")
 
 
-def create_mcp_server(
-    host: str = "localhost",
-    port: int = 3334,
-) -> FastMCP:
+def create_mcp_server() -> MCPServer:
     """Create and configure the MCP server instance.
 
-    Args:
-        host: Host to bind to
-        port: Port to listen on
-
     Returns:
-        Configured FastMCP server instance
+        Configured MCPServer instance
     """
 
     auth_mode = settings.mcp_auth_mode
@@ -1941,15 +1934,12 @@ def create_mcp_server(
         from sibyl.auth.mcp_oauth import SibylMcpOAuthProvider
 
         auth_server_provider = SibylMcpOAuthProvider()
-        # NOTE: FastMCP does not allow configuring both an auth_server_provider
+        # MCPServer does not allow configuring both an auth_server_provider
         # and a token_verifier at the same time. Our OAuth provider implements
         # access token validation via `load_access_token()`, so we rely on it.
 
-    mcp = FastMCP(
+    mcp = MCPServer(
         settings.server_name,
-        host=host,
-        port=port,
-        stateless_http=False,  # Maintain session state
         auth=auth_settings,
         auth_server_provider=auth_server_provider,
         token_verifier=token_verifier,
@@ -1987,7 +1977,7 @@ def _to_dict(obj: Any) -> Any:
     return obj
 
 
-def _register_tools(mcp: FastMCP) -> None:
+def _register_tools(mcp: MCPServer) -> None:
     """Register all MCP tools on the server instance."""
 
     # =========================================================================
@@ -2915,7 +2905,7 @@ def _register_tools(mcp: FastMCP) -> None:
         return [e.to_dict() for e in entries]
 
 
-def _register_resources(mcp: FastMCP) -> None:
+def _register_resources(mcp: MCPServer) -> None:
     """Register MCP resources on the server instance."""
 
     # =========================================================================

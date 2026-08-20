@@ -1,6 +1,6 @@
 """Every registered MCP entry point enforces scopes, observed by invoking it.
 
-This walks whatever the FastMCP managers hold (tools, resources, resource
+This walks whatever the MCPServer managers hold (tools, resources, resource
 templates, prompts), not a hand-written list, so an entry point that ships
 ungated is exercised here the moment it is registered. Each one is invoked
 under three credentials:
