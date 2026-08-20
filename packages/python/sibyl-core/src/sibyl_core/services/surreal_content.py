@@ -24,11 +24,11 @@ from sibyl_core.backends.surreal.fulltext import (
 )
 from sibyl_core.backends.surreal.knn import knn_search_effort
 from sibyl_core.config import settings
+from sibyl_core.embeddings import content as content_embeddings
 from sibyl_core.embeddings.providers import (
     DeterministicEmbeddingProvider,
     EmbeddingMetadata,
     EmbeddingProvider,
-    EmbeddingProviderName,
     create_embedding_provider,
 )
 from sibyl_core.errors import RevisionConflictError
@@ -69,11 +69,10 @@ _MARK_CLOSE = "</mark>"
 _SNIPPET_MAX_CHARS = 320
 _EMBEDDED_SURREAL_SCHEMES = ("memory://", "surrealkv://", "rocksdb://", "file://")
 log = structlog.get_logger()
-type _RawMemoryProviderCacheKey = tuple[EmbeddingProviderName, str, int, str]
 _normalize_record = _surreal_records.normalize_record
 _normalize_records = _surreal_records.normalize_records
 _raw_memory_embedding_provider: EmbeddingProvider | None = None
-_raw_memory_embedding_fingerprint: _RawMemoryProviderCacheKey | None = None
+_raw_memory_embedding_fingerprint: tuple[str, str, int, str] | None = None
 
 
 @dataclass(slots=True)
@@ -903,7 +902,7 @@ def reset_raw_memory_embedding_provider_cache() -> None:
 
 def _configured_raw_memory_embedding_provider() -> EmbeddingProvider | None:
     global _raw_memory_embedding_fingerprint, _raw_memory_embedding_provider
-    dimensions = _raw_memory_embedding_dimensions()
+    dimensions = content_embeddings.configured_content_embedding_dimensions()
     if os.getenv("SIBYL_MOCK_LLM", "").strip().lower() in {"1", "true", "yes", "on"}:
         return DeterministicEmbeddingProvider(
             EmbeddingMetadata(
@@ -916,72 +915,25 @@ def _configured_raw_memory_embedding_provider() -> EmbeddingProvider | None:
             )
         )
 
-    provider_name = _raw_memory_embedding_provider_name()
-    model = _raw_memory_embedding_model(provider_name)
-    api_key = _raw_memory_embedding_api_key(provider_name)
-    if not api_key:
+    config = content_embeddings.configured_content_embedding()
+    if not config.api_key:
         return None
 
-    fingerprint: _RawMemoryProviderCacheKey = (
-        provider_name,
-        model,
-        dimensions,
-        hashlib.sha256(api_key.encode()).hexdigest(),
-    )
-    if _raw_memory_embedding_provider is None or fingerprint != _raw_memory_embedding_fingerprint:
+    if (
+        _raw_memory_embedding_provider is None
+        or config.fingerprint != _raw_memory_embedding_fingerprint
+    ):
         _raw_memory_embedding_provider = create_embedding_provider(
-            provider=provider_name,
-            model=model,
-            dimensions=dimensions,
+            provider=config.provider,
+            model=config.model,
+            dimensions=config.dimensions,
             cache_namespace="raw-memory",
-            api_key=api_key,
+            api_key=config.api_key,
             max_cache_size=2000,
             tokenizer_estimate_method="provider-default",
         )
-        _raw_memory_embedding_fingerprint = fingerprint
+        _raw_memory_embedding_fingerprint = config.fingerprint
     return _raw_memory_embedding_provider
-
-
-def _raw_memory_embedding_provider_name() -> EmbeddingProviderName:
-    provider = (os.getenv("SIBYL_EMBEDDING_PROVIDER") or settings.embedding_provider).strip()
-    if provider == "openai":
-        return "openai"
-    if provider == "gemini":
-        return "gemini"
-    raise ValueError(f"unsupported raw memory embedding provider: {provider}")
-
-
-def _raw_memory_embedding_model(provider: EmbeddingProviderName) -> str:
-    model = os.getenv("SIBYL_EMBEDDING_MODEL", "").strip()
-    if model:
-        return model
-    if provider == "gemini" and settings.embedding_model == "text-embedding-3-small":
-        return "gemini-embedding-2"
-    return settings.embedding_model
-
-
-def _raw_memory_embedding_dimensions() -> int:
-    dimensions = os.getenv("SIBYL_EMBEDDING_DIMENSIONS", "").strip()
-    if dimensions:
-        return int(dimensions)
-    return settings.embedding_dimensions
-
-
-def _raw_memory_embedding_api_key(provider: EmbeddingProviderName) -> str | None:
-    if provider == "gemini":
-        return (
-            os.getenv("SIBYL_GEMINI_API_KEY", "")
-            or os.getenv("GEMINI_API_KEY", "")
-            or os.getenv("GOOGLE_API_KEY", "")
-            or settings.gemini_api_key.get_secret_value()
-            or None
-        )
-    return (
-        os.getenv("SIBYL_OPENAI_API_KEY", "")
-        or os.getenv("OPENAI_API_KEY", "")
-        or settings.openai_api_key.get_secret_value()
-        or None
-    )
 
 
 def _coerce_memory_scope(value: object | None) -> MemoryScope:

@@ -3993,6 +3993,220 @@ class TestAddTool:
         }
 
     @pytest.mark.asyncio
+    async def test_add_sync_and_queue_fallback_share_persistence_contract(self) -> None:
+        from sibyl_core.tools.add import add
+
+        projection = SimpleNamespace(
+            errors=(),
+            extracted=0,
+            projected_entities=0,
+            relationships=0,
+            projection_state="complete",
+            created_projected_entities=(),
+            created_projection_relationships=(),
+        )
+        passages = SimpleNamespace(
+            errors=(),
+            passages=0,
+            relationships=0,
+            created_passages=(),
+            created_relationships=(),
+        )
+        auto_links = AsyncMock(return_value=[("pattern_auto", 0.91)])
+        project_passages = AsyncMock(return_value=passages)
+        rehearsal_receipt = {"probes": [{"query": "where?", "rank": 1}]}
+        rehearse = AsyncMock(return_value=rehearsal_receipt)
+        embedding_receipt = {
+            "embedding_backfill": {
+                "status": "queued",
+                "job_ids": ["embedding:shared"],
+                "queued_entities": 1,
+                "queued_relationships": 1,
+            }
+        }
+        enqueue_backfill = AsyncMock(return_value=embedding_receipt)
+        queue = SimpleNamespace(
+            enqueue_create_entity=AsyncMock(side_effect=ConnectionError("queue down"))
+        )
+
+        with (
+            patch(
+                "sibyl_core.tools.add.get_graph_runtime",
+                AsyncMock(return_value=make_graph_runtime()),
+            ),
+            patch("sibyl_core.tools.add.get_queue_port", return_value=queue),
+            patch(
+                "sibyl_core.tools.add._create_entity_record",
+                AsyncMock(side_effect=lambda _manager, entity, **_kwargs: entity.id),
+            ),
+            patch(
+                "sibyl_core.tools.add._create_relationships_bulk",
+                AsyncMock(return_value=(1, 0)),
+            ),
+            patch("sibyl_core.tools.add._auto_discover_links", auto_links),
+            patch(
+                "sibyl_core.tools.add.project_memory_entity",
+                AsyncMock(return_value=projection),
+            ),
+            patch(
+                "sibyl_core.tools.add.project_entity_passages",
+                project_passages,
+            ),
+            patch("sibyl_core.tools.add._rehearse_write", rehearse),
+            patch(
+                "sibyl_core.tools.add._enqueue_embedding_backfill",
+                enqueue_backfill,
+            ),
+        ):
+            direct = await add(
+                title="Shared write",
+                content="Both synchronous modes persist the same graph.",
+                metadata={"organization_id": "org_123"},
+                check_conflicts=False,
+                sync=True,
+                generate_embeddings=False,
+            )
+            fallback = await add(
+                title="Shared write",
+                content="Both synchronous modes persist the same graph.",
+                metadata={"organization_id": "org_123"},
+                check_conflicts=False,
+                generate_embeddings=False,
+            )
+
+        assert direct.success is True
+        assert fallback.success is True
+        assert auto_links.await_count == 2
+        assert project_passages.await_count == 2
+        assert rehearse.await_count == 2
+        assert enqueue_backfill.await_count == 2
+        assert direct.probe_rehearsal == fallback.probe_rehearsal == rehearsal_receipt
+        assert (
+            direct.background_jobs["embedding_backfill"]
+            == fallback.background_jobs["embedding_backfill"]
+            == embedding_receipt["embedding_backfill"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_synchronous_persistence_backfills_every_derived_row(self) -> None:
+        from sibyl_core.memory_pipeline.structure import build_memory_structure
+        from sibyl_core.tools.add import _persist_synchronously, _SynchronousWrite
+
+        entity = Entity(
+            id="episode_parent",
+            entity_type=EntityType.EPISODE,
+            name="Parent",
+            content="Parent body",
+            organization_id="org_123",
+        )
+        projected = Entity(
+            id="entity_projected",
+            entity_type=EntityType.TOPIC,
+            name="Projected",
+            content="Projected body",
+            organization_id="org_123",
+        )
+        passage = Entity(
+            id="passage_1",
+            entity_type=EntityType.PASSAGE,
+            name="Passage",
+            content="Passage body",
+            organization_id="org_123",
+        )
+        projection = SimpleNamespace(
+            errors=(),
+            extracted=1,
+            projected_entities=1,
+            relationships=1,
+            projection_state="complete",
+            created_projected_entities=(projected,),
+            created_projection_relationships=(
+                SimpleNamespace(
+                    model_dump=lambda **_kwargs: {"id": "rel_projection"},
+                ),
+            ),
+        )
+        passages = SimpleNamespace(
+            errors=(),
+            passages=1,
+            relationships=1,
+            created_passages=(passage,),
+            created_relationships=(
+                SimpleNamespace(
+                    model_dump=lambda **_kwargs: {"id": "rel_passage"},
+                ),
+            ),
+        )
+        enqueue_backfill = AsyncMock(return_value={"embedding_backfill": {"status": "queued"}})
+
+        with (
+            patch(
+                "sibyl_core.tools.add._create_entity_record",
+                AsyncMock(return_value=entity.id),
+            ),
+            patch(
+                "sibyl_core.tools.add._create_relationships_bulk",
+                AsyncMock(return_value=(1, 0)),
+            ),
+            patch(
+                "sibyl_core.tools.add._auto_discover_links",
+                AsyncMock(return_value=[("pattern_auto", 0.91)]),
+            ),
+            patch(
+                "sibyl_core.tools.add.project_memory_entity",
+                AsyncMock(return_value=projection),
+            ),
+            patch(
+                "sibyl_core.tools.add.project_entity_passages",
+                AsyncMock(return_value=passages),
+            ),
+            patch(
+                "sibyl_core.tools.add._rehearse_write",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "sibyl_core.tools.add._enqueue_embedding_backfill",
+                enqueue_backfill,
+            ),
+        ):
+            result = await _persist_synchronously(
+                _SynchronousWrite(
+                    entity_manager=MagicMock(),
+                    relationship_manager=MagicMock(),
+                    entity=entity,
+                    organization_id="org_123",
+                    relationships=[{"id": "rel_explicit"}],
+                    title="Parent",
+                    content="Parent body",
+                    technologies=[],
+                    category=None,
+                    generate_embeddings=False,
+                    structure=build_memory_structure("Parent body"),
+                    principal_id=None,
+                    memory_scope=None,
+                    scope_key=None,
+                    project=None,
+                )
+            )
+
+        backfill_entities, organization_id, backfill_relationships = (
+            enqueue_backfill.await_args.args
+        )
+        assert result.embedding_backfill == {"embedding_backfill": {"status": "queued"}}
+        assert [item.id for item in backfill_entities] == [
+            "episode_parent",
+            "entity_projected",
+            "passage_1",
+        ]
+        assert organization_id == "org_123"
+        assert [item["id"] for item in backfill_relationships] == [
+            "rel_explicit",
+            "rel_episode_parent_references_pattern_auto",
+            "rel_projection",
+            "rel_passage",
+        ]
+
+    @pytest.mark.asyncio
     async def test_embedding_enqueue_failure_returns_repeatable_recovery_handle(self) -> None:
         from sibyl_core.tools.add import _enqueue_embedding_backfill
 

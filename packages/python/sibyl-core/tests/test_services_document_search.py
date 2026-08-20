@@ -7,9 +7,15 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from sibyl_core.embeddings.content import ContentEmbeddingConfig
 from sibyl_core.services import document_search as document_search_service
+from sibyl_core.services import surreal_content as surreal_content_service
 from sibyl_core.services.document_search import search_documents
 from sibyl_core.services.surreal_content import ContentChunk, ContentDocument, ContentSource
+
+_CONFIGURED_RAW_MEMORY_EMBEDDING_PROVIDER = (
+    surreal_content_service._configured_raw_memory_embedding_provider
+)
 
 
 @pytest.mark.asyncio
@@ -53,13 +59,74 @@ async def test_document_embedding_uses_core_native_provider(
     document_search_service.reset_document_embedding_provider_cache()
 
 
+def test_content_embedding_consumers_share_canonical_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = ContentEmbeddingConfig(
+        provider="gemini",
+        model="gemini-embedding-2",
+        dimensions=768,
+        api_key="gemini-key",
+    )
+    calls: list[dict[str, object]] = []
+
+    class FakeProvider:
+        pass
+
+    def fake_provider_factory(**kwargs: object) -> FakeProvider:
+        calls.append(kwargs)
+        return FakeProvider()
+
+    monkeypatch.setattr(
+        document_search_service.content_embeddings,
+        "configured_content_embedding",
+        lambda: config,
+    )
+    monkeypatch.setattr(
+        surreal_content_service,
+        "_configured_raw_memory_embedding_provider",
+        _CONFIGURED_RAW_MEMORY_EMBEDDING_PROVIDER,
+    )
+    monkeypatch.setattr(
+        document_search_service,
+        "create_embedding_provider",
+        fake_provider_factory,
+    )
+    monkeypatch.setattr(
+        surreal_content_service,
+        "create_embedding_provider",
+        fake_provider_factory,
+    )
+    document_search_service.reset_document_embedding_provider_cache()
+    surreal_content_service.reset_raw_memory_embedding_provider_cache()
+
+    document_search_service._get_document_embedding_provider()
+    surreal_content_service._configured_raw_memory_embedding_provider()
+
+    shared_keys = {"provider", "model", "dimensions", "api_key"}
+    assert [{key: call[key] for key in shared_keys} for call in calls] == [
+        {
+            "provider": "gemini",
+            "model": "gemini-embedding-2",
+            "dimensions": 768,
+            "api_key": "gemini-key",
+        },
+        {
+            "provider": "gemini",
+            "model": "gemini-embedding-2",
+            "dimensions": 768,
+            "api_key": "gemini-key",
+        },
+    ]
+    document_search_service.reset_document_embedding_provider_cache()
+    surreal_content_service.reset_raw_memory_embedding_provider_cache()
+
+
 class TestDocumentSearch:
     @pytest.mark.asyncio
     async def test_search_documents_uses_direct_surreal_chunk_search(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(document_search_service.settings, "store", "surreal")
-
         source = ContentSource(
             id="src-1",
             organization_id="org-1",
@@ -130,8 +197,6 @@ class TestDocumentSearch:
     async def test_search_documents_honors_content_budget(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(document_search_service.settings, "store", "surreal")
-
         source = ContentSource(
             id="src-1",
             organization_id="org-1",
@@ -178,8 +243,6 @@ class TestDocumentSearch:
     async def test_search_documents_propagates_vector_search_failures(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(document_search_service.settings, "store", "surreal")
-
         scope_loader = AsyncMock()
         with (
             patch(
@@ -204,8 +267,6 @@ class TestDocumentSearch:
     async def test_search_documents_falls_back_to_surreal_scope_without_embedding(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(document_search_service.settings, "store", "surreal")
-
         source = ContentSource(
             id="src-1",
             organization_id="org-1",
@@ -273,7 +334,6 @@ class TestDocumentSearch:
     async def test_search_documents_uses_lexical_search_after_embedding_timeout(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(document_search_service.settings, "store", "surreal")
         monkeypatch.setattr(
             document_search_service,
             "DOCUMENT_EMBEDDING_TIMEOUT_SECONDS",
@@ -337,7 +397,6 @@ class TestDocumentSearch:
         the embedder being down, not a true no-match, and it takes the same
         scope-scan path a hard search failure gets.
         """
-        monkeypatch.setattr(document_search_service.settings, "store", "surreal")
         monkeypatch.setattr(
             document_search_service,
             "DOCUMENT_EMBEDDING_TIMEOUT_SECONDS",
@@ -404,8 +463,6 @@ class TestDocumentSearch:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """With a healthy embedder, a true no-match stays a fast empty result."""
-        monkeypatch.setattr(document_search_service.settings, "store", "surreal")
-
         direct_search = AsyncMock(return_value=([], []))
         scope_loader = AsyncMock()
         with (
@@ -431,8 +488,6 @@ class TestDocumentSearch:
     async def test_search_documents_tokenizes_document_content_once(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(document_search_service.settings, "store", "surreal")
-
         source = ContentSource(
             id="src-1",
             organization_id="org-1",
