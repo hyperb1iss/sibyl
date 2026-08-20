@@ -18,6 +18,9 @@ if str(ROOT) not in sys.path:
 from benchmarks.longmemeval_v2_causal_ablation import (  # noqa: E402
     select_stratified_questions,
 )
+from benchmarks.longmemeval_v2_official_source import (  # noqa: E402
+    OFFICIAL_HARNESS_PREVIOUS_COMMIT,
+)
 from benchmarks.longmemeval_v2_reader_report import DOMAINS, sha256_file  # noqa: E402
 
 SCHEMA_VERSION = "sibyl-longmemeval-v2-validation-slice-v1"
@@ -27,8 +30,8 @@ QUESTIONS_PER_DOMAIN = 48
 SAMPLE_SEED = 20_260_716
 BASELINE_RUN_ID = 29_388_505_955
 BASELINE_COMMIT = "9c2d5bcb3e680b21b535725dd6001d4e1c2bbf86"
-OFFICIAL_HARNESS_COMMIT = "be15ea6e995462f3391c1a610892df3f67dfa7bd"
 READER_BASE_URL = "https://openrouter.ai/api/v1"
+OFFICIAL_HARNESS_COMMIT = OFFICIAL_HARNESS_PREVIOUS_COMMIT
 BASELINE_ARTIFACTS = {
     "web": {
         "id": 8_335_287_194,

@@ -90,8 +90,10 @@ except ModuleNotFoundError:
             self.memory_params = dict(memory_params)
             self._query_context = {}
 
-        def set_query_context(self, **kwargs: object) -> None:
-            self._query_context = dict(kwargs)
+        def set_query_context(self, *, query_invocation_id: str) -> None:
+            if not isinstance(query_invocation_id, str) or not query_invocation_id.strip():
+                raise RuntimeError("query_invocation_id must be a non-empty string")
+            self._query_context = {"query_invocation_id": query_invocation_id.strip()}
 
         def clear_query_context(self) -> None:
             self._query_context = {}
@@ -3812,13 +3814,8 @@ class SibylLiveApiMemory(Memory):
         ):
             self._load_checkpoint(self.checkpoint_dir)
 
-    def set_query_context(self, **kwargs: object) -> None:
-        question_item = kwargs.get("question_item")
-        safe_context = {
-            "question": question_item.get("question") if isinstance(question_item, dict) else None,
-            "image": question_item.get("image") if isinstance(question_item, dict) else None,
-        }
-        super().set_query_context(**safe_context)
+    def set_query_context(self, *, query_invocation_id: str) -> None:
+        super().set_query_context(query_invocation_id=query_invocation_id)
 
     def insert(self, trajectory: dict[str, object]) -> None:
         trajectory_id = _stripped_str(trajectory.get("id"))

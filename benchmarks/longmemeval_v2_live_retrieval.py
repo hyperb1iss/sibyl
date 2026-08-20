@@ -11,6 +11,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 BENCHMARKS_ROOT = Path(__file__).resolve().parent
 if str(BENCHMARKS_ROOT) not in sys.path:
@@ -407,7 +408,7 @@ def run_queries(
             question_id = str(question["id"])
             if question_id in completed_question_ids:
                 continue
-            memory.set_query_context(question_item=question)
+            memory.set_query_context(query_invocation_id=uuid4().hex)
             query_started = time.monotonic()
             try:
                 context = memory.query(str(question["question"]))

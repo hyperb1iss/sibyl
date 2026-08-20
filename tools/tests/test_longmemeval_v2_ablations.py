@@ -36,6 +36,7 @@ EXPECTED_SOURCE_QUESTION_COUNT = 62
 EXPECTED_INTERRUPT_WORKERS = 2
 EXPECTED_BOOTSTRAP_SAMPLES = 20_000
 STANDARD_CONTEXT_TOKENS = 200_000
+OPAQUE_INVOCATION_ID_HEX_LENGTH = 32
 
 
 def _load_module() -> ModuleType:
@@ -188,9 +189,11 @@ def test_retrieval_resume_skips_completed_questions_and_hides_gold(tmp_path: Pat
     )
 
     assert memory.queries == [("second question", "question.png")]
-    assert memory.contexts == [
-        {"question_item": {"question": "second question", "image": "question.png"}}
-    ]
+    assert len(memory.contexts) == 1
+    invocation_id = memory.contexts[0]["query_invocation_id"]
+    assert len(invocation_id) == OPAQUE_INVOCATION_ID_HEX_LENGTH
+    assert "second" not in invocation_id
+    assert "question.png" not in invocation_id
     assert [record["question_id"] for record in records] == ["q1", "q2"]
     assert "gold one" not in output_path.read_text(encoding="utf-8")
     assert "gold two" not in output_path.read_text(encoding="utf-8")
@@ -1878,10 +1881,10 @@ class _FakeMemory:
         self._local = threading.local()
         self._lock = threading.Lock()
 
-    def set_query_context(self, **kwargs: Any) -> None:
-        self._local.context = kwargs
+    def set_query_context(self, *, query_invocation_id: str) -> None:
+        self._local.context = {"query_invocation_id": query_invocation_id}
         with self._lock:
-            self.contexts.append(kwargs)
+            self.contexts.append(dict(self._local.context))
 
     def query(self, query: str, query_image: str | None = None) -> list[dict[str, str]]:
         with self._lock:

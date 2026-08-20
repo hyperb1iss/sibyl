@@ -378,7 +378,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: xiaowu0162/LongMemEval-V2
-          ref: be15ea6e995462f3391c1a610892df3f67dfa7bd
+          ref: 2cc8c540bdb87fe6761629b585e727e1c4704520
           path: .moon/cache/longmemeval-v2-official
           persist-credentials: false
 
@@ -763,7 +763,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: xiaowu0162/LongMemEval-V2
-          ref: be15ea6e995462f3391c1a610892df3f67dfa7bd
+          ref: 2cc8c540bdb87fe6761629b585e727e1c4704520
           path: .moon/cache/longmemeval-v2-official
           persist-credentials: false
 

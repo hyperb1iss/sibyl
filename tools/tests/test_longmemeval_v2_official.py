@@ -430,7 +430,10 @@ def _assert_question_id_hash_propagates(
     assert dataset_receipt["selected_question_ids_sha256"] == expected_question_ids_sha256
 
 
-def test_official_runner_receipt_only_emits_citable_contract(tmp_path: Path) -> None:
+def test_official_runner_receipt_only_emits_citable_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module = _load_runner_module()
     data_root = tmp_path / "data"
     receipt_dir = tmp_path / "receipt"
@@ -438,6 +441,13 @@ def test_official_runner_receipt_only_emits_citable_contract(tmp_path: Path) -> 
     enterprise_output_dir = tmp_path / "runs" / "enterprise"
     combined_dir = tmp_path / "combined"
     official_repo = _write_official_repo(tmp_path / "official")
+    fixture_commit = module.git_commit(official_repo)
+    source_record = module.official_source_record
+    monkeypatch.setattr(
+        module,
+        "official_source_record",
+        lambda repo: source_record(repo, expected_commit=fixture_commit),
+    )
     _write_dataset(data_root)
     _write_official_outputs(web_output_dir, domain="web", legacy_usage_identity=True)
     _write_official_outputs(enterprise_output_dir, domain="enterprise")
@@ -4450,27 +4460,16 @@ def test_official_runner_carries_substrate_and_budget_arms_into_memory_params(
     assert slice_params["evidence_char_budget"] == EXPECTED_CONTEXT_TOTAL_CHARS
 
 
-def test_sibyl_memory_query_context_exposes_only_question_and_image() -> None:
+def test_sibyl_memory_query_context_exposes_only_opaque_invocation_id() -> None:
     module = _load_memory_module()
     memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
     module.Memory.__init__(memory, {})
 
-    memory.set_query_context(
-        question_id="q1",
-        question_item={
-            "id": "q1",
-            "question": "Which filter was selected?",
-            "question_type": "static-environment",
-            "eval_function": "norm_phrase_match",
-            "image": "question.png",
-            "answer": "Priority",
-        },
-    )
+    memory.set_query_context(query_invocation_id="opaque-run-local-id")
 
-    assert memory.get_query_context() == {
-        "question": "Which filter was selected?",
-        "image": "question.png",
-    }
+    assert memory.get_query_context() == {"query_invocation_id": "opaque-run-local-id"}
+    with pytest.raises(TypeError):
+        memory.set_query_context(question_item={"question": "must not cross"})
 
 
 def test_sibyl_memory_accurate_query_rejects_planner_fallback() -> None:
