@@ -12,9 +12,9 @@ from uuid import UUID
 import structlog
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketException, status
 
-from sibyl.auth.jwt import JwtError, verify_access_token
+from sibyl.auth.websocket import resolve_active_websocket_claims
 from sibyl.config import settings
-from sibyl.persistence.auth_runtime import get_user_by_id, validate_access_session
+from sibyl.persistence.auth_runtime import get_user_by_id
 from sibyl.persistence.operations_runtime import require_global_admin
 from sibyl_core.logging import LogBuffer
 
@@ -69,23 +69,13 @@ async def get_log_stats() -> dict:
     }
 
 
-async def _validate_owner_token(token: str | None) -> bool:
-    """Validate that a token belongs to a global admin."""
+async def _validate_owner_websocket(websocket: WebSocket) -> bool:
+    """Validate that a WebSocket session belongs to a global admin."""
     if settings.disable_auth:
         return True
 
-    if not token:
-        return False
-
-    try:
-        claims = verify_access_token(token)
-    except JwtError:
-        return False
-    try:
-        is_active = await validate_access_session(token)
-    except TimeoutError:
-        return False
-    if not is_active:
+    claims = await resolve_active_websocket_claims(websocket)
+    if claims is None:
         return False
 
     try:
@@ -104,14 +94,11 @@ async def _validate_owner_token(token: str | None) -> bool:
 async def stream_logs(websocket: WebSocket) -> None:
     """Stream log entries in real-time via WebSocket.
 
-    Requires authentication via query parameter token.
-    Connect with: ws://host/api/logs/stream?token=<jwt>
+    Requires authentication via an Authorization header or access-token cookie.
 
     Messages are JSON objects with: timestamp, service, level, event, context
     """
-    # Validate auth via query param
-    token = websocket.query_params.get("token")
-    if not await _validate_owner_token(token):
+    if not await _validate_owner_websocket(websocket):
         raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
 
     await websocket.accept()

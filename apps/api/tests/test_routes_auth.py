@@ -900,7 +900,9 @@ async def test_device_token_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.asyncio
-async def test_device_verify_get_uses_runtime_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_device_verify_get_uses_active_session_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     request = FakeRequest(query_params={"user_code": "ABCD-EFGH"})
     resolve_user = AsyncMock(return_value=SimpleNamespace(email="nova@example.com", name="Nova"))
     get_request = AsyncMock(
@@ -915,7 +917,7 @@ async def test_device_verify_get_uses_runtime_helpers(monkeypatch: pytest.Monkey
     monkeypatch.setattr(
         auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests"
     )
-    monkeypatch.setattr(auth_routes, "resolve_request_user", resolve_user)
+    monkeypatch.setattr(auth_routes, "_optional_request_user", resolve_user)
     monkeypatch.setattr(auth_routes, "get_device_request_by_user_code", get_request)
 
     response = await _call_route(auth_routes.device_verify_get, request=request)
@@ -948,7 +950,7 @@ async def test_device_verify_get_offers_oidc_provider_login(
     monkeypatch.setattr(
         auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests"
     )
-    monkeypatch.setattr(auth_routes, "resolve_request_user", AsyncMock(return_value=None))
+    monkeypatch.setattr(auth_routes, "_optional_request_user", AsyncMock(return_value=None))
     monkeypatch.setattr(auth_routes, "get_device_request_by_user_code", get_request)
     monkeypatch.setattr(auth_routes, "enabled_oidc_providers", lambda: [provider])
 
@@ -1055,7 +1057,7 @@ async def test_device_verify_post_login_accepts_break_glass_reason(
 
 
 @pytest.mark.asyncio
-async def test_device_verify_post_approve_uses_runtime_helpers(
+async def test_device_verify_post_approve_uses_active_session_claims(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user_id = uuid4()
@@ -1072,7 +1074,7 @@ async def test_device_verify_post_approve_uses_runtime_helpers(
     monkeypatch.setattr(
         auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests"
     )
-    monkeypatch.setattr(auth_routes, "resolve_request_claims", claims)
+    monkeypatch.setattr(auth_routes, "resolve_claims", claims)
     monkeypatch.setattr(auth_routes, "get_user_by_id", get_user)
     monkeypatch.setattr(auth_routes, "approve_device_authorization", approve)
 
@@ -1087,6 +1089,60 @@ async def test_device_verify_post_approve_uses_runtime_helpers(
         user_code="ABCD-EFGH",
         request=request,
     )
+
+
+@pytest.mark.asyncio
+async def test_revoked_session_does_not_identify_device_approval_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = FakeRequest(query_params={"user_code": "ABCD-EFGH"})
+    get_request = AsyncMock(
+        return_value=SimpleNamespace(
+            client_name="sibyl-cli",
+            scope="mcp",
+            expires_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(minutes=10),
+            status="pending",
+        )
+    )
+    resolve_claims = AsyncMock(return_value=None)
+
+    monkeypatch.setattr(
+        auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests"
+    )
+    monkeypatch.setattr(auth_routes, "resolve_claims", resolve_claims)
+    monkeypatch.setattr(auth_routes, "get_device_request_by_user_code", get_request)
+
+    response = await _call_route(auth_routes.device_verify_get, request=request)
+
+    assert "Application:" not in response.body.decode()
+    resolve_claims.assert_awaited_once_with(request)
+
+
+@pytest.mark.asyncio
+async def test_revoked_session_cannot_approve_device_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = FakeRequest(
+        form_data={
+            "action": "approve",
+            "user_code": "ABCD-EFGH",
+        }
+    )
+    resolve_claims = AsyncMock(return_value=None)
+    approve = AsyncMock()
+
+    monkeypatch.setattr(
+        auth_routes, "_require_jwt_secret", lambda: "test-jwt-secret-key-for-api-tests"
+    )
+    monkeypatch.setattr(auth_routes, "resolve_claims", resolve_claims)
+    monkeypatch.setattr(auth_routes, "approve_device_authorization", approve)
+
+    response = await _call_route(auth_routes.device_verify_post, request=request)
+
+    assert response.status_code == 302
+    assert response.headers["location"].endswith("&error=not_authenticated")
+    resolve_claims.assert_awaited_once_with(request)
+    approve.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1208,7 +1264,7 @@ async def test_logout_uses_runtime_helpers(monkeypatch: pytest.MonkeyPatch) -> N
     log_audit = AsyncMock()
     revoke = AsyncMock()
 
-    monkeypatch.setattr(auth_routes, "resolve_request_claims", resolve_claims)
+    monkeypatch.setattr(auth_routes, "resolve_claims", resolve_claims)
     monkeypatch.setattr(auth_routes, "log_audit_event", log_audit)
     monkeypatch.setattr(auth_routes, "revoke_access_session", revoke)
 

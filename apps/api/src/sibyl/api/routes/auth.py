@@ -20,6 +20,7 @@ from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import (
     get_auth_context,
     require_org_admin,
+    resolve_claims,
 )
 from sibyl.auth.http import select_access_token
 from sibyl.auth.jit import provision_oidc_user
@@ -48,8 +49,6 @@ from sibyl.persistence.auth_runtime import (
     login_device_browser_user,
     login_github_identity,
     login_local_user,
-    resolve_request_claims,
-    resolve_request_user,
     revoke_access_session,
     revoke_api_key_for_user,
     rotate_refresh_exchange,
@@ -98,6 +97,26 @@ BREAK_GLASS_IP_DENIED_DETAIL = {
     "code": "break_glass_ip_denied",
     "message": "Break-glass access is not allowed from this source address.",
 }
+
+
+async def _optional_request_user(request: Request) -> AuthUser | None:
+    """Resolve an active request session to a user when one is present."""
+    claims = await resolve_claims(request)
+    if not claims:
+        return None
+    try:
+        user_id = UUID(str(claims.get("sub", "")))
+    except ValueError:
+        return None
+    try:
+        return await get_user_by_id(user_id)
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication storage temporarily unavailable",
+        ) from exc
+
+
 BREAK_GLASS_REASON_REQUIRED_DETAIL = {
     "code": "break_glass_reason_required",
     "message": "Break-glass access requires an incident reason.",
@@ -1418,7 +1437,7 @@ async def device_verify_get(request: Request) -> Response:
     user_code = normalize_user_code(raw_code)
     error_code = (request.query_params.get("error") or "").strip() or None
 
-    user = await resolve_request_user(request)
+    user = await _optional_request_user(request)
 
     pending: dict[str, object] | None = None
     if user_code:
@@ -1484,7 +1503,7 @@ async def device_verify_post(request: Request) -> Response:
         )
         return response
 
-    claims = await resolve_request_claims(request)
+    claims = await resolve_claims(request)
     if not claims:
         return RedirectResponse(url=verify_url + "&error=not_authenticated", status_code=302)
 
@@ -1610,7 +1629,7 @@ async def refresh_tokens(request: Request):
 
 @router.post("/logout")
 async def logout(request: Request) -> Response:
-    claims = await resolve_request_claims(request)
+    claims = await resolve_claims(request)
     token = select_access_token(
         authorization=request.headers.get("authorization"),
         cookie_token=request.cookies.get(ACCESS_TOKEN_COOKIE),

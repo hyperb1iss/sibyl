@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -13,150 +13,109 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from sibyl.api.routes.logs import _validate_owner_token, router
-from sibyl.auth.jwt import create_access_token
-from sibyl.config import Settings
+from sibyl.api.routes.logs import _validate_owner_websocket, router
 
 
-class TestValidateOwnerToken:
+class TestValidateOwnerWebsocket:
     """Tests for global-admin validation on log streaming."""
 
     @pytest.mark.asyncio
-    async def test_returns_true_for_global_admin(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SIBYL_JWT_SECRET", "test-jwt-secret-key-for-api-tests")
-        monkeypatch.setenv("SIBYL_JWT_ALGORITHM", "HS256")
-
-        from sibyl import config as config_module
-
-        config_module.settings = Settings(_env_file=None)  # type: ignore[assignment]
-
+    async def test_returns_true_for_global_admin(self) -> None:
         user_id = uuid4()
-        org_id = uuid4()
-        token = create_access_token(user_id=user_id, organization_id=org_id)
+        websocket = MagicMock()
 
         with (
+            patch(
+                "sibyl.api.routes.logs.resolve_active_websocket_claims",
+                AsyncMock(return_value={"sub": str(user_id)}),
+            ) as resolve_claims,
             patch(
                 "sibyl.api.routes.logs.get_user_by_id",
                 AsyncMock(return_value=SimpleNamespace(is_admin=True)),
             ) as get_user,
-            patch(
-                "sibyl.api.routes.logs.validate_access_session",
-                AsyncMock(return_value=True),
-            ) as validate_session,
         ):
-            assert await _validate_owner_token(token) is True
+            assert await _validate_owner_websocket(websocket) is True
 
-        validate_session.assert_awaited_once_with(token)
+        resolve_claims.assert_awaited_once_with(websocket)
         get_user.assert_awaited_once_with(user_id)
 
     @pytest.mark.asyncio
-    async def test_rejects_non_global_admin(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SIBYL_JWT_SECRET", "test-jwt-secret-key-for-api-tests")
-        monkeypatch.setenv("SIBYL_JWT_ALGORITHM", "HS256")
-
-        from sibyl import config as config_module
-
-        config_module.settings = Settings(_env_file=None)  # type: ignore[assignment]
-
+    async def test_rejects_non_global_admin(self) -> None:
         user_id = uuid4()
-        org_id = uuid4()
-        token = create_access_token(user_id=user_id, organization_id=org_id)
+        websocket = MagicMock()
 
         with (
+            patch(
+                "sibyl.api.routes.logs.resolve_active_websocket_claims",
+                AsyncMock(return_value={"sub": str(user_id)}),
+            ) as resolve_claims,
             patch(
                 "sibyl.api.routes.logs.get_user_by_id",
                 AsyncMock(return_value=SimpleNamespace(is_admin=False)),
             ) as get_user,
-            patch(
-                "sibyl.api.routes.logs.validate_access_session",
-                AsyncMock(return_value=True),
-            ) as validate_session,
         ):
-            assert await _validate_owner_token(token) is False
+            assert await _validate_owner_websocket(websocket) is False
 
-        validate_session.assert_awaited_once_with(token)
+        resolve_claims.assert_awaited_once_with(websocket)
         get_user.assert_awaited_once_with(user_id)
 
     @pytest.mark.asyncio
-    async def test_rejects_revoked_access_session(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SIBYL_JWT_SECRET", "test-jwt-secret-key-for-api-tests")
-        monkeypatch.setenv("SIBYL_JWT_ALGORITHM", "HS256")
-
-        from sibyl import config as config_module
-
-        config_module.settings = Settings(_env_file=None)  # type: ignore[assignment]
-
-        token = create_access_token(user_id=uuid4(), organization_id=uuid4())
+    async def test_rejects_revoked_access_session(self) -> None:
+        websocket = MagicMock()
 
         with (
             patch(
-                "sibyl.api.routes.logs.validate_access_session",
-                AsyncMock(return_value=False),
-            ) as validate_session,
+                "sibyl.api.routes.logs.resolve_active_websocket_claims",
+                AsyncMock(return_value=None),
+            ) as resolve_claims,
             patch(
                 "sibyl.api.routes.logs.get_user_by_id",
                 AsyncMock(),
             ) as get_user,
         ):
-            assert await _validate_owner_token(token) is False
+            assert await _validate_owner_websocket(websocket) is False
 
-        validate_session.assert_awaited_once_with(token)
+        resolve_claims.assert_awaited_once_with(websocket)
         get_user.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_rejects_auth_store_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SIBYL_JWT_SECRET", "test-jwt-secret-key-for-api-tests")
-        monkeypatch.setenv("SIBYL_JWT_ALGORITHM", "HS256")
-
-        from sibyl import config as config_module
-
-        config_module.settings = Settings(_env_file=None)  # type: ignore[assignment]
-
-        token = create_access_token(user_id=uuid4(), organization_id=uuid4())
+    async def test_rejects_auth_store_timeout(self) -> None:
+        websocket = MagicMock()
 
         with (
             patch(
-                "sibyl.api.routes.logs.validate_access_session",
-                AsyncMock(side_effect=TimeoutError),
-            ) as validate_session,
+                "sibyl.api.routes.logs.resolve_active_websocket_claims",
+                AsyncMock(return_value=None),
+            ) as resolve_claims,
             patch(
                 "sibyl.api.routes.logs.get_user_by_id",
                 AsyncMock(),
             ) as get_user,
         ):
-            assert await _validate_owner_token(token) is False
+            assert await _validate_owner_websocket(websocket) is False
 
-        validate_session.assert_awaited_once_with(token)
+        resolve_claims.assert_awaited_once_with(websocket)
         get_user.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_accepts_global_admin_without_org_context(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.setenv("SIBYL_JWT_SECRET", "test-jwt-secret-key-for-api-tests")
-        monkeypatch.setenv("SIBYL_JWT_ALGORITHM", "HS256")
-
-        from sibyl import config as config_module
-
-        config_module.settings = Settings(_env_file=None)  # type: ignore[assignment]
-
-        token = create_access_token(user_id=uuid4(), organization_id=None)
+    async def test_accepts_global_admin_without_org_context(self) -> None:
+        user_id = uuid4()
+        websocket = MagicMock()
 
         with (
             patch(
-                "sibyl.api.routes.logs.validate_access_session",
-                AsyncMock(return_value=True),
-            ) as validate_session,
+                "sibyl.api.routes.logs.resolve_active_websocket_claims",
+                AsyncMock(return_value={"sub": str(user_id)}),
+            ) as resolve_claims,
             patch(
                 "sibyl.api.routes.logs.get_user_by_id",
                 AsyncMock(return_value=SimpleNamespace(is_admin=True)),
             ) as get_user,
         ):
-            assert await _validate_owner_token(token) is True
+            assert await _validate_owner_websocket(websocket) is True
 
-        validate_session.assert_awaited_once_with(token)
-        get_user.assert_awaited_once()
+        resolve_claims.assert_awaited_once_with(websocket)
+        get_user.assert_awaited_once_with(user_id)
 
 
 class _FakeLogEntry:
@@ -198,9 +157,12 @@ class TestLogStreamRoute:
 
         with (
             self._create_client() as client,
-            patch("sibyl.api.routes.logs._validate_owner_token", AsyncMock(return_value=True)),
+            patch("sibyl.api.routes.logs._validate_owner_websocket", AsyncMock(return_value=True)),
             patch("sibyl.api.routes.logs.LogBuffer.get", return_value=buffer),
-            client.websocket_connect("/logs/stream?token=owner-token") as websocket,
+            client.websocket_connect(
+                "/logs/stream",
+                headers={"Authorization": "Bearer owner-token"},
+            ) as websocket,
         ):
             assert websocket.receive_json() == entry
 
@@ -209,9 +171,26 @@ class TestLogStreamRoute:
     def test_non_owner_websocket_stream_is_rejected(self) -> None:
         with (
             self._create_client() as client,
-            patch("sibyl.api.routes.logs._validate_owner_token", AsyncMock(return_value=False)),
+            patch("sibyl.api.routes.logs._validate_owner_websocket", AsyncMock(return_value=False)),
             pytest.raises(WebSocketDisconnect) as exc_info,
-            client.websocket_connect("/logs/stream?token=member-token"),
+            client.websocket_connect(
+                "/logs/stream",
+                headers={"Authorization": "Bearer member-token"},
+            ),
+        ):
+            pass
+
+        assert exc_info.value.code == 1008
+
+    def test_query_token_is_rejected(self) -> None:
+        with (
+            self._create_client() as client,
+            patch(
+                "sibyl.api.routes.logs.resolve_active_websocket_claims",
+                AsyncMock(return_value=None),
+            ),
+            pytest.raises(WebSocketDisconnect) as exc_info,
+            client.websocket_connect("/logs/stream?token=must-not-be-read"),
         ):
             pass
 

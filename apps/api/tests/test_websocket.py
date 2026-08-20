@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 
 import sibyl.api.websocket as websocket_module
+import sibyl.auth.websocket as auth_websocket_module
 from sibyl.api.websocket import (
     Connection,
     ConnectionManager,
@@ -158,6 +159,56 @@ class TestConnectionManagerOrgScoping:
 
         assert ws1.send_json.called
         assert ws2.send_json.called
+
+    @pytest.mark.asyncio
+    async def test_broadcast_starts_all_recipient_sends_concurrently(
+        self,
+        manager: ConnectionManager,
+    ) -> None:
+        slow_started = asyncio.Event()
+        fast_started = asyncio.Event()
+        release_slow = asyncio.Event()
+
+        async def slow_send(_message: object) -> None:
+            slow_started.set()
+            await release_slow.wait()
+
+        async def fast_send(_message: object) -> None:
+            fast_started.set()
+
+        slow_ws = MagicMock()
+        slow_ws.send_json = AsyncMock(side_effect=slow_send)
+        fast_ws = MagicMock()
+        fast_ws.send_json = AsyncMock(side_effect=fast_send)
+        manager.active_connections = [
+            Connection(websocket=slow_ws, org_id="org_a"),
+            Connection(websocket=fast_ws, org_id="org_a"),
+        ]
+
+        broadcast = asyncio.create_task(manager.broadcast("test_event", {}, org_id="org_a"))
+        await slow_started.wait()
+        await asyncio.wait_for(fast_started.wait(), timeout=1)
+        release_slow.set()
+        await broadcast
+
+    @pytest.mark.asyncio
+    async def test_broadcast_disconnects_only_failed_recipients(
+        self,
+        manager: ConnectionManager,
+    ) -> None:
+        failed_ws = MagicMock()
+        failed_ws.send_json = AsyncMock(side_effect=RuntimeError("disconnected"))
+        healthy_ws = MagicMock()
+        healthy_ws.send_json = AsyncMock()
+        manager.active_connections = [
+            Connection(websocket=failed_ws, org_id="org_a"),
+            Connection(websocket=healthy_ws, org_id="org_a"),
+        ]
+
+        await manager.broadcast("test_event", {}, org_id="org_a")
+
+        healthy_ws.send_json.assert_awaited_once()
+        assert [connection.websocket for connection in manager.active_connections] == [healthy_ws]
 
     @pytest.mark.asyncio
     async def test_broadcast_to_empty_org(self, manager: ConnectionManager) -> None:
@@ -339,12 +390,25 @@ class TestExtractOrgFromToken:
         assert result is None
 
     @pytest.mark.asyncio
+    async def test_query_token_is_not_accepted(self) -> None:
+        ws = MagicMock()
+        ws.cookies = {}
+        ws.headers = {}
+        ws.query_params = {"token": "must-not-be-read"}
+
+        result = await _extract_org_from_token(ws)
+
+        assert result is None
+
+    @pytest.mark.asyncio
     async def test_valid_jwt_with_org(self, monkeypatch) -> None:
         """Valid signed JWT with org claim should extract org_id."""
         monkeypatch.setenv("SIBYL_JWT_SECRET", "test-jwt-secret-key-for-api-tests")
         monkeypatch.setenv("SIBYL_JWT_ALGORITHM", "HS256")
         validate_access_session = AsyncMock(return_value=True)
-        monkeypatch.setattr(websocket_module, "validate_access_session", validate_access_session)
+        monkeypatch.setattr(
+            auth_websocket_module, "validate_access_session", validate_access_session
+        )
 
         from sibyl import config as config_module
 
@@ -357,6 +421,30 @@ class TestExtractOrgFromToken:
         ws.headers = {}
 
         result = await _extract_org_from_token(ws)
+        assert result == str(org_id)
+        validate_access_session.assert_awaited_once_with(token)
+
+    @pytest.mark.asyncio
+    async def test_authorization_header_is_accepted(self, monkeypatch) -> None:
+        monkeypatch.setenv("SIBYL_JWT_SECRET", "test-jwt-secret-key-for-api-tests")
+        monkeypatch.setenv("SIBYL_JWT_ALGORITHM", "HS256")
+        validate_access_session = AsyncMock(return_value=True)
+        monkeypatch.setattr(
+            auth_websocket_module, "validate_access_session", validate_access_session
+        )
+
+        from sibyl import config as config_module
+
+        config_module.settings = Settings(_env_file=None)  # type: ignore[assignment]
+
+        org_id = uuid4()
+        token = create_access_token(user_id=uuid4(), organization_id=org_id)
+        ws = MagicMock()
+        ws.cookies = {}
+        ws.headers = {"authorization": f"Bearer {token}"}
+
+        result = await _extract_org_from_token(ws)
+
         assert result == str(org_id)
         validate_access_session.assert_awaited_once_with(token)
 
@@ -376,7 +464,9 @@ class TestExtractOrgFromToken:
         monkeypatch.setenv("SIBYL_JWT_SECRET", "test-jwt-secret-key-for-api-tests")
         monkeypatch.setenv("SIBYL_JWT_ALGORITHM", "HS256")
         validate_access_session = AsyncMock(return_value=True)
-        monkeypatch.setattr(websocket_module, "validate_access_session", validate_access_session)
+        monkeypatch.setattr(
+            auth_websocket_module, "validate_access_session", validate_access_session
+        )
 
         from sibyl import config as config_module
 
@@ -398,7 +488,9 @@ class TestExtractOrgFromToken:
         monkeypatch.setenv("SIBYL_JWT_SECRET", "test-jwt-secret-key-for-api-tests")
         monkeypatch.setenv("SIBYL_JWT_ALGORITHM", "HS256")
         validate_access_session = AsyncMock(return_value=False)
-        monkeypatch.setattr(websocket_module, "validate_access_session", validate_access_session)
+        monkeypatch.setattr(
+            auth_websocket_module, "validate_access_session", validate_access_session
+        )
 
         from sibyl import config as config_module
 
@@ -419,7 +511,9 @@ class TestExtractOrgFromToken:
         monkeypatch.setenv("SIBYL_JWT_SECRET", "test-jwt-secret-key-for-api-tests")
         monkeypatch.setenv("SIBYL_JWT_ALGORITHM", "HS256")
         validate_access_session = AsyncMock(side_effect=TimeoutError)
-        monkeypatch.setattr(websocket_module, "validate_access_session", validate_access_session)
+        monkeypatch.setattr(
+            auth_websocket_module, "validate_access_session", validate_access_session
+        )
 
         from sibyl import config as config_module
 

@@ -8,32 +8,23 @@ from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 from sibyl import config as config_module
-from sibyl.auth.http import select_access_token
 from sibyl.auth.jwt import (
-    JwtError,
     create_access_token,
     create_refresh_token,
-    verify_access_token,
 )
 from sibyl.auth.session_cache import access_session_cache
 from sibyl.persistence.surreal.auth_runtime._common import (
     RefreshRotation,
     SurrealRecord,
     SurrealSessionRepository,
-    _api_key_allows_rest,
-    _api_key_claim_payload,
     _auth_client_scope,
     _auth_session_namespace,
-    _insufficient_api_scope,
-    _is_rest_request,
     _log_audit_event,
     _resolve_auth_context_from_claims,
     _session_id_from_access_token,
     _session_namespace,
     _SurrealRepository,
 )
-from sibyl.persistence.surreal.auth_runtime.api_keys import authenticate_api_key
-from sibyl.persistence.surreal.auth_runtime.users import get_user_by_id
 from sibyl_core.auth import (
     AuthContext,
 )
@@ -179,44 +170,6 @@ async def save_oauth_client_registration(
             uuid=registration_id,
             record=record,
         )
-
-
-async def resolve_request_claims(request) -> SurrealRecord | None:
-    claims = getattr(request.state, "jwt_claims", None)
-    if claims:
-        return claims
-    token = select_access_token(
-        authorization=request.headers.get("authorization"),
-        cookie_token=request.cookies.get("sibyl_access_token"),
-    )
-    if not token:
-        return None
-    try:
-        return verify_access_token(token)
-    except JwtError:
-        pass
-    if token.startswith("sk_"):
-        auth = await authenticate_api_key(token)
-        if auth is None:
-            return None
-        scopes = list(auth.scopes or [])
-        if _is_rest_request(request) and not _api_key_allows_rest(
-            scopes=scopes, method=request.method
-        ):
-            raise _insufficient_api_scope(scopes=scopes, method=request.method)
-        return _api_key_claim_payload(auth)
-    return None
-
-
-async def resolve_request_user(request):
-    claims = await resolve_request_claims(request)
-    if not claims:
-        return None
-    try:
-        user_id = UUID(str(claims.get("sub", "")))
-    except ValueError:
-        return None
-    return await get_user_by_id(user_id)
 
 
 async def validate_access_session(token: str) -> bool:

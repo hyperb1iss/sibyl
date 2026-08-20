@@ -97,6 +97,8 @@ Returns the last 50 entries.
 - The CLI `sibyl logs tail` command exposes the same buffer with streaming support
   (`sibyl logs tail -f`).
 - The REST equivalent is `GET /api/logs`, with a WebSocket stream at `/api/logs/stream`.
+  WebSocket clients authenticate with an `Authorization: Bearer` header or the existing
+  `sibyl_access_token` cookie. Credentials are never accepted in the URL.
 
 ## Error Handling
 

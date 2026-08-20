@@ -38,10 +38,10 @@ def test_stream_logs_requires_resolved_client_token(capsys: pytest.CaptureFixtur
 def test_stream_logs_uses_resolved_client_url_and_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    connect_urls: list[str] = []
+    connect_calls: list[tuple[str, dict[str, object]]] = []
 
-    def connect(url: str) -> _FakeWebSocket:
-        connect_urls.append(url)
+    def connect(url: str, **kwargs: object) -> _FakeWebSocket:
+        connect_calls.append((url, kwargs))
         return _FakeWebSocket()
 
     monkeypatch.setitem(
@@ -62,7 +62,13 @@ def test_stream_logs_uses_resolved_client_url_and_token(
         asyncio.run(_stream_logs(client, None, None))
 
     assert exc.value.exit_code == 1
-    assert connect_urls == ["wss://sibyl.example/api/logs/stream?token=scoped-access-token"]
+    assert connect_calls == [
+        (
+            "wss://sibyl.example/api/logs/stream",
+            {"additional_headers": {"Authorization": "Bearer scoped-access-token"}},
+        )
+    ]
+    assert "scoped-access-token" not in connect_calls[0][0]
 
 
 def test_stream_logs_exits_nonzero_when_the_connection_drops(
@@ -74,7 +80,7 @@ def test_stream_logs_exits_nonzero_when_the_connection_drops(
         sys.modules,
         "websockets",
         SimpleNamespace(
-            connect=lambda _url: _FakeWebSocket(),
+            connect=lambda _url, **_kwargs: _FakeWebSocket(),
             ConnectionClosed=_FakeConnectionClosed,
         ),
     )
