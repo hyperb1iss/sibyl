@@ -59,7 +59,7 @@ async def main():
         SurrealGraphClient,
         prepare_graph_schema,
     )
-    import sibyl_core.retrieval.search as retrieval_module
+    import sibyl_core.retrieval._search_database as retrieval_database
     import sibyl_core.services.memory_reflection as memory_module
     import sibyl_core.tools.add as add_module
     import sibyl_core.tools.context as context_module
@@ -100,7 +100,7 @@ async def main():
     explore_module.get_graph_runtime = runtime_factory
     health_module.get_graph_runtime = runtime_factory
     manage_module.get_graph_runtime = runtime_factory
-    retrieval_module.get_surreal_graph_runtime = runtime_factory
+    retrieval_database.get_surreal_graph_runtime = runtime_factory
     memory_module.get_surreal_graph_runtime = runtime_factory
     search_module.get_graph_runtime = runtime_factory
     temporal_module.get_graph_runtime = runtime_factory
