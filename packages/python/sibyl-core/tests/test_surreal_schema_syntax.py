@@ -1295,8 +1295,8 @@ async def test_graph_bootstrap_applies_migrations_without_full_rebuild() -> None
     assert not any("DEFINE TABLE OVERWRITE relates_to" in statement for statement in client.calls)
     assert any("idx_relates_source_created" in statement for statement in client.calls)
     assert any("idx_mentions_source_created" in statement for statement in client.calls)
-    assert sum("UPDATE relates_to SET" in statement for statement in client.calls) == 10
-    assert sum("UPDATE mentions SET" in statement for statement in client.calls) == 2
+    assert sum("UPDATE relates_to SET" in statement for statement in client.calls) == 11
+    assert sum("UPDATE mentions SET" in statement for statement in client.calls) == 3
     for table in (*REMOVED_GRAPH_EDGES, *REMOVED_GRAPH_TABLES):
         assert any(f"REMOVE TABLE IF EXISTS {table}" in statement for statement in client.calls)
     assert not any("DELETE FROM relates_to" in statement for statement in client.calls)
@@ -1314,8 +1314,8 @@ async def test_graph_bootstrap_applies_dead_graph_drop_without_full_rebuild() ->
 
     assert not any("DEFINE TABLE IF NOT EXISTS entity" in statement for statement in client.calls)
     assert not any("DEFINE TABLE OVERWRITE relates_to" in statement for statement in client.calls)
-    assert sum("UPDATE relates_to SET" in statement for statement in client.calls) == 9
-    assert sum("UPDATE mentions SET" in statement for statement in client.calls) == 1
+    assert sum("UPDATE relates_to SET" in statement for statement in client.calls) == 10
+    assert sum("UPDATE mentions SET" in statement for statement in client.calls) == 2
     for table in (*REMOVED_GRAPH_EDGES, *REMOVED_GRAPH_TABLES):
         assert any(f"REMOVE TABLE IF EXISTS {table}" in statement for statement in client.calls)
     assert client.schema_version == GRAPH_SCHEMA_CURRENT_VERSION

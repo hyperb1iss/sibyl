@@ -745,6 +745,8 @@ async def test_naive_arm_filters_retired_rows_before_fusion(
         "lifecycle_dropped": 2,
         "superseded_dropped": 0,
         "superseded_uuids": [],
+        "checked_candidates": 1,
+        "edge_rows_read": 0,
     }
 
 

@@ -1622,6 +1622,13 @@ class MockGraphClientForHybrid:
         mock.driver = self.MockDriver(self)
         return mock
 
+    async def execute_query(self, query: str, **_params: Any) -> list[dict[str, Any]]:
+        """Return no lifecycle edges while recording the production query."""
+        self.query_history.append(query)
+        if "FROM relates_to WITH INDEX idx_relates_target_created" in query:
+            return []
+        return self.traversal_results
+
     async def execute_read(self, query: str, **params: Any) -> list[dict[str, Any]]:
         """Execute an unscoped read."""
         self.read_calls.append(query)

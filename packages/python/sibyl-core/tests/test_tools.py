@@ -105,9 +105,12 @@ def make_graph_runtime(
     resolved_entity_manager = entity_manager if entity_manager is not None else MagicMock()
     if not isinstance(getattr(resolved_entity_manager, "get", None), AsyncMock):
         resolved_entity_manager.get = AsyncMock(return_value=None)
+    resolved_client = client if client is not None else MagicMock()
+    if not isinstance(getattr(resolved_client, "execute_query", None), AsyncMock):
+        resolved_client.execute_query = AsyncMock(return_value=[])
 
     return SimpleNamespace(
-        client=client if client is not None else MagicMock(),
+        client=resolved_client,
         entity_manager=resolved_entity_manager,
         relationship_manager=(
             relationship_manager if relationship_manager is not None else MagicMock()
