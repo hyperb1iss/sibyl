@@ -293,12 +293,14 @@ tasks:
     inputs:
       - VERSION
       - tools/release/sync_versions.py
+      - tools/release/version.py
 
   sync-versions-check:
     command: uv run python tools/release/sync_versions.py --check
     inputs:
       - VERSION
       - tools/release/sync_versions.py
+      - tools/release/version.py
       - charts/sibyl/Chart.yaml
       - charts/surrealdb/Chart.yaml
       - docker-compose.quickstart.yml
@@ -310,6 +312,13 @@ tasks:
       - docs/deployment/helm-chart.md
       - docs/deployment/kubernetes.md
       - docs/deployment/monitoring.md
+
+  release-version-validate:
+    command: uv run python -m tools.release.version
+    inputs:
+      - tools/release/version.py
+    options:
+      cache: false
 
   inventory:
     command: uv run python tools/inventory/runtime_surface.py
@@ -570,6 +579,7 @@ tasks:
     inputs:
       - tools/tests/conftest.py
       - tools/tests/test_release_workflow.py
+      - tools/release/*.py
       - .github/workflows/release.yml
       - .github/workflows/publish.yml
       - VERSION

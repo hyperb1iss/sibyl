@@ -21,7 +21,7 @@ interface Project {
   content: string; // Extended content/documentation
   category?: string; // Optional category
   languages: string[]; // Programming languages (tech stack)
-  tags: string[]; // Searchable tags
+  tags: string[]; // Browse-only metadata; no ranked retrieval effect
   metadata: {
     status: ProjectStatus;
     repository_url?: string;

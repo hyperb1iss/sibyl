@@ -28,7 +28,7 @@ interface AddInput {
   entity_type?: string; // Default: "episode"
   category?: string; // Domain category
   languages?: string[]; // Programming languages
-  tags?: string[]; // Searchable tags
+  tags?: string[]; // Browse-only metadata; no ranked retrieval effect
   related_to?: string[]; // Entity IDs to link (RELATED_TO)
   metadata?: Record<string, any>; // Additional structured data
 

@@ -12,6 +12,7 @@ import yaml
 from packaging.requirements import Requirement
 from tools.release.aur_pkgbuild import render_pkgbuild as render_aur_pkgbuild
 from tools.release.homebrew_formula import PackageArtifact, pep440_version, render_formula
+from tools.release.release_notes import RELEASE_NOTES_SURFACE, validate_release_notes_claims
 from tools.release.version import parse_release_version
 from tools.tests.conftest import REPO_ROOT
 
@@ -58,6 +59,8 @@ RELEASE_WORKFLOW_REQUIRED_FRAGMENTS = (
     "model: claude-opus-5",
     "secrets.ANTHROPIC_API_KEY",
     "Prepare release notes",
+    "tools.release.release_notes",
+    "release-notes-claim-receipt.json",
     "steps.ai_release_notes.outputs.content",
     "Git-Iris generated empty release notes",
     "[^[:space:]]",
@@ -545,6 +548,8 @@ def test_release_version_parser_normalizes_every_supported_form() -> None:
     assert {version: parse_release_version(version).tag for version in cases} == {
         version: f"v{version}" for version in cases
     }
+    task = _root_task("release-version-validate")
+    assert task["args"] == ["run", "python", "-m", "tools.release.version"]
 
 
 @pytest.mark.parametrize(
@@ -566,6 +571,31 @@ def test_release_version_parser_rejects_unsupported_forms_before_mutation(
 ) -> None:
     with pytest.raises(ValueError, match=r"expected X.Y.Z"):
         parse_release_version(version)
+
+
+def test_release_notes_pass_through_the_public_claim_gate() -> None:
+    receipt, failures = validate_release_notes_claims(
+        "## Changes\n\nFix authenticated browser navigation.\n"
+    )
+
+    assert failures == []
+    assert receipt["fixture"] == "generated-release-notes-claim-gate-v1"
+    assert RELEASE_NOTES_SURFACE in receipt["docs"]
+
+
+def test_release_notes_reject_a_forbidden_benchmark_claim() -> None:
+    receipt, failures = validate_release_notes_claims("Sibyl publishes a LongMemEval-V2 score.\n")
+
+    assert failures
+    assert receipt["unsupported_claims"] == [
+        {
+            "path": RELEASE_NOTES_SURFACE,
+            "phrase": "Sibyl publishes a LongMemEval-V2 score",
+            "reason": (
+                "V2 is approval-bound until the official web and enterprise runs are pinned"
+            ),
+        }
+    ]
 
 
 def test_python_packages_pin_sibyl_core_to_current_release() -> None:

@@ -30,7 +30,7 @@ interface RememberInput {
   kind?: MemoryKind; // Memory kind (default "episode")
   domain?: string; // Domain/category
   project?: string; // Project ID (sets project memory scope)
-  tags?: string[]; // Searchable tags
+  tags?: string[]; // Browse-only metadata; no ranked retrieval effect
 
   // Linking
   related_to?: string[]; // Entity IDs to link

@@ -298,6 +298,10 @@ jobs:
           fi
 
           printf '%s\n' "$AI_CONTENT" > "$notes_path"
+          mkdir -p .moon/cache/release
+          uv run python -m tools.release.release_notes \
+            --notes "$notes_path" \
+            --receipt .moon/cache/release/release-notes-claim-receipt.json
 
           delimiter="release_notes_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
           {
@@ -420,7 +424,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: rc-gate-receipt-${{ steps.candidate.outputs.sha }}
-          path: .moon/cache/release/rc-gate-receipt.json
+          path: .moon/cache/release/*.json
           if-no-files-found: error
 
       - name: "◆ Create and push tag"
