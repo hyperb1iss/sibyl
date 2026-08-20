@@ -3,7 +3,13 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
+from unittest.mock import AsyncMock
 
+import pytest
+from mcp import ClientSession
+from mcp_types import CallToolResult, TextContent
 from tools.baselines.common import (
     _raw_memory_matches_seed,
     read_jsonl,
@@ -13,6 +19,7 @@ from tools.baselines.common import (
     write_jsonl,
     write_manifest,
 )
+from tools.baselines.replay import execute_mcp_case
 
 EXPECTED_ERROR_COUNT = 3
 REPO_ROOT = Path(__file__).parents[2]
@@ -38,6 +45,26 @@ def test_resolve_pointer_handles_nested_maps_and_lists() -> None:
     }
 
     assert resolve_pointer(payload, "/body/results/0/name") == "Baseline Corpus Episode"
+
+
+@pytest.mark.asyncio
+async def test_mcp_baseline_results_preserve_wire_aliases() -> None:
+    result = CallToolResult(
+        content=[TextContent(text="ok")],
+        structured_content={"query": "memory"},
+        is_error=False,
+    )
+    session = cast("ClientSession", SimpleNamespace(call_tool=AsyncMock(return_value=result)))
+
+    actual = await execute_mcp_case(
+        {"kind": "mcp_tool", "tool": "search", "arguments": {}},
+        session,
+    )
+
+    assert actual["isError"] is False
+    assert actual["structuredContent"] == {"query": "memory"}
+    assert "is_error" not in actual
+    assert "structured_content" not in actual
 
 
 def test_validate_expectations_supports_required_equals_minimums_and_list_contains() -> None:

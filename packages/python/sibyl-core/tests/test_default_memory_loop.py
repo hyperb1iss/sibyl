@@ -459,7 +459,7 @@ from sibyl.server import create_mcp_server
 
 assert cli_main.app is not None
 api_app = create_api_app()
-mcp = create_mcp_server(host="127.0.0.1", port=3334)
+mcp = create_mcp_server()
 combined_app = create_combined_app(host="127.0.0.1", port=3334)
 api_paths = set(api_app.openapi()["paths"])
 combined_routes = {

@@ -39,18 +39,18 @@ async def execute_mcp_case(
 
     kind = case["kind"]
     if kind == "mcp_list_tools":
-        return (await mcp_session.list_tools()).model_dump(mode="json")
+        return (await mcp_session.list_tools()).model_dump(mode="json", by_alias=True)
     if kind == "mcp_list_resources":
-        return (await mcp_session.list_resources()).model_dump(mode="json")
+        return (await mcp_session.list_resources()).model_dump(mode="json", by_alias=True)
     if kind == "mcp_tool":
         return (
             await mcp_session.call_tool(
                 case["tool"],
                 case.get("arguments"),
             )
-        ).model_dump(mode="json")
+        ).model_dump(mode="json", by_alias=True)
     if kind == "mcp_resource":
-        return (await mcp_session.read_resource(case["uri"])).model_dump(mode="json")
+        return (await mcp_session.read_resource(case["uri"])).model_dump(mode="json", by_alias=True)
 
     raise ValueError(f"Unsupported MCP baseline case kind: {kind}")
 
