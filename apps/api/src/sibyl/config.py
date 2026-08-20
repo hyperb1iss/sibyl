@@ -846,7 +846,11 @@ class Settings(BaseSettings):
     @property
     def resolved_coordination_backend(self) -> Literal["local", "redis"]:
         """Resolve the active coordination backend for this runtime."""
-        return "redis" if self.coordination_backend == "redis" else "local"
+        if self.coordination_backend != "auto":
+            return self.coordination_backend
+
+        redis_fields = {"redis_host", "redis_port", "redis_password", "redis_jobs_db"}
+        return "redis" if self.model_fields_set & redis_fields else "local"
 
 
 # Global settings instance

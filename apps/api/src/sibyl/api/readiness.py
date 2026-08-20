@@ -2,10 +2,10 @@
 
 Liveness (`/health`) only asserts the process is up. Readiness asks the
 harder question: can this process actually serve traffic? For Sibyl that
-means the SurrealDB runtime is reachable. The check connects a dedicated
-auth client against the static `sibyl_auth` namespace and returns the
-pooled connection without issuing a query, so it never touches a per-org
-namespace or the tenant query path — a fast handshake ping, not a sweep.
+means the SurrealDB runtime and active coordination broker are reachable.
+The database check connects a dedicated auth client against the static
+`sibyl_auth` namespace and returns the pooled connection without issuing a
+query, so it never touches a per-org namespace or the tenant query path.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ class DependencyStatus:
     ready: bool
     detail: str | None = None
     latency_ms: float | None = None
+    backend: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -44,6 +45,7 @@ class ReadinessReport:
                     "ready": dep.ready,
                     **({"detail": dep.detail} if dep.detail is not None else {}),
                     **({"latency_ms": dep.latency_ms} if dep.latency_ms is not None else {}),
+                    **({"backend": dep.backend} if dep.backend is not None else {}),
                 }
                 for dep in self.dependencies
             ],
@@ -99,9 +101,27 @@ def check_schema_bootstrap_ready() -> DependencyStatus | None:
     )
 
 
+async def check_coordination_ready() -> DependencyStatus:
+    """Probe the active broker required to accept background work."""
+    from sibyl.coordination import get_coordination_backend, get_coordination_health
+
+    backend = get_coordination_backend()
+    started = time.perf_counter()
+    health = await get_coordination_health()
+    latency_ms = round((time.perf_counter() - started) * 1000, 2)
+    ready = health.get("status") == "healthy" and health.get("queue_healthy") is True
+    return DependencyStatus(
+        name="coordination",
+        ready=ready,
+        detail=None if ready else f"{backend} coordination broker unavailable",
+        latency_ms=latency_ms,
+        backend=backend,
+    )
+
+
 async def check_readiness() -> ReadinessReport:
     """Aggregate readiness across the dependencies needed to serve traffic."""
-    dependencies = [await check_surreal_ready()]
+    dependencies = [await check_surreal_ready(), await check_coordination_ready()]
     schema_status = check_schema_bootstrap_ready()
     if schema_status is not None:
         dependencies.append(schema_status)
@@ -114,6 +134,7 @@ async def check_readiness() -> ReadinessReport:
 __all__ = [
     "DependencyStatus",
     "ReadinessReport",
+    "check_coordination_ready",
     "check_readiness",
     "check_schema_bootstrap_ready",
     "check_surreal_ready",
