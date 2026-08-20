@@ -1,6 +1,7 @@
 # Sibyl v1.3 final implementation and release plan: One Surface
 
-- Status: implementation complete; harmony merge, paid benchmark, and release-cut evidence pending
+- Status: implementation and local harmony gates complete; merge, paid benchmark, and release-cut
+  evidence pending
 - Created: 2026-08-19
 - Updated: 2026-08-20
 - Working task: `8be323d1-0000-4ce2-9661-8ca504f17e17`
@@ -24,7 +25,8 @@ decision remains in
 The One Surface behavior is merged into `main` through pull request 406. A second 27-commit harmony
 range is implementation-complete on the release branch. The range gives each major service one
 canonical owner, removes dead compatibility runtimes, and closes durability failures found during
-adversarial review. Its merge and exact-main receipts remain pending.
+adversarial review. The complete local release gate passed on the harmony branch. Its merge,
+exact-main CI, and release-cut receipts remain pending.
 
 Waves 0 and 4 are implemented and covered by focused gates. Wave 1 has a pinned official harness,
 fail-closed receipts, a tested decision rig, and native SurrealDB monitoring. The machine race and
@@ -609,9 +611,9 @@ Sibyl v1.3 may cut when every required item below has a receipt.
 - [x] One prerelease grammar governs release validation and version sync.
 - [x] The supported live SurrealDB version covers the rewrite semantics used by admin, projection,
       and restore paths.
-- [ ] `moon run :check` passes from the clean harmony documentation head. The historical One Surface
-      receipt is recorded in section 9.
-- [ ] Targeted lifecycle, MCP authorization, queue retry, readiness, browser, benchmark-contract,
+- [x] `moon run --force :check` passes from the frozen harmony implementation and documentation head
+      with no tracked changes. The historical One Surface receipt is recorded in section 9.
+- [x] Targeted lifecycle, MCP authorization, queue retry, readiness, browser, benchmark-contract,
       release-workflow, and Helm gates pass uncached on the harmony head.
 - [ ] The release runbook records the exact commit, generated receipts, deferred work, and rollback
       points.
@@ -686,11 +688,16 @@ public One Surface behavior while making ownership and failure handling match th
 | Runtime convergence          | The API and core share one hosted content client pool. The graph runtime has one native Surreal construction path. Shutdown closes every pool independently, and the unsupported FalkorDB embedding command and Cypher repair branch are gone.                            |
 | API and CLI gates            | The forced API gate passed 2,279 tests with nine skips. The forced CLI gate passed 608 tests. Lint and type checks passed for both packages.                                                                                                                              |
 | Trust receipt                | The team-scope gate follows canonical retrieval and content owners. All 41 receipt tests passed, including byte-deterministic rebuild and every anti-vacuity budget.                                                                                                      |
-| Full release gate            | Pending refresh on the exact documentation head.                                                                                                                                                                                                                          |
+| Parallel test isolation      | Every Moon pytest task installs a process-unique OS temp root without overriding an explicit caller root. Two simultaneous runs of the same CLI target passed, and full CLI worktree tests stayed outside the source checkout.                                            |
+| Full release gate            | The uncached `moon run --force :check` gate passed all 56 Moon tasks in 1 minute 13 seconds on `3cb02e01`. API passed 2,279 tests with nine skips. Core passed 2,724 tests with 14 skips and one documented xfail. CLI passed 608 tests.                                  |
 
 Fresh independent agents reproduced the durability, authorization, runtime lifecycle, stable-ID,
 browser, and public-contract probes. First reviews failed on real defects. The fix rounds passed
 only after the hostile cases were added to the executable suites.
+
+Commit `3cb02e01` is the frozen implementation and documentation head used for the local full-gate
+receipt. The following documentation-only commit records that result. GitHub CI must still pass on
+the final pull request head, and the exact-main release gates remain required after merge.
 
 No paid LongMemEval run or leaderboard submission was made. The approval-bound measurement path
 remains stopped before A/A because no provider key or spending approval was supplied.
