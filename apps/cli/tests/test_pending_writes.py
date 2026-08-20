@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from sibyl_cli import client, pending_writes
+from sibyl_cli import client_transport, pending_writes
 
 
 def test_pending_write_store_uses_secure_modes(
@@ -79,14 +79,14 @@ def test_read_like_posts_are_not_buffered() -> None:
         "/context/pack",
         "/memory/raw/recall",
     ):
-        assert client._should_buffer_request("POST", path) is False, path
+        assert client_transport._should_buffer_request("POST", path) is False, path
 
 
 def test_durable_writes_are_still_buffered() -> None:
     # Genuine writes (including persist-capable reflect and raw memory) keep
     # their offline buffer + replay semantics.
     for path in ("/memory/raw", "/context/reflect", "/tasks", "/entities"):
-        assert client._should_buffer_request("POST", path) is True, path
+        assert client_transport._should_buffer_request("POST", path) is True, path
     # Reads and auth never buffer.
-    assert client._should_buffer_request("GET", "/search") is False
-    assert client._should_buffer_request("POST", "/auth/login") is False
+    assert client_transport._should_buffer_request("GET", "/search") is False
+    assert client_transport._should_buffer_request("POST", "/auth/login") is False

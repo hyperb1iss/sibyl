@@ -8,6 +8,8 @@ import httpx
 import pytest
 
 from sibyl_cli import client as client_module
+from sibyl_cli import client_auth as client_auth_module
+from sibyl_cli import client_transport as client_transport_module
 from sibyl_cli.client import SibylClient
 
 
@@ -54,7 +56,7 @@ async def test_environment_token_ignores_expired_stored_credential(
         raise AssertionError("environment auth must not read stored expiry metadata")
 
     monkeypatch.setattr(
-        client_module,
+        client_transport_module,
         "is_access_token_expired",
         unexpected_stored_expiry_check,
     )
@@ -86,9 +88,9 @@ async def test_refresh_uses_newer_token_written_by_another_process(
     monkeypatch.setattr(
         client_module, "_load_default_auth_token", lambda _api_url, _scope=None: "old-access"
     )
-    monkeypatch.setattr(client_module, "auth_file_lock", lambda: _noop_lock())
+    monkeypatch.setattr(client_auth_module, "auth_file_lock", lambda: _noop_lock())
     monkeypatch.setattr(
-        client_module,
+        client_auth_module,
         "read_server_credentials",
         lambda _api_url, **_kwargs: {
             "access_token": "new-access",
@@ -96,13 +98,17 @@ async def test_refresh_uses_newer_token_written_by_another_process(
             "access_token_expires_at": int(time.time()) + 3600,
         },
     )
-    monkeypatch.setattr(client_module, "is_access_token_expired", lambda _api_url, **_kwargs: False)
+    monkeypatch.setattr(
+        client_auth_module,
+        "is_access_token_expired",
+        lambda _api_url, **_kwargs: False,
+    )
 
     class UnexpectedAsyncClient:
         def __init__(self, *_args: object, **_kwargs: object) -> None:
             raise AssertionError("refresh endpoint should not be called")
 
-    monkeypatch.setattr(client_module.httpx, "AsyncClient", UnexpectedAsyncClient)
+    monkeypatch.setattr(client_auth_module.httpx, "AsyncClient", UnexpectedAsyncClient)
 
     client = SibylClient(base_url="http://example.test/api")
     refreshed, failure = await client._refresh_token()
@@ -120,9 +126,9 @@ async def test_refresh_rotates_and_writes_tokens_under_lock(
     monkeypatch.setattr(
         client_module, "_load_default_auth_token", lambda _api_url, _scope=None: "old-access"
     )
-    monkeypatch.setattr(client_module, "auth_file_lock", lambda: _noop_lock())
+    monkeypatch.setattr(client_auth_module, "auth_file_lock", lambda: _noop_lock())
     monkeypatch.setattr(
-        client_module,
+        client_auth_module,
         "read_server_credentials",
         lambda _api_url, **_kwargs: {
             "access_token": "old-access",
@@ -131,9 +137,13 @@ async def test_refresh_rotates_and_writes_tokens_under_lock(
         },
     )
     monkeypatch.setattr(
-        client_module, "get_refresh_token", lambda _api_url, **_kwargs: "old-refresh"
+        client_auth_module, "get_refresh_token", lambda _api_url, **_kwargs: "old-refresh"
     )
-    monkeypatch.setattr(client_module, "is_access_token_expired", lambda _api_url, **_kwargs: True)
+    monkeypatch.setattr(
+        client_auth_module,
+        "is_access_token_expired",
+        lambda _api_url, **_kwargs: True,
+    )
 
     writes: list[dict[str, Any]] = []
 
@@ -157,7 +167,7 @@ async def test_refresh_rotates_and_writes_tokens_under_lock(
             }
         )
 
-    monkeypatch.setattr(client_module, "set_tokens", fake_set_tokens)
+    monkeypatch.setattr(client_auth_module, "set_tokens", fake_set_tokens)
 
     class FakeResponse:
         status_code = 200
@@ -185,7 +195,7 @@ async def test_refresh_rotates_and_writes_tokens_under_lock(
             assert json == {"refresh_token": "old-refresh"}
             return FakeResponse()
 
-    monkeypatch.setattr(client_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(client_auth_module.httpx, "AsyncClient", FakeAsyncClient)
 
     client = SibylClient(base_url="http://example.test/api")
     refreshed, failure = await client._refresh_token()
