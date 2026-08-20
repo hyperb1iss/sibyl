@@ -63,7 +63,7 @@ async def graph(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[_Runtime]:
         return runtime
 
     import sibyl.jobs.entities as jobs_entities
-    import sibyl_core.retrieval._search_database as search_database
+    from sibyl_core.retrieval import _search_database as search_database
 
     monkeypatch.setattr(jobs_entities, "get_surreal_graph_runtime", runtime_factory)
     monkeypatch.setattr(search_database, "get_surreal_graph_runtime", runtime_factory)
@@ -245,7 +245,7 @@ async def test_a_row_projected_after_its_capture_was_corrected_is_born_retired(
     where the two are reconciled.
     """
 
-    import sibyl_core.services.memory_lifecycle as memory_lifecycle
+    from sibyl_core.services import memory_lifecycle
 
     monkeypatch.setattr(
         memory_lifecycle,
@@ -277,7 +277,7 @@ async def test_an_uncorrected_capture_still_projects_a_recallable_row(
     silently failed to project at all, would pass the test above.
     """
 
-    import sibyl_core.services.memory_lifecycle as memory_lifecycle
+    from sibyl_core.services import memory_lifecycle
 
     monkeypatch.setattr(
         memory_lifecycle,
@@ -311,7 +311,7 @@ async def test_a_correction_landing_inside_the_write_still_retires_the_row(
     only place it can land to reproduce this.
     """
 
-    import sibyl_core.services.memory_lifecycle as memory_lifecycle
+    from sibyl_core.services import memory_lifecycle
 
     capture = _corrected_capture(metadata={})
     monkeypatch.setattr(memory_lifecycle, "get_raw_memory", AsyncMock(return_value=capture))
