@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, call, patch
 
@@ -29,7 +30,6 @@ from sibyl_core.tools.admin import (
     create_backup,
     get_stats,
     health_check,
-    migrate_fix_name_embedding_types,
     rebuild_indices,
     restore_backup,
 )
@@ -67,28 +67,14 @@ class TestRebuildIndices:
         assert "requested target: all" in result.message.lower()
 
 
-class TestEmbeddingMaintenance:
-    """Embedding maintenance should not run Falkor-only Cypher in Surreal mode."""
+class TestAdminRuntimeContract:
+    """Admin tools should contain only supported Surreal runtime operations."""
 
-    @pytest.mark.asyncio
-    async def test_name_embedding_migration_noops_in_surreal_mode(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        driver = AsyncMock()
-        graph_client = SimpleNamespace(driver=driver)
+    def test_admin_tools_have_no_legacy_cypher_embedding_repair(self) -> None:
+        source = inspect.getsource(admin_module)
 
-        monkeypatch.setattr(admin_module.settings, "store", "surreal")
-        monkeypatch.setattr(
-            admin_module,
-            "get_graph_client",
-            AsyncMock(return_value=graph_client),
-        )
-
-        result = await migrate_fix_name_embedding_types()
-
-        assert result.success is True
-        assert result.entities_updated == 0
-        driver.execute_query.assert_not_called()
+        assert "MATCH (" not in source
+        assert "migrate_fix_name_embedding_types" not in source
 
 
 class TestBackupInventory:

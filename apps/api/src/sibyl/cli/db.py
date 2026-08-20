@@ -1331,59 +1331,6 @@ def db_plan_probes(
     _plan_probes()
 
 
-@app.command("fix-embeddings")
-def db_fix_embeddings(
-    batch_size: Annotated[
-        int,
-        typer.Option(
-            "--batch-size",
-            help="Batch size for scanning candidate nodes",
-            min=1,
-            max=5000,
-        ),
-    ] = 250,
-    max_entities: Annotated[
-        int,
-        typer.Option(
-            "--max-entities",
-            help="Safety cap for maximum nodes scanned",
-            min=1,
-            max=1_000_000,
-        ),
-    ] = 20_000,
-) -> None:
-    """Run the legacy FalkorDB embedding repair command.
-
-    Some older writes stored `name_embedding` as a plain List[float] instead of
-    a Vectorf32 value. This migration is retained only for compatibility
-    archives or preserved legacy source environments.
-    """
-
-    @run_async
-    async def _fix() -> None:
-        from sibyl_core.tools.admin import migrate_fix_name_embedding_types
-
-        try:
-            warn("Running embedding repair migration (this mutates graph data)")
-
-            result = await migrate_fix_name_embedding_types(
-                batch_size=batch_size,
-                max_entities=max_entities,
-            )
-
-            if result.success:
-                success(result.message)
-                info(f"Duration: {result.duration_seconds:.2f}s")
-            else:
-                error(f"Embedding repair failed: {result.message}")
-
-        except Exception as e:
-            error(f"Embedding repair failed: {e}")
-            print_db_hint()
-
-    _fix()
-
-
 @app.command("backfill-task-relationships")
 def backfill_task_relationships(
     org_id: Annotated[
