@@ -19,7 +19,7 @@ import {
   StopCircle,
   Trash2,
 } from '@/components/ui/icons';
-import type { SourceSummary } from '@/lib/api';
+import type { SourceSummary } from '@/lib/api/sources';
 import { formatDateTime } from '@/lib/constants/formatting';
 import {
   CRAWL_STATUS_CONFIG,

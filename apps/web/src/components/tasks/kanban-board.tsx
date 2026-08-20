@@ -12,7 +12,7 @@ import {
   Flame,
   Zap,
 } from '@/components/ui/icons';
-import type { TaskStatus, TaskSummary } from '@/lib/api';
+import type { TaskStatus, TaskSummary } from '@/lib/api/work-items';
 import { TASK_STATUS_CONFIG, TASK_STATUSES, type TaskStatusType } from '@/lib/constants/tasks';
 import { useProjectContext, useProjectFilter } from '@/lib/project-context';
 import { TaskCard, TaskCardSkeleton } from './task-card';

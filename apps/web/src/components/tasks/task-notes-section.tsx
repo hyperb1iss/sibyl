@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui';
 import { Command, EditPencil, Send, User } from '@/components/ui/icons';
 import { formatDistanceToNow } from '@/lib/constants/formatting';
-import { useAddTaskNote, useTaskNotes } from '@/lib/hooks';
+import { useAddTaskNote, useTaskNotes } from '@/lib/hooks/work-items';
 
 interface TaskNotesSectionProps {
   taskId: string;

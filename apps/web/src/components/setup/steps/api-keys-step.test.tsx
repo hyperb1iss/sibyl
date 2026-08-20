@@ -7,7 +7,7 @@ const mockUseSettings = vi.fn();
 const mockUseUpdateSettings = vi.fn();
 const mockUseValidateApiKeys = vi.fn();
 
-vi.mock('@/lib/hooks', () => ({
+vi.mock('@/lib/hooks/admin', () => ({
   useSettings: () => mockUseSettings(),
   useUpdateSettings: () => mockUseUpdateSettings(),
   useValidateApiKeys: () => mockUseValidateApiKeys(),

@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useState } from 'react';
-import { useUpdatePreferences } from '@/lib/hooks';
+import { useUpdatePreferences } from '@/lib/hooks/auth';
 import { CompletionStep } from './steps/completion-step';
 import { ProjectStep } from './steps/project-step';
 import { TaskStep } from './steps/task-step';

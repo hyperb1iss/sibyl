@@ -27,8 +27,8 @@ import type {
   LLMSurfaceSettings,
   LLMTestResult,
   UpdateLLMSurfaceRequest,
-} from '@/lib/api';
-import { useTestLLMSurface, useUpdateLLMSurface } from '@/lib/hooks';
+} from '@/lib/api/admin';
+import { useTestLLMSurface, useUpdateLLMSurface } from '@/lib/hooks/admin';
 import { SettingsField, type SettingsFieldSource, StatusPill } from './primitives';
 
 const CUSTOM_MODEL = '__custom__';

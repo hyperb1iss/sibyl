@@ -1,6 +1,6 @@
 'use client';
 
-import type { MemoryScope } from '@/lib/api';
+import type { MemoryScope } from '@/lib/api/memory';
 
 export type MemoryScopeFilter = 'all' | MemoryScope;
 

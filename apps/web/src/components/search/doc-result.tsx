@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { ExternalLink } from '@/components/ui/icons';
-import type { RAGChunkResult, RAGPageResult } from '@/lib/api';
+import type { RAGChunkResult, RAGPageResult } from '@/lib/api/search';
 
 interface DocChunkResultProps {
   result: RAGChunkResult;

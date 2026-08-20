@@ -6,8 +6,8 @@ import { EntityBadge, RelationshipBadge } from '@/components/ui/badge';
 import { ChevronDown, ChevronUp, Network } from '@/components/ui/icons';
 import { Markdown } from '@/components/ui/markdown';
 import { LoadingState } from '@/components/ui/spinner';
-import type { RelatedEntitySummary } from '@/lib/api';
-import { useEntity } from '@/lib/hooks';
+import type { RelatedEntitySummary } from '@/lib/api/graph';
+import { useEntity } from '@/lib/hooks/graph';
 
 interface RelatedEntity extends RelatedEntitySummary {}
 

@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useState } from 'react';
-import type { SetupStatus } from '@/lib/api';
+import type { SetupStatus } from '@/lib/api/admin';
 import { AdminAccountStep } from './steps/admin-account-step';
 import { ApiKeysStep } from './steps/api-keys-step';
 import { ConnectStep } from './steps/connect-step';

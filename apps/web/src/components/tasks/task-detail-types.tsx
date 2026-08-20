@@ -4,7 +4,7 @@
 
 import type { ReactNode } from 'react';
 import { CheckCircle2, Circle, Pause, Play, Send, Target, Zap } from '@/components/ui/icons';
-import type { Entity } from '@/lib/api';
+import type { Entity } from '@/lib/api/graph';
 import {
   TASK_PRIORITIES,
   TASK_PRIORITY_CONFIG,

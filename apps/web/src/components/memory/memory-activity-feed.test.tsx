@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { MemoryAuditEvent } from '@/lib/api';
+import type { MemoryAuditEvent } from '@/lib/api/memory';
 import { render, screen } from '@/test/utils';
 import { MemoryActivityFeed } from './memory-activity-feed';
 

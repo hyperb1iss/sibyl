@@ -11,7 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { FolderKanban } from '@/components/ui/icons';
-import { useCreateEntity } from '@/lib/hooks';
+import { useCreateEntity } from '@/lib/hooks/graph';
 
 interface CreateProjectDialogProps {
   isOpen: boolean;

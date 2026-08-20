@@ -5,7 +5,7 @@ import type {
   LLMProviderName,
   LLMSurface,
   LLMSurfaceSettings,
-} from '@/lib/api';
+} from '@/lib/api/admin';
 import { render, screen } from '@/test/utils';
 import { LLMSurfaceRow } from './llm-surface-row';
 
@@ -20,7 +20,7 @@ const toast = vi.hoisted(() => ({
   warning: vi.fn(),
 }));
 
-vi.mock('@/lib/hooks', () => hooks);
+vi.mock('@/lib/hooks/admin', () => hooks);
 vi.mock('sonner', () => ({ toast }));
 
 function valueField(value: string | number | null, source: LLMConfigSource = 'default') {

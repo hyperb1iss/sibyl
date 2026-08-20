@@ -4,13 +4,15 @@ import { useRouter } from 'next/navigation';
 import { useCallback } from 'react';
 import { toast } from 'sonner';
 import { Circle, Target } from '@/components/ui/icons';
-import type { Entity, TaskStatus } from '@/lib/api';
+import type { Entity } from '@/lib/api/graph';
+import type { TaskStatus } from '@/lib/api/work-items';
 import {
   TASK_STATUS_CONFIG,
   type TaskPriorityType,
   type TaskStatusType,
 } from '@/lib/constants/tasks';
-import { useDeleteEntity, useProjects, useTaskUpdateStatus, useUpdateEntity } from '@/lib/hooks';
+import { useDeleteEntity, useUpdateEntity } from '@/lib/hooks/graph';
+import { useProjects, useTaskUpdateStatus } from '@/lib/hooks/work-items';
 import { TaskContentSections } from './task-content-sections';
 import { TaskHeader } from './task-header';
 import { TaskQuickActions } from './task-quick-actions';

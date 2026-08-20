@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { RAGChunkResult } from '@/lib/api';
+import type { RAGChunkResult } from '@/lib/api/search';
 import { render, screen } from '@/test/utils';
 import { DocChunkResult } from './doc-result';
 

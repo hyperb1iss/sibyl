@@ -12,7 +12,7 @@
 
 import { createContext, type ReactNode, useContext, useMemo } from 'react';
 
-import { useMe } from './hooks';
+import { useMe } from './hooks/auth';
 
 // =============================================================================
 // Types

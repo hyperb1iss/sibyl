@@ -16,7 +16,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => navigationState.searchParams,
 }));
 
-vi.mock('@/lib/hooks', () => hooks);
+vi.mock('@/lib/hooks/memory', () => hooks);
 
 import { MemoryContent } from './memory-content';
 

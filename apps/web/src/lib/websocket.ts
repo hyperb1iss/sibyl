@@ -3,7 +3,7 @@
  */
 
 import { env } from 'next-dynenv';
-import type { SourceImportStatusResponse } from './api';
+import type { SourceImportStatusResponse } from './api/memory';
 
 // =============================================================================
 // Event Payload Types (Discriminated Unions)

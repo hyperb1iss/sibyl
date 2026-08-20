@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ConnectAgentModal } from '@/components/dashboard/connect-agent-modal';
 import { ArrowRight, BookOpen, Check, Network, Search, Xmark } from '@/components/ui/icons';
-import { useOnboardingProgress, useSetupStatus } from '@/lib/hooks';
+import { useSetupStatus } from '@/lib/hooks/admin';
+import { useOnboardingProgress } from '@/lib/hooks/auth';
 
 /** Minimum entities before automatically hiding the welcome banner */
 const WELCOME_BANNER_ENTITY_THRESHOLD = 10;

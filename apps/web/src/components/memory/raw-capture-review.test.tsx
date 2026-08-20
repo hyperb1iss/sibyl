@@ -22,7 +22,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => navigationState.searchParams,
 }));
 
-vi.mock('@/lib/hooks', () => hooks);
+vi.mock('@/lib/hooks/memory', () => hooks);
 vi.mock('sonner', () => ({ toast }));
 
 import { RawCaptureReview } from './raw-capture-review';

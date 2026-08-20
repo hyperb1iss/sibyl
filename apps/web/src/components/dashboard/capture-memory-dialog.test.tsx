@@ -11,7 +11,7 @@ const toast = vi.hoisted(() => ({
   error: vi.fn(),
 }));
 
-vi.mock('@/lib/hooks', () => hooks);
+vi.mock('@/lib/hooks/graph', () => hooks);
 vi.mock('sonner', () => ({ toast }));
 
 describe('CaptureMemoryDialog', () => {

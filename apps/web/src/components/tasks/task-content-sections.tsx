@@ -5,7 +5,7 @@ import { EditableTags, EditableText } from '@/components/editable';
 import { RelatedEntitiesSection } from '@/components/entities/related-entities-section';
 import { CheckCircle2, Hash, Pencil } from '@/components/ui/icons';
 import { Markdown } from '@/components/ui/markdown';
-import type { Entity } from '@/lib/api';
+import type { Entity } from '@/lib/api/graph';
 import type { TaskStatusType } from '@/lib/constants/tasks';
 import { TaskNotesSection } from './task-notes-section';
 
