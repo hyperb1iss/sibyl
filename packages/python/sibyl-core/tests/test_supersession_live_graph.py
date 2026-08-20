@@ -285,7 +285,7 @@ async def test_the_outgoing_walk_does_not_expand_into_a_real_retired_row(
     )
     assert [row.get("uuid") for row in hops] == []
 
-    # Naming the predicate is the documented carve-out for lineage walks.
+    # Naming the predicate narrows current recall; it is not a history request.
     lineage = await search_module._node_bfs_records(
         client=graph.client,
         origin_uuids=["walk-new"],
@@ -295,7 +295,7 @@ async def test_the_outgoing_walk_does_not_expand_into_a_real_retired_row(
         limit=10,
         relationship_names=["SUPERSEDES"],
     )
-    assert [row.get("uuid") for row in lineage] == ["walk-old"]
+    assert lineage == []
 
 
 @pytest.mark.asyncio

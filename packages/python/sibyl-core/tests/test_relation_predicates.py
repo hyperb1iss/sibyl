@@ -14,10 +14,17 @@ from sibyl_core.models.entities import Entity, EntityType, RelationshipType
 from sibyl_core.models.reflection import ReflectionCandidate
 from sibyl_core.models.relations import (
     DECLARABLE_RELATIONSHIP_PREDICATES,
+    PREDICATE_EXPANSION_PATH_SCORES,
+    PREDICATE_HYBRID_MULTIPLIERS,
+    PredicateDirection,
+    PredicateLifecycleEffect,
     declared_relation_targets,
     parse_relation_declaration,
     parse_relation_declarations,
+    predicate_direction_allows,
+    predicate_policy,
 )
+from sibyl_core.retrieval.hybrid import DEFAULT_GRAPH_RELATIONSHIP_TYPE_WEIGHTS
 from sibyl_core.retrieval.search import _GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS
 from sibyl_core.services.graph import (
     EntityManager,
@@ -125,6 +132,133 @@ class TestParsing:
         for relationship_type in DECLARABLE_RELATIONSHIP_PREDICATES.values():
             weight = _GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS.get(relationship_type.value, untyped)
             assert weight >= untyped, relationship_type
+
+    @pytest.mark.parametrize(
+        ("predicate", "hybrid", "expansion", "direction", "lifecycle"),
+        [
+            (
+                RelationshipType.SUPERSEDES,
+                1.10,
+                0.95,
+                PredicateDirection.INCOMING,
+                PredicateLifecycleEffect.HIDE_TARGET,
+            ),
+            (
+                RelationshipType.CONTRADICTS,
+                1.00,
+                0.64,
+                PredicateDirection.BOTH,
+                PredicateLifecycleEffect.MARK_CONTESTED,
+            ),
+            (
+                RelationshipType.REQUIRES,
+                1.15,
+                0.98,
+                PredicateDirection.OUTGOING,
+                PredicateLifecycleEffect.NONE,
+            ),
+            (
+                RelationshipType.SUPPORTS,
+                1.00,
+                0.94,
+                PredicateDirection.OUTGOING,
+                PredicateLifecycleEffect.NONE,
+            ),
+            (
+                RelationshipType.DECIDES,
+                1.00,
+                1.00,
+                PredicateDirection.OUTGOING,
+                PredicateLifecycleEffect.NONE,
+            ),
+            (
+                RelationshipType.RELATED_TO,
+                0.85,
+                0.64,
+                PredicateDirection.EXISTING,
+                PredicateLifecycleEffect.NONE,
+            ),
+        ],
+    )
+    def test_canonical_predicate_contract(
+        self,
+        predicate: RelationshipType,
+        hybrid: float,
+        expansion: float,
+        direction: PredicateDirection,
+        lifecycle: PredicateLifecycleEffect,
+    ) -> None:
+        policy = predicate_policy(predicate)
+
+        assert policy is not None
+        assert policy.hybrid_multiplier == hybrid
+        assert policy.expansion_path_score == expansion
+        assert policy.direction is direction
+        assert policy.lifecycle_effect is lifecycle
+        assert policy.receipt_label == predicate.value.lower()
+
+    def test_both_retrieval_engines_consume_canonical_numeric_policy(self) -> None:
+        assert DEFAULT_GRAPH_RELATIONSHIP_TYPE_WEIGHTS is PREDICATE_HYBRID_MULTIPLIERS
+        assert _GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS is PREDICATE_EXPANSION_PATH_SCORES
+
+    def test_canonical_policy_preserves_each_engines_existing_numeric_table(self) -> None:
+        assert dict(PREDICATE_HYBRID_MULTIPLIERS) == {
+            "APPLIES_TO": 1.10,
+            "BELONGS_TO": 1.20,
+            "BLOCKS": 1.25,
+            "BREAKS": 1.15,
+            "CONFLICTS_WITH": 1.10,
+            "CONTAINS": 1.10,
+            "CONTRADICTS": 1.00,
+            "DECIDES": 1.00,
+            "DEPENDS_ON": 1.25,
+            "DERIVED_FROM": 1.05,
+            "DOCUMENTED_IN": 1.00,
+            "ENABLES": 1.15,
+            "ENCOUNTERED": 1.10,
+            "IMPLEMENTED": 1.15,
+            "MENTIONS": 0.35,
+            "REFERENCES": 1.15,
+            "RELATED_TO": 0.85,
+            "REQUIRES": 1.15,
+            "SUPERSEDES": 1.10,
+            "SUPPORTS": 1.00,
+            "USES_PROCEDURE": 1.15,
+            "VALIDATED_BY": 1.15,
+        }
+        assert dict(PREDICATE_EXPANSION_PATH_SCORES) == {
+            "ABOUT": 0.78,
+            "BELONGS_TO": 0.72,
+            "BLOCKS": 0.96,
+            "CONTAINS": 0.72,
+            "CONTRADICTS": 0.64,
+            "DECIDES": 1.00,
+            "DEPENDS_ON": 0.98,
+            "DERIVED_FROM": 0.70,
+            "DOCUMENTED_IN": 0.66,
+            "ENCOUNTERED": 0.86,
+            "IMPLEMENTED": 0.90,
+            "MENTIONS": 0.58,
+            "PRODUCES": 0.82,
+            "REFERENCES": 0.86,
+            "RELATED_TO": 0.64,
+            "REQUIRES": 0.98,
+            "SHARES_COMMUNITY": 0.74,
+            "SUPERSEDES": 0.95,
+            "SUPPORTS": 0.94,
+            "TOUCHES": 0.82,
+            "USES_PROCEDURE": 0.92,
+            "VALIDATED_BY": 0.94,
+        }
+
+    def test_declared_directions_are_enforced_without_changing_existing_defaults(self) -> None:
+        assert predicate_direction_allows(RelationshipType.SUPERSEDES, "incoming") is True
+        assert predicate_direction_allows(RelationshipType.SUPERSEDES, "outgoing") is False
+        assert predicate_direction_allows(RelationshipType.CONTRADICTS, "incoming") is True
+        assert predicate_direction_allows(RelationshipType.CONTRADICTS, "outgoing") is True
+        assert predicate_direction_allows(RelationshipType.REQUIRES, "outgoing") is True
+        assert predicate_direction_allows(RelationshipType.REQUIRES, "incoming") is False
+        assert predicate_direction_allows(RelationshipType.DEPENDS_ON, "incoming") is True
 
 
 class _WritableTargets:

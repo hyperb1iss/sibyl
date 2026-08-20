@@ -31,6 +31,11 @@ from sibyl_core.embeddings.providers import EmbeddingMetadata, EmbeddingProvider
 from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
 from sibyl_core.memory_pipeline.retrieval import CandidateSourceFailure, CandidateSourceResult
 from sibyl_core.models.context import ContextFacet
+from sibyl_core.models.relations import (
+    PREDICATE_EXPANSION_PATH_SCORES,
+    predicate_direction_allows,
+    predicate_policy,
+)
 from sibyl_core.retrieval.candidates import (
     CandidateKind,
     CandidateScope,
@@ -83,29 +88,7 @@ RAW_LEXICAL_LIMIT_DIVISOR = 4
 _ACTIVE_TASK_STATUSES = {"doing", "in_progress", "review"}
 _RAW_MEMORY_CONTEXT_TYPES = {"raw_memory", "session", "episode", "note"}
 _EDGE_CONTEXT_TYPES = {"claim", "relationship"}
-_GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS = {
-    "DECIDES": 1.0,
-    "REQUIRES": 0.98,
-    "DEPENDS_ON": 0.98,
-    "BLOCKS": 0.96,
-    "SUPERSEDES": 0.95,
-    "SUPPORTS": 0.94,
-    "VALIDATED_BY": 0.94,
-    "USES_PROCEDURE": 0.92,
-    "IMPLEMENTED": 0.9,
-    "REFERENCES": 0.86,
-    "ENCOUNTERED": 0.86,
-    "TOUCHES": 0.82,
-    "PRODUCES": 0.82,
-    "ABOUT": 0.78,
-    "BELONGS_TO": 0.72,
-    "CONTAINS": 0.72,
-    "SHARES_COMMUNITY": 0.74,
-    "DERIVED_FROM": 0.7,
-    "DOCUMENTED_IN": 0.66,
-    "RELATED_TO": 0.64,
-    "MENTIONS": 0.58,
-}
+_GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS = PREDICATE_EXPANSION_PATH_SCORES
 _SUPERSEDES_PREDICATE = "SUPERSEDES"
 # An entity carrying an inbound SUPERSEDES edge is the row somebody replaced.
 # Resolving that over the surviving candidate set costs one indexed lookup
@@ -122,6 +105,7 @@ _GRAPH_EXPANSION_METADATA_KEYS = (
     "graph_expansion_depth",
     "graph_expansion_relationship",
     "graph_expansion_score",
+    "graph_expansion_direction",
     "graph_expansion_community_id",
 )
 log = structlog.get_logger()
@@ -654,6 +638,7 @@ async def context_search(
                 candidates=authorized_exact_key_candidates,
             ),
             **supersession_metadata,
+            **_predicate_hop_receipt(filtered_lists),
             "stage_timings_ms": stage_timings_ms,
         },
         graph_count=len([result for result in results if result.result_origin == "graph"]),
@@ -2145,6 +2130,8 @@ async def _relation_target_hops(
         if not uuid:
             continue
         relationship = _string_value(row.get("relationship")) or "RELATED_TO"
+        if not predicate_direction_allows(relationship, "outgoing"):
+            continue
         hops.append(
             _GraphExpansionHop(
                 uuid=uuid,
@@ -2198,6 +2185,8 @@ async def _relation_source_hops(
         if not uuid:
             continue
         relationship = _string_value(row.get("relationship")) or "RELATED_TO"
+        if not predicate_direction_allows(relationship, "incoming"):
+            continue
         hops.append(
             _GraphExpansionHop(
                 uuid=uuid,
@@ -2318,9 +2307,8 @@ async def _hydrate_graph_expansion_records(
         record["graph_expansion_depth"] = hop.depth
         record["graph_expansion_relationship"] = hop.relationship
         record["graph_expansion_score"] = hop.score
-        # Not in _GRAPH_EXPANSION_METADATA_KEYS on purpose: the scored lanes copy
-        # only the listed keys onto a candidate, so direction reaches a caller
-        # that reads the record directly and stays out of search result metadata.
+        # Direction travels with the scored candidate so receipts can separate
+        # incoming rescue from ordinary outgoing expansion.
         record["graph_expansion_direction"] = hop.direction
         if hop.community_id:
             record["graph_expansion_community_id"] = hop.community_id
@@ -2471,6 +2459,31 @@ def _graph_expansion_path_score(relationship: str, *, depth: int) -> float:
     base = _GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS.get(normalized, 0.64)
     depth_multiplier = _GRAPH_EXPANSION_DEPTH_DECAY ** max(depth - 1, 0)
     return max(min(base * depth_multiplier, 1.0), 0.1)
+
+
+def _predicate_hop_receipt(
+    source_lists: Sequence[tuple[RetrievalSignal, Sequence[RetrievalCandidate]]],
+) -> dict[str, object]:
+    by_predicate: dict[str, int] = {}
+    by_direction: dict[str, int] = {}
+    for signal, candidates in source_lists:
+        if signal is not RetrievalSignal.GRAPH_EXPANSION:
+            continue
+        for candidate in candidates:
+            metadata = candidate.metadata if isinstance(candidate.metadata, Mapping) else {}
+            predicate = str(metadata.get("graph_expansion_relationship") or "RELATED_TO")
+            policy = predicate_policy(predicate)
+            label = policy.receipt_label if policy is not None else predicate.lower()
+            direction = str(metadata.get("graph_expansion_direction") or "outgoing")
+            by_predicate[label] = by_predicate.get(label, 0) + 1
+            by_direction[direction] = by_direction.get(direction, 0) + 1
+    return {
+        "predicate_hops": {
+            "total": sum(by_predicate.values()),
+            "by_predicate": by_predicate,
+            "by_direction": by_direction,
+        }
+    }
 
 
 def _graph_expansion_fetch_limit(limit: int) -> int:

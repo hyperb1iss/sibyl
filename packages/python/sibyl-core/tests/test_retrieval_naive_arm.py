@@ -52,6 +52,7 @@ def _candidate(
     *,
     score: float = 0.5,
     content: str = "body",
+    metadata: dict[str, Any] | None = None,
 ) -> RetrievalCandidate:
     return RetrievalCandidate(
         id=candidate_id,
@@ -61,7 +62,7 @@ def _candidate(
         content=content,
         score=score,
         source=None,
-        metadata={},
+        metadata=dict(metadata or {}),
         scope=CandidateScope(),
     )
 
@@ -693,6 +694,58 @@ async def test_naive_arm_returns_rows_fused_from_both_lanes(
     assert "node_vector" in lanes
     assert response.filters["naive_lane_counts"]["node_fulltext"] > 0
     assert response.filters["naive_lane_counts"]["node_vector"] > 0
+
+
+@pytest.mark.asyncio
+async def test_naive_arm_filters_retired_rows_before_fusion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl_core.retrieval.candidates import VectorCandidateFetch
+
+    current = _candidate("current")
+    retired = _candidate("retired", metadata={"lifecycle_state": "superseded"})
+
+    class Client:
+        async def execute_query(self, _query: str, **_kwargs: object) -> list[object]:
+            return []
+
+    class Runtime:
+        client = Client()
+
+    async def fake_runtime(_organization_id: str, **_kwargs: object) -> Runtime:
+        return Runtime()
+
+    async def node_fulltext(**_kwargs: object) -> list[RetrievalCandidate]:
+        return [retired, current]
+
+    async def episode_fulltext(**_kwargs: object) -> list[RetrievalCandidate]:
+        return []
+
+    async def vector_candidates(**_kwargs: object) -> VectorCandidateFetch:
+        return VectorCandidateFetch(
+            node_candidates=[retired, current],
+            edge_candidates=[],
+            requested=True,
+            attempted=True,
+        )
+
+    monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(naive_module, "_node_fulltext_candidates", node_fulltext)
+    monkeypatch.setattr(naive_module, "_episode_fulltext_candidates", episode_fulltext)
+    monkeypatch.setattr(
+        naive_module,
+        "_vector_candidate_sources_detailed",
+        vector_candidates,
+    )
+
+    response = await naive_search(plan=_plan(query=CORPUS_QUERY), limit=10)
+
+    assert [result.id for result in response.results] == ["current"]
+    assert response.filters["supersession_gate"] == {
+        "lifecycle_dropped": 2,
+        "superseded_dropped": 0,
+        "superseded_uuids": [],
+    }
 
 
 @pytest.mark.asyncio

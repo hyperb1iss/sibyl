@@ -10,14 +10,20 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, TypeVar
 
 import structlog
 
+from sibyl_core.memory_pipeline.lifecycle import current_graph_memory_recallable
 from sibyl_core.models.entities import Entity
+from sibyl_core.models.relations import (
+    PREDICATE_HYBRID_MULTIPLIERS,
+    predicate_direction_allows,
+    predicate_policy,
+)
 from sibyl_core.query_anchors import (
     explicit_query_anchor_score,
     extract_explicit_query_anchors,
@@ -42,27 +48,7 @@ log = structlog.get_logger()
 
 T = TypeVar("T")
 MIN_PRIMARY_SEEDS_BEFORE_LINKING = 5
-DEFAULT_GRAPH_RELATIONSHIP_TYPE_WEIGHTS: Mapping[str, float] = {
-    "APPLIES_TO": 1.1,
-    "REQUIRES": 1.15,
-    "ENABLES": 1.15,
-    "BREAKS": 1.15,
-    "CONFLICTS_WITH": 1.1,
-    "SUPERSEDES": 1.1,
-    "BELONGS_TO": 1.2,
-    "CONTAINS": 1.1,
-    "DEPENDS_ON": 1.25,
-    "BLOCKS": 1.25,
-    "REFERENCES": 1.15,
-    "ENCOUNTERED": 1.1,
-    "IMPLEMENTED": 1.15,
-    "VALIDATED_BY": 1.15,
-    "USES_PROCEDURE": 1.15,
-    "DERIVED_FROM": 1.05,
-    "DOCUMENTED_IN": 1.0,
-    "RELATED_TO": 0.85,
-    "MENTIONS": 0.35,
-}
+DEFAULT_GRAPH_RELATIONSHIP_TYPE_WEIGHTS: Mapping[str, float] = PREDICATE_HYBRID_MULTIPLIERS
 
 
 def _require_group_id(group_id: str | None, operation: str) -> str:
@@ -330,6 +316,72 @@ def _filter_entity_results(
     return [(entity, score) for entity, score in results if result_filter(entity)]
 
 
+def _filter_recallable_entity_results(
+    results: list[tuple[Any, float]],
+) -> list[tuple[Any, float]]:
+    return [(entity, score) for entity, score in results if current_graph_memory_recallable(entity)]
+
+
+async def _apply_current_entity_gate(
+    results: list[tuple[Any, float]],
+    *,
+    client: Any,
+    group_id: str,
+) -> tuple[list[tuple[Any, float]], dict[str, Any]]:
+    """Filter authorized entities by metadata and incoming supersession edges."""
+
+    metadata_filtered = _filter_recallable_entity_results(results)
+    lifecycle_dropped = len(results) - len(metadata_filtered)
+    superseded: set[str] = set()
+    lookup_failed: str | None = None
+    entity_ids = [_entity_id(entity) for entity, _score in metadata_filtered if _entity_id(entity)]
+    if entity_ids:
+        try:
+            from sibyl_core.retrieval.search import _superseded_candidate_uuids
+
+            superseded, _edge_count = await _superseded_candidate_uuids(
+                client,
+                group_id=group_id,
+                uuids=entity_ids,
+            )
+        except Exception as exc:
+            lookup_failed = type(exc).__name__
+            log.warning("hybrid_supersession_lookup_failed", error_type=lookup_failed)
+    current = [
+        (entity, score)
+        for entity, score in metadata_filtered
+        if _entity_id(entity) not in superseded
+    ]
+    receipt: dict[str, Any] = {
+        "lifecycle_dropped": lifecycle_dropped,
+        "superseded_dropped": len(metadata_filtered) - len(current),
+        "superseded_uuids": sorted(superseded),
+    }
+    if lookup_failed is not None:
+        receipt["lookup_error_type"] = lookup_failed
+    return current, {"lifecycle_gate": receipt}
+
+
+def _merged_lifecycle_gate(*receipts: Mapping[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = {
+        "lifecycle_dropped": 0,
+        "superseded_dropped": 0,
+        "superseded_uuids": [],
+    }
+    superseded: set[str] = set()
+    for receipt in receipts:
+        gate = receipt.get("lifecycle_gate")
+        if not isinstance(gate, Mapping):
+            continue
+        merged["lifecycle_dropped"] += int(gate.get("lifecycle_dropped") or 0)
+        merged["superseded_dropped"] += int(gate.get("superseded_dropped") or 0)
+        superseded.update(str(value) for value in gate.get("superseded_uuids") or ())
+        if gate.get("lookup_error_type"):
+            merged["lookup_error_type"] = gate["lookup_error_type"]
+    merged["superseded_uuids"] = sorted(superseded)
+    return {"lifecycle_gate": merged}
+
+
 async def _hydrate_lightweight_candidates(
     results: list[tuple[Any, float]],
     entity_manager: Any,
@@ -507,10 +559,22 @@ async def _graph_traversal_via_relationship_manager(
                 if not entity.id or entity.id in seed_id_set or entity.id in visited:
                     continue
 
+                direction = _relationship_direction(relationship, seed_id=entity_id)
+                if not predicate_direction_allows(
+                    getattr(relationship, "relationship_type", None),
+                    direction,
+                ):
+                    continue
+
                 score = _graph_relationship_score(
                     relationship,
                     depth=current_depth,
                     relationship_type_weights=effective_relationship_type_weights,
+                )
+                entity = _entity_with_hop_metadata(
+                    entity,
+                    relationship=relationship,
+                    direction=direction,
                 )
                 existing = tier_candidates.get(entity.id)
                 if existing is None or score > existing[1]:
@@ -558,6 +622,59 @@ def _graph_relationship_score(
         * _relationship_weight(relationship)
         * _relationship_type_multiplier(relationship, relationship_type_weights)
     )
+
+
+def _relationship_direction(relationship: Any, *, seed_id: str) -> str:
+    metadata = getattr(relationship, "metadata", {})
+    if isinstance(metadata, Mapping):
+        value = str(metadata.get("direction") or "").lower()
+        if value in {"incoming", "outgoing"}:
+            return value
+    if str(getattr(relationship, "target_id", "")) == seed_id:
+        return "incoming"
+    return "outgoing"
+
+
+def _entity_with_hop_metadata(
+    entity: Entity,
+    *,
+    relationship: Any,
+    direction: str,
+) -> Entity:
+    relationship_type = getattr(relationship, "relationship_type", None)
+    predicate = str(getattr(relationship_type, "value", relationship_type) or "RELATED_TO")
+    policy = predicate_policy(predicate)
+    metadata = {
+        **entity.metadata,
+        "graph_expansion_relationship": predicate,
+        "graph_expansion_direction": direction,
+        "graph_expansion_receipt_label": (
+            policy.receipt_label if policy is not None else predicate.lower()
+        ),
+    }
+    return entity.model_copy(update={"metadata": metadata})
+
+
+def _predicate_hop_receipt(results: Sequence[tuple[Any, float]]) -> dict[str, Any]:
+    by_predicate: dict[str, int] = {}
+    by_direction: dict[str, int] = {}
+    for entity, _score in results:
+        metadata = getattr(entity, "metadata", {})
+        if not isinstance(metadata, Mapping):
+            continue
+        predicate = str(metadata.get("graph_expansion_receipt_label") or "")
+        direction = str(metadata.get("graph_expansion_direction") or "")
+        if not predicate or direction not in {"incoming", "outgoing"}:
+            continue
+        by_predicate[predicate] = by_predicate.get(predicate, 0) + 1
+        by_direction[direction] = by_direction.get(direction, 0) + 1
+    return {
+        "predicate_hops": {
+            "total": sum(by_predicate.values()),
+            "by_predicate": by_predicate,
+            "by_direction": by_direction,
+        }
+    }
 
 
 def _relationship_weight(relationship: Any) -> float:
@@ -673,6 +790,23 @@ async def hybrid_search(
     link_results = [
         result for result in link_attempt.results if _entity_id(result[0]) not in vector_ids
     ]
+    direct_results = [*vector_results, *link_results]
+    direct_results, direct_lifecycle_gate = await _apply_current_entity_gate(
+        direct_results,
+        client=client,
+        group_id=resolved_group_id,
+    )
+    direct_by_id = {_entity_id(entity): (entity, score) for entity, score in direct_results}
+    vector_results = [
+        direct_by_id[entity_id]
+        for entity, _score in vector_results
+        if (entity_id := _entity_id(entity)) in direct_by_id
+    ]
+    link_results = [
+        direct_by_id[entity_id]
+        for entity, _score in link_results
+        if (entity_id := _entity_id(entity)) in direct_by_id
+    ]
     stage_timings_ms["entity_linking"] = _elapsed_ms(stage_started_at)
 
     # Phase 2: Graph traversal from top vector results
@@ -700,6 +834,16 @@ async def hybrid_search(
                     for entity, score in graph_results
                     if _entity_matches_types(entity, entity_types)
                 ]
+            graph_results, graph_lifecycle_gate = await _apply_current_entity_gate(
+                graph_results,
+                client=client,
+                group_id=resolved_group_id,
+            )
+        else:
+            graph_lifecycle_gate = {}
+    else:
+        graph_lifecycle_gate = {}
+    lifecycle_gate = _merged_lifecycle_gate(direct_lifecycle_gate, graph_lifecycle_gate)
     stage_timings_ms["graph_traversal"] = _elapsed_ms(stage_started_at)
 
     # Phase 3: Merge results using RRF
@@ -734,6 +878,8 @@ async def hybrid_search(
                 "vector_count": len(vector_results),
                 "link_count": len(link_results),
                 "graph_count": len(graph_results),
+                **lifecycle_gate,
+                **_predicate_hop_receipt(graph_results),
                 "reranking_applied": False,
                 "reranking": reranking_receipt,
                 "stage_timings_ms": stage_timings_ms,
@@ -877,6 +1023,8 @@ async def hybrid_search(
         "vector_count": len(vector_results),
         "link_count": len(link_results),
         "graph_count": len(graph_results),
+        **lifecycle_gate,
+        **_predicate_hop_receipt(graph_results),
         "merged_count": len(merged),
         "candidate_hydration": candidate_hydration,
         "explicit_anchor_tail_admission": explicit_anchor_tail_admission,

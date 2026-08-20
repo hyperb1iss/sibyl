@@ -1282,6 +1282,45 @@ def test_graph_path_metadata_survives_fusion_with_direct_hit() -> None:
     assert result.metadata["graph_native_signal_boost"] == pytest.approx(1.2)
 
 
+def test_native_predicate_receipt_counts_labels_and_directions() -> None:
+    incoming = RetrievalCandidate(
+        id="successor",
+        type="decision",
+        name="Current successor",
+        content="current",
+        score=0.95,
+        source=None,
+        metadata={
+            "graph_expansion_relationship": "SUPERSEDES",
+            "graph_expansion_direction": "incoming",
+        },
+    )
+    outgoing = RetrievalCandidate(
+        id="contradiction",
+        type="decision",
+        name="Contested evidence",
+        content="contested",
+        score=0.64,
+        source=None,
+        metadata={
+            "graph_expansion_relationship": "CONTRADICTS",
+            "graph_expansion_direction": "outgoing",
+        },
+    )
+
+    receipt = search_module._predicate_hop_receipt(
+        [(RetrievalSignal.GRAPH_EXPANSION, [incoming, outgoing])]
+    )
+
+    assert receipt == {
+        "predicate_hops": {
+            "total": 2,
+            "by_predicate": {"supersedes": 1, "contradicts": 1},
+            "by_direction": {"incoming": 1, "outgoing": 1},
+        }
+    }
+
+
 def test_graph_native_signal_boost_skips_graph_only_hits() -> None:
     plan = build_context_retrieval_plan(
         query="surreal live query decision",

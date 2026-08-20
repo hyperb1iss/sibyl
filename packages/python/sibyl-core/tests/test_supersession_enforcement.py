@@ -144,8 +144,8 @@ async def test_outgoing_supersedes_edge_no_longer_expands_into_the_retired_row()
 
 
 @pytest.mark.asyncio
-async def test_explicit_supersedes_walk_still_reaches_the_retired_row() -> None:
-    """A caller naming the predicate is asking for lineage, not for recall."""
+async def test_explicit_outgoing_supersedes_walk_cannot_revive_the_retired_row() -> None:
+    """Predicate filters narrow current recall; they do not request history."""
 
     client = _SupersessionGraphClient()
     rows = await search_module._node_bfs_records(
@@ -158,7 +158,7 @@ async def test_explicit_supersedes_walk_still_reaches_the_retired_row() -> None:
         relationship_names=["SUPERSEDES"],
     )
 
-    assert [row.get("uuid") for row in rows] == [SUPERSEDED_ID]
+    assert rows == []
 
 
 @pytest.mark.asyncio

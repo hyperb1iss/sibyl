@@ -2668,6 +2668,158 @@ class TestGraphTraversal:
         assert results[0][1] == pytest.approx(1.25)
 
     @pytest.mark.asyncio
+    async def test_graph_traversal_rescues_successor_but_never_revives_superseded_target(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import sibyl_core.services.graph as graph_module
+
+        client = make_graph_client()
+        successor = make_entity_for_test("successor", name="Current successor")
+        retired = make_entity_for_test("retired", name="Retired target")
+        supersedes = Relationship(
+            id="rel_supersedes",
+            source_id="successor",
+            target_id="retired",
+            relationship_type=RelationshipType.SUPERSEDES,
+        )
+        relationship_manager = MagicMock()
+        relationship_manager.get_related_entities = AsyncMock(
+            side_effect=lambda entity_id, **_kwargs: (
+                [(retired, supersedes)] if entity_id == "successor" else [(successor, supersedes)]
+            )
+        )
+
+        monkeypatch.setattr(
+            graph_module,
+            "RelationshipManager",
+            MagicMock(return_value=relationship_manager),
+        )
+
+        from_successor = await graph_traversal(
+            ["successor"],
+            client,
+            depth=1,
+            group_id="org-123",
+        )
+        from_retired = await graph_traversal(
+            ["retired"],
+            client,
+            depth=1,
+            group_id="org-123",
+        )
+
+        assert from_successor == []
+        assert [entity.id for entity, _score in from_retired] == ["successor"]
+        assert from_retired[0][0].metadata["graph_expansion_relationship"] == "SUPERSEDES"
+        assert from_retired[0][0].metadata["graph_expansion_direction"] == "incoming"
+
+    @pytest.mark.asyncio
+    async def test_graph_traversal_keeps_both_contradicting_endpoints_recallable(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import sibyl_core.services.graph as graph_module
+
+        client = make_graph_client()
+        left = make_entity_for_test("left")
+        right = make_entity_for_test("right")
+        contradicts = Relationship(
+            id="rel_contradicts",
+            source_id="left",
+            target_id="right",
+            relationship_type=RelationshipType.CONTRADICTS,
+        )
+        relationship_manager = MagicMock()
+        relationship_manager.get_related_entities = AsyncMock(
+            side_effect=lambda entity_id, **_kwargs: (
+                [(right, contradicts)] if entity_id == "left" else [(left, contradicts)]
+            )
+        )
+
+        monkeypatch.setattr(
+            graph_module,
+            "RelationshipManager",
+            MagicMock(return_value=relationship_manager),
+        )
+
+        left_results = await graph_traversal(["left"], client, depth=1, group_id="org-123")
+        right_results = await graph_traversal(["right"], client, depth=1, group_id="org-123")
+
+        assert [entity.id for entity, _score in left_results] == ["right"]
+        assert [entity.id for entity, _score in right_results] == ["left"]
+        assert left_results[0][0].metadata["graph_expansion_direction"] == "outgoing"
+        assert right_results[0][0].metadata["graph_expansion_direction"] == "incoming"
+
+    def test_hybrid_predicate_receipt_counts_labels_and_directions(self) -> None:
+        incoming = make_entity_for_test("incoming").model_copy(
+            update={
+                "metadata": {
+                    "graph_expansion_receipt_label": "supersedes",
+                    "graph_expansion_direction": "incoming",
+                }
+            }
+        )
+        outgoing = make_entity_for_test("outgoing").model_copy(
+            update={
+                "metadata": {
+                    "graph_expansion_receipt_label": "contradicts",
+                    "graph_expansion_direction": "outgoing",
+                }
+            }
+        )
+
+        receipt = hybrid_module._predicate_hop_receipt([(incoming, 0.9), (outgoing, 0.8)])
+
+        assert receipt == {
+            "predicate_hops": {
+                "total": 2,
+                "by_predicate": {"supersedes": 1, "contradicts": 1},
+                "by_direction": {"incoming": 1, "outgoing": 1},
+            }
+        }
+
+    @pytest.mark.asyncio
+    async def test_hybrid_current_gate_filters_metadata_before_edge_lookup(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        current = make_entity_for_test("current")
+        edge_retired = make_entity_for_test("edge_retired")
+        metadata_retired = make_entity_for_test("metadata_retired").model_copy(
+            update={"metadata": {"lifecycle_state": "superseded"}}
+        )
+        superseded_lookup = AsyncMock(return_value=({"edge_retired"}, 1))
+        monkeypatch.setattr(
+            search_module,
+            "_superseded_candidate_uuids",
+            superseded_lookup,
+        )
+
+        results, receipt = await hybrid_module._apply_current_entity_gate(
+            [
+                (current, 1.0),
+                (edge_retired, 0.9),
+                (metadata_retired, 0.8),
+            ],
+            client=object(),
+            group_id="org-123",
+        )
+
+        assert [entity.id for entity, _score in results] == ["current"]
+        assert receipt == {
+            "lifecycle_gate": {
+                "lifecycle_dropped": 1,
+                "superseded_dropped": 1,
+                "superseded_uuids": ["edge_retired"],
+            }
+        }
+        assert superseded_lookup.await_args.kwargs["uuids"] == [
+            "current",
+            "edge_retired",
+        ]
+
+    @pytest.mark.asyncio
     async def test_graph_traversal_keeps_strongest_same_tier_parent_edge(
         self,
         monkeypatch: pytest.MonkeyPatch,

@@ -39,6 +39,7 @@ from sibyl_core.retrieval.search import (
     MAX_RETRIEVAL_LIMIT,
     RetrievalPlan,
     RetrievalSignal,
+    _apply_supersession_gate,
     _candidate_allowed,
     _candidate_source_metadata,
     _candidate_source_result,
@@ -49,6 +50,7 @@ from sibyl_core.retrieval.search import (
     _get_read_only_graph_runtime,
     _node_fulltext_candidates,
     _node_sources_allowed,
+    _predicate_hop_receipt,
     _search_filter_for_plan,
     _search_result_from_candidate,
     _vector_candidate_sources_detailed,
@@ -246,6 +248,11 @@ async def naive_search(
         )
         for signal, candidates in source_lists
     ]
+    filtered_lists, supersession_metadata = await _apply_supersession_gate(
+        client=client,
+        group_id=search_plan.organization_id,
+        source_lists=filtered_lists,
+    )
     # Recomputed from the authorized rows, never snapshotted from the raw fetch.
     # A count taken before the scope filter answers "does a row matching this
     # query exist in this organization" for a caller who may read none of them,
@@ -308,6 +315,8 @@ async def naive_search(
             "naive_lane_counts": {
                 signal.value: len(candidates) for signal, candidates in filtered_lists
             },
+            **_predicate_hop_receipt([]),
+            **supersession_metadata,
             **_candidate_source_metadata([*lexical_sources, vector_source]),
             **vector_metadata,
             **pack_receipt,

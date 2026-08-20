@@ -2472,14 +2472,22 @@ class TestSearchTool:
         mock_entity_manager.search_exact_name.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_search_skips_redundant_fallback_after_exhaustive_hybrid_miss(self) -> None:
+    async def test_search_still_rescues_exact_name_after_exhaustive_hybrid_miss(self) -> None:
         from sibyl_core.retrieval.hybrid import HybridResult
         from sibyl_core.tools.search import search
 
+        exact = MockEntity(
+            id="pattern_exact_after_hybrid",
+            entity_type=EntityType.PATTERN,
+            name="task notification bzzmrxv82 tool toolu_01s1pyuhrut1ljdyhxcbuxzk",
+            description="Exact-name rescue",
+            content="Exact result survives an exhaustive semantic miss.",
+        )
         mock_client = AsyncMock()
+        mock_client.execute_query = AsyncMock(return_value=[])
         mock_entity_manager = AsyncMock()
         mock_entity_manager.search = AsyncMock(return_value=[])
-        mock_entity_manager.search_exact_name = AsyncMock(return_value=[])
+        mock_entity_manager.search_exact_name = AsyncMock(return_value=[(exact, 2.0)])
 
         with (
             patch(
@@ -2507,9 +2515,64 @@ class TestSearchTool:
                 include_documents=False,
             )
 
-        assert response.graph_count == 0
+        assert response.graph_count == 1
+        assert [result.id for result in response.results] == ["pattern_exact_after_hybrid"]
         mock_entity_manager.search.assert_not_awaited()
-        mock_entity_manager.search_exact_name.assert_not_awaited()
+        mock_entity_manager.search_exact_name.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_retired_exact_name_hit_cannot_block_current_exact_name_rescue(self) -> None:
+        from sibyl_core.retrieval.hybrid import HybridResult
+        from sibyl_core.tools.search import search
+
+        query = "Current memory title"
+        retired = MockEntity(
+            id="pattern_retired_exact",
+            entity_type=EntityType.PATTERN,
+            name=query,
+            metadata={"lifecycle_state": "superseded"},
+        )
+        current = MockEntity(
+            id="pattern_current_exact",
+            entity_type=EntityType.PATTERN,
+            name=query,
+        )
+        mock_client = AsyncMock()
+        mock_client.execute_query = AsyncMock(return_value=[])
+        mock_entity_manager = AsyncMock()
+        mock_entity_manager.search = AsyncMock(return_value=[])
+        mock_entity_manager.search_exact_name = AsyncMock(return_value=[(current, 2.0)])
+
+        with (
+            patch(
+                "sibyl_core.tools.search.get_graph_runtime",
+                AsyncMock(
+                    return_value=make_graph_runtime(
+                        client=mock_client,
+                        entity_manager=mock_entity_manager,
+                    )
+                ),
+            ),
+            patch(
+                "sibyl_core.tools.search.hybrid_search",
+                new=AsyncMock(
+                    return_value=HybridResult(
+                        results=[(retired, 1.0)],
+                        metadata={"entity_manager_search_completed": True},
+                    )
+                ),
+            ),
+        ):
+            response = await search(
+                query=query,
+                types=["pattern"],
+                organization_id="org_123",
+                include_documents=False,
+            )
+
+        assert [result.id for result in response.results] == ["pattern_current_exact"]
+        mock_entity_manager.search.assert_not_awaited()
+        mock_entity_manager.search_exact_name.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_search_overlaps_document_search_with_graph_search(self) -> None:
