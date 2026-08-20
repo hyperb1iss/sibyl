@@ -22,6 +22,7 @@ from sibyl.server import (
     _manage_workflow_transition,
     _reflect_mcp_memory,
     _remember_mcp_memory,
+    _require_mcp_context,
     _require_owner_mcp_context,
     _resolve_mcp_capture_links,
     _resolve_mcp_project_scope,
@@ -410,6 +411,7 @@ async def test_remember_mcp_memory_scopes_project_metadata() -> None:
             "sibyl_core.tools.core.explore",
             AsyncMock(return_value=SimpleNamespace(entities=[])),
         ),
+        patch("sibyl.server._validate_mcp_relationship_targets", AsyncMock()),
     ):
         result = await _remember_mcp_memory(
             title="Use scoped memory",
@@ -534,6 +536,7 @@ async def test_remember_mcp_memory_replays_idempotent_receipt() -> None:
         patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
         patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
         patch("sibyl_core.tools.core.add", add),
+        patch("sibyl.server._validate_mcp_relationship_targets", AsyncMock()),
         patch("sibyl_core.services.surreal_content.remember_raw_memory", remember_raw),
         patch(
             "sibyl_core.tools.core.explore",
@@ -571,6 +574,7 @@ async def test_remember_mcp_memory_replays_idempotent_receipt() -> None:
             AsyncMock(return_value=saved_record),
         ),
         patch("sibyl_core.tools.core.add", add),
+        patch("sibyl.server._validate_mcp_relationship_targets", AsyncMock()),
         patch("sibyl_core.services.surreal_content.remember_raw_memory", remember_raw),
     ):
         replayed = await _remember_mcp_memory(**kwargs)
@@ -723,6 +727,7 @@ async def test_add_mcp_entity_scopes_project_metadata() -> None:
         patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
         patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
         patch("sibyl_core.tools.core.add", add),
+        patch("sibyl.server._validate_mcp_relationship_targets", AsyncMock()),
     ):
         result = await _add_mcp_entity(
             title="Wire MCP add policy",
@@ -1333,6 +1338,7 @@ async def test_remember_mcp_memory_links_single_active_project_task() -> None:
         patch("sibyl_core.tools.core.add", add),
         patch("sibyl_core.services.surreal_content.remember_raw_memory", remember_raw),
         patch("sibyl_core.tools.core.explore", explore),
+        patch("sibyl.server._validate_mcp_relationship_targets", AsyncMock()),
     ):
         await _remember_mcp_memory(
             title="Use scoped memory",
@@ -1476,6 +1482,7 @@ async def test_reflect_mcp_memory_links_single_active_task_when_persisting() -> 
         patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
         patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
         patch("sibyl_core.tools.core.reflect_memory", reflect_memory),
+        patch("sibyl.server._validate_mcp_relationship_targets", AsyncMock()),
         patch("sibyl_core.tools.core.explore", explore),
         patch("sibyl.api.context_audit.log_memory_audit_event", AsyncMock()) as audit,
     ):
@@ -1597,6 +1604,7 @@ async def test_get_mcp_context_uses_legacy_api_key_auth() -> None:
     with (
         patch("sibyl.server.get_access_token", return_value=SimpleNamespace(token=raw)),
         patch("sibyl.server.authenticate_api_key", AsyncMock(return_value=auth)) as authenticate,
+        patch("sibyl.server.resolve_org_role", AsyncMock(return_value="member")) as resolve_role,
     ):
         result = await _get_mcp_context()
 
@@ -1605,9 +1613,93 @@ async def test_get_mcp_context_uses_legacy_api_key_auth() -> None:
         user_id=str(auth.user_id),
         scopes=["mcp"],
         api_key_project_ids=[str(auth.project_ids[0])],
+        org_role="member",
         is_api_key=True,
     )
     authenticate.assert_awaited_once_with(raw)
+    resolve_role.assert_awaited_once_with(
+        org_id=str(auth.organization_id),
+        user_id=str(auth.user_id),
+    )
+
+
+@pytest.mark.parametrize("role", ["owner", "admin", "member"])
+@pytest.mark.asyncio
+async def test_require_mcp_context_allows_current_writer_roles(role: str) -> None:
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), org_role=role)
+
+    with patch("sibyl.server._get_mcp_context", AsyncMock(return_value=ctx)):
+        assert await _require_mcp_context(write=True) is ctx
+
+
+@pytest.mark.parametrize("role", ["viewer", None])
+@pytest.mark.asyncio
+async def test_require_mcp_context_denies_non_writer_roles(role: str | None) -> None:
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), org_role=role)
+
+    with (
+        patch("sibyl.server._get_mcp_context", AsyncMock(return_value=ctx)),
+        pytest.raises(ValueError, match="organization_write_forbidden"),
+    ):
+        await _require_mcp_context(write=True)
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        pytest.param(None, id="absent"),
+        pytest.param(
+            SimpleNamespace(
+                id="decision_hidden",
+                entity_type="decision",
+                metadata={"memory_scope": "private", "principal_id": "other-user"},
+            ),
+            id="hidden-untyped",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_remember_refuses_hidden_target_before_reservation_or_write(target: object) -> None:
+    ctx = McpContext(
+        org_id=str(uuid4()),
+        user_id="current-user",
+        scopes=["mcp"],
+        org_role="member",
+    )
+    entity_manager = SimpleNamespace(get=AsyncMock(return_value=target))
+    runtime = SimpleNamespace(entity_manager=entity_manager)
+    reserve = AsyncMock()
+    remember_raw = AsyncMock()
+    add = AsyncMock()
+
+    with (
+        patch("sibyl.server._require_mcp_context", AsyncMock(return_value=ctx)),
+        patch("sibyl.server._get_accessible_projects", AsyncMock(return_value={"project-a"})),
+        patch(
+            "sibyl_core.services.graph.get_surreal_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch("sibyl.server.reserve_idempotency_record", reserve),
+        patch("sibyl_core.services.surreal_content.remember_raw_memory", remember_raw),
+        patch("sibyl_core.tools.core.add", add),
+        pytest.raises(ValueError, match="Related entity not found: decision_hidden"),
+    ):
+        await _remember_mcp_memory.__wrapped__(
+            title="Cannot link hidden memory",
+            content="The target check must happen before any durable effect.",
+            kind="decision",
+            domain="sibyl",
+            project="project-a",
+            tags=None,
+            related_to=["decision_hidden"],
+            active_task=False,
+            idempotency_key="hidden-target-1",
+        )
+
+    entity_manager.get.assert_awaited_once_with("decision_hidden")
+    reserve.assert_not_awaited()
+    remember_raw.assert_not_awaited()
+    add.assert_not_awaited()
 
 
 @pytest.mark.asyncio

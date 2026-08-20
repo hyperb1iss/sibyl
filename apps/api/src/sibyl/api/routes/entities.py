@@ -47,6 +47,11 @@ from sibyl.auth.dependencies import (
     get_current_organization,
     require_org_role,
 )
+from sibyl.auth.memory_targets import (
+    RelatedTargetNotFoundError,
+    RelationshipReaderScope,
+    validate_relationship_targets,
+)
 from sibyl.persistence import content_runtime
 from sibyl.persistence.auth_runtime import (
     create_project_record,
@@ -70,13 +75,11 @@ from sibyl_core.auth.memory_policy import (
     private_scope_granted_for,
     stamp_memory_scope_metadata,
 )
-from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.memory_pipeline.retrieval_keys import normalize_retrieval_keys
 from sibyl_core.memory_pipeline.structure import strip_structure_metadata
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.relations import (
     SUPPRESSING_RELATIONSHIP_TYPES,
-    declared_relation_targets,
     parse_relation_declarations,
 )
 from sibyl_core.projection import (
@@ -900,36 +903,18 @@ async def _validate_related_to_targets_for_write(
     who can retrieve a project's decisions from ever saying one was superseded,
     which is exactly the person best placed to say it.
     """
-    if not related_to:
-        return
-
-    checked_ids: set[str] = set()
-    # A declared predicate rides on the same string as the id, so existence and
-    # access are checked against the target the edge will actually point at
-    # rather than against "supersedes:ent_0a1b".
-    for related_id in declared_relation_targets(related_to):
-        if related_id in checked_ids:
-            continue
-        checked_ids.add(related_id)
-
-        not_found = HTTPException(status_code=404, detail=f"Related entity not found: {related_id}")
-        # Absence only. `EntityManager.get` signals a missing row with KeyError
-        # and other managers raise the typed error, while a store that is
-        # merely unreachable must surface as a 5xx: reporting a timeout as a
-        # 404 tells the client to stop retrying something that would succeed.
-        try:
-            related_entity = await entity_manager.get(related_id)
-        except (EntityNotFoundError, KeyError) as exc:
-            raise not_found from exc
-        if related_entity is None:
-            raise not_found
-        if not _related_entity_visible(
-            related_entity,
-            reader_user_id=scope.user_id,
-            accessible_projects=scope.accessible_projects,
-            allowed_memory_scope_keys=scope.memory_grants,
-        ):
-            raise not_found
+    try:
+        await validate_relationship_targets(
+            entity_manager=entity_manager,
+            related_to=related_to,
+            scope=RelationshipReaderScope.from_values(
+                user_id=scope.user_id,
+                accessible_projects=scope.accessible_projects,
+                memory_grants=scope.memory_grants,
+            ),
+        )
+    except RelatedTargetNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 def _entity_matches_project_filter(

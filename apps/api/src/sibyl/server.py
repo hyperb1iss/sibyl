@@ -32,6 +32,7 @@ from sibyl.auth.mcp_auth import (
     insufficient_mcp_scope_message,
     mcp_scopes_allow,
 )
+from sibyl.auth.memory_targets import RelationshipReaderScope, validate_relationship_targets
 from sibyl.config import settings
 from sibyl.persistence.auth_runtime import (
     authenticate_api_key,
@@ -196,9 +197,12 @@ async def _get_mcp_context() -> McpContext | None:
             project_ids = (
                 [str(pid) for pid in auth.project_ids] if auth.project_ids is not None else None
             )
+            org_id = str(auth.organization_id)
+            user_id = str(auth.user_id)
+            org_role = await resolve_org_role(org_id=org_id, user_id=user_id)
             return McpContext(
-                org_id=str(auth.organization_id),
-                user_id=str(auth.user_id),
+                org_id=org_id,
+                user_id=user_id,
                 scopes=auth.scopes,
                 api_key_project_ids=project_ids,
                 api_key_memory_space_ids=[
@@ -213,6 +217,7 @@ async def _get_mcp_context() -> McpContext | None:
                 ]
                 if getattr(auth, "memory_spaces", None) is not None
                 else None,
+                org_role=org_role,
                 is_api_key=True,
             )
         return None
@@ -297,6 +302,8 @@ async def _require_mcp_context(*, write: bool = False) -> McpContext:
     if not ctx:
         raise ValueError("Organization context required. Authenticate with an org-scoped token.")
     _authorize_mcp_scope(ctx, write=write)
+    if write and ctx.org_role not in {"owner", "admin", "member"}:
+        raise ValueError("organization_write_forbidden")
     return ctx
 
 
@@ -619,6 +626,28 @@ async def _resolve_mcp_capture_links(
     return _append_unique_ids(links, [str(task_id)])
 
 
+async def _validate_mcp_relationship_targets(
+    *,
+    ctx: McpContext,
+    related_to: list[str] | None,
+    accessible_projects: set[str] | None,
+) -> None:
+    if not related_to:
+        return
+    from sibyl_core.services.graph import get_surreal_graph_runtime
+
+    runtime = await get_surreal_graph_runtime(ctx.org_id)
+    await validate_relationship_targets(
+        entity_manager=runtime.entity_manager,
+        related_to=related_to,
+        scope=RelationshipReaderScope.from_values(
+            user_id=ctx.user_id,
+            accessible_projects=accessible_projects,
+            memory_grants=ctx.api_key_memory_scope_keys,
+        ),
+    )
+
+
 @_serialize_mcp_idempotency("mcp/remember")
 async def _remember_mcp_memory(
     *,
@@ -658,6 +687,28 @@ async def _remember_mcp_memory(
     # Ahead of the idempotency claim: a refused plan must not consume the key,
     # or the caller's corrected retry would replay the rejection.
     build_memory_structure(content.strip(), spans=spans, atomic=atomic, probes=probes)
+
+    memory_scope = "project" if project else "private"
+    write_decision = _authorize_mcp_memory_write(
+        ctx=ctx,
+        memory_scope=memory_scope,
+        scope_key=project,
+        accessible_projects=accessible_projects,
+        surface="mcp_remember",
+    )
+    resolved_links = await _resolve_mcp_capture_links(
+        ctx=ctx,
+        project=project,
+        related_to=related_to,
+        task_ids=task_ids,
+        active_task=active_task,
+        accessible_projects=accessible_projects,
+    )
+    await _validate_mcp_relationship_targets(
+        ctx=ctx,
+        related_to=resolved_links,
+        accessible_projects=accessible_projects,
+    )
 
     idempotency_payload = {
         "title": title,
@@ -710,15 +761,6 @@ async def _remember_mcp_memory(
         else:
             idempotency_claim = record
 
-    memory_scope = "project" if project else "private"
-    write_decision = _authorize_mcp_memory_write(
-        ctx=ctx,
-        memory_scope=memory_scope,
-        scope_key=project,
-        accessible_projects=accessible_projects,
-        surface="mcp_remember",
-    )
-
     full_metadata = dict(metadata or {})
     full_metadata["capture_kind"] = kind
     full_metadata["organization_id"] = ctx.org_id
@@ -728,14 +770,6 @@ async def _remember_mcp_memory(
         full_metadata["project_id"] = project
     if ctx.user_id:
         full_metadata["created_by"] = ctx.user_id
-    resolved_links = await _resolve_mcp_capture_links(
-        ctx=ctx,
-        project=project,
-        related_to=related_to,
-        task_ids=task_ids,
-        active_task=active_task,
-        accessible_projects=accessible_projects,
-    )
     capture_request = MemoryCaptureRequest(
         title=title,
         content=content,
@@ -886,6 +920,11 @@ async def _reflect_mcp_memory(
             scope_key=scope_key,
             accessible_projects=accessible_projects,
             surface="mcp_reflect",
+        )
+        await _validate_mcp_relationship_targets(
+            ctx=ctx,
+            related_to=resolved_links,
+            accessible_projects=accessible_projects,
         )
     pack = await reflect_memory(
         content=content,
@@ -1161,6 +1200,11 @@ async def _add_mcp_entity(
         scope_key=scope_key,
         accessible_projects=accessible_projects,
         surface="mcp_add",
+    )
+    await _validate_mcp_relationship_targets(
+        ctx=ctx,
+        related_to=related_to,
+        accessible_projects=accessible_projects,
     )
 
     authorized_scope = None if normalized_entity_type in _UNSCOPED_ENTITY_TYPES else memory_scope
