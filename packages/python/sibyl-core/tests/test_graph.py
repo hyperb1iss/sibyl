@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 import sibyl_core.services.graph as graph_module
+import sibyl_core.services.graph_client as graph_client_module
 from sibyl_core.backends.surreal.connection import SurrealQueryError
 from sibyl_core.backends.surreal.records import coerce_datetime
 from sibyl_core.backends.surreal.schema import (
@@ -71,6 +72,14 @@ class _EmbeddingWriteClient:
         if "RELATE $src->$rel->$tgt" in query:
             return [{"uuid": params["uuid"], "fact_embedding": params["fact_embedding"]}]
         return []
+
+
+def test_graph_client_exports_delegate_to_canonical_module() -> None:
+    assert graph_module.SurrealGraphClient is graph_client_module.SurrealGraphClient
+    assert graph_module.get_surreal_graph_client is graph_client_module.get_surreal_graph_client
+    assert graph_module.close_graph_clients is graph_client_module.close_graph_clients
+    assert graph_module.prepare_graph_schema is graph_client_module.prepare_graph_schema
+    assert graph_module.mark_graph_schema_dirty is graph_client_module.mark_graph_schema_dirty
 
 
 class _BatchEntityReadClient:
@@ -516,17 +525,17 @@ async def test_graph_client_cache_evicts_oldest_client(
         async def close(self) -> None:
             closed.append(self.group_id)
 
-    monkeypatch.setattr(graph_module, "SurrealGraphClient", FakeNativeGraphClient)
-    monkeypatch.setattr(graph_module.settings, "surreal_graph_client_cache_size", 2)
+    monkeypatch.setattr(graph_client_module, "SurrealGraphClient", FakeNativeGraphClient)
+    monkeypatch.setattr(graph_client_module.settings, "surreal_graph_client_cache_size", 2)
 
     await graph_module.get_surreal_graph_client("org-a")
     await graph_module.get_surreal_graph_client("org-b")
-    graph_module._prepared_groups.update({"org-a", "org-b"})
+    graph_client_module._prepared_groups.update({"org-a", "org-b"})
     await graph_module.get_surreal_graph_client("org-c")
 
     assert closed == ["org-a"]
-    assert list(graph_module._clients) == ["org-b", "org-c"]
-    assert "org-a" not in graph_module._prepared_groups
+    assert list(graph_client_module._clients) == ["org-b", "org-c"]
+    assert "org-a" not in graph_client_module._prepared_groups
 
     await graph_module.close_graph_clients()
 
@@ -546,9 +555,9 @@ async def test_graph_client_uses_configured_pool_size(
         async def close(self) -> None:
             return None
 
-    monkeypatch.setattr(graph_module, "SurrealGraphClient", FakeNativeGraphClient)
-    monkeypatch.setattr(graph_module.settings, "surreal_pool_size", 8)
-    monkeypatch.setattr(graph_module.settings, "surreal_graph_pool_size", 34)
+    monkeypatch.setattr(graph_client_module, "SurrealGraphClient", FakeNativeGraphClient)
+    monkeypatch.setattr(graph_client_module.settings, "surreal_pool_size", 8)
+    monkeypatch.setattr(graph_client_module.settings, "surreal_graph_pool_size", 34)
 
     try:
         await graph_module.get_surreal_graph_client("org-pool")
@@ -564,8 +573,8 @@ async def test_replace_entity_retries_transient_surreal_query_id_keyerror(
 ) -> None:
     client = _TransientEntityWriteClient()
     bootstrap_schema = AsyncMock()
-    monkeypatch.setattr(graph_module, "bootstrap_schema", bootstrap_schema)
-    graph_module._prepared_groups.add(client.group_id)
+    monkeypatch.setattr(graph_client_module, "bootstrap_schema", bootstrap_schema)
+    graph_client_module._prepared_groups.add(client.group_id)
 
     try:
         row = await graph_module._replace_entity(
@@ -574,7 +583,7 @@ async def test_replace_entity_retries_transient_surreal_query_id_keyerror(
             group_id=client.group_id,
         )
     finally:
-        graph_module._prepared_groups.discard(client.group_id)
+        graph_client_module._prepared_groups.discard(client.group_id)
 
     assert row["uuid"] == "entity-retry"
     assert client.calls == 2
@@ -617,7 +626,7 @@ async def test_graph_runtime_can_skip_schema_preparation(
 ) -> None:
     client = _EmbeddingWriteClient()
     bootstrap_schema = AsyncMock()
-    monkeypatch.setattr(graph_module, "bootstrap_schema", bootstrap_schema)
+    monkeypatch.setattr(graph_client_module, "bootstrap_schema", bootstrap_schema)
     monkeypatch.setattr(
         graph_module,
         "get_surreal_graph_client",

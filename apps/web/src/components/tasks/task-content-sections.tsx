@@ -6,7 +6,7 @@ import { RelatedEntitiesSection } from '@/components/entities/related-entities-s
 import { CheckCircle2, Hash, Pencil } from '@/components/ui/icons';
 import { Markdown } from '@/components/ui/markdown';
 import type { Entity } from '@/lib/api';
-import type { TaskStatusType } from '@/lib/constants';
+import type { TaskStatusType } from '@/lib/constants/tasks';
 import { TaskNotesSection } from './task-notes-section';
 
 interface TaskContentSectionsProps {

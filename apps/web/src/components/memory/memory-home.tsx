@@ -20,7 +20,7 @@ import {
   Xmark,
 } from '@/components/ui/icons';
 import type { MemoryAuditEvent, MemoryScope, MemorySpace, RawCaptureSummary } from '@/lib/api';
-import { formatDistanceToNow } from '@/lib/constants';
+import { formatDistanceToNow } from '@/lib/constants/formatting';
 import { useMemoryAudit, useMemorySpaces, useRawCaptures } from '@/lib/hooks';
 import { MemoryActivityFeed } from './memory-activity-feed';
 import { type MemoryScopeFilter, MemoryScopeSwitcher } from './memory-scope-switcher';

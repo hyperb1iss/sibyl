@@ -24,7 +24,7 @@ import {
   WarningTriangle,
 } from 'iconoir-react';
 import type { ComponentType, SVGProps } from 'react';
-import type { EntityType } from '@/lib/constants';
+import type { EntityType } from '@/lib/constants/entities';
 
 type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
 

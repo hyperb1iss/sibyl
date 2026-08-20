@@ -6,7 +6,7 @@ import { EntityBadge } from '@/components/ui/badge';
 import { EntityIcon } from '@/components/ui/entity-icon';
 import { Eye, X } from '@/components/ui/icons';
 import { Tooltip } from '@/components/ui/tooltip';
-import { getEntityColorVar } from '@/lib/constants';
+import { getEntityColorVar } from '@/lib/constants/entities';
 
 interface Entity {
   id: string;

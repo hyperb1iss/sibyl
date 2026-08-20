@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui';
 import { Command, EditPencil, Send, User } from '@/components/ui/icons';
-import { formatDistanceToNow } from '@/lib/constants';
+import { formatDistanceToNow } from '@/lib/constants/formatting';
 import { useAddTaskNote, useTaskNotes } from '@/lib/hooks';
 
 interface TaskNotesSectionProps {

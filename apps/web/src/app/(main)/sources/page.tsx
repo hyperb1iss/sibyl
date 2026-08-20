@@ -25,7 +25,7 @@ import {
   Search,
 } from '@/components/ui/icons';
 import { VirtualizedList } from '@/components/ui/virtualized-list';
-import type { CrawlStatusType, SourceTypeValue } from '@/lib/constants';
+import type { CrawlStatusType, SourceTypeValue } from '@/lib/constants/sources';
 import {
   useAllCrawlProgress,
   useCancelCrawl,

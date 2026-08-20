@@ -3,7 +3,7 @@
 import { memo } from 'react';
 import { CheckCircle, Clock, Layers, Pause, Zap } from '@/components/ui/icons';
 import type { EpicStatus, EpicSummary, TaskPriority } from '@/lib/api';
-import { EPIC_STATUS_CONFIG } from '@/lib/constants';
+import { EPIC_STATUS_CONFIG } from '@/lib/constants/epics';
 
 interface EpicCardProps {
   epic: EpicSummary;

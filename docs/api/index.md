@@ -162,7 +162,8 @@ X-RateLimit-Reset: 1704067200
 Real-time updates are available via WebSocket at `/ws`:
 
 ```javascript
-const ws = new WebSocket("ws://localhost:3334/ws?token=YOUR_TOKEN");
+// Browser clients authenticate with the existing sibyl_access_token cookie.
+const ws = new WebSocket("ws://localhost:3334/ws");
 
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data);

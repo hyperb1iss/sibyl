@@ -20,15 +20,10 @@ from types import SimpleNamespace
 from typing import Protocol, Self, cast
 from uuid import UUID, uuid4
 
-from fastapi import HTTPException
-from starlette import status
 from starlette.requests import Request
 
 from sibyl import config as config_module
-from sibyl.auth.api_key_common import (
-    ApiKeyAuth,
-    ApiKeyMemorySpaceAuth,
-)
+from sibyl.auth.api_key_common import ApiKeyMemorySpaceAuth
 from sibyl.auth.jwt import (
     create_access_token,
     create_refresh_token,
@@ -75,37 +70,6 @@ _USER_DATETIME_FIELDS = {
     "deleted_at",
     "purge_after",
 }
-_SAFE_HTTP_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-_REST_READ_SCOPES = frozenset({"api:read", "api:write"})
-_REST_WRITE_SCOPE = "api:write"
-
-
-def _is_rest_request(request: Request) -> bool:
-    return request.url.path.startswith("/api/")
-
-
-def _api_key_allows_rest(*, scopes: list[str], method: str) -> bool:
-    normalized = {s.strip() for s in scopes if str(s).strip()}
-    if method.upper() in _SAFE_HTTP_METHODS:
-        return bool(normalized & _REST_READ_SCOPES)
-    return _REST_WRITE_SCOPE in normalized
-
-
-def _insufficient_api_scope(*, scopes: list[str], method: str) -> HTTPException:
-    expected = "api:read or api:write" if method.upper() in _SAFE_HTTP_METHODS else "api:write"
-    actual = ", ".join(scope for scope in scopes if scope.strip()) or "none"
-    return HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail={
-            "error": "insufficient_api_scope",
-            "message": "Request is missing required REST scope.",
-            "remediation": "Use a REST scope that matches this request.",
-            "details": {
-                "expected": expected,
-                "actual": actual,
-            },
-        },
-    )
 
 
 def _project_not_found_detail(project_id: object) -> str:
@@ -875,27 +839,6 @@ def _scopes_list(value: object | None) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item) for item in value if str(item).strip()]
-
-
-def _api_key_claim_payload(auth: ApiKeyAuth) -> SurrealRecord:
-    payload: SurrealRecord = {
-        "sub": str(auth.user_id),
-        "org": str(auth.organization_id),
-        "typ": "api_key",
-        "api_key_id": str(auth.api_key_id),
-        "scopes": list(auth.scopes or []),
-    }
-    if auth.project_ids is not None:
-        payload["api_key_project_ids"] = [str(project_id) for project_id in auth.project_ids]
-    if auth.memory_space_ids is not None:
-        payload["api_key_memory_space_ids"] = [
-            str(memory_space_id) for memory_space_id in auth.memory_space_ids
-        ]
-    if auth.memory_spaces is not None:
-        payload["api_key_memory_scope_keys"] = [
-            memory_space.policy_key for memory_space in auth.memory_spaces
-        ]
-    return payload
 
 
 async def _resolve_auth_context_from_claims(claims: Mapping[str, object]) -> AuthContext:

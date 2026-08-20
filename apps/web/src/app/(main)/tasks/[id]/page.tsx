@@ -3,7 +3,7 @@
 import { use, useMemo } from 'react';
 import { EntityBreadcrumb } from '@/components/layout/breadcrumb';
 import { TaskDetailPanel, TaskDetailSkeleton } from '@/components/tasks';
-import { ErrorState } from '@/components/ui/tooltip';
+import { ErrorState } from '@/components/ui/empty-state';
 import { useProjects, useTask } from '@/lib/hooks';
 
 interface TaskDetailPageProps {

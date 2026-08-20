@@ -5,7 +5,7 @@ import { Suspense } from 'react';
 
 import { EntityDetailSkeleton } from '@/components/suspense-boundary';
 import { ColorButton } from '@/components/ui/button';
-import { ErrorState } from '@/components/ui/tooltip';
+import { ErrorState } from '@/components/ui/empty-state';
 import { fetchEntity } from '@/lib/api-server';
 import { EntityDetailContent } from './entity-detail-content';
 

@@ -177,13 +177,16 @@ async def _stream_logs(
     # Build WebSocket URL (strip /api suffix for WS endpoint)
     base_url = client.base_url.removesuffix("/api")
     ws_url = base_url.replace("http://", "ws://").replace("https://", "wss://")
-    ws_url = f"{ws_url}/api/logs/stream?token={token}"
+    ws_url = f"{ws_url}/api/logs/stream"
 
     info("Connecting to log stream... (Ctrl+C to stop)")
     console.print()
 
     try:
-        async with websockets.connect(ws_url) as ws:
+        async with websockets.connect(
+            ws_url,
+            additional_headers={"Authorization": f"Bearer {token}"},
+        ) as ws:
             console.print(f"[{SUCCESS_GREEN}]Connected[/{SUCCESS_GREEN}] - streaming logs\n")
             while True:
                 try:

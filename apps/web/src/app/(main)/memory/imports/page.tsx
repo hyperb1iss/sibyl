@@ -8,7 +8,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { SourceImportProgress } from '@/components/memory/source-import-progress';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { EnhancedEmptyState } from '@/components/ui/empty-state';
+import { EnhancedEmptyState, ErrorState } from '@/components/ui/empty-state';
 import { FormField } from '@/components/ui/form-field';
 import { Database, RefreshCw, StopCircle, Upload } from '@/components/ui/icons';
 import { Input } from '@/components/ui/input';
@@ -20,7 +20,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { LoadingState } from '@/components/ui/spinner';
-import { ErrorState } from '@/components/ui/tooltip';
 import type { MemoryScope } from '@/lib/api';
 import {
   useCancelSourceImport,

@@ -12,7 +12,7 @@ import {
   TASK_STATUSES,
   type TaskPriorityType,
   type TaskStatusType,
-} from '@/lib/constants';
+} from '@/lib/constants/tasks';
 
 // Status icons mapping
 export const STATUS_ICONS: Record<TaskStatusType, ReactNode> = {

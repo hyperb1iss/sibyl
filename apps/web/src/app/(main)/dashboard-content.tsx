@@ -31,7 +31,7 @@ import {
   Zap,
 } from '@/components/ui/icons';
 import type { StatsResponse, TelemetryDurationSummary } from '@/lib/api';
-import { getEntityColorVar } from '@/lib/constants';
+import { getEntityColorVar } from '@/lib/constants/entities';
 import {
   useHealth,
   useMe,

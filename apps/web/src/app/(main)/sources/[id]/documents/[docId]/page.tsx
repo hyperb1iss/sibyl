@@ -18,7 +18,8 @@ import {
   X,
 } from '@/components/ui/icons';
 import { Markdown } from '@/components/ui/markdown';
-import { ENTITY_STYLES, formatDateTime } from '@/lib/constants';
+import { ENTITY_STYLES } from '@/lib/constants/entities';
+import { formatDateTime } from '@/lib/constants/formatting';
 import { useDocumentEntities, useFullPage, useUpdateDocument } from '@/lib/hooks';
 
 interface DocumentDetailPageProps {

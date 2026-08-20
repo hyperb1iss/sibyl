@@ -12,7 +12,7 @@ import { VelocityLineChart } from '@/components/metrics/charts';
 import { CreateProjectDialog } from '@/components/projects/create-project-dialog';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { ProjectsEmptyState } from '@/components/ui/empty-state';
+import { ErrorState, ProjectsEmptyState } from '@/components/ui/empty-state';
 import {
   AlertTriangle,
   Archive,
@@ -39,7 +39,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
-import { ErrorState, Tooltip } from '@/components/ui/tooltip';
+import { Tooltip } from '@/components/ui/tooltip';
 import type {
   ProjectRole,
   ProjectSummariesResponse,
@@ -48,7 +48,7 @@ import type {
   TaskStatus,
   TaskSummary,
 } from '@/lib/api';
-import { TASK_STATUS_CONFIG } from '@/lib/constants';
+import { TASK_STATUS_CONFIG } from '@/lib/constants/tasks';
 import {
   useDeleteEntity,
   useMe,

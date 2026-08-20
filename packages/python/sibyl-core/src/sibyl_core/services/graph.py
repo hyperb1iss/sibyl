@@ -22,7 +22,6 @@ from sibyl_core.backends.surreal.fulltext import (
 )
 from sibyl_core.backends.surreal.knn import knn_overfetch_pool, knn_search_effort
 from sibyl_core.backends.surreal.records import raise_on_error
-from sibyl_core.backends.surreal.schema import bootstrap_schema
 from sibyl_core.config import settings
 from sibyl_core.embeddings.providers import (
     EmbeddingInputKind,
@@ -95,8 +94,10 @@ from sibyl_core.services.graph_search import (
 )
 
 SurrealGraphClient = _graph_client.SurrealGraphClient
-_clients = _graph_client._clients
-_prepared_groups = _graph_client._prepared_groups
+get_surreal_graph_client = _graph_client.get_surreal_graph_client
+close_graph_clients = _graph_client.close_graph_clients
+prepare_graph_schema = _graph_client.prepare_graph_schema
+mark_graph_schema_dirty = _graph_client.mark_graph_schema_dirty
 
 type SurrealRecord = dict[str, object]
 
@@ -1958,34 +1959,6 @@ def _validate_native_embedding_dimensions(
     embedding_provider: EmbeddingProvider | None,
 ) -> None:
     _graph_client.validate_native_embedding_dimensions(embedding_provider)
-
-
-async def get_surreal_graph_client(group_id: str) -> SurrealGraphClient:
-    # Compatibility callers patch graph.SurrealGraphClient, not graph_client.
-    original_client_type = _graph_client.SurrealGraphClient
-    _graph_client.SurrealGraphClient = SurrealGraphClient
-    try:
-        return await _graph_client.get_surreal_graph_client(group_id)
-    finally:
-        _graph_client.SurrealGraphClient = original_client_type
-
-
-async def close_graph_clients() -> None:
-    await _graph_client.close_graph_clients()
-
-
-async def prepare_graph_schema(client: SurrealGraphClient) -> None:
-    # Compatibility callers patch graph.bootstrap_schema, not graph_client.
-    original_bootstrap_schema = _graph_client.bootstrap_schema
-    _graph_client.bootstrap_schema = bootstrap_schema
-    try:
-        await _graph_client.prepare_graph_schema(client)
-    finally:
-        _graph_client.bootstrap_schema = original_bootstrap_schema
-
-
-def mark_graph_schema_dirty(group_id: str) -> None:
-    _graph_client.mark_graph_schema_dirty(group_id)
 
 
 async def get_surreal_graph_runtime(

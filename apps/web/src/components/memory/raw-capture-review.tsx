@@ -8,7 +8,7 @@ import { Breadcrumb } from '@/components/layout/breadcrumb';
 import { PageHeader } from '@/components/layout/page-header';
 import { EntityBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { EnhancedEmptyState } from '@/components/ui/empty-state';
+import { EnhancedEmptyState, ErrorState } from '@/components/ui/empty-state';
 import {
   Calendar,
   Command,
@@ -29,8 +29,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { LoadingState } from '@/components/ui/spinner';
-import { ErrorState } from '@/components/ui/tooltip';
-import { formatDateTime, formatDistanceToNow } from '@/lib/constants';
+import { formatDateTime, formatDistanceToNow } from '@/lib/constants/formatting';
 import { useRawCapture, useRawCaptures, useUpdateRawCaptureReviewState } from '@/lib/hooks';
 
 const MAX_CAPTURE_RESULTS = 200;

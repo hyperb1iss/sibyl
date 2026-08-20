@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useMemo } from 'react';
 import type { IconComponent } from '@/components/ui/icons';
-import { withProjectsContext } from '@/lib/constants';
+import { withProjectsContext } from '@/lib/constants/navigation';
 
 interface NavLinkProps {
   href: string;

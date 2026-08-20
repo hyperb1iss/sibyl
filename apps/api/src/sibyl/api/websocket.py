@@ -24,9 +24,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from sibyl import config as config_module
 from sibyl.api.event_types import WSEvent
-from sibyl.auth.http import extract_bearer_token
-from sibyl.auth.jwt import JwtError, verify_access_token
-from sibyl.persistence.auth_runtime import validate_access_session
+from sibyl.auth.websocket import resolve_active_websocket_claims
 from sibyl_core.observability import telemetry_registry
 
 log = structlog.get_logger()
@@ -118,16 +116,21 @@ class ConnectionManager:
                     c for c in self.active_connections if _connection_accepts_event(c, event)
                 ]
 
-        disconnected = []
-        for conn in connections:
+        async def send(conn: Connection) -> WebSocket | None:
             try:
                 await conn.websocket.send_json(message)
             except Exception:
-                disconnected.append(conn.websocket)
+                return conn.websocket
+            return None
+
+        disconnected = [
+            websocket
+            for websocket in await asyncio.gather(*(send(conn) for conn in connections))
+            if websocket is not None
+        ]
 
         # Clean up disconnected clients
-        for ws in disconnected:
-            await self.disconnect(ws)
+        await asyncio.gather(*(self.disconnect(websocket) for websocket in disconnected))
 
         if connections:
             telemetry_registry().record_websocket_broadcast(
@@ -379,20 +382,8 @@ async def _extract_org_from_token(websocket: WebSocket) -> str | None:
     if config_module.settings.disable_auth:
         return None
 
-    auth_header = websocket.headers.get("authorization")
-    token = extract_bearer_token(auth_header) or websocket.cookies.get("sibyl_access_token")
-    if not token:
-        return None
-
-    try:
-        claims = verify_access_token(token)
-    except JwtError:
-        return None
-    try:
-        is_active = await validate_access_session(token)
-    except TimeoutError:
-        return None
-    if not is_active:
+    claims = await resolve_active_websocket_claims(websocket)
+    if claims is None:
         return None
 
     org_id = claims.get("org")

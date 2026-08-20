@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ForceGraphMethods } from 'react-force-graph-2d';
 import { EntityBadge, RelationshipBadge } from '@/components/ui/badge';
 import type { RelatedEntitySummary } from '@/lib/api';
-import { ENTITY_COLORS, type EntityType } from '@/lib/constants';
+import { ENTITY_COLORS, type EntityType } from '@/lib/constants/entities';
 import { useTheme } from '@/lib/theme';
 
 // Dynamic import to avoid SSR issues with canvas

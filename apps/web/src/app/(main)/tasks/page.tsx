@@ -8,11 +8,10 @@ import { type QuickTaskData, QuickTaskModal } from '@/components/tasks/quick-tas
 import { TaskListMobile } from '@/components/tasks/task-list-mobile';
 import { RemovableBadge } from '@/components/ui/badge';
 import { CommandPalette, useKeyboardShortcuts } from '@/components/ui/command-palette';
-import { TasksEmptyState } from '@/components/ui/empty-state';
+import { ErrorState, TasksEmptyState } from '@/components/ui/empty-state';
 import { ChevronDown, Hash, Plus, Search, X } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/spinner';
 import { TagChip } from '@/components/ui/toggle';
-import { ErrorState } from '@/components/ui/tooltip';
 import type { TaskStatus } from '@/lib/api';
 import { useCreateEntity, useEpics, useProjects, useTasks, useTaskUpdateStatus } from '@/lib/hooks';
 import { useProjectFilters } from '@/lib/project-context';

@@ -59,9 +59,6 @@ export function Tooltip({ content, children, side = 'top', delay = 200 }: Toolti
   );
 }
 
-// EmptyState, ErrorState, and SuccessState moved to empty-state.tsx with the
-// rest of the feedback components; re-exported here so existing imports keep working.
-export { EmptyState, ErrorState, SuccessState } from './empty-state';
 // Export primitives for advanced usage
 export { TooltipContent, TooltipProvider, TooltipRoot, TooltipTrigger };
 

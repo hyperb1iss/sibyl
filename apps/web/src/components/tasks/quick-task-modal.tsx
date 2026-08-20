@@ -11,7 +11,7 @@ import {
 } from '@/components/ui';
 import { ChevronRight, Layers, Menu, X } from '@/components/ui/icons';
 import type { TaskPriority } from '@/lib/api';
-import { TASK_PRIORITIES, TASK_PRIORITY_CONFIG } from '@/lib/constants';
+import { TASK_PRIORITIES, TASK_PRIORITY_CONFIG } from '@/lib/constants/tasks';
 
 // Radix Select forbids an empty-string item value, so the "none" options use a
 // sentinel that maps back to '' when read.

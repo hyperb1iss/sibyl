@@ -1,11 +1,11 @@
 'use client';
 
 import Link from 'next/link';
+import { ErrorState } from '@/components/ui/empty-state';
 import { ExternalLink, FileText, Hash, WarningCircle } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/spinner';
-import { ErrorState } from '@/components/ui/tooltip';
 import type { MemorySourceInspectResponse } from '@/lib/api';
-import { formatDateTime } from '@/lib/constants';
+import { formatDateTime } from '@/lib/constants/formatting';
 import { useMemorySourceInspect } from '@/lib/hooks';
 import { MemoryActivityFeed } from './memory-activity-feed';
 import { SourceCorrectionDialog } from './source-correction-dialog';

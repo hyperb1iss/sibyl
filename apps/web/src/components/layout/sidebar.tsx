@@ -6,7 +6,8 @@ import Link from 'next/link';
 import { useEffect } from 'react';
 import { Github, Heart, X } from '@/components/ui/icons';
 import { Tooltip } from '@/components/ui/tooltip';
-import { APP_CONFIG, NAVIGATION } from '@/lib/constants';
+import { APP_CONFIG } from '@/lib/constants/app';
+import { NAVIGATION } from '@/lib/constants/navigation';
 import { useMobileNav } from './mobile-nav-context';
 import { NavLink } from './nav-link';
 

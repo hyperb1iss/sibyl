@@ -29,7 +29,8 @@ import {
   Settings,
   StopCircle,
 } from '@/components/ui/icons';
-import { CRAWL_STATUS_CONFIG, formatDateTime, SOURCE_TYPE_CONFIG } from '@/lib/constants';
+import { formatDateTime } from '@/lib/constants/formatting';
+import { CRAWL_STATUS_CONFIG, SOURCE_TYPE_CONFIG } from '@/lib/constants/sources';
 import {
   useCancelCrawl,
   useCrawlSource,
