@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from shutil import which
 from typing import Any, cast
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from sibyl.persistence.surreal.auth_runtime import projects as projects_runtime
 from sibyl_core.auth.context import AuthContext
@@ -51,8 +51,10 @@ from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
 from sibyl_core.config import settings
 from sibyl_core.memory_pipeline.capture import MemoryCaptureRequest, MemoryCaptureService
 from sibyl_core.models.memory_scope import MemoryScope
+from sibyl_core.retrieval._search_candidates import _candidate_scope_allowed
+from sibyl_core.retrieval._search_plan import build_context_retrieval_plan
 from sibyl_core.retrieval.candidates import RetrievalCandidate
-from sibyl_core.retrieval.search import _candidate_scope_allowed, build_context_retrieval_plan
+from sibyl_core.services import content_client as content_client_service
 from sibyl_core.services import surreal_content as content_service
 from sibyl_core.tools.context import ContextFacet
 
@@ -1010,19 +1012,26 @@ async def _observe_probe(
 
 
 async def collect_team_scope_observations() -> dict[str, Any]:
-    auth_client = SurrealAuthClient(url="memory://")
-    content_client = SurrealContentClient(url="memory://")
+    fixture_namespace = f"sibyl_team_scope_{uuid4().hex}"
+    auth_client = SurrealAuthClient(
+        url="memory://",
+        namespace=f"{fixture_namespace}_auth",
+    )
+    content_client = SurrealContentClient(
+        url="memory://",
+        namespace=f"{fixture_namespace}_content",
+    )
 
     @asynccontextmanager
     async def fixture_content_scope():
         yield content_client
 
-    previous_content_scope = content_service.surreal_content_client
+    previous_content_scope = content_client_service.surreal_content_client
     try:
         async with _embedded_surreal_url():
             principals = await _provision_principals(auth_client)
             await bootstrap_content_schema(content_client)
-            content_service.surreal_content_client = cast(Any, fixture_content_scope)
+            content_client_service.surreal_content_client = cast(Any, fixture_content_scope)
             memories = await _seed_memories(_seed_requests())
             memories_by_label = {memory.label: memory for memory in memories}
             probes = _expected_probes(principals, memories)
@@ -1035,7 +1044,7 @@ async def collect_team_scope_observations() -> dict[str, Any]:
                 for probe in probes
             ]
     finally:
-        content_service.surreal_content_client = previous_content_scope
+        content_client_service.surreal_content_client = previous_content_scope
         await content_client.close()
         await auth_client.close()
 
