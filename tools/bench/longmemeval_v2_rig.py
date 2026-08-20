@@ -304,7 +304,7 @@ def build_aa_receipt(raw_passes: list[dict[str, Any]]) -> dict[str, Any]:
     if len(passes) not in {INITIAL_AA_PASS_COUNT, EXTENDED_AA_PASS_COUNT}:
         raise RigInputError("A/A requires exactly three or five paired passes")
     _validate_pass_set(passes, expected_count=len(passes))
-    pass_rows = []
+    pass_rows: list[dict[str, Any]] = []
     for item in passes:
         left = item["arms"]["left"]
         right = item["arms"]["right"]
@@ -492,7 +492,7 @@ def build_race_receipt(
     passes = [validate_pass(item) for item in raw_passes]
     _require_preregistered_passes(preregistration, passes)
     noise_floor = float(preregistration["noise_floor_pp"])
-    pass_rows = []
+    pass_rows: list[dict[str, Any]] = []
     for item in passes:
         machine = _arm_by_name(item, "machine")
         naive = _arm_by_name(item, "naive")
@@ -585,7 +585,7 @@ def build_render_receipt(
         or any(replay_survivors.get(lever) is not True for lever in included_levers)
     ):
         raise RigInputError("render bundle contains a lever that did not survive replay")
-    pass_rows = []
+    pass_rows: list[dict[str, Any]] = []
     for item in passes:
         control = _arm_by_name(item, "render_control")
         treatment = _arm_by_name(item, "render_treatment")

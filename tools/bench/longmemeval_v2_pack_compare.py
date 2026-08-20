@@ -110,7 +110,7 @@ def compare_packs(
             f"left_only={sorted(set(left) - set(right))}, "
             f"right_only={sorted(set(right) - set(left))}"
         )
-    rows = []
+    rows: list[dict[str, Any]] = []
     for question_id in sorted(left):
         left_ids = left[question_id]["entity_ids"]
         right_ids = right[question_id]["entity_ids"]
