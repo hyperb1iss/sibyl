@@ -1,0 +1,1351 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sibyl 1.3 · Findings and Path Forward</title>
+    <meta
+      name="description"
+      content="Deep-dive findings at c3c786ab and the path to Sibyl 1.3: one retrieval surface, one lifecycle rule, an honest anchor, and the arithmetic of the LongMemEval-V2 cliff."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fira+Code:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* =========================================================================
+         SilkCircuit tokens. Neon (dark) is the committed world; dawn is the light
+         theme. Tokens live on :root; the media query carries the OS preference and
+         [data-theme] overrides it in both directions.
+         ========================================================================= */
+      :root,
+      :root[data-theme="dark"] {
+        --sc-purple: oklch(64% 0.31 328);
+        --sc-magenta: oklch(70% 0.32 328);
+        --sc-cyan: oklch(92% 0.16 180);
+        --sc-coral: oklch(72% 0.22 350);
+        --sc-yellow: oklch(95% 0.13 105);
+        --sc-green: oklch(88% 0.23 145);
+        --sc-red: oklch(68% 0.22 25);
+        --sc-orange: oklch(78% 0.16 60);
+
+        --bg-void: oklch(6% 0.015 285);
+        --bg-base: oklch(10% 0.02 285);
+        --bg-raise: oklch(14% 0.025 285);
+        --bg-card: oklch(17% 0.03 285);
+        --bg-surface: oklch(21% 0.035 285);
+
+        --fg: oklch(98% 0.005 110);
+        --fg-2: oklch(80% 0.02 280);
+        --fg-muted: oklch(64% 0.035 280);
+        --fg-subtle: oklch(46% 0.03 280);
+
+        --hair: color-mix(in oklch, var(--fg) 10%, transparent);
+        --hair-strong: color-mix(in oklch, var(--fg) 18%, transparent);
+        --glow: color-mix(in oklch, var(--sc-purple) 26%, transparent);
+        --grid-line: color-mix(in oklch, var(--sc-purple) 8%, transparent);
+        color-scheme: dark;
+      }
+
+      @media (prefers-color-scheme: light) {
+        :root {
+          --sc-purple: oklch(42% 0.28 300);
+          --sc-magenta: oklch(40% 0.26 340);
+          --sc-cyan: oklch(45% 0.16 200);
+          --sc-coral: oklch(50% 0.22 350);
+          --sc-yellow: oklch(52% 0.16 85);
+          --sc-green: oklch(45% 0.2 145);
+          --sc-red: oklch(50% 0.24 25);
+          --sc-orange: oklch(52% 0.16 55);
+          --bg-void: oklch(95% 0.01 290);
+          --bg-base: oklch(97% 0.008 290);
+          --bg-raise: oklch(94% 0.015 290);
+          --bg-card: oklch(100% 0 0);
+          --bg-surface: oklch(91% 0.02 290);
+          --fg: oklch(18% 0.03 290);
+          --fg-2: oklch(30% 0.035 290);
+          --fg-muted: oklch(45% 0.04 290);
+          --fg-subtle: oklch(62% 0.03 290);
+          --hair: color-mix(in oklch, var(--fg) 12%, transparent);
+          --hair-strong: color-mix(in oklch, var(--fg) 22%, transparent);
+          --glow: color-mix(in oklch, var(--sc-purple) 16%, transparent);
+          --grid-line: color-mix(in oklch, var(--sc-purple) 7%, transparent);
+          color-scheme: light;
+        }
+      }
+
+      :root[data-theme="light"] {
+        --sc-purple: oklch(42% 0.28 300);
+        --sc-magenta: oklch(40% 0.26 340);
+        --sc-cyan: oklch(45% 0.16 200);
+        --sc-coral: oklch(50% 0.22 350);
+        --sc-yellow: oklch(52% 0.16 85);
+        --sc-green: oklch(45% 0.2 145);
+        --sc-red: oklch(50% 0.24 25);
+        --sc-orange: oklch(52% 0.16 55);
+        --bg-void: oklch(95% 0.01 290);
+        --bg-base: oklch(97% 0.008 290);
+        --bg-raise: oklch(94% 0.015 290);
+        --bg-card: oklch(100% 0 0);
+        --bg-surface: oklch(91% 0.02 290);
+        --fg: oklch(18% 0.03 290);
+        --fg-2: oklch(30% 0.035 290);
+        --fg-muted: oklch(45% 0.04 290);
+        --fg-subtle: oklch(62% 0.03 290);
+        --hair: color-mix(in oklch, var(--fg) 12%, transparent);
+        --hair-strong: color-mix(in oklch, var(--fg) 22%, transparent);
+        --glow: color-mix(in oklch, var(--sc-purple) 16%, transparent);
+        --grid-line: color-mix(in oklch, var(--sc-purple) 7%, transparent);
+        color-scheme: light;
+      }
+
+      /* ---- reset / base ------------------------------------------------------- */
+      *,
+      *::before,
+      *::after { box-sizing: border-box; }
+      html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; scroll-padding-top: 4.5rem; }
+      @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+      body {
+        margin: 0;
+        background: var(--bg-void);
+        color: var(--fg);
+        font-family: "Space Grotesk", system-ui, -apple-system, sans-serif;
+        font-size: 17px;
+        line-height: 1.65;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+      code, .mono, pre { font-family: "Fira Code", ui-monospace, SFMono-Regular, monospace; }
+      code {
+        font-size: 0.86em;
+        background: var(--bg-surface);
+        border: 1px solid var(--hair);
+        border-radius: 5px;
+        padding: 0.1em 0.38em;
+        color: var(--sc-cyan);
+        word-break: break-word;
+      }
+      a { color: var(--sc-cyan); text-decoration-color: var(--hair-strong); text-underline-offset: 3px; }
+      a:hover { color: var(--sc-magenta); }
+      h1, h2, h3, h4 { line-height: 1.2; margin: 0; font-weight: 600; letter-spacing: -0.015em; }
+      .wrap { width: min(1180px, 92vw); margin-inline: auto; }
+      .narrow { width: min(820px, 92vw); margin-inline: auto; }
+      .skip {
+        position: absolute; left: -9999px; top: 0; background: var(--sc-purple);
+        color: var(--bg-void); padding: 0.6rem 1rem; z-index: 100; border-radius: 0 0 8px 0;
+      }
+      .skip:focus { left: 0; }
+
+      /* ---- nav ---------------------------------------------------------------- */
+      nav {
+        position: sticky; top: 0; z-index: 50;
+        background: color-mix(in oklch, var(--bg-void) 86%, transparent);
+        backdrop-filter: blur(14px) saturate(1.4);
+        border-bottom: 1px solid var(--hair);
+      }
+      .nav-inner { display: flex; align-items: center; gap: 1.2rem; height: 3.4rem; }
+      .nav-mark { display: inline-flex; align-items: center; gap: 0.5rem; font-weight: 700; letter-spacing: 0.02em; }
+      .nav-mark .dot {
+        width: 9px; height: 9px; border-radius: 50%;
+        background: var(--sc-purple); box-shadow: 0 0 12px var(--glow);
+      }
+      .nav-links { margin-left: auto; display: flex; align-items: center; gap: 0.15rem; flex-wrap: wrap; }
+      .nav-links a {
+        font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.07em;
+        color: var(--fg-muted); text-decoration: none; padding: 0.35rem 0.55rem; border-radius: 7px;
+      }
+      .nav-links a:hover { color: var(--fg); background: var(--bg-raise); }
+      .theme-btn {
+        margin-left: 0.4rem; display: inline-flex; align-items: center; justify-content: center;
+        width: 2rem; height: 2rem; border-radius: 8px; cursor: pointer;
+        background: var(--bg-raise); border: 1px solid var(--hair); color: var(--fg-2);
+      }
+      .theme-btn:hover { color: var(--sc-cyan); border-color: var(--hair-strong); }
+
+      /* ---- hero --------------------------------------------------------------- */
+      .hero { position: relative; overflow: hidden; padding: 5rem 0 4rem; border-bottom: 1px solid var(--hair); }
+      .hero-bg {
+        position: absolute; inset: 0; pointer-events: none;
+        background:
+          radial-gradient(900px 420px at 18% 0%, var(--glow), transparent 70%),
+          radial-gradient(700px 380px at 90% 20%, color-mix(in oklch, var(--sc-cyan) 12%, transparent), transparent 72%),
+          linear-gradient(transparent 95%, var(--grid-line) 95%) 0 0 / 100% 42px,
+          linear-gradient(90deg, transparent 95%, var(--grid-line) 95%) 0 0 / 42px 100%;
+      }
+      .hero-inner { position: relative; }
+      .eyebrow {
+        display: inline-block; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.18em;
+        color: var(--sc-coral); font-weight: 600;
+      }
+      .wordmark {
+        font-size: clamp(2.6rem, 7vw, 4.6rem); font-weight: 700; margin: 0.5rem 0 0.2rem;
+        background: linear-gradient(100deg, var(--sc-purple), var(--sc-magenta) 40%, var(--sc-cyan));
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+      }
+      .tagline { font-size: clamp(1.05rem, 2.3vw, 1.5rem); color: var(--fg-2); font-weight: 500; }
+      .tagline b { color: var(--fg); }
+      .tagline .sep { color: var(--sc-purple); margin: 0 0.6rem; }
+      .hero-thesis { max-width: 58ch; color: var(--fg-2); font-size: 1.06rem; margin: 1.5rem 0 0; }
+      .hero-thesis .hl { color: var(--fg); font-weight: 600; }
+      .hero-meta {
+        display: flex; flex-wrap: wrap; gap: 0.5rem 1.6rem; margin-top: 2.2rem;
+        font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--fg-subtle);
+      }
+      .hero-meta span { display: inline-flex; align-items: baseline; gap: 0.5rem; }
+      .hero-meta b { color: var(--sc-cyan); font-weight: 600; letter-spacing: 0.02em; text-transform: none; font-size: 0.92rem; }
+
+      /* ---- sections ----------------------------------------------------------- */
+      section { padding: 4.2rem 0; border-bottom: 1px solid var(--hair); }
+      section:nth-of-type(even) { background: var(--bg-base); }
+      .section-title { font-size: clamp(1.5rem, 3.4vw, 2.15rem); margin: 0.6rem 0 0; max-width: 46ch; }
+      .lede { color: var(--fg-2); max-width: 68ch; margin: 1.1rem 0 0; font-size: 1.04rem; }
+      .prose { max-width: 72ch; color: var(--fg-2); }
+      .prose p { margin: 0 0 1.05rem; }
+      .prose strong { color: var(--fg); font-weight: 600; }
+
+      /* ---- components --------------------------------------------------------- */
+      .grid { display: grid; gap: 1.1rem; }
+      .g2 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+      .g3 { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+      .card {
+        background: var(--bg-card); border: 1px solid var(--hair);
+        border-radius: 14px; padding: 1.3rem 1.4rem;
+      }
+      .card h3 { font-size: 1.04rem; margin: 0.45rem 0 0.6rem; color: var(--fg); }
+      .card p { margin: 0; color: var(--fg-muted); font-size: 0.94rem; }
+      .card p + p { margin-top: 0.7rem; }
+      .pn {
+        font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.14em;
+        color: var(--sc-purple); font-weight: 700;
+      }
+      .callout {
+        margin-top: 1.8rem; padding: 1.15rem 1.35rem; border-radius: 12px;
+        background: var(--bg-raise); border: 1px solid var(--hair);
+        border-left: 3px solid var(--sc-purple);
+      }
+      .callout p { margin: 0; color: var(--fg-2); }
+      .callout.warn { border-left-color: var(--sc-yellow); }
+      .callout.bad { border-left-color: var(--sc-red); }
+      .callout.good { border-left-color: var(--sc-green); }
+
+      .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-top: 2rem; }
+      .stat {
+        background: var(--bg-card); border: 1px solid var(--hair); border-radius: 12px;
+        padding: 1.05rem 1.15rem;
+      }
+      .stat .big {
+        display: block; font-family: "Fira Code", monospace; font-size: 1.6rem;
+        font-weight: 600; color: var(--sc-cyan); line-height: 1.1;
+      }
+      .stat .big.bad { color: var(--sc-red); }
+      .stat .big.warn { color: var(--sc-yellow); }
+      .stat .big.good { color: var(--sc-green); }
+      .stat span.k {
+        display: block; margin-top: 0.45rem; font-size: 0.72rem; text-transform: uppercase;
+        letter-spacing: 0.11em; color: var(--fg-subtle);
+      }
+
+      .chip {
+        display: inline-block; font-family: "Fira Code", monospace; font-size: 0.7rem;
+        text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600;
+        padding: 0.16rem 0.5rem; border-radius: 999px;
+        border: 1px solid var(--hair-strong); color: var(--fg-muted); background: var(--bg-surface);
+      }
+      .chip.red { color: var(--sc-red); border-color: color-mix(in oklch, var(--sc-red) 45%, transparent); }
+      .chip.yellow { color: var(--sc-yellow); border-color: color-mix(in oklch, var(--sc-yellow) 45%, transparent); }
+      .chip.green { color: var(--sc-green); border-color: color-mix(in oklch, var(--sc-green) 45%, transparent); }
+      .chip.cyan { color: var(--sc-cyan); border-color: color-mix(in oklch, var(--sc-cyan) 45%, transparent); }
+      .chip.purple { color: var(--sc-magenta); border-color: color-mix(in oklch, var(--sc-purple) 50%, transparent); }
+
+      .table-scroll { overflow-x: auto; margin-top: 1.7rem; border: 1px solid var(--hair); border-radius: 12px; }
+      table { width: 100%; border-collapse: collapse; font-size: 0.9rem; min-width: 620px; }
+      thead th {
+        text-align: left; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.1em;
+        color: var(--sc-cyan); font-weight: 600; padding: 0.75rem 0.9rem;
+        background: var(--bg-surface); border-bottom: 1px solid var(--hair-strong); white-space: nowrap;
+      }
+      tbody td { padding: 0.75rem 0.9rem; border-bottom: 1px solid var(--hair); color: var(--fg-2); vertical-align: top; }
+      tbody tr:last-child td { border-bottom: 0; }
+      tbody tr:hover td { background: color-mix(in oklch, var(--sc-purple) 5%, transparent); }
+      td.num, th.num { font-family: "Fira Code", monospace; white-space: nowrap; }
+      tr.zero td { color: var(--fg-subtle); }
+      tr.hot td.num { color: var(--sc-green); font-weight: 600; }
+
+      .phase {
+        background: var(--bg-card); border: 1px solid var(--hair); border-radius: 14px;
+        padding: 1.35rem 1.45rem; margin-top: 1.1rem;
+      }
+      .phase-head { display: flex; align-items: baseline; gap: 0.8rem; flex-wrap: wrap; }
+      .phase-head h3 { font-size: 1.12rem; }
+      .phase > p { color: var(--fg-muted); font-size: 0.95rem; margin: 0.7rem 0 0; }
+      .phase ul { margin: 0.85rem 0 0; padding-left: 1.15rem; color: var(--fg-muted); font-size: 0.92rem; }
+      .phase li { margin-bottom: 0.42rem; }
+      .gate {
+        margin-top: 0.95rem; padding: 0.8rem 1rem; border-radius: 10px;
+        background: var(--bg-raise); border: 1px solid var(--hair); border-left: 3px solid var(--sc-yellow);
+        font-size: 0.9rem; color: var(--fg-2);
+      }
+      .gate b { color: var(--sc-yellow); text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.11em; display: block; margin-bottom: 0.3rem; }
+
+      ol.queue { counter-reset: q; list-style: none; padding: 0; margin: 1.8rem 0 0; }
+      ol.queue > li {
+        counter-increment: q; position: relative; padding: 1.05rem 1.2rem 1.05rem 3.4rem;
+        background: var(--bg-card); border: 1px solid var(--hair); border-radius: 12px; margin-bottom: 0.75rem;
+      }
+      ol.queue > li::before {
+        content: counter(q); position: absolute; left: 1.1rem; top: 1.05rem;
+        font-family: "Fira Code", monospace; font-size: 0.95rem; font-weight: 600;
+        color: var(--sc-purple);
+      }
+      ol.queue h4 { font-size: 0.99rem; margin: 0 0 0.4rem; color: var(--fg); }
+      ol.queue p { margin: 0; color: var(--fg-muted); font-size: 0.9rem; }
+      ol.queue .branch { margin-top: 0.5rem; font-size: 0.8rem; color: var(--fg-subtle); }
+
+      .decision { background: var(--bg-card); border: 1px solid var(--hair); border-radius: 13px; padding: 1.25rem 1.35rem; }
+      .decision h3 { font-size: 1.02rem; margin-bottom: 0.55rem; }
+      .decision .opts { font-size: 0.88rem; color: var(--fg-subtle); margin: 0 0 0.75rem; }
+      .decision .rec { font-size: 0.93rem; color: var(--fg-2); border-left: 3px solid var(--sc-green); padding-left: 0.85rem; }
+      .decision .rec b { color: var(--sc-green); }
+
+      ul.traps { list-style: none; padding: 0; margin: 1.7rem 0 0; }
+      ul.traps li {
+        position: relative; padding: 0.7rem 0 0.7rem 1.9rem; border-bottom: 1px solid var(--hair);
+        color: var(--fg-muted); font-size: 0.93rem;
+      }
+      ul.traps li::before { content: "\2715"; position: absolute; left: 0.35rem; color: var(--sc-red); font-size: 0.85rem; }
+      ul.traps li:last-child { border-bottom: 0; }
+      ul.traps b { color: var(--fg-2); }
+
+      footer { padding: 3rem 0 4rem; color: var(--fg-subtle); font-size: 0.86rem; }
+      footer .wrap > p { max-width: 74ch; }
+      .foot-grid { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1.3rem; }
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#verdict">Skip to content</a>
+
+    <nav>
+      <div class="wrap nav-inner">
+        <span class="nav-mark"><span class="dot"></span>Sibyl 1.3</span>
+        <div class="nav-links">
+          <a href="#verdict">Verdict</a>
+          <a href="#surface">Surface</a>
+          <a href="#blocking">Blocking</a>
+          <a href="#cliff">The Cliff</a>
+          <a href="#board">The Board</a>
+          <a href="#levers">Levers</a>
+          <a href="#plan">Plan</a>
+          <a href="#queue">Queue</a>
+          <a href="#decisions">Decisions</a>
+          <a href="#traps">Traps</a>
+          <button class="theme-btn" id="themeToggle" aria-label="Toggle color theme" title="Toggle theme">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- ============================= HERO ============================= -->
+    <header class="hero">
+      <div class="hero-bg"></div>
+      <div class="wrap hero-inner">
+        <span class="eyebrow">Deep dive · 2026-08-19 · HEAD c3c786ab</span>
+        <h1 class="wordmark">One Surface</h1>
+        <div class="tagline"><b>Findings</b><span class="sep">·</span><b>and the path to 1.3</b></div>
+        <p class="hero-thesis">
+          Wave 1 closed real defects and three of the premises the 1.3 plan rests on turn out to be
+          false. Retrieval is <span class="hl">three surfaces, not one</span>, and the lifecycle gate
+          reached exactly one of them. No trustworthy accuracy number exists at HEAD. And the
+          benchmark gate we have been steering by
+          <span class="hl">targets a score of zero</span>.
+        </p>
+
+        <div class="hero-meta">
+          <span>RELEASED<b>v1.2.2</b></span>
+          <span>FINDINGS RE-VERIFIED<b>242</b></span>
+          <span>REAL BLOCKING SET<b>9</b></span>
+          <span>CURRENT LAFS GAIN<b>0.0000</b></span>
+          <span>SHORT OF THE CLIFF<b>91 of 451</b></span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ============================= VERDICT ============================= -->
+    <section id="verdict">
+      <div class="wrap">
+        <span class="eyebrow">The Verdict</span>
+        <h2 class="section-title">Three premises in the 1.3 docs do not survive contact with the code.</h2>
+        <p class="lede">
+          Nine ground-truth lanes re-verified the 2026-08-13 audit against HEAD, then five adversarial
+          passes attacked the results. 242 findings came back where the audit counted about 120. Thirty
+          were claimed closed. Fifty corrections survived review, and three of them re-sequence the release.
+        </p>
+
+        <div class="grid g3" style="margin-top: 2.2rem">
+          <div class="card">
+            <div class="pn">Premise 01 · false</div>
+            <h3>The leaderboard is not empty, and the gate targets a zero.</h3>
+            <p>
+              The LongMemEval-V2 small tier has held three entries since 2026-08-09, four days before
+              the audit asserted first-mover status. Both SOTA sweeps missed it because the static HTML
+              ships hardcoded "coming soon" rows while the real entries live only in the deployed
+              JavaScript. A fetch that does not execute JS cannot see them.
+            </p>
+            <p>
+              Worse, <code>baseline-beat-gate</code> aims at 42.8% at 10s. Under the published LAFS
+              formula that scores <b>exactly 0.0000</b>. The reference floor across the whole
+              integration window is 51.0%.
+            </p>
+          </div>
+          <div class="card">
+            <div class="pn">Premise 02 · false</div>
+            <h3>Retrieval is three surfaces and #390 gated one.</h3>
+            <p>
+              Every call site of <code>graph_metadata_recallable</code> resolves inside
+              <code>context_search</code> or pack admission. None lands in
+              <code>retrieval/hybrid.py</code>, <code>tools/search.py</code>, or
+              <code>retrieval/naive.py</code>. So <code>sibyl search</code>, REST
+              <code>/search</code>, and MCP search all serve corrected memories as current.
+            </p>
+            <p>
+              And the correction action <code>delete</code> maps to a soft
+              <code>MemoryLifecycleState.DELETED</code>, so the ungated lane serves memories a user
+              explicitly deleted.
+            </p>
+          </div>
+          <div class="card">
+            <div class="pn">Premise 03 · overstated</div>
+            <h3>The ranker is decontaminated. The measurement never happened.</h3>
+            <p>
+              #386 fully removed the corpus vocabulary. Zero hits across <code>retrieval/</code> for
+              the proper nouns or the dataset typo. What survives is a chat-transcript-shape lexicon,
+              defensible for a conversational-memory product.
+            </p>
+            <p>
+              The live problem is the other half of the finding: the re-measurement never ran. #386's
+              own commit body calls the anchor run "the planned next step", #395 then moved the
+              tokenizer again, and the strategy skeleton still cites 30.38% unqualified.
+            </p>
+          </div>
+        </div>
+
+        <div class="callout good">
+          <p>
+            <b>What wave 1 genuinely closed, verified reachable on the default path:</b> the metadata
+            snapshot resurrection and the passage retire-sweep hole (#393), writable typed predicates
+            end to end across CLI, REST, and MCP (#391), the CLI auth-URL precedence and 32 silent
+            exit-0 paths (#392), the backups cross-org read (#384), MCP scope enforcement (#385), and
+            the chart JWT-secret guard (#387). The typed-predicate walk now has a producer, so the
+            traversal weight table is no longer a wish list.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= SURFACE ============================= -->
+    <section id="surface">
+      <div class="wrap">
+        <span class="eyebrow">The Core Defect</span>
+        <h2 class="section-title">One request, two opposite treatments of one predicate.</h2>
+        <div class="prose" style="margin-top: 1.6rem">
+          <p>
+            A default <code>/context/pack</code> request at <code>retrieval_mode=fast</code> runs both
+            halves of the system at once. The evidence block goes through
+            <code>_execute_context_evidence_search</code> into <code>hybrid_search</code>, which
+            supplies its own predicate table via <code>default_factory</code> where
+            <code>SUPERSEDES</code> is a <strong>1.1 boost</strong>. The pack sections come from
+            <code>context_search</code>, where <code>SUPERSEDES</code> is
+            <strong>excluded from the walk entirely</strong>.
+          </p>
+          <p>
+            The same retired row is dropped from the sections and promoted in the evidence, and the
+            benchmark measures the composite. That is why no arm result is interpretable until the
+            gate covers every surface. It is also why the fix is a lifecycle gate rather than a
+            pipeline merge: two pipelines with different weight tables is a pre-1.0 architectural
+            split that has shipped in every release and corrupts nothing on its own.
+          </p>
+        </div>
+
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr><th>Read surface</th><th>Lifecycle gate</th><th>SUPERSEDES</th><th>Serves deleted rows</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>/context/pack</code> pack sections</td><td><span class="chip green">gated</span></td><td class="num">excluded from walk</td><td class="num">no</td></tr>
+              <tr><td><code>/context/pack</code> evidence at <code>fast</code></td><td><span class="chip red">ungated</span></td><td class="num">1.1 boost</td><td class="num">yes</td></tr>
+              <tr><td>REST <code>/api/search</code></td><td><span class="chip red">ungated</span></td><td class="num">1.1 boost</td><td class="num">yes</td></tr>
+              <tr><td><code>sibyl search</code></td><td><span class="chip red">ungated</span></td><td class="num">1.1 boost</td><td class="num">yes</td></tr>
+              <tr><td>MCP <code>search</code></td><td><span class="chip red">ungated</span></td><td class="num">1.1 boost</td><td class="num">yes</td></tr>
+              <tr><td><code>/context/pack</code> evidence at <code>naive</code> (#396)</td><td><span class="chip red">ungated</span></td><td class="num">n/a</td><td class="num">yes</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout warn">
+          <p>
+            Cut criterion for 1.3: a two-row probe writes memory A, supersedes it with B, and asserts
+            A is absent from all five read surfaces. Today four of five serve it.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= BLOCKING ============================= -->
+    <section id="blocking">
+      <div class="wrap">
+        <span class="eyebrow">The Blocking Set</span>
+        <h2 class="section-title">Nine items, down from thirty-five claimed.</h2>
+        <p class="lede">
+          The adversarial passes deflated far more than they escalated. Of 16 tier-2/3/4 findings marked
+          1.3-blocking, 14 did not survive. Six of 29 tier-0 items had no named attacker and no boundary
+          crossing. The CORS entry filed as blocking is a false alarm, because all eight
+          <code>set_cookie</code> sites are <code>SameSite=Lax</code> so no cookie ever rides the
+          cross-site fetch. What remains is smaller and much sharper.
+        </p>
+
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr><th>Blocker</th><th>Class</th><th>Why it cannot ship open</th><th class="num">Size</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>MCP writes carry no org-role gate</td>
+                <td><span class="chip red">security</span></td>
+                <td>MCP mounts in the same process as REST, and <code>load_access_token</code> accepts any valid session JWT. The JWT path resolves <code>org_role</code> and hands it to the policy context, then nothing compares it to a write-role set. A VIEWER performs writes REST refuses.</td>
+                <td class="num">M</td>
+              </tr>
+              <tr>
+                <td>Lifecycle gate reaches one of five surfaces</td>
+                <td><span class="chip red">wrong data</span></td>
+                <td>Corrected and explicitly deleted memories are served as current on every default read path except pack sections.</td>
+                <td class="num">M</td>
+              </tr>
+              <tr>
+                <td>Failed local job blocks its own retry for 24 hours</td>
+                <td><span class="chip red">wrong data</span></td>
+                <td>Default backend. The entity id is content-derived, so retrying the same <code>add</code> reuses the dedup key and the write is silently swallowed. Not a latent variant, the ordinary user retry.</td>
+                <td class="num">S</td>
+              </tr>
+              <tr>
+                <td><code>create_entity</code> returns success after losing its enqueues</td>
+                <td><span class="chip red">wrong data</span></td>
+                <td>A create that fails to enqueue embedding backfill or memory extraction logs a warning and reports success, so the row exists and is unreachable by recall.</td>
+                <td class="num">S</td>
+              </tr>
+              <tr>
+                <td>Vector lane returns <code>[]</code> while the receipt says completed</td>
+                <td><span class="chip yellow">measurement</span></td>
+                <td>Launders a broken HNSW lane into a completed search. Every accuracy number measured through it is unattributable.</td>
+                <td class="num">S</td>
+              </tr>
+              <tr>
+                <td><code>compile_context</code> swallows retrieval exceptions</td>
+                <td><span class="chip yellow">measurement</span></td>
+                <td>Arm asymmetry against #396: the naive control re-raises and drops the datapoint while the Sibyl arm silently degrades, so the race is biased before it runs.</td>
+                <td class="num">S</td>
+              </tr>
+              <tr>
+                <td>Both anchors are invalid and nothing says so</td>
+                <td><span class="chip yellow">measurement</span></td>
+                <td>Nothing measured at or after #386. #395 additionally rewrote the adapter's client-side slicing, so the old anchor is unpairable for two independent reasons.</td>
+                <td class="num">L</td>
+              </tr>
+              <tr>
+                <td>Browser e2e suite can only skip or pass</td>
+                <td><span class="chip yellow">reliability</span></td>
+                <td>All five tests follow redirects and accept 3xx while <code>proxy.ts</code> redirects unauthenticated requests to <code>/login</code>. Six dependabot PRs are queued for merge on that green.</td>
+                <td class="num">S</td>
+              </tr>
+              <tr>
+                <td>Readiness probe blind to a dead broker</td>
+                <td><span class="chip yellow">reliability</span></td>
+                <td>All four startup handlers swallow into <code>log.warning</code>, the initialized flags are read nowhere, and <code>check_readiness</code> checks only Surreal. A pod that drops every background job reports ready.</td>
+                <td class="num">S</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout">
+          <p>
+            <b>Deflated out of the blocking set with proof:</b> the worker CrashLoopBackOff is cosmetic
+            because the API pod runs the queue in-process under the local backend; the SurrealDB
+            password cannot rotate out from under a working install because the chart has no SurrealDB
+            dependency at all; the missing <code>fsGroup</code> fails loudly at first install rather than
+            silently; <code>helm template</code> <em>is</em> executed by real subprocess tests inside the
+            release gate; ordinal fusion discarding score magnitudes is Reciprocal Rank Fusion behaving
+            as specified; and every "missing test" finding is coverage debt, not a shipped defect.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= THE CLIFF ============================= -->
+    <section id="cliff">
+      <div class="wrap">
+        <span class="eyebrow">The Benchmark</span>
+        <h2 class="section-title">51.0% is a cliff, not a slope.</h2>
+        <p class="lede">
+          LAFS gain is the integral of reachable accuracy over log-scaled latency budgets from 1s to
+          200s, scored against a fixed reference frontier. Because <code>RAG: query to slice + notes</code>
+          sits at 51.0% and 0.2s, the entire region from 1s to 26.9s is already held at 51.0. Any system
+          at or below that scores exactly zero no matter how fast it runs. There is no partial credit and
+          no first-mover credit for showing up at 40%.
+        </p>
+
+        <div class="stat-grid">
+          <div class="stat"><span class="big bad">0.0000</span><span class="k">Sibyl LAFS gain today</span></div>
+          <div class="stat"><span class="big">31.26%</span><span class="k">best comparable, at 7.48s</span></div>
+          <div class="stat"><span class="big warn">230 / 451</span><span class="k">correct needed to start scoring</span></div>
+          <div class="stat"><span class="big bad">91</span><span class="k">answers short of the cliff</span></div>
+          <div class="stat"><span class="big good">1.0955</span><span class="k">bar to beat, verifiably</span></div>
+        </div>
+
+        <h3 style="margin-top: 3rem; font-size: 1.2rem">The board, read live from the deployed JS</h3>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr><th></th><th>System</th><th class="num">Small tier</th><th class="num">LAFS gain</th><th>Note</th></tr>
+            </thead>
+            <tbody>
+              <tr class="hot"><td><span class="chip purple">sub</span></td><td>AgentRunbook-C v2 Online</td><td class="num">75.61% @ 130.54s</td><td class="num">2.8231</td><td>not reproducible from its displayed point</td></tr>
+              <tr class="hot"><td><span class="chip purple">sub</span></td><td>Perpetual Recall V3</td><td class="num">53.22% @ 1.96s</td><td class="num">1.0955</td><td>reproduced exactly; the real bar</td></tr>
+              <tr class="hot"><td><span class="chip purple">sub</span></td><td>OPS-Agentic-Memory-v1</td><td class="num">81.37% @ 153.64s</td><td class="num">0.3223</td><td>accuracy leader, near-worthless gain</td></tr>
+              <tr><td><span class="chip">ref</span></td><td>AgentRunbook-C</td><td class="num">74.9% @ 108.3s</td><td class="num">frontier</td><td>413 lines, beats R by 16.3pp</td></tr>
+              <tr><td><span class="chip">ref</span></td><td>Codex</td><td class="num">69.9% @ 177.2s</td><td class="num">frontier</td><td>no memory architecture at all</td></tr>
+              <tr><td><span class="chip">ref</span></td><td>AgentRunbook-R</td><td class="num">58.6% @ 26.9s</td><td class="num">frontier</td><td>3,258 lines of classical memory</td></tr>
+              <tr><td><span class="chip cyan">ref</span></td><td>RAG: query to slice + notes</td><td class="num">51.0% @ 0.2s</td><td class="num">the cliff</td><td>sets the floor; two embedding round trips</td></tr>
+              <tr><td><span class="chip">ref</span></td><td>RAG: query to slice</td><td class="num">42.8% @ 0.1s</td><td class="num">frontier</td><td>same code, one boolean flipped</td></tr>
+              <tr class="zero"><td><span class="chip">ref</span></td><td>No retrieval</td><td class="num">1.3% @ 0s</td><td class="num">frontier</td><td>reader only</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="lede" style="margin-top: 1.2rem; font-size: 0.95rem">
+          The top entry does not reconcile. Our reimplementation of LAFS reproduces the other two gains
+          to six decimal places, but 2.8231 computes to 0.0572 from its own displayed operating point, a
+          49x discrepancy, and the ceiling at 130.54s even at 100% accuracy is 2.0211. Multi-point
+          submission is officially permitted and the scorer takes the union, so the row is a lossy
+          display of a submission whose gain comes from undisplayed faster points. Note also that
+          2.8231 is a hand-typed four-decimal literal while the other two carry full float64 precision.
+        </p>
+
+        <h3 style="margin-top: 3rem; font-size: 1.2rem">Where we could land</h3>
+        <p class="prose" style="margin-top: 0.8rem">
+          Accuracy is exposure times conversion. Today that is 0.652 times 0.48 for 31.3%, against 31.26%
+          measured, so the model is trustworthy enough to price levers with. The 82.6% figure is a measured
+          ceiling on selection, so exposure cannot exceed it without new acquisition.
+        </p>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr><th class="num">Exposure</th><th class="num">Conversion</th><th class="num">Accuracy</th><th class="num">LAFS @7.5s</th><th class="num">LAFS @2s</th><th>Board position</th></tr>
+            </thead>
+            <tbody>
+              <tr class="zero"><td class="num">65.2%</td><td class="num">48%</td><td class="num">31.3%</td><td class="num">0.0000</td><td class="num">0.0000</td><td>off board (today)</td></tr>
+              <tr class="zero"><td class="num">75.0%</td><td class="num">50%</td><td class="num">37.5%</td><td class="num">0.0000</td><td class="num">0.0000</td><td>off board (render wave lands)</td></tr>
+              <tr class="zero"><td class="num">82.6%</td><td class="num">48%</td><td class="num">39.7%</td><td class="num">0.0000</td><td class="num">0.0000</td><td>off board (full exposure ceiling)</td></tr>
+              <tr class="zero"><td class="num">82.6%</td><td class="num">55%</td><td class="num">45.4%</td><td class="num">0.0000</td><td class="num">0.0000</td><td>off board (best measured conversion)</td></tr>
+              <tr><td class="num">82.6%</td><td class="num">62%</td><td class="num">51.2%</td><td class="num">0.0511</td><td class="num">0.1040</td><td>on the board, last</td></tr>
+              <tr class="hot"><td class="num">82.6%</td><td class="num">65%</td><td class="num">53.7%</td><td class="num">0.6509</td><td class="num">1.3244</td><td>2nd on gain at 2s</td></tr>
+              <tr class="hot"><td class="num">82.6%</td><td class="num">70%</td><td class="num">57.8%</td><td class="num">1.6440</td><td class="num">3.3456</td><td>1st outright at 2s</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout bad">
+          <p>
+            <b>Read the third row twice.</b> If we cash the entire un-cashed oracle exposure gap, every
+            ingest lever in the strategy skeleton, all the way to the measured selection ceiling, and
+            reader conversion does not move, we land at 39.7% and score zero. Retrieval work alone cannot
+            put us on this board. The binding constraint is reader conversion, which the strategy skeleton
+            ranks fifth.
+          </p>
+        </div>
+        <div class="callout good">
+          <p>
+            <b>And the empty square.</b> Nobody on this board has put structured memory above roughly 53%
+            at single-digit seconds. 58% at 2s scores 3.4337 and takes the top gain slot outright. 58% is
+            AgentRunbook-R's accuracy, which R pays 26.9s of one thinking-mode LLM call and eight
+            sequential embedding round trips to reach. Closing that gap is a memory-architecture problem,
+            not an agent-loop problem, and it is exactly where Sibyl lives.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= THE BOARD ============================= -->
+    <section id="board">
+      <div class="wrap">
+        <span class="eyebrow">What the Winners Teach</span>
+        <h2 class="section-title">We are the compact one by a factor of ten, and it buys us nothing.</h2>
+        <p class="lede">
+          The official harness ships every baseline's source, so this is a code read rather than a paper
+          read. Five lanes read it against the real corpus and two adversarial passes killed 21 of 32
+          proposed transfers, including three the readers fabricated outright.
+        </p>
+
+        <div class="grid g2" style="margin-top: 2.2rem">
+          <div class="card">
+            <div class="pn">Lesson 01 · the big one</div>
+            <h3>Reader payload is free on the scored axis.</h3>
+            <p>
+              LAFS latency is <code>memory_query_avg_seconds</code>, timed around
+              <code>memory.query()</code> only. Reader time, ingest time, and
+              <code>post_query_hook</code> are not counted. The 51.0% baseline spends 0.2s of scored
+              time to hand its reader a mean of about 368,000 characters plus six screenshots. Sibyl
+              delivers about 37,000 characters and 11,000 reader tokens against a 200,000-token
+              allowance it grants itself, with zero truncation events.
+            </p>
+            <p>
+              We have been optimizing an axis the metric ignores, and paying for the restraint in
+              accuracy.
+            </p>
+          </div>
+          <div class="card">
+            <div class="pn">Lesson 02 · the mechanism</div>
+            <h3>Compaction does not scale with the budget.</h3>
+            <p>
+              <code>compact_content_for_query</code> emits at most four windows of eight lines, or
+              eight of four in compact mode, roughly 32 lines <em>regardless of allocation</em>. The
+              only path to whole-state exposure is <code>len(content) &lt;= max_chars</code> returning
+              mode <code>full</code>.
+            </p>
+            <p>
+              So raising the character total is not a geometry tweak. It is the switch between showing
+              a state and showing 32 lines of it. That is where the exposure gap lives.
+            </p>
+          </div>
+          <div class="card">
+            <div class="pn">Lesson 03 · free density</div>
+            <h3>The action spine carries half the gold for 508 tokens.</h3>
+            <p>
+              R annotates each action with the accessibility line of the element it consumed, turning
+              <code>click('a790')</code> into <code>click('a790')  # [a790] menuitem 'Filters'</code>.
+              Pure AST parse plus a dict lookup, zero LLM. The whole trajectory spine is attached to
+              every retrieved result.
+            </p>
+            <p>
+              Measured over both haystacks: a median 1,478 characters carrying 70% of procedure gold
+              literals and 49% overall, riding on a 23,444-token slice. Sibyl has no equivalent.
+            </p>
+          </div>
+          <div class="card">
+            <div class="pn">Lesson 04 · the +8.2pp</div>
+            <h3>Notes are a single flipped boolean, and strictly additive.</h3>
+            <p>
+              The two RAG leaderboard rows are the same module run against configs differing in one
+              character. Two note kinds live in separate pools searched independently at top-3, so a
+              procedure note and a hint note always both arrive, and the raw lane is byte-identical
+              between arms. Notes add context and never evict a slice.
+            </p>
+            <p>
+              Sibyl's dedupe key collapses all three note kinds into one slot per trajectory, and its
+              note lane is a reservation that evicts raw evidence.
+            </p>
+          </div>
+          <div class="card">
+            <div class="pn">Lesson 05 · the unattacked pool</div>
+            <h3>The abstention block is four times bigger than we thought.</h3>
+            <p>
+              There are 128 <code>-abs</code> questions scored by <code>llm_abstention_checker</code>,
+              rolling up into the static, dynamic, and procedure columns. The errors-gotchas column we
+              have been measuring is only 29. That is 28.4% of the board, every reference system is
+              weak there, and it points at exactly the product failure where a confidently surfaced
+              memory is confidently wrong.
+            </p>
+            <p>
+              The catch: the judge converts only when the answer names the specific flaw. A generic
+              UNKNOWN scores zero.
+            </p>
+          </div>
+          <div class="card">
+            <div class="pn">Lesson 06 · architecture</div>
+            <h3>"Memory architecture is overkill" survives only in the weak form.</h3>
+            <p>
+              Codex has literally no memory architecture and reaches 69.9% by giving a frontier model
+              shell access for 177 seconds. Its LAFS gain is zero, because AgentRunbook-C dominates it
+              on both axes, and C's entire delta is a runbook, a deterministic corpus digest, and
+              ingest-time symbol resolution. Structure bought 69 seconds and 5 points.
+            </p>
+            <p>
+              Read the other end too: the 3,258-line classical memory system loses to C's 413 lines by
+              16.3 points. Architecture does not buy top accuracy here. It buys the latency axis, and
+              the latency axis is the entire metric.
+            </p>
+          </div>
+        </div>
+
+        <div class="callout warn">
+          <p>
+            <b>Honest capability gap.</b> Our corpus was downloaded in text-context mode, so the
+            screenshots are absent. The 51.0% baseline's note distiller reads pixels and no
+            accessibility text at all, and both RAG arms ship the centre state's screenshot to a vision
+            reader. We have never had access to that channel, and any comparison should say so.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= LEVERS ============================= -->
+    <section id="levers">
+      <div class="wrap">
+        <span class="eyebrow">Ranked Levers</span>
+        <h2 class="section-title">Ordered by expected gain per unit of work, survivors only.</h2>
+        <p class="lede">
+          Twenty-one of thirty-two proposed transfers died in review. These are what is left, with the
+          killed ones and their reasons recorded in the traps section. Nothing above rank 13 requires a
+          corpus rebuild.
+        </p>
+
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr><th class="num">#</th><th>Lever</th><th>Moves</th><th class="num">Expect</th><th class="num">Size</th><th>The change</th></tr>
+            </thead>
+            <tbody>
+              <tr class="hot">
+                <td class="num">1</td><td>Raise the reader character total so items reach <code>mode=full</code></td>
+                <td>exposure</td><td class="num">+5 to +12pp</td><td class="num">S</td>
+                <td><code>DEFAULT_CONTEXT_TOTAL_CHARS</code> 60,000 toward 400-600K, and the CLI default. Worth 0.0000 alone; it is the carrier that makes every other exposure lever cashable.</td>
+              </tr>
+              <tr>
+                <td class="num">2</td><td>Include <code>note_kind</code> in the typed-lane dedupe key</td>
+                <td>exposure</td><td class="num">+1 to +3pp</td><td class="num">XS</td>
+                <td><code>operational_evidence.py</code> keys on <code>(type, source_id)</code> and all three kinds share type <code>note</code>, so only the top kind per trajectory survives. Already stamped in metadata, so a key change not a schema change.</td>
+              </tr>
+              <tr>
+                <td class="num">3</td><td>Make the note lane additive instead of an evicting reservation</td>
+                <td>exposure</td><td class="num">+1 to +3pp</td><td class="num">S</td>
+                <td>Grant notes their own lane the way neighbour-overflow and traversal already do. Additive in items is not additive in characters, so land it with lever 1.</td>
+              </tr>
+              <tr>
+                <td class="num">4</td><td>English lane labels, and group items by lane</td>
+                <td>conversion</td><td class="num">+0 to +2pp</td><td class="num">XS</td>
+                <td>A lane token already ships, it is just jargon. Production already emits proper section titles, so this also closes a bench-versus-production divergence.</td>
+              </tr>
+              <tr>
+                <td class="num">5</td><td>Render the annotated action spine once per trajectory</td>
+                <td>multiple</td><td class="num">+1 to +3pp</td><td class="num">S</td>
+                <td>At pack assembly, from a per-trajectory side artifact. Never in <code>_trajectory_header</code>, which is embedded and would flatten within-trajectory discrimination and force a re-index.</td>
+              </tr>
+              <tr>
+                <td class="num">6</td><td>Add an observed-absence key to note distillation</td>
+                <td>premise</td><td class="num">+1 to +4pp</td><td class="num">S</td>
+                <td>A fourth key for controls looked for and not found, actions attempted and blocked. Question-blind by construction, so inside the integrity boundary. Rides the campaign's only lever with a stable positive receipt.</td>
+              </tr>
+              <tr>
+                <td class="num">7</td><td>Un-starve the note digest: scale the line budget <em>and</em> add interactive roles</td>
+                <td>exposure</td><td class="num">+1 to +3pp</td><td class="num">M</td>
+                <td>160 total lines is 1.6 lines per state on a 101-state trajectory, and 37% of literal-answer questions lose gold before the model is called. Both halves together or the role additions displace the content lines that were the web-gate NO-GO mechanism.</td>
+              </tr>
+              <tr>
+                <td class="num">8</td><td>Buy two fast operating points the week one point clears 51.0</td>
+                <td>selection</td><td class="num">+0.5 to +0.9 LAFS</td><td class="num">S</td>
+                <td>Multi-point is permitted and the scorer takes the union. 53% at 2s plus 57% at 8s totals 1.8966. Stack only below 26.9s.</td>
+              </tr>
+              <tr>
+                <td class="num">9</td><td>Coarse per-source routing census on the retrieval side</td>
+                <td>exposure</td><td class="num">+0 to +4pp</td><td class="num">M</td>
+                <td>One of only two levers that can lift exposure past the 82.6% ceiling. Retrieval-side only, zero characters of reader budget, or it becomes the killed inventory-annotation chain wearing a hat.</td>
+              </tr>
+              <tr>
+                <td class="num">10</td><td>LLM surface decomposition with per-target reserved slots</td>
+                <td>multiple</td><td class="num">unknown</td><td class="num">M</td>
+                <td>A conditional revival of the killed planner, justified by two changed mechanisms: disjoint surface targets rather than PRF expansion, and reservation rather than RRF. Costs 1 to 3s, which is fatal to the 2s zone.</td>
+              </tr>
+              <tr>
+                <td class="num">11</td><td>Deterministic enumerative-absence detector on selected passages</td>
+                <td>premise</td><td class="num">+0 to +3pp</td><td class="num">M</td>
+                <td>Sibyl-original; claim no harness provenance. Needs a pre-registered detector-precision measurement first, because a false absence claim is worse than silence.</td>
+              </tr>
+              <tr>
+                <td class="num">12</td><td>Ship screenshots as image context items</td>
+                <td>exposure</td><td class="num">unmeasured</td><td class="num">L</td>
+                <td>The one exposure channel never touched. Requires re-downloading the corpus with screenshots. Highest variance on the list; run it after lever 1 reports.</td>
+              </tr>
+              <tr class="zero">
+                <td class="num">13</td><td>The corpus rebuild wave</td>
+                <td>selection</td><td class="num">low single digits</td><td class="num">L</td>
+                <td>Ranked last deliberately. Selection work against a bottleneck measured as exposure times conversion, carrying the campaign's most expensive item for its smallest expected gain.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= PLAN ============================= -->
+    <section id="plan">
+      <div class="wrap">
+        <span class="eyebrow">The Plan</span>
+        <h2 class="section-title">1.3 is "One Surface". Everything else waits for a real number.</h2>
+        <p class="lede">
+          Three separate agendas were each deferred into 1.3: the roadmap's "Lead It" with TeamMemBench
+          and the coalescence engine, the benchmark chase moved whole from 1.2, and the rethink's own
+          Phase 0 through 3 plus the debt ledger. They cannot all ship. Coalescence has zero lines of
+          code in the repo and gets an explicit deferral with a written reason rather than silent
+          omission.
+        </p>
+
+        <div class="phase">
+          <div class="phase-head"><h3>Phase 0a · One surface, enforced</h3><span class="chip">M</span><span class="chip cyan">first</span></div>
+          <p>Every retrieval entry point drops the same retired rows and scores predicates from one table, so that any number produced afterward means something.</p>
+          <ul>
+            <li>Lift the lifecycle half of the supersession gate into a surface-agnostic helper and call it from <code>tools/search.py</code> and <code>retrieval/naive.py</code>.</li>
+            <li>Exclude <code>SUPERSEDES</code> from the outgoing direction of the hybrid walk. Keep incoming: reaching the successor from the retired row is wanted.</li>
+            <li>Collapse the two predicate weight tables to the tuned 21-entry one, and add <code>CONTRADICTS</code>, which is declarable and writable on all three surfaces yet scores the untyped baseline at read.</li>
+            <li>Fix the exact-name rescue guard, which is true whenever the seed search succeeds so the lane never fires, and the fixture whose mock omits the metadata key production always sets.</li>
+            <li>Publish a per-predicate hop counter on the receipt, so a typed-predicate arm that contributed zero typed hops is distinguishable from one that contributed many and lost.</li>
+          </ul>
+          <div class="gate"><b>Gate · behavioral</b>A two-row supersession probe returns zero retired rows across all five read surfaces, down from four of five today. Plus one test pinning predicate ordering identical across both call paths for all 21 entries.</div>
+        </div>
+
+        <div class="phase">
+          <div class="phase-head"><h3>Phase 0b · Rig repair and the first trustworthy number</h3><span class="chip">L</span></div>
+          <p>One post-decontamination anchor that satisfies same-commit pairing, with a measured noise floor attached, on a stack whose latency receipts are citable. Until this lands every accuracy claim here is a hypothesis.</p>
+          <ul>
+            <li>Flip the retrieval screen's <code>--source-evidence-bundling</code> default to match the adapter, since the naive conflict guard currently refuses the arm at construction.</li>
+            <li>Make the live smoke's typed-evidence check mode-aware, because it requires a selection origin the arm structurally cannot emit and so exits 1 on a healthy run.</li>
+            <li>Promote <code>jitter_floor.py</code> and the pack comparator out of gitignored cache into <code>tools/bench/</code> with their self-tests on a moon task. The tooling that enforces the rig's integrity currently dies with the cache directory.</li>
+            <li>Bump the harness pin off the pre-metadata-leak revision and rewrite the adapter's <code>set_query_context</code> override, which raises <code>TypeError</code> against the new keyword-only signature.</li>
+            <li>Add a native-process mode to the Surreal runtime monitor, which resolves its target through docker compose and so guards CI only.</li>
+            <li>Fix the two receipt-integrity blockers first: the swallowed vector lane that reports completed, and the <code>compile_context</code> swallow that biases the arm.</li>
+          </ul>
+          <div class="gate"><b>Gate · pre-registered</b>Run an A/A pair first. The anchor is accepted only if the combined-accuracy span is at most 3pp, every row carries the run SHA with <code>git_dirty</code> false, and arm receipts are non-empty on every row. Publish the anchor with its measured A/A span attached as its noise floor. Do not reuse 30.38%: that is the deprecated accurate arm, and the comparable machine number is 31.26% at 7.48s.</div>
+        </div>
+
+        <div class="phase">
+          <div class="phase-head"><h3>Phase 0c · The naive-strong race</h3><span class="chip">L</span></div>
+          <p>Find out whether the machine earns its latency. The fusion and pipeline-unification questions then resolve as consequences rather than as abstract design calls.</p>
+          <ul>
+            <li>Pre-register the arm definition, the numbers, and the geometry confound in writing before the paired pass.</li>
+            <li>State plainly that the machine arm is hybrid evidence plus eight-lane pack sections plus client assembly, so a loss localizes to the whole machine and not to fusion. The rethink doc's framing is wrong on this.</li>
+            <li>Add one matched-geometry control pass at equal exposed characters, since the arm gets a materially larger payload by default.</li>
+            <li>Post-hoc arm-activity check before any number is quoted.</li>
+          </ul>
+          <div class="gate"><b>Gate · pre-registered</b>The arm wins, meaning the machine becomes deletable, at mean paired delta at or above 0pp with consistent sign across 3 passes and arm latency at most 60% of machine latency. The machine survives at +3pp or better with consistent sign. A result between minus 3 and plus 3 resolves for the arm on latency grounds.</div>
+        </div>
+
+        <div class="phase">
+          <div class="phase-head"><h3>Phase 1 · The render wave</h3><span class="chip">M</span><span class="chip green">reprioritized</span></div>
+          <p>Levers 1 through 7, bundled as one arm with per-lever receipts. This is the phase the board arithmetic promoted: exposure alone cannot clear the cliff, and conversion is where the missing points are.</p>
+          <ul>
+            <li>Raise the character total so selected items reach whole-state exposure.</li>
+            <li>Fix the per-kind note dedupe and make the note lane additive.</li>
+            <li>Label and group the lanes in English.</li>
+            <li>Render the action spine once per trajectory at assembly time.</li>
+            <li>Add the observed-absence key, and un-starve the digest with roles and budget together.</li>
+          </ul>
+          <div class="gate"><b>Gate · bundled, never solo</b>Each lever is plausibly worth 0 to 3 points against a 3-point developmental noise floor, so a solo gate spends a paid run to learn nothing. One arm, per-lever receipts, multi-pass replay. If exposure stays near 0.652 after the character raise, the exposure hypothesis is falsified and levers 3, 5, and 7 lose their premise, which is a result worth having for one flag.</div>
+        </div>
+
+        <div class="phase">
+          <div class="phase-head"><h3>Phase R · The release surface</h3><span class="chip">M</span><span class="chip cyan">parallel</span></div>
+          <p>Make the shipped chart and the release path provable at review time rather than at cut time.</p>
+          <ul>
+            <li>Add CI classifier arms for <code>charts/</code>, <code>VERSION</code>, <code>install.sh</code>, and the Tiltfile; widen the workflow arm; invert the unmatched-path default so it fails closed naming the file.</li>
+            <li>Gate a job on that flag reaching the twelve helm render tests that already exist and already pass on CI runners, plus a real <code>helm template</code> matrix with defaults and a production values set.</li>
+            <li>Fix the e2e suite so it can fail, since six dependabot PRs are merging on a green that has exactly two outcomes.</li>
+            <li>Clear the stock-chart papercuts: no value reaches the public URL settings, so every deploy emails password-reset links pointing at localhost.</li>
+            <li>Write the release runbook outside the YAML, and fix the three-way prerelease-label divergence where a beta tag passes the format check then dies inside version sync.</li>
+          </ul>
+          <div class="gate"><b>Gate</b>Every one of <code>charts/</code>, <code>VERSION</code>, and the publish workflow triggers at least one non-skipped job on a PR. A stock-defaults render produces no worker Deployment unless the backend is redis.</div>
+        </div>
+
+        <div class="phase">
+          <div class="phase-head"><h3>Phase D · The debt that actually blocks</h3><span class="chip">M</span><span class="chip cyan">parallel</span></div>
+          <p>The nine blockers, and nothing else. Everything tier 4 goes to 1.4: the route-package helper sprawl, the divergent result normalizers, the MCP and REST convergence refactor, the dead archive tables.</p>
+          <ul>
+            <li>MCP write role gate, and validate <code>related_to</code> targets on the MCP add path the way REST does.</li>
+            <li>Readiness that can see a dead broker, and <code>coordination_backend=auto</code> selecting redis when redis is configured.</li>
+            <li>The 24-hour retry block on the default backend, and the enqueue-loss subset of failure-looks-like-success.</li>
+            <li>Live 3.2.3 coverage for the attributes merge, the sentinel clear, and the snapshot fold, including a same-uuid rewrite. Every entity write's preservation semantics currently rest on behavior verified only against the bundled 2.x embedded engine.</li>
+            <li>Projection inheritance expressing removal as <code>None</code> rather than omission, since #393 inverted the semantics underneath it.</li>
+            <li>Issue #394 and the sibling <code>bulk_create_direct</code> drift one file over.</li>
+          </ul>
+        </div>
+
+        <div class="phase">
+          <div class="phase-head"><h3>Phase M · MCP SDK 2.0</h3><span class="chip">M</span><span class="chip yellow">after 1.3</span></div>
+          <p>Smaller than the issue implies. <code>FastMCP</code> became <code>MCPServer</code> and the session manager, custom routes, tool and resource decorators, the app builder, and the access-token hook all survive at their old paths. Two files import the old surface.</p>
+          <ul>
+            <li>Move host, port, and stateless mode off the constructor onto the app builder. This is the risky edit: the builder defaults host to localhost, which auto-enables DNS-rebinding protection, and production binds 0.0.0.0.</li>
+            <li>Preserve the auth settings verbatim, because the lowlevel builder gates the entire auth middleware chain on their presence and dropping them silently disables #385.</li>
+            <li>Close #399 as superseded rather than trying to make it green. It contains only the pin and the lock, so it never can.</li>
+          </ul>
+          <div class="gate"><b>Gate · three assertions CI cannot make</b>A non-localhost Host header is accepted when bound to 0.0.0.0. A key scoped read-only is still refused a write tool, which is #385's invariant and is currently proven by nothing, because that test module is one of the thirteen that cannot collect under 2.0. All thirteen collect and pass.</div>
+        </div>
+
+        <div class="callout">
+          <p>
+            <b>Cut from 1.3, explicitly:</b> the skeleton's sub-1K corpus rebuild, because the LME corpus
+            declares zero relationships and the rebuild cannot start before the anchor exists; the
+            coalescence engine and TeamMemBench, deferred to 1.4 with the roadmap's own sequencing logic
+            intact; reader-side prompt work beyond the render wave, partly because nine readers disagree
+            on the sign of an evidence intervention in a third of jointly affected cells and our levers
+            are screened on one pinned reader while the product serves Claude and GPT.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= QUEUE ============================= -->
+    <section id="queue">
+      <div class="wrap">
+        <span class="eyebrow">Now Queue</span>
+        <h2 class="section-title">Fourteen PRs, in dependency order, from a clean tree.</h2>
+        <p class="lede">
+          Each lands independently. The first four are uncontroversial and clear the queue the user asked
+          to see handled.
+        </p>
+
+        <ol class="queue">
+          <li>
+            <h4>Merge #404 alone, then dry-run the publish workflow</h4>
+            <p>
+              Its CLEAN status means nothing ran: the file it edits is dispatch-only, so no PR-triggered
+              job can exercise it, and every other suite skipped. Both major-version breaking changes are
+              default flips with nothing removed and the call site passes no inputs, so it is safe on the
+              evidence. It lands in the irreversible publish job, so the dry-run is the only way to
+              exercise it before it matters.
+            </p>
+            <p class="branch">merge as-is, then <code>gh workflow run publish.yml -f dry_run=true</code></p>
+          </li>
+          <li>
+            <h4>Consolidate the three clean python bumps into one commit and one lock</h4>
+            <p>
+              All three contend on <code>uv.lock</code> and two on the same pyproject, so serial merging
+              buys three rebases and three CI cycles for three patch-to-minor moves. Before merging, run
+              the check CI cannot: pydantic-ai 2.30 moved provider imports to construction time and
+              <code>build_model</code> constructs all three. Add the uvicorn upper bound as ordinary pin
+              hygiene, matching mcp, authlib, pyjwt, and surrealdb.
+            </p>
+            <p class="branch">nova/deps-python-lock-consolidation · closes #398, #400, #401</p>
+          </li>
+          <li>
+            <h4>Merge the web pair, #403 first, then rebase #402</h4>
+            <p>
+              Both regenerate the pnpm lock with the same peer churn, so they conflict. #403 first because
+              the Storybook job actually ran and passed on it, which is the strongest real evidence in the
+              queue. Before #402, boot the app and load login plus an authenticated page by hand: 16.3.1
+              backports a fix restoring the live headers view, the server-side auth path reads cookies
+              from that API, and the e2e suite cannot see a render break.
+            </p>
+            <p class="branch">merge #403, <code>@dependabot rebase</code>, merge #402</p>
+          </li>
+          <li>
+            <h4>Fix #394 and the sibling drift one file over</h4>
+            <p>
+              The backfill calls a method removed from <code>EntityManager</code> and exits 0 with a
+              generic warning. Do not reach for <code>list_all</code>: it hydrates, and the row builder
+              promotes exactly the columns the detection tests for, so the repair would become a silent
+              100% already-set no-op. Add a raw-row pager instead. One file over, a probe reaches for a
+              name that exists nowhere, so graph restore has silently lost its bulk write path while
+              twelve mock sites assert against a method production cannot call.
+            </p>
+            <p class="branch">nova/fix-denormalized-backfill-and-bulk-probe</p>
+          </li>
+          <li>
+            <h4>Gate the lifecycle on every retrieval surface</h4>
+            <p>
+              The worst live defect at HEAD and it is on every default path. It also unblocks measurement,
+              because the benchmark hits the pack route whose evidence lane is the ungated one, so no arm
+              result is interpretable until this lands.
+            </p>
+            <p class="branch">nova/gate-lifecycle-on-every-retrieval-surface</p>
+          </li>
+          <li>
+            <h4>One predicate table, plus CONTRADICTS, plus the rescue-lane guard</h4>
+            <p>
+              One request currently exercises both tables with opposite treatment of the same predicate.
+              CONTRADICTS is declarable and writable on all three surfaces and gated as suppressing at
+              write, while scoring the untyped baseline at read, so #391's vocabulary is three predicates
+              that pay rather than five.
+            </p>
+            <p class="branch">nova/one-predicate-table-plus-contradicts</p>
+          </li>
+          <li>
+            <h4>Gate MCP writes on org role</h4>
+            <p>
+              A live intra-tenant authorization bypass. The role is already resolved on the JWT path and
+              handed to the policy context; nothing anywhere compares it to a write-role set. While there,
+              raise on the dead client-supplied-project fallback rather than leaving it as a trap for the
+              first entry point that admits an org-only credential.
+            </p>
+            <p class="branch">nova/mcp-write-role-gate</p>
+          </li>
+          <li>
+            <h4>Repair the bench screen path and the two receipt liars</h4>
+            <p>
+              Replay before paid is protocol law and both cheap entry points refuse the arm today. Bundle
+              the swallowed vector lane that reports a completed search and the context-compile swallow
+              that biases the arm, because both would poison the race before it runs.
+            </p>
+            <p class="branch">nova/bench-screen-path-repair</p>
+          </li>
+          <li>
+            <h4>Bump the harness pin and fix the adapter override</h4>
+            <p>
+              The pin is three commits stale at a pre-metadata-leak revision whose baseline modules were
+              then substantially rewritten, so an anchor cut on it gets thrown away. Not a one-line ref
+              change: the upstream signature went keyword-only. Worth noting in the receipt that our
+              adapter sanitized query context 25 days before upstream did.
+            </p>
+            <p class="branch">nova/lme-harness-pin-bump</p>
+          </li>
+          <li>
+            <h4>Classify the release surface in CI and render the charts</h4>
+            <p>
+              Every asset needed already exists and already passes on CI runners. Only a trigger is
+              missing. Fail-closed matters because the last fix added arms for five paths and still missed
+              charts, VERSION, the installer, and six workflow files.
+            </p>
+            <p class="branch">nova/ci-classify-release-surface-and-render-charts</p>
+          </li>
+          <li>
+            <h4>Make the e2e suite capable of failing</h4>
+            <p>
+              All five browser tests follow redirects and accept any 3xx while the proxy redirects
+              unauthenticated requests to login, so the suite has two outcomes, skip or pass. Until this
+              lands, "E2E green" means the server booted and nothing more.
+            </p>
+            <p class="branch">nova/e2e-can-actually-fail</p>
+          </li>
+          <li>
+            <h4>Readiness that sees a dead broker, and auto that selects redis</h4>
+            <p>
+              Four startup handlers swallow into warnings, their flags are read nowhere, and readiness
+              checks only Surreal. The default queue is in-process and persists nothing across a restart.
+            </p>
+            <p class="branch">nova/readiness-sees-dead-broker</p>
+          </li>
+          <li>
+            <h4>Inheritance expresses removal as None, plus quality-metadata precedence</h4>
+            <p>
+              #393 inverted the semantics underneath these helpers: omission used to clear a key and now
+              preserves it, and span ids are deterministic so reprojection lands on the duplicate path.
+              Bundle the metadata precedence inversion, where legacy shadow names rank first so a patch
+              that sets importance is silently reverted on the next read, on the ranking input that
+              decides retention.
+            </p>
+            <p class="branch">nova/inheritance-expresses-removal-as-none</p>
+          </li>
+          <li>
+            <h4>Live 3.2.3 coverage for the merge semantics</h4>
+            <p>
+              Every entity write's preservation semantics rest on duplicate-key resolution verified only
+              on the bundled 2.x embedded engine while production runs 3.2.3, and the nightly live suite
+              never writes the same uuid twice. If the production engine ever resolves duplicates the
+              other way, every write inverts into stale-value-wins with no error anywhere.
+            </p>
+            <p class="branch">nova/live-merge-semantics-on-32</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ============================= DECISIONS ============================= -->
+    <section id="decisions">
+      <div class="wrap">
+        <span class="eyebrow">Open Decisions</span>
+        <h2 class="section-title">Five forks, each with a recommendation attached.</h2>
+
+        <div class="grid g2" style="margin-top: 2rem">
+          <div class="decision">
+            <h3>What is 1.3?</h3>
+            <p class="opts">
+              Three agendas were each deferred into it. No Sibyl decision records which one wins; the fork
+              was left open.
+            </p>
+            <p class="rec">
+              <b>Recommend "One Surface".</b> Collapse the disagreeing read surfaces onto one lifecycle
+              rule and one predicate table, cut the first honest anchor, run the race, clear the nine
+              blockers and the chart papercuts. Coalescence and TeamMemBench get an explicit written
+              deferral to 1.4.
+            </p>
+          </div>
+          <div class="decision">
+            <h3>Does 1.3 chase a submission?</h3>
+            <p class="opts">
+              Keep chasing with the gate recalibrated, retarget to a different board, or ship with no
+              benchmark claim.
+            </p>
+            <p class="rec">
+              <b>Recommend no benchmark claim in 1.3</b>, with the gate recalibrated as part of it. Every
+              honest 1.3 outcome scores 0.0000, so a submission buys presence at rank last with a public
+              number to defend. Buy the levers because they are defects in our own retrieval and let the
+              board score them when the arithmetic pays.
+            </p>
+          </div>
+          <div class="decision">
+            <h3>Which tier?</h3>
+            <p class="opts">
+              The medium board is empty and its cliff is 5.1 points lower, which looks like the better
+              target.
+            </p>
+            <p class="rec">
+              <b>Recommend small, and only small, until we clear 51.0 there.</b> Medium has 433 distinct
+              haystacks averaging 487 trajectories against small's two shared haystacks of 100, so one run
+              pair is 451 fresh memory builds. The empty board is an entry-cost artifact. Naive slicing
+              loses exactly 5.1 points from small to medium, so the lower cliff is nominal. Worth measuring
+              cheaply on a subsample: our own small-to-medium slope, since typed pools lose only 1.6 points
+              where naive slicing loses 5.1.
+            </p>
+          </div>
+          <div class="decision">
+            <h3>If the naive arm wins the race, do we delete the machine?</h3>
+            <p class="opts">
+              Rip it out inside 1.3, ship the arm as a selectable non-default with a pre-committed
+              deletion, or keep both behind the flag.
+            </p>
+            <p class="rec">
+              <b>Recommend selectable non-default, deletion pre-committed to 1.4.</b> A mid-release rip-out
+              of the pipeline that also carries the supersession gate, the typed-predicate walk, and the
+              pack section builder is how a release stops shipping. Reject "keep both" explicitly: two
+              pipelines is the condition that produced this whole lane of defects.
+            </p>
+          </div>
+          <div class="decision">
+            <h3>Tags: index them or demote them honestly?</h3>
+            <p class="opts">
+              Add the index and expose a filter, state in the tool schemas that they are browse-only, or
+              leave as-is.
+            </p>
+            <p class="rec">
+              <b>Recommend honest demotion in 1.3, and revisit.</b> Tags have no index, no WHERE clause,
+              and a Python post-filter reachable only from the browse surface, so today they are
+              write-only. Demoting the claim costs a docstring and stops the surface implying something
+              false. Leaving as-is is the only wrong answer.
+            </p>
+          </div>
+          <div class="decision">
+            <h3>MCP SDK 2.0 in 1.3 or after?</h3>
+            <p class="opts">
+              Take the major with the release, or ship on the cap and land the port immediately after.
+            </p>
+            <p class="rec">
+              <b>Recommend after.</b> The port is mechanically small but both of its real failure modes are
+              invisible to CI, and the test that would catch the worse one is currently proving nothing
+              because it cannot collect. That is not a thing to verify under release pressure. Close #399
+              now either way.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================= TRAPS ============================= -->
+    <section id="traps">
+      <div class="wrap">
+        <span class="eyebrow">Traps</span>
+        <h2 class="section-title">Things that look transferable and are not.</h2>
+        <p class="lede">
+          Twenty-one of thirty-two proposed transfers died in adversarial review. Three were fabricated
+          by the reading agents, which is worth recording as its own lesson about accepting a mechanism
+          because it sounds like something a strong system would do.
+        </p>
+
+        <ul class="traps">
+          <li><b>Do not add a passage entity type to the served lanes on the theory that the session lane is lossy.</b> It is not. The projection returns the byte-exact tree as the content of its only session row, and the bench chunk emits the accessibility tree verbatim. The lossy deduplicated inventory has exactly one call site and it feeds the note lane. Serving passages is slice-serving geometry, which already died at 6K chars with paired state recall of 6.3% and 0.0% against a 25.0% baseline. The bytes are lost at render, not at ingest.</li>
+          <li><b>Do not raise the item ceiling before the character total.</b> At a fixed 60,000 chars, 28 items receive 2,143 each, which is below the compact threshold, so every item flips into the compact regime. That is worse per-item exposure than the killed 28K-budget arm. Chars lead, items ride.</li>
+          <li><b>Do not move note distillation off the clock to save query time.</b> It is already off the clock twice over: the bench submits it from insert, whose time is measured separately and never scored, and production already runs it as a queued job. There is no query budget to free. If the intent is to spend more because it is free, that is already true, and the place to spend it is the digest starvation.</li>
+          <li><b>Do not build a four-value evidence-status enum as a validated output gate.</b> Grepping the entire harness checkout for the flag and all four enum values returns zero hits. The taxonomy does not exist, which means both the argument for it and the "the leader turns it off" argument against it were invented.</li>
+          <li><b>Do not render a corpus census into the reader's context.</b> The winning system's digest lives in a sandbox filesystem and is read by the search agent; the reader never sees it. Inventory-in-the-pack is the killed abstention chain that moved abstention 1 of 13 across 45 contexts. A census is a retrieval-side routing artifact or it is nothing.</li>
+          <li><b>Do not inject the action spine into any chunk content.</b> The trajectory header is prepended to every chunk and is what gets embedded, so a shared spine makes every chunk of a trajectory lexically nearer every other chunk of it, flattening the discrimination a selection lever needs. It also changes content hashes and forces a full re-ingest.</li>
+          <li><b>Do not ship the digest role additions without the scaled line budget.</b> The line total is global with a dedupe set spanning observations, so adding seven abundant interactive roles at the same weight tier strictly displaces the content lines that were the web-gate NO-GO mechanism. The one-liner can reopen a closed regression while fixing the other domain.</li>
+          <li><b>Do not price the additive note lane off the cross-system subtraction.</b> The official notes are vision-distilled from every state's screenshot with no line budget and no accessibility text at all; ours come from a role-filtered digest through a small model. Part of that gap is the digest defect a separate lever proposes to fix, so the subtraction banks the same points twice.</li>
+          <li><b>Do not stack a slow operating point above 26.9s.</b> The reference bar there is 58.6%, and a second point at 55, 56, 58, or even 58.6% at 30s adds exactly 0.0000. Our only slower mode scored zero and is Pareto-dominated by our own fast mode.</li>
+          <li><b>Do not imitate the accuracy leaders.</b> The 81.37% entry earns 0.3223 where the same accuracy at 26.9s would have earned 6.7364. Latency past roughly 30s destroys the integral. What those systems teach is format and evidence budget, nothing about spending seconds.</li>
+          <li><b>Do not optimize latency below about 1.5s.</b> The integral is clamped at 1.0s, so nothing under it buys anything. The 1.5 to 2s band is the target and there is no reward for going faster.</li>
+          <li><b>Do not mutate the memory context list inside the post-query hook.</b> It receives the same list object the harness then renders, so an in-place edit would land in the reader's prompt off the clock. That is metric gaming against an immutable harness.</li>
+          <li><b>Do not read question metadata, and do not simplify away the override that prevents it.</b> The pinned harness still hands question id, question type, and the raw record including the gold answer to every backend. The only thing keeping us clean is our own override. Treat it as a protected invariant with a test.</li>
+          <li><b>Do not re-buy ranking or re-ranking before pools measurably widen.</b> The miss set was measured as pool-boundary limited rather than rank-buried, and the cross-encoder's revival condition is explicit and unmet: gold present in the pool but ranked below the cut.</li>
+          <li><b>Do not screen the small render levers as solo arms.</b> Each is plausibly worth 0 to 3 points against a 3-point noise floor, so a solo gate spends a paid run to learn nothing.</li>
+          <li><b>Do not trust a fetch that cannot execute JavaScript to prove absence.</b> Two SOTA sweeps concluded the leaderboard was empty from a tool that structurally could not see its contents. The existence oracle runs in reverse too.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============================= FOOTER ============================= -->
+    <footer>
+      <div class="wrap">
+        <span class="eyebrow">Method</span>
+        <p style="margin-top: 0.9rem">
+          Produced 2026-08-19 against <code>c3c786ab</code>. Twenty-five agents across three fan-outs:
+          nine ground-truth lanes re-verifying the four 2026-08-13 debt reports plus the bench ladder,
+          the Phase 1 wiring, the release surface, the dependabot queue, and the SOTA delta; four
+          adversarial passes re-checking 124 claims split by tier; five lanes reading the official
+          harness baselines against the real corpus with two more adversarial passes over their transfer
+          claims. Every status in this document was traced to a call chain rather than a symbol, because
+          the existence oracle has been caught five times in this project and it was caught twice more
+          here.
+        </p>
+        <p style="margin-top: 0.9rem">
+          The LAFS reimplementation reproduces two of the three published leaderboard gains to six
+          decimal places, which is what licenses the arithmetic in the cliff section. The third does not
+          reconcile and is documented as such rather than assumed correct.
+        </p>
+        <div class="foot-grid">
+          <span class="chip">242 findings</span>
+          <span class="chip">50 corrections</span>
+          <span class="chip red">9 blockers</span>
+          <span class="chip cyan">13 levers</span>
+          <span class="chip purple">14 queued PRs</span>
+          <span class="chip yellow">6 open decisions</span>
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      // ---- theme toggle (persists per browser; falls back gracefully) ----------
+      (function () {
+        var root = document.documentElement;
+        var btn = document.getElementById("themeToggle");
+        var stored = null;
+        try {
+          stored = localStorage.getItem("sibyl-13-theme");
+        } catch (e) {}
+        if (stored) root.setAttribute("data-theme", stored);
+        btn.addEventListener("click", function () {
+          var next = root.getAttribute("data-theme") === "light" ? "dark" : "light";
+          root.setAttribute("data-theme", next);
+          try {
+            localStorage.setItem("sibyl-13-theme", next);
+          } catch (e) {}
+        });
+      })();
+
+      // ---- active-section highlight in the nav --------------------------------
+      (function () {
+        var links = Array.prototype.slice.call(document.querySelectorAll(".nav-links a[href^='#']"));
+        var targets = links
+          .map(function (a) {
+            return document.querySelector(a.getAttribute("href"));
+          })
+          .filter(Boolean);
+        if (!targets.length || !("IntersectionObserver" in window)) return;
+        var obs = new IntersectionObserver(
+          function (entries) {
+            entries.forEach(function (e) {
+              if (!e.isIntersecting) return;
+              links.forEach(function (a) {
+                var on = a.getAttribute("href") === "#" + e.target.id;
+                a.style.color = on ? "var(--sc-cyan)" : "";
+                a.style.background = on ? "var(--bg-raise)" : "";
+              });
+            });
+          },
+          { rootMargin: "-45% 0px -50% 0px" }
+        );
+        targets.forEach(function (t) {
+          obs.observe(t);
+        });
+      })();
+    </script>
+  </body>
+</html>
