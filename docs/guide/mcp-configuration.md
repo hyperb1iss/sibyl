@@ -9,7 +9,8 @@ This guide covers advanced configuration of Sibyl's MCP (Model Context Protocol)
 
 ## Server Architecture
 
-Sibyl's MCP server is built on FastMCP and integrates with the main Starlette application:
+Sibyl's MCP server uses the Python SDK's `MCPServer` and mounts its streamable HTTP app in the main
+Starlette application:
 
 ```mermaid
 flowchart LR
@@ -201,13 +202,13 @@ The MCP server is constructed in `server.py` and registers 13 tools: `search`, `
 [Agents & MCP](./claude-code.md) for what each one does.
 
 ```python
-mcp = FastMCP(
+mcp = MCPServer(
     settings.server_name,
-    host=host,
-    port=port,
-    stateless_http=False,  # Maintain session state
     auth=auth_settings,
+    auth_server_provider=auth_server_provider,
 )
+
+mcp_app = mcp.streamable_http_app(host=host, stateless_http=False)
 
 @mcp.tool()
 async def search(...) -> dict:

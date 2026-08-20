@@ -287,7 +287,7 @@ sibyl/
 
 **Stack:**
 
-- **Backend:** Python 3.13 / FastAPI / FastMCP / SurrealDB-native runtime
+- **Backend:** Python 3.13 / FastAPI / MCP SDK 2 / SurrealDB-native runtime
 - **Frontend:** Next.js 16 / React 19 / React Query / Tailwind 4
 - **Storage:** SurrealDB unifies graph, content, and auth in one runtime
 - **AI routing:** Anthropic, OpenAI, and Gemini swap per surface; embeddings are pluggable

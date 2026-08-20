@@ -1,6 +1,6 @@
 # Sibyl API Server
 
-`sibyld` is the FastAPI + FastMCP server behind Sibyl's knowledge graph, agent memory loop, task
+`sibyld` is the FastAPI + MCP SDK server behind Sibyl's knowledge graph, agent memory loop, task
 workflow, search, synthesis, and real-time updates.
 
 ## Quick Reference

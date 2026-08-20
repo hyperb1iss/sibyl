@@ -591,7 +591,7 @@ def _login_auto(
     Preference order:
     1) Local password login when email/password are provided
     2) Device authorization flow (best for remote/headless)
-    3) OAuth PKCE (FastMCP auth server)
+    3) OAuth PKCE (MCP authorization server)
     """
     import httpx
 
