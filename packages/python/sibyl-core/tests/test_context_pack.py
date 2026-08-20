@@ -2231,7 +2231,8 @@ async def test_default_related_items_drop_a_private_neighbor_from_a_co_member() 
             get_related_entities=AsyncMock(
                 return_value=[(private_neighbor, _edge("session_seed", "decision_private"))]
             )
-        )
+        ),
+        client=SimpleNamespace(execute_query=AsyncMock(return_value=[])),
     )
 
     with patch(
@@ -2265,7 +2266,8 @@ async def test_default_related_items_batch_drops_a_private_neighbor() -> None:
                     ]
                 }
             )
-        )
+        ),
+        client=SimpleNamespace(execute_query=AsyncMock(return_value=[])),
     )
 
     with patch(

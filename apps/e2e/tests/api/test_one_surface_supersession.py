@@ -22,13 +22,19 @@ def _result_ids(payload: dict[str, Any]) -> set[str]:
 def _section_ids(payload: dict[str, Any]) -> set[str]:
     sections = payload.get("sections", [])
     assert isinstance(sections, list), payload
-    return {
-        str(item["id"])
-        for section in sections
-        if isinstance(section, dict)
-        for item in section.get("items", [])
-        if isinstance(item, dict) and "id" in item
-    }
+    served: set[str] = set()
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        for item in section.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            if "id" in item:
+                served.add(str(item["id"]))
+            for related in item.get("related", []):
+                if isinstance(related, dict) and "id" in related:
+                    served.add(str(related["id"]))
+    return served
 
 
 def _assert_current_only(
@@ -176,6 +182,14 @@ async def test_one_supersession_fixture_governs_all_six_public_observations(
             related_to=[f"supersedes:{retired_id}"],
         )
         created_ids.append(current_id)
+        control_id = await _create_decision(
+            auth_api_client,
+            name=f"Control {marker}",
+            content=f"{marker} independent current decision",
+            retrieval_key=f"{retrieval_key}_control",
+            project_id=project_id,
+        )
+        created_ids.append(control_id)
 
         sections_pack = await _context_pack(
             auth_api_client,
@@ -235,7 +249,6 @@ async def test_one_supersession_fixture_governs_all_six_public_observations(
             project_id,
             "--limit",
             "50",
-            "--no-related",
             "--json",
         )
         cli_output = cli_result.stdout or cli_result.stderr
@@ -243,9 +256,12 @@ async def test_one_supersession_fixture_governs_all_six_public_observations(
         assert cli_result.is_json, cli_output
         cli_payload = cli_result.json()
         assert isinstance(cli_payload, dict)
+        cli_ids = _section_ids(cli_payload)
+        assert control_id in cli_ids, "CLI context did not leave a control slot for comparison"
+        assert int(cli_payload.get("total_items", 50)) < 50, "CLI context saturated its item budget"
         _assert_current_only(
             surface="CLI context",
-            ids=_section_ids(cli_payload),
+            ids=cli_ids,
             current_id=current_id,
             retired_id=retired_id,
         )

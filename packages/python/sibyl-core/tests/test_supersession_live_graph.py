@@ -437,7 +437,28 @@ async def test_the_related_item_lane_does_not_attach_a_retired_neighbour(
             excluded_from_recall=True,
         )
     )
-    for target in ("neighbour-live", "neighbour-retired"):
+    await graph.entity_manager.create_direct(
+        _entity(
+            graph,
+            "neighbour-edge-retired",
+            "Edge Retired Neighbour",
+            "edge retired neighbour body",
+        )
+    )
+    await graph.entity_manager.create_direct(
+        _entity(
+            graph,
+            "neighbour-replacement",
+            "Neighbour Replacement",
+            "neighbour replacement body",
+        )
+    )
+    await _supersede(
+        graph,
+        survivor="neighbour-replacement",
+        retired="neighbour-edge-retired",
+    )
+    for target in ("neighbour-live", "neighbour-retired", "neighbour-edge-retired"):
         await graph.relationship_manager.create(
             Relationship(
                 id=f"rel_seed_{target}",
@@ -455,6 +476,7 @@ async def test_the_related_item_lane_does_not_attach_a_retired_neighbour(
     attached = _related_ids(pack)
     assert "neighbour-live" in attached, "the live neighbour proves the lane ran at all"
     assert "neighbour-retired" not in attached
+    assert "neighbour-edge-retired" not in attached
 
 
 def _passage_body(topic: str) -> str:
