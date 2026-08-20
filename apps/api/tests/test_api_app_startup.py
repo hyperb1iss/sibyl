@@ -113,3 +113,63 @@ async def test_runtime_services_closes_each_shared_surreal_pool_once(
 
     close_auth.assert_awaited_once_with()
     close_content.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing_pool", ["auth", "content"])
+async def test_runtime_services_closes_the_other_pool_after_one_close_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    failing_pool: str,
+) -> None:
+    failures = {failing_pool: RuntimeError(f"{failing_pool} close failed")}
+    close_auth = AsyncMock(side_effect=failures.get("auth"))
+    close_content = AsyncMock(side_effect=failures.get("content"))
+    monkeypatch.setattr(
+        "sibyl.persistence.surreal.auth.close_shared_surreal_auth_client",
+        close_auth,
+    )
+    monkeypatch.setattr(
+        "sibyl.persistence.surreal.content.close_shared_surreal_content_client",
+        close_content,
+    )
+    log = MagicMock()
+    services = runtime_services_module.RuntimeServices(log=log)
+
+    await services._close_shared_surreal_clients()
+
+    close_auth.assert_awaited_once_with()
+    close_content.assert_awaited_once_with()
+    log.debug.assert_called_once_with(
+        "Shared Surreal client shutdown errors",
+        errors={failing_pool: f"{failing_pool} close failed"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_services_reports_all_shared_pool_close_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    close_auth = AsyncMock(side_effect=RuntimeError("auth close failed"))
+    close_content = AsyncMock(side_effect=RuntimeError("content close failed"))
+    monkeypatch.setattr(
+        "sibyl.persistence.surreal.auth.close_shared_surreal_auth_client",
+        close_auth,
+    )
+    monkeypatch.setattr(
+        "sibyl.persistence.surreal.content.close_shared_surreal_content_client",
+        close_content,
+    )
+    log = MagicMock()
+    services = runtime_services_module.RuntimeServices(log=log)
+
+    await services._close_shared_surreal_clients()
+
+    close_auth.assert_awaited_once_with()
+    close_content.assert_awaited_once_with()
+    log.debug.assert_called_once_with(
+        "Shared Surreal client shutdown errors",
+        errors={
+            "auth": "auth close failed",
+            "content": "content close failed",
+        },
+    )
