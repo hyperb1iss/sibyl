@@ -167,6 +167,38 @@ async def test_project_memory_entity_creates_projected_entities_and_mentions() -
 
 
 @pytest.mark.asyncio
+async def test_fact_projection_explicitly_withdraws_missing_valid_at() -> None:
+    source = _session(
+        "I've been watching documentaries lately, especially on Netflix.",
+        metadata={"valid_at": None},
+    )
+    entity_manager = SimpleNamespace(
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda entities, **_: [entity.id for entity in entities]
+        )
+    )
+    relationship_manager = SimpleNamespace(create_bulk=AsyncMock(return_value=(1, 0)))
+
+    await project_memory_entity(
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+        source=source,
+        group_id="org-123",
+        generate_embeddings=False,
+    )
+
+    created_entities = entity_manager.create_direct_bulk.await_args.args[0]
+    fact_entities = [
+        entity
+        for entity in created_entities
+        if entity.metadata.get("category") == "memory_fact_projection"
+    ]
+    assert fact_entities
+    assert "valid_at" in fact_entities[0].metadata
+    assert fact_entities[0].metadata["valid_at"] is None
+
+
+@pytest.mark.asyncio
 async def test_project_memory_entity_defers_projection_relationship_embeddings() -> None:
     source = _session("I bought a Samsung TV for the den.")
     entity_manager = SimpleNamespace(

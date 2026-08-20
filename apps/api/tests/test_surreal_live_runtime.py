@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from typing import Any
@@ -25,6 +26,7 @@ from sibyl_core.backends.surreal.schema_version import (
 from sibyl_core.embeddings.providers import EmbeddingMetadata
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.services.graph import (
+    CLEAR_MEMORY_SCOPE,
     EntityManager,
     SurrealGraphClient,
     close_graph_clients,
@@ -102,6 +104,25 @@ async def _drop_surreal_namespace(namespace: str) -> None:
 
 def _graph_namespace_for_group(group_id: str) -> str:
     return f"org_{group_id.replace('-', '').lower()}"
+
+
+@asynccontextmanager
+async def _live_graph_manager() -> AsyncIterator[tuple[SurrealGraphClient, EntityManager]]:
+    group_id = str(uuid4())
+    client = SurrealGraphClient(
+        group_id=group_id,
+        url=_live_surreal_url(),
+        username=_surreal_username(),
+        password=_surreal_password(),
+    )
+    manager = EntityManager(client, group_id=group_id)
+    try:
+        await prepare_graph_schema(client)
+        yield client, manager
+    finally:
+        await client.close()
+        with suppress(Exception):
+            await _drop_surreal_namespace(client.namespace)
 
 
 async def _assert_live_extracted_into_endpoints(
@@ -502,6 +523,172 @@ async def test_live_surreal_server_round_trips_native_entity() -> None:
                 await _drop_surreal_namespace(client.namespace)
         else:
             await _drop_surreal_namespace(client.namespace)
+
+
+@pytest.mark.asyncio
+async def test_live_surreal_server_merges_attributes_on_partial_rewrite() -> None:
+    async with _live_graph_manager() as (client, manager):
+        await manager.create_direct(
+            Entity(
+                id="decision_attribute_merge",
+                entity_type=EntityType.DECISION,
+                name="Merged decision",
+                organization_id=client.group_id,
+                metadata={"original_key": "preserved", "shared_key": "old"},
+            )
+        )
+        await manager.create_direct(
+            Entity(
+                id="decision_attribute_merge",
+                entity_type=EntityType.DECISION,
+                name="Merged decision",
+                organization_id=client.group_id,
+                metadata={"shared_key": "new", "added_key": "added"},
+            )
+        )
+
+        fetched = await manager.get("decision_attribute_merge")
+
+        assert fetched.metadata["original_key"] == "preserved"
+        assert fetched.metadata["shared_key"] == "new"
+        assert fetched.metadata["added_key"] == "added"
+
+
+@pytest.mark.asyncio
+async def test_live_surreal_server_clears_promoted_scope_with_sentinel() -> None:
+    async with _live_graph_manager() as (client, manager):
+        await manager.create_direct(
+            Entity(
+                id="note_sentinel_clear",
+                entity_type=EntityType.NOTE,
+                name="Scoped note",
+                organization_id=client.group_id,
+                metadata={"memory_scope": "private", "principal_id": "owner-1"},
+            )
+        )
+        await manager.create_direct(
+            Entity(
+                id="note_sentinel_clear",
+                entity_type=EntityType.NOTE,
+                name="Scoped note",
+                organization_id=client.group_id,
+                metadata={"memory_scope": CLEAR_MEMORY_SCOPE},
+            )
+        )
+
+        fetched = await manager.get("note_sentinel_clear")
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT memory_scope, attributes.memory_scope AS attribute_scope
+                FROM entity
+                WHERE group_id = $group_id AND uuid = 'note_sentinel_clear'
+                LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+
+        assert fetched.metadata.get("memory_scope") is None
+        assert fetched.metadata["principal_id"] == "owner-1"
+        assert not rows[0].get("memory_scope")
+        assert not rows[0].get("attribute_scope")
+
+
+@pytest.mark.asyncio
+async def test_live_surreal_server_folds_legacy_snapshot_before_clear() -> None:
+    async with _live_graph_manager() as (client, manager):
+        await manager.create_direct(
+            Entity(
+                id="note_snapshot_fold",
+                entity_type=EntityType.NOTE,
+                name="Legacy snapshot note",
+                organization_id=client.group_id,
+                metadata={"withdrawn": "old", "current": "new"},
+            )
+        )
+        await client.execute_query(
+            """
+            UPDATE entity SET
+                attributes.metadata = $snapshot,
+                attributes.withdrawn = NONE,
+                attributes.snapshot_only = NONE
+            WHERE group_id = $group_id AND uuid = 'note_snapshot_fold';
+            """,
+            group_id=client.group_id,
+            snapshot=json.dumps(
+                {
+                    "withdrawn": "old",
+                    "snapshot_only": "preserved",
+                    "current": "stale",
+                }
+            ),
+        )
+        await manager.create_direct(
+            Entity(
+                id="note_snapshot_fold",
+                entity_type=EntityType.NOTE,
+                name="Legacy snapshot note",
+                organization_id=client.group_id,
+                metadata={"withdrawn": None},
+            )
+        )
+
+        fetched = await manager.get("note_snapshot_fold")
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT attributes
+                FROM entity
+                WHERE group_id = $group_id AND uuid = 'note_snapshot_fold'
+                LIMIT 1;
+                """,
+                group_id=client.group_id,
+            )
+        )
+
+        assert "withdrawn" not in fetched.metadata
+        assert fetched.metadata["snapshot_only"] == "preserved"
+        assert fetched.metadata["current"] == "new"
+        assert "metadata" not in rows[0]["attributes"]
+
+
+@pytest.mark.asyncio
+async def test_live_surreal_server_rewrites_same_uuid_in_place() -> None:
+    async with _live_graph_manager() as (client, manager):
+
+        def row(name: str, content: str) -> Entity:
+            return Entity(
+                id="procedure_same_uuid",
+                entity_type=EntityType.PROCEDURE,
+                name=name,
+                content=content,
+                organization_id=client.group_id,
+            )
+
+        first_ids = await manager.create_direct_bulk([row("First name", "first body")])
+        second_ids = await manager.create_direct_bulk([row("Second name", "second body")])
+        rows = normalize_records(
+            await client.execute_query(
+                """
+                SELECT uuid, name, content, revision
+                FROM entity
+                WHERE group_id = $group_id AND uuid = 'procedure_same_uuid';
+                """,
+                group_id=client.group_id,
+            )
+        )
+
+        assert first_ids == ["procedure_same_uuid"]
+        assert second_ids == ["procedure_same_uuid"]
+        assert rows == [
+            {
+                "uuid": "procedure_same_uuid",
+                "name": "Second name",
+                "content": "second body",
+                "revision": 2,
+            }
+        ]
 
 
 @pytest.mark.asyncio
