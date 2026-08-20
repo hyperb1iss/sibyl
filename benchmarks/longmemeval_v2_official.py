@@ -101,6 +101,8 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "traversal_deadline_seconds",
         "traversal_overflow_items",
         "traversal_search_limit",
+        "runner_provenance",
+        "official_source",
     }
 )
 QWEN_READER_MODEL_FRAGMENT = "qwen3.5-9b"
@@ -783,6 +785,9 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "bulk_max_content_chars": args.bulk_max_content_chars,
         "embedding_backfill_max_pending_jobs": args.embedding_backfill_max_pending_jobs,
         "runner_provenance": git_provenance(ROOT),
+        "official_source": official_source_record(
+            Path(args.official_repo).expanduser().resolve() if args.official_repo else None
+        ),
     }
     config = {"memory_type": "sibyl_live_api", "memory_params": params}
     if args.load_memory_dir:
@@ -830,7 +835,6 @@ LOADED_MEMORY_NON_MERGED_KEYS = frozenset(
         "bulk_max_content_chars",
         "embedding_backfill_max_pending_jobs",
         "embedding_job_wait_timeout_seconds",
-        "runner_provenance",
     }
 )
 

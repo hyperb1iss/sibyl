@@ -4816,6 +4816,43 @@ def test_operational_experience_payload_preserves_oversized_state_evidence() -> 
     assert tree in reconstructed
 
 
+def test_retrieval_lane_activity_fails_faulted_hybrid_and_typed_lanes() -> None:
+    module = _load_memory_module()
+
+    with pytest.raises(RuntimeError, match="hybrid vector lane failed"):
+        module.retrieval_lane_activity(
+            {"graph_retrieval": {"entity_manager_search_completed": False}},
+            retrieval_mode="fast",
+        )
+
+    with pytest.raises(RuntimeError, match="typed-evidence lane failed"):
+        module.retrieval_lane_activity(
+            {
+                "graph_retrieval": {"entity_manager_search_completed": True},
+                "evidence_composition": {"typed_search_status": "degraded"},
+            },
+            retrieval_mode="fast",
+        )
+
+
+def test_retrieval_lane_activity_is_mode_aware_for_naive() -> None:
+    module = _load_memory_module()
+
+    activity = module.retrieval_lane_activity(
+        {
+            "vector_requested": True,
+            "vector_attempted": True,
+            "vector_degraded": False,
+            "vector_status": "ok",
+        },
+        retrieval_mode="naive",
+    )
+
+    assert activity["naive_vector_attempts"] == 1
+    assert activity["typed_evidence_applicable"] is False
+    assert activity["activity_events"] > 0
+
+
 def test_context_pack_conversion_keeps_only_typed_operational_memory() -> None:
     module = _load_memory_module()
 

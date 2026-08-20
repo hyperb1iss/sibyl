@@ -251,6 +251,8 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "note_distillation",
         "note_distillation_model",
         "typed_reservation_items",
+        "runner_provenance",
+        "official_source",
     }
 )
 SAVED_MEMORY_IDENTITY_KEYS = frozenset(
@@ -644,6 +646,69 @@ def _required_context_evidence(
         [_string_key_dict(item) for item in results],
         _string_key_dict(filters),
     )
+
+
+def retrieval_lane_activity(
+    search_metadata: dict[str, object],
+    *,
+    retrieval_mode: str,
+) -> dict[str, object]:
+    """Validate failed lanes and return a mode-aware activity receipt."""
+    hybrid_attempts = 0
+    hybrid_successes = 0
+    vector_attempts = 0
+    vector_successes = 0
+    typed_statuses: list[str] = []
+
+    def visit(value: object) -> None:
+        nonlocal hybrid_attempts, hybrid_successes, vector_attempts, vector_successes
+        if isinstance(value, dict):
+            if "entity_manager_search_completed" in value:
+                hybrid_attempts += 1
+                completed = value.get("entity_manager_search_completed")
+                if completed is False:
+                    raise RuntimeError("benchmark hybrid vector lane failed")
+                if completed is True:
+                    hybrid_successes += 1
+            if value.get("vector_requested") is True:
+                vector_attempts += int(value.get("vector_attempted") is True)
+                vector_status = _stripped_str(value.get("vector_status"))
+                if value.get("vector_degraded") is True or vector_status in {
+                    "embedding_failed",
+                    "invalid_embedding",
+                    "query_failed",
+                }:
+                    raise RuntimeError(
+                        f"benchmark vector lane failed with status {vector_status or 'degraded'}"
+                    )
+                if value.get("vector_attempted") is True:
+                    vector_successes += 1
+            typed_status = _stripped_str(value.get("typed_search_status"))
+            if typed_status:
+                typed_statuses.append(typed_status)
+            for nested in value.values():
+                visit(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                visit(nested)
+
+    visit(search_metadata)
+    if retrieval_mode != NAIVE_RETRIEVAL_MODE and "degraded" in typed_statuses:
+        raise RuntimeError("benchmark typed-evidence lane failed")
+    planner_query_count = _nonnegative_int(search_metadata.get("query_count"))
+    activity_events = 1 + hybrid_attempts + vector_attempts + planner_query_count
+    return {
+        "retrieval_mode": retrieval_mode,
+        "context_pack_requests": 1,
+        "hybrid_vector_attempts": hybrid_attempts,
+        "hybrid_vector_successes": hybrid_successes,
+        "naive_vector_attempts": vector_attempts,
+        "naive_vector_successes": vector_successes,
+        "planner_query_count": planner_query_count,
+        "typed_evidence_applicable": retrieval_mode != NAIVE_RETRIEVAL_MODE,
+        "typed_search_statuses": sorted(set(typed_statuses)),
+        "activity_events": activity_events,
+    }
 
 
 def _source_supports(item: dict[str, object]) -> list[dict[str, object]]:
@@ -3381,6 +3446,12 @@ class SibylLiveApiMemory(Memory):
 
     def __init__(self, memory_params: dict[str, object]) -> None:
         super().__init__(memory_params)
+        runner_provenance = memory_params.get("runner_provenance")
+        self.runner_provenance = (
+            dict(runner_provenance) if isinstance(runner_provenance, dict) else {}
+        )
+        official_source = memory_params.get("official_source")
+        self.official_source = dict(official_source) if isinstance(official_source, dict) else {}
         self.api_url = _normalize_api_url(_param_str(memory_params, "api_url", DEFAULT_API_URL))
         self.run_id = _param_str(memory_params, "run_id", f"lme-v2-{uuid4().hex[:12]}")
         self.allow_localhost = _param_bool(memory_params, "allow_localhost", False)
@@ -4645,7 +4716,12 @@ class SibylLiveApiMemory(Memory):
                 "accurate retrieval requires a successful query planner; "
                 f"received planner_status={planner_status!r}"
             )
+        lane_activity = retrieval_lane_activity(
+            search_metadata,
+            retrieval_mode=getattr(self, "retrieval_mode", DEFAULT_RETRIEVAL_MODE),
+        )
         self._query_local.search_metadata = search_metadata
+        self._query_local.lane_activity = lane_activity
         results = _flatten_operational_result_metadata(results)
         chunk_catalog = getattr(self, "_chunk_catalog", {})
         neighbor_stitch_items = getattr(
@@ -5359,6 +5435,25 @@ class SibylLiveApiMemory(Memory):
                 "retrieval_max_planned_queries",
                 DEFAULT_RETRIEVAL_MAX_PLANNED_QUERIES,
             ),
+            "context_status": "complete" if memory_context else "empty",
+            "lane_activity": dict(getattr(self._query_local, "lane_activity", {})),
+            "stack_identity": {
+                "runner_provenance": dict(getattr(self, "runner_provenance", {})),
+                "api_runtime": dict(getattr(self, "api_runtime", {})),
+                "official_source": dict(getattr(self, "official_source", {})),
+            },
+            "provider_usage": {
+                "embedding": _string_key_dict(
+                    _string_key_dict(getattr(self._query_local, "search_metadata", {})).get(
+                        "embedding_usage"
+                    )
+                ),
+                "planner": _string_key_dict(
+                    _string_key_dict(getattr(self._query_local, "search_metadata", {})).get(
+                        "planner_usage"
+                    )
+                ),
+            },
             "search_metadata": dict(getattr(self._query_local, "search_metadata", {})),
             "retrieval_trace": list(getattr(self._query_local, "retrieval_trace", [])),
         }

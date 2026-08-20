@@ -752,7 +752,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     verify.add_argument("--reader-retry-attempts", required=True, type=int)
     verify.add_argument("--evaluator-model", required=True)
     verify.add_argument("--evidence-composition-mode", required=True)
-    verify.add_argument("--source-evidence-bundling", action="store_true")
+    verify.add_argument(
+        "--source-evidence-bundling",
+        action=argparse.BooleanOptionalAction,
+        default=CANDIDATE_CONFIGURATION["source_evidence_bundling"],
+    )
     verify.add_argument("--include-screenshot-refs", action="store_true")
     verify.add_argument("--max-context-total-chars", required=True, type=int)
     verify.add_argument("--output", required=True)
