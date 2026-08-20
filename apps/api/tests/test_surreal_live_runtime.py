@@ -198,7 +198,10 @@ async def _assert_live_raw_ingestion_path(
             MemoryBatchEntityExtractionResult,
             SourceMemoryExtraction,
         )
-        from sibyl_core.services import surreal_content as content_service
+        from sibyl_core.services import (
+            content_client as content_client_service,
+            content_raw_recall,
+        )
 
         @asynccontextmanager
         async def live_content_session():
@@ -244,8 +247,16 @@ async def _assert_live_raw_ingestion_path(
         async def live_graph_runtime(group_id: str, **_kwargs):
             return await get_surreal_graph_runtime(group_id, embedding_provider=None)
 
-        monkeypatch.setattr(content_service, "surreal_content_client", live_content_session)
-        monkeypatch.setattr(content_service, "_raw_memory_query_embedding", raw_query_embedding)
+        monkeypatch.setattr(
+            content_client_service,
+            "surreal_content_client",
+            live_content_session,
+        )
+        monkeypatch.setattr(
+            content_raw_recall,
+            "raw_memory_query_embedding",
+            raw_query_embedding,
+        )
         monkeypatch.setattr(app_content_service, "surreal_content_client", live_content_session)
         monkeypatch.setattr(
             raw_promotion,
