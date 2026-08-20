@@ -1509,6 +1509,7 @@ async def test_content_schema_migration_normalizes_memory_quality_metadata() -> 
     client = SurrealContentClient(url="memory://")
     capture_id = str(uuid4())
     string_capture_id = str(uuid4())
+    legacy_capture_id = str(uuid4())
     try:
         await bootstrap_content_schema(client, reset=True)
         await client.execute_query(
@@ -1526,6 +1527,20 @@ async def test_content_schema_migration_normalizes_memory_quality_metadata() -> 
                     "promotion_confidence": False,
                     "reflection_confidence": 0.75,
                     "confidence": 0.2,
+                },
+            },
+        )
+        await client.execute_query(
+            "CREATE raw_captures CONTENT $record;",
+            record={
+                "uuid": legacy_capture_id,
+                "organization_id": str(uuid4()),
+                "title": "Legacy-only quality metadata",
+                "raw_content": "migrate aliases only when canonical fields are absent",
+                "entity_type": "episode",
+                "metadata": {
+                    "retention_importance": 0.6,
+                    "promotion_confidence": 0.55,
                 },
             },
         )
@@ -1557,13 +1572,13 @@ async def test_content_schema_migration_normalizes_memory_quality_metadata() -> 
         )
         metadata = rows[0]["metadata"]
         assert metadata["importance"] == 0.4
-        assert metadata["confidence"] == 0.75
+        assert metadata["confidence"] == 0.2
         assert metadata["retention_importance"] == 0.4
         assert metadata["memory_importance"] == 0.4
-        assert metadata["promotion_confidence"] == 0.75
-        assert metadata["reflection_confidence"] == 0.75
-        assert metadata["projection_confidence"] == 0.75
-        assert metadata["share_confidence"] == 0.75
+        assert metadata["promotion_confidence"] == 0.2
+        assert metadata["reflection_confidence"] == 0.2
+        assert metadata["projection_confidence"] == 0.2
+        assert metadata["share_confidence"] == 0.2
         string_rows = _normalize_records(
             await client.execute_query(
                 "SELECT metadata FROM raw_captures WHERE uuid = $uuid LIMIT 1;",
@@ -1575,6 +1590,15 @@ async def test_content_schema_migration_normalizes_memory_quality_metadata() -> 
         assert string_metadata["memory_importance"] == "0.8"
         assert string_metadata["confidence"] == "bogus"
         assert string_metadata["share_confidence"] == "0.45"
+        legacy_rows = _normalize_records(
+            await client.execute_query(
+                "SELECT metadata FROM raw_captures WHERE uuid = $uuid LIMIT 1;",
+                uuid=legacy_capture_id,
+            )
+        )
+        legacy_metadata = legacy_rows[0]["metadata"]
+        assert legacy_metadata["importance"] == 0.6
+        assert legacy_metadata["confidence"] == 0.55
     finally:
         await client.close()
 

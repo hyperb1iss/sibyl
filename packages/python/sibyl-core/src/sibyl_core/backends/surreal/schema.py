@@ -440,20 +440,24 @@ WHERE citation_count = 0
 """
 
 MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS = """
-UPDATE entity SET attributes.importance = attributes.memory_importance
-WHERE type::is::number(attributes.importance) = false
-    AND type::is::number(attributes.memory_importance);
 UPDATE entity SET attributes.importance = attributes.retention_importance
-WHERE type::is::number(attributes.retention_importance);
-UPDATE entity SET attributes.confidence = attributes.share_confidence
-WHERE type::is::number(attributes.confidence) = false
-    AND type::is::number(attributes.share_confidence);
-UPDATE entity SET attributes.confidence = attributes.projection_confidence
-WHERE type::is::number(attributes.projection_confidence);
-UPDATE entity SET attributes.confidence = attributes.reflection_confidence
-WHERE type::is::number(attributes.reflection_confidence);
+WHERE attributes.importance = NONE
+    AND type::is::number(attributes.retention_importance);
+UPDATE entity SET attributes.importance = attributes.memory_importance
+WHERE attributes.importance = NONE
+    AND type::is::number(attributes.memory_importance);
 UPDATE entity SET attributes.confidence = attributes.promotion_confidence
-WHERE type::is::number(attributes.promotion_confidence);
+WHERE attributes.confidence = NONE
+    AND type::is::number(attributes.promotion_confidence);
+UPDATE entity SET attributes.confidence = attributes.reflection_confidence
+WHERE attributes.confidence = NONE
+    AND type::is::number(attributes.reflection_confidence);
+UPDATE entity SET attributes.confidence = attributes.projection_confidence
+WHERE attributes.confidence = NONE
+    AND type::is::number(attributes.projection_confidence);
+UPDATE entity SET attributes.confidence = attributes.share_confidence
+WHERE attributes.confidence = NONE
+    AND type::is::number(attributes.share_confidence);
 UPDATE entity SET
     attributes.retention_importance = attributes.importance,
     attributes.memory_importance = attributes.importance
@@ -464,20 +468,24 @@ UPDATE entity SET
     attributes.projection_confidence = attributes.confidence,
     attributes.share_confidence = attributes.confidence
 WHERE type::is::number(attributes.confidence);
-UPDATE relates_to SET attributes.importance = attributes.memory_importance
-WHERE type::is::number(attributes.importance) = false
-    AND type::is::number(attributes.memory_importance);
 UPDATE relates_to SET attributes.importance = attributes.retention_importance
-WHERE type::is::number(attributes.retention_importance);
-UPDATE relates_to SET attributes.confidence = attributes.share_confidence
-WHERE type::is::number(attributes.confidence) = false
-    AND type::is::number(attributes.share_confidence);
-UPDATE relates_to SET attributes.confidence = attributes.projection_confidence
-WHERE type::is::number(attributes.projection_confidence);
-UPDATE relates_to SET attributes.confidence = attributes.reflection_confidence
-WHERE type::is::number(attributes.reflection_confidence);
+WHERE attributes.importance = NONE
+    AND type::is::number(attributes.retention_importance);
+UPDATE relates_to SET attributes.importance = attributes.memory_importance
+WHERE attributes.importance = NONE
+    AND type::is::number(attributes.memory_importance);
 UPDATE relates_to SET attributes.confidence = attributes.promotion_confidence
-WHERE type::is::number(attributes.promotion_confidence);
+WHERE attributes.confidence = NONE
+    AND type::is::number(attributes.promotion_confidence);
+UPDATE relates_to SET attributes.confidence = attributes.reflection_confidence
+WHERE attributes.confidence = NONE
+    AND type::is::number(attributes.reflection_confidence);
+UPDATE relates_to SET attributes.confidence = attributes.projection_confidence
+WHERE attributes.confidence = NONE
+    AND type::is::number(attributes.projection_confidence);
+UPDATE relates_to SET attributes.confidence = attributes.share_confidence
+WHERE attributes.confidence = NONE
+    AND type::is::number(attributes.share_confidence);
 UPDATE relates_to SET
     attributes.retention_importance = attributes.importance,
     attributes.memory_importance = attributes.importance

@@ -508,20 +508,24 @@ DEFINE FIELD OVERWRITE review_state ON raw_captures TYPE string DEFAULT 'pending
 """
 
 CONTENT_MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS = """
-UPDATE raw_captures SET metadata.importance = metadata.memory_importance
-WHERE type::is::number(metadata.importance) = false
-    AND type::is::number(metadata.memory_importance);
 UPDATE raw_captures SET metadata.importance = metadata.retention_importance
-WHERE type::is::number(metadata.retention_importance);
-UPDATE raw_captures SET metadata.confidence = metadata.share_confidence
-WHERE type::is::number(metadata.confidence) = false
-    AND type::is::number(metadata.share_confidence);
-UPDATE raw_captures SET metadata.confidence = metadata.projection_confidence
-WHERE type::is::number(metadata.projection_confidence);
-UPDATE raw_captures SET metadata.confidence = metadata.reflection_confidence
-WHERE type::is::number(metadata.reflection_confidence);
+WHERE metadata.importance = NONE
+    AND type::is::number(metadata.retention_importance);
+UPDATE raw_captures SET metadata.importance = metadata.memory_importance
+WHERE metadata.importance = NONE
+    AND type::is::number(metadata.memory_importance);
 UPDATE raw_captures SET metadata.confidence = metadata.promotion_confidence
-WHERE type::is::number(metadata.promotion_confidence);
+WHERE metadata.confidence = NONE
+    AND type::is::number(metadata.promotion_confidence);
+UPDATE raw_captures SET metadata.confidence = metadata.reflection_confidence
+WHERE metadata.confidence = NONE
+    AND type::is::number(metadata.reflection_confidence);
+UPDATE raw_captures SET metadata.confidence = metadata.projection_confidence
+WHERE metadata.confidence = NONE
+    AND type::is::number(metadata.projection_confidence);
+UPDATE raw_captures SET metadata.confidence = metadata.share_confidence
+WHERE metadata.confidence = NONE
+    AND type::is::number(metadata.share_confidence);
 UPDATE raw_captures SET
     metadata.retention_importance = metadata.importance,
     metadata.memory_importance = metadata.importance
