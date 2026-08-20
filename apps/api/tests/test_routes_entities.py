@@ -9,8 +9,9 @@ from uuid import UUID
 
 import pytest
 
-from sibyl.api.routes import entities as entities_routes
-from sibyl.api.routes.entities import SortField, SortOrder, list_entities
+from sibyl.api.routes import entity_reads as entities_routes
+from sibyl.api.routes.entity_contracts import SortField, SortOrder
+from sibyl.api.routes.entity_reads import list_entities
 from sibyl.auth.context import AuthContext
 from sibyl.auth.errors import ProjectAccessDeniedError
 from sibyl_core.auth import ProjectRole
@@ -71,11 +72,11 @@ class TestListEntitiesRoute:
 
         with (
             patch(
-                "sibyl.api.routes.entities.get_entity_graph_runtime",
+                "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
             ),
             patch(
-                "sibyl.api.routes.entities.verify_entity_project_access",
+                "sibyl.api.routes.entity_policy.verify_entity_project_access",
                 AsyncMock(),
             ) as verify_project,
         ):
@@ -132,11 +133,11 @@ class TestListEntitiesRoute:
 
         with (
             patch(
-                "sibyl.api.routes.entities.get_entity_graph_runtime",
+                "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
             ),
             patch(
-                "sibyl.api.routes.entities.verify_entity_project_access",
+                "sibyl.api.routes.entity_policy.verify_entity_project_access",
                 AsyncMock(),
             ),
         ):
@@ -199,11 +200,11 @@ class TestListEntitiesRoute:
 
         with (
             patch(
-                "sibyl.api.routes.entities.get_entity_graph_runtime",
+                "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
             ),
             patch(
-                "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+                "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
                 AsyncMock(return_value=set()),
             ),
         ):
@@ -260,11 +261,11 @@ class TestListEntitiesRoute:
         with (
             patch.object(entities_routes, "LIST_BY_TYPE_PAGE_SIZE", 2),
             patch(
-                "sibyl.api.routes.entities.get_entity_graph_runtime",
+                "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
             ),
             patch(
-                "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+                "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
                 AsyncMock(return_value={"proj-1", "proj-2", "proj-3"}),
             ),
         ):
@@ -309,11 +310,11 @@ class TestListEntitiesRoute:
         with (
             patch.object(entities_routes, "LIST_BY_TYPE_PAGE_SIZE", 2),
             patch(
-                "sibyl.api.routes.entities.get_entity_graph_runtime",
+                "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
             ),
             patch(
-                "sibyl.api.routes.entities.verify_entity_project_access",
+                "sibyl.api.routes.entity_policy.verify_entity_project_access",
                 AsyncMock(),
             ),
         ):
@@ -365,11 +366,11 @@ class TestListEntitiesRoute:
         with (
             patch.object(entities_routes, "LIST_BY_TYPE_PAGE_SIZE", 2),
             patch(
-                "sibyl.api.routes.entities.get_entity_graph_runtime",
+                "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
             ),
             patch(
-                "sibyl.api.routes.entities.verify_entity_project_access",
+                "sibyl.api.routes.entity_policy.verify_entity_project_access",
                 AsyncMock(),
             ),
         ):
@@ -419,11 +420,11 @@ class TestListEntitiesRoute:
         with (
             patch.object(entities_routes, "LIST_BY_TYPE_PAGE_SIZE", 1),
             patch(
-                "sibyl.api.routes.entities.get_entity_graph_runtime",
+                "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
             ),
             patch(
-                "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+                "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
                 AsyncMock(return_value=set()),
             ),
         ):
@@ -465,11 +466,11 @@ class TestListEntitiesRoute:
         with (
             patch.object(entities_routes, "LIST_ALL_PAGE_SIZE", 2),
             patch(
-                "sibyl.api.routes.entities.get_entity_graph_runtime",
+                "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
             ),
             patch(
-                "sibyl.api.routes.entities.verify_entity_project_access",
+                "sibyl.api.routes.entity_policy.verify_entity_project_access",
                 AsyncMock(),
             ),
         ):
@@ -510,11 +511,11 @@ class TestListEntitiesRoute:
 
         with (
             patch(
-                "sibyl.api.routes.entities.get_entity_graph_runtime",
+                "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
             ),
             patch(
-                "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+                "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
                 AsyncMock(return_value={"proj-1"}),
             ) as list_projects,
         ):
@@ -564,11 +565,11 @@ class TestListEntitiesRoute:
 
         with (
             patch(
-                "sibyl.api.routes.entities.get_entity_graph_runtime",
+                "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
             ),
             patch(
-                "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+                "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
                 AsyncMock(return_value={"project-visible"}),
             ),
         ):
@@ -623,11 +624,11 @@ class TestListEntitiesRoute:
 
         with (
             patch(
-                "sibyl.api.routes.entities.get_entity_graph_runtime",
+                "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
             ),
             patch(
-                "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+                "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
                 AsyncMock(return_value={"project-visible"}),
             ),
         ):
@@ -685,11 +686,11 @@ class TestListEntitiesRoute:
 
         with (
             patch(
-                "sibyl.api.routes.entities.get_entity_graph_runtime",
+                "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
             ),
             patch(
-                "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+                "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
                 AsyncMock(return_value={"project-visible"}),
             ),
         ):
@@ -715,7 +716,7 @@ class TestListEntitiesRoute:
 
         with (
             patch(
-                "sibyl.api.routes.entities.verify_entity_project_access",
+                "sibyl.api.routes.entity_policy.verify_entity_project_access",
                 AsyncMock(
                     side_effect=ProjectAccessDeniedError(
                         project_id="proj-2",

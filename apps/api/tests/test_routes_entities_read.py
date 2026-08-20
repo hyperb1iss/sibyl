@@ -8,11 +8,11 @@ from uuid import UUID
 import pytest
 from fastapi import HTTPException
 
-from sibyl.api.routes.entities import (
-    _entity_visible_to_reader,
-    _should_fallback_to_document_entity,
-    _summarize_related_entities,
+from sibyl.api.routes.entity_policy import entity_visible_to_reader
+from sibyl.api.routes.entity_reads import (
     get_entity,
+    should_fallback_to_document_entity,
+    summarize_related_entities,
 )
 from sibyl.auth.context import AuthContext
 from sibyl.auth.errors import ProjectAccessDeniedError
@@ -61,7 +61,7 @@ def test_should_fallback_to_document_entity_requires_chunk_id_shape(
     entity_id: str,
     expected: bool,
 ) -> None:
-    assert _should_fallback_to_document_entity(entity_id) is expected
+    assert should_fallback_to_document_entity(entity_id) is expected
 
 
 def test_graph_entity_store_hydrates_native_mapping_without_node_to_entity() -> None:
@@ -111,11 +111,11 @@ async def test_get_entity_uses_knowledge_service_for_graph_entities() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(),
         ) as get_entity_graph_runtime,
         patch(
-            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project-1"}),
         ),
     ):
@@ -145,11 +145,11 @@ async def test_get_entity_denies_private_memory_projection_for_non_owner() -> No
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(),
         ),
         patch(
-            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project-1"}),
         ),
         pytest.raises(HTTPException) as exc,
@@ -180,7 +180,7 @@ def test_entity_visibility_matches_the_search_rule_on_every_scope(
     reader = "reader-1"
     entity = SimpleNamespace(metadata=metadata)
 
-    route_allows = _entity_visible_to_reader(
+    route_allows = entity_visible_to_reader(
         entity,
         reader_user_id=reader,
         accessible_projects=set(),
@@ -233,7 +233,7 @@ def test_related_summaries_hide_a_private_neighbour_but_keep_your_own() -> None:
         for neighbour in neighbours
     ]
 
-    summaries = _summarize_related_entities(
+    summaries = summarize_related_entities(
         "task-1",
         related_entities=neighbours,
         relationships=relationships,
@@ -252,13 +252,13 @@ def test_entity_visibility_treats_scope_key_as_a_private_owner_channel() -> None
     other = SimpleNamespace(metadata={"memory_scope": "private", "scope_key": "someone-else"})
 
     assert (
-        _entity_visible_to_reader(
+        entity_visible_to_reader(
             owned, reader_user_id=reader, accessible_projects=set(), allowed_memory_scope_keys=None
         )
         is True
     )
     assert (
-        _entity_visible_to_reader(
+        entity_visible_to_reader(
             other, reader_user_id=reader, accessible_projects=set(), allowed_memory_scope_keys=None
         )
         is False
@@ -297,15 +297,15 @@ async def test_get_entity_keeps_project_summary_enrichment() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch(
-            "sibyl.api.routes.entities.verify_entity_project_access",
+            "sibyl.api.routes.entity_policy.verify_entity_project_access",
             AsyncMock(),
         ),
         patch(
-            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project-1"}),
         ),
     ):
@@ -351,15 +351,15 @@ async def test_get_entity_summary_without_related_skips_bundle_loading() -> None
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch(
-            "sibyl.api.routes.entities.verify_entity_project_access",
+            "sibyl.api.routes.entity_policy.verify_entity_project_access",
             AsyncMock(),
         ),
         patch(
-            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project-1"}),
         ),
     ):
@@ -392,11 +392,11 @@ async def test_get_entity_graph_mode_skips_bundle_loading() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(),
         ) as get_entity_graph_runtime,
         patch(
-            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
             AsyncMock(return_value=set()),
         ),
     ):
@@ -424,9 +424,9 @@ async def test_get_entity_skips_document_fallback_for_typed_graph_ids() -> None:
     service.get_entity_bundle.return_value = None
 
     with (
-        patch("sibyl.api.routes.entities.get_content_read_session") as read_session,
+        patch("sibyl.api.routes.entity_reads.get_content_read_session") as read_session,
         patch(
-            "sibyl.api.routes.entities.content_runtime.resolve_document_entity",
+            "sibyl.api.routes.entity_reads.content_runtime.resolve_document_entity",
             AsyncMock(),
         ) as resolve_document_entity,
         pytest.raises(HTTPException) as exc_info,
@@ -466,11 +466,11 @@ async def test_get_entity_keeps_document_fallback_for_uuid_shaped_ids() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_content_read_session",
+            "sibyl.api.routes.entity_reads.get_content_read_session",
             return_value=_AsyncContext(session),
         ),
         patch(
-            "sibyl.api.routes.entities.content_runtime.resolve_document_entity",
+            "sibyl.api.routes.entity_reads.content_runtime.resolve_document_entity",
             AsyncMock(return_value=record),
         ) as resolve_document_entity,
     ):
@@ -533,15 +533,15 @@ async def test_get_entity_preserves_preloaded_project_related_context() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch(
-            "sibyl.api.routes.entities.verify_entity_project_access",
+            "sibyl.api.routes.entity_policy.verify_entity_project_access",
             AsyncMock(),
         ),
         patch(
-            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project-1"}),
         ),
     ):
@@ -565,7 +565,7 @@ async def test_get_entity_rejects_inaccessible_project_entity() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.verify_entity_project_access",
+            "sibyl.api.routes.entity_policy.verify_entity_project_access",
             AsyncMock(
                 side_effect=ProjectAccessDeniedError(
                     project_id="project-hidden",
@@ -595,7 +595,7 @@ async def test_get_entity_rejects_inaccessible_project_scoped_entity() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.verify_entity_project_access",
+            "sibyl.api.routes.entity_policy.verify_entity_project_access",
             AsyncMock(
                 side_effect=ProjectAccessDeniedError(
                     project_id="project-hidden",
@@ -653,11 +653,11 @@ async def test_get_entity_filters_inaccessible_related_entities() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.verify_entity_project_access",
+            "sibyl.api.routes.entity_policy.verify_entity_project_access",
             AsyncMock(),
         ),
         patch(
-            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project-visible"}),
         ),
     ):
@@ -745,15 +745,15 @@ async def test_get_entity_graph_mode_filters_fetched_related_entities() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch(
-            "sibyl.api.routes.entities.verify_entity_project_access",
+            "sibyl.api.routes.entity_policy.verify_entity_project_access",
             AsyncMock(),
         ) as verify_project,
         patch(
-            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project-visible"}),
         ),
     ):

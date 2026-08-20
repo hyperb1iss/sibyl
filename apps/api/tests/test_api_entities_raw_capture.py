@@ -5,7 +5,8 @@ from uuid import uuid4
 import pytest
 
 from sibyl.api.idempotency import idempotency_request_hash
-from sibyl.api.routes.entities import _raw_capture_visible_to_reader, create_entity
+from sibyl.api.routes.entity_mutations import create_entity
+from sibyl.api.routes.entity_policy import raw_capture_visible_to_reader
 from sibyl.api.schemas import EntityCreate, EntityResponse
 from sibyl.persistence.content_common import ApiIdempotencyRecord, RawCaptureRecord
 from sibyl_core.models.entities import EntityType
@@ -65,8 +66,8 @@ async def test_quick_capture_creates_raw_archive_record(
 
     with (
         patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)),
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
-        patch("sibyl.api.routes.entities.save_raw_capture_record", save_capture),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_captures.save_raw_capture_record", save_capture),
     ):
         resp = await create_entity(
             request=_request(),
@@ -188,8 +189,8 @@ async def test_regular_entity_create_does_not_archive_raw_capture() -> None:
 
     with (
         patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)),
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
-        patch("sibyl.api.routes.entities.save_raw_capture_record", save_capture),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_captures.save_raw_capture_record", save_capture),
     ):
         resp = await create_entity(
             request=_request(),
@@ -238,8 +239,8 @@ async def test_remember_capture_creates_raw_archive_record(monkeypatch: pytest.M
 
     with (
         patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)),
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
-        patch("sibyl.api.routes.entities.save_raw_capture_record", save_capture),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_captures.save_raw_capture_record", save_capture),
     ):
         resp = await create_entity(
             request=_request(),
@@ -283,7 +284,7 @@ def test_raw_capture_visibility_denies_delegated_without_membership() -> None:
     )
 
     assert (
-        _raw_capture_visible_to_reader(
+        raw_capture_visible_to_reader(
             capture,
             ctx=_reader_ctx(),
             accessible_projects=set(),
@@ -305,7 +306,7 @@ def test_raw_capture_visibility_allows_delegated_membership() -> None:
     )
 
     assert (
-        _raw_capture_visible_to_reader(
+        raw_capture_visible_to_reader(
             capture,
             ctx=_reader_ctx(),
             accessible_projects=set(),
@@ -326,7 +327,7 @@ def test_raw_capture_visibility_denies_unknown_scope() -> None:
     )
 
     assert (
-        _raw_capture_visible_to_reader(
+        raw_capture_visible_to_reader(
             capture,
             ctx=_reader_ctx(),
             accessible_projects=set(),

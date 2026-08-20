@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from sibyl.api.app import create_api_app
-from sibyl.api.routes.entities import create_entity
+from sibyl.api.routes.entity_mutations import create_entity
 from sibyl.api.schemas import EntityCreate
 from sibyl_core.models.entities import EntityType
 
@@ -123,7 +123,7 @@ async def test_create_entity_forwards_skip_conflicts() -> None:
 
     with (
         patch("sibyl_core.tools.core.add", add),
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
     ):
         response = await create_entity(
             request=request,

@@ -5,11 +5,11 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-from sibyl.api.routes.entities import (
-    _declared_bulk_relationships,
-    _ReaderScope,
-    _validate_related_to_targets_for_write,
-    create_entity,
+from sibyl.api.routes.entity_mutations import create_entity
+from sibyl.api.routes.entity_policy import (
+    ReaderScope,
+    declared_bulk_relationships,
+    validate_related_to_targets_for_write,
 )
 from sibyl.api.schemas import EntityCreate
 from sibyl.api.schemas.entities import EntityResponse
@@ -61,13 +61,13 @@ async def test_entities_create_passes_task_fields_to_add() -> None:
 
     with (
         patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)) as add,
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch(
-            "sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()
+            "sibyl.api.routes.entity_mutations.verify_entity_project_access", AsyncMock()
         ) as verify_access,
     ):
         resp = await create_entity(
@@ -122,11 +122,11 @@ async def test_entities_create_rejects_missing_related_to_target() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch("sibyl_core.tools.core.add", AsyncMock()) as add,
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
         pytest.raises(HTTPException) as exc,
     ):
         await create_entity(
@@ -185,9 +185,9 @@ async def test_entities_create_validates_the_target_behind_a_predicate() -> None
 
     with (
         patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)) as add,
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
     ):
@@ -229,7 +229,7 @@ class TestBulkDeclaredRelationships:
     @pytest.mark.asyncio
     async def test_untyped_entry_keeps_its_edge_shape(self) -> None:
         now = datetime(2026, 8, 13, tzinfo=UTC)
-        [rel] = await _declared_bulk_relationships(
+        [rel] = await declared_bulk_relationships(
             "ep_new",
             ["ep_old"],
             entity_manager=self._entity_manager("principal-a"),
@@ -244,7 +244,7 @@ class TestBulkDeclaredRelationships:
 
     @pytest.mark.asyncio
     async def test_writable_target_keeps_the_declared_predicate(self) -> None:
-        [rel] = await _declared_bulk_relationships(
+        [rel] = await declared_bulk_relationships(
             "ep_new",
             ["supersedes:ep_old"],
             entity_manager=self._entity_manager("principal-a"),
@@ -259,7 +259,7 @@ class TestBulkDeclaredRelationships:
 
     @pytest.mark.asyncio
     async def test_another_principals_target_is_downgraded(self) -> None:
-        [rel] = await _declared_bulk_relationships(
+        [rel] = await declared_bulk_relationships(
             "ep_new",
             ["supersedes:ep_old"],
             entity_manager=self._entity_manager("principal-b"),
@@ -299,8 +299,8 @@ class TestRelatedToExistenceOracle:
         return entity
 
     @staticmethod
-    def _scope(projects: set[str] | None = None) -> _ReaderScope:
-        return _ReaderScope(
+    def _scope(projects: set[str] | None = None) -> ReaderScope:
+        return ReaderScope(
             user_id="reader-a",
             accessible_projects=projects or set(),
             memory_grants=None,
@@ -310,7 +310,7 @@ class TestRelatedToExistenceOracle:
         manager = MagicMock()
         manager.get = AsyncMock(return_value=target)
         try:
-            await _validate_related_to_targets_for_write(
+            await validate_related_to_targets_for_write(
                 entity_manager=manager,
                 related_to=["supersedes:decision_hidden"],
                 scope=self._scope(),
@@ -334,7 +334,7 @@ class TestRelatedToExistenceOracle:
         visible.metadata = {}
         manager = MagicMock()
         manager.get = AsyncMock(return_value=visible)
-        await _validate_related_to_targets_for_write(
+        await validate_related_to_targets_for_write(
             entity_manager=manager,
             related_to=["supersedes:decision_hidden"],
             scope=self._scope(),
@@ -355,7 +355,7 @@ class TestRelatedToExistenceOracle:
         target.metadata = {"project_id": "project_b"}
         manager = MagicMock()
         manager.get = AsyncMock(return_value=target)
-        await _validate_related_to_targets_for_write(
+        await validate_related_to_targets_for_write(
             entity_manager=manager,
             related_to=["supersedes:decision_scoped"],
             scope=self._scope({"project_b"}),
@@ -367,7 +367,7 @@ class TestRelatedToExistenceOracle:
         manager = MagicMock()
         manager.get = AsyncMock(side_effect=TimeoutError("surreal unreachable"))
         with pytest.raises(TimeoutError):
-            await _validate_related_to_targets_for_write(
+            await validate_related_to_targets_for_write(
                 entity_manager=manager,
                 related_to=["supersedes:decision_hidden"],
                 scope=self._scope(),
@@ -384,7 +384,7 @@ class TestRelatedToExistenceOracle:
         manager = MagicMock()
         manager.get = AsyncMock(side_effect=EntityNotFoundError("decision", "gone"))
         with pytest.raises(HTTPException) as exc:
-            await _validate_related_to_targets_for_write(
+            await validate_related_to_targets_for_write(
                 entity_manager=manager,
                 related_to=["supersedes:decision_hidden"],
                 scope=self._scope(),
@@ -415,7 +415,7 @@ class TestBulkBatchComposition:
         sibling happened to be in the same request.
         """
         manager = self._manager("project_b")
-        alone = await _declared_bulk_relationships(
+        alone = await declared_bulk_relationships(
             "ep_new",
             ["supersedes:decision_scoped"],
             entity_manager=manager,
@@ -424,7 +424,7 @@ class TestBulkBatchComposition:
             allowed_memory_scope_keys=None,
             now=datetime(2026, 8, 13, tzinfo=UTC),
         )
-        with_sibling = await _declared_bulk_relationships(
+        with_sibling = await declared_bulk_relationships(
             "ep_new",
             ["supersedes:decision_scoped"],
             entity_manager=manager,
@@ -438,7 +438,7 @@ class TestBulkBatchComposition:
 
     @pytest.mark.asyncio
     async def test_a_project_the_caller_reads_is_declarable(self) -> None:
-        rels = await _declared_bulk_relationships(
+        rels = await declared_bulk_relationships(
             "ep_new",
             ["supersedes:decision_scoped"],
             entity_manager=self._manager("project_b"),
@@ -493,15 +493,15 @@ class TestIdempotentRetryAfterTargetLoss:
 
         with (
             patch(
-                "sibyl.api.routes.entities.get_entity_graph_runtime",
+                "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
             ),
             patch(
-                "sibyl.api.routes.entities.replay_idempotent_response",
+                "sibyl.api.routes.entity_mutations.replay_idempotent_response",
                 AsyncMock(return_value=stored),
             ),
             patch("sibyl_core.tools.core.add", AsyncMock()) as add,
-            patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+            patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
         ):
             resp = await create_entity(
                 request=request,
