@@ -324,11 +324,19 @@ def _snapshot_to_networkx(
 
     G = nx.Graph()
 
-    for entity in entities:
+    for entity in sorted(entities, key=lambda item: item.id or ""):
         if entity.id:
             G.add_node(entity.id, name=entity.name, type=entity.entity_type.value)
 
-    for relationship in relationships:
+    for relationship in sorted(
+        relationships,
+        key=lambda item: (
+            item.source_id,
+            item.target_id,
+            item.relationship_type.value,
+            item.id or "",
+        ),
+    ):
         if relationship.source_id not in G or relationship.target_id not in G:
             continue
 

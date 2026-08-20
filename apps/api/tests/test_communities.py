@@ -14,6 +14,7 @@ from sibyl_core.services.graph_communities import (
     CommunityConfig,
     DetectedCommunity,
     detect_communities,
+    detect_communities_louvain,
     export_to_networkx,
     get_cluster_nodes,
     get_clusters_for_visualization,
@@ -202,6 +203,29 @@ class TestPartitionToCommunities:
         ids = [c.id for c in communities]
         assert len(ids) == len(set(ids))
 
+    def test_community_ids_survive_partition_relabeling_and_restart(self) -> None:
+        """A public drilldown ID is derived from membership, not process state."""
+        first = partition_to_communities(
+            partition={"e1": 0, "e2": 0, "e3": 1, "e4": 1},
+            level=0,
+            resolution=1.0,
+            modularity=0.5,
+            min_size=2,
+        )
+        restarted = partition_to_communities(
+            partition={"e4": 7, "e3": 7, "e2": 9, "e1": 9},
+            level=0,
+            resolution=1.0,
+            modularity=0.5,
+            min_size=2,
+        )
+
+        first_ids = {frozenset(community.member_ids): community.id for community in first}
+        restarted_ids = {frozenset(community.member_ids): community.id for community in restarted}
+
+        assert restarted_ids == first_ids
+        assert all(community_id.startswith("comm_L0_") for community_id in first_ids.values())
+
 
 class TestLinkHierarchy:
     """Tests for link_hierarchy function."""
@@ -382,6 +406,20 @@ class TestDetectCommunities:
         communities = await detect_communities(mock_client, TEST_ORG_ID)
         assert communities == []
 
+    def test_louvain_uses_a_stable_seed(self) -> None:
+        graph = MagicMock()
+        graph.number_of_nodes.return_value = 2
+
+        with (
+            patch("community.best_partition", return_value={"e1": 0, "e2": 0}) as partition,
+            patch("community.modularity", return_value=0.5),
+        ):
+            detected, modularity = detect_communities_louvain(graph, resolution=1.25)
+
+        assert detected == {"e1": 0, "e2": 0}
+        assert modularity == 0.5
+        partition.assert_called_once_with(graph, resolution=1.25, random_state=0)
+
     @pytest.mark.asyncio
     async def test_with_mock_louvain(self, mock_client: MagicMock) -> None:
         """Communities detected with mocked Louvain."""
@@ -437,6 +475,57 @@ class TestHierarchicalGraph:
         client.execute_read_org = AsyncMock(return_value=[])
         client.execute_write_org = AsyncMock(return_value=[])
         return client
+
+    @pytest.mark.asyncio
+    async def test_overview_cluster_id_survives_server_restart(
+        self,
+        mock_client: MagicMock,
+    ) -> None:
+        entities = [
+            _make_entity("task-1", "Task 1", EntityType.TASK),
+            _make_entity("task-2", "Task 2", EntityType.TASK),
+            _make_entity("task-3", "Task 3", EntityType.TASK),
+            _make_entity("task-4", "Task 4", EntityType.TASK),
+        ]
+        relationships = [
+            _make_relationship("r1", "task-1", "task-2"),
+            _make_relationship("r2", "task-2", "task-3"),
+            _make_relationship("r3", "task-3", "task-4"),
+            _make_relationship("r4", "task-4", "task-1"),
+        ]
+
+        with (
+            patch(
+                "sibyl_core.services.graph_community_snapshot._list_all_entities",
+                AsyncMock(side_effect=[entities, list(reversed(entities))]),
+            ),
+            patch(
+                "sibyl_core.services.graph_community_snapshot._list_all_relationships",
+                AsyncMock(side_effect=[relationships, list(reversed(relationships))]),
+            ),
+        ):
+            communities.HIERARCHICAL_CACHE.clear()
+            communities.GRAPH_LOD_CACHE.clear()
+            communities.GRAPH_SNAPSHOT_CACHE.clear()
+            overview = await get_hierarchical_graph(
+                mock_client,
+                TEST_ORG_ID,
+                resolution="overview",
+            )
+            cluster_id = overview.nodes[0]["cluster_id"]
+
+            communities.HIERARCHICAL_CACHE.clear()
+            communities.GRAPH_LOD_CACHE.clear()
+            communities.GRAPH_SNAPSHOT_CACHE.clear()
+            detail = await get_hierarchical_graph(
+                mock_client,
+                TEST_ORG_ID,
+                resolution="detail",
+                cluster_id=cluster_id,
+            )
+
+        assert detail.displayed_nodes > 0
+        assert any(node["cluster_id"] == cluster_id for node in detail.nodes)
 
     @pytest.mark.asyncio
     async def test_prefers_connected_nodes_and_reuses_snapshot(

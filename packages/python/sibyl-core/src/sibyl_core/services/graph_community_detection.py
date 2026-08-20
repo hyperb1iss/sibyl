@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
+import hashlib
 from typing import Any
 
 import structlog
@@ -173,7 +173,11 @@ def detect_communities_louvain(
         return {}, 0.0
 
     # Run Louvain algorithm
-    partition = community_louvain.best_partition(G, resolution=resolution)
+    partition = community_louvain.best_partition(
+        G,
+        resolution=resolution,
+        random_state=0,
+    )
     modularity = community_louvain.modularity(partition, G)
 
     return partition, modularity
@@ -255,13 +259,15 @@ def partition_to_communities(
 
     # Create community objects
     communities: list[DetectedCommunity] = []
-    for comm_num, members in community_members.items():
+    for members in community_members.values():
         if len(members) < min_size:
             continue
 
+        sorted_members = sorted(members)
+        membership_digest = hashlib.sha256("\0".join(sorted_members).encode()).hexdigest()[:12]
         community = DetectedCommunity(
-            id=f"comm_L{level}_{comm_num}_{uuid.uuid4().hex[:8]}",
-            member_ids=sorted(members),
+            id=f"comm_L{level}_{membership_digest}",
+            member_ids=sorted_members,
             level=level,
             resolution=resolution,
             modularity=modularity,

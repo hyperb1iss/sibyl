@@ -10,6 +10,7 @@ from sibyl_core.services.graph_communities import GRAPH_RESOLUTION_OVERVIEW, Gra
 from sibyl_core.services.graph_community_selection import (
     _build_cluster_detail_graph_from_snapshot,
     _build_overview_graph_from_snapshot,
+    _snapshot_to_networkx,
 )
 
 
@@ -91,6 +92,24 @@ def test_build_overview_graph_emits_aggregate_cluster_bubbles() -> None:
     assert cluster_a["member_count"] == 4
     assert cluster_a["type_distribution"]["task"] == 3
     assert cluster_a["type_distribution"]["episode"] == 1
+
+
+def test_snapshot_graph_order_is_stable_across_database_page_order() -> None:
+    entities = [
+        _entity("task-2", EntityType.TASK),
+        _entity("task-1", EntityType.TASK),
+        _entity("project-1", EntityType.PROJECT),
+    ]
+    relationships = [
+        _relationship("rel-2", "task-2", "project-1", RelationshipType.BELONGS_TO),
+        _relationship("rel-1", "task-1", "task-2"),
+    ]
+
+    first = _snapshot_to_networkx(entities, relationships)
+    restarted = _snapshot_to_networkx(list(reversed(entities)), list(reversed(relationships)))
+
+    assert list(first.nodes) == list(restarted.nodes)
+    assert list(first.edges) == list(restarted.edges)
 
 
 def test_build_cluster_detail_graph_includes_cluster_members_and_neighbors() -> None:
