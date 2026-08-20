@@ -28,6 +28,8 @@ tasks:
     preset: server
   test-browser:
     command: uv run pytest -m browser
+    deps:
+    - ~:playwright-install
     env:
       SIBYL_E2E_CLI_COMMAND: uv run --project ../cli sibyl
     inputs:
