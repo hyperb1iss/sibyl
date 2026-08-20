@@ -1,11 +1,12 @@
 # Sibyl v1.3 final implementation and release plan: One Surface
 
-- Status: implementation complete; paid benchmark and release-cut evidence pending
+- Status: implementation merged; paid benchmark and release-cut evidence pending
 - Created: 2026-08-19
 - Working task: `8be323d1-0000-4ce2-9661-8ca504f17e17`
 - Starting commit: `c3c786ab603a67e45689c765b2365f6d3cef8bc6`
 - Plan baseline: `1e8e0b4b`
-- Implemented code range: `1e8e0b4b..bc95c476`
+- Reviewed source range: `1e8e0b4b..5ebb0461`
+- Merged commit: `1a56eea0` ([pull request 406](https://github.com/hyperb1iss/sibyl/pull/406))
 - Release thesis: one memory contract across every public surface
 
 This plan replaces the v1.3 scope in [`SIBYL_POST_1_0_ROADMAP.md`](SIBYL_POST_1_0_ROADMAP.md), the
@@ -16,10 +17,10 @@ decision remains in
 
 ## Current state
 
-The repository implementation is complete. Waves 0 and 4 are implemented and covered by focused
-gates. Wave 1 now has a pinned official harness, fail-closed receipts, a tested decision rig, and
-native SurrealDB monitoring. The machine race and render treatment are implemented as preregistered
-workflows, but their paid runs have not been authorized or executed.
+The repository implementation is complete and merged into `main`. Waves 0 and 4 are implemented and
+covered by focused gates. Wave 1 has a pinned official harness, fail-closed receipts, a tested
+decision rig, and native SurrealDB monitoring. The machine race and render treatment are implemented
+as preregistered workflows, but their paid runs have not been authorized or executed.
 
 No architecture choice remains open for v1.3. The release cut still needs four pieces of evidence
 from one frozen, clean commit:
@@ -27,7 +28,7 @@ from one frozen, clean commit:
 1. an A/A receipt that establishes the measured noise floor or stops the paid path as rig-blocked;
 2. a post-decontamination Small anchor for both domains when the rig passes;
 3. machine-versus-naive and render-bundle decisions, or the applicable rig-blocked receipts;
-4. the final clean-tree release gate and runbook receipt.
+4. the exact-main release gates, same-commit Nightly Regression, dry cut, and runbook receipt.
 
 The paid runner is approval-bound. No LongMemEval score, leaderboard claim, or submission exists
 until those receipts are generated. Product release remains allowed when the benchmark rig blocks,
@@ -635,8 +636,8 @@ shell command is not the source of truth for a scored run.
 
 ## 9. Implementation receipts
 
-The code range contains 40 commits after the frozen plan baseline: 36 implementation and test
-commits, plus four architecture receipt and format commits. The main verification receipts are:
+The reviewed source branch contains 44 commits after the frozen plan baseline. GitHub squash-merged
+the reviewed tree into `main` as `1a56eea0`. The main verification receipts are:
 
 | Surface               | Receipt                                                                                                                                                                                                            |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -648,7 +649,7 @@ commits, plus four architecture receipt and format commits. The main verificatio
 | CLI contract          | `cli:check` passed with 564 tests. Environment and explicit bearer tokens no longer consult unrelated stored-login expiry metadata.                                                                                |
 | Benchmark rig         | `root:bench-gate-test` passed all 474 tests. Closed receipts bind A/A, preregistration, decision passes, and the anchor to one reviewed control contract. Decision and anchor seeds cannot reuse A/A seeds.        |
 | Release path          | The focused release suites passed 42 release and CI tests, 15 Helm tests, five authenticated browser tests, six runner tests, and four live SurrealDB 3.2.3 contracts. The docs build rendered 107 pages.          |
-| Full release gate     | The uncached `moon run --force :check` gate passed all 56 moon tasks from a clean tree after the final receipt update.                                                                                             |
+| Full release gate     | The uncached `moon run --force :check` gate passed all 56 moon tasks in 1 minute 8 seconds from the clean source head `5ebb0461`. Every applicable exact-head GitHub check then passed before the squash merge.    |
 
 The live One Surface test used the deterministic local embedding provider. It created and removed
 its own project, decisions, relationship, and temporary MCP API key.
@@ -667,6 +668,7 @@ remains stopped before A/A because no provider key or spending approval was supp
 - [Sibyl pull request 391](https://github.com/hyperb1iss/sibyl/pull/391)
 - [Sibyl pull request 395](https://github.com/hyperb1iss/sibyl/pull/395)
 - [Sibyl pull request 396](https://github.com/hyperb1iss/sibyl/pull/396)
+- [Sibyl pull request 406](https://github.com/hyperb1iss/sibyl/pull/406)
 - [Sibyl issue 394](https://github.com/hyperb1iss/sibyl/issues/394)
 - Local official receipts under `.moon/cache/evals/`
 - The v1.3 research input documents linked at the top of this plan
@@ -683,3 +685,4 @@ remains stopped before A/A because no provider key or spending approval was supp
 | 6     | Claude, focused implementation re-review  | Pass    | Confirmed exact control binding, three fresh decision seeds, all three A/A outcomes, closed receipt schemas, and anchor lineage. The final negative tests cover render configuration drift, geometry drift, and anchor seed reuse. |
 | 7     | Nash, exact-head implementation review    | Fail    | Reproduced a valid automation token being blocked by expired stored-login metadata during the live `sibyl context` observation. The other lifecycle, planner, migration, and benchmark probes passed.                              |
 | 8     | Nash, final exact-head re-review          | Pass    | Confirmed the automation-token repair, focused CLI regression, public six-observation live fixture on fresh SurrealDB 3.2.3, plan range and count accuracy, and a clean frozen tree.                                               |
+| 9     | Nash, CI task-semantics re-review         | Pass    | Rejected all 18 negative mutations across the six finite E2E tasks and confirmed that CI mode collects 45 E2E tests.                                                                                                               |
