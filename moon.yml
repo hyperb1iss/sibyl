@@ -604,6 +604,7 @@ tasks:
       # asserts the three stay in agreement. Without these the cache would
       # report a stale green after the gate itself changed.
       - .github/workflows/ci.yml
+      - apps/web/moon.yml
       - .github/workflows/image-cve-gate.yml
       - .github/actions/trivy-image-gate/action.yml
       - .trivyignore

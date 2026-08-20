@@ -658,7 +658,9 @@ jobs:
         run: cd apps/web && pnpm install --frozen-lockfile
 
       - name: Build frontend for E2E
-        run: moon run web:build
+        run: |
+          moon run web:build
+          test -f apps/web/.next/BUILD_ID
 
       - name: Start backend server
         run: |
@@ -693,15 +695,22 @@ jobs:
         run: |
           cd apps/web
           pnpm start > /tmp/sibyl-web.log 2>&1 &
+          web_pid=$!
           echo "Waiting for frontend to start..."
           for i in {1..60}; do
             if curl -fsS http://localhost:3337 > /dev/null; then
               echo "Frontend is ready!"
               break
             fi
+            if ! kill -0 "$web_pid" 2>/dev/null; then
+              echo "Frontend exited before becoming ready."
+              cat /tmp/sibyl-web.log
+              exit 1
+            fi
             echo "Attempt $i: Frontend not ready yet..."
             sleep 1
           done
+          curl -fsS http://localhost:3337 > /dev/null
 
       - name: Run e2e tests
         env:
