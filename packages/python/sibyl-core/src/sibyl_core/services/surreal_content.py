@@ -16,6 +16,7 @@ from uuid import uuid4
 import structlog
 
 from sibyl_core.backends.surreal import SurrealContentClient
+from sibyl_core.backends.surreal import records as _surreal_records
 from sibyl_core.backends.surreal.fulltext import (
     build_fulltext_query,
     build_fulltext_terms,
@@ -69,6 +70,8 @@ _SNIPPET_MAX_CHARS = 320
 _EMBEDDED_SURREAL_SCHEMES = ("memory://", "surrealkv://", "rocksdb://", "file://")
 log = structlog.get_logger()
 type _RawMemoryProviderCacheKey = tuple[EmbeddingProviderName, str, int, str]
+_normalize_record = _surreal_records.normalize_record
+_normalize_records = _surreal_records.normalize_records
 _raw_memory_embedding_provider: EmbeddingProvider | None = None
 _raw_memory_embedding_fingerprint: _RawMemoryProviderCacheKey | None = None
 
@@ -638,34 +641,6 @@ async def close_shared_surreal_content_client() -> None:
 @asynccontextmanager
 async def surreal_content_client() -> AsyncIterator[SurrealContentClient]:
     yield await get_shared_surreal_content_client()
-
-
-def _normalize_record(record: object) -> SurrealRecord | None:
-    if not isinstance(record, dict):
-        return None
-    out = {str(key): value for key, value in record.items()}
-    if "result" in out and ("status" in out or "time" in out):
-        return None
-    out.pop("id", None)
-    return out
-
-
-def _normalize_records(result: object) -> list[SurrealRecord]:
-    if result is None:
-        return []
-    if isinstance(result, dict):
-        payload = {str(key): value for key, value in result.items()}
-        if "result" in payload and ("status" in payload or "time" in payload):
-            return _normalize_records(payload.get("result"))
-        record = _normalize_record(payload)
-        return [record] if record is not None else []
-    if not isinstance(result, list):
-        return []
-
-    records: list[SurrealRecord] = []
-    for item in result:
-        records.extend(_normalize_records(item))
-    return records
 
 
 def _normalize_records_preserving_id(result: object) -> list[SurrealRecord]:

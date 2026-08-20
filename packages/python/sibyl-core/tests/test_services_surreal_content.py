@@ -11,12 +11,14 @@ from datetime import UTC, datetime
 import pytest
 from surrealdb import AsyncSurreal
 
+import sibyl_core.services.surreal_content as surreal_content_module
 from sibyl_core.backends.surreal.content_client import SurrealContentClient
 from sibyl_core.backends.surreal.content_schema import (
     CONTENT_ENTITY_ANCHOR_MIGRATION_DEFINITIONS,
     CONTENT_LINEAGE_RELATION_MIGRATION_DEFINITIONS,
     bootstrap_content_schema,
 )
+from sibyl_core.backends.surreal.records import normalize_record, normalize_records
 from sibyl_core.embeddings.providers import EmbeddingMetadata
 from sibyl_core.errors import RevisionConflictError
 from sibyl_core.models.reflection import ReflectionCandidate
@@ -45,6 +47,11 @@ from sibyl_core.services.surreal_content import (
     save_raw_memory,
     search_document_chunks,
 )
+
+
+def test_surreal_content_uses_canonical_record_normalizers() -> None:
+    assert surreal_content_module._normalize_record is normalize_record
+    assert surreal_content_module._normalize_records is normalize_records
 
 
 def _query_result(records: list[dict[str, object]]) -> list[dict[str, object]]:
