@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ast
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -88,7 +90,6 @@ async def test_delete_project_graph_data_sweeps_project_scoped_graph(
         "_get_graph_runtime",
         AsyncMock(return_value=SimpleNamespace(client=driver)),
     )
-    monkeypatch.setattr(graph_runtime, "_surreal_driver_for", lambda candidate: candidate)
 
     await graph_runtime.delete_project_graph_data("org-123", "project-alpha")
 
@@ -109,18 +110,13 @@ async def test_delete_project_graph_data_sweeps_project_scoped_graph(
 
 
 @pytest.mark.asyncio
-async def test_graph_search_index_stats_skips_archive_only_tables(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_graph_search_index_stats_skips_archive_only_tables() -> None:
     driver = _StatsDriver()
     index = graph_runtime.GraphSearchIndex(
         driver,
         "org-123",
         SimpleNamespace(),
     )
-
-    monkeypatch.setattr(graph_runtime, "_driver_for_client", lambda client, group_id: driver)
-    monkeypatch.setattr(graph_runtime, "_surreal_driver_for", lambda candidate: candidate)
 
     stats = await index.stats()
 
@@ -151,6 +147,46 @@ async def test_graph_stats_payload_skips_archive_only_tables(
     assert all("episode_count" not in query for query in client.queries)
     assert all("community_count" not in query for query in client.queries)
     assert all("saga_count" not in query for query in client.queries)
+
+
+def test_graph_runtime_contains_only_the_native_driver_construction_path() -> None:
+    source = Path(graph_runtime.__file__).read_text()
+    tree = ast.parse(source)
+    function_names = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    string_literals = {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+
+    assert "from_client" not in function_names
+    assert "_driver_for_client" not in function_names
+    assert "_native_driver_for_client" not in function_names
+    assert "_surreal_driver_for" not in function_names
+    assert all("MATCH (" not in literal for literal in string_literals)
+
+
+@pytest.mark.asyncio
+async def test_graph_query_adapter_binds_the_native_runtime_directly() -> None:
+    client = SimpleNamespace()
+    entity_manager = SimpleNamespace()
+    relationship_manager = SimpleNamespace()
+    runtime = SimpleNamespace(
+        client=client,
+        entity_manager=entity_manager,
+        relationship_manager=relationship_manager,
+    )
+
+    adapter = graph_runtime.GraphQueryAdapter(runtime, "org-123")
+
+    assert adapter._client is client
+    assert adapter._entities is entity_manager
+    assert adapter._relationships is relationship_manager
+    assert adapter._group_id == "org-123"
 
 
 @pytest.mark.asyncio

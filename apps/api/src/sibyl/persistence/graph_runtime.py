@@ -13,10 +13,7 @@ from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.services import KnowledgeReadService
 from sibyl_core.services.graph import (
-    EntityManager,
     GraphRuntime,
-    RelationshipManager,
-    SurrealGraphClient,
     entity_from_surreal_row,
     get_surreal_graph_runtime,
     normalize_records,
@@ -29,7 +26,6 @@ from sibyl_core.storage import (
     GraphStats,
     GraphStore,
     Page,
-    RelationshipPatch,
     RelationshipStore,
     SearchFilters,
     SearchHit,
@@ -63,29 +59,6 @@ def _normalize_result(result: object) -> list[dict[str, object]]:
         else:
             return rows
     return normalize_records(result)
-
-
-def _driver_for_client(client: Any, group_id: str) -> Any:
-    get_org_driver = getattr(client, "get_org_driver", None)
-    if callable(get_org_driver):
-        return get_org_driver(group_id)
-    return client
-
-
-def _native_driver_for_client(client: Any, group_id: str) -> Any:
-    driver = _driver_for_client(client, group_id)
-    surreal_driver = _surreal_driver_for(driver)
-    if surreal_driver is None:
-        raise RuntimeError("Supported graph runtime requires native Surreal graph operations")
-    return surreal_driver
-
-
-def _entity_manager_for(client: Any, group_id: str) -> Any:
-    return EntityManager(_native_driver_for_client(client, group_id), group_id=group_id)
-
-
-def _relationship_manager_for(client: Any, group_id: str) -> Any:
-    return RelationshipManager(_native_driver_for_client(client, group_id), group_id=group_id)
 
 
 def _decode_cursor(cursor: str | None) -> int:
@@ -139,30 +112,6 @@ def _coerce_int(value: object, *, default: int = 0) -> int:
         except ValueError:
             return default
     return default
-
-
-def _coerce_relationship(row: dict[str, object]) -> Relationship:
-    relationship_name = str(row.get("rel_type") or row.get("name") or "RELATED_TO")
-    try:
-        relationship_type = RelationshipType(relationship_name)
-    except ValueError:
-        relationship_type = RelationshipType.RELATED_TO
-
-    raw_metadata = row.get("metadata")
-    metadata: dict[str, object]
-    if isinstance(raw_metadata, dict):
-        metadata = {str(key): value for key, value in raw_metadata.items()}
-    else:
-        metadata = {}
-
-    return Relationship(
-        id=str(row.get("id") or row.get("uuid") or ""),
-        relationship_type=relationship_type,
-        source_id=str(row.get("source_id") or ""),
-        target_id=str(row.get("target_id") or ""),
-        weight=_coerce_float(row.get("weight")),
-        metadata=metadata,
-    )
 
 
 async def _surreal_group_count(driver: Any, table: str, group_id: str) -> int:
@@ -221,15 +170,6 @@ async def _surreal_rows_or_empty(
         raise
 
 
-def _surreal_driver_for(driver: Any) -> Any | None:
-    return driver if isinstance(driver, SurrealGraphClient) else None
-
-
-def _assert_legacy_graph_query_allowed(driver: Any, operation: str) -> None:
-    if _surreal_driver_for(driver) is not None:
-        raise RuntimeError(f"SurrealDB {operation} requires native graph operations")
-
-
 class GraphEntityStore(EntityStore):
     """EntityStore backed by the current native entity manager."""
 
@@ -237,14 +177,6 @@ class GraphEntityStore(EntityStore):
         self._manager = manager
         self._driver = driver
         self._group_id = group_id
-
-    @classmethod
-    def from_client(cls, client: Any, group_id: str) -> Self:
-        return cls(
-            _entity_manager_for(client, group_id),
-            driver=_driver_for_client(client, group_id),
-            group_id=group_id,
-        )
 
     @classmethod
     def from_runtime(cls, runtime: GraphRuntime, group_id: str) -> Self:
@@ -339,26 +271,13 @@ class GraphEntityStore(EntityStore):
             raise TypeError(f"cannot hydrate entity from {type(node).__name__}") from exc
 
     async def count(self) -> int:
-        if _surreal_driver_for(self._driver) is not None:
-            rows = _normalize_result(
-                await self._driver.execute_query(
-                    """
-                    SELECT count() AS cnt
-                    FROM entity
-                    WHERE group_id = $group_id
-                    GROUP ALL;
-                    """,
-                    group_id=self._group_id,
-                )
-            )
-            return _coerce_int(rows[0].get("cnt")) if rows else 0
-
         rows = _normalize_result(
             await self._driver.execute_query(
                 """
-                MATCH (n)
-                WHERE n.group_id = $group_id AND n.entity_type IS NOT NULL
-                RETURN count(n) AS cnt
+                SELECT count() AS cnt
+                FROM entity
+                WHERE group_id = $group_id
+                GROUP ALL;
                 """,
                 group_id=self._group_id,
             )
@@ -375,78 +294,22 @@ class GraphRelationshipStore(RelationshipStore):
         self._group_id = group_id
 
     @classmethod
-    def from_client(cls, client: Any, group_id: str) -> Self:
-        return cls(
-            _relationship_manager_for(client, group_id),
-            driver=_driver_for_client(client, group_id),
-            group_id=group_id,
-        )
-
-    @classmethod
     def from_runtime(cls, runtime: GraphRuntime, group_id: str) -> Self:
         return cls(runtime.relationship_manager, driver=runtime.client, group_id=group_id)
 
     async def get(self, relationship_id: str) -> Relationship | None:
-        if _surreal_driver_for(self._driver) is not None:
-            try:
-                return await self._manager.get(relationship_id)
-            except KeyError:
-                return None
-
-        _assert_legacy_graph_query_allowed(self._driver, "relationship get")
-
-        rows = _normalize_result(
-            await self._driver.execute_query(
-                """
-                MATCH (source)-[r]->(target)
-                WHERE r.group_id = $group_id AND r.uuid = $relationship_id
-                RETURN r.uuid AS id,
-                       source.uuid AS source_id,
-                       target.uuid AS target_id,
-                       type(r) AS rel_type,
-                       COALESCE(r.weight, 1.0) AS weight,
-                       COALESCE(r.attributes, {}) AS metadata
-                LIMIT 1
-                """,
-                group_id=self._group_id,
-                relationship_id=relationship_id,
-            )
-        )
-        if not rows:
+        try:
+            return await self._manager.get(relationship_id)
+        except KeyError:
             return None
-        return _coerce_relationship(rows[0])
 
     async def upsert(self, relationship: Relationship) -> Relationship:
         existing = await self.get(relationship.id)
-        if _surreal_driver_for(self._driver) is not None:
-            if existing is not None:
-                created_id = await self._manager.create(relationship)
-                refreshed = await self.get(created_id)
-                if refreshed is None:
-                    msg = f"Relationship not found after update: {created_id}"
-                    raise LookupError(msg)
-                return refreshed
-        else:
-            _assert_legacy_graph_query_allowed(self._driver, "relationship upsert")
-
         if existing is not None:
-            patch = RelationshipPatch(weight=relationship.weight, metadata=relationship.metadata)
-            await self._driver.execute_query(
-                """
-                MATCH ()-[r]->()
-                WHERE r.group_id = $group_id AND r.uuid = $relationship_id
-                SET r.weight = $weight,
-                    r.attributes = $metadata
-                RETURN r.uuid AS id
-                """,
-                group_id=self._group_id,
-                relationship_id=relationship.id,
-                weight=patch.weight,
-                metadata=patch.metadata or {},
-            )
-            refreshed = await self.get(relationship.id)
+            created_id = await self._manager.create(relationship)
+            refreshed = await self.get(created_id)
             if refreshed is None:
-                msg = f"Relationship not found after update: {relationship.id}"
+                msg = f"Relationship not found after update: {created_id}"
                 raise LookupError(msg)
             return refreshed
 
@@ -487,58 +350,20 @@ class GraphRelationshipStore(RelationshipStore):
         *,
         relationship_type: RelationshipType | None = None,
     ) -> list[Relationship]:
-        if _surreal_driver_for(self._driver) is not None:
-            return await self._manager.find_between(
-                source_id,
-                target_id,
-                relationship_type=relationship_type,
-            )
-
-        _assert_legacy_graph_query_allowed(self._driver, "relationship find_between")
-
-        rows = _normalize_result(
-            await self._driver.execute_query(
-                """
-                MATCH (source {uuid: $source_id})-[r]-(target {uuid: $target_id})
-                WHERE r.group_id = $group_id
-                RETURN r.uuid AS id,
-                       source.uuid AS source_id,
-                       target.uuid AS target_id,
-                       type(r) AS rel_type,
-                       COALESCE(r.weight, 1.0) AS weight,
-                       COALESCE(r.attributes, {}) AS metadata
-                """,
-                group_id=self._group_id,
-                source_id=source_id,
-                target_id=target_id,
-            )
+        return await self._manager.find_between(
+            source_id,
+            target_id,
+            relationship_type=relationship_type,
         )
-        relationships = [_coerce_relationship(row) for row in rows]
-        if relationship_type is None:
-            return relationships
-        return [rel for rel in relationships if rel.relationship_type == relationship_type]
 
     async def count(self) -> int:
-        if _surreal_driver_for(self._driver) is not None:
-            rows = _normalize_result(
-                await self._driver.execute_query(
-                    """
-                    SELECT count() AS cnt
-                    FROM relates_to
-                    WHERE group_id = $group_id
-                    GROUP ALL;
-                    """,
-                    group_id=self._group_id,
-                )
-            )
-            return _coerce_int(rows[0].get("cnt")) if rows else 0
-
         rows = _normalize_result(
             await self._driver.execute_query(
                 """
-                MATCH ()-[r]->()
-                WHERE r.group_id = $group_id
-                RETURN count(r) AS cnt
+                SELECT count() AS cnt
+                FROM relates_to
+                WHERE group_id = $group_id
+                GROUP ALL;
                 """,
                 group_id=self._group_id,
             )
@@ -553,10 +378,6 @@ class GraphSearchIndex(SearchIndex):
         self._client = client
         self._group_id = group_id
         self._entities = entities
-
-    @classmethod
-    def from_client(cls, client: Any, group_id: str, entities: GraphEntityStore) -> Self:
-        return cls(client, group_id, entities)
 
     async def search(
         self,
@@ -583,95 +404,56 @@ class GraphSearchIndex(SearchIndex):
         return hits[:limit]
 
     async def stats(self) -> GraphStats:
-        driver = _driver_for_client(self._client, self._group_id)
-        if _surreal_driver_for(driver) is not None:
-            from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
-            from sibyl_core.migrate.legacy_graph_archive import (
-                ARCHIVE_GRAPH_EDGES,
-                ARCHIVE_GRAPH_TABLES,
-            )
-
-            entity_rows = await _surreal_rows_or_empty(
-                driver,
-                """
-                    SELECT entity_type, count() AS cnt
-                    FROM entity
-                    WHERE group_id = $group_id
-                    GROUP BY entity_type;
-                    """,
-                group_id=self._group_id,
-            )
-            relates_to_rows = await _surreal_rows_or_empty(
-                driver,
-                """
-                    SELECT name AS relationship_type, count() AS cnt
-                    FROM relates_to
-                    WHERE group_id = $group_id
-                    GROUP BY name;
-                    """,
-                group_id=self._group_id,
-            )
-
-            entities_by_type = {
-                str(row.get("entity_type")): _coerce_int(row.get("cnt"))
-                for row in entity_rows
-                if row.get("entity_type")
-            }
-            for table in GRAPH_TABLES:
-                if table == "entity" or table in ARCHIVE_GRAPH_TABLES:
-                    continue
-                count = await _surreal_group_count(driver, table, self._group_id)
-                if count:
-                    entities_by_type[table] = count
-
-            relationships_by_type = {
-                str(row.get("relationship_type") or "RELATED_TO"): _coerce_int(row.get("cnt"))
-                for row in relates_to_rows
-                if _coerce_int(row.get("cnt"))
-            }
-            for table in GRAPH_EDGES:
-                if table == "relates_to" or table in ARCHIVE_GRAPH_EDGES:
-                    continue
-                count = await _surreal_group_count(driver, table, self._group_id)
-                if count:
-                    relationships_by_type[table.upper()] = count
-
-            return GraphStats(
-                total_entities=sum(entities_by_type.values()),
-                total_relationships=sum(relationships_by_type.values()),
-                entities_by_type=entities_by_type,
-                relationships_by_type=relationships_by_type,
-            )
-
-        node_rows = _normalize_result(
-            await driver.execute_query(
-                """
-                MATCH (n)
-                WHERE n.group_id = $group_id AND n.entity_type IS NOT NULL
-                RETURN n.entity_type AS entity_type, count(*) AS cnt
-                """,
-                group_id=self._group_id,
-            )
+        from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
+        from sibyl_core.migrate.legacy_graph_archive import (
+            ARCHIVE_GRAPH_EDGES,
+            ARCHIVE_GRAPH_TABLES,
         )
-        relationship_rows = _normalize_result(
-            await driver.execute_query(
-                """
-                MATCH ()-[r]->()
-                WHERE r.group_id = $group_id
-                RETURN type(r) AS relationship_type, count(*) AS cnt
+
+        entity_rows = await _surreal_rows_or_empty(
+            self._client,
+            """
+                SELECT entity_type, count() AS cnt
+                FROM entity
+                WHERE group_id = $group_id
+                GROUP BY entity_type;
                 """,
-                group_id=self._group_id,
-            )
+            group_id=self._group_id,
+        )
+        relates_to_rows = await _surreal_rows_or_empty(
+            self._client,
+            """
+                SELECT name AS relationship_type, count() AS cnt
+                FROM relates_to
+                WHERE group_id = $group_id
+                GROUP BY name;
+                """,
+            group_id=self._group_id,
         )
 
         entities_by_type = {
-            str(row.get("entity_type") or "unknown"): _coerce_int(row.get("cnt"))
-            for row in node_rows
+            str(row.get("entity_type")): _coerce_int(row.get("cnt"))
+            for row in entity_rows
+            if row.get("entity_type")
         }
+        for table in GRAPH_TABLES:
+            if table == "entity" or table in ARCHIVE_GRAPH_TABLES:
+                continue
+            count = await _surreal_group_count(self._client, table, self._group_id)
+            if count:
+                entities_by_type[table] = count
+
         relationships_by_type = {
             str(row.get("relationship_type") or "RELATED_TO"): _coerce_int(row.get("cnt"))
-            for row in relationship_rows
+            for row in relates_to_rows
+            if _coerce_int(row.get("cnt"))
         }
+        for table in GRAPH_EDGES:
+            if table == "relates_to" or table in ARCHIVE_GRAPH_EDGES:
+                continue
+            count = await _surreal_group_count(self._client, table, self._group_id)
+            if count:
+                relationships_by_type[table.upper()] = count
 
         return GraphStats(
             total_entities=sum(entities_by_type.values()),
@@ -694,16 +476,6 @@ class ActiveGraphStore(GraphStore):
         self._entities = entities
         self._relationships = relationships
         self._search = search
-
-    @classmethod
-    def from_client(cls, client: Any, group_id: str) -> Self:
-        entities = GraphEntityStore.from_client(client, group_id)
-        relationships = GraphRelationshipStore.from_client(client, group_id)
-        return cls(
-            entities=entities,
-            relationships=relationships,
-            search=GraphSearchIndex.from_client(client, group_id, entities),
-        )
 
     @classmethod
     def from_runtime(cls, runtime: GraphRuntime, group_id: str) -> Self:
@@ -733,10 +505,6 @@ class GraphReadServiceAdapter(KnowledgeReadService):
 
     def __init__(self, store: GraphStore) -> None:
         self._store = store
-
-    @classmethod
-    def from_client(cls, client: Any, group_id: str) -> Self:
-        return cls(ActiveGraphStore.from_client(client, group_id))
 
     @classmethod
     def from_runtime(cls, runtime: GraphRuntime, group_id: str) -> Self:
@@ -806,33 +574,11 @@ class TaskGraphRuntime:
 class GraphQueryAdapter:
     """Thin graph query surface for routes that still need runtime reads."""
 
-    def __init__(
-        self,
-        client: Any,
-        group_id: str,
-        *,
-        entity_manager: Any | None = None,
-        relationship_manager: Any | None = None,
-    ) -> None:
-        self._client = client
+    def __init__(self, runtime: GraphRuntime, group_id: str) -> None:
+        self._client = runtime.client
         self._group_id = group_id
-        self._driver = _driver_for_client(client, group_id)
-        self._entities = entity_manager or _entity_manager_for(client, group_id)
-        self._relationships = relationship_manager or _relationship_manager_for(client, group_id)
-
-    @classmethod
-    def from_runtime(cls, runtime: GraphRuntime, group_id: str) -> Self:
-        return cls(
-            runtime.client,
-            group_id,
-            entity_manager=runtime.entity_manager,
-            relationship_manager=runtime.relationship_manager,
-        )
-
-    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
-        _assert_legacy_graph_query_allowed(self._driver, "raw query")
-        result = await self._driver.execute_query(query, group_id=self._group_id, **params)
-        return _normalize_result(result)
+        self._entities = runtime.entity_manager
+        self._relationships = runtime.relationship_manager
 
     async def list_entities_by_type(
         self,
@@ -932,72 +678,41 @@ class GraphQueryAdapter:
         if not scoped_entity_ids:
             return []
 
-        if _surreal_driver_for(self._driver) is not None:
-            type_clause = "AND name IN $relationship_types" if relationship_types else ""
-            rows = _normalize_result(
-                await self._driver.execute_query(
-                    f"""
-                    SELECT
-                        id AS record_id,
-                        uuid,
-                        name,
-                        fact,
-                        group_id,
-                        episodes,
-                        attributes,
-                        created_at,
-                        expired_at,
-                        valid_at,
-                        invalid_at,
-                        source_id AS source_uuid,
-                        target_id AS target_uuid
-                    FROM relates_to
-                    WHERE group_id = $group_id
-                      AND source_id IN $entity_ids
-                      AND target_id IN $entity_ids
-                      {type_clause}
-                    ORDER BY uuid DESC
-                    LIMIT $limit
-                    START $offset;
-                    """,  # noqa: S608
-                    group_id=self._group_id,
-                    entity_ids=sorted(scoped_entity_ids),
-                    relationship_types=[rel.value for rel in relationship_types or []],
-                    limit=limit,
-                    offset=max(offset, 0),
-                )
+        type_clause = "AND name IN $relationship_types" if relationship_types else ""
+        rows = _normalize_result(
+            await self._client.execute_query(
+                f"""
+                SELECT
+                    id AS record_id,
+                    uuid,
+                    name,
+                    fact,
+                    group_id,
+                    episodes,
+                    attributes,
+                    created_at,
+                    expired_at,
+                    valid_at,
+                    invalid_at,
+                    source_id AS source_uuid,
+                    target_id AS target_uuid
+                FROM relates_to
+                WHERE group_id = $group_id
+                  AND source_id IN $entity_ids
+                  AND target_id IN $entity_ids
+                  {type_clause}
+                ORDER BY uuid DESC
+                LIMIT $limit
+                START $offset;
+                """,  # noqa: S608
+                group_id=self._group_id,
+                entity_ids=sorted(scoped_entity_ids),
+                relationship_types=[rel.value for rel in relationship_types or []],
+                limit=limit,
+                offset=max(offset, 0),
             )
-            return [relationship_from_surreal_row(row) for row in rows]
-
-        remaining_offset = max(offset, 0)
-        page_offset = 0
-        page_size = max(200, min(max(limit, 1) * 2, 1000))
-        relationships: list[Relationship] = []
-
-        while len(relationships) < limit:
-            batch = await self._relationships.list_all(
-                relationship_types=relationship_types,
-                limit=page_size,
-                offset=page_offset,
-            )
-            if not batch:
-                break
-
-            page_offset += len(batch)
-            for relationship in batch:
-                if (
-                    relationship.source_id not in scoped_entity_ids
-                    or relationship.target_id not in scoped_entity_ids
-                ):
-                    continue
-                if remaining_offset:
-                    remaining_offset -= 1
-                    continue
-                relationships.append(relationship)
-                if len(relationships) >= limit:
-                    break
-
-        return relationships
+        )
+        return [relationship_from_surreal_row(row) for row in rows]
 
     async def get_connection_counts(
         self,
@@ -1010,52 +725,28 @@ class GraphQueryAdapter:
             return {}
 
         counts = dict.fromkeys(scoped_entity_ids, 0)
-        if _surreal_driver_for(self._driver) is not None:
-            type_clause = "AND name IN $relationship_types" if relationship_types else ""
-            rows = _normalize_result(
-                await self._driver.execute_query(
-                    f"""
-                    SELECT source_id, target_id
-                    FROM relates_to
-                    WHERE group_id = $group_id
-                      AND (source_id IN $entity_ids OR target_id IN $entity_ids)
-                      {type_clause};
-                    """,  # noqa: S608
-                    group_id=self._group_id,
-                    entity_ids=sorted(scoped_entity_ids),
-                    relationship_types=[rel.value for rel in relationship_types or []],
-                )
+        type_clause = "AND name IN $relationship_types" if relationship_types else ""
+        rows = _normalize_result(
+            await self._client.execute_query(
+                f"""
+                SELECT source_id, target_id
+                FROM relates_to
+                WHERE group_id = $group_id
+                  AND (source_id IN $entity_ids OR target_id IN $entity_ids)
+                  {type_clause};
+                """,  # noqa: S608
+                group_id=self._group_id,
+                entity_ids=sorted(scoped_entity_ids),
+                relationship_types=[rel.value for rel in relationship_types or []],
             )
-            for row in rows:
-                source_id = str(row.get("source_id") or "")
-                target_id = str(row.get("target_id") or "")
-                if source_id in counts:
-                    counts[source_id] += 1
-                if target_id in counts and target_id != source_id:
-                    counts[target_id] += 1
-            return counts
-
-        page_offset = 0
-        page_size = 1000
-
-        while True:
-            batch = await self._relationships.list_all(
-                relationship_types=relationship_types,
-                limit=page_size,
-                offset=page_offset,
-            )
-            if not batch:
-                break
-
-            page_offset += len(batch)
-            for relationship in batch:
-                if relationship.source_id in counts:
-                    counts[relationship.source_id] += 1
-                if (
-                    relationship.target_id in counts
-                    and relationship.target_id != relationship.source_id
-                ):
-                    counts[relationship.target_id] += 1
+        )
+        for row in rows:
+            source_id = str(row.get("source_id") or "")
+            target_id = str(row.get("target_id") or "")
+            if source_id in counts:
+                counts[source_id] += 1
+            if target_id in counts and target_id != source_id:
+                counts[target_id] += 1
 
         return counts
 
@@ -1081,15 +772,10 @@ class GraphQueryAdapter:
         entity_types: list[EntityType] | None = None,
         limit: int = 10,
     ) -> list[tuple[Entity, float]]:
-        return await self._entities.search(query, entity_types=entity_types, limit=limit)
-
-    async def execute_read_org(self, query: str, **params: object) -> list[dict[str, object]]:
-        return await self._client.execute_read_org(
-            query,
-            self._group_id,
-            allow_surreal=False,
-            group_id=self._group_id,
-            **params,
+        return await self._entities.search(
+            query=query,
+            entity_types=entity_types,
+            limit=limit,
         )
 
     async def get_clusters_for_visualization(
@@ -1172,7 +858,7 @@ async def get_graph_store(group_id: str) -> ActiveGraphStore:
 
 async def get_graph_query_adapter(group_id: str) -> GraphQueryAdapter:
     runtime = await _get_graph_runtime(group_id)
-    return GraphQueryAdapter.from_runtime(runtime, group_id)
+    return GraphQueryAdapter(runtime, group_id)
 
 
 async def execute_surreal_graph_query(
@@ -1181,11 +867,7 @@ async def execute_surreal_graph_query(
     **params: object,
 ) -> list[dict[str, object]] | None:
     runtime = await _get_graph_runtime(group_id)
-    driver = runtime.client
-    surreal_driver = _surreal_driver_for(driver)
-    if surreal_driver is None:
-        return None
-    result = await surreal_driver.execute_query(query, group_id=group_id, **params)
+    result = await runtime.client.execute_query(query, group_id=group_id, **params)
     return _normalize_result(result)
 
 
@@ -1215,74 +897,66 @@ async def update_graph_entity(
 async def delete_graph_data(group_id: str) -> None:
     runtime = await _get_graph_runtime(group_id)
     driver = runtime.client
-    if _surreal_driver_for(driver) is not None:
-        from sibyl_core.backends.surreal.records import raise_on_error
-        from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
+    from sibyl_core.backends.surreal.records import raise_on_error
+    from sibyl_core.backends.surreal.schema import GRAPH_EDGES, GRAPH_TABLES
 
-        # A failure here must propagate, not silently fall through to the
-        # per-table loop: degrading from an atomic clear to a non-atomic sweep
-        # on error is how a half-deleted graph used to slip through unnoticed.
-        graph_ops = getattr(driver, "graph_ops", None)
-        if graph_ops is not None:
-            await graph_ops.clear_data(driver, group_ids=[group_id])
-            return
-
-        # Table names are fixed module constants; the only runtime value
-        # ($group_id) stays parameter-bound. One transaction keeps the
-        # namespace-scoped clear atomic.
-        statements = "\n".join(
-            f"DELETE FROM {table} WHERE group_id = $group_id;"  # noqa: S608
-            for table in (*GRAPH_EDGES, *GRAPH_TABLES)
-        )
-        result = await driver.execute_query_raw(
-            f"BEGIN TRANSACTION;\n{statements}\nCOMMIT TRANSACTION;",
-            group_id=group_id,
-        )
-        raise_on_error(result, query="delete_graph_data")
+    # A failure here must propagate, not silently fall through to the
+    # per-table loop: degrading from an atomic clear to a non-atomic sweep
+    # on error is how a half-deleted graph used to slip through unnoticed.
+    graph_ops = getattr(driver, "graph_ops", None)
+    if graph_ops is not None:
+        await graph_ops.clear_data(driver, group_ids=[group_id])
         return
 
-    raise RuntimeError("Supported graph runtime requires native Surreal graph operations")
+    # Table names are fixed module constants; the only runtime value
+    # ($group_id) stays parameter-bound. One transaction keeps the
+    # namespace-scoped clear atomic.
+    statements = "\n".join(
+        f"DELETE FROM {table} WHERE group_id = $group_id;"  # noqa: S608
+        for table in (*GRAPH_EDGES, *GRAPH_TABLES)
+    )
+    result = await driver.execute_query_raw(
+        f"BEGIN TRANSACTION;\n{statements}\nCOMMIT TRANSACTION;",
+        group_id=group_id,
+    )
+    raise_on_error(result, query="delete_graph_data")
 
 
 async def delete_project_graph_data(group_id: str, project_id: str) -> None:
     runtime = await _get_graph_runtime(group_id)
     driver = runtime.client
-    if _surreal_driver_for(driver) is not None:
-        from sibyl_core.backends.surreal.records import raise_on_error
+    from sibyl_core.backends.surreal.records import raise_on_error
 
-        query = """
-            BEGIN TRANSACTION;
-            LET $project_entity_ids = (
-                SELECT VALUE uuid FROM entity
-                WHERE group_id = $group_id
-                  AND (project_id = $project_id OR uuid = $project_id)
-            );
-            LET $project_episode_ids = (
-                SELECT VALUE uuid FROM episode
-                WHERE group_id = $group_id AND project_id = $project_id
-            );
-            DELETE FROM relates_to
+    query = """
+        BEGIN TRANSACTION;
+        LET $project_entity_ids = (
+            SELECT VALUE uuid FROM entity
             WHERE group_id = $group_id
-              AND (source_id IN $project_entity_ids OR target_id IN $project_entity_ids);
-            DELETE FROM mentions
-            WHERE group_id = $group_id
-              AND (source_id IN $project_episode_ids OR target_id IN $project_entity_ids);
-            DELETE FROM entity
-            WHERE group_id = $group_id
-              AND (project_id = $project_id OR uuid = $project_id);
-            DELETE FROM episode
-            WHERE group_id = $group_id AND project_id = $project_id;
-            COMMIT TRANSACTION;
-        """
-        result = await driver.execute_query_raw(
-            query,
-            group_id=group_id,
-            project_id=project_id,
-        )
-        raise_on_error(result, query="delete_project_graph_data")
-        return
-
-    raise RuntimeError("Supported graph runtime requires native Surreal graph operations")
+              AND (project_id = $project_id OR uuid = $project_id)
+        );
+        LET $project_episode_ids = (
+            SELECT VALUE uuid FROM episode
+            WHERE group_id = $group_id AND project_id = $project_id
+        );
+        DELETE FROM relates_to
+        WHERE group_id = $group_id
+          AND (source_id IN $project_entity_ids OR target_id IN $project_entity_ids);
+        DELETE FROM mentions
+        WHERE group_id = $group_id
+          AND (source_id IN $project_episode_ids OR target_id IN $project_entity_ids);
+        DELETE FROM entity
+        WHERE group_id = $group_id
+          AND (project_id = $project_id OR uuid = $project_id);
+        DELETE FROM episode
+        WHERE group_id = $group_id AND project_id = $project_id;
+        COMMIT TRANSACTION;
+    """
+    result = await driver.execute_query_raw(
+        query,
+        group_id=group_id,
+        project_id=project_id,
+    )
+    raise_on_error(result, query="delete_project_graph_data")
 
 
 def graph_stats_payload(stats: GraphStats) -> dict[str, object]:
