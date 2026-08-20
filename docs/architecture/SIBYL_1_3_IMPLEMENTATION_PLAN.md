@@ -5,7 +5,7 @@
 - Working task: `8be323d1-0000-4ce2-9661-8ca504f17e17`
 - Starting commit: `c3c786ab603a67e45689c765b2365f6d3cef8bc6`
 - Plan baseline: `1e8e0b4b`
-- Implemented code range: `1e8e0b4b..405f1eb7`
+- Implemented code range: `1e8e0b4b..bc95c476`
 - Release thesis: one memory contract across every public surface
 
 This plan replaces the v1.3 scope in [`SIBYL_POST_1_0_ROADMAP.md`](SIBYL_POST_1_0_ROADMAP.md), the
@@ -635,20 +635,20 @@ shell command is not the source of truth for a scored run.
 
 ## 9. Implementation receipts
 
-The code range contains 38 commits after the frozen plan baseline: 35 implementation and test
-commits, plus three architecture receipt and format commits. The main verification receipts are:
+The code range contains 40 commits after the frozen plan baseline: 36 implementation and test
+commits, plus four architecture receipt and format commits. The main verification receipts are:
 
-| Surface               | Receipt                                                                                                                                                                                                             |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| One Surface lifecycle | One live project fixture passed all six observations against SurrealDB 3.2.3. The fixture covered context sections, fast evidence, naive evidence, REST, the installed `sibyl context` command, and streamable MCP. |
-| Lifecycle planner     | A live SurrealDB 3.2.3 `EXPLAIN FULL` receipt selected a target-first union index scan for the forced `idx_relates_target_created` path. Candidate-specific keyset scans replace unbounded offset paging.           |
-| Schema migration      | Graph schema migration 20 repairs absent, string, and malformed edge timestamps before restoring the required datetime contract. Live and embedded upgrade tests cover the migration and its indexed query.         |
-| Core contract         | `core:check` passed with 2,698 tests, 14 expected skips, and one documented xfail.                                                                                                                                  |
-| API contract          | `api:check` passed, including current-role MCP authorization, hidden-target ordering, retry truth, derived-work receipts, readiness, and scoped API-key persistence.                                                |
-| CLI contract          | `cli:check` passed with 563 tests.                                                                                                                                                                                  |
-| Benchmark rig         | `root:bench-gate-test` passed all 474 tests. Closed receipts bind A/A, preregistration, decision passes, and the anchor to one reviewed control contract. Decision and anchor seeds cannot reuse A/A seeds.         |
-| Release path          | The focused release suites passed 42 release and CI tests, 15 Helm tests, five authenticated browser tests, six runner tests, and four live SurrealDB 3.2.3 contracts. The docs build rendered 107 pages.           |
-| Full release gate     | Pending refresh on the exact documentation head.                                                                                                                                                                    |
+| Surface               | Receipt                                                                                                                                                                                                            |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| One Surface lifecycle | One live project fixture passed all six observations against SurrealDB 3.2.3. The installed `sibyl context` observation also passed with a fresh automation token and an expired stored login for the same server. |
+| Lifecycle planner     | A live SurrealDB 3.2.3 `EXPLAIN FULL` receipt selected a target-first union index scan for the forced `idx_relates_target_created` path. Candidate-specific keyset scans replace unbounded offset paging.          |
+| Schema migration      | Graph schema migration 20 repairs absent, string, and malformed edge timestamps before restoring the required datetime contract. Live and embedded upgrade tests cover the migration and its indexed query.        |
+| Core contract         | `core:check` passed with 2,698 tests, 14 expected skips, and one documented xfail.                                                                                                                                 |
+| API contract          | `api:check` passed, including current-role MCP authorization, hidden-target ordering, retry truth, derived-work receipts, readiness, and scoped API-key persistence.                                               |
+| CLI contract          | `cli:check` passed with 564 tests. Environment and explicit bearer tokens no longer consult unrelated stored-login expiry metadata.                                                                                |
+| Benchmark rig         | `root:bench-gate-test` passed all 474 tests. Closed receipts bind A/A, preregistration, decision passes, and the anchor to one reviewed control contract. Decision and anchor seeds cannot reuse A/A seeds.        |
+| Release path          | The focused release suites passed 42 release and CI tests, 15 Helm tests, five authenticated browser tests, six runner tests, and four live SurrealDB 3.2.3 contracts. The docs build rendered 107 pages.          |
+| Full release gate     | Pending refresh on the exact documentation head.                                                                                                                                                                   |
 
 The live One Surface test used the deterministic local embedding provider. It created and removed
 its own project, decisions, relationship, and temporary MCP API key.
@@ -681,4 +681,5 @@ remains stopped before A/A because no provider key or spending approval was supp
 | 4     | Nash, focused implementation re-review    | Fail    | Confirmed the original code failures were fixed, then rejected the frozen document because its commit range, test counts, and full-gate receipt predated the repairs.                                                              |
 | 5     | Claude, cross-model implementation review | Fail    | Found remaining A/A receipt-closure and negative-test gaps. A separate objection about preregistration timing did not apply because the locked protocol runs A/A before preregistration.                                           |
 | 6     | Claude, focused implementation re-review  | Pass    | Confirmed exact control binding, three fresh decision seeds, all three A/A outcomes, closed receipt schemas, and anchor lineage. The final negative tests cover render configuration drift, geometry drift, and anchor seed reuse. |
-| 7     | Nash, final exact-head review             | Pending | Awaiting the current documentation commit and uncached full release gate.                                                                                                                                                          |
+| 7     | Nash, exact-head implementation review    | Fail    | Reproduced a valid automation token being blocked by expired stored-login metadata during the live `sibyl context` observation. The other lifecycle, planner, migration, and benchmark probes passed.                              |
+| 8     | Nash, final exact-head re-review          | Pending | Awaiting the current documentation commit and uncached full release gate.                                                                                                                                                          |
