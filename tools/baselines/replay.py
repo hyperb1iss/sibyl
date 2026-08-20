@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 from mcp import ClientSession
-from mcp.client.streamable_http import streamable_http_client
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
 from tools.baselines.common import (
     CASE_FILE_ORDER,
@@ -181,9 +181,9 @@ async def replay_all(
 
             current_token = await ensure_token()
             transport_client = await stack.enter_async_context(
-                httpx.AsyncClient(timeout=30.0, headers=auth_headers(current_token))
+                create_mcp_http_client(headers=auth_headers(current_token))
             )
-            read_stream, write_stream, _ = await stack.enter_async_context(
+            read_stream, write_stream = await stack.enter_async_context(
                 streamable_http_client(mcp_url, http_client=transport_client)
             )
             mcp_session = await stack.enter_async_context(ClientSession(read_stream, write_stream))

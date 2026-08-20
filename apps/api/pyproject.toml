@@ -36,8 +36,7 @@ dependencies = [
     "sibyl-core[crawler,embeddings,graph,graphrag,llm]==1.2.2",
     # Core Framework
     "fastapi>=0.141.1",
-    # mcp 2.0 removed FastMCP (the server surface sibyl builds on); migration tracked in a repo issue.
-    "mcp>=1.29.0,<2",
+    "mcp>=2.0.0,<3",
     "starlette>=1.4.1",
     "uvicorn[standard]>=0.52.1",
     # Database (server-only)
@@ -280,10 +279,6 @@ filterwarnings = [
     "ignore::pytest.PytestUnraisableExceptionWarning",
     "ignore:Remove `format_exc_info`:UserWarning",
     "ignore:unclosed.*:ResourceWarning",
-    # mcp is held at <2 (FastMCP removed in 2.0; migration tracked in a repo
-    # issue) and its 1.x settings model trips pydantic-settings' new
-    # incomplete-forward-ref warning. Drop this filter with the mcp 2 move.
-    "ignore::pydantic_settings.exceptions.IncompleteFieldDefinitionWarning",
 ]
 markers = [
     "integration: marks tests as integration tests",

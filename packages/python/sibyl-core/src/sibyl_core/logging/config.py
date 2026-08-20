@@ -127,7 +127,6 @@ def _configure_stdlib_logging(level: str) -> None:
         "arq.worker",
         "arq.jobs",
         "mcp",
-        "fastmcp",
         "neo4j",
         "claude_code",
     ]

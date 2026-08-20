@@ -98,10 +98,10 @@ def create_combined_app(
     api_app = create_api_app()
 
     # Create MCP server
-    mcp = create_mcp_server(host=host, port=port)
+    mcp = create_mcp_server()
 
     # Get the MCP ASGI app (streamable HTTP transport)
-    mcp_app = mcp.streamable_http_app()
+    mcp_app = mcp.streamable_http_app(host=host, stateless_http=False)
 
     @asynccontextmanager
     async def lifespan(_app: Starlette) -> "AsyncGenerator[None]":
@@ -208,7 +208,7 @@ def run_server(
         # Legacy stdio mode - MCP only
         from sibyl.server import create_mcp_server
 
-        mcp = create_mcp_server(host=host, port=port)
+        mcp = create_mcp_server()
         mcp.run(transport="stdio")
     else:
         # HTTP mode - combined app with REST API + MCP

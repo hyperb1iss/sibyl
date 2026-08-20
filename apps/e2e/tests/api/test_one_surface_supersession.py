@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 import pytest
 from mcp import ClientSession
-from mcp.client.streamable_http import streamable_http_client
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
 from tests.conftest import API_BASE_URL, CLIRunner
 
@@ -121,10 +121,10 @@ async def _mcp_search(*, api_key: str, marker: str, project_id: str) -> dict[str
     mcp_url = f"{API_BASE_URL.removesuffix('/api')}/mcp"
     headers = {"Authorization": f"Bearer {api_key}"}
     async with (
-        httpx.AsyncClient(timeout=30.0, headers=headers) as transport_client,
+        create_mcp_http_client(headers=headers) as transport_client,
         streamable_http_client(mcp_url, http_client=transport_client) as streams,
     ):
-        read_stream, write_stream, _ = streams
+        read_stream, write_stream = streams
         async with ClientSession(read_stream, write_stream) as session:
             await session.initialize()
             result = await session.call_tool(

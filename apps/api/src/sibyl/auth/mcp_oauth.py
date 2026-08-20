@@ -1,7 +1,7 @@
-"""OAuth Authorization Server provider for FastMCP.
+"""OAuth Authorization Server provider for MCPServer.
 
 This enables Codex/MCP clients to authenticate via standard OAuth endpoints
-served by FastMCP when `auth_server_provider` is configured:
+served by MCPServer when `auth_server_provider` is configured:
 - `/.well-known/oauth-authorization-server`
 - `/authorize`
 - `/token`
@@ -167,7 +167,7 @@ class _RefreshSessionRecord(Protocol):
 class SibylMcpOAuthProvider(
     OAuthAuthorizationServerProvider[SibylAuthorizationCode, RefreshToken, AccessToken]
 ):
-    """OAuth provider for FastMCP auth routes."""
+    """OAuth provider for MCPServer auth routes."""
 
     def __init__(self) -> None:
         self._clients: dict[str, OAuthClientInformationFull] = {}

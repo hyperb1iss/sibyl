@@ -23,7 +23,7 @@ class _FakeMCPServer:
     def __init__(self) -> None:
         self.session_manager = _FakeSessionManager()
 
-    def streamable_http_app(self) -> Starlette:
+    def streamable_http_app(self, **_kwargs: object) -> Starlette:
         return Starlette()
 
 
@@ -51,7 +51,7 @@ async def test_fully_surreal_mode_skips_legacy_postgres_bootstrap(
     monkeypatch.setattr(main_module.settings, "store", "surreal")
     monkeypatch.setattr(main_module.settings, "auth_store", "surreal")
     monkeypatch.setattr("sibyl.api.app.create_api_app", Starlette)
-    monkeypatch.setattr("sibyl.server.create_mcp_server", lambda **_: _FakeMCPServer())
+    monkeypatch.setattr("sibyl.server.create_mcp_server", _FakeMCPServer)
     monkeypatch.setattr(
         runtime_services_module,
         "bootstrap_surreal_runtime_schemas",

@@ -1,8 +1,7 @@
-"""FastMCP token verification for Sibyl.
+"""MCPServer token verification for Sibyl.
 
-FastMCP can be configured as an OAuth Resource Server. We don't run a full OAuth
-authorization server yet, but we still want MCP endpoints to require a valid
-Bearer token.
+MCPServer can be configured as an OAuth Resource Server. Sibyl accepts both its
+own OAuth access tokens and scoped API keys at the MCP endpoint.
 
 Accepted tokens:
 - JWT access tokens issued by Sibyl (/api/auth/*)
