@@ -816,7 +816,7 @@ async def test_local_queue_broker_retries_failed_embedding_job() -> None:
     await broker.startup()
     entities = [{"id": "session-1", "content": "evidence"}]
     first_job_id = await broker.enqueue_entity_embedding_backfill(entities, "org-123")
-    first_info = await _wait_for_job_status(broker, first_job_id, JobStatus.COMPLETE)
+    first_info = await _wait_for_job_status(broker, first_job_id, JobStatus.FAILED)
     retry_job_id = await broker.enqueue_entity_embedding_backfill(entities, "org-123")
     retry_info = await _wait_for_job_status(broker, retry_job_id, JobStatus.COMPLETE)
 
@@ -824,6 +824,62 @@ async def test_local_queue_broker_retries_failed_embedding_job() -> None:
     assert retry_job_id == first_job_id
     assert retry_info.result == {"embedded": True}
     assert calls == 2
+
+    await broker.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_local_queue_broker_closes_failed_create_marker_and_retries_same_id() -> None:
+    calls = 0
+
+    async def create_entity(
+        _ctx: dict[str, object],
+        entity_data: dict[str, object],
+        entity_type: str,
+        group_id: str,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        nonlocal calls
+        del entity_type, group_id
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("database unavailable")
+        return {"entity_id": entity_data["id"]}
+
+    broker = LocalQueueBroker(
+        functions={"create_entity": create_entity},
+        max_concurrency=1,
+        result_ttl_seconds=60,
+    )
+    mark_pending = AsyncMock()
+    clear_pending = AsyncMock(return_value=True)
+
+    await broker.startup()
+    with (
+        patch("sibyl.jobs.pending.mark_pending", mark_pending),
+        patch("sibyl.jobs.pending.clear_pending", clear_pending),
+    ):
+        first_job_id = await broker.enqueue_create_entity(
+            "entity-123",
+            {"id": "entity-123", "name": "Entity"},
+            "session",
+            "org-123",
+        )
+        first_info = await _wait_for_job_status(broker, first_job_id, JobStatus.FAILED)
+        retry_job_id = await broker.enqueue_create_entity(
+            "entity-123",
+            {"id": "entity-123", "name": "Entity"},
+            "session",
+            "org-123",
+        )
+        retry_info = await _wait_for_job_status(broker, retry_job_id, JobStatus.COMPLETE)
+
+    assert first_info.error == "database unavailable"
+    assert retry_job_id == first_job_id == "create_entity:entity-123"
+    assert retry_info.result == {"entity_id": "entity-123"}
+    assert calls == 2
+    assert mark_pending.await_count == 2
+    clear_pending.assert_awaited_once_with("entity-123")
 
     await broker.shutdown()
 
