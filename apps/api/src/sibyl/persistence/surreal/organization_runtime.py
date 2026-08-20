@@ -112,6 +112,39 @@ async def _execute_checked(client: QueryClient, query: str, **params: object) ->
     return result
 
 
+def _require_created_org_records(
+    result: object,
+    *,
+    organization: Mapping[str, object],
+    membership: Mapping[str, object],
+) -> None:
+    payload = _record_payload(result)
+    statement_results = payload.get("result")
+    normalized_input = statement_results if isinstance(statement_results, list) else result
+    records = _normalize_records(normalized_input)
+    organization_id = str(organization["uuid"])
+    membership_id = str(membership["uuid"])
+    organization_records = [
+        record for record in records if str(record.get("uuid") or "") == organization_id
+    ]
+    membership_records = [
+        record for record in records if str(record.get("uuid") or "") == membership_id
+    ]
+    if len(organization_records) != 1 or len(membership_records) != 1:
+        raise RuntimeError("organization create transaction returned incomplete results")
+
+    created_org = organization_records[0]
+    created_membership = membership_records[0]
+    if (
+        str(created_org.get("slug") or "") != str(organization["slug"])
+        or str(created_org.get("name") or "") != str(organization["name"])
+        or str(created_membership.get("organization_id") or "") != organization_id
+        or str(created_membership.get("user_id") or "") != str(membership["user_id"])
+        or str(created_membership.get("role") or "") != OrganizationRole.OWNER.value
+    ):
+        raise RuntimeError("organization create transaction returned incomplete results")
+
+
 async def _list_user_records_by_id(
     client: QueryClient,
     user_ids: list[UUID],
@@ -662,7 +695,7 @@ async def create_org(
             "updated_at": now,
         }
         try:
-            await _execute_checked(
+            transaction_result = await _execute_checked(
                 client,
                 "BEGIN TRANSACTION;\n"
                 "CREATE organizations CONTENT $organization;\n"
@@ -678,6 +711,12 @@ async def create_org(
                     detail="Slug already taken",
                 ) from exc
             raise
+
+        _require_created_org_records(
+            transaction_result,
+            organization=organization,
+            membership=membership,
+        )
 
         try:
             await ensure_graph_indexes(str(organization_id))

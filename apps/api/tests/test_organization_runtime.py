@@ -600,7 +600,7 @@ async def test_surreal_create_org_rotates_current_session(
 
         async def execute_query(self, query: str, **params):
             self.calls.append((query, params))
-            return []
+            return [params["organization"], params["membership"]]
 
     fake_client = FakeClient()
 
@@ -671,6 +671,72 @@ async def test_surreal_create_org_rotates_current_session(
     session_repo.create_session.assert_not_awaited()
     assert result.id == organization.id
     assert result.access_token == "access-token"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "result_case",
+    ["empty", "organization_only", "membership_only", "duplicate_membership", "non_owner"],
+)
+async def test_surreal_create_org_rejects_incomplete_success_results(
+    monkeypatch: pytest.MonkeyPatch,
+    result_case: str,
+) -> None:
+    class IncompleteClient:
+        async def execute_query_raw(self, query: str, **params: object) -> object:
+            del query
+            organization = params["organization"]
+            membership = params["membership"]
+            assert isinstance(organization, dict)
+            assert isinstance(membership, dict)
+            result_records: list[dict[str, object]]
+            if result_case == "empty":
+                result_records = []
+            elif result_case == "organization_only":
+                result_records = [organization]
+            elif result_case == "membership_only":
+                result_records = [membership]
+            elif result_case == "duplicate_membership":
+                result_records = [organization, membership, membership]
+            else:
+                result_records = [organization, {**membership, "role": "member"}]
+            return {
+                "result": [
+                    {"status": "OK", "result": []},
+                    {"status": "OK", "result": result_records},
+                    {"status": "OK", "result": []},
+                ]
+            }
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield IncompleteClient()
+
+    rotate_session = AsyncMock()
+    ensure_indexes = AsyncMock()
+    audit_log = AsyncMock()
+    monkeypatch.setattr(surreal_organization_runtime, "_auth_client_scope", fake_scope)
+    monkeypatch.setattr(
+        surreal_organization_runtime,
+        "_rotate_or_create_org_session",
+        rotate_session,
+    )
+    monkeypatch.setattr(surreal_organization_runtime, "ensure_graph_indexes", ensure_indexes)
+    monkeypatch.setattr(surreal_organization_runtime, "log_audit_event", audit_log)
+
+    with pytest.raises(
+        RuntimeError,
+        match="organization create transaction returned incomplete results",
+    ):
+        await surreal_organization_runtime.create_org(
+            request=_request(),
+            user_id=uuid4(),
+            name="Electric Coven",
+        )
+
+    rotate_session.assert_not_awaited()
+    ensure_indexes.assert_not_awaited()
+    audit_log.assert_not_awaited()
 
 
 @pytest.mark.asyncio
