@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, Self
@@ -258,8 +257,7 @@ class GraphEntityStore(EntityStore):
             return None
 
     async def get_many(self, entity_ids: list[str]) -> list[Entity]:
-        entities = await asyncio.gather(*(self.get(entity_id) for entity_id in entity_ids))
-        return [entity for entity in entities if entity is not None]
+        return await self._manager.get_many(entity_ids)
 
     async def upsert(self, entity: Entity) -> Entity:
         existing = await self.get(entity.id)
