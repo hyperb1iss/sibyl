@@ -8,7 +8,7 @@ import typer
 from typer.testing import CliRunner
 
 from sibyl_cli import auth, auth_store, config_store
-from sibyl_cli.client import SibylClient, SibylClientError
+from sibyl_cli.client import SibylClient, SibylClientError, clear_client_cache, get_client
 from sibyl_cli.main import app
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -383,6 +383,22 @@ def test_login_resolves_the_same_server_as_every_other_command(
     assert result.exit_code == 0
     assert calls[0]["api_url"] == "https://sibyl.example.com/api"
     assert calls[0]["api_url"] == SibylClient().base_url
+
+
+def test_paired_automation_url_and_token_override_the_interactive_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config_store.Path, "home", lambda: tmp_path)
+    config_store.create_context("prod", "https://sibyl.example.com", set_active=True)
+    monkeypatch.setenv("SIBYL_API_URL", "http://localhost:3344/api")
+    monkeypatch.setenv("SIBYL_AUTH_TOKEN", "automation-token")
+
+    clear_client_cache()
+    try:
+        assert get_client().base_url == "http://localhost:3344/api"
+    finally:
+        clear_client_cache()
 
 
 def test_auth_commands_follow_the_context_override_like_the_client(

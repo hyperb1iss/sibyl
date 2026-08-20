@@ -51,15 +51,22 @@ class ErrorPayload:
     details: dict[str, object] | None = None
 
 
+def _paired_automation_api_url() -> str | None:
+    env_url = os.environ.get("SIBYL_API_URL", "").strip()
+    env_token = os.environ.get("SIBYL_AUTH_TOKEN", "").strip()
+    return env_url if env_url and env_token else None
+
+
 def resolve_api_base_url(context_name: str | None = None) -> str:
     """Get API URL from context, config file, env var, or default.
 
     Priority:
     1. Explicit context (if provided)
-    2. Active context's server_url
-    3. Environment variable (SIBYL_API_URL)
-    4. Legacy config file (server.url)
-    5. Default (http://localhost:3334/api)
+    2. Paired automation environment (SIBYL_API_URL + SIBYL_AUTH_TOKEN)
+    3. Active context's server_url
+    4. Environment variable (SIBYL_API_URL)
+    5. Legacy config file (server.url)
+    6. Default (http://localhost:3334/api)
 
     This is the single source of truth for CLI server selection. `sibyl auth`
     resolves through it too, so a login stores its token under the same server
@@ -80,23 +87,28 @@ def resolve_api_base_url(context_name: str | None = None) -> str:
         if ctx:
             return f"{ctx.server_url}/api"
 
-    # 2. Try active context
+    # 2. A paired URL and token are an explicit, self-contained automation
+    #    target. Letting an interactive context override only the URL would
+    #    send that token to the wrong server.
+    if automation_url := _paired_automation_api_url():
+        return automation_url
+
+    # 3. Try active context
     ctx = config_store.get_active_context()
     if ctx:
         return f"{ctx.server_url}/api"
 
-    # 3. Try env var
-    env_url = os.environ.get("SIBYL_API_URL", "").strip()
-    if env_url:
-        return env_url
+    # 4. Try env var
+    if fallback_env_url := os.environ.get("SIBYL_API_URL", "").strip():
+        return fallback_env_url
 
-    # 4. Try legacy config file
+    # 5. Try legacy config file
     if config_store.config_exists():
         url = config_store.get_server_url()
         if url:
             return f"{url}/api"
 
-    # 5. Default
+    # 6. Default
     return f"http://localhost:{DEFAULT_SERVER_PORT}/api"
 
 
@@ -2361,7 +2373,7 @@ def get_client(context_name: str | None = None) -> SibylClient:
     global _clients
 
     # Resolve the effective context when one isn't explicitly provided.
-    if context_name is None:
+    if context_name is None and _paired_automation_api_url() is None:
         from sibyl_cli import config_store
 
         context_name = config_store.resolve_context_name()
