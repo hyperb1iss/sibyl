@@ -1,11 +1,11 @@
 # Sibyl v1.3 final implementation and release plan: One Surface
 
-- Status: implementation complete; release-cut evidence pending
+- Status: implementation complete; paid benchmark and release-cut evidence pending
 - Created: 2026-08-19
 - Working task: `8be323d1-0000-4ce2-9661-8ca504f17e17`
 - Starting commit: `c3c786ab603a67e45689c765b2365f6d3cef8bc6`
 - Plan baseline: `1e8e0b4b`
-- Implemented code range: `1e8e0b4b..a398c0e0`
+- Implemented code range: `1e8e0b4b..405f1eb7`
 - Release thesis: one memory contract across every public surface
 
 This plan replaces the v1.3 scope in [`SIBYL_POST_1_0_ROADMAP.md`](SIBYL_POST_1_0_ROADMAP.md), the
@@ -635,21 +635,26 @@ shell command is not the source of truth for a scored run.
 
 ## 9. Implementation receipts
 
-The implementation range contains 25 atomic commits after the frozen plan baseline. The main
-verification receipts are:
+The code range contains 38 commits after the frozen plan baseline: 35 implementation and test
+commits, plus three architecture receipt and format commits. The main verification receipts are:
 
-| Surface               | Receipt                                                                                                                                                                                                   |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| One Surface lifecycle | One live project fixture passed all six observations against SurrealDB 3.2.3. The fixture covered context sections, fast evidence, naive evidence, REST, the installed CLI, and streamable MCP.           |
-| Core contract         | `core:check` passed with 2,692 tests, 14 expected skips, and one documented xfail.                                                                                                                        |
-| API contract          | `api:check` passed, including current-role MCP authorization, hidden-target ordering, retry truth, derived-work receipts, readiness, and scoped API-key persistence.                                      |
-| CLI contract          | `cli:check` passed with 563 tests.                                                                                                                                                                        |
-| Benchmark rig         | `root:bench-gate-test` passed all 463 tests. `api:typecheck` and `root:inventory-lint` also passed with the benchmark tools included.                                                                     |
-| Release path          | The focused release suites passed 42 release and CI tests, 15 Helm tests, five authenticated browser tests, six runner tests, and four live SurrealDB 3.2.3 contracts. The docs build rendered 107 pages. |
-| Full release gate     | The uncached `moon run :check` gate passed all 56 moon tasks from a clean integration tree in 2 minutes 43 seconds.                                                                                       |
+| Surface               | Receipt                                                                                                                                                                                                             |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| One Surface lifecycle | One live project fixture passed all six observations against SurrealDB 3.2.3. The fixture covered context sections, fast evidence, naive evidence, REST, the installed `sibyl context` command, and streamable MCP. |
+| Lifecycle planner     | A live SurrealDB 3.2.3 `EXPLAIN FULL` receipt selected a target-first union index scan for the forced `idx_relates_target_created` path. Candidate-specific keyset scans replace unbounded offset paging.           |
+| Schema migration      | Graph schema migration 20 repairs absent, string, and malformed edge timestamps before restoring the required datetime contract. Live and embedded upgrade tests cover the migration and its indexed query.         |
+| Core contract         | `core:check` passed with 2,698 tests, 14 expected skips, and one documented xfail.                                                                                                                                  |
+| API contract          | `api:check` passed, including current-role MCP authorization, hidden-target ordering, retry truth, derived-work receipts, readiness, and scoped API-key persistence.                                                |
+| CLI contract          | `cli:check` passed with 563 tests.                                                                                                                                                                                  |
+| Benchmark rig         | `root:bench-gate-test` passed all 474 tests. Closed receipts bind A/A, preregistration, decision passes, and the anchor to one reviewed control contract. Decision and anchor seeds cannot reuse A/A seeds.         |
+| Release path          | The focused release suites passed 42 release and CI tests, 15 Helm tests, five authenticated browser tests, six runner tests, and four live SurrealDB 3.2.3 contracts. The docs build rendered 107 pages.           |
+| Full release gate     | Pending refresh on the exact documentation head.                                                                                                                                                                    |
 
 The live One Surface test used the deterministic local embedding provider. It created and removed
 its own project, decisions, relationship, and temporary MCP API key.
+
+No paid LongMemEval run or leaderboard submission was made. The approval-bound measurement path
+remains stopped before A/A because no provider key or spending approval was supplied.
 
 ## 10. Primary sources and receipts
 
@@ -668,7 +673,12 @@ its own project, decisions, relationship, and temporary MCP API key.
 
 ## 11. Independent review history
 
-| Round | Reviewer                        | Verdict | Result                                                                                                                                                                                                          |
-| ----- | ------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1     | Claude, independent plan review | Fail    | Found nine material issues: a reversed deletion rule, two weak measurement gates, incomplete predicate policy, MCP target-order ambiguity, browser CI gaps, upgrade-path omissions, and three dropped findings. |
-| 2     | Claude, focused re-review       | Pass    | All nine material findings closed. The final edit corrected one REST reservation-order attribution and aligned render sign consistency with the race gate.                                                      |
+| Round | Reviewer                                  | Verdict | Result                                                                                                                                                                                                                             |
+| ----- | ----------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | Claude, independent plan review           | Fail    | Found nine material issues: a reversed deletion rule, two weak measurement gates, incomplete predicate policy, MCP target-order ambiguity, browser CI gaps, upgrade-path omissions, and three dropped findings.                    |
+| 2     | Claude, focused plan re-review            | Pass    | All nine material findings closed. The final edit corrected one REST reservation-order attribution and aligned render sign consistency with the race gate.                                                                         |
+| 3     | Nash, independent implementation review   | Fail    | Reproduced a fail-open lifecycle lookup, benchmark drift across passes, missing receipt lineage, and a live fixture that named a hidden compatibility command as public CLI behavior.                                              |
+| 4     | Nash, focused implementation re-review    | Fail    | Confirmed the original code failures were fixed, then rejected the frozen document because its commit range, test counts, and full-gate receipt predated the repairs.                                                              |
+| 5     | Claude, cross-model implementation review | Fail    | Found remaining A/A receipt-closure and negative-test gaps. A separate objection about preregistration timing did not apply because the locked protocol runs A/A before preregistration.                                           |
+| 6     | Claude, focused implementation re-review  | Pass    | Confirmed exact control binding, three fresh decision seeds, all three A/A outcomes, closed receipt schemas, and anchor lineage. The final negative tests cover render configuration drift, geometry drift, and anchor seed reuse. |
+| 7     | Nash, final exact-head review             | Pending | Awaiting the current documentation commit and uncached full release gate.                                                                                                                                                          |
