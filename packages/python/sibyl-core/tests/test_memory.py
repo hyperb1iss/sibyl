@@ -13,8 +13,10 @@ from sibyl_core.models.reflection import (
     reflection_findings_from_metadata,
 )
 from sibyl_core.services import memory_correction as correction_module
+from sibyl_core.services import memory_lifecycle as lifecycle_module
 from sibyl_core.services import memory_reflection as reflection_module
 from sibyl_core.services import memory_sharing as sharing_module
+from sibyl_core.services.content_models import raw_memory_matches_as_of
 from sibyl_core.services.memory import (
     ReflectionWriteResult,
     WriteMode,
@@ -31,7 +33,7 @@ from sibyl_core.services.memory import (
     share_memory,
     write_mode_from_env,
 )
-from sibyl_core.services.surreal_content import MemoryScope, RawMemory, _raw_memory_matches_as_of
+from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 from sibyl_core.tools.responses import AddResponse
 
 
@@ -1476,6 +1478,12 @@ async def test_promote_review_candidate_bounds_contradicted_source_for_as_of_rea
     monkeypatch.setattr(reflection_module, "get_raw_memory", fake_get_raw_memory)
     monkeypatch.setattr(reflection_module, "save_raw_memory", fake_save_raw_memory)
     monkeypatch.setattr(
+        lifecycle_module,
+        "list_raw_memories_by_source_id",
+        AsyncMock(return_value=[contradicted]),
+    )
+    monkeypatch.setattr(lifecycle_module, "save_raw_memory", fake_save_raw_memory)
+    monkeypatch.setattr(
         reflection_module, "get_surreal_graph_runtime", AsyncMock(return_value=runtime)
     )
 
@@ -1494,11 +1502,11 @@ async def test_promote_review_candidate_bounds_contradicted_source_for_as_of_rea
     assert invalidated.metadata["invalid_at"] == cutoff
     assert invalidated.metadata["valid_to"] == cutoff
     assert invalidated.metadata["invalidated_by_entity_id"] == "decision_new"
-    assert _raw_memory_matches_as_of(
+    assert raw_memory_matches_as_of(
         invalidated,
         datetime(2026, 1, 15, tzinfo=UTC),
     )
-    assert not _raw_memory_matches_as_of(
+    assert not raw_memory_matches_as_of(
         invalidated,
         datetime(2026, 2, 2, tzinfo=UTC),
     )
@@ -1564,7 +1572,7 @@ async def test_promote_review_candidate_skips_other_private_principal_invalidati
 
     monkeypatch.setattr(reflection_module, "get_raw_memory", fake_get_raw_memory)
     monkeypatch.setattr(
-        reflection_module,
+        lifecycle_module,
         "list_raw_memories_by_source_id",
         AsyncMock(return_value=[]),
     )

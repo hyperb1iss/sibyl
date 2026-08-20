@@ -9,12 +9,9 @@ from sibyl_core.backends.surreal.content_client import SurrealContentClient
 from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
 from sibyl_core.backends.surreal.records import coerce_datetime, normalize_records
 from sibyl_core.models.entities import Entity, EntityType
+from sibyl_core.services.content_models import RawMemory, raw_memory_record
+from sibyl_core.services.content_raw_persistence import replace_raw_memory_records_bulk
 from sibyl_core.services.graph import EntityManager, SurrealGraphClient, prepare_graph_schema
-from sibyl_core.services.surreal_content import (
-    RawMemory,
-    _raw_memory_record,
-    _replace_raw_memory_records_bulk,
-)
 from sibyl_core.services.usage import (
     MemoryUsageEvent,
     MemoryUsageItemKind,
@@ -368,10 +365,10 @@ async def test_record_memory_usage_persists_events_and_stamps_surreal_records() 
             ],
             graph_client=graph_client,
         )
-        await _replace_raw_memory_records_bulk(
+        await replace_raw_memory_records_bulk(
             content_client,
             [
-                _raw_memory_record(
+                raw_memory_record(
                     RawMemory(
                         id="raw-usage",
                         organization_id=organization_id,

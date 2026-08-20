@@ -8,14 +8,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from sibyl_core.embeddings.content import ContentEmbeddingConfig
+from sibyl_core.services import content_models
 from sibyl_core.services import document_search as document_search_service
-from sibyl_core.services import surreal_content as surreal_content_service
 from sibyl_core.services.document_search import search_documents
 from sibyl_core.services.surreal_content import ContentChunk, ContentDocument, ContentSource
 
-_CONFIGURED_RAW_MEMORY_EMBEDDING_PROVIDER = (
-    surreal_content_service._configured_raw_memory_embedding_provider
-)
+_CONFIGURED_RAW_MEMORY_EMBEDDING_PROVIDER = content_models.configured_raw_memory_embedding_provider
 
 
 @pytest.mark.asyncio
@@ -83,8 +81,8 @@ def test_content_embedding_consumers_share_canonical_config(
         lambda: config,
     )
     monkeypatch.setattr(
-        surreal_content_service,
-        "_configured_raw_memory_embedding_provider",
+        content_models,
+        "configured_raw_memory_embedding_provider",
         _CONFIGURED_RAW_MEMORY_EMBEDDING_PROVIDER,
     )
     monkeypatch.setattr(
@@ -93,15 +91,15 @@ def test_content_embedding_consumers_share_canonical_config(
         fake_provider_factory,
     )
     monkeypatch.setattr(
-        surreal_content_service,
+        content_models,
         "create_embedding_provider",
         fake_provider_factory,
     )
     document_search_service.reset_document_embedding_provider_cache()
-    surreal_content_service.reset_raw_memory_embedding_provider_cache()
+    content_models.reset_raw_memory_embedding_provider_cache()
 
     document_search_service._get_document_embedding_provider()
-    surreal_content_service._configured_raw_memory_embedding_provider()
+    content_models.configured_raw_memory_embedding_provider()
 
     shared_keys = {"provider", "model", "dimensions", "api_key"}
     assert [{key: call[key] for key in shared_keys} for call in calls] == [
@@ -119,7 +117,7 @@ def test_content_embedding_consumers_share_canonical_config(
         },
     ]
     document_search_service.reset_document_embedding_provider_cache()
-    surreal_content_service.reset_raw_memory_embedding_provider_cache()
+    content_models.reset_raw_memory_embedding_provider_cache()
 
 
 class TestDocumentSearch:

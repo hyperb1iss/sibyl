@@ -9,6 +9,7 @@ import pytest
 
 from sibyl_core.backends.surreal.content_client import SurrealContentClient
 from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
+from sibyl_core.services import content_client as content_client_service
 from sibyl_core.services.surreal_content import recall_raw_memory, remember_raw_memory
 
 
@@ -23,12 +24,10 @@ async def test_raw_memory_local_p95_latency_targets(monkeypatch: pytest.MonkeyPa
     await bootstrap_content_schema(client, reset=True)
 
     @asynccontextmanager
-    async def content_client() -> AsyncIterator[SurrealContentClient]:
+    async def fake_content_client() -> AsyncIterator[SurrealContentClient]:
         yield client
 
-    from sibyl_core.services import surreal_content as content_service
-
-    monkeypatch.setattr(content_service, "surreal_content_client", content_client)
+    monkeypatch.setattr(content_client_service, "surreal_content_client", fake_content_client)
     try:
         await remember_raw_memory(
             organization_id="org-latency",
