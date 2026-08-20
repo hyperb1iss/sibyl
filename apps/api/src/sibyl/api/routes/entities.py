@@ -1724,6 +1724,79 @@ async def get_entity(
 # =============================================================================
 
 
+def _background_job_recovery(
+    job: str,
+    entity_ids: list[str],
+) -> dict[str, Any]:
+    return {
+        "method": "POST",
+        "endpoint": "/api/entities/bulk/requeue-background-jobs",
+        "request": {"entity_ids": entity_ids, "jobs": [job]},
+    }
+
+
+def _memory_extraction_receipt(
+    enqueue_result: Any,
+    entity_ids: list[str],
+) -> dict[str, Any]:
+    receipt = {
+        "status": enqueue_result.status,
+        "job_ids": list(enqueue_result.job_ids),
+        "queued_sources": enqueue_result.queued_sources,
+        "skipped_sources": enqueue_result.skipped_sources,
+        "queue_depth": enqueue_result.queue_depth,
+        "reason": enqueue_result.reason,
+    }
+    if enqueue_result.status in {"partial", "backpressure"}:
+        receipt["recovery"] = _background_job_recovery(
+            "memory_extraction",
+            entity_ids,
+        )
+    return receipt
+
+
+async def _enqueue_bulk_memory_extraction(
+    entities: list[Entity],
+    created_ids: list[str],
+    group_id: str,
+) -> dict[str, Any]:
+    try:
+        from sibyl.jobs.memory_extraction import enqueue_memory_extraction_batches
+
+        enqueue_result = await enqueue_memory_extraction_batches(
+            [source.model_dump(mode="json") for source in entities],
+            group_id,
+            created_source_ids=created_ids,
+        )
+        log.info(
+            "bulk_entity_memory_extraction_result",
+            status=enqueue_result.status,
+            jobs=len(enqueue_result.job_ids),
+            queued_sources=enqueue_result.queued_sources,
+            skipped_sources=enqueue_result.skipped_sources,
+            reason=enqueue_result.reason,
+        )
+        return _memory_extraction_receipt(enqueue_result, created_ids)
+    except Exception as exc:
+        log.warning(
+            "bulk_entity_memory_extraction_enqueue_failed",
+            sources=len(entities),
+            error=str(exc),
+        )
+        return {
+            "status": "failed",
+            "job_ids": [],
+            "queued_sources": 0,
+            "skipped_sources": len(entities),
+            "reason": "enqueue_failed",
+            "error_type": type(exc).__name__,
+            "recovery": _background_job_recovery(
+                "memory_extraction",
+                created_ids,
+            ),
+        }
+
+
 @router.post(
     "/bulk",
     response_model=EntityBulkCreateResponse,
@@ -1840,6 +1913,18 @@ async def create_entities_bulk(
                 relationships=len(relationships),
                 error=str(exc),
             )
+            background_jobs["embedding_backfill"] = {
+                "status": "failed",
+                "job_ids": [],
+                "queued_entities": 0,
+                "queued_relationships": 0,
+                "reason": "enqueue_failed",
+                "error_type": type(exc).__name__,
+                "recovery": _background_job_recovery(
+                    "embedding_backfill",
+                    list(created_ids),
+                ),
+            }
     projection_sources: list[Entity] = []
     projection_source_ids: list[str] = []
     for source, created_id in zip(entities, created_ids, strict=True):
@@ -1873,53 +1958,32 @@ async def create_entities_bulk(
                 sources=len(projection_sources),
                 error=str(exc),
             )
-
-    try:
-        from sibyl.jobs.memory_extraction import enqueue_memory_extraction_batches
-
-        extraction_enqueue = await enqueue_memory_extraction_batches(
-            [source.model_dump(mode="json") for source in entities],
-            group_id,
-            created_source_ids=list(created_ids),
-        )
-        if extraction_enqueue.status in {"queued", "partial"}:
-            log.info(
-                "bulk_entity_memory_extraction_enqueued",
-                status=extraction_enqueue.status,
-                jobs=len(extraction_enqueue.job_ids),
-                queued_sources=extraction_enqueue.queued_sources,
-                skipped_sources=extraction_enqueue.skipped_sources,
-                reason=extraction_enqueue.reason,
-            )
-            background_jobs["memory_extraction"] = {
-                "status": extraction_enqueue.status,
-                "job_ids": list(extraction_enqueue.job_ids),
-                "queued_sources": extraction_enqueue.queued_sources,
-                "skipped_sources": extraction_enqueue.skipped_sources,
-                "queue_depth": extraction_enqueue.queue_depth,
-                "reason": extraction_enqueue.reason,
+            background_jobs["memory_projection"] = {
+                "status": "failed",
+                "job_ids": [],
+                "queued_sources": 0,
+                "skipped_sources": len(projection_sources),
+                "reason": "enqueue_failed",
+                "error_type": type(exc).__name__,
+                "recovery": _background_job_recovery(
+                    "memory_projection",
+                    list(projection_source_ids),
+                ),
             }
-        elif extraction_enqueue.reason != "disabled":
-            log.info(
-                "bulk_entity_memory_extraction_skipped",
-                status=extraction_enqueue.status,
-                reason=extraction_enqueue.reason,
-                skipped_sources=extraction_enqueue.skipped_sources,
-            )
-            background_jobs["memory_extraction"] = {
-                "status": extraction_enqueue.status,
-                "job_ids": list(extraction_enqueue.job_ids),
-                "queued_sources": extraction_enqueue.queued_sources,
-                "skipped_sources": extraction_enqueue.skipped_sources,
-                "queue_depth": extraction_enqueue.queue_depth,
-                "reason": extraction_enqueue.reason,
-            }
-    except Exception as exc:
-        log.warning(
-            "bulk_entity_memory_extraction_enqueue_failed",
-            sources=len(entities),
-            error=str(exc),
-        )
+    else:
+        background_jobs["memory_projection"] = {
+            "status": "skipped",
+            "job_ids": [],
+            "queued_sources": 0,
+            "skipped_sources": len(entities),
+            "reason": "no_projectable_sources",
+        }
+
+    background_jobs["memory_extraction"] = await _enqueue_bulk_memory_extraction(
+        entities,
+        list(created_ids),
+        group_id,
+    )
 
     responses = [
         _entity_response_from_bulk_create(
@@ -2147,6 +2211,18 @@ async def requeue_entity_background_jobs(
                 "queued_sources": 0,
                 "skipped_sources": len(entities),
             }
+    if "memory_extraction" in requested_jobs:
+        from sibyl.jobs.memory_extraction import enqueue_memory_extraction_batches
+
+        extraction_enqueue = await enqueue_memory_extraction_batches(
+            [entity.model_dump(mode="json") for entity in entities],
+            group_id,
+            created_source_ids=[entity.id for entity in entities],
+        )
+        background_jobs["memory_extraction"] = _memory_extraction_receipt(
+            extraction_enqueue,
+            [entity.id for entity in entities],
+        )
     return EntityBackgroundJobsRequeueResponse(
         entity_ids=[entity.id for entity in entities],
         manifest_id=request.manifest_id,

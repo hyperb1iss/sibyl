@@ -25,7 +25,7 @@ from sibyl_core.models.context import (
     ContextPack,
     ContextSection,
 )
-from sibyl_core.models.entities import EntityType, RelationshipType
+from sibyl_core.models.entities import Entity, EntityType, RelationshipType
 from sibyl_core.services.usage import (
     MemoryUsageItemKind,
     MemoryUsageSignal,
@@ -3739,6 +3739,143 @@ class TestAddTool:
 
         assert response.success is True
         detect_conflicts.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_add_async_receipt_exposes_parent_and_deferred_work(self) -> None:
+        from sibyl_core.tools.add import add
+
+        queue = SimpleNamespace(
+            enqueue_create_entity=AsyncMock(return_value="create_entity:episode_123")
+        )
+        runtime = make_graph_runtime()
+
+        with (
+            patch(
+                "sibyl_core.tools.add.get_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            patch("sibyl_core.tools.add.get_queue_port", return_value=queue),
+        ):
+            response = await add(
+                title="Queue truth",
+                content="The parent write schedules every derived operation.",
+                metadata={"organization_id": "org_123"},
+                check_conflicts=False,
+                generate_embeddings=False,
+            )
+
+        assert response.success is True
+        assert response.background_jobs["entity_create"] == {
+            "status": "queued",
+            "job_ids": ["create_entity:episode_123"],
+            "entity_ids": [response.id],
+        }
+        assert response.background_jobs["memory_projection"]["queued_by"] == (
+            "create_entity:episode_123"
+        )
+        assert response.background_jobs["memory_extraction"]["queued_by"] == (
+            "create_entity:episode_123"
+        )
+        assert response.background_jobs["embedding_backfill"]["queued_by"] == (
+            "create_entity:episode_123"
+        )
+
+    @pytest.mark.asyncio
+    async def test_add_sync_fallback_is_explicit_in_structured_receipt(self) -> None:
+        from sibyl_core.tools.add import add
+
+        entity_manager = MagicMock()
+        entity_manager.create_direct = AsyncMock(side_effect=lambda entity, **_kwargs: entity.id)
+        runtime = make_graph_runtime(entity_manager=entity_manager)
+        queue = SimpleNamespace(
+            enqueue_create_entity=AsyncMock(side_effect=ConnectionError("queue down"))
+        )
+        projection = SimpleNamespace(
+            errors=(),
+            extracted=0,
+            projected_entities=0,
+            relationships=0,
+            projection_state="complete",
+            created_projected_entities=(),
+            created_projection_relationships=(),
+        )
+        passages = SimpleNamespace(
+            errors=(),
+            passages=0,
+            relationships=0,
+            created_passages=(),
+            created_relationships=(),
+        )
+
+        with (
+            patch(
+                "sibyl_core.tools.add.get_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            patch("sibyl_core.tools.add.get_queue_port", return_value=queue),
+            patch(
+                "sibyl_core.tools.add.project_memory_entity",
+                AsyncMock(return_value=projection),
+            ),
+            patch(
+                "sibyl_core.tools.add.project_entity_passages",
+                AsyncMock(return_value=passages),
+            ),
+        ):
+            response = await add(
+                title="Fallback truth",
+                content="Persist synchronously when the queue cannot accept work.",
+                metadata={"organization_id": "org_123"},
+                check_conflicts=False,
+            )
+
+        assert response.success is True
+        assert response.message.startswith("Added (sync fallback):")
+        assert response.background_jobs["entity_create"] == {
+            "status": "complete",
+            "mode": "sync_fallback",
+            "job_ids": [],
+            "entity_ids": [response.id],
+            "reason": "queue_unavailable",
+            "error_type": "ConnectionError",
+        }
+        assert response.background_jobs["memory_projection"]["status"] == "complete"
+        assert response.background_jobs["memory_extraction"] == {
+            "status": "skipped",
+            "job_ids": [],
+            "reason": "synchronous_fallback",
+        }
+
+    @pytest.mark.asyncio
+    async def test_embedding_enqueue_failure_returns_repeatable_recovery_handle(self) -> None:
+        from sibyl_core.tools.add import _enqueue_embedding_backfill
+
+        entity = Entity(
+            id="episode_123",
+            entity_type=EntityType.EPISODE,
+            name="Queue truth",
+            content="The entity already exists without its vectors.",
+            organization_id="org_123",
+        )
+        queue = SimpleNamespace(
+            enqueue_entity_embedding_backfill=AsyncMock(side_effect=ConnectionError("queue down"))
+        )
+
+        with patch("sibyl_core.tools.add.get_queue_port", return_value=queue):
+            receipt = await _enqueue_embedding_backfill([entity], "org_123", [])
+
+        assert receipt["embedding_backfill"] == {
+            "status": "failed",
+            "job_ids": [],
+            "queued_entities": 0,
+            "queued_relationships": 0,
+            "reason": "enqueue_failed",
+            "error_type": "ConnectionError",
+            "recovery": {
+                "action": "repeat_add_request",
+                "entity_ids": [entity.id],
+            },
+        }
 
     @pytest.mark.asyncio
     async def test_auto_discover_links_skips_empty_candidate_types(self) -> None:

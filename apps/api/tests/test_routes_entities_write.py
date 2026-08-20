@@ -1210,6 +1210,132 @@ async def test_create_entities_bulk_reports_partial_memory_extraction() -> None:
     assert jobs["job_ids"] == ["extract-memory-1"]
     assert jobs["skipped_sources"] == 1
     assert jobs["reason"] == "queue_depth"
+    assert jobs["recovery"] == {
+        "method": "POST",
+        "endpoint": "/api/entities/bulk/requeue-background-jobs",
+        "request": {
+            "entity_ids": ["session_one"],
+            "jobs": ["memory_extraction"],
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_create_entities_bulk_reports_every_failed_derived_enqueue() -> None:
+    org = _org()
+    ctx = _ctx()
+    batch = EntityBulkCreateRequest(
+        defer_embeddings=True,
+        entities=[
+            EntityCreate(
+                name="Session one",
+                content="I bought a Samsung TV for the den.",
+                entity_type=EntityType.SESSION,
+                skip_conflicts=True,
+            )
+        ],
+    )
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(create_direct_bulk=AsyncMock(return_value=["session_one"])),
+        relationship_manager=SimpleNamespace(create_bulk=AsyncMock(return_value=(0, 0))),
+    )
+
+    with (
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "sibyl.jobs.queue.enqueue_entity_embedding_backfill",
+            AsyncMock(side_effect=ConnectionError("embedding queue down")),
+        ),
+        patch(
+            "sibyl.jobs.queue.enqueue_memory_projection",
+            AsyncMock(side_effect=ConnectionError("projection queue down")),
+        ),
+        patch(
+            "sibyl.jobs.memory_extraction.enqueue_memory_extraction_batches",
+            AsyncMock(side_effect=ConnectionError("extraction queue down")),
+        ),
+    ):
+        response = await create_entities_bulk(
+            batch=batch,
+            org=org,
+            ctx=ctx,
+            content_session=None,
+        )
+
+    assert response.created == 1
+    assert set(response.background_jobs) == {
+        "embedding_backfill",
+        "memory_projection",
+        "memory_extraction",
+    }
+    for job_name, receipt in response.background_jobs.items():
+        assert receipt["status"] == "failed"
+        assert receipt["job_ids"] == []
+        assert receipt["reason"] == "enqueue_failed"
+        assert receipt["error_type"] == "ConnectionError"
+        assert receipt["recovery"] == {
+            "method": "POST",
+            "endpoint": "/api/entities/bulk/requeue-background-jobs",
+            "request": {
+                "entity_ids": ["session_one"],
+                "jobs": [job_name],
+            },
+        }
+
+
+@pytest.mark.asyncio
+async def test_requeue_entity_background_jobs_recovers_memory_extraction() -> None:
+    org = _org()
+    ctx = _ctx()
+    entity = Entity(
+        id="session_one",
+        entity_type=EntityType.SESSION,
+        name="Session one",
+        content="semantic memory content with enough signal",
+        organization_id=str(org.id),
+    )
+    runtime = SimpleNamespace(entity_manager=SimpleNamespace(get=AsyncMock(return_value=entity)))
+    enqueue_result = SimpleNamespace(
+        status="queued",
+        job_ids=("extract-restored",),
+        queued_sources=1,
+        skipped_sources=0,
+        queue_depth=0,
+        reason=None,
+    )
+
+    with (
+        patch(
+            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "sibyl.api.routes.entities._require_entity_read_access",
+            AsyncMock(return_value=set()),
+        ),
+        patch(
+            "sibyl.jobs.memory_extraction.enqueue_memory_extraction_batches",
+            AsyncMock(return_value=enqueue_result),
+        ) as enqueue_extraction,
+    ):
+        response = await requeue_entity_background_jobs(
+            request=EntityBackgroundJobsRequeueRequest(
+                entity_ids=[entity.id],
+                jobs=["memory_extraction"],
+            ),
+            org=org,
+            ctx=ctx,
+            content_session="session",
+        )
+
+    payload, group_id = enqueue_extraction.await_args.args
+    assert payload[0]["id"] == entity.id
+    assert group_id == str(org.id)
+    assert enqueue_extraction.await_args.kwargs == {"created_source_ids": [entity.id]}
+    assert response.background_jobs["memory_extraction"]["job_ids"] == ["extract-restored"]
 
 
 @pytest.mark.asyncio
