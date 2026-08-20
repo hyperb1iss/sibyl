@@ -1,12 +1,16 @@
 # Sibyl v1.3 final implementation and release plan: One Surface
 
-- Status: implementation merged; paid benchmark and release-cut evidence pending
+- Status: implementation complete; harmony merge, paid benchmark, and release-cut evidence pending
 - Created: 2026-08-19
+- Updated: 2026-08-20
 - Working task: `8be323d1-0000-4ce2-9661-8ca504f17e17`
 - Starting commit: `c3c786ab603a67e45689c765b2365f6d3cef8bc6`
 - Plan baseline: `1e8e0b4b`
 - Reviewed source range: `1e8e0b4b..5ebb0461`
-- Merged commit: `1a56eea0` ([pull request 406](https://github.com/hyperb1iss/sibyl/pull/406))
+- One Surface merged commit: `1a56eea0`
+  ([pull request 406](https://github.com/hyperb1iss/sibyl/pull/406))
+- Harmony base: `f0ddc27fe97c5087643774adecaba0b645271936`
+- Harmony implementation range: `f0ddc27f..a561c725`
 - Release thesis: one memory contract across every public surface
 
 This plan replaces the v1.3 scope in [`SIBYL_POST_1_0_ROADMAP.md`](SIBYL_POST_1_0_ROADMAP.md), the
@@ -17,18 +21,24 @@ decision remains in
 
 ## Current state
 
-The repository implementation is complete and merged into `main`. Waves 0 and 4 are implemented and
-covered by focused gates. Wave 1 has a pinned official harness, fail-closed receipts, a tested
-decision rig, and native SurrealDB monitoring. The machine race and render treatment are implemented
-as preregistered workflows, but their paid runs have not been authorized or executed.
+The One Surface behavior is merged into `main` through pull request 406. A second 27-commit harmony
+range is implementation-complete on the release branch. The range gives each major service one
+canonical owner, removes dead compatibility runtimes, and closes durability failures found during
+adversarial review. Its merge and exact-main receipts remain pending.
 
-No architecture choice remains open for v1.3. The release cut still needs four pieces of evidence
+Waves 0 and 4 are implemented and covered by focused gates. Wave 1 has a pinned official harness,
+fail-closed receipts, a tested decision rig, and native SurrealDB monitoring. The machine race and
+render treatment are implemented as preregistered workflows, but their paid runs have not been
+authorized or executed.
+
+No architecture choice remains open for v1.3. The release cut still needs five pieces of evidence
 from one frozen, clean commit:
 
-1. an A/A receipt that establishes the measured noise floor or stops the paid path as rig-blocked;
-2. a post-decontamination Small anchor for both domains when the rig passes;
-3. machine-versus-naive and render-bundle decisions, or the applicable rig-blocked receipts;
-4. the exact-main release gates, same-commit Nightly Regression, dry cut, and runbook receipt.
+1. the harmony range merged with exact-head CI green;
+2. an A/A receipt that establishes the measured noise floor or stops the paid path as rig-blocked;
+3. a post-decontamination Small anchor for both domains when the rig passes;
+4. machine-versus-naive and render-bundle decisions, or the applicable rig-blocked receipts;
+5. the exact-main release gates, same-commit Nightly Regression, dry cut, and runbook receipt.
 
 The paid runner is approval-bound. No LongMemEval score, leaderboard claim, or submission exists
 until those receipts are generated. Product release remains allowed when the benchmark rig blocks,
@@ -526,6 +536,8 @@ configuration does.
 
 - Replace the removed private manager call tracked by issue 394 with a public runtime capability in
   `packages/python/sibyl-core/src/sibyl_core/tools/admin.py`.
+- Remove maintenance commands whose only implementation is an unreachable Cypher branch. The
+  supported Surreal schema bootstrap and embedding backfill own dimension reconciliation.
 - Audit the sibling `bulk_create_direct` capability checks in
   `packages/python/sibyl-core/src/sibyl_core/projection/memory.py`, the admin restore path, and
   `apps/api/src/sibyl/cli/generate.py`. The generate command currently calls the absent method
@@ -535,8 +547,8 @@ configuration does.
 - Express intentional projection-field removal explicitly rather than relying on omission after
   merge semantics changed.
 
-**Gate:** the admin backfill, projection rewrite, and restore paths pass against the supported live
-SurrealDB version without private manager methods.
+**Gate:** the supported schema bootstrap, projection rewrite, and restore paths pass against the
+supported live SurrealDB version without private manager methods or dormant driver branches.
 
 #### R4.5 Make the remaining public claims exact
 
@@ -597,9 +609,10 @@ Sibyl v1.3 may cut when every required item below has a receipt.
 - [x] One prerelease grammar governs release validation and version sync.
 - [x] The supported live SurrealDB version covers the rewrite semantics used by admin, projection,
       and restore paths.
-- [x] `moon run :check` passes from a clean tree.
-- [x] Targeted lifecycle, MCP authorization, queue retry, readiness, browser, benchmark-contract,
-      release-workflow, and Helm gates pass uncached.
+- [ ] `moon run :check` passes from the clean harmony documentation head. The historical One Surface
+      receipt is recorded in section 9.
+- [ ] Targeted lifecycle, MCP authorization, queue retry, readiness, browser, benchmark-contract,
+      release-workflow, and Helm gates pass uncached on the harmony head.
 - [ ] The release runbook records the exact commit, generated receipts, deferred work, and rollback
       points.
 
@@ -613,7 +626,7 @@ Sibyl v1.3 may cut when every required item below has a receipt.
 - MCP SDK 2.0;
 - reader-prompt work beyond the bounded render treatment;
 - a physical merger of REST, MCP, CLI, context, and naive internals;
-- unrelated route-package, result-normalizer, and archive-table cleanup.
+- removal of explicitly documented legacy graph archives before their migration window closes.
 
 The deferral does not erase the roadmap. v1.4 starts with one trustworthy surface and can evaluate
 coalescence without first debugging contradictory read paths or invalid benchmark anchors.
@@ -636,8 +649,8 @@ shell command is not the source of truth for a scored run.
 
 ## 9. Implementation receipts
 
-The reviewed source branch contains 44 commits after the frozen plan baseline. GitHub squash-merged
-the reviewed tree into `main` as `1a56eea0`. The main verification receipts are:
+The first reviewed source branch contained 44 commits after the frozen plan baseline. GitHub
+squash-merged that tree into `main` as `1a56eea0`. The One Surface verification receipts were:
 
 | Surface               | Receipt                                                                                                                                                                                                            |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -653,6 +666,31 @@ the reviewed tree into `main` as `1a56eea0`. The main verification receipts are:
 
 The live One Surface test used the deterministic local embedding provider. It created and removed
 its own project, decisions, relationship, and temporary MCP API key.
+
+### 9.1 Harmony hardening
+
+The harmony implementation contains 27 commits in `f0ddc27f..a561c725`. The work preserves the
+public One Surface behavior while making ownership and failure handling match that contract.
+
+| Surface                      | Final receipt                                                                                                                                                                                                                                                             |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Core service ownership       | Retrieval, memory, graph, graph communities, and content persistence now have small public facades over acyclic domain owners. The full core suite passed with 2,718 tests, 14 skips, and one documented xfail.                                                           |
+| Write and embedding contract | Explicit synchronous writes and queue-failure fallback share one persistence contract. Content embedding configuration has one canonical resolver, and every derived row participates in backfill.                                                                        |
+| API ownership                | MCP registration and the memory and entity route families have canonical domain owners. Ordered route and filtered OpenAPI parity stayed exact across all 33 affected routes.                                                                                             |
+| CLI ownership                | Command registration and the API client are split by domain. The `SibylClient` constructor, all 88 public methods, and all 100 method bodies retained their verified contract.                                                                                            |
+| Web ownership                | API clients, hooks, and the graph page are split into acyclic domain modules. API exports, hook exports, the 26-key client namespace, and the graph page behavior retained exact parity. The full web suite passed 177 tests and the production build rendered 34 routes. |
+| Graph stability              | Community IDs derive from level and sorted membership rather than process-local UUIDs. Twenty-four fresh processes produced one identical mapping across shuffled input and hash seeds, while membership changes produced a new ID.                                       |
+| Durable source imports       | Run state persists before cache updates or broadcasts. A schema-backed revision CAS protects resume, checkpoint, completion, and cancellation. A real SCHEMAFULL embedded lifecycle and cancellation race matrix passed.                                                  |
+| Durable organizations        | Organization and owner membership creation use one checked transaction. Empty, partial, duplicate, and wrong-owner result sets cannot trigger indexes, session rotation, audit, or success.                                                                               |
+| Durable CLI state            | Configuration mutation is locked and crash-durable. Invalid bytes and invalid TOML shapes fail with typed remediation. Corrupt pending writes stay visible, byte-preserved, and protected from path traversal. A 96-process mutation probe retained all 96 updates.       |
+| Runtime convergence          | The API and core share one hosted content client pool. The graph runtime has one native Surreal construction path. Shutdown closes every pool independently, and the unsupported FalkorDB embedding command and Cypher repair branch are gone.                            |
+| API and CLI gates            | The forced API gate passed 2,279 tests with nine skips. The forced CLI gate passed 608 tests. Lint and type checks passed for both packages.                                                                                                                              |
+| Trust receipt                | The team-scope gate follows canonical retrieval and content owners. All 41 receipt tests passed, including byte-deterministic rebuild and every anti-vacuity budget.                                                                                                      |
+| Full release gate            | Pending refresh on the exact documentation head.                                                                                                                                                                                                                          |
+
+Fresh independent agents reproduced the durability, authorization, runtime lifecycle, stable-ID,
+browser, and public-contract probes. First reviews failed on real defects. The fix rounds passed
+only after the hostile cases were added to the executable suites.
 
 No paid LongMemEval run or leaderboard submission was made. The approval-bound measurement path
 remains stopped before A/A because no provider key or spending approval was supplied.
@@ -686,3 +724,9 @@ remains stopped before A/A because no provider key or spending approval was supp
 | 7     | Nash, exact-head implementation review    | Fail    | Reproduced a valid automation token being blocked by expired stored-login metadata during the live `sibyl context` observation. The other lifecycle, planner, migration, and benchmark probes passed.                              |
 | 8     | Nash, final exact-head re-review          | Pass    | Confirmed the automation-token repair, focused CLI regression, public six-observation live fixture on fresh SurrealDB 3.2.3, plan range and count accuracy, and a clean frozen tree.                                               |
 | 9     | Nash, CI task-semantics re-review         | Pass    | Rejected all 18 negative mutations across the six finite E2E tasks and confirmed that CI mode collects 45 E2E tests.                                                                                                               |
+| 10    | Fresh domain verification agents          | Pass    | Verified the decomposed retrieval, memory, graph, community, content, MCP, API route, CLI, web data, and graph-page contracts with static ownership checks and focused executable gates.                                           |
+| 11    | Legacy hotspot audit                      | Fail    | Found unsafe CLI configuration and pending-write persistence, fail-open source-import persistence, non-atomic organization creation, duplicate content pools, dead graph-driver paths, and unstable community handles.             |
+| 12    | Durability verification agents            | Fail    | Broke the first fixes with wrong-shape TOML, invalid UTF-8, path traversal, malformed queued payloads, a missing SCHEMAFULL revision field, a cancel-resume race, and unchecked transaction result cardinality.                    |
+| 13    | Durability focused re-review              | Pass    | Reproduced every hostile case after repair. The re-review included 96 concurrent CLI processes, interrupted replacement, real schema bootstrap, stale CAS, cancellation races, and malformed transaction results.                  |
+| 14    | Runtime convergence verification          | Fail    | Found partial shutdown skipping the content pool and an unsupported FalkorDB embedding command returning successful zero-work on the only supported Surreal runtime.                                                               |
+| 15    | Runtime convergence focused re-review     | Pass    | Confirmed independent pool cleanup, shared hosted client identity, standalone fallback, close and reconnect behavior, configured pool capacity, org scoping, native graph ownership, and complete removal of the false command.    |
