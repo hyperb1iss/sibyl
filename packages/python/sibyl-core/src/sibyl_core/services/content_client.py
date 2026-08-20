@@ -11,6 +11,7 @@ from typing import cast
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal import records as _surreal_records
 from sibyl_core.config import settings
+from sibyl_core.runtime_ports import RuntimePortUnavailable, get_content_port
 from sibyl_core.services import content_models as models
 
 CONTENT_KNN_EF_FLOOR = 40
@@ -62,6 +63,13 @@ def build_surreal_content_client() -> SurrealContentClient:
 
 
 async def get_shared_surreal_content_client() -> SurrealContentClient:
+    try:
+        content_port = get_content_port()
+    except RuntimePortUnavailable:
+        pass
+    else:
+        return await content_port.get_shared_client()
+
     if _shared_content_client_state.client is not None:
         return _shared_content_client_state.client
 

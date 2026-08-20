@@ -91,3 +91,25 @@ async def test_runtime_services_starts_and_stops_raw_capture_live_query(
 
     start_live.assert_awaited_once()
     stop_live.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_runtime_services_closes_each_shared_surreal_pool_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    close_auth = AsyncMock()
+    close_content = AsyncMock()
+    monkeypatch.setattr(
+        "sibyl.persistence.surreal.auth.close_shared_surreal_auth_client",
+        close_auth,
+    )
+    monkeypatch.setattr(
+        "sibyl.persistence.surreal.content.close_shared_surreal_content_client",
+        close_content,
+    )
+    services = runtime_services_module.RuntimeServices(log=MagicMock())
+
+    await services._close_shared_surreal_clients()
+
+    close_auth.assert_awaited_once_with()
+    close_content.assert_awaited_once_with()

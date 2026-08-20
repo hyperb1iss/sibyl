@@ -21,6 +21,7 @@ from sibyl_core.backends.surreal.records import normalize_record, normalize_reco
 from sibyl_core.embeddings.providers import EmbeddingMetadata
 from sibyl_core.errors import RevisionConflictError
 from sibyl_core.models.reflection import ReflectionCandidate
+from sibyl_core.runtime_ports import install_content_port, reset_runtime_ports
 from sibyl_core.services import (
     content_client,
     content_models,
@@ -113,6 +114,14 @@ class FakeClient:
 
     async def close(self) -> None:
         self.closed += 1
+
+
+class _HostContentPort:
+    def __init__(self, client: FakeClient) -> None:
+        self._client = client
+
+    async def get_shared_client(self) -> FakeClient:
+        return self._client
 
 
 class FakeLog:
@@ -690,6 +699,21 @@ class TestSurrealContentHelpers:
 
         assert first_client.closed == 1
         assert second_client.closed == 0
+
+    @pytest.mark.asyncio
+    async def test_host_content_port_owns_the_shared_client_lifecycle(self) -> None:
+        hosted_client = FakeClient([])
+        await content_client.close_shared_surreal_content_client()
+        install_content_port(_HostContentPort(hosted_client))
+
+        try:
+            resolved = await content_client.get_shared_surreal_content_client()
+            await content_client.close_shared_surreal_content_client()
+        finally:
+            reset_runtime_ports()
+
+        assert resolved is hosted_client
+        assert hosted_client.closed == 0
 
     def test_build_surreal_content_client_uses_configured_pool_size(
         self,

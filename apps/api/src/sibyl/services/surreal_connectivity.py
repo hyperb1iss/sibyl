@@ -30,7 +30,6 @@ async def warm_shared_surreal_clients() -> None:
     await asyncio.gather(
         _warm_client("auth", _auth_client),
         _warm_client("content", _content_client),
-        _warm_client("core_content", _core_content_client),
     )
 
 
@@ -62,7 +61,6 @@ async def _monitor_loop() -> None:
         await asyncio.gather(
             _ping_client("auth", _auth_client),
             _ping_client("content", _content_client),
-            _ping_client("core_content", _core_content_client),
         )
 
 
@@ -88,12 +86,6 @@ async def _auth_client() -> DedicatedSurrealClient:
 
 async def _content_client() -> DedicatedSurrealClient:
     from sibyl.persistence.surreal.content import get_shared_surreal_content_client
-
-    return await get_shared_surreal_content_client()
-
-
-async def _core_content_client() -> DedicatedSurrealClient:
-    from sibyl_core.services.surreal_content import get_shared_surreal_content_client
 
     return await get_shared_surreal_content_client()
 
