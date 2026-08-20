@@ -4,6 +4,7 @@ import shutil
 import subprocess
 
 import pytest
+import yaml
 from tools.release.ci_changes import UnmatchedPathsError, classify_changed_paths, main
 from tools.tests.conftest import REPO_ROOT
 
@@ -100,3 +101,17 @@ def test_ci_runs_release_and_helm_contract_jobs() -> None:
     assert "moon run e2e:test-browser" in workflow
     assert "profile: defaults" in workflow
     assert "profile: production-redis" in workflow
+
+
+def test_e2e_ci_tasks_are_finite_tasks() -> None:
+    config = yaml.safe_load((REPO_ROOT / "apps/e2e/moon.yml").read_text(encoding="utf-8"))
+
+    for task_name in (
+        "test",
+        "test-api",
+        "test-perf",
+        "test-browser",
+        "playwright-install",
+        "format",
+    ):
+        assert config["tasks"][task_name].get("preset") != "server"
