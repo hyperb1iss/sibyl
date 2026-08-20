@@ -659,7 +659,7 @@ jobs:
 
       - name: Build frontend for E2E
         run: |
-          moon run --force web:build
+          moon run web:build
           test -f apps/web/.next/BUILD_ID
 
       - name: Start backend server

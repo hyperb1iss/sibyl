@@ -237,13 +237,17 @@ def test_ci_e2e_build_is_materialized_and_frontend_readiness_fails_closed() -> N
     steps = workflow["jobs"]["e2e"]["steps"]
     steps_by_name = {step.get("name"): step for step in steps}
 
+    web_tasks = yaml.safe_load((REPO_ROOT / "apps/web/moon.yml").read_text(encoding="utf-8"))
+    assert web_tasks["tasks"]["build"]["options"]["cache"] is False
+
     build_script = steps_by_name["Build frontend for E2E"]["run"]
-    assert "moon run --force web:build" in build_script
+    assert "moon run web:build" in build_script
     assert "test -f apps/web/.next/BUILD_ID" in build_script
 
     start_script = steps_by_name["Start frontend server"]["run"]
     assert "web_pid=$!" in start_script
     assert 'kill -0 "$web_pid"' in start_script
+    assert "cat /tmp/sibyl-web.log\n    exit 1" in start_script
     assert start_script.rstrip().endswith("curl -fsS http://localhost:3337 > /dev/null")
 
 

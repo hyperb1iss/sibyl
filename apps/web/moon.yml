@@ -133,6 +133,8 @@ tasks:
     inputs:
       - "@group(sources)"
       - "@group(configs)"
+    options:
+      cache: false
     # Note: .next excluded from outputs - Next.js manages its own cache,
     # and the directory contains symlinks that break moon's archiver
 
