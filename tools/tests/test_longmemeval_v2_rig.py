@@ -320,6 +320,19 @@ def test_anchor_rejects_tampered_or_drifted_aa_lineage() -> None:
     with pytest.raises(rig.RigInputError, match="differs from A/A"):
         rig.build_anchor_receipt(drifted_pass, arm_side="left", aa_receipt=aa_receipt)
 
+    reused_seed_pass = _paired_pass(
+        "anchor-reused-seed",
+        seed="seed-0",
+        left=_arm("machine", mode="fast", accuracy=0.6),
+        right=_arm("machine", mode="fast", accuracy=0.6),
+    )
+    with pytest.raises(rig.RigInputError, match="reuses an A/A calibration seed"):
+        rig.build_anchor_receipt(
+            reused_seed_pass,
+            arm_side="left",
+            aa_receipt=aa_receipt,
+        )
+
 
 def test_preregistration_requires_untampered_aa_lineage() -> None:
     missing = _race_preregistration_input()
@@ -408,31 +421,44 @@ def test_race_is_preregistered_and_keeps_deletion_out_of_v13() -> None:
     assert receipt["naive_default"] is False
 
 
-def _render_preregistration() -> dict[str, Any]:
+def _render_preregistration_input() -> dict[str, Any]:
     control_configuration = {"retrieval_mode": "fast", "render": "control"}
     geometry = {"max_context_items": 8, "max_context_total_chars": 60_000}
-    return rig.freeze_preregistration(
-        {
-            "created_at": "2026-08-20T00:00:00Z",
-            "stack": _stack(),
-            "seeds": ["decision-seed-0", "decision-seed-1", "decision-seed-2"],
-            "aa_receipt": _aa_receipt(
-                name="render_control",
-                configuration=control_configuration,
-                geometry=geometry,
-            ),
-            "control_configuration": control_configuration,
-            "treatment_configuration": {
-                "retrieval_mode": "fast",
-                "render": "bounded_bundle",
-            },
-            "geometry": geometry,
-            "included_levers": ["plain_english_lanes", "action_spine"],
-            "replay_survivors": {"plain_english_lanes": True, "action_spine": True},
-            "decision_rule": rig.RENDER_DECISION_RULE,
+    return {
+        "created_at": "2026-08-20T00:00:00Z",
+        "stack": _stack(),
+        "seeds": ["decision-seed-0", "decision-seed-1", "decision-seed-2"],
+        "aa_receipt": _aa_receipt(
+            name="render_control",
+            configuration=control_configuration,
+            geometry=geometry,
+        ),
+        "control_configuration": control_configuration,
+        "treatment_configuration": {
+            "retrieval_mode": "fast",
+            "render": "bounded_bundle",
         },
-        kind="render",
-    )
+        "geometry": geometry,
+        "included_levers": ["plain_english_lanes", "action_spine"],
+        "replay_survivors": {"plain_english_lanes": True, "action_spine": True},
+        "decision_rule": rig.RENDER_DECISION_RULE,
+    }
+
+
+def _render_preregistration() -> dict[str, Any]:
+    return rig.freeze_preregistration(_render_preregistration_input(), kind="render")
+
+
+@pytest.mark.parametrize("drift", ["configuration", "geometry"])
+def test_render_preregistration_rejects_aa_control_drift(drift: str) -> None:
+    raw = _render_preregistration_input()
+    if drift == "configuration":
+        raw["control_configuration"] = {"retrieval_mode": "fast", "render": "other"}
+    else:
+        raw["geometry"] = {"max_context_items": 9, "max_context_total_chars": 60_000}
+
+    with pytest.raises(rig.RigInputError, match="does not match the preregistered render control"):
+        rig.freeze_preregistration(raw, kind="render")
 
 
 def test_render_bundle_ships_only_when_every_gate_passes() -> None:
