@@ -97,6 +97,7 @@ def _context(scopes: list[str]) -> McpContext:
         org_id=str(uuid4()),
         user_id=str(uuid4()),
         scopes=scopes,
+        org_role="member",
         is_api_key=True,
     )
 

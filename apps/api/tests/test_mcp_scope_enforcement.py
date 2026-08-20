@@ -31,6 +31,7 @@ def _api_key_ctx(scopes: list[str] | None) -> McpContext:
         org_id=str(uuid4()),
         user_id=str(uuid4()),
         scopes=scopes,
+        org_role="member",
         is_api_key=True,
     )
 
@@ -182,7 +183,12 @@ async def test_require_mcp_context_refuses_keys_without_mcp_scope(
 
 @pytest.mark.asyncio
 async def test_require_mcp_context_leaves_user_sessions_ungated() -> None:
-    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=None)
+    ctx = McpContext(
+        org_id=str(uuid4()),
+        user_id=str(uuid4()),
+        scopes=None,
+        org_role="member",
+    )
 
     with patch("sibyl.server._get_mcp_context", AsyncMock(return_value=ctx)):
         assert await _require_mcp_context(write=True) is ctx
