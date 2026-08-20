@@ -180,6 +180,23 @@ def test_helm_non_production_render_keeps_development_jwt_autogeneration() -> No
     assert result.returncode == 0, result.stderr
     assert 'SIBYL_ENVIRONMENT: "development"' in result.stdout
     assert "key: SIBYL_JWT_SECRET" not in result.stdout
+    assert "name: sibyl-worker" not in result.stdout
+
+
+@requires_helm
+def test_helm_production_redis_render_includes_the_worker() -> None:
+    result = _helm_template(
+        "--set",
+        "backend.existingSecret=sibyl-secrets",
+        "--set",
+        "coordinationBackend=redis",
+        "--set",
+        "backend.redis.password=ci-only",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "name: sibyl-worker" in result.stdout
+    assert 'SIBYL_COORDINATION_BACKEND: "redis"' in result.stdout
 
 
 @requires_helm

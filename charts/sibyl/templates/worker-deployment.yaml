@@ -1,4 +1,4 @@
-{{- if .Values.worker.enabled }}
+{{- if and .Values.worker.enabled (eq .Values.coordinationBackend "redis") }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

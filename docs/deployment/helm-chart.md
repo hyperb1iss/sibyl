@@ -283,11 +283,12 @@ upgrades and pod replacements; changing it makes encrypted settings unreadable.
 
 ### Storage Mode
 
-The active persistence runtime is fixed to SurrealDB. Use Redis/Valkey coordination for multi-pod
+The active persistence runtime is fixed to SurrealDB. Local and auto coordination run jobs in the
+API process and do not render a separate worker. Set Redis coordination explicitly for multi-pod
 deployments:
 
 ```yaml
-coordinationBackend: "auto" # use "redis" for multi-pod deployments
+coordinationBackend: "redis"
 ```
 
 See [storage-modes.md](../guide/storage-modes.md) for the mode matrix.
@@ -459,6 +460,10 @@ frontend:
 ```
 
 ## Worker Configuration
+
+The chart renders this deployment only when both `worker.enabled` is true and
+`coordinationBackend` is `redis`. Local and auto coordination keep job execution in the API
+process.
 
 ```yaml
 worker:
@@ -668,7 +673,7 @@ global:
   imagePullSecrets:
     - name: ghcr-pull-secret
 
-coordinationBackend: "auto"
+coordinationBackend: "redis"
 publicUrl: "https://sibyl.example.com"
 
 backend:
@@ -684,6 +689,10 @@ backend:
     existingSecret: sibyl-surreal
     namespacePrefix: "org_"
     database: "graph"
+  redis:
+    host: "prod-valkey.internal"
+    port: "6379"
+    existingSecret: sibyl-redis
   env:
     SIBYL_ENVIRONMENT: "production"
   autoscaling:
