@@ -32,7 +32,7 @@ from sibyl_core.models.context import (
 from sibyl_core.models.reflection import memory_lifecycle_from_metadata
 from sibyl_core.retrieval._search_lifecycle import _superseded_candidate_uuids
 from sibyl_core.retrieval.search import build_context_retrieval_plan, context_search
-from sibyl_core.services.graph import get_surreal_graph_runtime
+from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
 from sibyl_core.services.surreal_content import (
     MemoryScope,
     RawMemory,

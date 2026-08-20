@@ -50,11 +50,9 @@ def _get_graph_managers(
     client: Any,
     organization_id: str,
 ) -> tuple[Any, Any]:
-    from sibyl_core.services.graph import (
-        EntityManager,
-        RelationshipManager,
-        SurrealGraphClient,
-    )
+    from sibyl_core.services.graph_client import SurrealGraphClient
+    from sibyl_core.services.graph_entities import EntityManager
+    from sibyl_core.services.graph_relationships import RelationshipManager
 
     if isinstance(client, SurrealGraphClient):
         return (

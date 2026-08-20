@@ -39,15 +39,15 @@ import structlog
 from sibyl_core.backends.surreal.records import normalize_records, raise_on_error
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.models.tasks import EpicStatus, TaskStatus
-from sibyl_core.services.graph import (
+from sibyl_core.services.graph_entity_store import (
     _ENTITY_BULK_UPSERT_QUERY,
-    _entity_from_row,
     _entity_record,
     heal_entity_metadata_snapshots,
 )
+from sibyl_core.services.graph_records import _entity_from_row
 
 if TYPE_CHECKING:
-    from sibyl_core.services.graph import SurrealGraphClient
+    from sibyl_core.services.graph_client import SurrealGraphClient
 
 log = structlog.get_logger()
 

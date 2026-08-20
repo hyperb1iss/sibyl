@@ -18,12 +18,11 @@ from sibyl_core.migrate.collapse_epics import (
 )
 from sibyl_core.models.entities import EntityType
 from sibyl_core.models.tasks import Epic, EpicStatus, Task, TaskStatus
-from sibyl_core.services.graph import (
+from sibyl_core.services.graph_client import SurrealGraphClient, prepare_graph_schema
+from sibyl_core.services.graph_entities import EntityManager
+from sibyl_core.services.graph_entity_store import (
     _ENTITY_BULK_UPSERT_QUERY,
-    EntityManager,
-    SurrealGraphClient,
     _entity_record,
-    prepare_graph_schema,
 )
 
 

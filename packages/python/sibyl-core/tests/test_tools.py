@@ -972,7 +972,7 @@ class TestSearchTool:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Search should not run schema bootstrap on the read path."""
-        from sibyl_core.services import graph as graph_module
+        from sibyl_core.tools import search as search_module
         from sibyl_core.tools.search import get_graph_runtime
 
         seen: dict[str, object] = {}
@@ -982,7 +982,7 @@ class TestSearchTool:
             seen.update(kwargs)
             return object()
 
-        monkeypatch.setattr(graph_module, "get_surreal_graph_runtime", fake_runtime)
+        monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
 
         await get_graph_runtime("org_123")
 
@@ -990,11 +990,11 @@ class TestSearchTool:
         assert seen["ensure_schema"] is False
 
     @pytest.mark.asyncio
-    async def test_search_graph_runtime_supports_legacy_runtime_factory(
+    async def test_search_graph_runtime_forwards_read_only_contract(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from sibyl_core.services import graph as graph_module
+        from sibyl_core.tools import search as search_module
         from sibyl_core.tools.search import get_graph_runtime
 
         seen: dict[str, object] = {}
@@ -1004,18 +1004,20 @@ class TestSearchTool:
             group_id: str,
             *,
             embedding_provider: object | None = None,
+            ensure_schema: bool = True,
         ) -> object:
             seen["group_id"] = group_id
             seen["embedding_provider"] = embedding_provider
+            seen["ensure_schema"] = ensure_schema
             return runtime
 
-        monkeypatch.setattr(graph_module, "get_surreal_graph_runtime", fake_runtime)
+        monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
 
         result = await get_graph_runtime("org_123")
 
         assert result is runtime
         assert seen["group_id"] == "org_123"
-        assert "embedding_provider" in seen
+        assert seen["ensure_schema"] is False
 
     @pytest.mark.asyncio
     async def test_search_builds_filters_dict(self) -> None:

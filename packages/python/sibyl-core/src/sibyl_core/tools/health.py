@@ -6,7 +6,7 @@ from sibyl_core.models.entities import EntityType
 
 
 async def get_graph_client():
-    from sibyl_core.services.graph import get_surreal_graph_client
+    from sibyl_core.services.graph_client import get_surreal_graph_client
 
     client = await get_surreal_graph_client("health")
     await client.connect()
@@ -14,7 +14,7 @@ async def get_graph_client():
 
 
 async def get_graph_runtime(group_id: str):
-    from sibyl_core.services.graph import get_surreal_graph_runtime
+    from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
 
     return await get_surreal_graph_runtime(group_id)
 
@@ -22,10 +22,10 @@ async def get_graph_runtime(group_id: str):
 async def execute_graph_query(
     group_id: str, query: str, **params: object
 ) -> list[dict[str, object]]:
-    from sibyl_core.services.graph import normalize_records
+    from sibyl_core.services.graph_common import normalize_graph_records
 
     runtime = await get_graph_runtime(group_id)
-    return normalize_records(await runtime.client.execute_query(query, **params))
+    return normalize_graph_records(await runtime.client.execute_query(query, **params))
 
 
 async def get_health(*, organization_id: str | None = None) -> dict[str, Any]:

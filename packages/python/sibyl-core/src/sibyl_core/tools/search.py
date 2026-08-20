@@ -30,6 +30,7 @@ from sibyl_core.retrieval.fusion import rrf_merge
 from sibyl_core.retrieval.hybrid import _apply_current_entity_gate
 from sibyl_core.retrieval.temporal import parse_temporal_datetime
 from sibyl_core.services import document_search as document_search_service
+from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
 from sibyl_core.services.surreal_content import (
     MemoryScope,
     RawMemory,
@@ -83,19 +84,11 @@ class RawMemorySearchFetch:
 
 
 async def get_graph_runtime(group_id: str):
-    from sibyl_core.services.graph import get_surreal_graph_runtime
-
-    kwargs = {
-        "embedding_provider": configured_embedding_provider(),
-        "ensure_schema": False,
-    }
-    try:
-        return await get_surreal_graph_runtime(group_id, **kwargs)
-    except TypeError as error:
-        if "unexpected keyword argument 'ensure_schema'" not in str(error):
-            raise
-        kwargs.pop("ensure_schema")
-        return await get_surreal_graph_runtime(group_id, **kwargs)
+    return await get_surreal_graph_runtime(
+        group_id,
+        embedding_provider=configured_embedding_provider(),
+        ensure_schema=False,
+    )
 
 
 __all__ = [

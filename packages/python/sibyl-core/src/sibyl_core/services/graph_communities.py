@@ -164,7 +164,8 @@ def _attached_manager(client: Any, name: str) -> Any | None:
 
 
 def _entity_manager_for_client(client: Any, organization_id: str) -> Any:
-    from sibyl_core.services.graph import EntityManager, SurrealGraphClient
+    from sibyl_core.services.graph_client import SurrealGraphClient
+    from sibyl_core.services.graph_entities import EntityManager
 
     if _entity_manager_factory is not None:
         return _entity_manager_factory(client, organization_id)
@@ -182,7 +183,8 @@ def _entity_manager_for_client(client: Any, organization_id: str) -> Any:
 
 
 def _relationship_manager_for_client(client: Any, organization_id: str) -> Any:
-    from sibyl_core.services.graph import RelationshipManager, SurrealGraphClient
+    from sibyl_core.services.graph_client import SurrealGraphClient
+    from sibyl_core.services.graph_relationships import RelationshipManager
 
     if _relationship_manager_factory is not None:
         return _relationship_manager_factory(client, organization_id)
@@ -484,9 +486,9 @@ async def _native_rows(
         result = execute_query(query, group_id=organization_id, **params)
         if not inspect.isawaitable(result):
             return None
-        from sibyl_core.services.graph import normalize_records
+        from sibyl_core.services.graph_common import normalize_graph_records
 
-        return normalize_records(await result)
+        return normalize_graph_records(await result)
     except Exception as exc:
         log.warning("native_graph_query_failed", org_id=organization_id, error=str(exc))
         return None
@@ -496,13 +498,14 @@ async def _graph_totals(
     client: Any,
     organization_id: str,
 ) -> tuple[int, int] | None:
-    from sibyl_core.services.graph import SurrealGraphClient, normalize_records
+    from sibyl_core.services.graph_client import SurrealGraphClient
+    from sibyl_core.services.graph_common import normalize_graph_records
 
     if not isinstance(client, SurrealGraphClient):
         return None
 
     try:
-        rows = normalize_records(
+        rows = normalize_graph_records(
             await client.execute_query(
                 """
                 RETURN {
@@ -1503,7 +1506,7 @@ async def _native_entities_by_ids(
     if rows is None:
         return None
 
-    from sibyl_core.services.graph import entity_from_surreal_row
+    from sibyl_core.services.graph_records import entity_from_surreal_row
 
     entities: dict[str, Entity] = {}
     for row in rows:

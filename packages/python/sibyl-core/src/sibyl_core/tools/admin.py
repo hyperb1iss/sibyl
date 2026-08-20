@@ -1789,7 +1789,7 @@ async def backfill_denormalized_fields(
         return value is None or value == "" or value == []
 
     try:
-        from sibyl_core.services.graph import normalize_records
+        from sibyl_core.services.graph_common import normalize_graph_records
 
         runtime = await get_graph_runtime(organization_id)
         entity_manager = runtime.entity_manager
@@ -1797,7 +1797,7 @@ async def backfill_denormalized_fields(
 
         offset = 0
         while True:
-            rows = normalize_records(
+            rows = normalize_graph_records(
                 await client.execute_query(
                     """
                     SELECT uuid,

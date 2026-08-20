@@ -30,7 +30,7 @@ from sibyl_core.projection.experience import (
     MAX_TYPED_ENTITY_CONTENT_CHARS,
 )
 from sibyl_core.projection.slicing import slice_body
-from sibyl_core.services.graph import (
+from sibyl_core.services.graph_entity_store import (
     MAX_ENTITY_CONTENT_CHARS,
     _enforce_entity_content_limit,
 )
