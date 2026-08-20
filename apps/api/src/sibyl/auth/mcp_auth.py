@@ -1,22 +1,8 @@
-"""MCPServer token verification for Sibyl.
-
-MCPServer can be configured as an OAuth Resource Server. Sibyl accepts both its
-own OAuth access tokens and scoped API keys at the MCP endpoint.
-
-Accepted tokens:
-- JWT access tokens issued by Sibyl (/api/auth/*)
-- API keys starting with "sk_" (hashed in the active auth runtime)
-"""
+"""Scope policy shared by Sibyl's MCP OAuth provider and tool handlers."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
-from uuid import UUID
-
-from mcp.server.auth.provider import AccessToken
-
-from sibyl.auth.jwt import JwtError, verify_access_token
-from sibyl.persistence.auth_runtime import authenticate_api_key, validate_access_session
 
 # Scope vocabulary for the MCP surface.
 #
@@ -79,65 +65,3 @@ def insufficient_mcp_scope_message(scopes: Iterable[str] | None, *, write: bool)
         f"API key is missing the scope required for this MCP {verb} tool. "
         f"Expected {expected}; key has {actual}."
     )
-
-
-def _parse_scopes(claims: dict[str, object]) -> list[str]:
-    scopes = claims.get("scopes")
-    if isinstance(scopes, list):
-        parsed_scopes = [item for item in scopes if isinstance(item, str)]
-        if len(parsed_scopes) == len(scopes):
-            return parsed_scopes
-    scope = claims.get("scope")
-    if isinstance(scope, str) and scope.strip():
-        return scope.split()
-    return []
-
-
-class SibylMcpTokenVerifier:
-    """Verify MCP Bearer tokens as either JWT or API key."""
-
-    async def verify_token(self, token: str) -> AccessToken | None:
-        if token.startswith("sk_"):
-            auth = await authenticate_api_key(token)
-            if auth is None:
-                return None
-            scopes = [scope for scope in (auth.scopes or []) if isinstance(scope, str)]
-            if MCP_SURFACE_SCOPE not in scopes:
-                return None
-            return AccessToken(
-                token=token,
-                client_id=f"api_key:{auth.api_key_id}",
-                scopes=scopes,
-            )
-
-        try:
-            claims = verify_access_token(token)
-        except JwtError:
-            return None
-        try:
-            is_active = await validate_access_session(token)
-        except TimeoutError:
-            return None
-        if not is_active:
-            return None
-
-        sub = claims.get("sub")
-        if not isinstance(sub, str) or not sub:
-            return None
-        try:
-            user_id = UUID(sub)
-        except ValueError:
-            return None
-        scopes = _parse_scopes(claims)
-        if MCP_SURFACE_SCOPE not in scopes:
-            return None
-
-        exp = claims.get("exp")
-        expires_at = exp if isinstance(exp, int) else None
-
-        return AccessToken(
-            token=token,
-            client_id=f"user:{user_id}",
-            scopes=scopes,
-            expires_at=expires_at,
-        )

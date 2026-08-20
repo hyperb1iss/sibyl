@@ -102,6 +102,7 @@ include = ["/src", "/tests", "/README.md", "/LICENSE"]
 
 [dependency-groups]
 dev = [
+    "httpx2>=2.5.0,<3",
     "pre-commit",
     "pytest",
     "pytest-asyncio",

@@ -3683,6 +3683,7 @@ graphrag-leiden = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "httpx2" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -3725,6 +3726,7 @@ provides-extras = ["docs", "generator", "graphrag", "graphrag-leiden"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "httpx2", specifier = ">=2.5.0,<3" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-asyncio" },

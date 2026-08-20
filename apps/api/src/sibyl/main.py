@@ -8,8 +8,10 @@ import os
 import secrets
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 import structlog
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
@@ -69,6 +71,49 @@ def _root_metrics_authorized(request: Request) -> bool:
     return client in {"127.0.0.1", "::1", "localhost"}
 
 
+def _mcp_transport_security(bind_host: str, bind_port: int) -> TransportSecuritySettings:
+    """Allow loopback, bind, and configured public origins without disabling DNS protection."""
+    allowed_hosts = {
+        "127.0.0.1",
+        "127.0.0.1:*",
+        "localhost",
+        "localhost:*",
+        "[::1]",
+        "[::1]:*",
+    }
+    allowed_origins = {
+        "http://127.0.0.1:*",
+        "http://localhost:*",
+        "http://[::1]:*",
+        "https://127.0.0.1:*",
+        "https://localhost:*",
+        "https://[::1]:*",
+    }
+
+    def add_host(hostname: str, *, port: int | None = None) -> None:
+        if not hostname or hostname in {"0.0.0.0", "::"}:  # noqa: S104
+            return
+        host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
+        allowed_hosts.add(host)
+        allowed_hosts.add(f"{host}:*")
+        if port is not None:
+            allowed_hosts.add(f"{host}:{port}")
+
+    add_host(bind_host, port=bind_port)
+    for configured_url in (settings.server_url, settings.frontend_url):
+        parsed = urlsplit(configured_url)
+        if not parsed.scheme or not parsed.hostname:
+            continue
+        add_host(parsed.hostname, port=parsed.port)
+        allowed_origins.add(f"{parsed.scheme}://{parsed.netloc}")
+
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=sorted(allowed_hosts),
+        allowed_origins=sorted(allowed_origins),
+    )
+
+
 def create_combined_app(
     host: str | None = None, port: int | None = None, *, embed_worker: bool = False
 ) -> Starlette:
@@ -80,8 +125,8 @@ def create_combined_app(
         /       - Root redirect to API docs
 
     Args:
-        host: Host to bind to
-        port: Port to listen on
+        host: Bind host to include in MCP transport validation
+        port: Bind port to include in MCP transport validation
         embed_worker: If True, run arq worker in-process (for dev mode)
 
     Returns:
@@ -101,7 +146,11 @@ def create_combined_app(
     mcp = create_mcp_server()
 
     # Get the MCP ASGI app (streamable HTTP transport)
-    mcp_app = mcp.streamable_http_app(host=host, stateless_http=False)
+    mcp_app = mcp.streamable_http_app(
+        host=host,
+        stateless_http=False,
+        transport_security=_mcp_transport_security(host, port),
+    )
 
     @asynccontextmanager
     async def lifespan(_app: Starlette) -> "AsyncGenerator[None]":
