@@ -186,6 +186,98 @@ class TestCreateEntityJob:
             "rel-1",
             "rel-pattern-123-mentions-topic",
         }
+        assert result["derived_work"]["memory_projection"]["status"] == "complete"
+        assert result["derived_work"]["embedding_backfill"] == {
+            "status": "queued",
+            "job_ids": ["embed-pattern-123"],
+            "queued_entities": 2,
+            "queued_relationships": 2,
+        }
+        assert result["derived_work"]["memory_extraction"]["status"] == "skipped"
+        assert result["derived_work"]["memory_extraction"]["reason"] == "disabled"
+
+    @pytest.mark.asyncio
+    async def test_reports_each_failed_derived_enqueue_with_recovery(self) -> None:
+        entity = Episode(
+            id="episode-123",
+            name="Derived work truth",
+            content="The parent persists even when every derived queue is down.",
+        )
+        entity_manager = MagicMock()
+        entity_manager.create_direct = AsyncMock(return_value=entity.id)
+        entity_manager.get = AsyncMock(return_value=None)
+        relationship_manager = MagicMock()
+        runtime = SimpleNamespace(
+            entity_manager=entity_manager,
+            relationship_manager=relationship_manager,
+        )
+        projection = SimpleNamespace(
+            errors=("projection failed",),
+            extracted=1,
+            projected_entities=0,
+            relationships=0,
+            projection_state="partial",
+            created_projected_entities=(),
+            created_projection_relationships=(),
+        )
+        passages = SimpleNamespace(
+            errors=(),
+            passages=0,
+            relationships=0,
+            created_passages=(),
+            created_relationships=(),
+        )
+
+        with (
+            patch("sibyl.jobs.entities.get_surreal_graph_runtime", AsyncMock(return_value=runtime)),
+            patch(
+                "sibyl.jobs.entities.project_memory_entity",
+                AsyncMock(return_value=projection),
+            ),
+            patch(
+                "sibyl.jobs.entities.project_entity_passages",
+                AsyncMock(return_value=passages),
+            ),
+            patch("sibyl.jobs.entities._safe_broadcast", AsyncMock()),
+            patch("sibyl.jobs.pending.clear_pending", AsyncMock()),
+            patch("sibyl.jobs.pending.process_pending_operations", AsyncMock(return_value=[])),
+            patch(
+                "sibyl_core.tools.conflicts.find_similar_entities",
+                AsyncMock(return_value=[]),
+            ),
+            patch(
+                "sibyl.jobs.queue.enqueue_entity_embedding_backfill",
+                AsyncMock(side_effect=ConnectionError("embedding queue down")),
+            ),
+            patch(
+                "sibyl.jobs.memory_extraction.enqueue_memory_extraction_batches",
+                AsyncMock(side_effect=ConnectionError("extraction queue down")),
+            ),
+        ):
+            result = await create_entity(
+                {},
+                entity.model_dump(mode="json"),
+                "episode",
+                "org-1",
+                generate_embeddings=False,
+            )
+
+        assert result["entity_id"] == entity.id
+        assert set(result["derived_work"]) == {
+            "memory_projection",
+            "embedding_backfill",
+            "memory_extraction",
+        }
+        for job, receipt in result["derived_work"].items():
+            assert receipt["status"] == "failed"
+            assert receipt["job_ids"] == []
+            assert receipt["recovery"] == {
+                "method": "POST",
+                "endpoint": "/api/entities/bulk/requeue-background-jobs",
+                "request": {"entity_ids": [entity.id], "jobs": [job]},
+            }
+        assert result["derived_work"]["embedding_backfill"]["error_type"] == ("ConnectionError")
+        assert result["derived_work"]["memory_extraction"]["error_type"] == ("ConnectionError")
 
 
 class TestBackfillEntityEmbeddingsJob:

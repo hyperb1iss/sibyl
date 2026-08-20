@@ -717,6 +717,25 @@ async def create_entity(  # noqa: PLR0915
                 relationships=passage_result.relationships,
             )
 
+        def recovery(job: str) -> dict[str, Any]:
+            return {
+                "method": "POST",
+                "endpoint": "/api/entities/bulk/requeue-background-jobs",
+                "request": {"entity_ids": [created_id], "jobs": [job]},
+            }
+
+        projection_errors = len(projection_result.errors)
+        derived_work: dict[str, Any] = {
+            "memory_projection": {
+                "status": "failed" if projection_errors else "complete",
+                "job_ids": [],
+                "projected_entities": projection_result.projected_entities,
+                "relationships": projection_result.relationships,
+                "projection_state": projection_result.projection_state,
+                "error_count": projection_errors,
+                **({"recovery": recovery("memory_projection")} if projection_errors else {}),
+            }
+        }
         embedding_backfill_job_id: str | None = None
         if not generate_embeddings:
             try:
@@ -749,11 +768,20 @@ async def create_entity(  # noqa: PLR0915
                     ]
                     or None,
                 )
+                queued_embedding_entities = (
+                    1 + len(projection_entities) + len(passage_result.created_passages)
+                )
+                derived_work["embedding_backfill"] = {
+                    "status": "queued",
+                    "job_ids": [embedding_backfill_job_id],
+                    "queued_entities": queued_embedding_entities,
+                    "queued_relationships": len(relationships_to_backfill),
+                }
                 log.info(
                     "create_entity_embedding_backfill_enqueued",
                     entity_id=created_id,
                     job_id=embedding_backfill_job_id,
-                    entities=1 + len(projection_entities),
+                    entities=queued_embedding_entities,
                     relationships=len(relationships_to_backfill),
                 )
             except Exception as exc:
@@ -762,6 +790,21 @@ async def create_entity(  # noqa: PLR0915
                     entity_id=created_id,
                     error=str(exc),
                 )
+                derived_work["embedding_backfill"] = {
+                    "status": "failed",
+                    "job_ids": [],
+                    "queued_entities": 0,
+                    "queued_relationships": 0,
+                    "reason": "enqueue_failed",
+                    "error_type": type(exc).__name__,
+                    "recovery": recovery("embedding_backfill"),
+                }
+        else:
+            derived_work["embedding_backfill"] = {
+                "status": "skipped",
+                "job_ids": [],
+                "reason": "embeddings_written_inline",
+            }
 
         try:
             from sibyl.jobs.memory_extraction import enqueue_memory_extraction_batches
@@ -788,12 +831,32 @@ async def create_entity(  # noqa: PLR0915
                     status=extraction_enqueue.status,
                     reason=extraction_enqueue.reason,
                 )
+            extraction_receipt = {
+                "status": extraction_enqueue.status,
+                "job_ids": list(extraction_enqueue.job_ids),
+                "queued_sources": extraction_enqueue.queued_sources,
+                "skipped_sources": extraction_enqueue.skipped_sources,
+                "queue_depth": getattr(extraction_enqueue, "queue_depth", None),
+                "reason": extraction_enqueue.reason,
+            }
+            if extraction_enqueue.status in {"partial", "backpressure"}:
+                extraction_receipt["recovery"] = recovery("memory_extraction")
+            derived_work["memory_extraction"] = extraction_receipt
         except Exception as exc:
             log.warning(
                 "create_entity_memory_extraction_enqueue_failed",
                 entity_id=created_id,
                 error=str(exc),
             )
+            derived_work["memory_extraction"] = {
+                "status": "failed",
+                "job_ids": [],
+                "queued_sources": 0,
+                "skipped_sources": 1,
+                "reason": "enqueue_failed",
+                "error_type": type(exc).__name__,
+                "recovery": recovery("memory_extraction"),
+            }
 
         # Clear pending status and process any queued operations
         from sibyl.jobs.pending import clear_pending, process_pending_operations
@@ -810,6 +873,7 @@ async def create_entity(  # noqa: PLR0915
             "projection_relationships": projection_result.relationships,
             "projection_state": projection_result.projection_state,
             "embedding_backfill_job_id": embedding_backfill_job_id,
+            "derived_work": derived_work,
             "pending_ops_processed": len(pending_results),
             "deduplicated": deduplicated,
         }
