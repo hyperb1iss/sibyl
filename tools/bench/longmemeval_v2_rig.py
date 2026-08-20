@@ -49,6 +49,52 @@ RENDER_DECISION_RULE = {
     "maximum_reader_token_regression_ratio": 0.25,
 }
 
+AA_RECEIPT_KEYS = frozenset(
+    {
+        "schema_version",
+        "status",
+        "paid_benchmark_allowed",
+        "score_claim_allowed",
+        "stack",
+        "arm_contract",
+        "pass_count",
+        "passes",
+        "observed_span_pp",
+        "first_three_span_pp",
+        "stabilized",
+        "noise_floor_pp",
+        "stabilization_rule",
+        "aa_receipt_sha256",
+    }
+)
+AA_PASS_ROW_KEYS = frozenset(
+    {
+        "pass_id",
+        "seed",
+        "left",
+        "right",
+        "accuracy_delta_pp",
+        "latency_delta_seconds",
+        "reader_token_delta",
+    }
+)
+ARM_SUMMARY_KEYS = frozenset(
+    {
+        "name",
+        "question_count",
+        "accuracy",
+        "accuracy_by_domain",
+        "evidence_exposure",
+        "evidence_exposure_by_domain",
+        "latency_mean_seconds",
+        "latency_p95_seconds",
+        "reader_tokens_mean",
+        "reader_tokens_total",
+        "provider_requests",
+        "activity_events",
+    }
+)
+
 
 class RigInputError(ValueError):
     """Raised when an input cannot support a benchmark decision."""
@@ -85,6 +131,14 @@ def _positive_int(value: object, *, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise RigInputError(f"{name} must be a positive integer")
     return value
+
+
+def _require_exact_keys(raw: dict[str, Any], expected: frozenset[str], *, name: str) -> None:
+    actual = set(raw)
+    if actual != expected:
+        missing = sorted(expected - actual)
+        unknown = sorted(actual - expected)
+        raise RigInputError(f"{name} fields differ: missing={missing}, unknown={unknown}")
 
 
 def _mean(values: list[float]) -> float:
@@ -395,6 +449,7 @@ def _aa_receipt_deltas(raw: dict[str, Any]) -> list[float]:
     for index, row in enumerate(pass_rows):
         if not isinstance(row, dict):
             raise RigInputError(f"A/A passes[{index}] is not an object")
+        _require_exact_keys(row, AA_PASS_ROW_KEYS, name=f"A/A passes[{index}]")
         pass_id = _nonempty_string(row.get("pass_id"), name=f"A/A passes[{index}].pass_id")
         seed = _nonempty_string(row.get("seed"), name=f"A/A passes[{index}].seed")
         if pass_id in pass_ids or seed in seeds:
@@ -405,6 +460,15 @@ def _aa_receipt_deltas(raw: dict[str, Any]) -> list[float]:
             row.get("accuracy_delta_pp"),
             name=f"A/A passes[{index}].accuracy_delta_pp",
         )
+        for side in ("left", "right"):
+            summary = row.get(side)
+            if not isinstance(summary, dict):
+                raise RigInputError(f"A/A passes[{index}].{side} is not an object")
+            _require_exact_keys(
+                summary,
+                ARM_SUMMARY_KEYS,
+                name=f"A/A passes[{index}].{side}",
+            )
         absolute_deltas.append(abs(delta))
     return absolute_deltas
 
@@ -434,6 +498,11 @@ def _validate_aa_arm_contract(raw: dict[str, Any]) -> None:
     arm_contract = raw.get("arm_contract")
     if not isinstance(arm_contract, dict):
         raise RigInputError("A/A arm contract is missing")
+    _require_exact_keys(
+        arm_contract,
+        frozenset({"name", "configuration", "geometry"}),
+        name="A/A arm contract",
+    )
     _nonempty_string(arm_contract.get("name"), name="A/A arm name")
     configuration = arm_contract.get("configuration")
     geometry = arm_contract.get("geometry")
@@ -452,6 +521,7 @@ def _validate_aa_arm_contract(raw: dict[str, Any]) -> None:
 def validate_aa_receipt(raw: object) -> dict[str, Any]:
     if not isinstance(raw, dict) or raw.get("schema_version") != AA_SCHEMA_VERSION:
         raise RigInputError("A/A receipt is missing or invalid")
+    _require_exact_keys(raw, AA_RECEIPT_KEYS, name="A/A receipt")
     digest = raw.get("aa_receipt_sha256")
     unsigned = {key: value for key, value in raw.items() if key != "aa_receipt_sha256"}
     if digest != canonical_sha256(unsigned):
@@ -468,6 +538,10 @@ def _require_passing_aa_receipt(raw: object) -> dict[str, Any]:
     if receipt["status"] != "PASS" or receipt["paid_benchmark_allowed"] is not True:
         raise RigInputError("paid benchmark work requires a stabilized PASS A/A receipt")
     return receipt
+
+
+def _aa_seeds(receipt: dict[str, Any]) -> set[str]:
+    return {str(row["seed"]) for row in receipt["passes"]}
 
 
 def build_anchor_receipt(
@@ -490,6 +564,8 @@ def build_anchor_receipt(
     }
     if arm_contract != validated_aa["arm_contract"]:
         raise RigInputError("anchor arm configuration or geometry differs from A/A")
+    if paired_pass["seed"] in _aa_seeds(validated_aa):
+        raise RigInputError("anchor seed reuses an A/A calibration seed")
     summary = arm_summary(arm)
     lafs = _finite_number(arm.get("official_lafs"), name="anchor official_lafs")
     noise_floor = float(validated_aa["noise_floor_pp"])
@@ -502,6 +578,8 @@ def build_anchor_receipt(
         "historical_denominator_allowed": False,
         "stack": paired_pass["stack"],
         "aa_receipt_sha256": validated_aa["aa_receipt_sha256"],
+        "aa_pass_count": validated_aa["pass_count"],
+        "aa_observed_span_pp": validated_aa["observed_span_pp"],
         "arm": arm_contract,
         "metrics": {**summary, "official_lafs": lafs, "noise_floor_pp": noise_floor},
     }
@@ -524,20 +602,6 @@ def freeze_preregistration(raw: dict[str, Any], *, kind: str) -> dict[str, Any]:
 
     if {"aa_span_pp", "noise_floor_pp", "aa_receipt_sha256"}.intersection(raw):
         raise RigInputError("A/A thresholds are derived from the bound receipt")
-    aa_receipt = _require_passing_aa_receipt(raw.get("aa_receipt"))
-    reject_scores({key: value for key, value in raw.items() if key != "aa_receipt"})
-    stack = validate_stack(raw.get("stack"))
-    if stack != aa_receipt["stack"]:
-        raise RigInputError("preregistration stack does not match its A/A receipt")
-    seeds = raw.get("seeds")
-    if not isinstance(seeds, list) or len(seeds) != PAIRED_PASS_COUNT:
-        raise RigInputError("preregistration must freeze exactly three seeds")
-    normalized_seeds = [_nonempty_string(seed, name="seed") for seed in seeds]
-    if len(set(normalized_seeds)) != PAIRED_PASS_COUNT:
-        raise RigInputError("preregistered seeds must be unique")
-    expected_rule = RACE_DECISION_RULE if kind == "race" else RENDER_DECISION_RULE
-    if raw.get("decision_rule") != expected_rule:
-        raise RigInputError(f"{kind} decision rule does not match the v1.3 contract")
     required = (
         {"machine_configuration", "naive_configuration", "shipping_geometry", "matched_geometry"}
         if kind == "race"
@@ -552,6 +616,44 @@ def freeze_preregistration(raw: dict[str, Any], *, kind: str) -> dict[str, Any]:
     missing = sorted(key for key in required if key not in raw)
     if missing:
         raise RigInputError(f"{kind} preregistration is missing {missing}")
+    reject_scores({key: value for key, value in raw.items() if key != "aa_receipt"})
+    allowed = required | {"created_at", "stack", "seeds", "aa_receipt", "decision_rule"}
+    unknown = sorted(set(raw) - allowed)
+    if unknown:
+        raise RigInputError(f"{kind} preregistration has unknown fields {unknown}")
+    aa_receipt = _require_passing_aa_receipt(raw.get("aa_receipt"))
+    stack = validate_stack(raw.get("stack"))
+    if stack != aa_receipt["stack"]:
+        raise RigInputError("preregistration stack does not match its A/A receipt")
+    if kind == "race":
+        shipping_geometry = raw["shipping_geometry"]
+        machine_geometry = (
+            shipping_geometry.get("machine") if isinstance(shipping_geometry, dict) else None
+        )
+        expected_aa_contract = {
+            "name": "machine",
+            "configuration": raw["machine_configuration"],
+            "geometry": machine_geometry,
+        }
+    else:
+        expected_aa_contract = {
+            "name": "render_control",
+            "configuration": raw["control_configuration"],
+            "geometry": raw["geometry"],
+        }
+    if aa_receipt["arm_contract"] != expected_aa_contract:
+        raise RigInputError(f"A/A arm does not match the preregistered {kind} control")
+    seeds = raw.get("seeds")
+    if not isinstance(seeds, list) or len(seeds) != PAIRED_PASS_COUNT:
+        raise RigInputError("preregistration must freeze exactly three seeds")
+    normalized_seeds = [_nonempty_string(seed, name="seed") for seed in seeds]
+    if len(set(normalized_seeds)) != PAIRED_PASS_COUNT:
+        raise RigInputError("preregistered seeds must be unique")
+    if set(normalized_seeds) & _aa_seeds(aa_receipt):
+        raise RigInputError("preregistered seeds must not reuse A/A calibration seeds")
+    expected_rule = RACE_DECISION_RULE if kind == "race" else RENDER_DECISION_RULE
+    if raw.get("decision_rule") != expected_rule:
+        raise RigInputError(f"{kind} decision rule does not match the v1.3 contract")
     payload = {
         **raw,
         "schema_version": PREREGISTRATION_SCHEMA_VERSION,
