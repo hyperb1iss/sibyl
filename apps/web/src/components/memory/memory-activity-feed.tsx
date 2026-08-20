@@ -12,7 +12,7 @@ import {
   WarningCircle,
 } from '@/components/ui/icons';
 import type { MemoryAuditEvent } from '@/lib/api';
-import { formatDistanceToNow } from '@/lib/constants';
+import { formatDistanceToNow } from '@/lib/constants/formatting';
 
 interface MemoryActivityFeedProps {
   events: MemoryAuditEvent[];

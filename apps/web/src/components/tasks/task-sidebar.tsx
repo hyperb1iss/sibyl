@@ -16,7 +16,7 @@ import {
   Users,
 } from '@/components/ui/icons';
 import type { Entity } from '@/lib/api';
-import { formatDateTime } from '@/lib/constants';
+import { formatDateTime } from '@/lib/constants/formatting';
 import type { ProjectOption } from './task-detail-types';
 
 interface TaskSidebarProps {

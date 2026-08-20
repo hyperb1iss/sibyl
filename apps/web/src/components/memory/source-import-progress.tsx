@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import type { SourceImportStatus, SourceImportStatusResponse } from '@/lib/api';
-import { formatDateTime, formatDistanceToNow } from '@/lib/constants';
+import { formatDateTime, formatDistanceToNow } from '@/lib/constants/formatting';
 
 const STATUS_STYLES: Record<SourceImportStatus, string> = {
   pending: 'border-sc-fg-subtle/20 bg-sc-fg-subtle/10 text-sc-fg-muted',

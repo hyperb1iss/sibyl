@@ -5,12 +5,12 @@ import { use, useMemo } from 'react';
 import { RelatedEntitiesSection } from '@/components/entities/related-entities-section';
 import { EntityBreadcrumb } from '@/components/layout/breadcrumb';
 import { EpicDetailSkeleton } from '@/components/suspense-boundary';
-import { EnhancedEmptyState } from '@/components/ui/empty-state';
+import { EnhancedEmptyState, ErrorState } from '@/components/ui/empty-state';
 import { CheckCircle, Clock, Layers, Pause, Target, Zap } from '@/components/ui/icons';
 import { Skeleton } from '@/components/ui/spinner';
-import { ErrorState } from '@/components/ui/tooltip';
 import type { EpicStatus, TaskPriority } from '@/lib/api';
-import { EPIC_STATUS_CONFIG, TASK_PRIORITY_CONFIG, TASK_STATUS_CONFIG } from '@/lib/constants';
+import { EPIC_STATUS_CONFIG } from '@/lib/constants/epics';
+import { TASK_PRIORITY_CONFIG, TASK_STATUS_CONFIG } from '@/lib/constants/tasks';
 import { useEpic, useEpicTasks, useProjects } from '@/lib/hooks';
 
 interface EpicDetailPageProps {

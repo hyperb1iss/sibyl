@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { EntityBadge } from '@/components/ui/badge';
 import { ExternalLink } from '@/components/ui/icons';
-import { ENTITY_ICONS, type EntityType, getEntityStyles } from '@/lib/constants';
+import { ENTITY_ICONS, type EntityType, getEntityStyles } from '@/lib/constants/entities';
 
 interface SearchResult {
   id: string;

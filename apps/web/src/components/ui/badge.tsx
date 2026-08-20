@@ -2,7 +2,8 @@
 
 import { AnimatePresence, motion } from 'motion/react';
 import { Check, RefreshDouble, Xmark } from '@/components/ui/icons';
-import { getEntityStyles, getRelationshipConfig } from '@/lib/constants';
+import { getEntityStyles } from '@/lib/constants/entities';
+import { getRelationshipConfig } from '@/lib/constants/relationships';
 import { EntityIcon } from './entity-icon';
 
 type BadgeSize = 'sm' | 'md' | 'lg';

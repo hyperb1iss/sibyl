@@ -3,7 +3,7 @@
 import type { ReactNode } from 'react';
 import { EditableDate, EditableSelect, EditableText } from '@/components/editable';
 import { Loader2, Zap } from '@/components/ui/icons';
-import { TASK_PRIORITY_CONFIG, TASK_STATUS_CONFIG } from '@/lib/constants';
+import { TASK_PRIORITY_CONFIG, TASK_STATUS_CONFIG } from '@/lib/constants/tasks';
 import {
   priorityOptions,
   STATUS_FLOW,

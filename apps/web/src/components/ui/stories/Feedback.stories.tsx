@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/nextjs-vite';
 import { Button } from '../button';
-import { EmptyState, ErrorState, Hint, InfoTooltip, SuccessState, Tooltip } from '../tooltip';
+import { EmptyState, ErrorState, SuccessState } from '../empty-state';
+import { Hint, InfoTooltip, Tooltip } from '../tooltip';
 
 const meta = {
   title: 'UI/Feedback',

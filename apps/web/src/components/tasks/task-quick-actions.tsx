@@ -2,7 +2,7 @@
 
 import { EditableText } from '@/components/editable';
 import { AlertCircle } from '@/components/ui/icons';
-import type { TaskStatusType } from '@/lib/constants';
+import type { TaskStatusType } from '@/lib/constants/tasks';
 
 interface TaskQuickActionsProps {
   status: TaskStatusType;

@@ -1,4 +1,4 @@
-import { getEntityColorVar } from '@/lib/constants';
+import { getEntityColorVar } from '@/lib/constants/entities';
 import { EntityIcon } from './entity-icon';
 
 interface ToggleProps {

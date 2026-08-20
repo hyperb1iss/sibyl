@@ -7,7 +7,7 @@ import { CodeResult } from '@/components/search/code-result';
 import { DocResult } from '@/components/search/doc-result';
 import { SearchResultCard } from '@/components/search/search-result';
 import { Button } from '@/components/ui/button';
-import { EnhancedEmptyState, SearchEmptyState } from '@/components/ui/empty-state';
+import { EnhancedEmptyState, ErrorState, SearchEmptyState } from '@/components/ui/empty-state';
 import { Code, FileText } from '@/components/ui/icons';
 import { SearchInput } from '@/components/ui/input';
 import {
@@ -20,9 +20,8 @@ import {
 import { LoadingState } from '@/components/ui/spinner';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FilterChip } from '@/components/ui/toggle';
-import { ErrorState } from '@/components/ui/tooltip';
 import type { MemoryScope, SearchResponse, SearchResult, StatsResponse } from '@/lib/api';
-import { TASK_STATUS_CONFIG, TASK_STATUSES } from '@/lib/constants';
+import { TASK_STATUS_CONFIG, TASK_STATUSES } from '@/lib/constants/tasks';
 import { useCodeExamples, useRAGHybridSearch, useSearch, useSources, useStats } from '@/lib/hooks';
 
 // Radix Select forbids empty-string item values, so the "All sources" option

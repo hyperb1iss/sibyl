@@ -8,7 +8,7 @@ import { EntityCard } from '@/components/entities/entity-card';
 import { PageHeader } from '@/components/layout/page-header';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { EntitiesEmptyState } from '@/components/ui/empty-state';
+import { EntitiesEmptyState, ErrorState } from '@/components/ui/empty-state';
 import { ChevronDown, Search } from '@/components/ui/icons';
 import { Input } from '@/components/ui/input';
 import {
@@ -20,7 +20,6 @@ import {
 } from '@/components/ui/select';
 import { LoadingState } from '@/components/ui/spinner';
 import { EntityTypeChip, FilterChip } from '@/components/ui/toggle';
-import { ErrorState } from '@/components/ui/tooltip';
 import type { EntityListResponse, EntitySortField, SortOrder, StatsResponse } from '@/lib/api';
 import { useDeleteEntity, useEntities, useStats } from '@/lib/hooks';
 import { useProjectContext } from '@/lib/project-context';

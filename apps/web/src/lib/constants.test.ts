@@ -1,14 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { ENTITY_COLORS, getEntityColor } from './constants/entities';
+import { formatDateTime, formatUptime } from './constants/formatting';
 import {
-  ENTITY_COLORS,
-  formatDateTime,
-  formatUptime,
-  getEntityColor,
   TASK_PRIORITIES,
   TASK_PRIORITY_CONFIG,
   TASK_STATUS_CONFIG,
   TASK_STATUSES,
-} from './constants';
+} from './constants/tasks';
 
 describe('TASK_STATUSES', () => {
   it('contains all expected statuses', () => {

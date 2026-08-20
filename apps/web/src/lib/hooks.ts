@@ -25,7 +25,7 @@ import type {
   UpdateSettingsRequest,
 } from './api';
 import { api } from './api';
-import { TIMING } from './constants';
+import { TIMING } from './constants/app';
 import { type ConnectionStatus, wsClient } from './websocket';
 
 // =============================================================================

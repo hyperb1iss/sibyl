@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Plus, Search } from '@/components/ui/icons';
-import { NAVIGATION, withProjectsContext } from '@/lib/constants';
+import { NAVIGATION, withProjectsContext } from '@/lib/constants/navigation';
 
 interface CommandItem {
   id: string;

@@ -13,7 +13,8 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Input, Textarea } from '@/components/ui/input';
 import { Markdown } from '@/components/ui/markdown';
 import type { Entity } from '@/lib/api';
-import { formatDateTime, getEntityColorVar } from '@/lib/constants';
+import { getEntityColorVar } from '@/lib/constants/entities';
+import { formatDateTime } from '@/lib/constants/formatting';
 import { useDeleteEntity, useEntity, useUpdateEntity } from '@/lib/hooks';
 
 interface EntityDetailContentProps {

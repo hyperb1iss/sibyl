@@ -5,7 +5,11 @@ import { useCallback } from 'react';
 import { toast } from 'sonner';
 import { Circle, Target } from '@/components/ui/icons';
 import type { Entity, TaskStatus } from '@/lib/api';
-import { TASK_STATUS_CONFIG, type TaskPriorityType, type TaskStatusType } from '@/lib/constants';
+import {
+  TASK_STATUS_CONFIG,
+  type TaskPriorityType,
+  type TaskStatusType,
+} from '@/lib/constants/tasks';
 import { useDeleteEntity, useProjects, useTaskUpdateStatus, useUpdateEntity } from '@/lib/hooks';
 import { TaskContentSections } from './task-content-sections';
 import { TaskHeader } from './task-header';

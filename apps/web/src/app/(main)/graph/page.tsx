@@ -6,7 +6,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import type { ForceGraphMethods } from 'react-force-graph-2d';
 import { EntityDetailPanel } from '@/components/graph/entity-detail-panel';
 import { Card } from '@/components/ui/card';
-import { GraphEmptyState } from '@/components/ui/empty-state';
+import { ErrorState, GraphEmptyState } from '@/components/ui/empty-state';
 import {
   Check,
   ChevronDown,
@@ -24,7 +24,6 @@ import {
   X,
 } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/spinner';
-import { ErrorState } from '@/components/ui/tooltip';
 import type {
   GraphResolution,
   HierarchicalCluster,
@@ -32,13 +31,8 @@ import type {
   HierarchicalNode,
   RelatedEntitySummary,
 } from '@/lib/api';
-import {
-  canvasNodeColor,
-  ENTITY_TYPES,
-  GRAPH_DEFAULTS,
-  getClusterColor,
-  getEntityColor,
-} from '@/lib/constants';
+import { ENTITY_TYPES, getEntityColor } from '@/lib/constants/entities';
+import { canvasNodeColor, GRAPH_DEFAULTS, getClusterColor } from '@/lib/constants/graph';
 import { useHierarchicalGraph, useMediaQuery, useProjects } from '@/lib/hooks';
 import { useProjectContext } from '@/lib/project-context';
 import { useTheme } from '@/lib/theme';

@@ -20,12 +20,12 @@ import {
   Trash2,
 } from '@/components/ui/icons';
 import type { SourceSummary } from '@/lib/api';
+import { formatDateTime } from '@/lib/constants/formatting';
 import {
   CRAWL_STATUS_CONFIG,
   type CrawlStatusType,
-  formatDateTime,
   type SourceTypeValue,
-} from '@/lib/constants';
+} from '@/lib/constants/sources';
 
 interface SourceCardEnhancedProps {
   source: SourceSummary;
