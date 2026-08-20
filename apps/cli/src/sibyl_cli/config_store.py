@@ -30,13 +30,13 @@ class ConfigStoreError(Exception):
 
 
 class ConfigCorruptionError(ConfigStoreError):
-    """The on-disk configuration exists but is not valid TOML."""
+    """The on-disk configuration is malformed or has invalid known fields."""
 
-    def __init__(self, path: Path, cause: Exception) -> None:
+    def __init__(self, path: Path, cause: Exception, *, problem: str = "invalid TOML") -> None:
         self.path = path
         self.cause = cause
         super().__init__(
-            f"Config file {path} is invalid TOML: {cause}. "
+            f"Config file {path} has {problem}: {cause}. "
             "Repair it or run 'sibyl config reset' to replace it."
         )
 
@@ -170,11 +170,74 @@ def _load_config_unlocked(path: Path) -> dict[str, Any]:
     try:
         with path.open("rb") as file:
             file_config = tomllib.load(file)
-    except tomllib.TOMLDecodeError as exc:
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise ConfigCorruptionError(path, exc) from exc
 
     _deep_merge(config, file_config)
+    _validate_config_schema(config, path)
     return config
+
+
+def _schema_failure(path: Path, field: str, expected: str, value: Any) -> None:
+    actual = type(value).__name__
+    cause = ValueError(f"{field} must be {expected}, found {actual}")
+    raise ConfigCorruptionError(path, cause, problem="an invalid schema") from cause
+
+
+def _validate_config_schema(config: dict[str, Any], path: Path) -> None:
+    """Validate every known config container before it can steer a command."""
+    server = config.get("server")
+    if not isinstance(server, dict):
+        _schema_failure(path, "server", "a table", server)
+    server_url = server.get("url")
+    if not isinstance(server_url, str) or not server_url:
+        _schema_failure(path, "server.url", "a non-empty string", server_url)
+
+    defaults = config.get("defaults")
+    if not isinstance(defaults, dict):
+        _schema_failure(path, "defaults", "a table", defaults)
+    default_project = defaults.get("project")
+    if not isinstance(default_project, str):
+        _schema_failure(path, "defaults.project", "a string", default_project)
+
+    active_context = config.get("active_context")
+    if not isinstance(active_context, str):
+        _schema_failure(path, "active_context", "a string", active_context)
+
+    paths = config.get("paths")
+    if not isinstance(paths, dict):
+        _schema_failure(path, "paths", "a table", paths)
+    for mapped_path, entry in paths.items():
+        if isinstance(entry, str):
+            continue
+        if not isinstance(entry, dict):
+            _schema_failure(path, f"paths.{mapped_path}", "a string or table", entry)
+        for field in ("project", "context"):
+            value = entry.get(field)
+            if value is not None and not isinstance(value, str):
+                _schema_failure(path, f"paths.{mapped_path}.{field}", "a string", value)
+
+    contexts = config.get("contexts")
+    if not isinstance(contexts, dict):
+        _schema_failure(path, "contexts", "a table", contexts)
+    for name, context in contexts.items():
+        if not isinstance(context, dict):
+            _schema_failure(path, f"contexts.{name}", "a table", context)
+        context_url = context.get("server_url")
+        if not isinstance(context_url, str) or not context_url:
+            _schema_failure(
+                path,
+                f"contexts.{name}.server_url",
+                "a non-empty string",
+                context_url,
+            )
+        for field in ("org_slug", "default_project"):
+            value = context.get(field)
+            if value is not None and not isinstance(value, str):
+                _schema_failure(path, f"contexts.{name}.{field}", "a string", value)
+        insecure = context.get("insecure")
+        if insecure is not None and not isinstance(insecure, bool):
+            _schema_failure(path, f"contexts.{name}.insecure", "a boolean", insecure)
 
 
 def load_config() -> dict[str, Any]:
@@ -189,6 +252,9 @@ def load_config() -> dict[str, Any]:
 def _write_config_unlocked(path: Path, config: dict[str, Any]) -> None:
     """Durably replace a config file without exposing partial TOML."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    validated = _deep_copy(DEFAULT_CONFIG)
+    _deep_merge(validated, config)
+    _validate_config_schema(validated, path)
     content = tomli_w.dumps(config).encode("utf-8")
     fd: int | None = None
     temporary: str | None = None
@@ -236,6 +302,17 @@ def update_config[Result](mutation: Callable[[dict[str, Any]], Result]) -> Resul
         result = mutation(config)
         _write_config_unlocked(path, config)
     return result
+
+
+def ensure_config_file() -> bool:
+    """Create the default config once under lock, preserving a concurrent writer."""
+    path = config_path()
+    with _config_file_lock(path):
+        if path.exists():
+            _load_config_unlocked(path)
+            return False
+        _write_config_unlocked(path, _deep_copy(DEFAULT_CONFIG))
+        return True
 
 
 def get(key: str, default: Any = None) -> Any:

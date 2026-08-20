@@ -79,6 +79,70 @@ class TestConfigStore:
         assert "sibyl config reset" in str(exc_info.value)
         assert config_path.read_bytes() == corrupt
 
+    def test_non_utf8_config_is_a_typed_failure_without_overwrite(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        config_path = tmp_path / "config.toml"
+        corrupt = b"[server]\nurl = \"\xff\"\n"
+        config_path.write_bytes(corrupt)
+
+        with (
+            patch.object(config_store, "config_dir", return_value=tmp_path),
+            pytest.raises(config_store.ConfigCorruptionError) as exc_info,
+        ):
+            config_store.set_value("server.url", "https://new.example.com")
+
+        assert isinstance(exc_info.value.cause, UnicodeDecodeError)
+        assert config_path.read_bytes() == corrupt
+
+    @pytest.mark.parametrize(
+        "content,field",
+        [
+            ('server = "production"\n', "server"),
+            ("[server]\nurl = 42\n", "server.url"),
+            ("active_context = 42\n", "active_context"),
+            ('paths = ["/repo"]\n', "paths"),
+            ('[paths]\n"/repo" = 42\n', "paths./repo"),
+            ('contexts = ["production"]\n', "contexts"),
+            ("[contexts.production]\nserver_url = 42\n", "contexts.production.server_url"),
+            (
+                '[contexts.production]\nserver_url = "https://example.com"\ninsecure = "yes"\n',
+                "contexts.production.insecure",
+            ),
+        ],
+    )
+    def test_valid_toml_with_wrong_known_shapes_never_defaults_or_retargets(
+        self,
+        tmp_path: Path,
+        content: str,
+        field: str,
+    ) -> None:
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(content, encoding="utf-8")
+        original = config_path.read_bytes()
+
+        with (
+            patch.object(config_store, "config_dir", return_value=tmp_path),
+            pytest.raises(config_store.ConfigCorruptionError) as exc_info,
+        ):
+            config_store.set_value("defaults.project", "project_safe")
+
+        assert field in str(exc_info.value)
+        assert "invalid schema" in str(exc_info.value)
+        assert config_path.read_bytes() == original
+
+    def test_mutation_cannot_write_an_invalid_known_shape(self, tmp_path: Path) -> None:
+        with patch.object(config_store, "config_dir", return_value=tmp_path):
+            config_store.set_value("defaults.project", "project_safe")
+            original = config_store.config_path().read_bytes()
+
+            with pytest.raises(config_store.ConfigCorruptionError, match="server"):
+                config_store.set_value("server", "production")
+
+            assert config_store.config_path().read_bytes() == original
+            assert config_store.get_default_project() == "project_safe"
+
     def test_save_uses_same_directory_replace_and_fsync(
         self,
         tmp_path: Path,
@@ -135,6 +199,37 @@ config_store.update_config(append)
         assert second.wait(timeout=10) == 0
         with patch.object(config_store, "config_dir", return_value=tmp_path):
             assert sorted(config_store.load_config()["updates"]) == ["first", "second"]
+
+    def test_ensure_config_file_preserves_an_existing_writer(self, tmp_path: Path) -> None:
+        with patch.object(config_store, "config_dir", return_value=tmp_path):
+            assert config_store.ensure_config_file() is True
+            config_store.set_value("defaults.project", "project_concurrent")
+            before = config_store.config_path().read_bytes()
+
+            assert config_store.ensure_config_file() is False
+            assert config_store.config_path().read_bytes() == before
+            assert config_store.get_default_project() == "project_concurrent"
+
+    def test_config_edit_uses_locked_file_creation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from typer.testing import CliRunner
+
+        from sibyl_cli import config_cmd
+
+        path = tmp_path / "config.toml"
+        with (
+            patch.object(config_store, "config_path", return_value=path),
+            patch.object(config_store, "ensure_config_file", return_value=True) as ensure,
+            patch("subprocess.run") as run,
+        ):
+            result = CliRunner().invoke(config_cmd.app, ["edit"])
+
+        assert result.exit_code == 0
+        ensure.assert_called_once_with()
+        run.assert_called_once()
+        assert "Created default config" in result.stdout
 
     def test_cli_renders_corruption_without_a_traceback(
         self,

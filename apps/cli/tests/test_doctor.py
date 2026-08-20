@@ -44,6 +44,23 @@ def test_doctor_fails_when_active_context_is_missing(
     assert any(check.name == "context" and check.status == "fail" for check in checks)
 
 
+def test_doctor_reports_non_utf8_config_without_rewriting_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_home(tmp_path, monkeypatch)
+    config_store.ensure_config_dir()
+    corrupt = b'[server]\nurl = "\xff"\n'
+    config_store.config_path().write_bytes(corrupt)
+
+    checks, context = doctor_module._load_config_context()
+
+    assert context is None
+    assert [(check.name, check.status) for check in checks] == [("config", "fail")]
+    assert checks[0].message == "Sibyl config is unreadable."
+    assert config_store.config_path().read_bytes() == corrupt
+
+
 def test_doctor_embedded_lock_detects_stale_pid(tmp_path: Path) -> None:
     lock_path = tmp_path / "embedded-surreal.lock"
     lock_path.write_text("pid = 424242\n")

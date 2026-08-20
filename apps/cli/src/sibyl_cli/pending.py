@@ -22,6 +22,7 @@ from sibyl_cli.common import (
 from sibyl_cli.pending_writes import (
     delete_pending_write,
     increment_attempts,
+    is_canonical_pending_write_id,
     is_corrupt_pending_write,
     list_pending_writes,
     pending_write_label,
@@ -205,10 +206,14 @@ def flush_writes(
     valid = [item for item in selected if not is_corrupt_pending_write(item)]
     for item in corrupt:
         error(f"Cannot replay {item['filename']}: {item['error']}")
-        warn(
-            f"Repair {pending_writes_dir() / str(item['filename'])}, or discard it explicitly "
-            f"with: sibyl pending-writes discard {item['id']}"
-        )
+        path = pending_writes_dir() / str(item["filename"])
+        if is_canonical_pending_write_id(str(item["id"])):
+            warn(
+                f"Repair {path}, or discard it explicitly with: "
+                f"sibyl pending-writes discard {item['id']}"
+            )
+        else:
+            warn(f"Inspect and remove this exact file manually: {path}")
 
     replayable, skipped = _partition_replayable(valid)
     if skipped:
