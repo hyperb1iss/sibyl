@@ -3,10 +3,13 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+import time
 from pathlib import Path
 from shutil import which
 
 from tools.tests.conftest import REPO_ROOT
+
+EXPECTED_NATIVE_SAMPLE_LINES = 3
 
 
 def _write_docker_stub(bin_dir: Path) -> None:
@@ -561,6 +564,7 @@ exit 64
     )
     (output_dir / "docker-events.jsonl").write_text(event, encoding="utf-8")
     (output_dir / "docker-events.pid").write_text("999999\n", encoding="utf-8")
+    (output_dir / "runtime-kind.txt").write_text("container\n", encoding="utf-8")
     (output_dir / "monitor-ready").touch()
     if failure_marker is not None:
         (output_dir / failure_marker).touch()
@@ -726,3 +730,74 @@ esac
     assert result.returncode == 1
     assert "docker events collector exited unexpectedly" in result.stderr
     assert (output_dir / "docker-events.failed").exists()
+
+
+def test_surreal_runtime_monitor_samples_and_gates_native_process(tmp_path: Path) -> None:
+    bash = which("bash")
+    sleep = which("sleep")
+    assert bash is not None
+    assert sleep is not None
+    output_dir = tmp_path / "telemetry"
+    target = subprocess.Popen([sleep, "30"])  # noqa: S603
+    monitor = subprocess.Popen(  # noqa: S603
+        [
+            bash,
+            "tools/dev/surreal-runtime-monitor.sh",
+            "monitor",
+            "--pid",
+            str(target.pid),
+            "--output-dir",
+            str(output_dir),
+            "--interval",
+            "1",
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        samples = output_dir / "samples.tsv"
+        while time.monotonic() < deadline:
+            if (
+                samples.exists()
+                and len(samples.read_text(encoding="utf-8").splitlines())
+                >= EXPECTED_NATIVE_SAMPLE_LINES
+            ):
+                break
+            time.sleep(0.05)
+        else:
+            monitor.terminate()
+            _stdout, stderr = monitor.communicate(timeout=5)
+            raise AssertionError(f"native monitor did not produce two samples: {stderr}")
+
+        monitor.terminate()
+        _stdout, stderr = monitor.communicate(timeout=5)
+        assert monitor.returncode == 0, stderr
+        gate = subprocess.run(  # noqa: S603
+            [
+                bash,
+                "tools/dev/surreal-runtime-monitor.sh",
+                "gate",
+                "--pid",
+                str(target.pid),
+                "--output-dir",
+                str(output_dir),
+            ],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        assert gate.returncode == 0, gate.stderr
+        assert "runtime_kind=process" in gate.stdout
+        assert "valid_samples=2" in gate.stdout
+        assert "result=pass" in gate.stdout
+    finally:
+        if monitor.poll() is None:
+            monitor.terminate()
+            monitor.communicate(timeout=5)
+        target.terminate()
+        target.wait(timeout=5)
