@@ -596,7 +596,7 @@ Sibyl v1.3 may cut when every required item below has a receipt.
 - [x] One prerelease grammar governs release validation and version sync.
 - [x] The supported live SurrealDB version covers the rewrite semantics used by admin, projection,
       and restore paths.
-- [ ] `moon run :check` passes from a clean tree.
+- [x] `moon run :check` passes from a clean tree.
 - [x] Targeted lifecycle, MCP authorization, queue retry, readiness, browser, benchmark-contract,
       release-workflow, and Helm gates pass uncached.
 - [ ] The release runbook records the exact commit, generated receipts, deferred work, and rollback
@@ -646,6 +646,7 @@ verification receipts are:
 | CLI contract          | `cli:check` passed with 563 tests.                                                                                                                                                                        |
 | Benchmark rig         | `root:bench-gate-test` passed all 463 tests. `api:typecheck` and `root:inventory-lint` also passed with the benchmark tools included.                                                                     |
 | Release path          | The focused release suites passed 42 release and CI tests, 15 Helm tests, five authenticated browser tests, six runner tests, and four live SurrealDB 3.2.3 contracts. The docs build rendered 107 pages. |
+| Full release gate     | The uncached `moon run :check` gate passed all 56 moon tasks from a clean integration tree in 2 minutes 43 seconds.                                                                                       |
 
 The live One Surface test used the deterministic local embedding provider. It created and removed
 its own project, decisions, relationship, and temporary MCP API key.
