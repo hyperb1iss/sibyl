@@ -25,7 +25,7 @@ from sibyl_core.models.context import (
     ContextPack,
     ContextSection,
 )
-from sibyl_core.models.entities import EntityType, RelationshipType
+from sibyl_core.models.entities import Entity, EntityType, RelationshipType
 from sibyl_core.services.usage import (
     MemoryUsageItemKind,
     MemoryUsageSignal,
@@ -105,9 +105,12 @@ def make_graph_runtime(
     resolved_entity_manager = entity_manager if entity_manager is not None else MagicMock()
     if not isinstance(getattr(resolved_entity_manager, "get", None), AsyncMock):
         resolved_entity_manager.get = AsyncMock(return_value=None)
+    resolved_client = client if client is not None else MagicMock()
+    if not isinstance(getattr(resolved_client, "execute_query", None), AsyncMock):
+        resolved_client.execute_query = AsyncMock(return_value=[])
 
     return SimpleNamespace(
-        client=client if client is not None else MagicMock(),
+        client=resolved_client,
         entity_manager=resolved_entity_manager,
         relationship_manager=(
             relationship_manager if relationship_manager is not None else MagicMock()
@@ -2179,6 +2182,86 @@ class TestSearchTool:
         ]
 
     @pytest.mark.asyncio
+    async def test_search_drops_graph_source_when_lifecycle_lookup_fails(self) -> None:
+        search_module = import_module("sibyl_core.tools.search")
+        unchecked = MockEntity(
+            id="edge_only_retired",
+            entity_type=EntityType.PATTERN,
+            name="Unchecked retired pattern",
+            description="The edge lookup must decide whether this row is current.",
+        )
+        entity_manager = AsyncMock()
+        entity_manager.search = AsyncMock(return_value=[(unchecked, 0.9)])
+        entity_manager.search_exact_name = AsyncMock(return_value=[])
+
+        with (
+            patch(
+                "sibyl_core.tools.search.get_graph_runtime",
+                AsyncMock(return_value=make_graph_runtime(entity_manager=entity_manager)),
+            ),
+            patch(
+                "sibyl_core.tools.search._apply_current_entity_gate",
+                AsyncMock(side_effect=RuntimeError("lifecycle lookup failed")),
+            ),
+        ):
+            response = await search_module.search(
+                query="retired pattern",
+                types=["pattern"],
+                organization_id="org_123",
+                include_documents=False,
+                include_raw_memory=False,
+                use_enhanced=False,
+            )
+
+        assert response.results == []
+        assert response.graph_count == 0
+        assert response.filters["search_source_failures"] == [
+            {"source": "graph", "error_type": "RuntimeError"}
+        ]
+
+    @pytest.mark.asyncio
+    async def test_search_regates_fallback_after_hybrid_lifecycle_failure(self) -> None:
+        search_module = import_module("sibyl_core.tools.search")
+        unchecked = MockEntity(
+            id="edge_only_retired",
+            entity_type=EntityType.PATTERN,
+            name="Unchecked retired pattern",
+            description="Fallback must not bypass the failed lifecycle lookup.",
+        )
+        entity_manager = AsyncMock()
+        entity_manager.search = AsyncMock(return_value=[(unchecked, 0.9)])
+        entity_manager.search_exact_name = AsyncMock(return_value=[])
+        final_gate = AsyncMock(side_effect=RuntimeError("lifecycle lookup failed"))
+
+        with (
+            patch(
+                "sibyl_core.tools.search.get_graph_runtime",
+                AsyncMock(return_value=make_graph_runtime(entity_manager=entity_manager)),
+            ),
+            patch(
+                "sibyl_core.tools.search.hybrid_search",
+                AsyncMock(side_effect=RuntimeError("hybrid lifecycle lookup failed")),
+            ),
+            patch("sibyl_core.tools.search._apply_current_entity_gate", final_gate),
+        ):
+            response = await search_module.search(
+                query="retired pattern",
+                types=["pattern"],
+                organization_id="org_123",
+                include_documents=False,
+                include_raw_memory=False,
+                use_enhanced=True,
+            )
+
+        assert response.results == []
+        assert response.graph_count == 0
+        final_gate.assert_awaited_once()
+        assert response.filters["search_source_failures"] == [
+            {"source": "graph_enhanced", "error_type": "RuntimeError"},
+            {"source": "graph", "error_type": "RuntimeError"},
+        ]
+
+    @pytest.mark.asyncio
     async def test_search_hybrid_failure_reports_degraded_source_after_fallback(self) -> None:
         search_module = import_module("sibyl_core.tools.search")
         fallback = MockEntity(
@@ -2472,14 +2555,22 @@ class TestSearchTool:
         mock_entity_manager.search_exact_name.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_search_skips_redundant_fallback_after_exhaustive_hybrid_miss(self) -> None:
+    async def test_search_still_rescues_exact_name_after_exhaustive_hybrid_miss(self) -> None:
         from sibyl_core.retrieval.hybrid import HybridResult
         from sibyl_core.tools.search import search
 
+        exact = MockEntity(
+            id="pattern_exact_after_hybrid",
+            entity_type=EntityType.PATTERN,
+            name="task notification bzzmrxv82 tool toolu_01s1pyuhrut1ljdyhxcbuxzk",
+            description="Exact-name rescue",
+            content="Exact result survives an exhaustive semantic miss.",
+        )
         mock_client = AsyncMock()
+        mock_client.execute_query = AsyncMock(return_value=[])
         mock_entity_manager = AsyncMock()
         mock_entity_manager.search = AsyncMock(return_value=[])
-        mock_entity_manager.search_exact_name = AsyncMock(return_value=[])
+        mock_entity_manager.search_exact_name = AsyncMock(return_value=[(exact, 2.0)])
 
         with (
             patch(
@@ -2507,9 +2598,64 @@ class TestSearchTool:
                 include_documents=False,
             )
 
-        assert response.graph_count == 0
+        assert response.graph_count == 1
+        assert [result.id for result in response.results] == ["pattern_exact_after_hybrid"]
         mock_entity_manager.search.assert_not_awaited()
-        mock_entity_manager.search_exact_name.assert_not_awaited()
+        mock_entity_manager.search_exact_name.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_retired_exact_name_hit_cannot_block_current_exact_name_rescue(self) -> None:
+        from sibyl_core.retrieval.hybrid import HybridResult
+        from sibyl_core.tools.search import search
+
+        query = "Current memory title"
+        retired = MockEntity(
+            id="pattern_retired_exact",
+            entity_type=EntityType.PATTERN,
+            name=query,
+            metadata={"lifecycle_state": "superseded"},
+        )
+        current = MockEntity(
+            id="pattern_current_exact",
+            entity_type=EntityType.PATTERN,
+            name=query,
+        )
+        mock_client = AsyncMock()
+        mock_client.execute_query = AsyncMock(return_value=[])
+        mock_entity_manager = AsyncMock()
+        mock_entity_manager.search = AsyncMock(return_value=[])
+        mock_entity_manager.search_exact_name = AsyncMock(return_value=[(current, 2.0)])
+
+        with (
+            patch(
+                "sibyl_core.tools.search.get_graph_runtime",
+                AsyncMock(
+                    return_value=make_graph_runtime(
+                        client=mock_client,
+                        entity_manager=mock_entity_manager,
+                    )
+                ),
+            ),
+            patch(
+                "sibyl_core.tools.search.hybrid_search",
+                new=AsyncMock(
+                    return_value=HybridResult(
+                        results=[(retired, 1.0)],
+                        metadata={"entity_manager_search_completed": True},
+                    )
+                ),
+            ),
+        ):
+            response = await search(
+                query=query,
+                types=["pattern"],
+                organization_id="org_123",
+                include_documents=False,
+            )
+
+        assert [result.id for result in response.results] == ["pattern_current_exact"]
+        mock_entity_manager.search.assert_not_awaited()
+        mock_entity_manager.search_exact_name.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_search_overlaps_document_search_with_graph_search(self) -> None:
@@ -3739,6 +3885,143 @@ class TestAddTool:
 
         assert response.success is True
         detect_conflicts.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_add_async_receipt_exposes_parent_and_deferred_work(self) -> None:
+        from sibyl_core.tools.add import add
+
+        queue = SimpleNamespace(
+            enqueue_create_entity=AsyncMock(return_value="create_entity:episode_123")
+        )
+        runtime = make_graph_runtime()
+
+        with (
+            patch(
+                "sibyl_core.tools.add.get_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            patch("sibyl_core.tools.add.get_queue_port", return_value=queue),
+        ):
+            response = await add(
+                title="Queue truth",
+                content="The parent write schedules every derived operation.",
+                metadata={"organization_id": "org_123"},
+                check_conflicts=False,
+                generate_embeddings=False,
+            )
+
+        assert response.success is True
+        assert response.background_jobs["entity_create"] == {
+            "status": "queued",
+            "job_ids": ["create_entity:episode_123"],
+            "entity_ids": [response.id],
+        }
+        assert response.background_jobs["memory_projection"]["queued_by"] == (
+            "create_entity:episode_123"
+        )
+        assert response.background_jobs["memory_extraction"]["queued_by"] == (
+            "create_entity:episode_123"
+        )
+        assert response.background_jobs["embedding_backfill"]["queued_by"] == (
+            "create_entity:episode_123"
+        )
+
+    @pytest.mark.asyncio
+    async def test_add_sync_fallback_is_explicit_in_structured_receipt(self) -> None:
+        from sibyl_core.tools.add import add
+
+        entity_manager = MagicMock()
+        entity_manager.create_direct = AsyncMock(side_effect=lambda entity, **_kwargs: entity.id)
+        runtime = make_graph_runtime(entity_manager=entity_manager)
+        queue = SimpleNamespace(
+            enqueue_create_entity=AsyncMock(side_effect=ConnectionError("queue down"))
+        )
+        projection = SimpleNamespace(
+            errors=(),
+            extracted=0,
+            projected_entities=0,
+            relationships=0,
+            projection_state="complete",
+            created_projected_entities=(),
+            created_projection_relationships=(),
+        )
+        passages = SimpleNamespace(
+            errors=(),
+            passages=0,
+            relationships=0,
+            created_passages=(),
+            created_relationships=(),
+        )
+
+        with (
+            patch(
+                "sibyl_core.tools.add.get_graph_runtime",
+                AsyncMock(return_value=runtime),
+            ),
+            patch("sibyl_core.tools.add.get_queue_port", return_value=queue),
+            patch(
+                "sibyl_core.tools.add.project_memory_entity",
+                AsyncMock(return_value=projection),
+            ),
+            patch(
+                "sibyl_core.tools.add.project_entity_passages",
+                AsyncMock(return_value=passages),
+            ),
+        ):
+            response = await add(
+                title="Fallback truth",
+                content="Persist synchronously when the queue cannot accept work.",
+                metadata={"organization_id": "org_123"},
+                check_conflicts=False,
+            )
+
+        assert response.success is True
+        assert response.message.startswith("Added (sync fallback):")
+        assert response.background_jobs["entity_create"] == {
+            "status": "complete",
+            "mode": "sync_fallback",
+            "job_ids": [],
+            "entity_ids": [response.id],
+            "reason": "queue_unavailable",
+            "error_type": "ConnectionError",
+        }
+        assert response.background_jobs["memory_projection"]["status"] == "complete"
+        assert response.background_jobs["memory_extraction"] == {
+            "status": "skipped",
+            "job_ids": [],
+            "reason": "synchronous_fallback",
+        }
+
+    @pytest.mark.asyncio
+    async def test_embedding_enqueue_failure_returns_repeatable_recovery_handle(self) -> None:
+        from sibyl_core.tools.add import _enqueue_embedding_backfill
+
+        entity = Entity(
+            id="episode_123",
+            entity_type=EntityType.EPISODE,
+            name="Queue truth",
+            content="The entity already exists without its vectors.",
+            organization_id="org_123",
+        )
+        queue = SimpleNamespace(
+            enqueue_entity_embedding_backfill=AsyncMock(side_effect=ConnectionError("queue down"))
+        )
+
+        with patch("sibyl_core.tools.add.get_queue_port", return_value=queue):
+            receipt = await _enqueue_embedding_backfill([entity], "org_123", [])
+
+        assert receipt["embedding_backfill"] == {
+            "status": "failed",
+            "job_ids": [],
+            "queued_entities": 0,
+            "queued_relationships": 0,
+            "reason": "enqueue_failed",
+            "error_type": "ConnectionError",
+            "recovery": {
+                "action": "repeat_add_request",
+                "entity_ids": [entity.id],
+            },
+        }
 
     @pytest.mark.asyncio
     async def test_auto_discover_links_skips_empty_candidate_types(self) -> None:

@@ -431,7 +431,10 @@ def create_epic(
     assignee: Annotated[
         str | None, typer.Option("--assignee", "-a", help="Epic lead/owner")
     ] = None,
-    tags: Annotated[str | None, typer.Option("--tags", help="Comma-separated tags")] = None,
+    tags: Annotated[
+        str | None,
+        typer.Option("--tags", help="Comma-separated browse-only metadata tags"),
+    ] = None,
     sync: Annotated[
         bool,
         typer.Option("--sync", help="Wait for epic creation (slower but immediately available)"),
@@ -646,7 +649,10 @@ def update_epic(
     ] = None,
     title: Annotated[str | None, typer.Option("--title", help="Epic title")] = None,
     assignee: Annotated[str | None, typer.Option("-a", "--assignee", help="Epic lead")] = None,
-    tags: Annotated[str | None, typer.Option("--tags", help="Comma-separated tags")] = None,
+    tags: Annotated[
+        str | None,
+        typer.Option("--tags", help="Comma-separated browse-only metadata tags"),
+    ] = None,
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,

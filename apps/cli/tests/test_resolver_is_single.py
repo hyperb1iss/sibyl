@@ -45,6 +45,8 @@ ALLOWED_ACTIVE_CONTEXT_READERS = {
 
 # (module, enclosing function) pairs allowed to read SIBYL_API_URL.
 ALLOWED_ENV_READERS = {
+    # A paired URL and token form the explicit automation target.
+    ("client.py", "_paired_automation_api_url"),
     # Rank 3 of the one resolution order.
     ("client.py", "resolve_api_base_url"),
     # Presence check, not a resolution: an implicit-localhost write is refused

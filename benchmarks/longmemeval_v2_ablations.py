@@ -17,6 +17,7 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -810,7 +811,7 @@ def execute_retrieval(
 def query_one(memory: Any, question: dict[str, Any]) -> dict[str, Any]:
     question_text = str(question["question"])
     question_image = question.get("image")
-    memory.set_query_context(question_item={"question": question_text, "image": question_image})
+    memory.set_query_context(query_invocation_id=uuid4().hex)
     try:
         started = time.perf_counter()
         memory_context = memory.query(question_text, query_image=question_image)

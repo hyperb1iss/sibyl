@@ -11,11 +11,13 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 BENCHMARKS_ROOT = Path(__file__).resolve().parent
 if str(BENCHMARKS_ROOT) not in sys.path:
     sys.path.insert(0, str(BENCHMARKS_ROOT))
 
+from benchmarks.git_provenance import git_provenance  # noqa: E402
 from longmemeval_v2_memory.sibyl_memory import (  # noqa: E402
     DEFAULT_EVIDENCE_COMPOSITION_MODE,
     EVIDENCE_COMPOSITION_MODES,
@@ -78,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
             "typed_pool": args.typed_pool,
             "typed_stream_retrieval": args.typed_stream_retrieval,
             "typed_stream_limit": args.typed_stream_limit,
+            "runner_provenance": git_provenance(BENCHMARKS_ROOT.parent),
         },
         expected_trajectory_ids=expected_trajectory_ids,
         trajectories=trajectories,
@@ -384,7 +387,7 @@ def prepare_output(
     return {
         str(record.get("question_id") or "")
         for record in load_resumable_jsonl(results_path)
-        if record.get("question_id")
+        if record.get("question_id") and record.get("row_status") != "failed"
     }
 
 
@@ -407,7 +410,7 @@ def run_queries(
             question_id = str(question["id"])
             if question_id in completed_question_ids:
                 continue
-            memory.set_query_context(question_item=question)
+            memory.set_query_context(query_invocation_id=uuid4().hex)
             query_started = time.monotonic()
             try:
                 context = memory.query(str(question["question"]))
@@ -417,6 +420,34 @@ def run_queries(
                     query_image=None,
                     memory_context=context,
                 )
+            except Exception as exc:
+                duration = time.monotonic() - query_started
+                failure_record = {
+                    "index": index,
+                    "stream_index": index,
+                    "question_id": question_id,
+                    "question_type": question.get("question_type"),
+                    "category": question.get("domain"),
+                    "eval_function": question.get("eval_function"),
+                    "question_text": question.get("question"),
+                    "question_image": question.get("image"),
+                    "haystack_ids": haystack[question_id],
+                    "memory_context": None,
+                    "memory_query_duration_seconds": duration,
+                    "memory_post_query_metadata": None,
+                    "row_status": "failed",
+                    "context_status": "failed",
+                    "failure": {"stage": "retrieval", "error_type": type(exc).__name__},
+                    "stack_identity": {
+                        "runner_provenance": dict(getattr(memory, "runner_provenance", {})),
+                        "api_runtime": dict(getattr(memory, "api_runtime", {})),
+                        "official_source": dict(getattr(memory, "official_source", {})),
+                    },
+                    "score_bool": None,
+                }
+                handle.write(json.dumps(failure_record, ensure_ascii=True) + "\n")
+                handle.flush()
+                raise
             finally:
                 memory.clear_query_context()
             if isinstance(metadata, dict):
@@ -438,6 +469,21 @@ def run_queries(
                 "memory_context": context,
                 "memory_query_duration_seconds": duration,
                 "memory_post_query_metadata": metadata,
+                "row_status": "valid",
+                "context_status": (
+                    metadata.get("context_status", "unknown")
+                    if isinstance(metadata, dict)
+                    else "unknown"
+                ),
+                "lane_activity": (
+                    metadata.get("lane_activity", {}) if isinstance(metadata, dict) else {}
+                ),
+                "stack_identity": (
+                    metadata.get("stack_identity", {}) if isinstance(metadata, dict) else {}
+                ),
+                "provider_usage": (
+                    metadata.get("provider_usage", {}) if isinstance(metadata, dict) else {}
+                ),
                 "score_bool": None,
             }
             handle.write(json.dumps(record, ensure_ascii=True) + "\n")

@@ -25,7 +25,10 @@ class RawMemoryRememberRequest(BaseModel):
     diary: bool = Field(default=False, description="Store as a private agent diary entry")
     agent_id: str | None = Field(default=None, description="Agent identity for diary entries")
     project_id: str | None = Field(default=None, description="Project associated with this diary")
-    tags: list[str] = Field(default_factory=list, description="Searchable tags")
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Browse-only metadata tags; tags do not affect ranked recall",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Auxiliary metadata")
     provenance: dict[str, Any] = Field(default_factory=dict, description="Source provenance")
     capture_surface: str = Field(default="api", description="Capture surface")
@@ -75,7 +78,10 @@ class RawMemoryResponse(BaseModel):
     scope_key: str | None = Field(default=None, description="Project/team/shared scope key")
     title: str = Field(default="", description="Human title")
     raw_content: str = Field(..., description="Verbatim memory")
-    tags: list[str] = Field(default_factory=list, description="Searchable tags")
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Browse-only metadata tags; tags do not affect ranked recall",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Auxiliary metadata")
     provenance: dict[str, Any] = Field(default_factory=dict, description="Source provenance")
     capture_surface: str | None = Field(default=None, description="Capture surface")
@@ -310,7 +316,10 @@ class MemorySourceInspectResponse(BaseModel):
     raw_content: str | None = Field(default=None, description="Verbatim memory when readable")
     content_redacted: bool = Field(..., description="Whether raw content was redacted")
     raw_content_length: int = Field(..., description="Length of the raw memory content")
-    tags: list[str] = Field(default_factory=list, description="Searchable tags")
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Browse-only metadata tags; tags do not affect ranked recall",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Auxiliary metadata")
     provenance: dict[str, Any] = Field(default_factory=dict, description="Source provenance")
     capture_surface: str | None = Field(default=None, description="Capture surface")

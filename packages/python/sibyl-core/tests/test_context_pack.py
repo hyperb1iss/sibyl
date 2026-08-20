@@ -831,7 +831,10 @@ async def test_compile_context_batches_default_related_items(
             return_value={"decision-1": [(related_entity, relationship)], "decision-2": []}
         ),
     )
-    runtime = SimpleNamespace(relationship_manager=relationship_manager)
+    runtime = SimpleNamespace(
+        client=SimpleNamespace(execute_query=AsyncMock(return_value=[])),
+        relationship_manager=relationship_manager,
+    )
 
     with patch.object(context_module, "get_graph_runtime", AsyncMock(return_value=runtime)):
         pack = await compile_context(
@@ -926,7 +929,10 @@ async def test_compile_context_filters_related_project_entities_by_own_id(
             ]
         )
     )
-    runtime = SimpleNamespace(relationship_manager=relationship_manager)
+    runtime = SimpleNamespace(
+        client=SimpleNamespace(execute_query=AsyncMock(return_value=[])),
+        relationship_manager=relationship_manager,
+    )
 
     with patch.object(context_module, "get_graph_runtime", AsyncMock(return_value=runtime)):
         pack = await compile_context(
@@ -2231,7 +2237,8 @@ async def test_default_related_items_drop_a_private_neighbor_from_a_co_member() 
             get_related_entities=AsyncMock(
                 return_value=[(private_neighbor, _edge("session_seed", "decision_private"))]
             )
-        )
+        ),
+        client=SimpleNamespace(execute_query=AsyncMock(return_value=[])),
     )
 
     with patch(
@@ -2265,7 +2272,8 @@ async def test_default_related_items_batch_drops_a_private_neighbor() -> None:
                     ]
                 }
             )
-        )
+        ),
+        client=SimpleNamespace(execute_query=AsyncMock(return_value=[])),
     )
 
     with patch(

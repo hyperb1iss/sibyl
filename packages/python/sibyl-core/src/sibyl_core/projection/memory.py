@@ -656,21 +656,6 @@ async def _create_projected_entities(
             ),
         )
 
-    bulk_create_direct = getattr(entity_manager, "bulk_create_direct", None)
-    if callable(bulk_create_direct):
-        created, failed = await bulk_create_direct(unresolved_entities)
-        if failed:
-            raise RuntimeError(f"{failed} projected entities failed to persist")
-        if created != len(unresolved_entities):
-            raise RuntimeError(
-                f"projected entity count mismatch: {created}/{len(unresolved_entities)}"
-            )
-        return _ProjectedEntityWriteResult(
-            created_ids=[entity.id for entity in unresolved_entities],
-            id_map=id_map,
-            created_entities=tuple(unresolved_entities),
-        )
-
     create_direct = getattr(entity_manager, "create_direct", None)
     if callable(create_direct):
         created_ids: list[str] = []
@@ -1007,8 +992,10 @@ def _projected_fact_entity(
     }
     metadata["source_entity_id"] = source.id
     valid_at = (source.metadata or {}).get("valid_at") or (source.metadata or {}).get("valid_from")
-    if valid_at is not None:
-        metadata["valid_at"] = valid_at
+    # Entity upserts merge attributes to preserve keys a partial writer never
+    # saw. Projection rebuilds know whether this field still exists, so NONE
+    # explicitly withdraws an earlier timestamp instead of preserving it.
+    metadata["valid_at"] = valid_at
     if metadata.get("memory_scope") == "project" and metadata.get("scope_key"):
         metadata["project_id"] = metadata["scope_key"]
     return Entity(

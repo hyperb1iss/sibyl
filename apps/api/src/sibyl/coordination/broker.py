@@ -52,6 +52,7 @@ class JobStatus(StrEnum):
     QUEUED = "queued"
     IN_PROGRESS = "in_progress"
     COMPLETE = "complete"
+    FAILED = "failed"
     NOT_FOUND = "not_found"
     DEFERRED = "deferred"
     CANCELLED = "cancelled"

@@ -1,12 +1,8 @@
 """The predicate vocabulary a writing agent may declare, and how to parse it.
 
-Retrieval's graph expansion lane scores every hop by the edge's predicate:
-`DECIDES` 1.0, `REQUIRES` 0.98, `SUPERSEDES` 0.95, `SUPPORTS` 0.94, down to
-`RELATED_TO` 0.64, with anything unlisted falling to the same 0.64 the untyped
-edge gets (`sibyl_core/retrieval/search.py`, `_GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS`
-and `_graph_expansion_path_score`). This module is the producer for that
-consumer: it lets a declaration surface accept `"<predicate>:<entity_id>"` on
-the `related_to` channel and mint an edge of that type.
+Retrieval's graph expansion lane scores every hop by the edge's predicate.
+This module owns both that score and hybrid traversal's multiplier so the
+write vocabulary and both readers share one meaning for every predicate.
 
 Direction convention
 --------------------
@@ -45,11 +41,9 @@ decides          DECIDES             settles the question the target raises
 at the 0.64 unknown default, which is exactly what an untyped `RELATED_TO`
 already scores. It would cost a schema value and buy no retrieval signal.
 
-`contradicts` is included even though `CONTRADICTS` carries no weight-table
-entry today and therefore also scores 0.64. It differs from the `caused_by`
-case in that the predicate already exists in the enum, is already filterable by
-`relationship_names`, and is the edge supersession and correction work needs to
-read. Its traversal weight is retrieval's call, not the write surface's.
+`contradicts` is explicit at the fallback scores both readers used before the
+canonical policy existed. The predicate keeps both endpoints recallable and
+allows either endpoint to reach the other.
 
 Unknown predicates are not an error
 -----------------------------------
@@ -73,6 +67,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from types import MappingProxyType
 
 from sibyl_core.models.entities import RelationshipType
@@ -80,12 +75,20 @@ from sibyl_core.models.entities import RelationshipType
 __all__ = [
     "DECLARABLE_PREDICATE_HELP",
     "DECLARABLE_RELATIONSHIP_PREDICATES",
+    "PREDICATE_EXPANSION_PATH_SCORES",
+    "PREDICATE_HYBRID_MULTIPLIERS",
+    "PREDICATE_POLICIES",
     "RELATION_DECLARATION_SEPARATOR",
     "SUPPRESSING_RELATIONSHIP_TYPES",
+    "PredicateDirection",
+    "PredicateLifecycleEffect",
+    "PredicatePolicy",
     "RelationDeclaration",
     "declared_relation_targets",
     "parse_relation_declaration",
     "parse_relation_declarations",
+    "predicate_direction_allows",
+    "predicate_policy",
 ]
 
 RELATION_DECLARATION_SEPARATOR = ":"
@@ -99,6 +102,149 @@ DECLARABLE_RELATIONSHIP_PREDICATES: MappingProxyType[str, RelationshipType] = Ma
         "decides": RelationshipType.DECIDES,
     }
 )
+
+
+class PredicateDirection(StrEnum):
+    """Allowed traversal direction from the reader's current frontier."""
+
+    EXISTING = "existing"
+    OUTGOING = "outgoing"
+    INCOMING = "incoming"
+    BOTH = "both"
+
+
+class PredicateLifecycleEffect(StrEnum):
+    """Lifecycle meaning carried by a predicate declaration."""
+
+    NONE = "none"
+    HIDE_TARGET = "hide_target"
+    MARK_CONTESTED = "mark_contested"
+
+
+@dataclass(frozen=True, slots=True)
+class PredicatePolicy:
+    """One relationship's score, direction, lifecycle, and receipt contract."""
+
+    hybrid_multiplier: float | None
+    expansion_path_score: float | None
+    direction: PredicateDirection = PredicateDirection.EXISTING
+    lifecycle_effect: PredicateLifecycleEffect = PredicateLifecycleEffect.NONE
+    receipt_label: str = ""
+
+
+def _policy(
+    name: str,
+    *,
+    hybrid: float | None = None,
+    expansion: float | None = None,
+    direction: PredicateDirection = PredicateDirection.EXISTING,
+    lifecycle: PredicateLifecycleEffect = PredicateLifecycleEffect.NONE,
+) -> PredicatePolicy:
+    return PredicatePolicy(
+        hybrid_multiplier=hybrid,
+        expansion_path_score=expansion,
+        direction=direction,
+        lifecycle_effect=lifecycle,
+        receipt_label=name.lower(),
+    )
+
+
+# The union of every relationship with an engine-specific score. A missing
+# score means that engine keeps its existing unknown-predicate default rather
+# than borrowing the other engine's numeric unit.
+PREDICATE_POLICIES: MappingProxyType[str, PredicatePolicy] = MappingProxyType(
+    {
+        "ABOUT": _policy("ABOUT", expansion=0.78),
+        "APPLIES_TO": _policy("APPLIES_TO", hybrid=1.10),
+        "BELONGS_TO": _policy("BELONGS_TO", hybrid=1.20, expansion=0.72),
+        "BLOCKS": _policy("BLOCKS", hybrid=1.25, expansion=0.96),
+        "BREAKS": _policy("BREAKS", hybrid=1.15),
+        "CONFLICTS_WITH": _policy("CONFLICTS_WITH", hybrid=1.10),
+        "CONTAINS": _policy("CONTAINS", hybrid=1.10, expansion=0.72),
+        "CONTRADICTS": _policy(
+            "CONTRADICTS",
+            hybrid=1.00,
+            expansion=0.64,
+            direction=PredicateDirection.BOTH,
+            lifecycle=PredicateLifecycleEffect.MARK_CONTESTED,
+        ),
+        "DECIDES": _policy(
+            "DECIDES",
+            hybrid=1.00,
+            expansion=1.00,
+            direction=PredicateDirection.OUTGOING,
+        ),
+        "DEPENDS_ON": _policy("DEPENDS_ON", hybrid=1.25, expansion=0.98),
+        "DERIVED_FROM": _policy("DERIVED_FROM", hybrid=1.05, expansion=0.70),
+        "DOCUMENTED_IN": _policy("DOCUMENTED_IN", hybrid=1.00, expansion=0.66),
+        "ENABLES": _policy("ENABLES", hybrid=1.15),
+        "ENCOUNTERED": _policy("ENCOUNTERED", hybrid=1.10, expansion=0.86),
+        "IMPLEMENTED": _policy("IMPLEMENTED", hybrid=1.15, expansion=0.90),
+        "MENTIONS": _policy("MENTIONS", hybrid=0.35, expansion=0.58),
+        "PRODUCES": _policy("PRODUCES", expansion=0.82),
+        "REFERENCES": _policy("REFERENCES", hybrid=1.15, expansion=0.86),
+        "RELATED_TO": _policy("RELATED_TO", hybrid=0.85, expansion=0.64),
+        "REQUIRES": _policy(
+            "REQUIRES",
+            hybrid=1.15,
+            expansion=0.98,
+            direction=PredicateDirection.OUTGOING,
+        ),
+        "SHARES_COMMUNITY": _policy("SHARES_COMMUNITY", expansion=0.74),
+        "SUPERSEDES": _policy(
+            "SUPERSEDES",
+            hybrid=1.10,
+            expansion=0.95,
+            direction=PredicateDirection.INCOMING,
+            lifecycle=PredicateLifecycleEffect.HIDE_TARGET,
+        ),
+        "SUPPORTS": _policy(
+            "SUPPORTS",
+            hybrid=1.00,
+            expansion=0.94,
+            direction=PredicateDirection.OUTGOING,
+        ),
+        "TOUCHES": _policy("TOUCHES", expansion=0.82),
+        "USES_PROCEDURE": _policy("USES_PROCEDURE", hybrid=1.15, expansion=0.92),
+        "VALIDATED_BY": _policy("VALIDATED_BY", hybrid=1.15, expansion=0.94),
+    }
+)
+
+PREDICATE_HYBRID_MULTIPLIERS: MappingProxyType[str, float] = MappingProxyType(
+    {
+        name: policy.hybrid_multiplier
+        for name, policy in PREDICATE_POLICIES.items()
+        if policy.hybrid_multiplier is not None
+    }
+)
+PREDICATE_EXPANSION_PATH_SCORES: MappingProxyType[str, float] = MappingProxyType(
+    {
+        name: policy.expansion_path_score
+        for name, policy in PREDICATE_POLICIES.items()
+        if policy.expansion_path_score is not None
+    }
+)
+
+
+def predicate_policy(predicate: object) -> PredicatePolicy | None:
+    name = str(getattr(predicate, "value", predicate) or "").upper()
+    return PREDICATE_POLICIES.get(name)
+
+
+def predicate_direction_allows(
+    predicate: object,
+    direction: str,
+    *,
+    existing_default: bool = True,
+) -> bool:
+    """Apply declared direction while preserving unspecified engine behavior."""
+
+    policy = predicate_policy(predicate)
+    if policy is None or policy.direction is PredicateDirection.EXISTING:
+        return existing_default
+    normalized = str(direction).lower()
+    return policy.direction is PredicateDirection.BOTH or policy.direction.value == normalized
+
 
 # The two predicates that assert the target is wrong rather than merely
 # related. Retrieval demotes or hides what they point at, so declaring one is a

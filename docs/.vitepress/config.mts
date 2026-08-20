@@ -83,6 +83,7 @@ export default defineConfig({
                         { text: 'Inviting Users', link: '/admin/inviting-users' },
                         { text: 'Audit Log', link: '/admin/audit-log' },
                         { text: 'Backup And Restore', link: '/admin/backup-restore' },
+                        { text: 'Release Runbook', link: '/admin/releasing' },
                         { text: 'Break-Glass Access', link: '/admin/break-glass' },
                     ],
                 },

@@ -80,7 +80,17 @@ def _default_local_surreal_url(env: dict[str, str]) -> str:
 
 
 def _resolve_coordination_backend(env: dict[str, str]) -> str:
-    return "redis" if env.get("SIBYL_COORDINATION_BACKEND") == "redis" else "local"
+    configured = env.get("SIBYL_COORDINATION_BACKEND", "auto")
+    if configured != "auto":
+        return configured
+
+    redis_settings = {
+        "SIBYL_REDIS_HOST",
+        "SIBYL_REDIS_PORT",
+        "SIBYL_REDIS_PASSWORD",
+        "SIBYL_REDIS_JOBS_DB",
+    }
+    return "redis" if redis_settings & env.keys() else "local"
 
 
 def _apply_surreal_dev_defaults(env: dict[str, str]) -> None:

@@ -12,8 +12,11 @@ if [[ -n "$command" ]]; then
 fi
 
 container=""
+process_pid=""
 output_dir=""
 interval_seconds=5
+runtime_kind=""
+process_hwm_kib=0
 
 usage() {
   cat <<'EOF'
@@ -27,6 +30,7 @@ Commands:
 
 Options:
   -c, --container ID         Docker container ID or name
+  -p, --pid PID              Native SurrealDB process ID
   -o, --output-dir PATH      Telemetry directory
   -i, --interval SECONDS     Sample interval (default: 5)
   -h, --help                 Show this help
@@ -42,6 +46,10 @@ while (($#)); do
   case "$1" in
     -c | --container)
       container="${2:?missing container}"
+      shift 2
+      ;;
+    -p | --pid)
+      process_pid="${2:?missing process ID}"
       shift 2
       ;;
     -o | --output-dir)
@@ -68,17 +76,28 @@ if [[ "$command" != "monitor" && "$command" != "gate" ]]; then
   usage >&2
   exit 2
 fi
-if [[ -z "$container" || -z "$output_dir" ]]; then
+if [[ -z "$output_dir" ]] || [[ -z "$container" && -z "$process_pid" ]] ||
+  [[ -n "$container" && -n "$process_pid" ]]; then
   usage >&2
+  exit 2
+fi
+if [[ -n "$process_pid" && ! "$process_pid" =~ ^[1-9][0-9]*$ ]]; then
+  printf 'process ID must be a positive integer\n' >&2
   exit 2
 fi
 if [[ ! "$interval_seconds" =~ ^[1-9][0-9]*$ ]]; then
   printf 'interval must be a positive integer\n' >&2
   exit 2
 fi
-if ! command -v docker >/dev/null 2>&1; then
+if [[ -n "$container" ]] && ! command -v docker >/dev/null 2>&1; then
   printf 'docker not found on PATH\n' >&2
   exit 127
+fi
+
+if [[ -n "$container" ]]; then
+  runtime_kind=container
+else
+  runtime_kind=process
 fi
 
 samples="$output_dir/samples.tsv"
@@ -236,35 +255,89 @@ sample_container() {
     >> "$samples"
 }
 
+sample_process() {
+  local timestamp status proc_status rss hwm anon file swap threads
+
+  timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if ! kill -0 "$process_pid" 2>/dev/null; then
+    printf '%s\tpid:%s\tmissing\t0\tfalse\t-\t%s\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\n' \
+      "$timestamp" "$process_pid" "$process_pid" >> "$samples"
+    return
+  fi
+
+  status=running
+  proc_status="$(read_proc_status "$process_pid")"
+  IFS=$'\t' read -r rss hwm anon file swap threads <<< "$proc_status"
+  if [[ "$rss" == "-" ]]; then
+    rss="$(ps -o rss= -p "$process_pid" 2>/dev/null | awk '{$1=$1; print; exit}')"
+    rss="${rss:--}"
+    anon=-
+    file=-
+    swap=-
+  fi
+  if [[ "$threads" == "-" ]]; then
+    threads="$(ps -o thcount= -p "$process_pid" 2>/dev/null | awk '{$1=$1; print; exit}')"
+    if [[ ! "$threads" =~ ^[0-9]+$ ]]; then
+      threads="$(ps -o nlwp= -p "$process_pid" 2>/dev/null | awk '{$1=$1; print; exit}')"
+    fi
+    if [[ ! "$threads" =~ ^[0-9]+$ ]]; then
+      threads="$(ps -M -p "$process_pid" 2>/dev/null | awk 'NR > 1 { count++ } END { if (count) print count }')"
+    fi
+    if [[ ! "$threads" =~ ^[0-9]+$ ]]; then
+      threads=-
+    fi
+  fi
+  if [[ "$hwm" == "-" && "$rss" =~ ^[0-9]+$ ]]; then
+    if ((rss > process_hwm_kib)); then
+      process_hwm_kib="$rss"
+    fi
+    hwm="$process_hwm_kib"
+  fi
+
+  printf '%s\tpid:%s\t%s\t0\tfalse\t0\t%s\t-\t-\t%s\t%s\t%s\t%s\t%s\t%s\t-\t-\t-\t-\t-\t-\t-\t-\n' \
+    "$timestamp" "$process_pid" "$status" "$process_pid" "$rss" "$hwm" \
+    "$anon" "$file" "$swap" "$threads" >> "$samples"
+}
+
 monitor_runtime() {
   mkdir -p "$output_dir"
+  printf '%s\n' "$runtime_kind" > "$output_dir/runtime-kind.txt"
   printf '%s\n' \
     $'timestamp\tcontainer_id\tstatus\trestart_count\toom_killed\texit_code\tpid\tstarted_at\tfinished_at\trss_kib\thwm_kib\tanon_kib\tfile_kib\tswap_kib\tthreads\tcgroup_current_bytes\tcgroup_peak_bytes\tcgroup_swap_bytes\tcgroup_oom\tcgroup_oom_kill\tpressure_some_total\tpressure_full_total\thost_available_kib' \
     > "$samples"
-  : > "$events"
+  if [[ "$runtime_kind" == "container" ]]; then
+    : > "$events"
+    docker inspect --format \
+      'container={{.Id}} image={{.Config.Image}} started_at={{.State.StartedAt}}' \
+      "$container" > "$output_dir/container.txt"
 
-  docker inspect --format \
-    'container={{.Id}} image={{.Config.Image}} started_at={{.State.StartedAt}}' \
-    "$container" > "$output_dir/container.txt"
-
-  docker events \
-    --since "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    --filter "container=$container" \
-    --format '{{json .}}' \
-    > "$events" 2> "$output_dir/docker-events.stderr" &
-  events_pid=$!
-  printf '%s\n' "$events_pid" > "$output_dir/docker-events.pid"
+    docker events \
+      --since "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      --filter "container=$container" \
+      --format '{{json .}}' \
+      > "$events" 2> "$output_dir/docker-events.stderr" &
+    events_pid=$!
+    printf '%s\n' "$events_pid" > "$output_dir/docker-events.pid"
+  else
+    printf 'pid=%s\n' "$process_pid" > "$output_dir/process.txt"
+  fi
 
   cleanup() {
-    kill "$events_pid" 2>/dev/null || true
-    wait "$events_pid" 2>/dev/null || true
+    if [[ -n "$events_pid" ]]; then
+      kill "$events_pid" 2>/dev/null || true
+      wait "$events_pid" 2>/dev/null || true
+    fi
   }
   trap cleanup EXIT
   trap 'exit 0' INT TERM
 
   while true; do
-    sample_container
-    if ! kill -0 "$events_pid" 2>/dev/null; then
+    if [[ "$runtime_kind" == "container" ]]; then
+      sample_container
+    else
+      sample_process
+    fi
+    if [[ -n "$events_pid" ]] && ! kill -0 "$events_pid" 2>/dev/null; then
       wait "$events_pid" 2>/dev/null || true
       : > "$output_dir/docker-events.failed"
       printf 'docker events collector exited unexpectedly\n' >&2
@@ -276,7 +349,7 @@ monitor_runtime() {
 }
 
 numeric_summary() {
-  awk -F '\t' '
+  awk -F '\t' -v runtime_kind="$runtime_kind" -v expected_pid="$process_pid" '
     NR == 1 {
       for (field_index = 1; field_index <= NF; field_index++) {
         column[$field_index] = field_index
@@ -312,19 +385,23 @@ numeric_summary() {
       if (oom_killed_value != "false") sample_valid = 0
       if (rss_value !~ /^[0-9]+$/) sample_valid = 0
       if (hwm_value !~ /^[0-9]+$/) sample_valid = 0
-      if (anon_value !~ /^[0-9]+$/) sample_valid = 0
-      if (file_value !~ /^[0-9]+$/) sample_valid = 0
-      if (swap_value !~ /^[0-9]+$/) sample_valid = 0
       if (threads_value !~ /^[0-9]+$/) sample_valid = 0
-      if (current_value !~ /^[0-9]+$/) sample_valid = 0
-      if (peak_value !~ /^[0-9]+$/) sample_valid = 0
-      if (cgroup_swap_value !~ /^[0-9]+$/) sample_valid = 0
-      if (available_value !~ /^[0-9]+$/) sample_valid = 0
-      if (restart_value !~ /^[0-9]+$/) sample_valid = 0
-      if (oom_value !~ /^[0-9]+$/) sample_valid = 0
-      if (oom_kill_value !~ /^[0-9]+$/) sample_valid = 0
-      if (pressure_some_value !~ /^[0-9]+$/) sample_valid = 0
-      if (pressure_full_value !~ /^[0-9]+$/) sample_valid = 0
+      if (runtime_kind == "process") {
+        if ($(column["pid"]) != expected_pid) sample_valid = 0
+      } else {
+        if (anon_value !~ /^[0-9]+$/) sample_valid = 0
+        if (file_value !~ /^[0-9]+$/) sample_valid = 0
+        if (swap_value !~ /^[0-9]+$/) sample_valid = 0
+        if (current_value !~ /^[0-9]+$/) sample_valid = 0
+        if (peak_value !~ /^[0-9]+$/) sample_valid = 0
+        if (cgroup_swap_value !~ /^[0-9]+$/) sample_valid = 0
+        if (available_value !~ /^[0-9]+$/) sample_valid = 0
+        if (restart_value !~ /^[0-9]+$/) sample_valid = 0
+        if (oom_value !~ /^[0-9]+$/) sample_valid = 0
+        if (oom_kill_value !~ /^[0-9]+$/) sample_valid = 0
+        if (pressure_some_value !~ /^[0-9]+$/) sample_valid = 0
+        if (pressure_full_value !~ /^[0-9]+$/) sample_valid = 0
+      }
       if (!sample_valid) {
         invalid_samples++
         next
@@ -414,12 +491,24 @@ gate_runtime() {
     return 1
   fi
 
-  inspect="$(
-    docker inspect --format \
-      '{{.State.Status}}|{{.RestartCount}}|{{.State.OOMKilled}}|{{.State.ExitCode}}' \
-      "$container"
-  )"
-  IFS='|' read -r status restart_count oom_killed exit_code <<< "$inspect"
+  if [[ "$runtime_kind" == "container" ]]; then
+    inspect="$(
+      docker inspect --format \
+        '{{.State.Status}}|{{.RestartCount}}|{{.State.OOMKilled}}|{{.State.ExitCode}}' \
+        "$container"
+    )"
+    IFS='|' read -r status restart_count oom_killed exit_code <<< "$inspect"
+  elif kill -0 "$process_pid" 2>/dev/null; then
+    status=running
+    restart_count=0
+    oom_killed=false
+    exit_code=0
+  else
+    status=missing
+    restart_count=0
+    oom_killed=false
+    exit_code=-
+  fi
 
   summary="$(numeric_summary)"
   samples_count="$(awk -F= '$1 == "samples" { print $2 }' <<< "$summary")"
@@ -433,11 +522,21 @@ gate_runtime() {
   oom_delta="$(awk -F= '$1 == "cgroup_oom_delta" { print $2 }' <<< "$summary")"
   oom_kill_max="$(awk -F= '$1 == "cgroup_oom_kill_max" { print $2 }' <<< "$summary")"
   oom_kill_delta="$(awk -F= '$1 == "cgroup_oom_kill_delta" { print $2 }' <<< "$summary")"
-  event_oom_count="$(grep -Ec '"(Action|status)":"oom"' "$events" 2>/dev/null || true)"
-  event_die_count="$(grep -Ec '"(Action|status)":"die"' "$events" 2>/dev/null || true)"
-  event_restart_count="$(grep -Ec '"(Action|status)":"restart"' "$events" 2>/dev/null || true)"
+  if [[ "$runtime_kind" == "container" ]]; then
+    event_oom_count="$(grep -Ec '"(Action|status)":"oom"' "$events" 2>/dev/null || true)"
+    event_die_count="$(grep -Ec '"(Action|status)":"die"' "$events" 2>/dev/null || true)"
+    event_restart_count="$(grep -Ec '"(Action|status)":"restart"' "$events" 2>/dev/null || true)"
+  else
+    event_oom_count=0
+    event_die_count=0
+    event_restart_count=0
+  fi
 
   {
+    printf 'runtime_kind=%s\n' "$runtime_kind"
+    if [[ "$runtime_kind" == "process" ]]; then
+      printf 'pid=%s\n' "$process_pid"
+    fi
     printf 'status=%s\n' "$status"
     printf 'restart_count=%s\n' "$restart_count"
     printf 'oom_killed=%s\n' "$oom_killed"
@@ -452,30 +551,37 @@ gate_runtime() {
     printf 'SurrealDB is not running: %s\n' "$status" >&2
     failed=1
   fi
-  if [[ "$restart_count" != "0" || "$restart_delta" != "0" ]]; then
+  if [[ "$runtime_kind" == "container" &&
+    ("$restart_count" != "0" || "$restart_delta" != "0") ]]; then
     printf 'SurrealDB restarted: count=%s delta=%s\n' "$restart_count" "$restart_delta" >&2
     failed=1
   fi
-  if [[ "$restart_max" != "0" ]]; then
+  if [[ "$runtime_kind" == "container" && "$restart_max" != "0" ]]; then
     printf 'SurrealDB telemetry observed a nonzero restart count\n' >&2
     failed=1
   fi
-  if [[ "$oom_killed" == "true" || "$oom_max" != "0" || "$oom_delta" != "0" ||
-    "$oom_kill_max" != "0" || "$oom_kill_delta" != "0" ]]; then
+  if [[ "$runtime_kind" == "container" &&
+    ("$oom_killed" == "true" || "$oom_max" != "0" || "$oom_delta" != "0" ||
+      "$oom_kill_max" != "0" || "$oom_kill_delta" != "0") ]]; then
     printf 'SurrealDB cgroup recorded OOM activity\n' >&2
     failed=1
   fi
-  if [[ "$event_oom_count" != "0" || "$event_die_count" != "0" || "$event_restart_count" != "0" ]]; then
+  if [[ "$runtime_kind" == "container" &&
+    ("$event_oom_count" != "0" || "$event_die_count" != "0" ||
+      "$event_restart_count" != "0") ]]; then
     printf 'SurrealDB lifecycle events recorded runtime integrity loss\n' >&2
     failed=1
   fi
   if ((samples_count < 2 || valid_samples < 2 || invalid_samples != 0)) ||
-    [[ "$rss_peak" == "-" || "$cgroup_peak" == "-" ]]; then
+    [[ "$rss_peak" == "-" ]] ||
+    [[ "$runtime_kind" == "container" && "$cgroup_peak" == "-" ]]; then
     printf 'SurrealDB telemetry is incomplete\n' >&2
     failed=1
   fi
-  if [[ ! -e "$events" || ! -s "$output_dir/docker-events.pid" ||
-    ! -e "$output_dir/monitor-ready" ]]; then
+  if [[ ! -e "$output_dir/monitor-ready" || ! -s "$output_dir/runtime-kind.txt" ]] ||
+    [[ "$runtime_kind" == "container" &&
+      (! -e "$events" || ! -s "$output_dir/docker-events.pid") ]] ||
+    [[ "$runtime_kind" == "process" && ! -s "$output_dir/process.txt" ]]; then
     printf 'SurrealDB lifecycle telemetry did not initialize\n' >&2
     failed=1
   fi

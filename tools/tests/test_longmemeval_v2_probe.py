@@ -154,7 +154,7 @@ def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
     assert "Frozen validation slice produced no question IDs" in workflow
     assert "Upload frozen validation report" in workflow
     assert (
-        workflow.count("ref: be15ea6e995462f3391c1a610892df3f67dfa7bd")
+        workflow.count("ref: 2cc8c540bdb87fe6761629b585e727e1c4704520")
         == EXPECTED_WORKFLOW_OCCURRENCES
     )
     assert (

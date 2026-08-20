@@ -293,12 +293,14 @@ tasks:
     inputs:
       - VERSION
       - tools/release/sync_versions.py
+      - tools/release/version.py
 
   sync-versions-check:
     command: uv run python tools/release/sync_versions.py --check
     inputs:
       - VERSION
       - tools/release/sync_versions.py
+      - tools/release/version.py
       - charts/sibyl/Chart.yaml
       - charts/surrealdb/Chart.yaml
       - docker-compose.quickstart.yml
@@ -310,6 +312,13 @@ tasks:
       - docs/deployment/helm-chart.md
       - docs/deployment/kubernetes.md
       - docs/deployment/monitoring.md
+
+  release-version-validate:
+    command: uv run python -m tools.release.version
+    inputs:
+      - tools/release/version.py
+    options:
+      cache: false
 
   inventory:
     command: uv run python tools/inventory/runtime_surface.py
@@ -553,6 +562,15 @@ tasks:
       - packages/python/sibyl-core/src/**/*.py
       - "**/pyproject.toml"
 
+  helm-test:
+    command: uv run pytest tools/tests/test_runtime_surface.py -k helm -v
+    inputs:
+      - charts/**/*.yaml
+      - charts/**/*.yml
+      - charts/**/*.tpl
+      - tools/tests/conftest.py
+      - tools/tests/test_runtime_surface.py
+
   dev-script-test:
     command:
       uv run pytest tools/tests/test_dev_scripts.py tools/tests/test_surreal_migration_moon_tasks.py
@@ -566,10 +584,14 @@ tasks:
       - moon.yml
 
   release-workflow-test:
-    command: uv run pytest tools/tests/test_release_workflow.py -v
+    command:
+      uv run pytest tools/tests/test_ci_changes.py tools/tests/test_release_workflow.py -v
     inputs:
       - tools/tests/conftest.py
+      - tools/tests/test_ci_changes.py
       - tools/tests/test_release_workflow.py
+      - tools/release/*.py
+      - apps/e2e/moon.yml
       - .github/workflows/release.yml
       - .github/workflows/publish.yml
       - VERSION
@@ -685,6 +707,25 @@ tasks:
       - benchmarks/compare_eval_reports.py
       - pyproject.toml
 
+  longmemeval-v2-rig:
+    command: uv run python tools/bench/longmemeval_v2_rig.py
+    inputs:
+      - tools/bench/longmemeval_v2_rig.py
+      - tools/bench/longmemeval_v2_pack_compare.py
+      - benchmarks/longmemeval_v2/**/*.json
+      - pyproject.toml
+    options:
+      cache: false
+
+  longmemeval-v2-pack-compare:
+    command: uv run python tools/bench/longmemeval_v2_pack_compare.py
+    inputs:
+      - tools/bench/longmemeval_v2_pack_compare.py
+      - benchmarks/longmemeval_v2/**/*.json
+      - pyproject.toml
+    options:
+      cache: false
+
   eval-skill-trigger:
     command: uv run --with claude-agent-sdk python -m tools.eval.skill_invocation
     inputs:
@@ -716,6 +757,8 @@ tasks:
       tools/tests/test_longmemeval_v2_projection_audit.py
       tools/tests/test_longmemeval_v2_ablations.py
       tools/tests/test_longmemeval_v2_causal_ablation.py
+      tools/tests/test_longmemeval_v2_pack_compare.py
+      tools/tests/test_longmemeval_v2_rig.py
       tools/tests/test_longmemeval_v2_validation_slice.py
       tools/tests/test_longmemeval_v2_validation_slice_v2.py -v
     inputs:

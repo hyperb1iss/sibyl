@@ -16,6 +16,7 @@ from sibyl_core.auth.memory_policy import (
     private_scope_granted_for,
 )
 from sibyl_core.embeddings.providers import configured_embedding_provider
+from sibyl_core.memory_pipeline.lifecycle import current_graph_memory_recallable
 from sibyl_core.memory_pipeline.retrieval import CandidateSourceFailure
 from sibyl_core.models.entities import EntityType
 from sibyl_core.retrieval import HybridConfig, hybrid_search, temporal_boost
@@ -26,6 +27,7 @@ from sibyl_core.retrieval.candidates import (
     candidate_contract_metadata,
 )
 from sibyl_core.retrieval.fusion import rrf_merge
+from sibyl_core.retrieval.hybrid import _apply_current_entity_gate
 from sibyl_core.retrieval.temporal import parse_temporal_datetime
 from sibyl_core.services import document_search as document_search_service
 from sibyl_core.services.surreal_content import (
@@ -118,7 +120,8 @@ def _graph_results_contain_exact_name_match(
         return False
 
     return any(
-        str(getattr(entity, "name", "")).strip().lower() == normalized_query
+        current_graph_memory_recallable(entity)
+        and str(getattr(entity, "name", "")).strip().lower() == normalized_query
         for entity, _score in results
     )
 
@@ -1144,8 +1147,14 @@ async def search(
             if (
                 query
                 and not graph_search_failed
-                and not enhanced_search_exhausted
-                and not _graph_results_contain_exact_name_match(raw_results, query)
+                and not _graph_results_contain_exact_name_match(
+                    [
+                        (entity, score)
+                        for entity, score in raw_results
+                        if graph_result_allowed(entity)
+                    ],
+                    query,
+                )
             ):
                 try:
                     exact_name_results = await with_timeout(
@@ -1226,6 +1235,15 @@ async def search(
                 ]
 
             raw_results = typed_results
+
+            raw_results, final_lifecycle_gate = await _apply_current_entity_gate(
+                raw_results,
+                client=client,
+                group_id=organization_id,
+            )
+            graph_retrieval_metadata["final_lifecycle_gate"] = final_lifecycle_gate[
+                "lifecycle_gate"
+            ]
 
             # Filter and convert to SearchResult
             for entity, score in raw_results:

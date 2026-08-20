@@ -261,6 +261,33 @@ WHERE source_id = NONE
 """
 
 
+RELATION_CREATED_AT_CURSOR_MIGRATION_DEFINITIONS = """
+DEFINE FIELD OVERWRITE created_at ON relates_to TYPE option<datetime>;
+UPDATE (
+    SELECT VALUE id
+    FROM relates_to
+    WHERE type::is::string(created_at)
+        AND string::is::datetime(created_at)
+) SET created_at = type::datetime(created_at);
+UPDATE relates_to SET created_at = time::now()
+    WHERE created_at = NONE
+        OR !type::is::datetime(created_at);
+DEFINE FIELD OVERWRITE created_at ON relates_to TYPE datetime DEFAULT time::now();
+
+DEFINE FIELD OVERWRITE created_at ON mentions TYPE option<datetime>;
+UPDATE (
+    SELECT VALUE id
+    FROM mentions
+    WHERE type::is::string(created_at)
+        AND string::is::datetime(created_at)
+) SET created_at = type::datetime(created_at);
+UPDATE mentions SET created_at = time::now()
+    WHERE created_at = NONE
+        OR !type::is::datetime(created_at);
+DEFINE FIELD OVERWRITE created_at ON mentions TYPE datetime DEFAULT time::now();
+"""
+
+
 ENTITY_UPDATED_AT_DATETIME_FIELD_REPAIR_DEFINITIONS = """
 DEFINE FIELD OVERWRITE updated_at ON entity TYPE option<datetime>;
 UPDATE (
@@ -440,20 +467,24 @@ WHERE citation_count = 0
 """
 
 MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS = """
-UPDATE entity SET attributes.importance = attributes.memory_importance
-WHERE type::is::number(attributes.importance) = false
-    AND type::is::number(attributes.memory_importance);
 UPDATE entity SET attributes.importance = attributes.retention_importance
-WHERE type::is::number(attributes.retention_importance);
-UPDATE entity SET attributes.confidence = attributes.share_confidence
-WHERE type::is::number(attributes.confidence) = false
-    AND type::is::number(attributes.share_confidence);
-UPDATE entity SET attributes.confidence = attributes.projection_confidence
-WHERE type::is::number(attributes.projection_confidence);
-UPDATE entity SET attributes.confidence = attributes.reflection_confidence
-WHERE type::is::number(attributes.reflection_confidence);
+WHERE attributes.importance = NONE
+    AND type::is::number(attributes.retention_importance);
+UPDATE entity SET attributes.importance = attributes.memory_importance
+WHERE attributes.importance = NONE
+    AND type::is::number(attributes.memory_importance);
 UPDATE entity SET attributes.confidence = attributes.promotion_confidence
-WHERE type::is::number(attributes.promotion_confidence);
+WHERE attributes.confidence = NONE
+    AND type::is::number(attributes.promotion_confidence);
+UPDATE entity SET attributes.confidence = attributes.reflection_confidence
+WHERE attributes.confidence = NONE
+    AND type::is::number(attributes.reflection_confidence);
+UPDATE entity SET attributes.confidence = attributes.projection_confidence
+WHERE attributes.confidence = NONE
+    AND type::is::number(attributes.projection_confidence);
+UPDATE entity SET attributes.confidence = attributes.share_confidence
+WHERE attributes.confidence = NONE
+    AND type::is::number(attributes.share_confidence);
 UPDATE entity SET
     attributes.retention_importance = attributes.importance,
     attributes.memory_importance = attributes.importance
@@ -464,20 +495,24 @@ UPDATE entity SET
     attributes.projection_confidence = attributes.confidence,
     attributes.share_confidence = attributes.confidence
 WHERE type::is::number(attributes.confidence);
-UPDATE relates_to SET attributes.importance = attributes.memory_importance
-WHERE type::is::number(attributes.importance) = false
-    AND type::is::number(attributes.memory_importance);
 UPDATE relates_to SET attributes.importance = attributes.retention_importance
-WHERE type::is::number(attributes.retention_importance);
-UPDATE relates_to SET attributes.confidence = attributes.share_confidence
-WHERE type::is::number(attributes.confidence) = false
-    AND type::is::number(attributes.share_confidence);
-UPDATE relates_to SET attributes.confidence = attributes.projection_confidence
-WHERE type::is::number(attributes.projection_confidence);
-UPDATE relates_to SET attributes.confidence = attributes.reflection_confidence
-WHERE type::is::number(attributes.reflection_confidence);
+WHERE attributes.importance = NONE
+    AND type::is::number(attributes.retention_importance);
+UPDATE relates_to SET attributes.importance = attributes.memory_importance
+WHERE attributes.importance = NONE
+    AND type::is::number(attributes.memory_importance);
 UPDATE relates_to SET attributes.confidence = attributes.promotion_confidence
-WHERE type::is::number(attributes.promotion_confidence);
+WHERE attributes.confidence = NONE
+    AND type::is::number(attributes.promotion_confidence);
+UPDATE relates_to SET attributes.confidence = attributes.reflection_confidence
+WHERE attributes.confidence = NONE
+    AND type::is::number(attributes.reflection_confidence);
+UPDATE relates_to SET attributes.confidence = attributes.projection_confidence
+WHERE attributes.confidence = NONE
+    AND type::is::number(attributes.projection_confidence);
+UPDATE relates_to SET attributes.confidence = attributes.share_confidence
+WHERE attributes.confidence = NONE
+    AND type::is::number(attributes.share_confidence);
 UPDATE relates_to SET
     attributes.retention_importance = attributes.importance,
     attributes.memory_importance = attributes.importance
@@ -706,6 +741,13 @@ GRAPH_SCHEMA_MIGRATIONS = (
         version=19,
         name="entity_labels_element_index",
         statements=tuple(split_statements(ENTITY_LABELS_ELEMENT_INDEX_DEFINITIONS)),
+    ),
+    # Defaults do not repair rows created before a field definition. Normalize
+    # every relation cursor before lifecycle keyset scans can depend on it.
+    SchemaMigration(
+        version=20,
+        name="relation_created_at_cursor",
+        statements=tuple(split_statements(RELATION_CREATED_AT_CURSOR_MIGRATION_DEFINITIONS)),
     ),
 )
 
@@ -1110,6 +1152,7 @@ __all__ = [
     "MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS",
     "NODE_DEFINITIONS",
     "PARENT_TASK_CANONICALIZATION_DEFINITIONS",
+    "RELATION_CREATED_AT_CURSOR_MIGRATION_DEFINITIONS",
     "RELATION_EDGE_CLEANUP_DEFINITIONS",
     "REMOVED_GRAPH_EDGES",
     "REMOVED_GRAPH_OBJECTS",

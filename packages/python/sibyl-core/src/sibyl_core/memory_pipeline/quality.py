@@ -31,19 +31,15 @@ def memory_metadata_score(metadata: Mapping[str, object], key: str) -> float | N
 
 def normalize_memory_quality_metadata(metadata: Mapping[str, object]) -> dict[str, object]:
     normalized = dict(metadata)
-    importance = _first_score(
+    importance = _canonical_or_legacy_score(
         normalized,
-        ("retention_importance", "importance", "memory_importance"),
+        canonical_key="importance",
+        legacy_keys=LEGACY_IMPORTANCE_KEYS,
     )
-    confidence = _first_score(
+    confidence = _canonical_or_legacy_score(
         normalized,
-        (
-            "promotion_confidence",
-            "reflection_confidence",
-            "projection_confidence",
-            "confidence",
-            "share_confidence",
-        ),
+        canonical_key="confidence",
+        legacy_keys=LEGACY_CONFIDENCE_KEYS,
     )
     for key in (*LEGACY_IMPORTANCE_KEYS, *LEGACY_CONFIDENCE_KEYS):
         normalized.pop(key, None)
@@ -72,6 +68,17 @@ def _first_score(metadata: Mapping[str, object], keys: tuple[str, ...]) -> float
         if (score := memory_metadata_score(metadata, key)) is not None:
             return score
     return None
+
+
+def _canonical_or_legacy_score(
+    metadata: Mapping[str, object],
+    *,
+    canonical_key: str,
+    legacy_keys: tuple[str, ...],
+) -> float | None:
+    if canonical_key in metadata:
+        return memory_metadata_score(metadata, canonical_key)
+    return _first_score(metadata, legacy_keys)
 
 
 __all__ = [

@@ -31,6 +31,11 @@ from sibyl_core.embeddings.providers import EmbeddingMetadata, EmbeddingProvider
 from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
 from sibyl_core.memory_pipeline.retrieval import CandidateSourceFailure, CandidateSourceResult
 from sibyl_core.models.context import ContextFacet
+from sibyl_core.models.relations import (
+    PREDICATE_EXPANSION_PATH_SCORES,
+    predicate_direction_allows,
+    predicate_policy,
+)
 from sibyl_core.retrieval.candidates import (
     CandidateKind,
     CandidateScope,
@@ -83,35 +88,15 @@ RAW_LEXICAL_LIMIT_DIVISOR = 4
 _ACTIVE_TASK_STATUSES = {"doing", "in_progress", "review"}
 _RAW_MEMORY_CONTEXT_TYPES = {"raw_memory", "session", "episode", "note"}
 _EDGE_CONTEXT_TYPES = {"claim", "relationship"}
-_GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS = {
-    "DECIDES": 1.0,
-    "REQUIRES": 0.98,
-    "DEPENDS_ON": 0.98,
-    "BLOCKS": 0.96,
-    "SUPERSEDES": 0.95,
-    "SUPPORTS": 0.94,
-    "VALIDATED_BY": 0.94,
-    "USES_PROCEDURE": 0.92,
-    "IMPLEMENTED": 0.9,
-    "REFERENCES": 0.86,
-    "ENCOUNTERED": 0.86,
-    "TOUCHES": 0.82,
-    "PRODUCES": 0.82,
-    "ABOUT": 0.78,
-    "BELONGS_TO": 0.72,
-    "CONTAINS": 0.72,
-    "SHARES_COMMUNITY": 0.74,
-    "DERIVED_FROM": 0.7,
-    "DOCUMENTED_IN": 0.66,
-    "RELATED_TO": 0.64,
-    "MENTIONS": 0.58,
-}
+_GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS = PREDICATE_EXPANSION_PATH_SCORES
 _SUPERSEDES_PREDICATE = "SUPERSEDES"
 # An entity carrying an inbound SUPERSEDES edge is the row somebody replaced.
-# Resolving that over the surviving candidate set costs one indexed lookup
-# (idx_relates_name_target) and is the only way a lane that never walked the
-# graph -- vector, fulltext, exact key -- learns the row is stale.
-_SUPERSESSION_LOOKUP_LIMIT = 512
+# Resolving that over the surviving candidate set uses bounded target-first
+# index scans (idx_relates_target_created) and is the only way a lane that never
+# walked the graph, including vector, fulltext, and exact key, learns the row is
+# stale.
+_SUPERSESSION_LOOKUP_BATCH_SIZE = 512
+_SUPERSESSION_EDGE_PAGE_SIZE = 512
 # Candidate ids that are not entity uuids and so can never match an edge
 # endpoint. Raw memories carry a "raw_memory:" prefix and episodes live in
 # their own table, so feeding either to the lookup only widens the IN list.
@@ -122,6 +107,7 @@ _GRAPH_EXPANSION_METADATA_KEYS = (
     "graph_expansion_depth",
     "graph_expansion_relationship",
     "graph_expansion_score",
+    "graph_expansion_direction",
     "graph_expansion_community_id",
 )
 log = structlog.get_logger()
@@ -654,6 +640,7 @@ async def context_search(
                 candidates=authorized_exact_key_candidates,
             ),
             **supersession_metadata,
+            **_predicate_hop_receipt(filtered_lists),
             "stage_timings_ms": stage_timings_ms,
         },
         graph_count=len([result for result in results if result.result_origin == "graph"]),
@@ -892,33 +879,112 @@ async def _superseded_candidate_uuids(
     group_id: str,
     uuids: Sequence[str],
 ) -> tuple[set[str], int]:
-    """Resolve which of these candidates something else declared it replaced.
+    """Resolve every inbound supersession edge for the candidate set.
 
-    The row count comes back alongside the set because dedup destroys the
-    only evidence that the row cap bound: one retired row can carry several
-    inbound edges, so 300 candidates can produce more than 512 rows and still
-    dedup to a handful of uuids.
+    Candidate ids are batched to keep the indexed ``IN`` lookup bounded. Edge
+    rows are paged independently because one retired candidate can have many
+    inbound declarations. Returning a partial edge set would make a retired
+    row look current, while treating a safety limit as an error would turn a
+    dense but valid history into an availability failure.
     """
 
     if not uuids:
         return set(), 0
-    rows = await _execute_query_records(
-        client,
-        """
-        SELECT uuid, target_id, source_id, created_at
-        FROM relates_to
-        WHERE name = $predicate
-          AND target_id IN $uuids
-          AND group_id = $group_id
-        ORDER BY created_at, uuid
-        LIMIT $limit;
-        """,
-        predicate=_SUPERSEDES_PREDICATE,
-        uuids=list(uuids),
-        group_id=group_id,
-        limit=_SUPERSESSION_LOOKUP_LIMIT,
-    )
+    rows: list[dict[str, object]] = []
+    for batch_start in range(0, len(uuids), _SUPERSESSION_LOOKUP_BATCH_SIZE):
+        batch = list(uuids[batch_start : batch_start + _SUPERSESSION_LOOKUP_BATCH_SIZE])
+        upper_rows = await _execute_query_records(
+            client,
+            """
+            SELECT uuid, target_id, source_id, created_at
+            FROM relates_to WITH INDEX idx_relates_target_created
+            WHERE name = $predicate
+              AND target_id IN $uuids
+              AND group_id = $group_id
+            ORDER BY created_at DESC, uuid DESC
+            LIMIT 1;
+            """,
+            predicate=_SUPERSEDES_PREDICATE,
+            uuids=batch,
+            group_id=group_id,
+        )
+        if not upper_rows:
+            continue
+        upper_created_at, upper_uuid, upper_key = _supersession_edge_cursor(upper_rows[0])
+        after_created_at: object | None = None
+        after_uuid: str | None = None
+        after_key: tuple[str, str] | None = None
+        while True:
+            if after_key is None:
+                page = await _execute_query_records(
+                    client,
+                    """
+                    SELECT uuid, target_id, source_id, created_at
+                    FROM relates_to WITH INDEX idx_relates_target_created
+                    WHERE name = $predicate
+                      AND target_id IN $uuids
+                      AND group_id = $group_id
+                      AND (
+                        created_at < $upper_created_at
+                        OR (created_at = $upper_created_at AND uuid <= $upper_uuid)
+                      )
+                    ORDER BY created_at, uuid
+                    LIMIT $limit;
+                    """,
+                    predicate=_SUPERSEDES_PREDICATE,
+                    uuids=batch,
+                    group_id=group_id,
+                    upper_created_at=upper_created_at,
+                    upper_uuid=upper_uuid,
+                    limit=_SUPERSESSION_EDGE_PAGE_SIZE,
+                )
+            else:
+                page = await _execute_query_records(
+                    client,
+                    """
+                    SELECT uuid, target_id, source_id, created_at
+                    FROM relates_to WITH INDEX idx_relates_target_created
+                    WHERE name = $predicate
+                      AND target_id IN $uuids
+                      AND group_id = $group_id
+                      AND (
+                        created_at > $after_created_at
+                        OR (created_at = $after_created_at AND uuid > $after_uuid)
+                      )
+                      AND (
+                        created_at < $upper_created_at
+                        OR (created_at = $upper_created_at AND uuid <= $upper_uuid)
+                      )
+                    ORDER BY created_at, uuid
+                    LIMIT $limit;
+                    """,
+                    predicate=_SUPERSEDES_PREDICATE,
+                    uuids=batch,
+                    group_id=group_id,
+                    after_created_at=after_created_at,
+                    after_uuid=after_uuid,
+                    upper_created_at=upper_created_at,
+                    upper_uuid=upper_uuid,
+                    limit=_SUPERSESSION_EDGE_PAGE_SIZE,
+                )
+            rows.extend(page)
+            if len(page) < _SUPERSESSION_EDGE_PAGE_SIZE:
+                break
+            after_created_at, after_uuid, next_key = _supersession_edge_cursor(page[-1])
+            if after_key is not None and next_key <= after_key:
+                raise RuntimeError("supersession edge cursor did not advance")
+            if next_key > upper_key:
+                raise RuntimeError("supersession edge cursor advanced beyond its snapshot")
+            after_key = next_key
     return _resolve_superseded(rows), len(rows)
+
+
+def _supersession_edge_cursor(row: Mapping[str, object]) -> tuple[object, str, tuple[str, str]]:
+    created_at = row.get("created_at")
+    uuid = _string_value(row.get("uuid"))
+    if created_at is None or not uuid:
+        raise RuntimeError("supersession edge is missing its pagination cursor")
+    return created_at, uuid, (_edge_sort_key(created_at), uuid)
 
 
 def _resolve_superseded(rows: Sequence[Mapping[str, object]]) -> set[str]:
@@ -1022,27 +1088,23 @@ async def _apply_supersession_gate(
         if candidate.type not in _NON_ENTITY_CANDIDATE_TYPES
     )
     superseded: set[str] = set()
-    lookup_failed: str | None = None
-    # Both caps fail open: a candidate past the slice is never checked, and a
-    # retired row can carry several inbound edges so the row cap can bite
-    # before the candidate cap does. Neither is reachable at current pool
-    # sizes, and neither may pass silently if it ever becomes reachable.
-    truncated = len(node_uuids) > _SUPERSESSION_LOOKUP_LIMIT
     edge_rows = 0
     if node_uuids:
         try:
             superseded, edge_rows = await _superseded_candidate_uuids(
                 client,
                 group_id=group_id,
-                uuids=node_uuids[:_SUPERSESSION_LOOKUP_LIMIT],
+                uuids=node_uuids,
             )
         except Exception as exc:
-            # A gate that cannot read its own edges must not silently pass
-            # every stale row as fresh, but it also must not fail the search
-            # outright: lifecycle metadata still applies and the receipt says
-            # the edge half did not run.
-            lookup_failed = type(exc).__name__
-            log.warning("supersession_lookup_failed", error_type=lookup_failed)
+            error_type = type(exc).__name__
+            log.error(
+                "supersession_lookup_failed",
+                organization_id=group_id,
+                candidate_count=len(node_uuids),
+                error_type=error_type,
+            )
+            raise RuntimeError("supersession lifecycle lookup failed") from exc
 
     edge_dropped = 0
     if superseded:
@@ -1057,14 +1119,9 @@ async def _apply_supersession_gate(
         "lifecycle_dropped": lifecycle_dropped,
         "superseded_dropped": edge_dropped,
         "superseded_uuids": sorted(superseded),
+        "checked_candidates": len(node_uuids),
+        "edge_rows_read": edge_rows,
     }
-    if truncated or edge_rows >= _SUPERSESSION_LOOKUP_LIMIT:
-        receipt["truncated"] = True
-        receipt["checked_candidates"] = min(len(node_uuids), _SUPERSESSION_LOOKUP_LIMIT)
-        receipt["total_candidates"] = len(node_uuids)
-        receipt["edge_rows_read"] = edge_rows
-    if lookup_failed is not None:
-        receipt["lookup_error_type"] = lookup_failed
     return surviving, {"supersession_gate": receipt}
 
 
@@ -1075,16 +1132,17 @@ def _merged_supersession_metadata(
 
     The gate runs twice per search, once before the graph walk is seeded and
     once on what the walk brought back, and a receipt that reported only the
-    second pass would say a corrected row was never dropped. Counts add, uuid
-    sets union, and any pass that truncated or failed its edge lookup makes the
-    whole receipt say so: a reader checking whether the gate was complete
-    cannot be told yes because one of two passes was.
+    second pass would say a corrected row was never dropped. Counts add and
+    uuid sets union. Lookup failures do not produce receipts because the gate
+    fails closed before returning unchecked candidates.
     """
 
     merged: dict[str, Any] = {
         "lifecycle_dropped": 0,
         "superseded_dropped": 0,
         "superseded_uuids": [],
+        "checked_candidates": 0,
+        "edge_rows_read": 0,
     }
     uuids: set[str] = set()
     for receipt in receipts:
@@ -1093,13 +1151,9 @@ def _merged_supersession_metadata(
             continue
         merged["lifecycle_dropped"] += int(gate.get("lifecycle_dropped") or 0)
         merged["superseded_dropped"] += int(gate.get("superseded_dropped") or 0)
+        merged["checked_candidates"] += int(gate.get("checked_candidates") or 0)
+        merged["edge_rows_read"] += int(gate.get("edge_rows_read") or 0)
         uuids.update(str(value) for value in gate.get("superseded_uuids") or ())
-        if gate.get("truncated"):
-            merged["truncated"] = True
-            for key in ("checked_candidates", "total_candidates", "edge_rows_read"):
-                merged[key] = int(merged.get(key) or 0) + int(gate.get(key) or 0)
-        if gate.get("lookup_error_type"):
-            merged["lookup_error_type"] = gate["lookup_error_type"]
     merged["superseded_uuids"] = sorted(uuids)
     return {"supersession_gate": merged}
 
@@ -2145,6 +2199,8 @@ async def _relation_target_hops(
         if not uuid:
             continue
         relationship = _string_value(row.get("relationship")) or "RELATED_TO"
+        if not predicate_direction_allows(relationship, "outgoing"):
+            continue
         hops.append(
             _GraphExpansionHop(
                 uuid=uuid,
@@ -2198,6 +2254,8 @@ async def _relation_source_hops(
         if not uuid:
             continue
         relationship = _string_value(row.get("relationship")) or "RELATED_TO"
+        if not predicate_direction_allows(relationship, "incoming"):
+            continue
         hops.append(
             _GraphExpansionHop(
                 uuid=uuid,
@@ -2318,9 +2376,8 @@ async def _hydrate_graph_expansion_records(
         record["graph_expansion_depth"] = hop.depth
         record["graph_expansion_relationship"] = hop.relationship
         record["graph_expansion_score"] = hop.score
-        # Not in _GRAPH_EXPANSION_METADATA_KEYS on purpose: the scored lanes copy
-        # only the listed keys onto a candidate, so direction reaches a caller
-        # that reads the record directly and stays out of search result metadata.
+        # Direction travels with the scored candidate so receipts can separate
+        # incoming rescue from ordinary outgoing expansion.
         record["graph_expansion_direction"] = hop.direction
         if hop.community_id:
             record["graph_expansion_community_id"] = hop.community_id
@@ -2471,6 +2528,31 @@ def _graph_expansion_path_score(relationship: str, *, depth: int) -> float:
     base = _GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS.get(normalized, 0.64)
     depth_multiplier = _GRAPH_EXPANSION_DEPTH_DECAY ** max(depth - 1, 0)
     return max(min(base * depth_multiplier, 1.0), 0.1)
+
+
+def _predicate_hop_receipt(
+    source_lists: Sequence[tuple[RetrievalSignal, Sequence[RetrievalCandidate]]],
+) -> dict[str, object]:
+    by_predicate: dict[str, int] = {}
+    by_direction: dict[str, int] = {}
+    for signal, candidates in source_lists:
+        if signal is not RetrievalSignal.GRAPH_EXPANSION:
+            continue
+        for candidate in candidates:
+            metadata = candidate.metadata if isinstance(candidate.metadata, Mapping) else {}
+            predicate = str(metadata.get("graph_expansion_relationship") or "RELATED_TO")
+            policy = predicate_policy(predicate)
+            label = policy.receipt_label if policy is not None else predicate.lower()
+            direction = str(metadata.get("graph_expansion_direction") or "outgoing")
+            by_predicate[label] = by_predicate.get(label, 0) + 1
+            by_direction[direction] = by_direction.get(direction, 0) + 1
+    return {
+        "predicate_hops": {
+            "total": sum(by_predicate.values()),
+            "by_predicate": by_predicate,
+            "by_direction": by_direction,
+        }
+    }
 
 
 def _graph_expansion_fetch_limit(limit: int) -> int:

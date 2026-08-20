@@ -21,6 +21,7 @@ from sibyl_core.services.graph import (
 from sibyl_core.tools import admin as admin_module
 from sibyl_core.tools.admin import (
     BackupData,
+    backfill_denormalized_fields,
     backfill_episode_task_relationships,
     backfill_project_id_from_relationships,
     backfill_shared_project,
@@ -303,7 +304,7 @@ class TestRestoreBackup:
         entity_manager = AsyncMock()
         relationship_manager = AsyncMock()
         driver = SimpleNamespace()
-        entity_manager.bulk_create_direct = AsyncMock(return_value=(2, 0))
+        entity_manager.create_direct_bulk = AsyncMock(return_value=["entity-1", "entity-2"])
         entity_manager.create_direct = AsyncMock()
         relationship_manager.create_bulk = AsyncMock(return_value=(1, 0))
         relationship_manager.create = AsyncMock()
@@ -350,7 +351,10 @@ class TestRestoreBackup:
         assert result.success is True
         assert result.entities_restored == 2
         assert result.entities_skipped == 0
-        entity_manager.bulk_create_direct.assert_awaited_once()
+        entity_manager.create_direct_bulk.assert_awaited_once_with(
+            ANY,
+            generate_embeddings=False,
+        )
         entity_manager.create_direct.assert_not_awaited()
         relationship_manager.create_bulk.assert_awaited_once()
         relationship_manager.create.assert_not_awaited()
@@ -366,7 +370,9 @@ class TestRestoreBackup:
         """
         org_id = "00000000-0000-0000-0000-000000000111"
         entity_manager = AsyncMock()
-        entity_manager.bulk_create_direct = AsyncMock(return_value=(3, 0))
+        entity_manager.create_direct_bulk = AsyncMock(
+            return_value=["episode_planted", "episode_halfstamped", "episode_keyowned"]
+        )
         relationship_manager = AsyncMock()
         backup_data = BackupData(
             version="2.0",
@@ -420,7 +426,7 @@ class TestRestoreBackup:
         assert result.success is True
         restored = {
             entity.id: entity.metadata
-            for entity in entity_manager.bulk_create_direct.await_args.args[0]
+            for entity in entity_manager.create_direct_bulk.await_args.args[0]
         }
         # Recorded ownership survives; the extra owner channel does not.
         assert restored["episode_planted"]["memory_scope"] == "private"
@@ -453,7 +459,9 @@ class TestRestoreBackup:
         org_id = "00000000-0000-0000-0000-000000000111"
         entity_manager = AsyncMock()
         relationship_manager = AsyncMock()
-        entity_manager.bulk_create_direct = AsyncMock(return_value=(3, 0))
+        entity_manager.create_direct_bulk = AsyncMock(
+            return_value=["task-1", "project-1", "epic-1"]
+        )
         relationship_manager.create_bulk = AsyncMock(return_value=(0, 0))
         task = Task(
             id="task-1",
@@ -511,7 +519,7 @@ class TestRestoreBackup:
             )
 
         assert result.success is True
-        restored = entity_manager.bulk_create_direct.await_args.args[0]
+        restored = entity_manager.create_direct_bulk.await_args.args[0]
         assert [type(entity) for entity in restored] == [Task, Project, Epic]
         assert restored[0].status is TaskStatus.DOING
         assert restored[0].priority is TaskPriority.CRITICAL
@@ -526,7 +534,7 @@ class TestRestoreBackup:
         org_id = "00000000-0000-0000-0000-000000000111"
         entity_manager = AsyncMock()
         relationship_manager = AsyncMock()
-        entity_manager.bulk_create_direct = AsyncMock(return_value=(2, 0))
+        entity_manager.create_direct_bulk = AsyncMock(return_value=["note-1", "error-pattern-1"])
         relationship_manager.create_bulk = AsyncMock(return_value=(0, 0))
         backup_data = BackupData(
             version="2.0",
@@ -570,7 +578,7 @@ class TestRestoreBackup:
             )
 
         assert result.success is True
-        restored = entity_manager.bulk_create_direct.await_args.args[0]
+        restored = entity_manager.create_direct_bulk.await_args.args[0]
         assert [type(entity) for entity in restored] == [Entity, Entity]
         assert [entity.entity_type for entity in restored] == [
             EntityType.NOTE,
@@ -580,7 +588,7 @@ class TestRestoreBackup:
         assert restored[1].content == "Old error pattern before structured fields"
 
     @pytest.mark.asyncio
-    async def test_skip_existing_restore_uses_direct_create_without_embeddings(self) -> None:
+    async def test_skip_existing_restore_uses_bulk_create_without_embeddings(self) -> None:
         org_id = "00000000-0000-0000-0000-000000000111"
         entity_manager = AsyncMock()
         relationship_manager = AsyncMock()
@@ -589,7 +597,7 @@ class TestRestoreBackup:
             side_effect=[SimpleNamespace(id="entity-1"), Exception("missing")]
         )
         entity_manager.create_direct = AsyncMock()
-        entity_manager.bulk_create_direct = AsyncMock()
+        entity_manager.create_direct_bulk = AsyncMock(return_value=["entity-2"])
         relationship_manager.create_bulk = AsyncMock(return_value=(0, 0))
         relationship_manager.create = AsyncMock()
         backup_data = BackupData(
@@ -631,12 +639,14 @@ class TestRestoreBackup:
         assert result.success is True
         assert result.entities_restored == 1
         assert result.entities_skipped == 1
-        entity_manager.bulk_create_direct.assert_not_awaited()
-        entity_manager.create_direct.assert_awaited_once()
+        entity_manager.create_direct_bulk.assert_awaited_once_with(
+            ANY,
+            generate_embeddings=False,
+        )
+        entity_manager.create_direct.assert_not_awaited()
         relationship_manager.create_bulk.assert_not_awaited()
-        create_args = entity_manager.create_direct.await_args
-        assert create_args.args[0].id == "entity-2"
-        assert create_args.kwargs == {"generate_embedding": False}
+        create_args = entity_manager.create_direct_bulk.await_args
+        assert [entity.id for entity in create_args.args[0]] == ["entity-2"]
 
     @pytest.mark.asyncio
     async def test_restore_rehydrates_episodes_and_mentions(self) -> None:
@@ -873,7 +883,7 @@ class TestRestoreBackup:
         org_id = "00000000-0000-0000-0000-000000000111"
         entity_manager = AsyncMock()
         relationship_manager = AsyncMock()
-        entity_manager.bulk_create_direct = AsyncMock(return_value=(2, 0))
+        entity_manager.create_direct_bulk = AsyncMock(return_value=["project-1", "task-1"])
         relationship_manager.create_bulk = AsyncMock(return_value=(1, 0))
         relationship_manager.create = AsyncMock()
         backup_data = BackupData(
@@ -924,7 +934,7 @@ class TestRestoreBackup:
             )
 
         assert result.success is True
-        restored_entities = entity_manager.bulk_create_direct.await_args.args[0]
+        restored_entities = entity_manager.create_direct_bulk.await_args.args[0]
         restored_relationships = relationship_manager.create_bulk.await_args.args[0]
         assert [entity.id for entity in restored_entities] == ["project-1", "task-1"]
         assert restored_entities[1].metadata["source_ids"] == ["source:task"]
@@ -932,6 +942,59 @@ class TestRestoreBackup:
         assert restored_relationships[0].target_id == "project-1"
         assert restored_relationships[0].relationship_type is RelationshipType.BELONGS_TO
         assert restored_relationships[0].metadata["source_ids"] == ["source:task"]
+
+
+class TestBackfillDenormalizedFields:
+    """The admin backfill must use the public graph runtime client."""
+
+    @pytest.mark.asyncio
+    async def test_backfill_reads_raw_rows_through_runtime_client(self) -> None:
+        org_id = "00000000-0000-0000-0000-000000000111"
+        client = AsyncMock()
+        client.execute_query = AsyncMock(
+            side_effect=[
+                [
+                    {
+                        "uuid": "task-1",
+                        "metadata": '{"project_id":"project-1","status":"doing"}',
+                        "project_id": None,
+                        "status": "",
+                    },
+                    {
+                        "uuid": "task-2",
+                        "metadata": {"project_id": "project-2"},
+                        "project_id": "project-2",
+                    },
+                ],
+                [],
+            ]
+        )
+        entity_manager = AsyncMock()
+        entity_manager.update = AsyncMock()
+
+        with patch(
+            "sibyl_core.tools.admin.get_graph_runtime",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    client=client,
+                    entity_manager=entity_manager,
+                    relationship_manager=AsyncMock(),
+                )
+            ),
+        ):
+            result = await backfill_denormalized_fields(organization_id=org_id)
+
+        assert result.success is True
+        assert result.entities_scanned == 2
+        assert result.entities_updated == 1
+        assert result.entities_already_set == 1
+        entity_manager.update.assert_awaited_once_with(
+            "task-1",
+            {"project_id": "project-1", "status": "doing"},
+        )
+        first_query = client.execute_query.await_args_list[0]
+        assert "FROM entity" in first_query.args[0]
+        assert first_query.kwargs["group_id"] == org_id
 
 
 class TestBackfillTaskProjectRelationships:

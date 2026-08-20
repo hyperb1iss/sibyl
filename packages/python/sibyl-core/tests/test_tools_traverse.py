@@ -285,7 +285,7 @@ class TestExpandNeighborRecords:
     @pytest.mark.asyncio
     async def test_tags_hops_and_hydrates_rows(self) -> None:
         client = _FakeClient(
-            outgoing=[{"uuid": "decision_b", "relationship": "SUPERSEDES"}],
+            outgoing=[{"uuid": "decision_b", "relationship": "SUPPORTS"}],
             rows=[_entity_row("decision_b")],
         )
 
@@ -298,9 +298,46 @@ class TestExpandNeighborRecords:
         )
 
         assert [record["uuid"] for record in records] == ["decision_b"]
-        assert records[0]["graph_expansion_relationship"] == "SUPERSEDES"
+        assert records[0]["graph_expansion_relationship"] == "SUPPORTS"
         assert records[0]["graph_expansion_depth"] == 1
         assert records[0]["graph_expansion_direction"] == "outgoing"
+
+    @pytest.mark.asyncio
+    async def test_outgoing_supersedes_never_revives_retired_target(self) -> None:
+        client = _FakeClient(
+            outgoing=[{"uuid": "decision_retired", "relationship": "SUPERSEDES"}],
+            rows=[_entity_row("decision_retired")],
+        )
+
+        records = await expand_neighbor_records(
+            client=client,
+            origin_uuids=["decision_successor"],
+            group_id=ORG,
+            max_depth=1,
+            limit=5,
+            relationship_names=["SUPERSEDES"],
+        )
+
+        assert records == []
+
+    @pytest.mark.asyncio
+    async def test_incoming_supersedes_rescues_current_successor(self) -> None:
+        client = _FakeClient(
+            incoming=[{"uuid": "decision_successor", "relationship": "SUPERSEDES"}],
+            rows=[_entity_row("decision_successor")],
+        )
+
+        records = await expand_neighbor_records(
+            client=client,
+            origin_uuids=["decision_retired"],
+            group_id=ORG,
+            max_depth=1,
+            limit=5,
+            relationship_names=["SUPERSEDES"],
+        )
+
+        assert [record["uuid"] for record in records] == ["decision_successor"]
+        assert records[0]["graph_expansion_direction"] == "incoming"
 
     @pytest.mark.asyncio
     async def test_walks_inbound_edges_and_marks_direction(self) -> None:

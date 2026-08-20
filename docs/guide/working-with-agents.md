@@ -297,7 +297,7 @@ Help future sessions (and other agents) by documenting state:
 
 1. Be specific when capturing: give context, cause, fix, and prevention
 2. Review and upgrade episodes to patterns when they prove useful
-3. Add categories and tags for better searchability
+3. Add categories for grouping and tags for browse filters
 
 ## Example Session
 

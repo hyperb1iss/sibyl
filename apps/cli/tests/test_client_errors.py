@@ -231,6 +231,7 @@ async def test_expired_token_refresh_failure_skips_expired_request(
         return httpx.Response(200, json={"ok": True})
 
     client = _client_with_transport(httpx.MockTransport(unexpected_request))
+    client._uses_stored_auth = True
     refresh = AsyncMock(return_value=(False, "Authentication storage temporarily unavailable"))
     monkeypatch.setattr(client_module, "is_access_token_expired", lambda _api_url, **_kwargs: True)
     monkeypatch.setattr(client, "_refresh_token", refresh)
@@ -260,6 +261,7 @@ async def test_expired_token_refresh_failure_keeps_pending_write(
         return httpx.Response(200, json={"ok": True})
 
     client = _client_with_transport(httpx.MockTransport(unexpected_request))
+    client._uses_stored_auth = True
     refresh = AsyncMock(return_value=(False, "Authentication storage temporarily unavailable"))
     monkeypatch.setattr(client_module, "is_access_token_expired", lambda _api_url, **_kwargs: True)
     monkeypatch.setattr(client, "_refresh_token", refresh)

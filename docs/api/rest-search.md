@@ -228,7 +228,7 @@ Navigate graph structure without semantic search.
 | `priority`           | string   | No       | -       | Priority filter (comma-separated)             |
 | `complexity`         | string   | No       | -       | Complexity filter                             |
 | `feature`            | string   | No       | -       | Feature filter                                |
-| `tags`               | string   | No       | -       | Tags filter (comma-separated)                 |
+| `tags`               | string   | No       | -       | Browse filter; comma-separated, no rank boost |
 | `include_archived`   | boolean  | No       | false   | Include archived                              |
 | `limit`              | integer  | No       | 50      | Results limit (1-200)                         |
 | `offset`             | integer  | No       | 0       | Pagination offset                             |

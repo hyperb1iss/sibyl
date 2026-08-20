@@ -14,6 +14,7 @@ from sibyl_core.backends.surreal.connection import SurrealQueryError
 from sibyl_core.backends.surreal.records import coerce_datetime
 from sibyl_core.backends.surreal.schema import (
     ANALYZER_DEFINITIONS,
+    EDGE_DEFINITIONS,
     EMBEDDING_DIM,
     NODE_DEFINITIONS,
     bootstrap_schema,
@@ -2609,6 +2610,71 @@ async def test_graph_migration_normalizes_legacy_updated_at_values() -> None:
         await client.close()
 
 
+@pytest.mark.asyncio
+async def test_graph_migration_backfills_missing_relation_cursors() -> None:
+    client = SurrealGraphClient(group_id="org-relation-cursor-migration", url="memory://")
+    try:
+        legacy_edges = EDGE_DEFINITIONS.replace(
+            "DEFINE FIELD IF NOT EXISTS created_at ON relates_to "
+            "TYPE datetime DEFAULT time::now();",
+            "DEFINE FIELD IF NOT EXISTS created_at ON relates_to TYPE option<datetime>;",
+        )
+        await client.execute_query(
+            render_fulltext_compatible_sql(
+                ANALYZER_DEFINITIONS + "\n" + NODE_DEFINITIONS + "\n" + legacy_edges,
+                url="memory://",
+            )
+        )
+        manager = EntityManager(client, group_id=client.group_id)
+        for entity_id in ("legacy-survivor", "legacy-retired"):
+            await manager.create_direct(
+                Entity(
+                    id=entity_id,
+                    entity_type=EntityType.DECISION,
+                    name=entity_id,
+                    organization_id=client.group_id,
+                    metadata={},
+                )
+            )
+        relationships = RelationshipManager(client, group_id=client.group_id)
+        await relationships.create(
+            Relationship(
+                id="legacy-supersession",
+                source_id="legacy-survivor",
+                target_id="legacy-retired",
+                relationship_type=RelationshipType.SUPERSEDES,
+                organization_id=client.group_id,
+                metadata={"fact": "legacy survivor supersedes legacy retired"},
+            )
+        )
+        await client.execute_query(
+            """
+            UPDATE relates_to SET created_at = NONE
+            WHERE uuid = 'legacy-supersession';
+            """
+        )
+        await ensure_schema_version_table(client.execute_query, group_id=client.group_id)
+        await record_schema_version(
+            client.execute_query,
+            version=19,
+            migrations=(),
+            name=GRAPH_SCHEMA_NAME,
+        )
+
+        await bootstrap_schema(client)
+
+        rows = normalize_records(
+            await client.execute_query(
+                "SELECT uuid, created_at FROM relates_to WHERE uuid = 'legacy-supersession';"
+            )
+        )
+        assert len(rows) == 1
+        assert isinstance(rows[0]["created_at"], datetime)
+        assert await get_schema_version(client.execute_query) == GRAPH_SCHEMA_CURRENT_VERSION
+    finally:
+        await client.close()
+
+
 @pytest.mark.parametrize("schema_version", [9, 13])
 @pytest.mark.asyncio
 async def test_graph_migration_repairs_partial_required_fields(schema_version: int) -> None:
@@ -2784,6 +2850,14 @@ async def test_graph_migration_normalizes_memory_quality_metadata() -> None:
                 organization_id=client.group_id,
             )
         )
+        await entity_manager.create_direct(
+            Entity(
+                id="quality_legacy",
+                entity_type=EntityType.TOPIC,
+                name="Legacy-only quality",
+                organization_id=client.group_id,
+            )
+        )
         await relationship_manager.create(
             Relationship(
                 id="quality_relation",
@@ -2825,6 +2899,10 @@ async def test_graph_migration_normalizes_memory_quality_metadata() -> None:
                 attributes.confidence = 'bogus',
                 attributes.share_confidence = '0.35'
             WHERE uuid = 'quality_string_relation';
+            UPDATE entity SET
+                attributes.retention_importance = 0.8,
+                attributes.promotion_confidence = 0.9
+            WHERE uuid = 'quality_legacy';
             """
         )
         await record_schema_version(
@@ -2856,16 +2934,22 @@ async def test_graph_migration_normalizes_memory_quality_metadata() -> None:
                 "SELECT attributes FROM relates_to WHERE uuid = 'quality_string_relation' LIMIT 1;"
             )
         )
+        legacy_rows = normalize_records(
+            await client.execute_query(
+                "SELECT attributes FROM entity WHERE uuid = 'quality_legacy' LIMIT 1;"
+            )
+        )
         entity_metadata = entity_rows[0]["attributes"]
         relation_metadata = relation_rows[0]["attributes"]
         string_entity_metadata = string_entity_rows[0]["attributes"]
         string_relation_metadata = string_relation_rows[0]["attributes"]
+        legacy_metadata = legacy_rows[0]["attributes"]
         assert entity_metadata["importance"] == 0.2
-        assert entity_metadata["confidence"] == 0.7
-        assert relation_metadata["confidence"] == 0.6
+        assert entity_metadata["confidence"] == 0.1
+        assert relation_metadata["confidence"] == 0.1
         assert entity_metadata["retention_importance"] == 0.2
-        assert entity_metadata["reflection_confidence"] == 0.7
-        assert relation_metadata["projection_confidence"] == 0.6
+        assert entity_metadata["reflection_confidence"] == 0.1
+        assert relation_metadata["projection_confidence"] == 0.1
         assert string_entity_metadata["importance"] == "bogus"
         assert string_entity_metadata["memory_importance"] == "0.8"
         assert string_entity_metadata["confidence"] == "bogus"
@@ -2874,9 +2958,12 @@ async def test_graph_migration_normalizes_memory_quality_metadata() -> None:
         assert string_relation_metadata["memory_importance"] == "0.65"
         assert string_relation_metadata["confidence"] == "bogus"
         assert string_relation_metadata["share_confidence"] == "0.35"
+        assert legacy_metadata["importance"] == 0.8
+        assert legacy_metadata["confidence"] == 0.9
 
         loaded_entity = await entity_manager.get("quality_source")
         loaded_string_entity = await entity_manager.get("quality_target")
+        loaded_legacy_entity = await entity_manager.get("quality_legacy")
         loaded_relationships = await relationship_manager.get_for_entity(
             "quality_source",
             direction="outgoing",
@@ -2887,13 +2974,16 @@ async def test_graph_migration_normalizes_memory_quality_metadata() -> None:
         )
         assert loaded_entity is not None
         assert loaded_string_entity is not None
+        assert loaded_legacy_entity is not None
         assert loaded_entity.metadata["importance"] == 0.2
-        assert loaded_entity.metadata["confidence"] == 0.7
-        assert loaded_relationships[0].metadata["confidence"] == 0.6
-        assert loaded_string_entity.metadata["importance"] == 0.8
-        assert loaded_string_entity.metadata["confidence"] == 0.45
-        assert loaded_string_relationships[0].metadata["importance"] == 0.65
-        assert loaded_string_relationships[0].metadata["confidence"] == 0.35
+        assert loaded_entity.metadata["confidence"] == 0.1
+        assert loaded_relationships[0].metadata["confidence"] == 0.1
+        assert loaded_string_entity.metadata["importance"] == "bogus"
+        assert loaded_string_entity.metadata["confidence"] == "bogus"
+        assert loaded_string_relationships[0].metadata["importance"] == "bogus"
+        assert loaded_string_relationships[0].metadata["confidence"] == "bogus"
+        assert loaded_legacy_entity.metadata["importance"] == 0.8
+        assert loaded_legacy_entity.metadata["confidence"] == 0.9
         for legacy_key in (
             "retention_importance",
             "memory_importance",
@@ -2906,6 +2996,7 @@ async def test_graph_migration_normalizes_memory_quality_metadata() -> None:
             assert legacy_key not in loaded_relationships[0].metadata
             assert legacy_key not in loaded_string_entity.metadata
             assert legacy_key not in loaded_string_relationships[0].metadata
+            assert legacy_key not in loaded_legacy_entity.metadata
     finally:
         await client.close()
 

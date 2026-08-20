@@ -8,6 +8,8 @@ from typing import Any
 
 import pytest
 
+OPAQUE_INVOCATION_ID_HEX_LENGTH = 32
+
 
 def _load_module() -> ModuleType:
     path = Path(__file__).parents[2] / "benchmarks" / "longmemeval_v2_live_retrieval.py"
@@ -154,8 +156,11 @@ def test_run_queries_flushes_resumable_official_rows(tmp_path: Path) -> None:
         project_id = "project_test"
         run_id = "run_test"
 
-        def set_query_context(self, **kwargs: object) -> None:
-            self.question = kwargs["question_item"]
+        def __init__(self) -> None:
+            self.query_invocation_ids: list[str] = []
+
+        def set_query_context(self, *, query_invocation_id: str) -> None:
+            self.query_invocation_ids.append(query_invocation_id)
 
         def clear_query_context(self) -> None:
             self.question = None
@@ -202,8 +207,9 @@ def test_run_queries_flushes_resumable_official_rows(tmp_path: Path) -> None:
             "eval_function": "qa",
         },
     ]
+    memory = FakeMemory()
     summary = module.run_queries(
-        FakeMemory(),
+        memory,
         questions=questions,
         haystack={"q1": ["t1"], "q2": ["t1"]},
         output_dir=tmp_path,
@@ -219,6 +225,70 @@ def test_run_queries_flushes_resumable_official_rows(tmp_path: Path) -> None:
     assert summary["query_embedding_usage_this_invocation"]["requests"] == 1
     assert summary["query_cost_usd_this_invocation"] == pytest.approx(0.001)
     assert summary["query_cost_complete"] is True
+    assert len(memory.query_invocation_ids) == 1
+    assert len(memory.query_invocation_ids[0]) == OPAQUE_INVOCATION_ID_HEX_LENGTH
+    assert "second" not in memory.query_invocation_ids[0]
+
+
+def test_run_queries_persists_failed_row_and_resume_retries_it(tmp_path: Path) -> None:
+    module = _load_module()
+
+    class FailingMemory:
+        project_id = "project_test"
+        run_id = "run_test"
+
+        def __init__(self) -> None:
+            self.runner_provenance = {"sibyl_commit": "a" * 40, "git_status": "clean"}
+            self.api_runtime = {"runtime": {"commit": "api"}}
+            self.official_source = {"commit": "official"}
+
+        def set_query_context(self, *, query_invocation_id: str) -> None:
+            self.query_invocation_id = query_invocation_id
+
+        def clear_query_context(self) -> None:
+            self.query_invocation_id = None
+
+        def query(self, query: str) -> list[dict[str, str]]:
+            raise RuntimeError(f"fault injected for {query}")
+
+    question = {
+        "id": "q1",
+        "domain": "enterprise",
+        "question": "first?",
+        "question_type": "procedure",
+        "eval_function": "qa",
+    }
+    with pytest.raises(RuntimeError, match="fault injected"):
+        module.run_queries(
+            FailingMemory(),
+            questions=[question],
+            haystack={"q1": ["t1"]},
+            output_dir=tmp_path,
+            completed_question_ids=set(),
+        )
+
+    rows = module.load_jsonl(tmp_path / "per_question.jsonl")
+    assert rows == [
+        {
+            **rows[0],
+            "row_status": "failed",
+            "context_status": "failed",
+            "memory_context": None,
+            "memory_post_query_metadata": None,
+            "failure": {"stage": "retrieval", "error_type": "RuntimeError"},
+            "score_bool": None,
+        }
+    ]
+    run_config = {"schema_version": module.RUN_SCHEMA_VERSION, "api_runtime": {}}
+    (tmp_path / "run_config.json").write_text(json.dumps(run_config), encoding="utf-8")
+    completed = module.prepare_output(
+        tmp_path,
+        run_config=run_config,
+        questions=[question],
+        haystack={"q1": ["t1"]},
+        resume=True,
+    )
+    assert completed == set()
 
 
 def test_prepare_output_resumes_across_a_server_restart(tmp_path: Path) -> None:

@@ -6,11 +6,14 @@ import subprocess
 from shutil import which
 from typing import Any, cast
 
+import pytest
 import tomllib
 import yaml
 from packaging.requirements import Requirement
 from tools.release.aur_pkgbuild import render_pkgbuild as render_aur_pkgbuild
 from tools.release.homebrew_formula import PackageArtifact, pep440_version, render_formula
+from tools.release.release_notes import RELEASE_NOTES_SURFACE, validate_release_notes_claims
+from tools.release.version import parse_release_version
 from tools.tests.conftest import REPO_ROOT
 
 RELEASE_TEST_DEPS = {
@@ -47,7 +50,7 @@ RELEASE_WORKFLOW_REQUIRED_FRAGMENTS = (
     "The committed bump differs from the base by non-pin files.",
     "git status --porcelain",
     "rc-gate-receipt-${{ steps.candidate.outputs.sha }}",
-    r"(-[a-zA-Z0-9.]+)?",
+    'python -m tools.release.version "$VERSION"',
     "steps.version.outputs.needs_version_commit == 'true'",
     "from: ${{ steps.version.outputs.previous_tag }}",
     "Generate AI release notes",
@@ -56,6 +59,8 @@ RELEASE_WORKFLOW_REQUIRED_FRAGMENTS = (
     "model: claude-opus-5",
     "secrets.ANTHROPIC_API_KEY",
     "Prepare release notes",
+    "tools.release.release_notes",
+    "release-notes-claim-receipt.json",
     "steps.ai_release_notes.outputs.content",
     "Git-Iris generated empty release notes",
     "[^[:space:]]",
@@ -531,18 +536,66 @@ def test_install_script_defaults_to_server_ui_story() -> None:
     assert "uv tool upgrade" not in installer
 
 
-def test_pep440_version_normalizes_supported_prerelease_labels() -> None:
+def test_release_version_parser_normalizes_every_supported_form() -> None:
     cases = {
         "1.0.0": "1.0.0",
         "1.0.0-rc.1": "1.0.0rc1",
-        "1.0.0-alpha.1": "1.0.0a1",
-        "1.0.0-beta.2": "1.0.0b2",
-        "1.0.0-c.3": "1.0.0rc3",
-        "1.0.0-pre.4": "1.0.0rc4",
-        "1.0.0-preview.5": "1.0.0rc5",
+        "0.0.1": "0.0.1",
+        "12.34.56-rc.789": "12.34.56rc789",
     }
 
     assert {version: pep440_version(version) for version in cases} == cases
+    assert {version: parse_release_version(version).tag for version in cases} == {
+        version: f"v{version}" for version in cases
+    }
+    task = _root_task("release-version-validate")
+    assert task["args"] == ["run", "python", "-m", "tools.release.version"]
+
+
+@pytest.mark.parametrize(
+    "version",
+    [
+        "v1.0.0",
+        "1.0",
+        "1.0.0-alpha.1",
+        "1.0.0-beta.1",
+        "1.0.0-preview.1",
+        "1.0.0-rc.0",
+        "1.0.0-rc.01",
+        "01.0.0",
+        "1.0.0+build",
+    ],
+)
+def test_release_version_parser_rejects_unsupported_forms_before_mutation(
+    version: str,
+) -> None:
+    with pytest.raises(ValueError, match=r"expected X.Y.Z"):
+        parse_release_version(version)
+
+
+def test_release_notes_pass_through_the_public_claim_gate() -> None:
+    receipt, failures = validate_release_notes_claims(
+        "## Changes\n\nFix authenticated browser navigation.\n"
+    )
+
+    assert failures == []
+    assert receipt["fixture"] == "generated-release-notes-claim-gate-v1"
+    assert RELEASE_NOTES_SURFACE in receipt["docs"]
+
+
+def test_release_notes_reject_a_forbidden_benchmark_claim() -> None:
+    receipt, failures = validate_release_notes_claims("Sibyl publishes a LongMemEval-V2 score.\n")
+
+    assert failures
+    assert receipt["unsupported_claims"] == [
+        {
+            "path": RELEASE_NOTES_SURFACE,
+            "phrase": "Sibyl publishes a LongMemEval-V2 score",
+            "reason": (
+                "V2 is approval-bound until the official web and enterprise runs are pinned"
+            ),
+        }
+    ]
 
 
 def test_python_packages_pin_sibyl_core_to_current_release() -> None:

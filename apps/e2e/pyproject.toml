@@ -26,6 +26,7 @@ browser = [
 [dependency-groups]
 dev = [
     "httpx",
+    "mcp>=1.29.0,<2",
     "playwright",
     "pytest",
     "pytest-asyncio",

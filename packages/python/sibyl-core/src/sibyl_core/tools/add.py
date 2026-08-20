@@ -291,9 +291,15 @@ async def _enqueue_embedding_backfill(
         return {
             "embedding_backfill": {
                 "status": "failed",
+                "job_ids": [],
                 "queued_entities": 0,
                 "queued_relationships": 0,
-                "error": str(exc),
+                "reason": "enqueue_failed",
+                "error_type": type(exc).__name__,
+                "recovery": {
+                    "action": "repeat_add_request",
+                    "entity_ids": [entity.id for entity in entities],
+                },
             }
         }
     return {
@@ -304,6 +310,28 @@ async def _enqueue_embedding_backfill(
             "queued_relationships": len(relationships_to_create),
         }
     }
+
+
+def _projection_receipt(
+    projection_result: Any,
+    passage_result: Any,
+    *,
+    entity_id: str,
+) -> dict[str, Any]:
+    error_count = len(projection_result.errors) + len(passage_result.errors)
+    receipt: dict[str, Any] = {
+        "status": "failed" if error_count else "complete",
+        "projected_entities": projection_result.projected_entities,
+        "relationships": projection_result.relationships + passage_result.relationships,
+        "projection_state": projection_result.projection_state,
+        "error_count": error_count,
+    }
+    if error_count:
+        receipt["recovery"] = {
+            "action": "repeat_add_request",
+            "entity_ids": [entity_id],
+        }
+    return receipt
 
 
 async def add(
@@ -377,7 +405,8 @@ async def add(
         entity_type: Type to create - episode (default), pattern, task, epic, project.
         category: Domain category (authentication, database, api, debugging, etc.).
         languages: Programming languages (python, typescript, rust, etc.).
-        tags: Searchable tags for discovery.
+        tags: Browse-only metadata tags for filtering and organization. Tags do
+              not affect ranked recall.
         related_to: Entity IDs to explicitly link. A bare ID creates an untyped
               RELATED_TO edge. Prefixing an ID with a predicate from the closed
               vocabulary declares what this memory does to that one, and
@@ -974,7 +1003,24 @@ async def add(
                 message += f" (linked: {len(relationships_to_create)})"
             if conflicts:
                 message += f" (⚠️ {len(conflicts)} potential conflict(s) detected)"
-            background_jobs = {}
+            background_jobs = {
+                "entity_create": {
+                    "status": "complete",
+                    "mode": "sync",
+                    "job_ids": [],
+                    "entity_ids": [created_id],
+                },
+                "memory_projection": _projection_receipt(
+                    projection_result,
+                    passage_result,
+                    entity_id=created_id,
+                ),
+                "memory_extraction": {
+                    "status": "skipped",
+                    "job_ids": [],
+                    "reason": "synchronous_write",
+                },
+            }
             if not generate_embeddings:
                 projection_entities = list(
                     getattr(projection_result, "created_projected_entities", ())
@@ -991,13 +1037,15 @@ async def add(
                     relationship.model_dump(mode="json")
                     for relationship in passage_result.created_relationships
                 ]
-                background_jobs = await _enqueue_embedding_backfill(
-                    [entity, *projection_entities, *passage_result.created_passages],
-                    org_id,
-                    relationships_to_create
-                    + auto_relationships
-                    + projection_relationships
-                    + passage_relationships,
+                background_jobs.update(
+                    await _enqueue_embedding_backfill(
+                        [entity, *projection_entities, *passage_result.created_passages],
+                        org_id,
+                        relationships_to_create
+                        + auto_relationships
+                        + projection_relationships
+                        + passage_relationships,
+                    )
                 )
 
             return AddResponse(
@@ -1098,7 +1146,26 @@ async def add(
             fallback_message = f"Added (sync fallback): {title}"
             if conflicts:
                 fallback_message += f" (⚠️ {len(conflicts)} potential conflict(s) detected)"
-            background_jobs = {}
+            background_jobs = {
+                "entity_create": {
+                    "status": "complete",
+                    "mode": "sync_fallback",
+                    "job_ids": [],
+                    "entity_ids": [created_id],
+                    "reason": "queue_unavailable",
+                    "error_type": type(e).__name__,
+                },
+                "memory_projection": _projection_receipt(
+                    projection_result,
+                    fallback_passages,
+                    entity_id=created_id,
+                ),
+                "memory_extraction": {
+                    "status": "skipped",
+                    "job_ids": [],
+                    "reason": "synchronous_fallback",
+                },
+            }
             if not generate_embeddings:
                 projection_entities = list(
                     getattr(projection_result, "created_projected_entities", ())
@@ -1111,10 +1178,12 @@ async def add(
                         (),
                     )
                 ]
-                background_jobs = await _enqueue_embedding_backfill(
-                    [entity, *projection_entities],
-                    org_id,
-                    relationships_to_create + projection_relationships,
+                background_jobs.update(
+                    await _enqueue_embedding_backfill(
+                        [entity, *projection_entities],
+                        org_id,
+                        relationships_to_create + projection_relationships,
+                    )
                 )
             return AddResponse(
                 success=True,
@@ -1129,15 +1198,30 @@ async def add(
         queued_message = f"Queued: {title} (processing in background)"
         if conflicts:
             queued_message += f" (⚠️ {len(conflicts)} potential conflict(s) detected)"
-        background_jobs = {}
+        background_jobs = {
+            "entity_create": {
+                "status": "queued",
+                "job_ids": [create_job_id],
+                "entity_ids": [entity_id],
+            },
+            "memory_projection": {
+                "status": "deferred",
+                "job_ids": [],
+                "queued_by": create_job_id,
+            },
+            "memory_extraction": {
+                "status": "deferred",
+                "job_ids": [],
+                "queued_by": create_job_id,
+            },
+        }
         if not generate_embeddings:
-            background_jobs = {
-                "embedding_backfill": {
-                    "status": "deferred",
-                    "queued_by": create_job_id,
-                    "queued_entities": 1,
-                    "queued_relationships": len(relationships_to_create),
-                }
+            background_jobs["embedding_backfill"] = {
+                "status": "deferred",
+                "job_ids": [],
+                "queued_by": create_job_id,
+                "queued_entities": 1,
+                "queued_relationships": len(relationships_to_create),
             }
         return AddResponse(
             success=True,

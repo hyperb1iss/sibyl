@@ -21,6 +21,7 @@ def _clear_runtime_env(monkeypatch) -> None:
         "SIBYL_REDIS_HOST",
         "SIBYL_REDIS_PORT",
         "SIBYL_REDIS_PASSWORD",
+        "SIBYL_REDIS_JOBS_DB",
         "SIBYL_RUN_WORKER",
     ):
         monkeypatch.delenv(key, raising=False)
@@ -75,6 +76,15 @@ def test_coordination_backend_helper_defaults_to_surreal_local() -> None:
     assert up_cmd._resolve_coordination_backend({}) == "local"
 
 
+def test_coordination_backend_helper_resolves_auto_from_redis_intent() -> None:
+    env = {
+        "SIBYL_COORDINATION_BACKEND": "auto",
+        "SIBYL_REDIS_HOST": "valkey.internal",
+    }
+
+    assert up_cmd._resolve_coordination_backend(env) == "redis"
+
+
 def test_up_ignores_project_dotenv(tmp_path: Path, monkeypatch) -> None:
     _clear_runtime_env(monkeypatch)
     (tmp_path / ".env").write_text("SIBYL_COORDINATION_BACKEND=redis\n")
@@ -105,6 +115,23 @@ def test_up_starts_redis_when_surreal_coordination_backend_is_redis(
     assert env["SIBYL_COORDINATION_BACKEND"] == "redis"
     assert env["SIBYL_REDIS_HOST"] == "127.0.0.1"
     assert env["SIBYL_REDIS_PORT"] == "6381"
+
+
+def test_up_starts_redis_when_auto_has_redis_settings(tmp_path: Path, monkeypatch) -> None:
+    _clear_runtime_env(monkeypatch)
+    monkeypatch.setenv("SIBYL_COORDINATION_BACKEND", "auto")
+    monkeypatch.setenv("SIBYL_REDIS_HOST", "valkey.internal")
+    run_compose, start_foreground = _prepare_up_command(monkeypatch, tmp_path)
+
+    up_cmd.up()
+
+    run_compose.assert_called_once_with(
+        ["up", "-d", "surrealdb", "redis"],
+        tmp_path,
+    )
+    env = start_foreground.call_args.args[2]
+    assert up_cmd._resolve_coordination_backend(env) == "redis"
+    assert env["SIBYL_REDIS_HOST"] == "valkey.internal"
 
 
 def test_up_ignores_removed_postgres_auth_store(tmp_path: Path, monkeypatch) -> None:

@@ -5,7 +5,7 @@ from sibyl_core.memory_pipeline.quality import (
 )
 
 
-def test_normalize_memory_quality_metadata_preserves_legacy_precedence() -> None:
+def test_normalize_memory_quality_metadata_preserves_canonical_precedence() -> None:
     normalized = normalize_memory_quality_metadata(
         {
             "importance": 0.8,
@@ -17,8 +17,8 @@ def test_normalize_memory_quality_metadata_preserves_legacy_precedence() -> None
     )
 
     assert normalized == {
-        "importance": 0.3,
-        "confidence": 0.4,
+        "importance": 0.8,
+        "confidence": 0.9,
         "title": "keep me",
     }
 
@@ -26,15 +26,32 @@ def test_normalize_memory_quality_metadata_preserves_legacy_precedence() -> None
 def test_normalize_memory_quality_metadata_skips_invalid_higher_priority_scores() -> None:
     normalized = normalize_memory_quality_metadata(
         {
-            "retention_importance": "bogus",
             "importance": 0.8,
+            "retention_importance": "bogus",
+            "memory_importance": 0.2,
+            "confidence": 0.9,
             "promotion_confidence": False,
             "reflection_confidence": "unknown",
-            "confidence": 0.9,
         }
     )
 
     assert normalized == {"importance": 0.8, "confidence": 0.9}
+
+
+def test_normalize_memory_quality_metadata_never_replaces_present_canonical_values() -> None:
+    normalized = normalize_memory_quality_metadata(
+        {
+            "importance": "operator-supplied",
+            "retention_importance": 0.3,
+            "confidence": False,
+            "reflection_confidence": 0.4,
+        }
+    )
+
+    assert normalized == {
+        "importance": "operator-supplied",
+        "confidence": False,
+    }
 
 
 def test_normalize_memory_quality_metadata_migrates_legacy_scores() -> None:
@@ -68,3 +85,29 @@ def test_expand_memory_quality_storage_metadata_dual_writes_rolling_shadows() ->
     assert expanded["projection_confidence"] == 0.9
     assert expanded["share_confidence"] == 0.9
     assert expanded["title"] == "keep me"
+
+
+def test_storage_expansion_overwrites_stale_legacy_shadows_from_canonical_values() -> None:
+    expanded = expand_memory_quality_storage_metadata(
+        {
+            "importance": 0.8,
+            "retention_importance": 0.3,
+            "memory_importance": 0.2,
+            "confidence": 0.9,
+            "reflection_confidence": 0.4,
+            "share_confidence": 0.1,
+        }
+    )
+
+    assert expanded["importance"] == 0.8
+    assert expanded["confidence"] == 0.9
+    assert {expanded[key] for key in ("retention_importance", "memory_importance")} == {0.8}
+    assert {
+        expanded[key]
+        for key in (
+            "promotion_confidence",
+            "reflection_confidence",
+            "projection_confidence",
+            "share_confidence",
+        )
+    } == {0.9}

@@ -15,7 +15,9 @@ metadata:
 data:
   # Backend configuration
   {{- range $key, $value := .Values.backend.env }}
+  {{- if ne $key "SIBYL_PUBLIC_URL" }}
   {{ $key }}: {{ $value | quote }}
+  {{- end }}
   {{- end }}
   # Storage mode
   SIBYL_STORE: "surreal"
@@ -23,6 +25,11 @@ data:
   SIBYL_COORDINATION_BACKEND: {{ .Values.coordinationBackend | quote }}
   SIBYL_LOCAL_AUTH_ENABLED: {{ .Values.auth.localAuthEnabled | quote }}
   SIBYL_PUBLIC_SIGNUPS_ENABLED: {{ .Values.auth.publicSignupsEnabled | quote }}
+  {{- if .Values.publicUrl }}
+  SIBYL_PUBLIC_URL: {{ trimSuffix "/" .Values.publicUrl | quote }}
+  {{- else if hasKey .Values.backend.env "SIBYL_PUBLIC_URL" }}
+  SIBYL_PUBLIC_URL: {{ index .Values.backend.env "SIBYL_PUBLIC_URL" | quote }}
+  {{- end }}
   SIBYL_BREAK_GLASS_ENABLED: {{ .Values.breakGlass.enabled | quote }}
   SIBYL_BREAK_GLASS_ALLOWED_IPS: {{ .Values.breakGlass.allowedIPs | toJson | quote }}
   {{- if .Values.breakGlass.expiresAt }}

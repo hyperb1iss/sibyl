@@ -14,6 +14,16 @@ from dataclasses import dataclass
 import httpx
 import pytest
 import pytest_asyncio
+from playwright.sync_api import (
+    Browser,
+    BrowserContext,
+    Page,
+    Playwright,
+    sync_playwright,
+)
+from playwright.sync_api import (
+    TimeoutError as PlaywrightTimeoutError,
+)
 
 # =============================================================================
 # Configuration
@@ -193,6 +203,7 @@ class CLIRunner:
         domain: str | None = None,
         tags: str | None = None,
         wait_searchable: bool = False,
+        all_projects: bool = False,
     ) -> CLIResult:
         """Remember knowledge in the graph."""
         args = ["remember", title, content, "--kind", kind, "--json"]
@@ -200,6 +211,8 @@ class CLIRunner:
             args.extend(["--domain", domain])
         if tags:
             args.extend(["--tags", tags])
+        if all_projects:
+            args.append("--all-projects")
         if wait_searchable:
             args.append("--wait-searchable")
         timeout = WAIT_SEARCHABLE_COMMAND_TIMEOUT if wait_searchable else 30
@@ -383,7 +396,7 @@ def e2e_auth_token() -> str:
             },
         )
 
-        if signup_response.status_code == 200:
+        if signup_response.status_code == 201:
             return signup_response.json()["access_token"]
 
         # If signup also failed, raise error with details
@@ -500,12 +513,108 @@ def test_task_title(unique_id: str) -> str:
 # =============================================================================
 
 
-@pytest.fixture
-def frontend_available() -> bool:
-    """Check if frontend is running."""
+@pytest.fixture(scope="session")
+def wait_for_frontend() -> None:
+    """Require the frontend login surface to become ready."""
+    deadline = time.monotonic() + HEALTH_TIMEOUT
+    last_error = "no response"
+
+    while time.monotonic() < deadline:
+        try:
+            with httpx.Client(timeout=5.0, follow_redirects=False) as client:
+                response = client.get(f"{FRONTEND_URL}/login")
+            if response.status_code == 200:
+                return
+            last_error = f"HTTP {response.status_code}"
+        except httpx.RequestError as error:
+            last_error = str(error)
+        time.sleep(HEALTH_INTERVAL)
+
+    raise TimeoutError(
+        f"Frontend not ready at {FRONTEND_URL}/login after {HEALTH_TIMEOUT}s: {last_error}"
+    )
+
+
+@pytest.fixture(scope="session")
+def playwright_runtime() -> Generator[Playwright]:
+    """Start the Playwright runtime once for the browser suite."""
+    with sync_playwright() as playwright:
+        yield playwright
+
+
+@pytest.fixture(scope="session")
+def chromium_browser(playwright_runtime: Playwright) -> Generator[Browser]:
+    """Launch the Chromium browser used by the release browser contract."""
+    browser = playwright_runtime.chromium.launch(headless=True)
+    yield browser
+    browser.close()
+
+
+@pytest.fixture(scope="session")
+def authenticated_browser_storage(
+    chromium_browser: Browser,
+    e2e_auth_token: str,
+    wait_for_frontend: None,
+) -> dict:
+    """Authenticate through the real login page and persist browser session state."""
+    del e2e_auth_token  # Ensures the production-shaped E2E account exists before browser login.
+    context = chromium_browser.new_context(base_url=FRONTEND_URL)
+    page = context.new_page()
+
+    page.goto("/login", wait_until="domcontentloaded")
+    login_form = page.locator('form[action="/api/auth/local/login"]')
+    login_form.get_by_label("Email", exact=True).fill(E2E_TEST_EMAIL)
+    login_form.get_by_label("Password", exact=True).fill(E2E_TEST_PASSWORD)
+    login_form.get_by_role("button", name="Sign In", exact=True).click()
+    page.wait_for_url(f"{FRONTEND_URL}/", wait_until="domcontentloaded")
+
+    skip_onboarding = page.get_by_role("button", name="Skip for now", exact=True)
     try:
-        with httpx.Client(timeout=2.0) as client:
-            response = client.get(FRONTEND_URL)
-            return response.status_code in (200, 301, 302, 307, 308)
-    except httpx.RequestError:
-        return False
+        skip_onboarding.wait_for(state="visible", timeout=2_000)
+    except PlaywrightTimeoutError:
+        pass
+    else:
+        skip_onboarding.click()
+        skip_onboarding.wait_for(state="hidden")
+
+    storage = context.storage_state()
+    context.close()
+    return storage
+
+
+@pytest.fixture
+def authenticated_browser_context(
+    chromium_browser: Browser,
+    authenticated_browser_storage: dict,
+) -> Generator[BrowserContext]:
+    """Create an isolated authenticated browser context for each behavior test."""
+    context = chromium_browser.new_context(
+        base_url=FRONTEND_URL,
+        storage_state=authenticated_browser_storage,
+        viewport={"width": 1440, "height": 1000},
+    )
+    yield context
+    context.close()
+
+
+@pytest.fixture
+def authenticated_page(authenticated_browser_context: BrowserContext) -> Generator[Page]:
+    """Open a fresh authenticated page."""
+    page = authenticated_browser_context.new_page()
+    yield page
+    page.close()
+
+
+@pytest.fixture
+def unauthenticated_page(
+    chromium_browser: Browser,
+    wait_for_frontend: None,
+) -> Generator[Page]:
+    """Open a fresh page without auth state for redirect-contract tests."""
+    context = chromium_browser.new_context(
+        base_url=FRONTEND_URL,
+        viewport={"width": 1440, "height": 1000},
+    )
+    page = context.new_page()
+    yield page
+    context.close()

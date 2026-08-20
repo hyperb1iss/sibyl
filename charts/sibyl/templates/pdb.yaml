@@ -38,7 +38,7 @@ spec:
       {{- include "sibyl.frontend.selectorLabels" . | nindent 6 }}
 {{- end }}
 ---
-{{- if and .Values.worker.enabled .Values.worker.pdb.enabled }}
+{{- if and .Values.worker.enabled (eq .Values.coordinationBackend "redis") .Values.worker.pdb.enabled }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

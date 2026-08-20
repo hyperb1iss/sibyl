@@ -855,12 +855,16 @@ async def restore_backup(
                 if len(errors) <= 10:
                     log.warning("Entity restore failed", error=error_msg)
 
-        bulk_create_direct = getattr(entity_manager, "bulk_create_direct", None)
+        create_direct_bulk = getattr(entity_manager, "create_direct_bulk", None)
         create_direct = getattr(entity_manager, "create_direct", None)
 
-        if entities_to_restore and not skip_existing and callable(bulk_create_direct):
-            created_count, failed_count = await bulk_create_direct(entities_to_restore)
-            entities_restored += created_count
+        if entities_to_restore and callable(create_direct_bulk):
+            created_ids = await create_direct_bulk(
+                entities_to_restore,
+                generate_embeddings=False,
+            )
+            entities_restored += len(created_ids)
+            failed_count = len(entities_to_restore) - len(created_ids)
             if failed_count:
                 error_msg = f"Bulk entity restore failed for {failed_count} entities"
                 errors.append(error_msg)
@@ -1785,15 +1789,36 @@ async def backfill_denormalized_fields(
         return value is None or value == "" or value == []
 
     try:
+        from sibyl_core.services.graph import normalize_records
+
         runtime = await get_graph_runtime(organization_id)
         entity_manager = runtime.entity_manager
+        client = runtime.client
 
         offset = 0
         while True:
-            rows = await entity_manager._surreal_select_entity_records(
-                limit=BACKFILL_PAGE_SIZE,
-                offset=offset,
-                include_archived=True,
+            rows = normalize_records(
+                await client.execute_query(
+                    """
+                    SELECT uuid,
+                           attributes.metadata AS metadata,
+                           project_id,
+                           epic_id,
+                           task_id,
+                           status,
+                           priority,
+                           complexity,
+                           feature,
+                           tags
+                    FROM entity
+                    WHERE group_id = $group_id
+                    ORDER BY updated_at DESC, created_at DESC, uuid DESC
+                    LIMIT $limit START $offset;
+                    """,
+                    group_id=organization_id,
+                    limit=BACKFILL_PAGE_SIZE,
+                    offset=offset,
+                )
             )
             if not rows:
                 break

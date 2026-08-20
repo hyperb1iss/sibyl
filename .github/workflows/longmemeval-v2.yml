@@ -7,7 +7,9 @@ on:
       - ".github/workflows/longmemeval-v2.yml"
       - "benchmarks/longmemeval_v2_download.py"
       - "benchmarks/longmemeval_v2_memory/**"
+      - "benchmarks/longmemeval_v2_live_retrieval.py"
       - "benchmarks/longmemeval_v2_official.py"
+      - "benchmarks/longmemeval_v2_official_source.py"
       - "benchmarks/longmemeval_v2_ablations.py"
       - "benchmarks/longmemeval_v2_reader_report.py"
       - "benchmarks/longmemeval_v2_reader_replication.py"
@@ -25,9 +27,13 @@ on:
       - "benchmarks/longmemeval_v2_probe.py"
       - "packages/python/sibyl-core/src/sibyl_core/evals/**"
       - "tools/bench/eval_gate.py"
+      - "tools/bench/longmemeval_v2_pack_compare.py"
+      - "tools/bench/longmemeval_v2_rig.py"
       - "tools/tests/test_longmemeval_v2_official.py"
       - "tools/tests/test_longmemeval_v2_ablations.py"
       - "tools/tests/test_longmemeval_v2_causal_ablation.py"
+      - "tools/tests/test_longmemeval_v2_pack_compare.py"
+      - "tools/tests/test_longmemeval_v2_rig.py"
       - "tools/tests/test_longmemeval_v2_validation_slice.py"
       - "tools/tests/test_longmemeval_v2_validation_slice_v2.py"
       - "tools/tests/test_longmemeval_v2_diagnostics.py"
@@ -43,7 +49,9 @@ on:
       - ".github/workflows/longmemeval-v2.yml"
       - "benchmarks/longmemeval_v2_download.py"
       - "benchmarks/longmemeval_v2_memory/**"
+      - "benchmarks/longmemeval_v2_live_retrieval.py"
       - "benchmarks/longmemeval_v2_official.py"
+      - "benchmarks/longmemeval_v2_official_source.py"
       - "benchmarks/longmemeval_v2_ablations.py"
       - "benchmarks/longmemeval_v2_reader_report.py"
       - "benchmarks/longmemeval_v2_reader_replication.py"
@@ -61,9 +69,13 @@ on:
       - "benchmarks/longmemeval_v2_probe.py"
       - "packages/python/sibyl-core/src/sibyl_core/evals/**"
       - "tools/bench/eval_gate.py"
+      - "tools/bench/longmemeval_v2_pack_compare.py"
+      - "tools/bench/longmemeval_v2_rig.py"
       - "tools/tests/test_longmemeval_v2_official.py"
       - "tools/tests/test_longmemeval_v2_ablations.py"
       - "tools/tests/test_longmemeval_v2_causal_ablation.py"
+      - "tools/tests/test_longmemeval_v2_pack_compare.py"
+      - "tools/tests/test_longmemeval_v2_rig.py"
       - "tools/tests/test_longmemeval_v2_validation_slice.py"
       - "tools/tests/test_longmemeval_v2_validation_slice_v2.py"
       - "tools/tests/test_longmemeval_v2_diagnostics.py"
@@ -378,7 +390,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: xiaowu0162/LongMemEval-V2
-          ref: be15ea6e995462f3391c1a610892df3f67dfa7bd
+          ref: 2cc8c540bdb87fe6761629b585e727e1c4704520
           path: .moon/cache/longmemeval-v2-official
           persist-credentials: false
 
@@ -763,7 +775,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: xiaowu0162/LongMemEval-V2
-          ref: be15ea6e995462f3391c1a610892df3f67dfa7bd
+          ref: 2cc8c540bdb87fe6761629b585e727e1c4704520
           path: .moon/cache/longmemeval-v2-official
           persist-credentials: false
 

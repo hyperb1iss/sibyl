@@ -180,3 +180,15 @@ def graph_metadata_recallable(metadata: Mapping[str, object] | None) -> bool:
         for key in GRAPH_RECALL_EXCLUSION_KEYS
         if not (active and key in _STATE_OVERRIDABLE_EXCLUSION_KEYS)
     )
+
+
+def current_graph_memory_recallable(value: object) -> bool:
+    """Apply the graph lifecycle verdict to a row, model, or metadata bag."""
+
+    if isinstance(value, Mapping):
+        nested = value.get("metadata") or value.get("attributes")
+        metadata = nested if isinstance(nested, Mapping) else value
+    else:
+        nested = getattr(value, "metadata", None)
+        metadata = nested if isinstance(nested, Mapping) else {}
+    return graph_metadata_recallable(metadata)

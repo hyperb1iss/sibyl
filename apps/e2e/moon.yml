@@ -9,14 +9,12 @@ tasks:
       SIBYL_E2E_CLI_COMMAND: uv run --project ../cli sibyl
     inputs:
     - '@group(tests)'
-    preset: server
   test-api:
     command: uv run pytest -m 'api or cli'
     env:
       SIBYL_E2E_CLI_COMMAND: uv run --project ../cli sibyl
     inputs:
     - '@group(tests)'
-    preset: server
   test-perf:
     command: uv run pytest tests/perf -m perf -v -s
     env:
@@ -25,17 +23,16 @@ tasks:
     inputs:
     - '@group(tests)'
     - /tools/perf/**/*.py
-    preset: server
   test-browser:
     command: uv run pytest -m browser
+    deps:
+    - ~:playwright-install
     env:
       SIBYL_E2E_CLI_COMMAND: uv run --project ../cli sibyl
     inputs:
     - '@group(tests)'
-    preset: server
   playwright-install:
     command: uv run playwright install chromium
-    preset: server
   sync:
     command: uv sync
     inputs:
@@ -48,7 +45,6 @@ tasks:
     command: uv run ruff format tests
     inputs:
     - '@group(tests)'
-    preset: server
 tags:
 - python
 - e2e

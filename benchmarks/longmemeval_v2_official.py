@@ -32,6 +32,10 @@ if str(CORE_SRC) not in sys.path:
     sys.path.insert(0, str(CORE_SRC))
 
 from benchmarks.git_provenance import git_provenance  # noqa: E402
+from benchmarks.longmemeval_v2_official_source import (  # noqa: E402
+    official_source_record,
+    require_pinned_source,
+)
 from benchmarks.provider_usage import (  # noqa: E402
     AsyncUsageTrackingClient,
     ProviderUsageRecorder,
@@ -48,8 +52,6 @@ from sibyl_core.retrieval.refinement import MAX_REFINEMENT_QUERIES  # noqa: E402
 PLAN_SCHEMA_VERSION = "sibyl-longmemeval-v2-official-plan-v1"
 RECEIPT_SCHEMA_VERSION = "sibyl-longmemeval-v2-official-receipt-v1"
 ACCOUNTING_SCHEMA_VERSION = "sibyl-eval-accounting-v1"
-OFFICIAL_REPO_URL = "https://github.com/xiaowu0162/LongMemEval-V2"
-OFFICIAL_HARNESS_PATH = "evaluation/harness.py"
 LOADED_MEMORY_RUNTIME_KEYS = frozenset(
     {
         "api_token",
@@ -99,6 +101,8 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "traversal_deadline_seconds",
         "traversal_overflow_items",
         "traversal_search_limit",
+        "runner_provenance",
+        "official_source",
     }
 )
 QWEN_READER_MODEL_FRAGMENT = "qwen3.5-9b"
@@ -177,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     official_repo = resolve_official_repo(args.official_repo)
-    ensure_official_harness(official_repo)
+    require_pinned_source(official_repo)
     sys.path.insert(0, str(official_repo))
     import benchmarks.longmemeval_v2_memory.sibyl_memory  # noqa: F401, PLC0415
     import evaluation.harness as official_harness  # noqa: PLC0415
@@ -781,6 +785,9 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "bulk_max_content_chars": args.bulk_max_content_chars,
         "embedding_backfill_max_pending_jobs": args.embedding_backfill_max_pending_jobs,
         "runner_provenance": git_provenance(ROOT),
+        "official_source": official_source_record(
+            Path(args.official_repo).expanduser().resolve() if args.official_repo else None
+        ),
     }
     config = {"memory_type": "sibyl_live_api", "memory_params": params}
     if args.load_memory_dir:
@@ -828,7 +835,6 @@ LOADED_MEMORY_NON_MERGED_KEYS = frozenset(
         "bulk_max_content_chars",
         "embedding_backfill_max_pending_jobs",
         "embedding_job_wait_timeout_seconds",
-        "runner_provenance",
     }
 )
 
@@ -907,6 +913,9 @@ def build_run_plan(
         "runtime_dir": str(runtime_dir),
         "memory_config_path": str(memory_config_path),
         "official_repo": args.official_repo,
+        "official_source": official_source_record(
+            Path(args.official_repo).expanduser().resolve() if args.official_repo else None
+        ),
         "plan_only": args.plan_only,
         "save_memory": args.save_memory,
         "skip_evaluation": args.skip_evaluation,
@@ -988,11 +997,12 @@ def build_run_plan(
 
 def build_requirement_status(*, args: argparse.Namespace, data_root: Path) -> dict[str, bool]:
     official_repo = Path(args.official_repo).expanduser().resolve() if args.official_repo else None
+    official_source = official_source_record(official_repo)
     return {
         "official_repo_configured": official_repo is not None,
-        "official_harness_exists": bool(
-            official_repo and (official_repo / "evaluation" / "harness.py").exists()
-        ),
+        "official_harness_exists": bool(official_source["harness_exists"]),
+        "official_commit_matches_pin": bool(official_source["pin_matches"]),
+        "official_checkout_clean": official_source["git_status"] == "clean",
         "trajectories_jsonl_exists": (data_root / "trajectories.jsonl").exists(),
         "reader_api_key_env_set": bool(os.getenv(args.reader_api_key_env)),
         "reader_endpoint_reachable": reader_endpoint_reachable(
@@ -1159,13 +1169,7 @@ def build_receipt_from_artifacts(
         source_runs=source_runs,
     )
     metrics.update(accounting_metric_aliases(accounting))
-    official_repo_record = {
-        "url": OFFICIAL_REPO_URL,
-        "path": str(official_repo) if official_repo else None,
-        "commit": git_commit(official_repo) if official_repo else None,
-        "harness_path": OFFICIAL_HARNESS_PATH,
-        "harness_exists": bool(official_repo and (official_repo / OFFICIAL_HARNESS_PATH).exists()),
-    }
+    official_repo_record = official_source_record(official_repo)
     dataset = build_dataset_receipt(
         data_root=data_root,
         domain=args.domain,
@@ -2063,8 +2067,10 @@ def build_receipt_checks(receipt: dict[str, Any]) -> list[dict[str, Any]]:
         check(
             "official harness",
             _truthy_path(receipt, ("official_repo", "commit"))
-            and _truthy_path(receipt, ("official_repo", "harness_exists")),
-            "official repo commit and evaluation/harness.py are recorded",
+            and _truthy_path(receipt, ("official_repo", "harness_exists"))
+            and receipt.get("official_repo", {}).get("pin_matches") is True
+            and receipt.get("official_repo", {}).get("git_status") == "clean",
+            "official repo is the clean reviewed pin with evaluation/harness.py present",
             ["official harness"],
         ),
         check(

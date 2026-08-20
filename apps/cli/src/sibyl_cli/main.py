@@ -1882,7 +1882,11 @@ def add_knowledge(
     ),
     category: str | None = typer.Option(None, "--category", "-c", help="Category"),
     language: str | None = typer.Option(None, "--language", "-l", help="Language"),
-    tags: str | None = typer.Option(None, "--tags", help="Comma-separated tags"),
+    tags: str | None = typer.Option(
+        None,
+        "--tags",
+        help="Comma-separated browse-only metadata tags",
+    ),
     project: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     all_projects: bool = typer.Option(
         False,
@@ -2007,7 +2011,11 @@ def capture_memory(
         callback=_normalize_add_type,
         help=ENTITY_TYPE_HELP,
     ),
-    tags: str | None = typer.Option(None, "--tags", help="Comma-separated tags"),
+    tags: str | None = typer.Option(
+        None,
+        "--tags",
+        help="Comma-separated browse-only metadata tags",
+    ),
     project: str | None = typer.Option(None, "--project", "-p", help="Project ID"),
     all_projects: bool = typer.Option(
         False,
@@ -2141,7 +2149,11 @@ def note_alias(
         "--all-projects",
         help="Do not auto-scope to the linked project",
     ),
-    tags: str | None = typer.Option(None, "--tags", help="Comma-separated tags"),
+    tags: str | None = typer.Option(
+        None,
+        "--tags",
+        help="Comma-separated browse-only metadata tags",
+    ),
     related_to: str | None = typer.Option(
         None,
         "--related-to",
@@ -2518,7 +2530,11 @@ def synthesis_remember_command(
     ),
     memory_scope: str = typer.Option("private", "--scope", help="Artifact memory scope"),
     scope_key: str | None = typer.Option(None, "--scope-key", help="Artifact scope key"),
-    tags: str | None = typer.Option(None, "--tags", help="Comma-separated artifact tags"),
+    tags: str | None = typer.Option(
+        None,
+        "--tags",
+        help="Comma-separated browse-only artifact metadata tags",
+    ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output full JSON"),
 ) -> None:
     """Draft, verify, and remember a synthesis artifact."""
@@ -3704,7 +3720,11 @@ def remember_memory(
         "--all-projects",
         help="Do not auto-scope to the linked project",
     ),
-    tags: str | None = typer.Option(None, "--tags", help="Comma-separated tags"),
+    tags: str | None = typer.Option(
+        None,
+        "--tags",
+        help="Comma-separated browse-only metadata tags",
+    ),
     keys: Annotated[
         list[str] | None,
         typer.Option(

@@ -201,7 +201,7 @@ Creates a new entity in the knowledge graph.
 | `entity_type` | string   | No       | -          | Default: `episode`         |
 | `category`    | string   | No       | -          | Category for organization  |
 | `languages`   | string[] | No       | -          | Programming languages      |
-| `tags`        | string[] | No       | -          | Searchable tags            |
+| `tags`        | string[] | No       | -          | Browse-only metadata       |
 | `metadata`    | object   | No       | -          | Additional structured data |
 
 **Example Request:**

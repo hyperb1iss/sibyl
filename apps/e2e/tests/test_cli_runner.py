@@ -48,6 +48,24 @@ class TestCLIRunner:
 
         assert mock_run.call_args.kwargs["timeout"] == WAIT_SEARCHABLE_COMMAND_TIMEOUT
 
+    def test_remember_can_ignore_host_project_mapping(self) -> None:
+        """Browser seeds can write without inheriting the checkout's project mapping."""
+        runner = CLIRunner()
+
+        with patch.object(runner, "run") as mock_run:
+            runner.remember("Title", "Content", all_projects=True)
+
+        mock_run.assert_called_once_with(
+            "remember",
+            "Title",
+            "Content",
+            "--kind",
+            "pattern",
+            "--json",
+            "--all-projects",
+            timeout=30,
+        )
+
     def test_context_uses_converged_command(self) -> None:
         runner = CLIRunner()
 

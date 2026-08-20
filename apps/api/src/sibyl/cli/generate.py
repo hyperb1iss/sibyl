@@ -49,6 +49,26 @@ async def _graph_managers(org_id: str) -> tuple[Any, Any]:
     return runtime.entity_manager, runtime.relationship_manager
 
 
+async def _store_generated_graph(
+    entity_manager: Any,
+    relationship_manager: Any,
+    entities: list[Any],
+    relationships: list[Any],
+    *,
+    write_batch_size: int,
+) -> tuple[int, int]:
+    """Persist generated graph rows through the supported direct-bulk API."""
+    stored_entity_ids = await entity_manager.create_direct_bulk(
+        entities,
+        write_batch_size=write_batch_size,
+    )
+    stored_relationship_ids = await relationship_manager.create_direct_bulk(
+        relationships,
+        write_batch_size=write_batch_size,
+    )
+    return len(stored_entity_ids), len(stored_relationship_ids)
+
+
 @app.command("realistic")
 def generate_realistic(
     projects: Annotated[int, typer.Option("--projects", "-p", help="Number of projects")] = 5,
@@ -157,14 +177,15 @@ def generate_realistic(
                 entity_mgr, rel_mgr = await _graph_managers(org_id)
 
                 # Use direct bulk writes for speed.
-                stored_entities, _ = await entity_mgr.bulk_create_direct(
-                    result.entities, batch_size=100
-                )
-                stored_rels, _ = await rel_mgr.bulk_create_direct(
-                    result.relationships, batch_size=100
+                stored_entities, stored_relationships = await _store_generated_graph(
+                    entity_mgr,
+                    rel_mgr,
+                    result.entities,
+                    result.relationships,
+                    write_batch_size=100,
                 )
 
-                success(f"Stored {stored_entities} entities, {stored_rels} relationships")
+                success(f"Stored {stored_entities} entities, {stored_relationships} relationships")
             else:
                 info("Data not stored")
 
@@ -261,14 +282,17 @@ def generate_stress(
                 entity_mgr, rel_mgr = await _graph_managers(org_id)
 
                 # Use direct bulk writes for speed.
-                stored, _failed_ents = await entity_mgr.bulk_create_direct(
-                    result.entities, batch_size=500
-                )
-                stored_rels, _failed_rels = await rel_mgr.bulk_create_direct(
-                    result.relationships, batch_size=500
+                stored_entities, stored_relationships = await _store_generated_graph(
+                    entity_mgr,
+                    rel_mgr,
+                    result.entities,
+                    result.relationships,
+                    write_batch_size=500,
                 )
 
-                success(f"Stored {stored:,} entities, {stored_rels:,} relationships")
+                success(
+                    f"Stored {stored_entities:,} entities, {stored_relationships:,} relationships"
+                )
             else:
                 info("Data not stored")
 
@@ -387,14 +411,17 @@ def generate_scenario(  # noqa: PLR0915 - complex CLI command
                 entity_mgr, rel_mgr = await _graph_managers(org_id)
 
                 # Use direct bulk writes for speed.
-                stored_entities, _ = await entity_mgr.bulk_create_direct(
-                    result.entities, batch_size=100
-                )
-                stored_rels, _ = await rel_mgr.bulk_create_direct(
-                    result.relationships, batch_size=100
+                stored_entities, stored_relationships = await _store_generated_graph(
+                    entity_mgr,
+                    rel_mgr,
+                    result.entities,
+                    result.relationships,
+                    write_batch_size=100,
                 )
 
-                success(f"Stored {stored_entities:,} entities, {stored_rels:,} relationships")
+                success(
+                    f"Stored {stored_entities:,} entities, {stored_relationships:,} relationships"
+                )
             else:
                 info("Data not stored")
 

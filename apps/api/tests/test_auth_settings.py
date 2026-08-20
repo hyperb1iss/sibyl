@@ -202,6 +202,34 @@ def test_settings_coordination_backend_can_override_auto() -> None:
     assert s.resolved_coordination_backend == "redis"
 
 
+@pytest.mark.parametrize(
+    ("redis_setting", "value"),
+    [
+        ("redis_host", "valkey.internal"),
+        ("redis_port", 6379),
+        ("redis_password", "secret"),
+        ("redis_jobs_db", 4),
+    ],
+)
+def test_settings_coordination_auto_uses_explicit_redis_intent(
+    redis_setting: str,
+    value: object,
+) -> None:
+    s = Settings(_env_file=None, **{redis_setting: value})
+
+    assert s.resolved_coordination_backend == "redis"
+
+
+def test_settings_coordination_local_overrides_explicit_redis_settings() -> None:
+    s = Settings(
+        _env_file=None,
+        coordination_backend="local",
+        redis_host="valkey.internal",
+    )
+
+    assert s.resolved_coordination_backend == "local"
+
+
 def test_settings_rate_limit_storage_uses_redis_password() -> None:
     s = Settings(
         _env_file=None,

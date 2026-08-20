@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from sibyl_core.memory_pipeline.lifecycle import (
+    current_graph_memory_recallable,
     memory_lifecycle_state,
     raw_memory_lifecycle_recallable,
 )
@@ -102,3 +103,21 @@ def test_raw_memory_lifecycle_recallable_rejects_structured_flags() -> None:
     )
 
     assert raw_memory_lifecycle_recallable(RawMemoryView(metadata=metadata)) is False
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"metadata": {"lifecycle_state": "superseded"}},
+        {"attributes": {"excluded_from_recall": True}},
+        RawMemoryView(metadata={"lifecycle_flags": ["redacted"]}),
+    ],
+)
+def test_current_graph_memory_recallable_rejects_every_supported_row_shape(
+    value: object,
+) -> None:
+    assert current_graph_memory_recallable(value) is False
+
+
+def test_current_graph_memory_recallable_accepts_active_model() -> None:
+    assert current_graph_memory_recallable(RawMemoryView(metadata={"lifecycle_state": "active"}))

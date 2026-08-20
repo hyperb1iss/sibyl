@@ -31,6 +31,7 @@ from sibyl_core.models.context import (
 )
 from sibyl_core.models.reflection import memory_lifecycle_from_metadata
 from sibyl_core.retrieval.search import (
+    _superseded_candidate_uuids,
     build_context_retrieval_plan,
     context_search,
 )
@@ -471,9 +472,19 @@ async def _default_related_items(
         max_depth=1,
         limit=limit,
     )
+    candidate_ids = list(
+        dict.fromkeys(str(entity.id) for entity, _relationship in raw_results if entity.id)
+    )
+    superseded, _edge_count = await _superseded_candidate_uuids(
+        runtime.client,
+        group_id=organization_id,
+        uuids=candidate_ids,
+    )
 
     related: list[ContextRelatedItem] = []
     for entity, relationship in raw_results:
+        if str(entity.id) in superseded:
+            continue
         if not _related_scope_allowed(
             entity,
             principal_id=principal_id,
@@ -548,11 +559,26 @@ async def _default_related_items_batch(
             )
             for entity_id in ids
         }
+    candidate_ids = list(
+        dict.fromkeys(
+            str(entity.id)
+            for raw_results in raw_by_seed.values()
+            for entity, _relationship in raw_results
+            if entity.id
+        )
+    )
+    superseded, _edge_count = await _superseded_candidate_uuids(
+        runtime.client,
+        group_id=organization_id,
+        uuids=candidate_ids,
+    )
 
     related_by_seed: dict[str, list[ContextRelatedItem]] = {}
     for seed_id, raw_results in raw_by_seed.items():
         related: list[ContextRelatedItem] = []
         for entity, relationship in raw_results:
+            if str(entity.id) in superseded:
+                continue
             if not _related_scope_allowed(
                 entity,
                 principal_id=principal_id,
@@ -1185,7 +1211,12 @@ async def _attach_related_items(
                 allowed_memory_scope_keys=allowed_memory_scope_keys,
                 limit=related_limit,
             )
-        except Exception:
+        except Exception as exc:
+            log.warning(
+                "context_related_batch_failed",
+                organization_id=organization_id,
+                error_type=type(exc).__name__,
+            )
             related_by_item_id = {}
 
     enriched_sections: list[ContextSection] = []

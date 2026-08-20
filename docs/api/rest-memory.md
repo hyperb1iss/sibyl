@@ -84,7 +84,7 @@ Stores verbatim memory before extraction or graph reflection.
 | `diary`           | boolean  | No       | false     | Store as a private agent diary entry |
 | `agent_id`        | string   | No       | -         | Agent identity for diary entries     |
 | `project_id`      | string   | No       | -         | Associated project                   |
-| `tags`            | string[] | No       | `[]`      | Searchable tags                      |
+| `tags`            | string[] | No       | `[]`      | Browse-only metadata                 |
 | `metadata`        | object   | No       | `{}`      | Auxiliary metadata                   |
 | `provenance`      | object   | No       | `{}`      | Source provenance                    |
 | `capture_surface` | string   | No       | `api`     | Capture surface label                |

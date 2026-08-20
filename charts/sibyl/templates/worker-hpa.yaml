@@ -1,4 +1,4 @@
-{{- if and .Values.worker.enabled .Values.worker.autoscaling.enabled }}
+{{- if and .Values.worker.enabled (eq .Values.coordinationBackend "redis") .Values.worker.autoscaling.enabled }}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:

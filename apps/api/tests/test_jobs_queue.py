@@ -608,6 +608,47 @@ async def test_get_job_status_falls_back_when_metadata_is_incomplete(
 
 
 @pytest.mark.asyncio
+async def test_get_job_status_reports_failed_redis_result_truthfully(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class MetadataPool:
+        async def get(self, _key: str) -> bytes:
+            return json.dumps(
+                {
+                    "function": "project_memory_batch",
+                    "organization_id": "org-123",
+                }
+            ).encode()
+
+    class FakeJob:
+        def __init__(self, _job_id: str, _pool: object) -> None:
+            pass
+
+        async def status(self):
+            return redis_broker_module.ArqJobStatus.complete
+
+        async def info(self):
+            raise AssertionError("metadata is sufficient")
+
+        async def result_info(self):
+            return SimpleNamespace(
+                result=RuntimeError("provider unavailable"),
+                success=False,
+                finish_time=datetime(2026, 7, 11, 12, 1, tzinfo=UTC),
+                start_time=datetime(2026, 7, 11, 12, tzinfo=UTC),
+            )
+
+    broker = make_broker(MetadataPool())
+    monkeypatch.setattr(redis_broker_module, "Job", FakeJob)
+
+    info = await broker.get_job_status("project-memory-failed")
+
+    assert info.status == JobStatus.FAILED
+    assert info.error == "provider unavailable"
+    assert info.result is None
+
+
+@pytest.mark.asyncio
 async def test_deduplicated_enqueue_does_not_replace_original_metadata() -> None:
     pool = DuplicateEnqueuePool()
     broker = make_broker(pool)

@@ -220,7 +220,10 @@ def create_entity(
     languages: Annotated[
         str | None, typer.Option("--languages", "-l", help="Comma-separated languages")
     ] = None,
-    tags: Annotated[str | None, typer.Option("--tags", help="Comma-separated tags")] = None,
+    tags: Annotated[
+        str | None,
+        typer.Option("--tags", help="Comma-separated browse-only metadata tags"),
+    ] = None,
     json_out: Annotated[
         bool, typer.Option("--json", "-j", help="JSON output (for scripting)")
     ] = False,

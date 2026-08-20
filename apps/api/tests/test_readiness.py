@@ -1,8 +1,8 @@
 """Readiness probe contract.
 
 `/health` stays cheap liveness; `/health/ready` reports whether the serving
-dependencies (SurrealDB reachability) are healthy. The dependency probe is
-mocked so these tests never need a live runtime.
+database and coordination dependencies are healthy. The dependency probes
+are mocked so these tests never need a live runtime.
 """
 
 from __future__ import annotations
@@ -45,17 +45,37 @@ def test_liveness_health_stays_cheap_and_unauthenticated() -> None:
 def test_readiness_returns_200_when_dependencies_ready() -> None:
     client = TestClient(create_api_app(), raise_server_exceptions=False)
     ready = DependencyStatus(name="surrealdb", ready=True, latency_ms=1.5)
+    coordination = DependencyStatus(
+        name="coordination",
+        ready=True,
+        latency_ms=0.4,
+        backend="local",
+    )
 
-    with patch(
-        "sibyl.api.readiness.check_surreal_ready",
-        AsyncMock(return_value=ready),
+    with (
+        patch(
+            "sibyl.api.readiness.check_surreal_ready",
+            AsyncMock(return_value=ready),
+        ),
+        patch(
+            "sibyl.api.readiness.check_coordination_ready",
+            AsyncMock(return_value=coordination),
+        ),
     ):
         response = client.get("/health/ready")
 
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ready"
-    assert body["dependencies"] == [{"name": "surrealdb", "ready": True, "latency_ms": 1.5}]
+    assert body["dependencies"] == [
+        {"name": "surrealdb", "ready": True, "latency_ms": 1.5},
+        {
+            "name": "coordination",
+            "ready": True,
+            "latency_ms": 0.4,
+            "backend": "local",
+        },
+    ]
 
 
 def test_readiness_returns_503_when_dependency_unreachable() -> None:
@@ -66,9 +86,16 @@ def test_readiness_returns_503_when_dependency_unreachable() -> None:
         detail="SurrealDB runtime unreachable",
     )
 
-    with patch(
-        "sibyl.api.readiness.check_surreal_ready",
-        AsyncMock(return_value=down),
+    coordination = DependencyStatus(name="coordination", ready=True, backend="local")
+    with (
+        patch(
+            "sibyl.api.readiness.check_surreal_ready",
+            AsyncMock(return_value=down),
+        ),
+        patch(
+            "sibyl.api.readiness.check_coordination_ready",
+            AsyncMock(return_value=coordination),
+        ),
     ):
         response = client.get("/health/ready")
 
@@ -78,6 +105,42 @@ def test_readiness_returns_503_when_dependency_unreachable() -> None:
     assert body["dependencies"][0]["name"] == "surrealdb"
     assert body["dependencies"][0]["ready"] is False
     assert body["dependencies"][0]["detail"] == "SurrealDB runtime unreachable"
+
+
+def test_dead_required_broker_fails_readiness_but_not_liveness() -> None:
+    client = TestClient(create_api_app(), raise_server_exceptions=False)
+    surreal = DependencyStatus(name="surrealdb", ready=True, latency_ms=1.5)
+    coordination = DependencyStatus(
+        name="coordination",
+        ready=False,
+        detail="redis coordination broker unavailable",
+        latency_ms=2.0,
+        backend="redis",
+    )
+
+    with (
+        patch(
+            "sibyl.api.readiness.check_surreal_ready",
+            AsyncMock(return_value=surreal),
+        ),
+        patch(
+            "sibyl.api.readiness.check_coordination_ready",
+            AsyncMock(return_value=coordination),
+        ),
+    ):
+        ready_response = client.get("/health/ready")
+        live_response = client.get("/health")
+
+    assert ready_response.status_code == 503
+    assert ready_response.json()["dependencies"][1] == {
+        "name": "coordination",
+        "ready": False,
+        "detail": "redis coordination broker unavailable",
+        "latency_ms": 2.0,
+        "backend": "redis",
+    }
+    assert live_response.status_code == 200
+    assert live_response.json()["status"] == "healthy"
 
 
 @pytest.mark.asyncio
@@ -120,10 +183,17 @@ async def test_check_surreal_ready_reports_unreachable_on_connect_failure() -> N
 @pytest.mark.asyncio
 async def test_check_readiness_aggregates_dependency_status() -> None:
     down = DependencyStatus(name="surrealdb", ready=False, detail="nope")
+    coordination = DependencyStatus(name="coordination", ready=True, backend="local")
 
-    with patch(
-        "sibyl.api.readiness.check_surreal_ready",
-        AsyncMock(return_value=down),
+    with (
+        patch(
+            "sibyl.api.readiness.check_surreal_ready",
+            AsyncMock(return_value=down),
+        ),
+        patch(
+            "sibyl.api.readiness.check_coordination_ready",
+            AsyncMock(return_value=coordination),
+        ),
     ):
         report = await check_readiness()
 
@@ -151,6 +221,16 @@ async def test_check_readiness_reports_schema_bootstrap_failure() -> None:
     with (
         patch("sibyl.api.readiness.check_surreal_ready", AsyncMock(return_value=ready)),
         patch(
+            "sibyl.api.readiness.check_coordination_ready",
+            AsyncMock(
+                return_value=DependencyStatus(
+                    name="coordination",
+                    ready=True,
+                    backend="local",
+                )
+            ),
+        ),
+        patch(
             "sibyl.surreal_runtime_startup.get_runtime_schema_bootstrap_status",
             return_value=schema_status,
         ),
@@ -160,8 +240,58 @@ async def test_check_readiness_reports_schema_bootstrap_failure() -> None:
     assert report.ready is False
     payload = report.as_payload()
     assert payload["status"] == "not_ready"
-    assert payload["dependencies"][1] == {
+    assert payload["dependencies"][2] == {
         "name": "schemas",
         "ready": False,
         "detail": "auth v1: auth offline",
     }
+
+
+@pytest.mark.asyncio
+async def test_coordination_readiness_accepts_healthy_local_mode() -> None:
+    health = {
+        "status": "healthy",
+        "backend": "local",
+        "queue_healthy": True,
+        "worker_healthy": True,
+    }
+    with (
+        patch("sibyl.coordination.get_coordination_backend", return_value="local"),
+        patch(
+            "sibyl.coordination.get_coordination_health",
+            AsyncMock(return_value=health),
+        ),
+    ):
+        from sibyl.api.readiness import check_coordination_ready
+
+        status = await check_coordination_ready()
+
+    assert status.ready is True
+    assert status.backend == "local"
+    assert status.detail is None
+    assert status.latency_ms is not None
+
+
+@pytest.mark.asyncio
+async def test_coordination_readiness_rejects_dead_required_redis() -> None:
+    health = {
+        "status": "unhealthy",
+        "backend": "redis",
+        "queue_healthy": False,
+        "worker_healthy": False,
+    }
+    with (
+        patch("sibyl.coordination.get_coordination_backend", return_value="redis"),
+        patch(
+            "sibyl.coordination.get_coordination_health",
+            AsyncMock(return_value=health),
+        ),
+    ):
+        from sibyl.api.readiness import check_coordination_ready
+
+        status = await check_coordination_ready()
+
+    assert status.ready is False
+    assert status.backend == "redis"
+    assert status.detail == "redis coordination broker unavailable"
+    assert status.latency_ms is not None

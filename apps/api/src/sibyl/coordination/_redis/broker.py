@@ -664,6 +664,7 @@ class RedisQueueBroker:
                     job_info.finish_time = result.finish_time
                     job_info.start_time = result.start_time
                     if not result.success:
+                        job_info.status = JobStatus.FAILED
                         job_info.error = str(result.result)
                         job_info.result = None
 

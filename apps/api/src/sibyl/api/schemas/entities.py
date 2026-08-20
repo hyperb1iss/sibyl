@@ -59,7 +59,10 @@ class EntityBase(BaseModel):
     content: str = Field(default="", max_length=50000, description="Full content")
     category: str | None = Field(default=None, description="Category for organization")
     languages: list[str] = Field(default_factory=list, description="Programming languages")
-    tags: list[str] = Field(default_factory=list, description="Searchable tags")
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Browse-only metadata tags; tags do not affect ranked recall",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
 
@@ -221,10 +224,10 @@ class EntityBackgroundJobsRequeueRequest(BaseModel):
 
     entity_ids: list[str] = Field(default_factory=list, max_length=128)
     manifest_id: str | None = Field(default=None, min_length=1, max_length=2048)
-    jobs: list[Literal["embedding_backfill", "memory_projection"]] = Field(
+    jobs: list[Literal["embedding_backfill", "memory_projection", "memory_extraction"]] = Field(
         ...,
         min_length=1,
-        max_length=2,
+        max_length=3,
     )
 
     @model_validator(mode="after")

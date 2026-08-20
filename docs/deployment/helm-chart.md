@@ -103,6 +103,8 @@ binding, and Sibyl fails closed if the bound organization cannot be resolved.
 ### Basic Settings
 
 ```yaml
+publicUrl: "https://sibyl.example.com"
+
 backend:
   # Number of replicas (ignored if autoscaling is enabled)
   replicaCount: 1
@@ -113,6 +115,10 @@ backend:
     # Defaults to chart appVersion if empty
     tag: ""
 ```
+
+Set `publicUrl` to the external application origin. The chart passes the value to the backend for
+callbacks, password resets, and redirects. It also derives the browser API and WebSocket origin. Use
+`frontend.publicApiUrl` only when the browser reaches the API through a different origin.
 
 ### Service
 
@@ -277,11 +283,12 @@ upgrades and pod replacements; changing it makes encrypted settings unreadable.
 
 ### Storage Mode
 
-The active persistence runtime is fixed to SurrealDB. Use Redis/Valkey coordination for multi-pod
+The active persistence runtime is fixed to SurrealDB. Local and auto coordination run jobs in the
+API process and do not render a separate worker. Set Redis coordination explicitly for multi-pod
 deployments:
 
 ```yaml
-coordinationBackend: "auto" # use "redis" for multi-pod deployments
+coordinationBackend: "redis"
 ```
 
 See [storage-modes.md](../guide/storage-modes.md) for the mode matrix.
@@ -430,7 +437,7 @@ frontend:
 
   # Defaults to http://<release>-backend:<port>/api when empty
   apiUrl: ""
-  # Optional browser-visible API URL. Leave empty for same-origin ingress.
+  # Optional browser-visible API URL. When empty, publicUrl supplies <origin>/api.
   publicApiUrl: ""
 
   podSecurityContext:
@@ -453,6 +460,9 @@ frontend:
 ```
 
 ## Worker Configuration
+
+The chart renders this deployment only when both `worker.enabled` is true and `coordinationBackend`
+is `redis`. Local and auto coordination keep job execution in the API process.
 
 ```yaml
 worker:
@@ -662,7 +672,8 @@ global:
   imagePullSecrets:
     - name: ghcr-pull-secret
 
-coordinationBackend: "auto"
+coordinationBackend: "redis"
+publicUrl: "https://sibyl.example.com"
 
 backend:
   replicaCount: 3
@@ -677,9 +688,12 @@ backend:
     existingSecret: sibyl-surreal
     namespacePrefix: "org_"
     database: "graph"
+  redis:
+    host: "prod-valkey.internal"
+    port: "6379"
+    existingSecret: sibyl-redis
   env:
     SIBYL_ENVIRONMENT: "production"
-    SIBYL_PUBLIC_URL: "https://sibyl.example.com"
   autoscaling:
     enabled: true
     minReplicas: 3

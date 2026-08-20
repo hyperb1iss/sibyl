@@ -797,11 +797,12 @@ class LocalQueueBroker:
             log.info("Local job cancelled", job_id=record.job_id, function=record.function)
             return
         except Exception as e:
-            record.status = JobStatus.COMPLETE
+            record.status = JobStatus.FAILED
             record.finish_time = datetime.now(UTC)
             record.error = str(e)
             record.result = None
             record.expires_at = record.finish_time + self._result_ttl
+            await self._clear_failed_create_pending(record)
             telemetry_registry().record_job_finished(
                 function=record.function,
                 status="error",
@@ -821,6 +822,27 @@ class LocalQueueBroker:
             duration_ms=(time.perf_counter() - started_at) * 1000,
         )
         log.info("Local job complete", job_id=record.job_id, function=record.function)
+
+    async def _clear_failed_create_pending(self, record: LocalJobRecord) -> None:
+        if record.function != "create_entity" or not record.args:
+            return
+
+        entity_data = record.args[0]
+        if not isinstance(entity_data, dict) or not entity_data.get("id"):
+            return
+
+        from sibyl.jobs.pending import clear_pending
+
+        entity_id = str(entity_data["id"])
+        try:
+            await clear_pending(entity_id)
+        except Exception as exc:
+            log.warning(
+                "Failed to clear pending marker after local create failure",
+                entity_id=entity_id,
+                job_id=record.job_id,
+                error=str(exc),
+            )
 
     def _purge_expired_jobs(self) -> None:
         expired_job_ids = [

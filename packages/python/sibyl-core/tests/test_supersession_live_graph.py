@@ -16,6 +16,7 @@ still had, so the bypass tests here call the pack.
 
 from __future__ import annotations
 
+import os
 import uuid as uuid_module
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -60,7 +61,12 @@ async def graph(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[_Runtime]:
     # a shared group id leaks rows and edges between tests and turns a
     # supersession assertion into a function of test ordering.
     group_id = f"supersession-live-{uuid_module.uuid4().hex[:12]}"
-    client = SurrealGraphClient(group_id=group_id, url="memory://")
+    client = SurrealGraphClient(
+        group_id=group_id,
+        url=os.getenv("SIBYL_TEST_SURREAL_URL", "memory://"),
+        username=os.getenv("SIBYL_TEST_SURREAL_USERNAME", ""),
+        password=os.getenv("SIBYL_TEST_SURREAL_PASSWORD", ""),
+    )
     await client.connect()
     await prepare_graph_schema(client)
     runtime = _Runtime(
@@ -262,6 +268,34 @@ async def test_a_real_self_supersession_retires_nothing(graph: _Runtime) -> None
 
 
 @pytest.mark.asyncio
+async def test_dense_supersession_edges_use_the_real_keyset_query(
+    graph: _Runtime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The production parser and driver must return every dense-history page."""
+
+    monkeypatch.setattr(search_module, "_SUPERSESSION_EDGE_PAGE_SIZE", 2)
+    await graph.entity_manager.create_direct(
+        _entity(graph, "dense-retired", "Dense Retired", "dense retired decision")
+    )
+    for index in range(5):
+        survivor = f"dense-survivor-{index}"
+        await graph.entity_manager.create_direct(
+            _entity(graph, survivor, f"Dense Survivor {index}", "dense current decision")
+        )
+        await _supersede(graph, survivor=survivor, retired="dense-retired")
+
+    superseded, edge_count = await search_module._superseded_candidate_uuids(
+        graph.client,
+        group_id=graph.group_id,
+        uuids=["dense-retired"],
+    )
+
+    assert superseded == {"dense-retired"}
+    assert edge_count == 5
+
+
+@pytest.mark.asyncio
 async def test_the_outgoing_walk_does_not_expand_into_a_real_retired_row(
     graph: _Runtime,
 ) -> None:
@@ -285,7 +319,7 @@ async def test_the_outgoing_walk_does_not_expand_into_a_real_retired_row(
     )
     assert [row.get("uuid") for row in hops] == []
 
-    # Naming the predicate is the documented carve-out for lineage walks.
+    # Naming the predicate narrows current recall; it is not a history request.
     lineage = await search_module._node_bfs_records(
         client=graph.client,
         origin_uuids=["walk-new"],
@@ -295,7 +329,7 @@ async def test_the_outgoing_walk_does_not_expand_into_a_real_retired_row(
         limit=10,
         relationship_names=["SUPERSEDES"],
     )
-    assert [row.get("uuid") for row in lineage] == ["walk-old"]
+    assert lineage == []
 
 
 @pytest.mark.asyncio
@@ -403,7 +437,28 @@ async def test_the_related_item_lane_does_not_attach_a_retired_neighbour(
             excluded_from_recall=True,
         )
     )
-    for target in ("neighbour-live", "neighbour-retired"):
+    await graph.entity_manager.create_direct(
+        _entity(
+            graph,
+            "neighbour-edge-retired",
+            "Edge Retired Neighbour",
+            "edge retired neighbour body",
+        )
+    )
+    await graph.entity_manager.create_direct(
+        _entity(
+            graph,
+            "neighbour-replacement",
+            "Neighbour Replacement",
+            "neighbour replacement body",
+        )
+    )
+    await _supersede(
+        graph,
+        survivor="neighbour-replacement",
+        retired="neighbour-edge-retired",
+    )
+    for target in ("neighbour-live", "neighbour-retired", "neighbour-edge-retired"):
         await graph.relationship_manager.create(
             Relationship(
                 id=f"rel_seed_{target}",
@@ -421,6 +476,7 @@ async def test_the_related_item_lane_does_not_attach_a_retired_neighbour(
     attached = _related_ids(pack)
     assert "neighbour-live" in attached, "the live neighbour proves the lane ran at all"
     assert "neighbour-retired" not in attached
+    assert "neighbour-edge-retired" not in attached
 
 
 def _passage_body(topic: str) -> str:

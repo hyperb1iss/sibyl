@@ -66,6 +66,7 @@ from sibyl_core.backends.surreal.schema import (
     MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS,
     NODE_DEFINITIONS,
     PARENT_TASK_CANONICALIZATION_DEFINITIONS,
+    RELATION_CREATED_AT_CURSOR_MIGRATION_DEFINITIONS,
     RELATION_EDGE_CLEANUP_DEFINITIONS,
     RELATION_ENDPOINT_BACKFILL_DEFINITIONS,
     RELATION_ENDPOINT_SCHEMA_DEFINITIONS,
@@ -1119,6 +1120,23 @@ def test_graph_schema_current_version_matches_latest_migration() -> None:
     assert latest_migration_version == GRAPH_SCHEMA_CURRENT_VERSION
 
 
+def test_relation_created_at_cursor_repair_is_versioned() -> None:
+    migration = next(
+        item for item in GRAPH_SCHEMA_MIGRATIONS if item.name == "relation_created_at_cursor"
+    )
+    migration_sql = "\n".join(migration.statements)
+
+    assert GRAPH_SCHEMA_CURRENT_VERSION >= 20
+    assert migration.version == 20
+    for relation in ("relates_to", "mentions"):
+        assert f"DEFINE FIELD OVERWRITE created_at ON {relation} TYPE option<datetime>" in (
+            migration_sql
+        )
+        assert f"UPDATE {relation} SET created_at = time::now()" in migration_sql
+        assert f"DEFINE FIELD OVERWRITE created_at ON {relation} TYPE datetime" in migration_sql
+    assert "string::is::datetime(created_at)" in RELATION_CREATED_AT_CURSOR_MIGRATION_DEFINITIONS
+
+
 def test_graph_entity_actor_attribution_fields_are_versioned() -> None:
     migration_sql = "\n".join(
         statement for migration in GRAPH_SCHEMA_MIGRATIONS for statement in migration.statements
@@ -1277,8 +1295,8 @@ async def test_graph_bootstrap_applies_migrations_without_full_rebuild() -> None
     assert not any("DEFINE TABLE OVERWRITE relates_to" in statement for statement in client.calls)
     assert any("idx_relates_source_created" in statement for statement in client.calls)
     assert any("idx_mentions_source_created" in statement for statement in client.calls)
-    assert sum("UPDATE relates_to SET" in statement for statement in client.calls) == 10
-    assert sum("UPDATE mentions SET" in statement for statement in client.calls) == 2
+    assert sum("UPDATE relates_to SET" in statement for statement in client.calls) == 11
+    assert sum("UPDATE mentions SET" in statement for statement in client.calls) == 3
     for table in (*REMOVED_GRAPH_EDGES, *REMOVED_GRAPH_TABLES):
         assert any(f"REMOVE TABLE IF EXISTS {table}" in statement for statement in client.calls)
     assert not any("DELETE FROM relates_to" in statement for statement in client.calls)
@@ -1296,8 +1314,8 @@ async def test_graph_bootstrap_applies_dead_graph_drop_without_full_rebuild() ->
 
     assert not any("DEFINE TABLE IF NOT EXISTS entity" in statement for statement in client.calls)
     assert not any("DEFINE TABLE OVERWRITE relates_to" in statement for statement in client.calls)
-    assert sum("UPDATE relates_to SET" in statement for statement in client.calls) == 9
-    assert sum("UPDATE mentions SET" in statement for statement in client.calls) == 1
+    assert sum("UPDATE relates_to SET" in statement for statement in client.calls) == 10
+    assert sum("UPDATE mentions SET" in statement for statement in client.calls) == 2
     for table in (*REMOVED_GRAPH_EDGES, *REMOVED_GRAPH_TABLES):
         assert any(f"REMOVE TABLE IF EXISTS {table}" in statement for statement in client.calls)
     assert client.schema_version == GRAPH_SCHEMA_CURRENT_VERSION

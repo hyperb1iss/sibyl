@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
+import pytest
 from typer.testing import CliRunner
 
 from sibyl.cli import generate as generate_cli
@@ -26,3 +29,29 @@ def test_count_result_rows_falls_back_to_row_count() -> None:
     rows = [{"uuid": "entity-1"}, {"uuid": "entity-2"}]
 
     assert generate_cli._count_result_rows(rows) == 2
+
+
+@pytest.mark.asyncio
+async def test_generated_graph_uses_supported_direct_bulk_capabilities() -> None:
+    entity_manager = AsyncMock()
+    relationship_manager = AsyncMock()
+    entity_manager.create_direct_bulk.return_value = ["entity-1", "entity-2"]
+    relationship_manager.create_direct_bulk.return_value = ["relationship-1"]
+
+    counts = await generate_cli._store_generated_graph(
+        entity_manager,
+        relationship_manager,
+        ["entity-one", "entity-two"],
+        ["relationship-one"],
+        write_batch_size=100,
+    )
+
+    assert counts == (2, 1)
+    entity_manager.create_direct_bulk.assert_awaited_once_with(
+        ["entity-one", "entity-two"],
+        write_batch_size=100,
+    )
+    relationship_manager.create_direct_bulk.assert_awaited_once_with(
+        ["relationship-one"],
+        write_batch_size=100,
+    )
