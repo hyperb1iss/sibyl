@@ -14,6 +14,7 @@ from sibyl_core.backends.surreal.connection import SurrealQueryError
 from sibyl_core.backends.surreal.records import coerce_datetime
 from sibyl_core.backends.surreal.schema import (
     ANALYZER_DEFINITIONS,
+    EDGE_DEFINITIONS,
     EMBEDDING_DIM,
     NODE_DEFINITIONS,
     bootstrap_schema,
@@ -2604,6 +2605,71 @@ async def test_graph_migration_normalizes_legacy_updated_at_values() -> None:
             "malformed_string",
             "missing_updated",
         ]
+        assert await get_schema_version(client.execute_query) == GRAPH_SCHEMA_CURRENT_VERSION
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_graph_migration_backfills_missing_relation_cursors() -> None:
+    client = SurrealGraphClient(group_id="org-relation-cursor-migration", url="memory://")
+    try:
+        legacy_edges = EDGE_DEFINITIONS.replace(
+            "DEFINE FIELD IF NOT EXISTS created_at ON relates_to "
+            "TYPE datetime DEFAULT time::now();",
+            "DEFINE FIELD IF NOT EXISTS created_at ON relates_to TYPE option<datetime>;",
+        )
+        await client.execute_query(
+            render_fulltext_compatible_sql(
+                ANALYZER_DEFINITIONS + "\n" + NODE_DEFINITIONS + "\n" + legacy_edges,
+                url="memory://",
+            )
+        )
+        manager = EntityManager(client, group_id=client.group_id)
+        for entity_id in ("legacy-survivor", "legacy-retired"):
+            await manager.create_direct(
+                Entity(
+                    id=entity_id,
+                    entity_type=EntityType.DECISION,
+                    name=entity_id,
+                    organization_id=client.group_id,
+                    metadata={},
+                )
+            )
+        relationships = RelationshipManager(client, group_id=client.group_id)
+        await relationships.create(
+            Relationship(
+                id="legacy-supersession",
+                source_id="legacy-survivor",
+                target_id="legacy-retired",
+                relationship_type=RelationshipType.SUPERSEDES,
+                organization_id=client.group_id,
+                metadata={"fact": "legacy survivor supersedes legacy retired"},
+            )
+        )
+        await client.execute_query(
+            """
+            UPDATE relates_to SET created_at = NONE
+            WHERE uuid = 'legacy-supersession';
+            """
+        )
+        await ensure_schema_version_table(client.execute_query, group_id=client.group_id)
+        await record_schema_version(
+            client.execute_query,
+            version=19,
+            migrations=(),
+            name=GRAPH_SCHEMA_NAME,
+        )
+
+        await bootstrap_schema(client)
+
+        rows = normalize_records(
+            await client.execute_query(
+                "SELECT uuid, created_at FROM relates_to WHERE uuid = 'legacy-supersession';"
+            )
+        )
+        assert len(rows) == 1
+        assert isinstance(rows[0]["created_at"], datetime)
         assert await get_schema_version(client.execute_query) == GRAPH_SCHEMA_CURRENT_VERSION
     finally:
         await client.close()

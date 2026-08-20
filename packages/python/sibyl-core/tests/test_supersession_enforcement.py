@@ -1172,6 +1172,10 @@ async def test_supersession_lookup_pages_every_inbound_edge(
     assert superseded == {"entity-retired"}
     assert edge_count == 5
     page_calls = client.execute_query.await_args_list[1:]
+    assert all(
+        "FROM relates_to WITH INDEX idx_relates_target_created" in call.args[0]
+        for call in client.execute_query.await_args_list
+    )
     assert "after_uuid" not in page_calls[0].kwargs
     assert [call.kwargs.get("after_uuid") for call in page_calls[1:]] == ["edge-1", "edge-3"]
     assert all(call.kwargs["upper_uuid"] == "edge-4" for call in page_calls)

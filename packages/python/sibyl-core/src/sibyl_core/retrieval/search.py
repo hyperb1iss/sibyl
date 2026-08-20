@@ -91,9 +91,10 @@ _EDGE_CONTEXT_TYPES = {"claim", "relationship"}
 _GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS = PREDICATE_EXPANSION_PATH_SCORES
 _SUPERSEDES_PREDICATE = "SUPERSEDES"
 # An entity carrying an inbound SUPERSEDES edge is the row somebody replaced.
-# Resolving that over the surviving candidate set uses bounded indexed lookups
-# (idx_relates_name_target) and is the only way a lane that never walked the
-# graph, including vector, fulltext, and exact key, learns the row is stale.
+# Resolving that over the surviving candidate set uses bounded target-first
+# index scans (idx_relates_target_created) and is the only way a lane that never
+# walked the graph, including vector, fulltext, and exact key, learns the row is
+# stale.
 _SUPERSESSION_LOOKUP_BATCH_SIZE = 512
 _SUPERSESSION_EDGE_PAGE_SIZE = 512
 # Candidate ids that are not entity uuids and so can never match an edge
@@ -896,7 +897,7 @@ async def _superseded_candidate_uuids(
             client,
             """
             SELECT uuid, target_id, source_id, created_at
-            FROM relates_to
+            FROM relates_to WITH INDEX idx_relates_target_created
             WHERE name = $predicate
               AND target_id IN $uuids
               AND group_id = $group_id
@@ -919,7 +920,7 @@ async def _superseded_candidate_uuids(
                     client,
                     """
                     SELECT uuid, target_id, source_id, created_at
-                    FROM relates_to
+                    FROM relates_to WITH INDEX idx_relates_target_created
                     WHERE name = $predicate
                       AND target_id IN $uuids
                       AND group_id = $group_id
@@ -942,7 +943,7 @@ async def _superseded_candidate_uuids(
                     client,
                     """
                     SELECT uuid, target_id, source_id, created_at
-                    FROM relates_to
+                    FROM relates_to WITH INDEX idx_relates_target_created
                     WHERE name = $predicate
                       AND target_id IN $uuids
                       AND group_id = $group_id

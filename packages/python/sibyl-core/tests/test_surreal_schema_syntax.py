@@ -66,6 +66,7 @@ from sibyl_core.backends.surreal.schema import (
     MEMORY_QUALITY_METADATA_MIGRATION_DEFINITIONS,
     NODE_DEFINITIONS,
     PARENT_TASK_CANONICALIZATION_DEFINITIONS,
+    RELATION_CREATED_AT_CURSOR_MIGRATION_DEFINITIONS,
     RELATION_EDGE_CLEANUP_DEFINITIONS,
     RELATION_ENDPOINT_BACKFILL_DEFINITIONS,
     RELATION_ENDPOINT_SCHEMA_DEFINITIONS,
@@ -1117,6 +1118,23 @@ def test_graph_schema_current_version_matches_latest_migration() -> None:
     latest_migration_version = max(migration.version for migration in GRAPH_SCHEMA_MIGRATIONS)
 
     assert latest_migration_version == GRAPH_SCHEMA_CURRENT_VERSION
+
+
+def test_relation_created_at_cursor_repair_is_versioned() -> None:
+    migration = next(
+        item for item in GRAPH_SCHEMA_MIGRATIONS if item.name == "relation_created_at_cursor"
+    )
+    migration_sql = "\n".join(migration.statements)
+
+    assert GRAPH_SCHEMA_CURRENT_VERSION >= 20
+    assert migration.version == 20
+    for relation in ("relates_to", "mentions"):
+        assert f"DEFINE FIELD OVERWRITE created_at ON {relation} TYPE option<datetime>" in (
+            migration_sql
+        )
+        assert f"UPDATE {relation} SET created_at = time::now()" in migration_sql
+        assert f"DEFINE FIELD OVERWRITE created_at ON {relation} TYPE datetime" in migration_sql
+    assert "string::is::datetime(created_at)" in RELATION_CREATED_AT_CURSOR_MIGRATION_DEFINITIONS
 
 
 def test_graph_entity_actor_attribution_fields_are_versioned() -> None:
