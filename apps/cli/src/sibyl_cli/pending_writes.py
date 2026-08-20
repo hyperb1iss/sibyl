@@ -17,6 +17,8 @@ from uuid import uuid4
 # these names, so an unlisted one would be written and then silently dropped.
 PendingMetric = Literal["attempted", "completed", "replayed", "dropped", "discarded"]
 PENDING_METRIC_NAMES: tuple[PendingMetric, ...] = get_args(PendingMetric)
+CORRUPT_PENDING_WRITE_STATUS = "corrupt"
+_REQUIRED_STRING_FIELDS = ("id", "idempotency_key", "base_url", "method", "path")
 
 
 def pending_writes_dir() -> Path:
@@ -73,6 +75,57 @@ def _pending_path(write_id: str) -> Path:
     return pending_writes_dir() / f"{write_id}.json"
 
 
+def _corrupt_pending_write(path: Path, error: str) -> dict[str, Any]:
+    return {
+        "id": path.stem,
+        "status": CORRUPT_PENDING_WRITE_STATUS,
+        "filename": path.name,
+        "error": error,
+    }
+
+
+def is_corrupt_pending_write(item: dict[str, Any]) -> bool:
+    return (
+        item.get("status") == CORRUPT_PENDING_WRITE_STATUS
+        and isinstance(item.get("filename"), str)
+        and isinstance(item.get("error"), str)
+    )
+
+
+def _read_pending_path(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return _corrupt_pending_write(
+            path,
+            f"Invalid JSON at line {exc.lineno}, column {exc.colno}: {exc.msg}",
+        )
+    except (OSError, UnicodeError) as exc:
+        return _corrupt_pending_write(path, f"{type(exc).__name__}: {exc}")
+
+    if not isinstance(data, dict):
+        return _corrupt_pending_write(
+            path,
+            f"Expected a JSON object, found {type(data).__name__}",
+        )
+    missing = [
+        field
+        for field in _REQUIRED_STRING_FIELDS
+        if not isinstance(data.get(field), str) or not data[field]
+    ]
+    if missing:
+        return _corrupt_pending_write(
+            path,
+            f"Missing or invalid required fields: {', '.join(missing)}",
+        )
+    if data["id"] != path.stem:
+        return _corrupt_pending_write(path, "Stored id does not match the queue filename")
+    attempts = data.get("attempts", 0)
+    if not isinstance(attempts, int) or attempts < 0:
+        return _corrupt_pending_write(path, "Missing or invalid required field: attempts")
+    return data
+
+
 def create_pending_write(
     *,
     method: str,
@@ -101,20 +154,14 @@ def create_pending_write(
 
 def read_pending_write(write_id: str) -> dict[str, Any]:
     path = resolve_pending_write_path(write_id)
-    return json.loads(path.read_text(encoding="utf-8"))
+    return _read_pending_path(path)
 
 
 def list_pending_writes() -> list[dict[str, Any]]:
     root = pending_writes_dir()
     if not root.exists():
         return []
-    writes: list[dict[str, Any]] = []
-    for path in sorted(root.glob("*.json")):
-        try:
-            writes.append(json.loads(path.read_text(encoding="utf-8")))
-        except Exception:
-            continue
-    return writes
+    return [_read_pending_path(path) for path in sorted(root.glob("*.json"))]
 
 
 def pending_write_count() -> int:
@@ -157,6 +204,8 @@ def resolve_pending_write_path(write_id: str) -> Path:
 
 def increment_attempts(write_id: str) -> dict[str, Any]:
     data = read_pending_write(write_id)
+    if is_corrupt_pending_write(data):
+        raise ValueError(f"Cannot update corrupt pending write {data['filename']}: {data['error']}")
     data["attempts"] = int(data.get("attempts") or 0) + 1
     data["last_attempt_at"] = datetime.now(UTC).isoformat()
     _secure_write_json(resolve_pending_write_path(write_id), data)
@@ -189,8 +238,14 @@ def record_pending_metric(name: PendingMetric, count: int = 1) -> dict[str, int]
 
 
 def pending_write_status() -> dict[str, Any]:
+    writes = list_pending_writes()
     return {
-        "count": len(list_pending_writes()),
+        "count": len(writes),
+        "failures": [
+            {"filename": item["filename"], "error": item["error"]}
+            for item in writes
+            if is_corrupt_pending_write(item)
+        ],
         "metrics": read_pending_metrics(),
     }
 

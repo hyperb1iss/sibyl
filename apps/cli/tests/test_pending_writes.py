@@ -51,6 +51,52 @@ def test_pending_write_list_and_prefix_delete(
     assert pending_writes.list_pending_writes() == []
 
 
+def test_corrupt_pending_write_remains_counted_as_a_structured_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    root = pending_writes.pending_writes_dir()
+    root.mkdir(parents=True)
+    path = root / "broken-write.json"
+    path.write_text('{"id": ', encoding="utf-8")
+
+    writes = pending_writes.list_pending_writes()
+    status = pending_writes.pending_write_status()
+
+    assert writes == [
+        {
+            "id": "broken-write",
+            "status": "corrupt",
+            "filename": "broken-write.json",
+            "error": writes[0]["error"],
+        }
+    ]
+    assert "Invalid JSON" in writes[0]["error"]
+    assert pending_writes.pending_write_count() == 1
+    assert status["count"] == 1
+    assert status["failures"] == [
+        {"filename": "broken-write.json", "error": writes[0]["error"]}
+    ]
+    assert path.exists()
+
+
+def test_pending_json_with_an_invalid_shape_is_not_silently_dropped(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    root = pending_writes.pending_writes_dir()
+    root.mkdir(parents=True)
+    (root / "array.json").write_text("[]", encoding="utf-8")
+
+    item = pending_writes.read_pending_write("array")
+
+    assert item["status"] == "corrupt"
+    assert item["filename"] == "array.json"
+    assert "Expected a JSON object" in item["error"]
+
+
 def test_pending_write_label_avoids_raw_content() -> None:
     title, kind = pending_writes.pending_write_label(
         {
