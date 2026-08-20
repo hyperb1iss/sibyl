@@ -140,6 +140,40 @@ def test_helm_production_render_succeeds_with_an_existing_secret() -> None:
 
 
 @requires_helm
+def test_helm_public_url_reaches_backend_and_frontend_consumers() -> None:
+    result = _helm_template(
+        "--set",
+        "backend.existingSecret=sibyl-secrets",
+        "--set",
+        "publicUrl=https://sibyl.example.test/",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert 'SIBYL_PUBLIC_URL: "https://sibyl.example.test"' in result.stdout
+    assert "name: NEXT_PUBLIC_API_URL" in result.stdout
+    assert 'value: "https://sibyl.example.test/api"' in result.stdout
+    assert "name: SIBYL_PUBLIC_URL" in result.stdout
+    assert 'value: "https://sibyl.example.test"' in result.stdout
+
+
+@requires_helm
+def test_helm_explicit_frontend_public_api_url_wins_over_public_url() -> None:
+    result = _helm_template(
+        "--set",
+        "backend.existingSecret=sibyl-secrets",
+        "--set",
+        "publicUrl=https://sibyl.example.test",
+        "--set",
+        "frontend.publicApiUrl=https://api.sibyl.example.test/v1",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "name: NEXT_PUBLIC_API_URL" in result.stdout
+    assert 'value: "https://api.sibyl.example.test/v1"' in result.stdout
+    assert 'value: "https://sibyl.example.test/api"' not in result.stdout
+
+
+@requires_helm
 def test_helm_non_production_render_keeps_development_jwt_autogeneration() -> None:
     result = _helm_template("--set", "backend.env.SIBYL_ENVIRONMENT=development")
 

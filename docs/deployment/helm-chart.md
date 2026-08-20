@@ -103,6 +103,8 @@ binding, and Sibyl fails closed if the bound organization cannot be resolved.
 ### Basic Settings
 
 ```yaml
+publicUrl: "https://sibyl.example.com"
+
 backend:
   # Number of replicas (ignored if autoscaling is enabled)
   replicaCount: 1
@@ -113,6 +115,10 @@ backend:
     # Defaults to chart appVersion if empty
     tag: ""
 ```
+
+Set `publicUrl` to the external application origin. The chart passes the value to the backend for
+callbacks, password resets, and redirects. It also derives the browser API and WebSocket origin. Use
+`frontend.publicApiUrl` only when the browser reaches the API through a different origin.
 
 ### Service
 
@@ -430,7 +436,7 @@ frontend:
 
   # Defaults to http://<release>-backend:<port>/api when empty
   apiUrl: ""
-  # Optional browser-visible API URL. Leave empty for same-origin ingress.
+  # Optional browser-visible API URL. When empty, publicUrl supplies <origin>/api.
   publicApiUrl: ""
 
   podSecurityContext:
@@ -663,6 +669,7 @@ global:
     - name: ghcr-pull-secret
 
 coordinationBackend: "auto"
+publicUrl: "https://sibyl.example.com"
 
 backend:
   replicaCount: 3
@@ -679,7 +686,6 @@ backend:
     database: "graph"
   env:
     SIBYL_ENVIRONMENT: "production"
-    SIBYL_PUBLIC_URL: "https://sibyl.example.com"
   autoscaling:
     enabled: true
     minReplicas: 3

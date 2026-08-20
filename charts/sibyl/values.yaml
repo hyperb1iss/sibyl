@@ -8,6 +8,11 @@ global:
   # -- Image pull secrets for private registries
   imagePullSecrets: []
 
+# -- Public application origin. Set this to the shared external URL exposed by
+# ingress or Gateway API. The chart sends it to the backend for callbacks,
+# password resets, and redirects, and derives the browser API/WebSocket origin.
+publicUrl: ""
+
 # -- Storage mode configuration.
 # Sibyl's active Helm runtime is fully SurrealDB-backed.
 # Archive and legacy migration sidecars are operated outside this release chart.

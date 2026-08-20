@@ -69,9 +69,16 @@ spec:
             - name: SIBYL_API_URL
               value: {{ .Values.frontend.apiUrl | default (printf "http://%s-backend:%v/api" (include "sibyl.fullname" .) .Values.backend.service.port) | quote }}
             {{- end }}
-            {{- if .Values.frontend.publicApiUrl }}
+            {{- if and (not (hasKey .Values.frontend.env "NEXT_PUBLIC_API_URL")) .Values.frontend.publicApiUrl }}
             - name: NEXT_PUBLIC_API_URL
               value: {{ .Values.frontend.publicApiUrl | quote }}
+            {{- else if and (not (hasKey .Values.frontend.env "NEXT_PUBLIC_API_URL")) .Values.publicUrl }}
+            - name: NEXT_PUBLIC_API_URL
+              value: {{ printf "%s/api" (trimSuffix "/" .Values.publicUrl) | quote }}
+            {{- end }}
+            {{- if and (not (hasKey .Values.frontend.env "SIBYL_PUBLIC_URL")) .Values.publicUrl }}
+            - name: SIBYL_PUBLIC_URL
+              value: {{ trimSuffix "/" .Values.publicUrl | quote }}
             {{- end }}
             # WebSocket derives URL from window.location behind shared ingress
             - name: HOSTNAME
