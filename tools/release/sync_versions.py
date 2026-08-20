@@ -25,23 +25,32 @@ import sys
 from pathlib import Path
 from typing import TextIO
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from tools.release.version import (
+    PEP440_VERSION_PATTERN,
+    RELEASE_VERSION_PATTERN,
+    parse_release_version,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VERSION_FILE = REPO_ROOT / "VERSION"
 
 # A Sibyl release version: 1.2.3 or 1.2.3-rc.4. Scoped tightly so a surrounding
 # context match never captures an unrelated version (e.g. SurrealDB's appVersion).
-_VER = r"\d+\.\d+\.\d+(?:-rc\.\d+)?"
+_VER = RELEASE_VERSION_PATTERN
 
 # The same version in PEP 440 normalized form (1.0.0-rc.8 -> 1.0.0rc8), used by
 # the internal Python package pins. Our scheme only ever carries a final or
 # `-rc.N` suffix (see _VER), so this matches the canonical
 # tools.release.homebrew_formula.pep440_version for every accepted version; the
 # release-workflow-test gate enforces that parity.
-_PEP440_VER = r"\d+\.\d+\.\d+(?:rc\d+)?"
+_PEP440_VER = PEP440_VERSION_PATTERN
 
 
 def _pep440(version: str) -> str:
-    return version.replace("-rc.", "rc")
+    return parse_release_version(version).pep440
 
 
 # Each target lists (pattern, replacement) pairs. Patterns capture the
@@ -111,9 +120,10 @@ def _targets(version: str) -> dict[str, list[_Sub]]:
 
 def _read_version() -> str:
     version = VERSION_FILE.read_text(encoding="utf-8").strip()
-    if not re.fullmatch(_VER, version):
-        raise SystemExit(f"VERSION file holds an unexpected value: {version!r}")
-    return version
+    try:
+        return parse_release_version(version).canonical
+    except ValueError as exc:
+        raise SystemExit(f"VERSION file holds an unexpected value: {version!r}") from exc
 
 
 def _apply(text: str, subs: list[_Sub]) -> tuple[str, list[int]]:
