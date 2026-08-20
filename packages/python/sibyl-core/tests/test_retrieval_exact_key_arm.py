@@ -9,6 +9,12 @@ import pytest
 
 from sibyl_core.memory_pipeline.capture import MemoryCaptureRequest, MemoryCaptureService
 from sibyl_core.models.context import ContextFacet
+from sibyl_core.retrieval import _search_candidates as candidate_module
+from sibyl_core.retrieval import _search_database as database_module
+from sibyl_core.retrieval import _search_expansion as expansion_module
+from sibyl_core.retrieval import _search_fusion as fusion_module
+from sibyl_core.retrieval import _search_plan as plan_module
+from sibyl_core.retrieval import _search_sources as source_module
 from sibyl_core.retrieval import search as search_module
 from sibyl_core.retrieval.candidates import RetrievalCandidate
 from sibyl_core.retrieval.search import (
@@ -186,10 +192,10 @@ async def test_arm_finds_a_row_whose_body_never_contains_the_query() -> None:
     client = _RecordingClient([_row(metadata)])
     plan = _plan()
 
-    candidates = await search_module._exact_key_candidates(
+    candidates = await source_module._exact_key_candidates(
         client=client,
         plan=plan,
-        search_filter=search_module._search_filter_for_plan(plan),
+        search_filter=plan_module._search_filter_for_plan(plan),
         limit=8,
         probe_tokens=(PROBE_KEY.casefold(),),
     )
@@ -215,10 +221,10 @@ async def test_arm_reads_the_indexed_column_with_one_set_membership_query() -> N
     client = _RecordingClient()
     plan = _plan()
 
-    await search_module._exact_key_candidates(
+    await source_module._exact_key_candidates(
         client=client,
         plan=plan,
-        search_filter=search_module._search_filter_for_plan(plan),
+        search_filter=plan_module._search_filter_for_plan(plan),
         limit=8,
         probe_tokens=("err_conn_reset_0x7f31", "search.py"),
     )
@@ -237,10 +243,10 @@ async def test_arm_issues_no_read_without_a_probe() -> None:
     client = _RecordingClient([{"uuid": "should-not-be-read"}])
     plan = _plan(query="how do we handle authentication")
 
-    candidates = await search_module._exact_key_candidates(
+    candidates = await source_module._exact_key_candidates(
         client=client,
         plan=plan,
-        search_filter=search_module._search_filter_for_plan(plan),
+        search_filter=plan_module._search_filter_for_plan(plan),
         limit=8,
         probe_tokens=(),
     )
@@ -268,10 +274,10 @@ async def test_best_overlap_row_survives_a_lane_limit_smaller_than_the_match_cou
     client = _RecordingClient([newer_one, newer_two, both])
     plan = _plan()
 
-    candidates = await search_module._exact_key_candidates(
+    candidates = await source_module._exact_key_candidates(
         client=client,
         plan=plan,
-        search_filter=search_module._search_filter_for_plan(plan),
+        search_filter=plan_module._search_filter_for_plan(plan),
         limit=2,
         probe_tokens=("key_a", "key_b"),
     )
@@ -289,10 +295,10 @@ async def test_arm_drops_a_row_whose_stored_keys_do_not_actually_match() -> None
     client = _RecordingClient([_row(metadata, normalized_keys=["some_other_key"])])
     plan = _plan()
 
-    candidates = await search_module._exact_key_candidates(
+    candidates = await source_module._exact_key_candidates(
         client=client,
         plan=plan,
-        search_filter=search_module._search_filter_for_plan(plan),
+        search_filter=plan_module._search_filter_for_plan(plan),
         limit=8,
         probe_tokens=(PROBE_KEY.casefold(),),
     )
@@ -308,10 +314,10 @@ async def test_arm_ranks_more_matched_keys_above_fewer() -> None:
     client = _RecordingClient([one_of_two, two_of_two])
     plan = _plan()
 
-    candidates = await search_module._exact_key_candidates(
+    candidates = await source_module._exact_key_candidates(
         client=client,
         plan=plan,
-        search_filter=search_module._search_filter_for_plan(plan),
+        search_filter=plan_module._search_filter_for_plan(plan),
         limit=8,
         probe_tokens=("key_a", "key_b"),
     )
@@ -329,13 +335,13 @@ async def test_arm_ranks_more_matched_keys_above_fewer() -> None:
 @pytest.mark.asyncio
 async def test_exact_key_hit_reaches_its_owner() -> None:
     metadata = await _captured_metadata(principal_id="user-alice")
-    candidate = search_module._candidate_from_node_record(
+    candidate = candidate_module._candidate_from_node_record(
         _row(metadata),
         signal=RetrievalSignal.EXACT_KEY,
         score=1.0,
     )
 
-    assert search_module._candidate_allowed(
+    assert candidate_module._candidate_allowed(
         candidate,
         plan=_plan(principal_id="user-alice"),
         requested_types=set(),
@@ -348,13 +354,13 @@ async def test_exact_key_hit_is_denied_to_a_project_co_member() -> None:
     """A declared key is not a scope override: the private row stays private."""
 
     metadata = await _captured_metadata(principal_id="user-alice")
-    candidate = search_module._candidate_from_node_record(
+    candidate = candidate_module._candidate_from_node_record(
         _row(metadata),
         signal=RetrievalSignal.EXACT_KEY,
         score=1.0,
     )
 
-    assert not search_module._candidate_allowed(
+    assert not candidate_module._candidate_allowed(
         candidate,
         plan=_plan(principal_id="user-bob"),
         requested_types=set(),
@@ -369,13 +375,13 @@ async def test_project_scoped_exact_key_hit_reaches_a_co_member() -> None:
         memory_scope="project",
         scope_key="project_123",
     )
-    candidate = search_module._candidate_from_node_record(
+    candidate = candidate_module._candidate_from_node_record(
         _row(metadata),
         signal=RetrievalSignal.EXACT_KEY,
         score=1.0,
     )
 
-    assert search_module._candidate_allowed(
+    assert candidate_module._candidate_allowed(
         candidate,
         plan=_plan(principal_id="user-bob"),
         requested_types=set(),
@@ -390,13 +396,13 @@ async def test_project_scoped_exact_key_hit_is_denied_outside_the_project() -> N
         memory_scope="project",
         scope_key="project_123",
     )
-    candidate = search_module._candidate_from_node_record(
+    candidate = candidate_module._candidate_from_node_record(
         _row(metadata),
         signal=RetrievalSignal.EXACT_KEY,
         score=1.0,
     )
 
-    assert not search_module._candidate_allowed(
+    assert not candidate_module._candidate_allowed(
         candidate,
         plan=_plan(principal_id="user-bob", project="project_other"),
         requested_types=set(),
@@ -431,7 +437,7 @@ async def _seeds_for(
         if PROBE_KEY.casefold() not in probes:
             return []
         return [
-            search_module._candidate_from_node_record(
+            candidate_module._candidate_from_node_record(
                 victim,
                 signal=RetrievalSignal.EXACT_KEY,
                 score=1.0,
@@ -451,9 +457,9 @@ async def _seeds_for(
     async def no_raw_recall(**_kwargs: object) -> list[Any]:
         return []
 
-    monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
-    monkeypatch.setattr(search_module, "_exact_key_candidates", fake_exact_key_candidates)
-    monkeypatch.setattr(search_module, "_graph_expansion_candidates", fake_graph_expansion)
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(source_module, "_exact_key_candidates", fake_exact_key_candidates)
+    monkeypatch.setattr(expansion_module, "_graph_expansion_candidates", fake_graph_expansion)
 
     await search_module.context_search(
         plan=_plan(principal_id=reader, query=f"why does {probe_key} fire"),
@@ -538,7 +544,7 @@ def test_exact_key_hit_outranks_an_equally_ranked_lexical_hit() -> None:
     exact = _candidate("exact", retrieval_keys=[PROBE_KEY], matched=[PROBE_KEY.casefold()])
     lexical = _candidate("lexical")
 
-    ranked = search_module._fuse_candidates(
+    ranked = fusion_module._fuse_candidates(
         [
             (RetrievalSignal.NODE_FULLTEXT, [lexical]),
             (RetrievalSignal.EXACT_KEY, [exact]),
@@ -566,7 +572,7 @@ def test_exact_key_boost_applies_once_to_a_candidate_found_by_two_lanes() -> Non
     plan = _plan()
     both = _candidate("both", retrieval_keys=[PROBE_KEY], matched=[PROBE_KEY.casefold()])
 
-    ranked = search_module._fuse_candidates(
+    ranked = fusion_module._fuse_candidates(
         [
             (RetrievalSignal.NODE_FULLTEXT, [both]),
             (RetrievalSignal.EXACT_KEY, [both]),
@@ -592,7 +598,7 @@ def test_matched_keys_survive_a_row_that_another_lane_found_first() -> None:
     from_fulltext = _candidate("shared")
     from_key = _candidate("shared", retrieval_keys=[PROBE_KEY], matched=[PROBE_KEY.casefold()])
 
-    ranked = search_module._fuse_candidates(
+    ranked = fusion_module._fuse_candidates(
         [
             (RetrievalSignal.NODE_FULLTEXT, [from_fulltext]),
             (RetrievalSignal.EXACT_KEY, [from_key]),
@@ -623,7 +629,7 @@ def test_a_candidate_found_only_by_the_key_is_not_demoted_as_vector_only() -> No
         project_id="project_0",
     )
 
-    ranked = search_module._fuse_candidates(
+    ranked = fusion_module._fuse_candidates(
         [(RetrievalSignal.EXACT_KEY, [exact])],
         plan=plan,
         limit=1,
@@ -646,7 +652,7 @@ def test_an_inert_lane_changes_no_score_and_no_metadata() -> None:
     lexical = _candidate("lexical")
     vector = _candidate("vector")
 
-    without_lane = search_module._fuse_candidates(
+    without_lane = fusion_module._fuse_candidates(
         [
             (RetrievalSignal.NODE_FULLTEXT, [lexical]),
             (RetrievalSignal.NODE_VECTOR, [vector]),
@@ -654,7 +660,7 @@ def test_an_inert_lane_changes_no_score_and_no_metadata() -> None:
         plan=plan,
         limit=10,
     )
-    with_inert_lane = search_module._fuse_candidates(
+    with_inert_lane = fusion_module._fuse_candidates(
         [
             (RetrievalSignal.NODE_FULLTEXT, [lexical]),
             (RetrievalSignal.EXACT_KEY, []),
@@ -677,7 +683,7 @@ def test_matched_keys_join_the_coverage_text() -> None:
 
     exact = _candidate("exact", retrieval_keys=[PROBE_KEY])
 
-    text = search_module._candidate_query_text(exact, matched_keys=(PROBE_KEY.casefold(),))
+    text = fusion_module._candidate_query_text(exact, matched_keys=(PROBE_KEY.casefold(),))
 
     assert PROBE_KEY.casefold() in text
 
@@ -692,14 +698,14 @@ def test_declared_but_unmatched_keys_stay_out_of_the_coverage_text() -> None:
 
     keyed = _candidate("keyed", retrieval_keys=["connection pooling handbook"])
 
-    assert search_module._candidate_query_text(keyed) == f"keyed {BODY_WITHOUT_THE_KEY}".lower()
-    assert "handbook" not in search_module._candidate_query_text(keyed)
+    assert fusion_module._candidate_query_text(keyed) == f"keyed {BODY_WITHOUT_THE_KEY}".lower()
+    assert "handbook" not in fusion_module._candidate_query_text(keyed)
 
 
 def test_a_candidate_without_keys_has_unchanged_coverage_text() -> None:
     plain = _candidate("plain")
 
-    assert search_module._candidate_query_text(plain) == f"plain {BODY_WITHOUT_THE_KEY}".lower()
+    assert fusion_module._candidate_query_text(plain) == f"plain {BODY_WITHOUT_THE_KEY}".lower()
 
 
 def test_coverage_rerank_ignores_keys_the_query_did_not_match() -> None:
@@ -712,7 +718,7 @@ def test_coverage_rerank_ignores_keys_the_query_did_not_match() -> None:
         (rival, 0.9, {"sources": [RetrievalSignal.NODE_FULLTEXT.value]}),
     ]
 
-    reranked = search_module._apply_query_coverage_to_fused(
+    reranked = fusion_module._apply_query_coverage_to_fused(
         "how do we handle connection pooling",
         fused,
         temporal_target=None,
@@ -723,7 +729,7 @@ def test_coverage_rerank_ignores_keys_the_query_did_not_match() -> None:
         (_candidate("keyed"), 1.0, {"sources": [RetrievalSignal.NODE_FULLTEXT.value]}),
         (_candidate("rival"), 0.9, {"sources": [RetrievalSignal.NODE_FULLTEXT.value]}),
     ]
-    baseline = search_module._apply_query_coverage_to_fused(
+    baseline = fusion_module._apply_query_coverage_to_fused(
         "how do we handle connection pooling",
         stripped,
         temporal_target=None,
@@ -778,14 +784,14 @@ def test_receipt_counts_authorized_hits_only() -> None:
 def test_search_result_surfaces_the_boost_and_the_matched_keys() -> None:
     plan = _plan()
     exact = _candidate("exact", retrieval_keys=[PROBE_KEY], matched=[PROBE_KEY.casefold()])
-    ranked = search_module._fuse_candidates(
+    ranked = fusion_module._fuse_candidates(
         [(RetrievalSignal.EXACT_KEY, [exact])],
         plan=plan,
         limit=1,
     )
     candidate, score, fusion_metadata = ranked[0]
 
-    result = search_module._search_result_from_candidate(
+    result = fusion_module._search_result_from_candidate(
         candidate,
         score=score,
         fusion_metadata=fusion_metadata,

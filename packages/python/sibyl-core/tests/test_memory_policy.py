@@ -461,7 +461,7 @@ def test_promoted_candidate_cannot_inherit_a_forged_owner_from_its_capture() -> 
     bag alone.
     """
     from sibyl_core.models.reflection import ReflectionCandidate
-    from sibyl_core.services.memory import _entity_from_candidate
+    from sibyl_core.services.memory_promotion import _entity_from_candidate
 
     candidate = ReflectionCandidate(
         kind="decision",

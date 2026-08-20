@@ -34,11 +34,9 @@ from sibyl_core.projection.passages import (
     PASSAGE_COVERS_PARENT_KEY,
     spans_cover_parent,
 )
+from sibyl_core.retrieval._search_expansion import expand_neighbor_records
+from sibyl_core.retrieval._search_plan import DEFAULT_CANDIDATES_PER_SIGNAL
 from sibyl_core.retrieval.operational_sources import PASSAGE_WINDOW_UNITS
-from sibyl_core.retrieval.search import (
-    DEFAULT_CANDIDATES_PER_SIGNAL,
-    expand_neighbor_records,
-)
 from sibyl_core.tools.helpers import ScopeGuard, memory_scope_guard
 from sibyl_core.tools.responses import (
     ExpandNeighborsResponse,

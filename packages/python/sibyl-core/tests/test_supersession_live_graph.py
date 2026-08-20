@@ -28,12 +28,17 @@ import pytest_asyncio
 
 import sibyl_core.retrieval.search as search_module
 import sibyl_core.services.memory as memory_module
+import sibyl_core.services.memory_correction as memory_correction_module
+import sibyl_core.services.memory_lifecycle as memory_lifecycle_module
 import sibyl_core.tools.context as context_module
 from sibyl_core.auth.memory_policy import stamp_memory_scope_metadata
 from sibyl_core.models.context import ContextFacet, ContextPack
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.projection.memory import project_memory_entity
 from sibyl_core.projection.passages import project_entity_passages
+from sibyl_core.retrieval import _search_database as database_module
+from sibyl_core.retrieval import _search_expansion as expansion_module
+from sibyl_core.retrieval import _search_lifecycle as lifecycle_module
 from sibyl_core.retrieval.search import build_context_retrieval_plan
 from sibyl_core.services.graph import (
     EntityManager,
@@ -80,10 +85,10 @@ async def graph(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[_Runtime]:
         assert str(requested_group_id) == group_id
         return runtime
 
-    monkeypatch.setattr(search_module, "get_surreal_graph_runtime", runtime_factory)
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", runtime_factory)
     monkeypatch.setattr(context_module, "get_surreal_graph_runtime", runtime_factory)
     monkeypatch.setattr(context_module, "get_graph_runtime", runtime_factory, raising=False)
-    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", runtime_factory)
+    monkeypatch.setattr(memory_lifecycle_module, "get_surreal_graph_runtime", runtime_factory)
     # No embedding provider in the embedded harness. Left alone, building one
     # can raise inside the native lane, and `compile_context` answers an
     # exception by falling back to a different search path, which would leave
@@ -274,7 +279,7 @@ async def test_dense_supersession_edges_use_the_real_keyset_query(
 ) -> None:
     """The production parser and driver must return every dense-history page."""
 
-    monkeypatch.setattr(search_module, "_SUPERSESSION_EDGE_PAGE_SIZE", 2)
+    monkeypatch.setattr(lifecycle_module, "_SUPERSESSION_EDGE_PAGE_SIZE", 2)
     await graph.entity_manager.create_direct(
         _entity(graph, "dense-retired", "Dense Retired", "dense retired decision")
     )
@@ -285,7 +290,7 @@ async def test_dense_supersession_edges_use_the_real_keyset_query(
         )
         await _supersede(graph, survivor=survivor, retired="dense-retired")
 
-    superseded, edge_count = await search_module._superseded_candidate_uuids(
+    superseded, edge_count = await lifecycle_module._superseded_candidate_uuids(
         graph.client,
         group_id=graph.group_id,
         uuids=["dense-retired"],
@@ -309,7 +314,7 @@ async def test_the_outgoing_walk_does_not_expand_into_a_real_retired_row(
     )
     await _supersede(graph, survivor="walk-new", retired="walk-old")
 
-    hops = await search_module._node_bfs_records(
+    hops = await expansion_module._node_bfs_records(
         client=graph.client,
         origin_uuids=["walk-new"],
         search_filter=search_module.SearchFilter(node_types=("decision",)),
@@ -320,7 +325,7 @@ async def test_the_outgoing_walk_does_not_expand_into_a_real_retired_row(
     assert [row.get("uuid") for row in hops] == []
 
     # Naming the predicate narrows current recall; it is not a history request.
-    lineage = await search_module._node_bfs_records(
+    lineage = await expansion_module._node_bfs_records(
         client=graph.client,
         origin_uuids=["walk-new"],
         search_filter=search_module.SearchFilter(node_types=("decision",)),
@@ -518,10 +523,10 @@ async def _correct(
         provenance={},
         capture_surface="reflection_candidate",
     )
-    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=memory))
-    monkeypatch.setattr(memory_module, "get_raw_memory_by_source_id", AsyncMock())
+    monkeypatch.setattr(memory_correction_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(memory_correction_module, "get_raw_memory_by_source_id", AsyncMock())
     monkeypatch.setattr(
-        memory_module,
+        memory_correction_module,
         "save_raw_memory",
         AsyncMock(side_effect=lambda updated, **_kwargs: updated),
     )
@@ -928,7 +933,7 @@ async def test_a_real_supersession_cycle_resolves_the_same_way_in_either_order(
             )
         )
 
-    rows = await search_module._execute_query_records(
+    rows = await database_module._execute_query_records(
         graph.client,
         """
         SELECT uuid, target_id, source_id, created_at
@@ -942,8 +947,8 @@ async def test_a_real_supersession_cycle_resolves_the_same_way_in_either_order(
         group_id=graph.group_id,
     )
     assert len(rows) == 2, "both directions of the cycle must be on the table"
-    forward = search_module._resolve_superseded(rows)
-    reverse = search_module._resolve_superseded(list(reversed(rows)))
+    forward = lifecycle_module._resolve_superseded(rows)
+    reverse = lifecycle_module._resolve_superseded(list(reversed(rows)))
     assert forward == reverse
     assert len(forward) == 1
 

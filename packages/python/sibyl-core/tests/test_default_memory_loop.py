@@ -60,7 +60,7 @@ async def main():
         prepare_graph_schema,
     )
     import sibyl_core.retrieval.search as retrieval_module
-    import sibyl_core.services.memory as memory_module
+    import sibyl_core.services.memory_reflection as memory_module
     import sibyl_core.tools.add as add_module
     import sibyl_core.tools.context as context_module
     import sibyl_core.tools.core as core_module

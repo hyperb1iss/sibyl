@@ -18,7 +18,8 @@ from sibyl_core.auth.memory_policy import memory_scope_policy_key
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.memory_scope import MemoryScope
 from sibyl_core.projection.passages import PASSAGE_COVERS_PARENT_KEY
-from sibyl_core.retrieval.search import SearchFilter, expand_neighbor_records
+from sibyl_core.retrieval._search_expansion import expand_neighbor_records
+from sibyl_core.retrieval._search_plan import SearchFilter
 from sibyl_core.tools.traverse import (
     DEFAULT_SLICE_WINDOW,
     MAX_EXPAND_LIMIT,
@@ -1405,7 +1406,7 @@ class TestSteeredWalkMatchesTheScoredLane:
 
     @pytest.mark.asyncio
     async def test_depth_decay_is_applied_by_true_distance(self) -> None:
-        from sibyl_core.retrieval.search import _graph_expansion_path_score
+        from sibyl_core.retrieval._search_expansion import _graph_expansion_path_score
 
         client = _GraphClient(
             edges=[
@@ -1455,7 +1456,8 @@ class TestSharedBfsContractAtDefaultArgs:
         contribute 'b'. Suppressing it there costs 'b' its graph-native signal
         boost and an RRF rank term on the scored path.
         """
-        from sibyl_core.retrieval.search import SearchFilter, _node_bfs_records
+        from sibyl_core.retrieval._search_expansion import _node_bfs_records
+        from sibyl_core.retrieval._search_plan import SearchFilter
 
         client = _GraphClient(
             edges=[("entity_a", "entity_b", "RELATED_TO")],
@@ -1475,7 +1477,8 @@ class TestSharedBfsContractAtDefaultArgs:
 
     @pytest.mark.asyncio
     async def test_defaults_keep_inbound_off_and_community_on(self) -> None:
-        from sibyl_core.retrieval.search import SearchFilter, _node_bfs_records
+        from sibyl_core.retrieval._search_expansion import _node_bfs_records
+        from sibyl_core.retrieval._search_plan import SearchFilter
 
         client = _GraphClient(
             edges=[("other", "seed", "RELATED_TO")],

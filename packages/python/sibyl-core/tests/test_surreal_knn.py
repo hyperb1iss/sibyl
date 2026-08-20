@@ -201,11 +201,8 @@ from sibyl_core.backends.surreal.knn import (  # noqa: E402
     knn_overfetch_pool,
 )
 from sibyl_core.models.entities import EntityType  # noqa: E402
-from sibyl_core.retrieval.search import (  # noqa: E402
-    RetrievalPlan,
-    SearchFilter,
-    _node_vector_candidates,
-)
+from sibyl_core.retrieval._search_plan import RetrievalPlan, SearchFilter  # noqa: E402
+from sibyl_core.retrieval._search_sources import _node_vector_candidates  # noqa: E402
 
 
 def test_overfetch_pool_scales_and_caps() -> None:

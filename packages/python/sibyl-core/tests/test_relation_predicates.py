@@ -7,7 +7,8 @@ from typing import Any
 
 import pytest
 
-import sibyl_core.services.memory as memory_module
+import sibyl_core.services.memory_promotion as memory_module
+import sibyl_core.services.memory_reflection as reflection_module
 import sibyl_core.tools.add as add_module
 from sibyl_core.errors import EntityNotFoundError
 from sibyl_core.models.entities import Entity, EntityType, RelationshipType
@@ -24,8 +25,8 @@ from sibyl_core.models.relations import (
     predicate_direction_allows,
     predicate_policy,
 )
+from sibyl_core.retrieval._search_expansion import _GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS
 from sibyl_core.retrieval.hybrid import DEFAULT_GRAPH_RELATIONSHIP_TYPE_WEIGHTS
-from sibyl_core.retrieval.search import _GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS
 from sibyl_core.services.graph import (
     EntityManager,
     GraphRuntime,
@@ -694,13 +695,13 @@ class TestPromotionLinkTargets:
             relationship_manager = SimpleNamespace()
 
         monkeypatch.setattr(
-            memory_module,
+            reflection_module,
             "get_surreal_graph_runtime",
             _always(Runtime()),
         )
 
         with pytest.raises(TimeoutError):
-            await memory_module.persist_reflection_candidate(
+            await reflection_module.persist_reflection_candidate(
                 candidate=ReflectionCandidate(
                     kind="decision",
                     title="Decision: never lands",

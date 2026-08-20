@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import ast
 import asyncio
 from collections.abc import Mapping
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -27,16 +29,25 @@ from sibyl_core.embeddings.providers import (
 from sibyl_core.memory_pipeline.capture import MemoryCaptureRequest, MemoryCaptureService
 from sibyl_core.memory_pipeline.retrieval import CandidateSourceResult
 from sibyl_core.models.context import ContextFacet
-from sibyl_core.retrieval.candidates import CandidateKind, CandidateScope
+from sibyl_core.retrieval import _search_candidates as candidate_module
+from sibyl_core.retrieval import _search_database as database_module
+from sibyl_core.retrieval import _search_expansion as expansion_module
+from sibyl_core.retrieval import _search_fusion as fusion_module
+from sibyl_core.retrieval import _search_plan as plan_module
+from sibyl_core.retrieval import _search_sources as source_module
+from sibyl_core.retrieval.candidates import (
+    CandidateKind,
+    CandidateScope,
+    RetrievalCandidate,
+    VectorCandidateFetch,
+)
 from sibyl_core.retrieval.search import (
     DEFAULT_FILTER_SELECTIVITY_THRESHOLD,
     MAX_RETRIEVAL_LIMIT,
     MIN_CANDIDATES_PER_SIGNAL,
     CandidateLimits,
     FusionBackend,
-    RetrievalCandidate,
     RetrievalSignal,
-    VectorCandidateFetch,
     build_context_retrieval_plan,
     coerce_fusion_backend,
     fusion_backend_from_env,
@@ -218,25 +229,102 @@ def test_fusion_backend_accepts_surreal_rrf() -> None:
     )
 
 
+def test_search_exposes_only_the_intentional_retrieval_contract() -> None:
+    assert set(search_module.__all__) == {
+        "DEFAULT_CANDIDATES_PER_SIGNAL",
+        "DEFAULT_FILTER_SELECTIVITY_THRESHOLD",
+        "MAX_RETRIEVAL_LIMIT",
+        "MIN_CANDIDATES_PER_SIGNAL",
+        "RAW_LEXICAL_LIMIT_DIVISOR",
+        "CandidateLimits",
+        "FusionBackend",
+        "RetrievalPlan",
+        "RetrievalSignal",
+        "RetrievalWeights",
+        "ScopeSpec",
+        "SearchFilter",
+        "build_context_retrieval_plan",
+        "coerce_fusion_backend",
+        "context_search",
+        "fusion_backend_from_env",
+        "seed_candidates_per_signal",
+    }
+
+
+def test_private_search_stage_dependencies_are_acyclic() -> None:
+    retrieval_dir = Path(search_module.__file__).parent
+    stage_paths = sorted(retrieval_dir.glob("_search_*.py"))
+    stage_names = {path.stem for path in stage_paths}
+    dependencies: dict[str, set[str]] = {name: set() for name in stage_names}
+
+    for path in stage_paths:
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for imported in node.names:
+                    assert imported.name != "sibyl_core.retrieval.search"
+                    if imported.name.startswith("sibyl_core.retrieval._search_"):
+                        dependencies[path.stem].add(imported.name.rsplit(".", 1)[-1])
+            if isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                assert module != "sibyl_core.retrieval.search"
+                if module.startswith("sibyl_core.retrieval._search_"):
+                    dependencies[path.stem].add(module.rsplit(".", 1)[-1])
+                if module == "sibyl_core.retrieval":
+                    dependencies[path.stem].update(
+                        imported.name for imported in node.names if imported.name in stage_names
+                    )
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(stage: str) -> None:
+        assert stage not in visiting, f"private retrieval import cycle at {stage}"
+        if stage in visited:
+            return
+        visiting.add(stage)
+        for dependency in dependencies[stage]:
+            visit(dependency)
+        visiting.remove(stage)
+        visited.add(stage)
+
+    for stage in sorted(stage_names):
+        visit(stage)
+
+
 @pytest.mark.asyncio
-async def test_read_only_graph_runtime_supports_legacy_runtime_factory(
+async def test_read_only_graph_runtime_disables_schema_preparation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class Runtime:
         client = object()
 
-    calls: list[str] = []
+    calls: list[tuple[str, bool]] = []
 
-    async def fake_runtime(organization_id: str) -> Runtime:
-        calls.append(organization_id)
+    async def fake_runtime(organization_id: str, *, ensure_schema: bool) -> Runtime:
+        calls.append((organization_id, ensure_schema))
         return Runtime()
 
-    monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
 
-    runtime = await search_module._get_read_only_graph_runtime("org-123")
+    runtime = await database_module._get_read_only_graph_runtime("org-123")
 
     assert isinstance(runtime, Runtime)
-    assert calls == ["org-123"]
+    assert calls == [("org-123", False)]
+
+
+@pytest.mark.asyncio
+async def test_read_only_graph_runtime_does_not_reinterpret_runtime_type_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_runtime(_organization_id: str, *, ensure_schema: bool) -> object:
+        assert ensure_schema is False
+        raise TypeError("runtime exploded")
+
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
+
+    with pytest.raises(TypeError, match="runtime exploded"):
+        await database_module._get_read_only_graph_runtime("org-123")
 
 
 def test_build_context_retrieval_plan_records_scopes_and_weights() -> None:
@@ -372,8 +460,8 @@ def test_query_time_limits_narrow_lanes_but_never_widen_them() -> None:
         graph_expansion=28,
     )
 
-    narrowed = search_module._candidate_limits_for_limit(limits, 4)
-    widened = search_module._candidate_limits_for_limit(limits, MAX_RETRIEVAL_LIMIT * 2)
+    narrowed = plan_module._candidate_limits_for_limit(limits, 4)
+    widened = plan_module._candidate_limits_for_limit(limits, MAX_RETRIEVAL_LIMIT * 2)
 
     assert narrowed.node_fulltext == 4
     assert narrowed.raw_lexical == 4
@@ -381,7 +469,7 @@ def test_query_time_limits_narrow_lanes_but_never_widen_them() -> None:
     # A plan built at the narrowest layer stays narrow however deep the pack
     # composer's own search limit runs.
     narrow_plan = CandidateLimits(**_flat_cap_lane_limits(8))
-    assert search_module._candidate_limits_for_limit(narrow_plan, 50) == narrow_plan
+    assert plan_module._candidate_limits_for_limit(narrow_plan, 50) == narrow_plan
 
 
 def test_search_filter_for_plan_carries_requested_entity_types() -> None:
@@ -396,7 +484,7 @@ def test_search_filter_for_plan_carries_requested_entity_types() -> None:
         limit=6,
     )
 
-    search_filter = search_module._search_filter_for_plan(
+    search_filter = plan_module._search_filter_for_plan(
         plan,
         requested_types={"task", "epic"},
     )
@@ -422,8 +510,8 @@ def test_build_context_retrieval_plan_denies_unverified_project_scope() -> None:
     assert plan.denied_scopes[0].memory_scope is MemoryScope.PROJECT
     assert plan.denied_scopes[0].scope_key == "project_123"
     assert plan.denied_scopes[0].reason == "unverified_membership"
-    assert search_module._search_filter_for_plan(plan).project_ids == ()
-    assert not search_module._candidate_allowed(
+    assert plan_module._search_filter_for_plan(plan).project_ids == ()
+    assert not candidate_module._candidate_allowed(
         RetrievalCandidate(
             id="task-1",
             type="task",
@@ -498,7 +586,7 @@ def test_build_context_retrieval_plan_excludes_scopes_outside_api_key_grants() -
     excluded = [d for d in plan.denied_scopes if d.reason == "api_key_scope_excluded"]
     assert [d.memory_scope for d in excluded] == [MemoryScope.PROJECT]
     assert excluded[0].scope_key == "project_123"
-    assert search_module._search_filter_for_plan(plan).project_ids == ()
+    assert plan_module._search_filter_for_plan(plan).project_ids == ()
 
 
 def test_build_context_retrieval_plan_excludes_all_scopes_when_no_grant_matches() -> None:
@@ -521,7 +609,7 @@ def test_build_context_retrieval_plan_trims_accessible_projects_to_api_key_grant
     )
 
     assert plan.accessible_projects == frozenset()
-    assert search_module._authorized_project_ids(plan) == ()
+    assert plan_module._authorized_project_ids(plan) == ()
 
 
 def test_build_context_retrieval_plan_keeps_granted_accessible_projects() -> None:
@@ -540,7 +628,7 @@ def test_build_context_retrieval_plan_keeps_granted_accessible_projects() -> Non
     )
 
     assert plan.accessible_projects == frozenset({"project_123"})
-    assert search_module._authorized_project_ids(plan) == ("project_123",)
+    assert plan_module._authorized_project_ids(plan) == ("project_123",)
     assert [
         (scope.memory_scope, scope.scope_key)
         for scope in plan.scopes
@@ -649,7 +737,7 @@ def test_build_context_retrieval_plan_includes_project_less_agent_diary_scope() 
 
 
 def test_candidate_from_raw_memory_uses_top_level_project_id_when_metadata_missing() -> None:
-    candidate = search_module._candidate_from_raw_memory(
+    candidate = candidate_module._candidate_from_raw_memory(
         RawMemory(
             id="raw-1",
             organization_id="org-123",
@@ -685,7 +773,7 @@ def test_candidate_allowed_denies_private_candidate_without_private_grant() -> N
     )
 
     assert MemoryScope.PRIVATE not in [scope.memory_scope for scope in plan.scopes]
-    assert not search_module._candidate_allowed(
+    assert not candidate_module._candidate_allowed(
         RetrievalCandidate(
             id="entity-1",
             type="note",
@@ -717,7 +805,7 @@ def test_candidate_allowed_allows_private_candidate_with_private_grant() -> None
         },
     )
 
-    assert search_module._candidate_allowed(
+    assert candidate_module._candidate_allowed(
         RetrievalCandidate(
             id="entity-2",
             type="note",
@@ -746,7 +834,7 @@ def test_candidate_allowed_denies_private_scope_key_mismatch() -> None:
         agent_id=None,
     )
 
-    assert not search_module._candidate_allowed(
+    assert not candidate_module._candidate_allowed(
         RetrievalCandidate(
             id="entity-1",
             type="note",
@@ -775,7 +863,7 @@ def test_candidate_allowed_allows_private_scope_key_match() -> None:
         agent_id=None,
     )
 
-    assert search_module._candidate_allowed(
+    assert candidate_module._candidate_allowed(
         RetrievalCandidate(
             id="entity-2",
             type="note",
@@ -843,7 +931,7 @@ async def test_captured_private_memory_is_hidden_from_project_co_member() -> Non
     """
     metadata = await _capture_private_note_metadata("user-alice", "project_123")
 
-    candidate = search_module._candidate_from_node_record(
+    candidate = candidate_module._candidate_from_node_record(
         {
             "uuid": "note_private_1",
             "name": "Salary negotiation notes",
@@ -855,7 +943,7 @@ async def test_captured_private_memory_is_hidden_from_project_co_member() -> Non
         score=1.0,
     )
 
-    assert not search_module._candidate_allowed(
+    assert not candidate_module._candidate_allowed(
         candidate,
         plan=_plan_for("user-bob", "project_123"),
         requested_types=set(),
@@ -867,7 +955,7 @@ async def test_captured_private_memory_is_hidden_from_project_co_member() -> Non
 async def test_captured_private_memory_stays_visible_to_its_owner() -> None:
     metadata = await _capture_private_note_metadata("user-alice", "project_123")
 
-    candidate = search_module._candidate_from_node_record(
+    candidate = candidate_module._candidate_from_node_record(
         {
             "uuid": "note_private_1",
             "name": "Salary negotiation notes",
@@ -879,7 +967,7 @@ async def test_captured_private_memory_stays_visible_to_its_owner() -> None:
         score=1.0,
     )
 
-    assert search_module._candidate_allowed(
+    assert candidate_module._candidate_allowed(
         candidate,
         plan=_plan_for("user-alice", "project_123"),
         requested_types=set(),
@@ -946,7 +1034,7 @@ async def test_captured_scope_retrieval_matrix(
     )
 
     def reads(principal_id: str) -> bool:
-        candidate = search_module._candidate_from_node_record(
+        candidate = candidate_module._candidate_from_node_record(
             {
                 "uuid": "entity_1",
                 "name": "Scoped capture",
@@ -957,7 +1045,7 @@ async def test_captured_scope_retrieval_matrix(
             signal=RetrievalSignal.NODE_FULLTEXT,
             score=1.0,
         )
-        return search_module._candidate_allowed(
+        return candidate_module._candidate_allowed(
             candidate,
             plan=_plan_for(principal_id, "project_123"),
             requested_types=set(),
@@ -1012,7 +1100,7 @@ def test_candidate_allowed_rejects_cross_project_claim_edge() -> None:
         project_id=None,
     )
 
-    assert not search_module._candidate_allowed(
+    assert not candidate_module._candidate_allowed(
         candidate,
         plan=plan,
         requested_types=set(),
@@ -1044,7 +1132,7 @@ def test_candidate_allowed_accepts_claim_edge_when_both_endpoints_accessible() -
         project_id=None,
     )
 
-    assert search_module._candidate_allowed(
+    assert candidate_module._candidate_allowed(
         candidate,
         plan=plan,
         requested_types=set(),
@@ -1077,7 +1165,7 @@ def test_candidate_allowed_treats_relationship_as_edge_claim_alias() -> None:
         project_id=None,
     )
 
-    assert search_module._candidate_allowed(
+    assert candidate_module._candidate_allowed(
         candidate,
         plan=plan,
         requested_types={"relationship"},
@@ -1132,7 +1220,7 @@ def test_vector_only_candidates_demote_under_selective_project_filter() -> None:
         project_id="project_0",
     )
 
-    ranked = search_module._fuse_candidates(
+    ranked = fusion_module._fuse_candidates(
         [
             (RetrievalSignal.NODE_VECTOR, [vector_candidate]),
             (RetrievalSignal.NODE_FULLTEXT, [lexical_candidate]),
@@ -1168,7 +1256,7 @@ def test_vector_matches_with_lexical_signal_do_not_demote() -> None:
         project_id="project_0",
     )
 
-    ranked = search_module._fuse_candidates(
+    ranked = fusion_module._fuse_candidates(
         [
             (RetrievalSignal.NODE_VECTOR, [candidate]),
             (RetrievalSignal.NODE_FULLTEXT, [candidate]),
@@ -1209,7 +1297,7 @@ def test_graph_expansion_only_sessions_demote_below_direct_hits() -> None:
         metadata={},
     )
 
-    ranked = search_module._fuse_candidates(
+    ranked = fusion_module._fuse_candidates(
         [
             (RetrievalSignal.GRAPH_EXPANSION, [graph_candidate]),
             (RetrievalSignal.NODE_FULLTEXT, [direct_candidate]),
@@ -1258,7 +1346,7 @@ def test_graph_path_metadata_survives_fusion_with_direct_hit() -> None:
         project_id="project_123",
     )
 
-    [(candidate, score, fusion_metadata)] = search_module._fuse_candidates(
+    [(candidate, score, fusion_metadata)] = fusion_module._fuse_candidates(
         [
             (RetrievalSignal.NODE_FULLTEXT, [direct_candidate]),
             (RetrievalSignal.GRAPH_EXPANSION, [graph_candidate]),
@@ -1266,7 +1354,7 @@ def test_graph_path_metadata_survives_fusion_with_direct_hit() -> None:
         plan=plan,
         limit=1,
     )
-    result = search_module._search_result_from_candidate(
+    result = fusion_module._search_result_from_candidate(
         candidate,
         score=score,
         fusion_metadata=fusion_metadata,
@@ -1308,7 +1396,7 @@ def test_native_predicate_receipt_counts_labels_and_directions() -> None:
         },
     )
 
-    receipt = search_module._predicate_hop_receipt(
+    receipt = expansion_module._predicate_hop_receipt(
         [(RetrievalSignal.GRAPH_EXPANSION, [incoming, outgoing])]
     )
 
@@ -1346,12 +1434,12 @@ def test_graph_native_signal_boost_skips_graph_only_hits() -> None:
         project_id="project_123",
     )
 
-    [(candidate, score, fusion_metadata)] = search_module._fuse_candidates(
+    [(candidate, score, fusion_metadata)] = fusion_module._fuse_candidates(
         [(RetrievalSignal.GRAPH_EXPANSION, [graph_candidate])],
         plan=plan,
         limit=1,
     )
-    result = search_module._search_result_from_candidate(
+    result = fusion_module._search_result_from_candidate(
         candidate,
         score=score,
         fusion_metadata=fusion_metadata,
@@ -1426,7 +1514,7 @@ async def test_surreal_rrf_backend_uses_database_fusion_scores() -> None:
     )
     client = _RrfClient()
 
-    fusion = await search_module._fuse_candidates_for_plan(
+    fusion = await fusion_module._fuse_candidates_for_plan(
         client=client,
         source_lists=[
             (RetrievalSignal.NODE_FULLTEXT, [lexical, shared]),
@@ -1470,7 +1558,7 @@ async def test_surreal_rrf_backend_falls_back_to_python_rrf_on_error() -> None:
     )
     failures: list[search_module.CandidateSourceFailure] = []
 
-    fusion = await search_module._fuse_candidates_for_plan(
+    fusion = await fusion_module._fuse_candidates_for_plan(
         client=_FailingRrfClient(),
         source_lists=[(RetrievalSignal.NODE_FULLTEXT, [candidate])],
         plan=plan,
@@ -1510,7 +1598,7 @@ async def test_surreal_rrf_empty_fallback_reports_actual_backend() -> None:
     )
     failures: list[search_module.CandidateSourceFailure] = []
 
-    fusion = await search_module._fuse_candidates_for_plan(
+    fusion = await fusion_module._fuse_candidates_for_plan(
         client=_FailingRrfClient(),
         source_lists=[(RetrievalSignal.NODE_FULLTEXT, [candidate])],
         plan=plan,
@@ -1545,11 +1633,11 @@ async def test_candidate_source_reports_surreal_error_envelope() -> None:
     )
 
     gathered = await search_module._gather_candidate_sources(
-        search_module._empty_candidate_source(),
+        source_module._empty_candidate_source(),
         [
             (
                 RetrievalSignal.NODE_FULLTEXT,
-                search_module._node_fulltext_candidates(
+                source_module._node_fulltext_candidates(
                     client=_SurrealErrorEnvelopeClient(),
                     plan=plan,
                     search_filter=search_module.SearchFilter(),
@@ -1854,7 +1942,7 @@ async def test_context_search_pushes_facet_types_into_graph_queries(
     async def fake_raw_recall(**_kwargs: object) -> list[RawMemory]:
         raise AssertionError("active-work facet should not recall raw memories")
 
-    monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
 
     response = await search_module.context_search(
         plan=plan,
@@ -1930,9 +2018,9 @@ async def test_context_search_reports_graph_expansion_failure(
     async def fake_graph_expansion(**_kwargs: object) -> list[RetrievalCandidate]:
         raise RuntimeError("bfs unavailable")
 
-    monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
-    monkeypatch.setattr(search_module, "_node_fulltext_candidates", fake_node_fulltext)
-    monkeypatch.setattr(search_module, "_graph_expansion_candidates", fake_graph_expansion)
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(source_module, "_node_fulltext_candidates", fake_node_fulltext)
+    monkeypatch.setattr(expansion_module, "_graph_expansion_candidates", fake_graph_expansion)
 
     response = await search_module.context_search(
         plan=plan,
@@ -1990,7 +2078,7 @@ async def test_context_search_reports_raw_recall_source_failures(
             ),
         )
 
-    monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
 
     response = await search_module.context_search(
         plan=plan,
@@ -2048,9 +2136,9 @@ async def test_context_search_reports_surreal_rrf_fallback(
         return []
 
     monkeypatch.setenv("SIBYL_FUSION_BACKEND", "surreal_rrf")
-    monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
-    monkeypatch.setattr(search_module, "_node_fulltext_candidates", fake_node_fulltext)
-    monkeypatch.setattr(search_module, "_graph_expansion_candidates", fake_graph_expansion)
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(source_module, "_node_fulltext_candidates", fake_node_fulltext)
+    monkeypatch.setattr(expansion_module, "_graph_expansion_candidates", fake_graph_expansion)
 
     response = await search_module.context_search(
         plan=plan,
@@ -2085,7 +2173,7 @@ async def test_graph_expansion_skips_mentions_for_entity_seeds_and_limits_edges(
     )
     client = _GraphExpansionClient()
 
-    candidates = await search_module._graph_expansion_candidates(
+    candidates = await expansion_module._graph_expansion_candidates(
         client=client,
         plan=plan,
         search_filter=search_module.SearchFilter(
@@ -2113,7 +2201,7 @@ async def test_graph_expansion_skips_mentions_for_entity_seeds_and_limits_edges(
         (query, params) for query, params in client.calls if "FROM relates_to" in query
     ]
     assert relation_calls
-    assert relation_calls[0][1]["limit"] == search_module._graph_expansion_fetch_limit(2)
+    assert relation_calls[0][1]["limit"] == expansion_module._graph_expansion_fetch_limit(2)
     assert "LIMIT $limit" in relation_calls[0][0]
 
 
@@ -2131,7 +2219,7 @@ async def test_graph_expansion_uses_mentions_for_episode_seeds_with_limit() -> N
     )
     client = _GraphExpansionClient()
 
-    candidates = await search_module._graph_expansion_candidates(
+    candidates = await expansion_module._graph_expansion_candidates(
         client=client,
         plan=plan,
         search_filter=search_module.SearchFilter(
@@ -2160,7 +2248,7 @@ async def test_graph_expansion_uses_mentions_for_episode_seeds_with_limit() -> N
     mention_calls = [(query, params) for query, params in client.calls if "FROM mentions" in query]
     assert mention_calls
     assert mention_calls[0][1]["episode_uuids"] == ["episode-seed"]
-    assert mention_calls[0][1]["limit"] == search_module._graph_expansion_fetch_limit(2)
+    assert mention_calls[0][1]["limit"] == expansion_module._graph_expansion_fetch_limit(2)
     assert "LIMIT $limit" in mention_calls[0][0]
 
 
@@ -2177,7 +2265,7 @@ async def test_graph_expansion_ranks_typed_edges_above_generic_edges() -> None:
         limit=12,
     )
 
-    candidates = await search_module._graph_expansion_candidates(
+    candidates = await expansion_module._graph_expansion_candidates(
         client=_WeightedGraphExpansionClient(),
         plan=plan,
         search_filter=search_module.SearchFilter(project_ids=("project_123",)),
@@ -2205,7 +2293,7 @@ async def test_graph_expansion_ranks_typed_edges_above_generic_edges() -> None:
     assert candidates[0].metadata["graph_expansion_depth"] == 1
     assert candidates[1].metadata["graph_expansion_relationship"] == "RELATED_TO"
 
-    limited_candidates = await search_module._graph_expansion_candidates(
+    limited_candidates = await expansion_module._graph_expansion_candidates(
         client=_WeightedGraphExpansionClient(),
         plan=plan,
         search_filter=search_module.SearchFilter(project_ids=("project_123",)),
@@ -2243,7 +2331,7 @@ async def test_graph_expansion_keeps_strongest_same_depth_path() -> None:
         limit=12,
     )
 
-    candidates = await search_module._graph_expansion_candidates(
+    candidates = await expansion_module._graph_expansion_candidates(
         client=_OverlappingGraphExpansionClient(),
         plan=plan,
         search_filter=search_module.SearchFilter(project_ids=("project_123",)),
@@ -2293,7 +2381,7 @@ async def test_graph_expansion_applies_depth_decay() -> None:
         graph_expansion_depth=2,
     )
 
-    candidates = await search_module._graph_expansion_candidates(
+    candidates = await expansion_module._graph_expansion_candidates(
         client=_DepthGraphExpansionClient(),
         plan=plan,
         search_filter=search_module.SearchFilter(project_ids=("project_123",)),
@@ -2323,11 +2411,11 @@ async def test_graph_expansion_applies_depth_decay() -> None:
 
 
 def test_graph_expansion_path_score_uses_fallback_and_floor() -> None:
-    assert search_module._graph_expansion_path_score(
+    assert expansion_module._graph_expansion_path_score(
         "UNKNOWN_RELATIONSHIP",
         depth=1,
     ) == pytest.approx(0.64)
-    assert search_module._graph_expansion_path_score(
+    assert expansion_module._graph_expansion_path_score(
         "MENTIONS",
         depth=99,
     ) == pytest.approx(0.1)
@@ -2350,7 +2438,7 @@ async def test_graph_expansion_uses_shared_community_membership() -> None:
     )
     client = _CommunityGraphExpansionClient()
 
-    candidates = await search_module._graph_expansion_candidates(
+    candidates = await expansion_module._graph_expansion_candidates(
         client=client,
         plan=plan,
         search_filter=search_module.SearchFilter(project_ids=("project_123",)),
@@ -2402,7 +2490,7 @@ async def test_vector_candidate_sources_use_embedding_contract() -> None:
     )
     client = _VectorClient()
 
-    node_candidates, edge_candidates = await search_module._vector_candidate_sources(
+    node_candidates, edge_candidates = await source_module._vector_candidate_sources(
         client=client,
         plan=plan,
         search_filter=search_module.SearchFilter(project_ids=("project_123",)),
@@ -2468,7 +2556,7 @@ async def test_candidate_source_gather_reports_failures() -> None:
         [(RetrievalSignal.NODE_FULLTEXT, invalid_graph_source())],
     )
     raw_source, graph_sources, _raw_failures, _raw_metadata = gathered
-    metadata = search_module._candidate_source_metadata((raw_source, *graph_sources))
+    metadata = source_module._candidate_source_metadata((raw_source, *graph_sources))
 
     assert raw_source.degraded is True
     assert graph_sources[0].degraded is True
@@ -2504,7 +2592,7 @@ async def test_vector_candidate_sources_report_embedding_failure() -> None:
         async def embed_texts(self, *_args: object, **_kwargs: object) -> list[list[float]]:
             raise RuntimeError("provider offline")
 
-    result = await search_module._vector_candidate_sources_detailed(
+    result = await source_module._vector_candidate_sources_detailed(
         client=_VectorClient(),
         plan=plan,
         search_filter=search_module.SearchFilter(project_ids=("project_123",)),
@@ -2543,7 +2631,7 @@ async def test_vector_candidate_sources_report_partial_query_failure() -> None:
                 raise RuntimeError("edge index unavailable")
             return await super().execute_query(query, **params)
 
-    result = await search_module._vector_candidate_sources_detailed(
+    result = await source_module._vector_candidate_sources_detailed(
         client=PartiallyFailingVectorClient(),
         plan=plan,
         search_filter=search_module.SearchFilter(project_ids=("project_123",)),
@@ -2560,7 +2648,7 @@ async def test_vector_candidate_sources_report_partial_query_failure() -> None:
 async def test_vector_candidate_sources_use_configured_knn_effort(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(search_module.core_config, "graph_knn_ef", 96)
+    monkeypatch.setattr(source_module.core_config, "graph_knn_ef", 96)
     plan = build_context_retrieval_plan(
         query="native vectors",
         organization_id="org-123",
@@ -2581,7 +2669,7 @@ async def test_vector_candidate_sources_use_configured_knn_effort(
     )
     client = _VectorClient()
 
-    await search_module._vector_candidate_sources(
+    await source_module._vector_candidate_sources(
         client=client,
         plan=plan,
         search_filter=search_module.SearchFilter(project_ids=("project_123",)),
@@ -2602,7 +2690,7 @@ async def test_vector_lanes_raise_knn_effort_to_the_seed_budget(
 ) -> None:
     # An HNSW read returns at most `ef` rows, so a deep-search plan whose seed
     # budget outruns the configured effort would silently come back short.
-    monkeypatch.setattr(search_module.core_config, "graph_knn_ef", 40)
+    monkeypatch.setattr(source_module.core_config, "graph_knn_ef", 40)
     plan = build_context_retrieval_plan(
         query="deep search vectors",
         organization_id="org-123",
@@ -2624,7 +2712,7 @@ async def test_vector_lanes_raise_knn_effort_to_the_seed_budget(
     )
     client = _VectorClient()
 
-    await search_module._vector_candidate_sources(
+    await source_module._vector_candidate_sources(
         client=client,
         plan=plan,
         search_filter=search_module.SearchFilter(project_ids=("project_123",)),
@@ -2636,11 +2724,11 @@ async def test_vector_lanes_raise_knn_effort_to_the_seed_budget(
     assert plan.candidate_limits.node_vector == MAX_RETRIEVAL_LIMIT
     assert f"name_embedding <|{MAX_RETRIEVAL_LIMIT}, {MAX_RETRIEVAL_LIMIT}|>" in node_query
     assert f"fact_embedding <|{MAX_RETRIEVAL_LIMIT}, {MAX_RETRIEVAL_LIMIT}|>" in edge_query
-    assert search_module.knn_search_effort(8, 40) == 40
+    assert source_module.knn_search_effort(8, 40) == 40
 
 
 def test_node_record_candidates_keep_top_level_provenance_metadata() -> None:
-    candidate = search_module._candidate_from_node_record(
+    candidate = candidate_module._candidate_from_node_record(
         {
             "uuid": "procedure-1",
             "name": "Procedure",
@@ -2675,7 +2763,7 @@ def test_node_record_candidates_keep_top_level_provenance_metadata() -> None:
 
 
 def test_edge_record_candidates_keep_top_level_temporal_metadata() -> None:
-    candidate = search_module._candidate_from_edge_record(
+    candidate = candidate_module._candidate_from_edge_record(
         {
             "uuid": "rel-1",
             "name": "SUPPORTS",
@@ -2765,7 +2853,7 @@ async def test_raw_candidates_sort_by_relevance_across_scopes() -> None:
             ),
         ]
 
-    raw_fetch = await search_module._recall_raw_candidates(
+    raw_fetch = await source_module._recall_raw_candidates(
         plan=plan,
         facet=ContextFacet.RECENT_MEMORY,
         requested_types={"session", "episode", "note"},
@@ -2818,7 +2906,7 @@ async def test_raw_candidates_recall_accessible_project_scopes_concurrently() ->
         ]
 
     raw_fetch = await asyncio.wait_for(
-        search_module._recall_raw_candidates(
+        source_module._recall_raw_candidates(
             plan=plan,
             facet=ContextFacet.RECENT_MEMORY,
             requested_types={"raw_memory"},
@@ -2868,7 +2956,7 @@ async def test_raw_candidates_degrade_failed_scope_without_dropping_successes() 
             )
         ]
 
-    raw_fetch = await search_module._recall_raw_candidates(
+    raw_fetch = await source_module._recall_raw_candidates(
         plan=plan,
         facet=ContextFacet.RECENT_MEMORY,
         requested_types={"raw_memory"},
@@ -2916,7 +3004,7 @@ async def test_raw_candidates_propagate_cancelled_scope() -> None:
         ]
 
     with pytest.raises(asyncio.CancelledError):
-        await search_module._recall_raw_candidates(
+        await source_module._recall_raw_candidates(
             plan=plan,
             facet=ContextFacet.RECENT_MEMORY,
             requested_types={"raw_memory"},
@@ -2971,7 +3059,7 @@ async def test_raw_candidates_filter_lifecycle_hidden_memory() -> None:
             ),
         ]
 
-    raw_fetch = await search_module._recall_raw_candidates(
+    raw_fetch = await source_module._recall_raw_candidates(
         plan=plan,
         facet=ContextFacet.RECENT_MEMORY,
         requested_types={"session", "episode", "note"},
@@ -3069,7 +3157,7 @@ async def test_edge_fulltext_splits_matches_from_relation_hydration() -> None:
     )
     client = _EdgeFulltextClient()
 
-    candidates = await search_module._edge_fulltext_candidates(
+    candidates = await source_module._edge_fulltext_candidates(
         client=client,
         plan=plan,
         search_filter=search_module.SearchFilter(
@@ -3114,14 +3202,12 @@ def test_context_search_and_hybrid_share_one_query_coverage_core() -> None:
         is query_ranking_module.rank_items_by_query_coverage
     )
     assert (
-        search_module.rank_items_by_query_coverage
+        fusion_module.rank_items_by_query_coverage
         is query_ranking_module.rank_items_by_query_coverage
     )
 
 
-def test_context_query_coverage_reranks_through_shared_core(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_context_query_coverage_reranks_through_shared_core() -> None:
     """context_search's post-fusion pass calls the shared coverage ranker."""
 
     calls: list[str] = []
@@ -3130,8 +3216,6 @@ def test_context_query_coverage_reranks_through_shared_core(
     def spy(query, items, **kwargs):  # type: ignore[no-untyped-def]
         calls.append(query)
         return real(query, items, **kwargs)
-
-    monkeypatch.setattr(search_module, "rank_items_by_query_coverage", spy)
 
     strong = RetrievalCandidate(
         id="strong",
@@ -3153,10 +3237,11 @@ def test_context_query_coverage_reranks_through_shared_core(
     )
     fused = [_fused_entry(weak, 0.9), _fused_entry(strong, 0.8)]
 
-    reranked = search_module._apply_query_coverage_to_fused(
+    reranked = fusion_module._apply_query_coverage_to_fused(
         "what quarterly billing migration notes did I write",
         fused,
         temporal_target=None,
+        ranker=spy,
     )
 
     assert calls == ["what quarterly billing migration notes did I write"]
@@ -3190,7 +3275,7 @@ def test_context_query_coverage_preserves_base_order_for_thin_query() -> None:
 
     # Single-keyword query: rank_by_query_coverage does not apply, so the
     # shared core returns the prior order unchanged.
-    reranked = search_module._apply_query_coverage_to_fused(
+    reranked = fusion_module._apply_query_coverage_to_fused(
         "coffee",
         fused,
         temporal_target=None,
@@ -3216,16 +3301,12 @@ def test_context_query_coverage_prefers_valid_at_timestamp() -> None:
         captured.append(kwargs["timestamp_fn"](fact))
         return items, False, False
 
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(search_module, "rank_items_by_query_coverage", spy)
-    try:
-        search_module._apply_query_coverage_to_fused(
-            "Which streaming service did I start using most recently?",
-            [_fused_entry(fact, 1.0)],
-            temporal_target=None,
-        )
-    finally:
-        monkeypatch.undo()
+    fusion_module._apply_query_coverage_to_fused(
+        "Which streaming service did I start using most recently?",
+        [_fused_entry(fact, 1.0)],
+        temporal_target=None,
+        ranker=spy,
+    )
 
     assert captured == [datetime(2026, 1, 8, 9, 0, tzinfo=UTC)]
 
@@ -3300,7 +3381,7 @@ def test_context_query_coverage_promotes_projected_fact_card() -> None:
         ),
     ]
 
-    reranked = search_module._apply_query_coverage_to_fused(
+    reranked = fusion_module._apply_query_coverage_to_fused(
         "Which streaming service did I start using most recently?",
         [_fused_entry(candidate, candidate.score) for candidate in candidates],
         temporal_target=datetime(2026, 1, 10, tzinfo=UTC),
@@ -3318,7 +3399,7 @@ def test_scope_decisions_includes_project_less_agent_diary_scope() -> None:
     context packs. The live context-pack eval's agent-diary case caught it.
     """
 
-    decisions = search_module._scope_decisions(
+    decisions = plan_module._scope_decisions(
         principal_id="user-1",
         project=None,
         accessible_projects=frozenset({"project-a", "project-b"}),
@@ -3430,25 +3511,7 @@ def test_record_content_outranks_truncated_attribute_description() -> None:
         "attributes": {"description": _truncated_description(full_content)},
     }
 
-    resolved = search_module._content_for_record(row, row["attributes"])
-
-    assert resolved == full_content
-    assert len(resolved) > 500
-
-
-def test_node_content_outranks_truncated_attribute_description() -> None:
-    full_content = "Full decision body. " * 100
-    attributes = {"description": _truncated_description(full_content)}
-    node = SimpleNamespace(
-        uuid="decision_1",
-        name="Decision",
-        content=full_content,
-        description=_truncated_description(full_content),
-        summary=_truncated_description(full_content),
-        attributes=attributes,
-    )
-
-    resolved = search_module._content_for_node(node, attributes)
+    resolved = candidate_module._content_for_record(row, row["attributes"])
 
     assert resolved == full_content
     assert len(resolved) > 500
@@ -3457,7 +3520,7 @@ def test_node_content_outranks_truncated_attribute_description() -> None:
 def test_node_record_candidate_serves_full_content_over_description() -> None:
     """The reorder has to survive the projection, not just the helper."""
     full_content = "Full decision body. " * 100
-    candidate = search_module._candidate_from_node_record(
+    candidate = candidate_module._candidate_from_node_record(
         {
             "uuid": "decision_1",
             "name": "Decision",
@@ -3485,9 +3548,9 @@ def test_record_content_resolution_falls_back_through_every_carrier() -> None:
         ({}, {}, ""),
     ]
     for row, attributes, expected in cases:
-        assert search_module._content_for_record({**row, "attributes": attributes}, attributes) == (
-            expected
-        )
+        assert candidate_module._content_for_record(
+            {**row, "attributes": attributes}, attributes
+        ) == (expected)
 
 
 def test_record_content_resolution_skips_empty_carriers() -> None:
@@ -3495,23 +3558,9 @@ def test_record_content_resolution_skips_empty_carriers() -> None:
     row = {"content": "", "description": "", "summary": "row summary"}
     attributes: dict[str, object] = {"content": "", "description": ""}
 
-    assert search_module._content_for_record({**row, "attributes": attributes}, attributes) == (
+    assert candidate_module._content_for_record({**row, "attributes": attributes}, attributes) == (
         "row summary"
     )
-
-
-def test_node_content_resolution_falls_back_through_every_carrier() -> None:
-    cases: list[tuple[dict[str, object], dict[str, object], str]] = [
-        ({"content": "node content"}, {}, "node content"),
-        ({}, {"content": "attribute content"}, "attribute content"),
-        ({}, {"description": "attribute description"}, "attribute description"),
-        ({"description": "node description"}, {}, "node description"),
-        ({"summary": "node summary"}, {}, "node summary"),
-        ({}, {}, ""),
-    ]
-    for fields, attributes, expected in cases:
-        node = SimpleNamespace(attributes=attributes, **fields)
-        assert search_module._content_for_node(node, attributes) == expected
 
 
 def test_record_content_column_outranks_attribute_content_copy() -> None:
@@ -3524,14 +3573,7 @@ def test_record_content_column_outranks_attribute_content_copy() -> None:
     attributes = {"content": "attribute copy"}
     row = {"uuid": "entity_1", "content": "canonical column", "attributes": attributes}
 
-    assert search_module._content_for_record(row, attributes) == "canonical column"
-
-
-def test_node_content_resolution_skips_empty_carriers() -> None:
-    node = SimpleNamespace(content="", description="", summary="node summary")
-    attributes: dict[str, object] = {"content": "", "description": ""}
-
-    assert search_module._content_for_node(node, attributes) == "node summary"
+    assert candidate_module._content_for_record(row, attributes) == "canonical column"
 
 
 @pytest.mark.asyncio
@@ -3594,7 +3636,7 @@ async def test_restamped_span_stops_surfacing_through_search() -> None:
 
     def surfaces_for(principal_id: str) -> bool:
         span = manager.entities[span_id]
-        candidate = search_module._candidate_from_node_record(
+        candidate = candidate_module._candidate_from_node_record(
             {
                 "uuid": span.id,
                 "name": span.name,
@@ -3606,7 +3648,7 @@ async def test_restamped_span_stops_surfacing_through_search() -> None:
             signal=RetrievalSignal.NODE_FULLTEXT,
             score=1.0,
         )
-        return search_module._candidate_allowed(
+        return candidate_module._candidate_allowed(
             candidate,
             plan=_plan_for(principal_id, "project_123"),
             requested_types=set(),
