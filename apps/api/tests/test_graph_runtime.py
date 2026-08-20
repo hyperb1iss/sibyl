@@ -61,6 +61,23 @@ class _StatsPayloadClient:
 
 
 @pytest.mark.asyncio
+async def test_graph_entity_store_get_many_delegates_large_inputs_once() -> None:
+    entity_ids = [f"entity-{index}" for index in range(512)]
+    entity = Entity(id="entity-0", entity_type=EntityType.NOTE, name="First")
+    manager = SimpleNamespace(
+        get=AsyncMock(),
+        get_many=AsyncMock(return_value=[entity]),
+    )
+    store = graph_runtime.GraphEntityStore(manager, driver=object(), group_id="org-123")
+
+    entities = await store.get_many(entity_ids)
+
+    assert entities == [entity]
+    manager.get_many.assert_awaited_once_with(entity_ids)
+    manager.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_delete_project_graph_data_sweeps_project_scoped_graph(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
