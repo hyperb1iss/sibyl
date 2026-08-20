@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from importlib.util import find_spec
 
 import pytest
 
@@ -12,7 +13,6 @@ import pytest
     [
         "sibyl.persistence.auth_archive",
         "sibyl.persistence.content_archive",
-        "sibyl.auth.rls",
     ],
 )
 def test_storage_neutral_imports_do_not_load_relational_stack(module_name: str) -> None:
@@ -33,3 +33,8 @@ def test_storage_neutral_imports_do_not_load_relational_stack(module_name: str) 
     )
 
     assert json.loads(result.stdout) == {"db": False, "sqlalchemy": False}
+
+
+@pytest.mark.parametrize("module_name", ["sibyl.auth.rls", "sibyl.cache"])
+def test_retired_runtime_modules_are_absent(module_name: str) -> None:
+    assert find_spec(module_name) is None

@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 from starlette.requests import Request
 
-from sibyl.auth import dependencies, rls
+from sibyl.auth import dependencies
 from sibyl_core.auth import OrganizationRole
 
 
@@ -319,57 +319,3 @@ async def test_get_current_user_ignores_cached_auth_context_for_other_user(
         session=None,
     )
     get_user_by_id.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_get_auth_session_uses_surreal_context_without_postgres(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    user_id = uuid4()
-    org_id = uuid4()
-    request = _make_request(user_id=str(user_id), org_id=str(org_id))
-    expected_ctx = SimpleNamespace(
-        user=SimpleNamespace(id=user_id),
-        organization=SimpleNamespace(id=org_id),
-    )
-
-    build_auth_context = AsyncMock(return_value=expected_ctx)
-
-    monkeypatch.setattr(dependencies.settings, "auth_store", "surreal")
-    monkeypatch.setattr(dependencies, "build_auth_context", build_auth_context)
-
-    generator = rls.get_auth_session(request)
-    auth_session = await anext(generator)
-
-    assert auth_session.ctx is expected_ctx
-    assert auth_session.session is None
-    build_auth_context.assert_awaited_once_with(request, None)
-
-    with pytest.raises(StopAsyncIteration):
-        await anext(generator)
-
-
-@pytest.mark.asyncio
-async def test_get_auth_session_uses_plain_context_when_auth_is_surreal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    user_id = uuid4()
-    org_id = uuid4()
-    request = _make_request(user_id=str(user_id), org_id=str(org_id))
-    expected_ctx = SimpleNamespace(
-        user=SimpleNamespace(id=user_id),
-        organization=SimpleNamespace(id=org_id),
-    )
-    build_auth_context = AsyncMock(return_value=expected_ctx)
-
-    monkeypatch.setattr(dependencies, "build_auth_context", build_auth_context)
-
-    generator = rls.get_auth_session(request)
-    auth_session = await anext(generator)
-
-    assert auth_session.ctx is expected_ctx
-    assert auth_session.session is None
-    build_auth_context.assert_awaited_once_with(request, None)
-
-    with pytest.raises(StopAsyncIteration):
-        await anext(generator)
