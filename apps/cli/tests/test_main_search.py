@@ -4,11 +4,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from typer.testing import CliRunner
 
-from sibyl_cli.main import (
+from sibyl_cli.main import app
+from sibyl_cli.memory_views import (
     SEARCH_PREVIEW_CHARS,
-    _format_highlight_preview,
+    format_highlight_preview,
     _format_search_preview,
-    app,
 )
 
 
@@ -36,7 +36,7 @@ def test_format_search_preview_keeps_more_context() -> None:
 
 
 def test_format_highlight_preview_renders_mark_tags_as_rich_markup() -> None:
-    preview = _format_highlight_preview("alpha <mark>beta</mark> gamma", "ignored")
+    preview = format_highlight_preview("alpha <mark>beta</mark> gamma", "ignored")
 
     assert "<mark>" not in preview
     assert "</mark>" not in preview
@@ -44,8 +44,8 @@ def test_format_highlight_preview_renders_mark_tags_as_rich_markup() -> None:
     assert "beta" in preview
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.recall.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.recall.get_client")
 def test_search_command_renders_longer_previews(
     mock_get_client: MagicMock, mock_resolve_project_from_cwd: MagicMock
 ) -> None:
@@ -88,8 +88,8 @@ def test_search_command_renders_longer_previews(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.recall.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.recall.get_client")
 def test_search_command_can_search_graph_only(
     mock_get_client: MagicMock, mock_resolve_project_from_cwd: MagicMock
 ) -> None:
@@ -112,8 +112,8 @@ def test_search_command_can_search_graph_only(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.recall.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.recall.get_client")
 def test_search_command_labels_raw_memory_results(
     mock_get_client: MagicMock, mock_resolve_project_from_cwd: MagicMock
 ) -> None:
@@ -143,8 +143,8 @@ def test_search_command_labels_raw_memory_results(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.recall.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.recall.get_client")
 def test_search_command_can_search_docs_only(
     mock_get_client: MagicMock, mock_resolve_project_from_cwd: MagicMock
 ) -> None:
@@ -167,8 +167,8 @@ def test_search_command_can_search_docs_only(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.recall.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.recall.get_client")
 def test_search_command_forwards_as_of(
     mock_get_client: MagicMock, mock_resolve_project_from_cwd: MagicMock
 ) -> None:
@@ -208,9 +208,9 @@ def test_search_command_rejects_docs_only_graph_type() -> None:
     assert "--docs-only can only be combined with --type document" in result.stdout
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.console.print")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.recall.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.recall.console.print")
+@patch("sibyl_cli.recall.get_client")
 def test_search_command_soft_wraps_previews(
     mock_get_client: MagicMock,
     mock_console_print: MagicMock,
@@ -240,8 +240,8 @@ def test_search_command_soft_wraps_previews(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.recall.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.recall.get_client")
 def test_search_alias_returns_context_pack(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -271,8 +271,8 @@ def test_search_alias_returns_context_pack(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.recall.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.recall.get_client")
 def test_recall_command_can_render_raw_memories(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -316,8 +316,8 @@ def test_recall_command_can_render_raw_memories(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.recall.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.recall.get_client")
 def test_recall_command_forwards_raw_metadata_filters(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -367,8 +367,8 @@ def test_recall_command_forwards_raw_metadata_filters(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.recall.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.recall.get_client")
 def test_recall_command_can_render_agent_diary(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -411,8 +411,8 @@ def test_recall_command_can_render_agent_diary(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.recall.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.recall.get_client")
 def test_recall_command_diary_requires_agent(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,

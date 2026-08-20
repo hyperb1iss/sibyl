@@ -8,7 +8,9 @@ import pytest
 from typer.testing import CliRunner
 
 from sibyl_cli.client import SibylClient, SibylClientError
-from sibyl_cli.main import _derive_capture_title, _parse_id_args, app
+from sibyl_cli.command_support import parse_id_args
+from sibyl_cli.capture_support import derive_capture_title
+from sibyl_cli.main import app
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -39,7 +41,7 @@ def _strip_ansi(text: str) -> str:
 
 
 def test_derive_capture_title_truncates_cleanly() -> None:
-    title = _derive_capture_title("  shipped   a fix for the archived paging bug " * 3)
+    title = derive_capture_title("  shipped   a fix for the archived paging bug " * 3)
 
     assert "  " not in title
     assert len(title) <= 72
@@ -47,15 +49,15 @@ def test_derive_capture_title_truncates_cleanly() -> None:
 
 
 def test_parse_id_args_accepts_csv_and_positional_values() -> None:
-    assert _parse_id_args(["raw-1,raw-2", "raw-2", "raw-3"]) == [
+    assert parse_id_args(["raw-1,raw-2", "raw-2", "raw-3"]) == [
         "raw-1",
         "raw-2",
         "raw-3",
     ]
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory_admin.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory_admin.get_client")
 def test_cite_command_records_cited_memories(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -87,8 +89,8 @@ def test_cite_command_records_cited_memories(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory_admin.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.memory_admin.get_client")
 def test_cite_command_records_misleading_feedback(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -427,8 +429,8 @@ async def test_synthesis_draft_client_posts_remember_contract() -> None:
     assert payload["tags"] == ["roadmap"]
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.capture.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.capture.get_client")
 def test_capture_command_derives_title_and_marks_quick_capture(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -451,8 +453,8 @@ def test_capture_command_derives_title_and_marks_quick_capture(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.capture.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.capture.get_client")
 def test_capture_command_title_override_wins(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -476,8 +478,8 @@ def test_capture_command_title_override_wins(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.memory.get_client")
 def test_add_command_waits_for_direct_readiness(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -521,8 +523,8 @@ def test_add_alias_rejects_conflicting_kind_flags() -> None:
     assert "--kind and the legacy --type alias must match" in explicit_default.stdout
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.capture.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.capture.get_client")
 def test_add_command_can_skip_conflict_detection(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -548,8 +550,8 @@ def test_add_command_can_skip_conflict_detection(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.capture.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.capture.get_client")
 def test_add_command_accepts_title_and_content_options(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -573,8 +575,8 @@ def test_add_command_accepts_title_and_content_options(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.capture.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.capture.get_client")
 def test_add_command_reads_content_from_stdin(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -591,8 +593,8 @@ def test_add_command_reads_content_from_stdin(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory.get_client")
 def test_add_command_uses_full_memory_pipeline_with_active_task_link(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -626,7 +628,7 @@ def test_add_command_uses_full_memory_pipeline_with_active_task_link(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.capture.get_client")
 def test_capture_command_rejects_symlink_content_file(
     mock_get_client: MagicMock,
     tmp_path: Path,
@@ -647,8 +649,8 @@ def test_capture_command_rejects_symlink_content_file(
     mock_client.create_entity.assert_not_called()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.capture.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.capture.get_client")
 def test_capture_command_waits_for_direct_readiness(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -677,8 +679,8 @@ def test_capture_command_waits_for_direct_readiness(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.capture.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.capture.get_client")
 def test_capture_command_uses_full_memory_pipeline_with_task_flags(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -710,7 +712,7 @@ def test_capture_command_uses_full_memory_pipeline_with_task_flags(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.capture.get_client")
 def test_note_alias_routes_task_ids_to_task_notes(mock_get_client: MagicMock) -> None:
     mock_client = MagicMock()
     mock_client.create_note = AsyncMock(return_value={"id": "note_123"})
@@ -732,8 +734,8 @@ def test_note_alias_routes_task_ids_to_task_notes(mock_get_client: MagicMock) ->
     assert "Note added: note_123" in result.stdout
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.capture.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.capture.get_client")
 def test_note_alias_routes_free_notes_to_remember_note(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -755,8 +757,8 @@ def test_note_alias_routes_free_notes_to_remember_note(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory.get_client")
 def test_remember_command_records_domain_memory_with_links(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -860,8 +862,8 @@ def test_remember_command_records_domain_memory_with_links(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory.get_client")
 def test_remember_command_accepts_content_option(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -883,8 +885,8 @@ def test_remember_command_accepts_content_option(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory.get_client")
 def test_remember_command_reads_content_file(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -910,8 +912,8 @@ def test_remember_command_reads_content_file(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory.get_client")
 def test_remember_command_writes_project_raw_source_before_graph_entity(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -963,8 +965,8 @@ def test_remember_command_writes_project_raw_source_before_graph_entity(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.memory.get_client")
 def test_remember_command_reads_body_from_stdin(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1008,8 +1010,8 @@ def test_remember_command_reads_body_from_stdin(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.memory.get_client")
 def test_remember_command_forwards_repeated_retrieval_keys(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1048,8 +1050,8 @@ def test_remember_command_forwards_repeated_retrieval_keys(
     assert mock_resolve_project_from_cwd.called
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.memory.get_client")
 def test_remember_command_accepts_gotcha_alias(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1075,8 +1077,8 @@ def test_remember_command_accepts_gotcha_alias(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd")
+@patch("sibyl_cli.memory.get_client")
 def test_remember_command_rejects_invalid_kind_before_api(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1099,8 +1101,8 @@ def test_remember_command_rejects_invalid_kind_before_api(
     mock_resolve_project_from_cwd.assert_not_called()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory.get_client")
 def test_remember_command_can_store_raw_memory(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1151,8 +1153,8 @@ def test_remember_command_can_store_raw_memory(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.memory.get_client")
 def test_remember_command_records_capture_flags_for_raw_and_graph(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1200,8 +1202,8 @@ def test_remember_command_records_capture_flags_for_raw_and_graph(
         ("--propose-scope", "public", ("team",)),
     ],
 )
-@patch("sibyl_cli.main.resolve_project_from_cwd")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd")
+@patch("sibyl_cli.memory.get_client")
 def test_remember_command_rejects_invalid_capture_flags_before_api(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1228,8 +1230,8 @@ def test_remember_command_rejects_invalid_capture_flags_before_api(
     mock_resolve_project_from_cwd.assert_not_called()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory.get_client")
 def test_remember_command_can_store_agent_diary(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1275,8 +1277,8 @@ def test_remember_command_can_store_agent_diary(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory.get_client")
 def test_remember_command_diary_requires_agent(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1294,8 +1296,8 @@ def test_remember_command_diary_requires_agent(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_from_path")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_from_path")
+@patch("sibyl_cli.memory.get_client")
 def test_remember_command_project_option_overrides_path_context(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1335,8 +1337,8 @@ def test_remember_command_project_option_overrides_path_context(
     mock_resolve_project_from_cwd.assert_not_called()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value=None)
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value=None)
+@patch("sibyl_cli.memory.get_client")
 def test_remember_command_project_slug_resolves_to_accessible_project(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1371,8 +1373,8 @@ def test_remember_command_project_slug_resolves_to_accessible_project(
     mock_resolve_project_from_cwd.assert_not_called()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory.get_client")
 def test_remember_command_auto_links_single_active_project_task(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1405,8 +1407,8 @@ def test_remember_command_auto_links_single_active_project_task(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory.get_client")
 def test_remember_command_skips_ambiguous_active_project_tasks(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1440,8 +1442,8 @@ def test_remember_command_skips_ambiguous_active_project_tasks(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory.get_client")
 def test_remember_command_explicit_task_links_and_no_active_task(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1477,8 +1479,8 @@ def test_remember_command_explicit_task_links_and_no_active_task(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.recall.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.recall.get_client")
 def test_recall_command_outputs_markdown_context(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1513,8 +1515,8 @@ def test_recall_command_outputs_markdown_context(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.recall.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.recall.get_client")
 def test_recall_command_accepts_review_intent(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1532,8 +1534,8 @@ def test_recall_command_accepts_review_intent(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.recall.resolve_project_from_cwd")
+@patch("sibyl_cli.recall.get_client")
 def test_recall_command_rejects_invalid_intent_before_api(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1554,8 +1556,8 @@ def test_recall_command_rejects_invalid_intent_before_api(
     mock_resolve_project_from_cwd.assert_not_called()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.recall.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.recall.get_client")
 def test_recall_command_reports_project_access_denied(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1581,8 +1583,8 @@ def test_recall_command_reports_project_access_denied(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.synthesis.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.synthesis.get_client")
 def test_synthesis_plan_command_outputs_section_summary(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1675,8 +1677,8 @@ def test_synthesis_plan_command_outputs_section_summary(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.synthesis.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.synthesis.get_client")
 def test_synthesis_draft_command_outputs_markdown(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1703,8 +1705,8 @@ def test_synthesis_draft_command_outputs_markdown(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.synthesis.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.synthesis.get_client")
 def test_synthesis_remember_command_requests_artifact_persistence(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -1749,7 +1751,7 @@ def test_synthesis_remember_command_requests_artifact_persistence(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory_admin.get_client")
 def test_memory_audit_command_lists_events(mock_get_client: MagicMock) -> None:
     mock_client = MagicMock()
     mock_client.memory_audit = AsyncMock(
@@ -1804,7 +1806,7 @@ def test_memory_audit_command_lists_events(mock_get_client: MagicMock) -> None:
     )
 
 
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory_admin.get_client")
 def test_memory_inspect_command_renders_source_summary(mock_get_client: MagicMock) -> None:
     mock_client = MagicMock()
     mock_client.resolve_id_prefix = AsyncMock(return_value={"matches": [{"id": "memory-1"}]})
@@ -1848,7 +1850,7 @@ def test_memory_inspect_command_renders_source_summary(mock_get_client: MagicMoc
     mock_client.memory_inspect.assert_awaited_once_with("memory-1")
 
 
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory_admin.get_client")
 def test_correct_command_applies_user_facing_action_and_prints_receipt(
     mock_get_client: MagicMock,
 ) -> None:
@@ -1891,7 +1893,7 @@ def test_correct_command_applies_user_facing_action_and_prints_receipt(
     )
 
 
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory_admin.get_client")
 def test_correct_command_renders_revision_and_lineage_history(
     mock_get_client: MagicMock,
 ) -> None:
@@ -1949,7 +1951,7 @@ def test_correct_command_renders_revision_and_lineage_history(
     mock_client.memory_blame.assert_awaited_once_with("memory-1")
 
 
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory_admin.get_client")
 def test_memory_import_status_command_renders_import_receipts(mock_get_client: MagicMock) -> None:
     mock_client = MagicMock()
     mock_client.source_import_status = AsyncMock(
@@ -1988,7 +1990,7 @@ def test_memory_import_status_command_renders_import_receipts(mock_get_client: M
     mock_client.source_import_status.assert_awaited_once_with("import/run:1")
 
 
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory_admin.get_client")
 def test_memory_inspect_command_outputs_json(mock_get_client: MagicMock) -> None:
     mock_client = MagicMock()
     mock_client.resolve_id_prefix = AsyncMock(return_value={"matches": [{"id": "memory-1"}]})
@@ -2109,8 +2111,8 @@ def test_show_command_renders_graph_entity(mock_get_client: MagicMock) -> None:
     mock_client.memory_inspect.assert_not_called()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory_admin.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory_admin.get_client")
 def test_memory_promote_preview_command_renders_decision(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -2171,8 +2173,8 @@ def test_memory_promote_preview_command_renders_decision(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory_admin.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory_admin.get_client")
 def test_memory_promote_apply_command_renders_result(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -2224,8 +2226,8 @@ def test_memory_promote_apply_command_renders_result(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory_admin.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory_admin.get_client")
 def test_memory_promote_auto_command_renders_decision(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -2295,7 +2297,7 @@ def test_memory_promote_auto_command_renders_decision(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory_admin.get_client")
 def test_memory_promote_without_preview_is_denied(mock_get_client: MagicMock) -> None:
     runner = CliRunner()
     result = runner.invoke(app, ["admin", "memory", "promote", "candidate-1"])
@@ -2305,8 +2307,8 @@ def test_memory_promote_without_preview_is_denied(mock_get_client: MagicMock) ->
     mock_get_client.assert_not_called()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory_review.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory_review.get_client")
 def test_memory_review_drain_command_renders_summary(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -2388,7 +2390,7 @@ def test_memory_review_drain_command_renders_summary(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory_review.get_client")
 def test_memory_review_dream_command_queues_dry_run(mock_get_client: MagicMock) -> None:
     mock_client = MagicMock()
     mock_client.enqueue_reflection_dream_cycle = AsyncMock(
@@ -2429,7 +2431,7 @@ def test_memory_review_dream_command_queues_dry_run(mock_get_client: MagicMock) 
     )
 
 
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory_review.get_client")
 def test_memory_review_dream_command_apply_queues_mutating_run(
     mock_get_client: MagicMock,
 ) -> None:
@@ -2457,7 +2459,7 @@ def test_memory_review_dream_command_apply_queues_mutating_run(
     )
 
 
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory_review.get_client")
 def test_memory_review_status_renders_runs_and_receipts(mock_get_client: MagicMock) -> None:
     mock_client = MagicMock()
     mock_client.list_jobs = AsyncMock(
@@ -2532,8 +2534,8 @@ def test_memory_review_status_renders_runs_and_receipts(mock_get_client: MagicMo
     assert mock_client.memory_audit.await_count == 2
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory_admin.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory_admin.get_client")
 def test_memory_share_preview_command_renders_redactions(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -2594,8 +2596,8 @@ def test_memory_share_preview_command_renders_redactions(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory_admin.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory_admin.get_client")
 def test_memory_share_applies_with_apply(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -2646,8 +2648,8 @@ def test_memory_share_applies_with_apply(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory_admin.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory_admin.get_client")
 def test_memory_share_defaults_to_preview(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -2691,7 +2693,7 @@ def test_memory_share_defaults_to_preview(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory_space.get_client")
 def test_memory_space_preview_agent_command_renders_access(
     mock_get_client: MagicMock,
 ) -> None:
@@ -2745,7 +2747,7 @@ def test_memory_space_preview_agent_command_renders_access(
     )
 
 
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.team.get_client")
 def test_team_create_command_renders_memory_scope_key(mock_get_client: MagicMock) -> None:
     mock_client = MagicMock()
     mock_client.create_team = AsyncMock(
@@ -2779,7 +2781,7 @@ def test_team_create_command_renders_memory_scope_key(mock_get_client: MagicMock
     )
 
 
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.team.get_client")
 def test_team_link_project_command_calls_client(mock_get_client: MagicMock) -> None:
     mock_client = MagicMock()
     mock_client.link_team_project = AsyncMock(
@@ -2816,8 +2818,8 @@ def test_team_link_project_command_calls_client(mock_get_client: MagicMock) -> N
     )
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.recall.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.recall.get_client")
 def test_recall_command_can_request_agent_diary_context(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -2846,8 +2848,8 @@ def test_recall_command_can_request_agent_diary_context(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory.get_client")
 def test_reflect_command_outputs_markdown_candidates(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -2912,8 +2914,8 @@ def test_reflect_command_outputs_markdown_candidates(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory.get_client")
 def test_reflect_command_passes_cited_ids(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -2949,8 +2951,8 @@ def test_reflect_command_passes_cited_ids(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory.get_client")
 def test_reflect_command_reads_notes_from_stdin(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -2987,8 +2989,8 @@ def test_reflect_command_reads_notes_from_stdin(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory.get_client")
 def test_reflect_command_can_persist_candidates_without_source(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -3047,8 +3049,8 @@ def test_reflect_command_can_persist_candidates_without_source(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory.get_client")
 def test_reflect_command_persist_auto_links_single_active_project_task(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -3086,8 +3088,8 @@ def test_reflect_command_persist_auto_links_single_active_project_task(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory.get_client")
 def test_reflect_command_can_persist_review_queue(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -3123,8 +3125,8 @@ def test_reflect_command_can_persist_review_queue(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.memory.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.memory.get_client")
 def test_reflect_command_explicit_task_links_and_no_active_task(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
@@ -3167,8 +3169,8 @@ def test_reflect_command_explicit_task_links_and_no_active_task(
     mock_resolve_project_from_cwd.assert_called_once_with()
 
 
-@patch("sibyl_cli.main.resolve_project_from_cwd", return_value="project_123")
-@patch("sibyl_cli.main.get_client")
+@patch("sibyl_cli.recall.resolve_project_from_cwd", return_value="project_123")
+@patch("sibyl_cli.recall.get_client")
 def test_brief_command_prints_markdown_only(
     mock_get_client: MagicMock,
     mock_resolve_project_from_cwd: MagicMock,
