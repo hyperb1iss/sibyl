@@ -461,9 +461,8 @@ frontend:
 
 ## Worker Configuration
 
-The chart renders this deployment only when both `worker.enabled` is true and
-`coordinationBackend` is `redis`. Local and auto coordination keep job execution in the API
-process.
+The chart renders this deployment only when both `worker.enabled` is true and `coordinationBackend`
+is `redis`. Local and auto coordination keep job execution in the API process.
 
 ```yaml
 worker:
