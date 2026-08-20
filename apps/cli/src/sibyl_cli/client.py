@@ -662,9 +662,13 @@ class SibylClient:
         refresh_failure: str | None = None
 
         # Proactively refresh if token is about to expire.
-        if self.auth_token and is_access_token_expired(
-            self.base_url,
-            credential_scope=self.credential_scope,
+        if (
+            self._uses_stored_auth
+            and self.auth_token
+            and is_access_token_expired(
+                self.base_url,
+                credential_scope=self.credential_scope,
+            )
         ):
             refreshed, refresh_failure = await self._refresh_token()
             if not refreshed:

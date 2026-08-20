@@ -4,6 +4,7 @@ import time
 from contextlib import contextmanager
 from typing import Any
 
+import httpx
 import pytest
 
 from sibyl_cli import client as client_module
@@ -41,6 +42,40 @@ async def test_refresh_skips_manual_auth_token() -> None:
 
     assert refreshed is False
     assert failure == "Automatic renewal is only available for stored CLI login tokens."
+
+
+@pytest.mark.asyncio
+async def test_environment_token_ignores_expired_stored_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SIBYL_AUTH_TOKEN", "automation-token")
+
+    def unexpected_stored_expiry_check(*_args: object, **_kwargs: object) -> bool:
+        raise AssertionError("environment auth must not read stored expiry metadata")
+
+    monkeypatch.setattr(
+        client_module,
+        "is_access_token_expired",
+        unexpected_stored_expiry_check,
+    )
+    seen_authorization: list[str] = []
+
+    def authorized(request: httpx.Request) -> httpx.Response:
+        seen_authorization.append(request.headers["Authorization"])
+        return httpx.Response(200, json={"ok": True})
+
+    client = SibylClient(base_url="http://example.test/api")
+    client._client = httpx.AsyncClient(
+        base_url=client.base_url,
+        transport=httpx.MockTransport(authorized),
+        headers=client._default_headers(),
+    )
+
+    result = await client.get("/entities")
+
+    await client.close()
+    assert result == {"ok": True}
+    assert seen_authorization == ["Bearer automation-token"]
 
 
 @pytest.mark.asyncio
