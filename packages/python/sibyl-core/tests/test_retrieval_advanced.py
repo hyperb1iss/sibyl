@@ -2812,6 +2812,8 @@ class TestGraphTraversal:
                 "lifecycle_dropped": 1,
                 "superseded_dropped": 1,
                 "superseded_uuids": ["edge_retired"],
+                "checked_candidates": 2,
+                "edge_rows_read": 1,
             }
         }
         assert superseded_lookup.await_args.kwargs["uuids"] == [
@@ -2825,10 +2827,11 @@ class TestGraphTraversal:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         edge_only_retired = make_entity_for_test("edge_only_retired")
+        superseded_lookup = AsyncMock(side_effect=RuntimeError("surreal is unhappy"))
         monkeypatch.setattr(
             search_module,
             "_superseded_candidate_uuids",
-            AsyncMock(side_effect=RuntimeError("surreal is unhappy")),
+            superseded_lookup,
         )
 
         with pytest.raises(RuntimeError, match="hybrid supersession lifecycle lookup failed"):
@@ -2837,6 +2840,7 @@ class TestGraphTraversal:
                 client=object(),
                 group_id="org-123",
             )
+        superseded_lookup.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_graph_traversal_keeps_strongest_same_tier_parent_edge(

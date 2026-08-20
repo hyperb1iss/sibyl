@@ -2179,6 +2179,44 @@ class TestSearchTool:
         ]
 
     @pytest.mark.asyncio
+    async def test_search_drops_graph_source_when_lifecycle_lookup_fails(self) -> None:
+        search_module = import_module("sibyl_core.tools.search")
+        unchecked = MockEntity(
+            id="edge_only_retired",
+            entity_type=EntityType.PATTERN,
+            name="Unchecked retired pattern",
+            description="The edge lookup must decide whether this row is current.",
+        )
+        entity_manager = AsyncMock()
+        entity_manager.search = AsyncMock(return_value=[(unchecked, 0.9)])
+        entity_manager.search_exact_name = AsyncMock(return_value=[])
+
+        with (
+            patch(
+                "sibyl_core.tools.search.get_graph_runtime",
+                AsyncMock(return_value=make_graph_runtime(entity_manager=entity_manager)),
+            ),
+            patch(
+                "sibyl_core.tools.search._apply_current_entity_gate",
+                AsyncMock(side_effect=RuntimeError("lifecycle lookup failed")),
+            ),
+        ):
+            response = await search_module.search(
+                query="retired pattern",
+                types=["pattern"],
+                organization_id="org_123",
+                include_documents=False,
+                include_raw_memory=False,
+                use_enhanced=False,
+            )
+
+        assert response.results == []
+        assert response.graph_count == 0
+        assert response.filters["search_source_failures"] == [
+            {"source": "graph", "error_type": "RuntimeError"}
+        ]
+
+    @pytest.mark.asyncio
     async def test_search_hybrid_failure_reports_degraded_source_after_fallback(self) -> None:
         search_module = import_module("sibyl_core.tools.search")
         fallback = MockEntity(

@@ -919,41 +919,27 @@ def test_dict_shaped_lifecycle_flags_are_not_read_as_set_flags() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_truncated_supersession_check_fails_closed(
+async def test_supersession_lookup_batches_every_candidate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Candidates beyond the complete lookup limit cannot receive a verdict."""
+    """A wide result set is checked completely without turning width into an outage."""
 
-    monkeypatch.setattr(search_module, "_SUPERSESSION_LOOKUP_LIMIT", 2)
+    monkeypatch.setattr(search_module, "_SUPERSESSION_LOOKUP_BATCH_SIZE", 2)
+    client = SimpleNamespace(execute_query=AsyncMock(return_value=[]))
 
-    async def empty_lookup(*_args: object, **_kwargs: object) -> tuple[set[str], int]:
-        return set(), 0
+    superseded, edge_count = await search_module._superseded_candidate_uuids(
+        client,
+        group_id="org-123",
+        uuids=[f"entity-{index}" for index in range(5)],
+    )
 
-    monkeypatch.setattr(search_module, "_superseded_candidate_uuids", empty_lookup)
-
-    def candidate(identifier: str) -> RetrievalCandidate:
-        return RetrievalCandidate(
-            id=identifier,
-            type="decision",
-            name=identifier,
-            content="body",
-            score=1.0,
-            source=None,
-            metadata={},
-            project_id="project_123",
-        )
-
-    with pytest.raises(RuntimeError, match="cannot completely check 5 candidates"):
-        await search_module._apply_supersession_gate(
-            client=_SupersessionGraphClient(),
-            group_id="org-123",
-            source_lists=[
-                (
-                    RetrievalSignal.NODE_FULLTEXT,
-                    [candidate(f"entity-{index}") for index in range(5)],
-                )
-            ],
-        )
+    assert superseded == set()
+    assert edge_count == 0
+    assert [call.kwargs["uuids"] for call in client.execute_query.await_args_list] == [
+        ["entity-0", "entity-1"],
+        ["entity-2", "entity-3"],
+        ["entity-4"],
+    ]
 
 
 @pytest.mark.asyncio
@@ -1157,41 +1143,35 @@ async def test_a_refused_target_is_reported_rather_than_silently_skipped(
 
 
 @pytest.mark.asyncio
-async def test_the_row_cap_fails_closed_even_when_dedup_hides_it(
+async def test_supersession_lookup_pages_every_inbound_edge(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """One retired row can carry many inbound edges, so rows bind before uuids do."""
+    """Many declarations for one row are consumed instead of capped or truncated."""
 
-    monkeypatch.setattr(search_module, "_SUPERSESSION_LOOKUP_LIMIT", 4)
+    monkeypatch.setattr(search_module, "_SUPERSESSION_EDGE_PAGE_SIZE", 2)
+    pages = [
+        [
+            {
+                "uuid": f"edge-{index}",
+                "target_id": "entity-retired",
+                "source_id": f"replacement-{index}",
+                "created_at": f"2026-01-01T00:00:0{index}+00:00",
+            }
+            for index in range(start, end)
+        ]
+        for start, end in ((0, 2), (2, 4), (4, 5))
+    ]
+    client = SimpleNamespace(execute_query=AsyncMock(side_effect=pages))
 
-    async def saturated_lookup(*_args: object, **_kwargs: object) -> tuple[set[str], int]:
-        # Five rows read, all pointing at the same retired row.
-        return {"entity-retired"}, 5
+    superseded, edge_count = await search_module._superseded_candidate_uuids(
+        client,
+        group_id="org-123",
+        uuids=["entity-retired"],
+    )
 
-    monkeypatch.setattr(search_module, "_superseded_candidate_uuids", saturated_lookup)
-
-    with pytest.raises(RuntimeError, match="incomplete edge set"):
-        await search_module._apply_supersession_gate(
-            client=_SupersessionGraphClient(),
-            group_id="org-123",
-            source_lists=[
-                (
-                    RetrievalSignal.NODE_FULLTEXT,
-                    [
-                        RetrievalCandidate(
-                            id="entity-retired",
-                            type="decision",
-                            name="retired",
-                            content="body",
-                            score=1.0,
-                            source=None,
-                            metadata={},
-                            project_id="project_123",
-                        )
-                    ],
-                )
-            ],
-        )
+    assert superseded == {"entity-retired"}
+    assert edge_count == 5
+    assert [call.kwargs["start"] for call in client.execute_query.await_args_list] == [0, 2, 4]
 
 
 def test_a_self_supersession_retires_nothing() -> None:

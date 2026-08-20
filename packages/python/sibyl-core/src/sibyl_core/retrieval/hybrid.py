@@ -333,19 +333,25 @@ async def _apply_current_entity_gate(
     metadata_filtered = _filter_recallable_entity_results(results)
     lifecycle_dropped = len(results) - len(metadata_filtered)
     superseded: set[str] = set()
+    edge_rows = 0
     entity_ids = [_entity_id(entity) for entity, _score in metadata_filtered if _entity_id(entity)]
     if entity_ids:
         try:
             from sibyl_core.retrieval.search import _superseded_candidate_uuids
 
-            superseded, _edge_count = await _superseded_candidate_uuids(
+            superseded, edge_rows = await _superseded_candidate_uuids(
                 client,
                 group_id=group_id,
                 uuids=entity_ids,
             )
         except Exception as exc:
             error_type = type(exc).__name__
-            log.error("hybrid_supersession_lookup_failed", error_type=error_type)
+            log.error(
+                "hybrid_supersession_lookup_failed",
+                organization_id=group_id,
+                candidate_count=len(entity_ids),
+                error_type=error_type,
+            )
             raise RuntimeError("hybrid supersession lifecycle lookup failed") from exc
     current = [
         (entity, score)
@@ -356,6 +362,8 @@ async def _apply_current_entity_gate(
         "lifecycle_dropped": lifecycle_dropped,
         "superseded_dropped": len(metadata_filtered) - len(current),
         "superseded_uuids": sorted(superseded),
+        "checked_candidates": len(entity_ids),
+        "edge_rows_read": edge_rows,
     }
     return current, {"lifecycle_gate": receipt}
 
@@ -365,6 +373,8 @@ def _merged_lifecycle_gate(*receipts: Mapping[str, Any]) -> dict[str, Any]:
         "lifecycle_dropped": 0,
         "superseded_dropped": 0,
         "superseded_uuids": [],
+        "checked_candidates": 0,
+        "edge_rows_read": 0,
     }
     superseded: set[str] = set()
     for receipt in receipts:
@@ -373,9 +383,9 @@ def _merged_lifecycle_gate(*receipts: Mapping[str, Any]) -> dict[str, Any]:
             continue
         merged["lifecycle_dropped"] += int(gate.get("lifecycle_dropped") or 0)
         merged["superseded_dropped"] += int(gate.get("superseded_dropped") or 0)
+        merged["checked_candidates"] += int(gate.get("checked_candidates") or 0)
+        merged["edge_rows_read"] += int(gate.get("edge_rows_read") or 0)
         superseded.update(str(value) for value in gate.get("superseded_uuids") or ())
-        if gate.get("lookup_error_type"):
-            merged["lookup_error_type"] = gate["lookup_error_type"]
     merged["superseded_uuids"] = sorted(superseded)
     return {"lifecycle_gate": merged}
 

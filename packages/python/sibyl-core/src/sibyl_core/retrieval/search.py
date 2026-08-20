@@ -91,10 +91,11 @@ _EDGE_CONTEXT_TYPES = {"claim", "relationship"}
 _GRAPH_EXPANSION_RELATIONSHIP_WEIGHTS = PREDICATE_EXPANSION_PATH_SCORES
 _SUPERSEDES_PREDICATE = "SUPERSEDES"
 # An entity carrying an inbound SUPERSEDES edge is the row somebody replaced.
-# Resolving that over the surviving candidate set costs one indexed lookup
+# Resolving that over the surviving candidate set uses bounded indexed lookups
 # (idx_relates_name_target) and is the only way a lane that never walked the
-# graph -- vector, fulltext, exact key -- learns the row is stale.
-_SUPERSESSION_LOOKUP_LIMIT = 512
+# graph, including vector, fulltext, and exact key, learns the row is stale.
+_SUPERSESSION_LOOKUP_BATCH_SIZE = 512
+_SUPERSESSION_EDGE_PAGE_SIZE = 512
 # Candidate ids that are not entity uuids and so can never match an edge
 # endpoint. Raw memories carry a "raw_memory:" prefix and episodes live in
 # their own table, so feeding either to the lookup only widens the IN list.
@@ -877,42 +878,43 @@ async def _superseded_candidate_uuids(
     group_id: str,
     uuids: Sequence[str],
 ) -> tuple[set[str], int]:
-    """Resolve which of these candidates something else declared it replaced.
+    """Resolve every inbound supersession edge for the candidate set.
 
-    The row count comes back alongside the set because dedup destroys the
-    only evidence that the row cap bound: one retired row can carry several
-    inbound edges, so 300 candidates can produce more than 512 rows and still
-    dedup to a handful of uuids.
+    Candidate ids are batched to keep the indexed ``IN`` lookup bounded. Edge
+    rows are paged independently because one retired candidate can have many
+    inbound declarations. Returning a partial edge set would make a retired
+    row look current, while treating a safety limit as an error would turn a
+    dense but valid history into an availability failure.
     """
 
     if not uuids:
         return set(), 0
-    if len(uuids) > _SUPERSESSION_LOOKUP_LIMIT:
-        raise RuntimeError(
-            "supersession candidate set exceeds the complete lookup limit "
-            f"({len(uuids)} > {_SUPERSESSION_LOOKUP_LIMIT})"
-        )
-    rows = await _execute_query_records(
-        client,
-        """
-        SELECT uuid, target_id, source_id, created_at
-        FROM relates_to
-        WHERE name = $predicate
-          AND target_id IN $uuids
-          AND group_id = $group_id
-        ORDER BY created_at, uuid
-        LIMIT $limit;
-        """,
-        predicate=_SUPERSEDES_PREDICATE,
-        uuids=list(uuids),
-        group_id=group_id,
-        limit=_SUPERSESSION_LOOKUP_LIMIT + 1,
-    )
-    if len(rows) > _SUPERSESSION_LOOKUP_LIMIT:
-        raise RuntimeError(
-            "supersession edge set exceeds the complete lookup limit "
-            f"({len(rows)} > {_SUPERSESSION_LOOKUP_LIMIT})"
-        )
+    rows: list[dict[str, object]] = []
+    for batch_start in range(0, len(uuids), _SUPERSESSION_LOOKUP_BATCH_SIZE):
+        batch = list(uuids[batch_start : batch_start + _SUPERSESSION_LOOKUP_BATCH_SIZE])
+        page_start = 0
+        while True:
+            page = await _execute_query_records(
+                client,
+                """
+                SELECT uuid, target_id, source_id, created_at
+                FROM relates_to
+                WHERE name = $predicate
+                  AND target_id IN $uuids
+                  AND group_id = $group_id
+                ORDER BY created_at, uuid
+                LIMIT $limit START $start;
+                """,
+                predicate=_SUPERSEDES_PREDICATE,
+                uuids=batch,
+                group_id=group_id,
+                limit=_SUPERSESSION_EDGE_PAGE_SIZE,
+                start=page_start,
+            )
+            rows.extend(page)
+            if len(page) < _SUPERSESSION_EDGE_PAGE_SIZE:
+                break
+            page_start += len(page)
     return _resolve_superseded(rows), len(rows)
 
 
@@ -1019,10 +1021,6 @@ async def _apply_supersession_gate(
     superseded: set[str] = set()
     edge_rows = 0
     if node_uuids:
-        if len(node_uuids) > _SUPERSESSION_LOOKUP_LIMIT:
-            raise RuntimeError(
-                f"supersession lifecycle gate cannot completely check {len(node_uuids)} candidates"
-            )
         try:
             superseded, edge_rows = await _superseded_candidate_uuids(
                 client,
@@ -1031,10 +1029,13 @@ async def _apply_supersession_gate(
             )
         except Exception as exc:
             error_type = type(exc).__name__
-            log.error("supersession_lookup_failed", error_type=error_type)
+            log.error(
+                "supersession_lookup_failed",
+                organization_id=group_id,
+                candidate_count=len(node_uuids),
+                error_type=error_type,
+            )
             raise RuntimeError("supersession lifecycle lookup failed") from exc
-        if edge_rows > _SUPERSESSION_LOOKUP_LIMIT:
-            raise RuntimeError("supersession lifecycle gate received an incomplete edge set")
 
     edge_dropped = 0
     if superseded:
@@ -1049,6 +1050,8 @@ async def _apply_supersession_gate(
         "lifecycle_dropped": lifecycle_dropped,
         "superseded_dropped": edge_dropped,
         "superseded_uuids": sorted(superseded),
+        "checked_candidates": len(node_uuids),
+        "edge_rows_read": edge_rows,
     }
     return surviving, {"supersession_gate": receipt}
 
@@ -1060,16 +1063,17 @@ def _merged_supersession_metadata(
 
     The gate runs twice per search, once before the graph walk is seeded and
     once on what the walk brought back, and a receipt that reported only the
-    second pass would say a corrected row was never dropped. Counts add, uuid
-    sets union, and any pass that truncated or failed its edge lookup makes the
-    whole receipt say so: a reader checking whether the gate was complete
-    cannot be told yes because one of two passes was.
+    second pass would say a corrected row was never dropped. Counts add and
+    uuid sets union. Lookup failures do not produce receipts because the gate
+    fails closed before returning unchecked candidates.
     """
 
     merged: dict[str, Any] = {
         "lifecycle_dropped": 0,
         "superseded_dropped": 0,
         "superseded_uuids": [],
+        "checked_candidates": 0,
+        "edge_rows_read": 0,
     }
     uuids: set[str] = set()
     for receipt in receipts:
@@ -1078,13 +1082,9 @@ def _merged_supersession_metadata(
             continue
         merged["lifecycle_dropped"] += int(gate.get("lifecycle_dropped") or 0)
         merged["superseded_dropped"] += int(gate.get("superseded_dropped") or 0)
+        merged["checked_candidates"] += int(gate.get("checked_candidates") or 0)
+        merged["edge_rows_read"] += int(gate.get("edge_rows_read") or 0)
         uuids.update(str(value) for value in gate.get("superseded_uuids") or ())
-        if gate.get("truncated"):
-            merged["truncated"] = True
-            for key in ("checked_candidates", "total_candidates", "edge_rows_read"):
-                merged[key] = int(merged.get(key) or 0) + int(gate.get(key) or 0)
-        if gate.get("lookup_error_type"):
-            merged["lookup_error_type"] = gate["lookup_error_type"]
     merged["superseded_uuids"] = sorted(uuids)
     return {"supersession_gate": merged}
 
