@@ -562,6 +562,9 @@ def main() -> None:
     """CLI entry point."""
     try:
         app()
+    except config_store.ConfigStoreError as exc:
+        error(str(exc))
+        raise SystemExit(1) from None
     except config_store.UnknownContextError as exc:
         # Backstop for any resolver reached without passing the root callback.
         error(str(exc))

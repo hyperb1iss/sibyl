@@ -1,7 +1,12 @@
 """Tests for CLI config store."""
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from sibyl_cli import config_store
 
@@ -55,6 +60,105 @@ class TestConfigStore:
         assert base["a"]["b"] == 10
         assert base["a"]["c"] == 2
         assert base["a"]["d"] == 3
+
+    def test_corrupt_config_is_a_typed_failure_without_overwrite(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        config_path = tmp_path / "config.toml"
+        corrupt = b"[server\nurl = 'https://broken.example.com'\n"
+        config_path.write_bytes(corrupt)
+
+        with (
+            patch.object(config_store, "config_dir", return_value=tmp_path),
+            pytest.raises(config_store.ConfigCorruptionError) as exc_info,
+        ):
+            config_store.set_value("server.url", "https://new.example.com")
+
+        assert exc_info.value.path == config_path
+        assert "sibyl config reset" in str(exc_info.value)
+        assert config_path.read_bytes() == corrupt
+
+    def test_save_uses_same_directory_replace_and_fsync(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        replacements: list[tuple[Path, Path]] = []
+        fsync_calls: list[int] = []
+        original_replace = os.replace
+        original_fsync = os.fsync
+
+        def replace(source: str | Path, destination: str | Path) -> None:
+            replacements.append((Path(source), Path(destination)))
+            original_replace(source, destination)
+
+        def fsync(fd: int) -> None:
+            fsync_calls.append(fd)
+            original_fsync(fd)
+
+        monkeypatch.setattr(config_store.os, "replace", replace)
+        monkeypatch.setattr(config_store.os, "fsync", fsync)
+
+        with patch.object(config_store, "config_dir", return_value=tmp_path):
+            config_store.save_config({"server": {"url": "https://safe.example.com"}})
+
+        assert len(replacements) == 1
+        temporary, destination = replacements[0]
+        assert temporary.parent == destination.parent == tmp_path
+        assert destination == tmp_path / "config.toml"
+        assert len(fsync_calls) >= 1
+        assert config_store._load_config_unlocked(destination)["server"]["url"] == (
+            "https://safe.example.com"
+        )
+
+    def test_update_config_serializes_competing_processes(self, tmp_path: Path) -> None:
+        script = """
+import sys
+import time
+from pathlib import Path
+from sibyl_cli import config_store
+
+config_store.config_dir = lambda: Path(sys.argv[1])
+
+def append(config):
+    updates = config.setdefault("updates", [])
+    time.sleep(0.2)
+    updates.append(sys.argv[2])
+
+config_store.update_config(append)
+"""
+        first = subprocess.Popen([sys.executable, "-c", script, str(tmp_path), "first"])
+        second = subprocess.Popen([sys.executable, "-c", script, str(tmp_path), "second"])
+
+        assert first.wait(timeout=10) == 0
+        assert second.wait(timeout=10) == 0
+        with patch.object(config_store, "config_dir", return_value=tmp_path):
+            assert sorted(config_store.load_config()["updates"]) == ["first", "second"]
+
+    def test_cli_renders_corruption_without_a_traceback(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        from sibyl_cli.main import main as cli_main
+
+        config_home = tmp_path / ".sibyl"
+        config_home.mkdir()
+        (config_home / "config.toml").write_text("[broken", encoding="utf-8")
+        monkeypatch.setattr(config_store.Path, "home", lambda: tmp_path)
+        monkeypatch.setattr(sys, "argv", ["sibyl", "config", "show"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            cli_main()
+
+        captured = capsys.readouterr()
+        assert exc_info.value.code == 1
+        assert "invalid" in captured.out
+        assert "TOML" in captured.out
+        assert "sibyl config reset" in captured.out
+        assert "Traceback" not in captured.out + captured.err
 
 
 class TestContext:

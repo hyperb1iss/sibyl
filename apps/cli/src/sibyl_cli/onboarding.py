@@ -166,9 +166,7 @@ def run_onboarding() -> bool:
         console.print()
 
         # Save config
-        config = config_store.load_config()
-        config["server"]["url"] = url
-        config_store.save_config(config)
+        config_store.set_value("server.url", url)
 
         # Test connection
         test_connection(url)
