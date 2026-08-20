@@ -299,11 +299,29 @@ def _validate_pass_set(passes: list[dict[str, Any]], *, expected_count: int) -> 
         raise RigInputError("paired passes changed stack, model, or dataset identity")
 
 
+def _aa_outcome(absolute_deltas: list[float]) -> tuple[str, bool]:
+    observed_span = max(absolute_deltas)
+    first_three_span = max(absolute_deltas[:INITIAL_AA_PASS_COUNT])
+    if len(absolute_deltas) == INITIAL_AA_PASS_COUNT and observed_span > INITIAL_NOISE_FLOOR_PP:
+        return "NEEDS_TWO_MORE", False
+    if len(absolute_deltas) == EXTENDED_AA_PASS_COUNT and any(
+        delta > first_three_span for delta in absolute_deltas[INITIAL_AA_PASS_COUNT:]
+    ):
+        return "RIG_BLOCKED", False
+    return "PASS", True
+
+
 def build_aa_receipt(raw_passes: list[dict[str, Any]]) -> dict[str, Any]:
     passes = [validate_pass(item) for item in raw_passes]
     if len(passes) not in {INITIAL_AA_PASS_COUNT, EXTENDED_AA_PASS_COUNT}:
         raise RigInputError("A/A requires exactly three or five paired passes")
     _validate_pass_set(passes, expected_count=len(passes))
+    first_arm = passes[0]["arms"]["left"]
+    arm_contract = {
+        "name": first_arm["name"],
+        "configuration": first_arm["configuration"],
+        "geometry": first_arm["geometry"],
+    }
     pass_rows: list[dict[str, Any]] = []
     for item in passes:
         left = item["arms"]["left"]
@@ -314,6 +332,13 @@ def build_aa_receipt(raw_passes: list[dict[str, Any]]) -> dict[str, Any]:
             raise RigInputError("A/A arm configurations differ")
         if left["geometry"] != right["geometry"]:
             raise RigInputError("A/A arm geometry differs")
+        current_contract = {
+            "name": left["name"],
+            "configuration": left["configuration"],
+            "geometry": left["geometry"],
+        }
+        if current_contract != arm_contract:
+            raise RigInputError("A/A arm configuration or geometry changed between passes")
         left_summary = arm_summary(left)
         right_summary = arm_summary(right)
         pass_rows.append(
@@ -334,23 +359,14 @@ def build_aa_receipt(raw_passes: list[dict[str, Any]]) -> dict[str, Any]:
     absolute_deltas = [abs(float(item["accuracy_delta_pp"])) for item in pass_rows]
     observed_span = max(absolute_deltas)
     first_three_span = max(absolute_deltas[:INITIAL_AA_PASS_COUNT])
-    if len(passes) == INITIAL_AA_PASS_COUNT and observed_span > INITIAL_NOISE_FLOOR_PP:
-        status = "NEEDS_TWO_MORE"
-        stable = False
-    elif len(passes) == EXTENDED_AA_PASS_COUNT and any(
-        delta > first_three_span for delta in absolute_deltas[INITIAL_AA_PASS_COUNT:]
-    ):
-        status = "RIG_BLOCKED"
-        stable = False
-    else:
-        status = "PASS"
-        stable = True
-    return {
+    status, stable = _aa_outcome(absolute_deltas)
+    payload = {
         "schema_version": AA_SCHEMA_VERSION,
         "status": status,
         "paid_benchmark_allowed": status == "PASS",
         "score_claim_allowed": False,
         "stack": passes[0]["stack"],
+        "arm_contract": arm_contract,
         "pass_count": len(passes),
         "passes": pass_rows,
         "observed_span_pp": observed_span,
@@ -362,21 +378,121 @@ def build_aa_receipt(raw_passes: list[dict[str, Any]]) -> dict[str, Any]:
             "neither of which may expand the first-three span"
         ),
     }
+    payload["aa_receipt_sha256"] = canonical_sha256(payload)
+    return payload
+
+
+def _aa_receipt_deltas(raw: dict[str, Any]) -> list[float]:
+    pass_count = _positive_int(raw.get("pass_count"), name="A/A pass_count")
+    pass_rows = raw.get("passes")
+    if pass_count not in {INITIAL_AA_PASS_COUNT, EXTENDED_AA_PASS_COUNT}:
+        raise RigInputError("A/A receipt requires exactly three or five passes")
+    if not isinstance(pass_rows, list) or len(pass_rows) != pass_count:
+        raise RigInputError("A/A receipt pass count does not match its rows")
+    pass_ids: set[str] = set()
+    seeds: set[str] = set()
+    absolute_deltas: list[float] = []
+    for index, row in enumerate(pass_rows):
+        if not isinstance(row, dict):
+            raise RigInputError(f"A/A passes[{index}] is not an object")
+        pass_id = _nonempty_string(row.get("pass_id"), name=f"A/A passes[{index}].pass_id")
+        seed = _nonempty_string(row.get("seed"), name=f"A/A passes[{index}].seed")
+        if pass_id in pass_ids or seed in seeds:
+            raise RigInputError("A/A receipt pass IDs and seeds must be unique")
+        pass_ids.add(pass_id)
+        seeds.add(seed)
+        delta = _finite_number(
+            row.get("accuracy_delta_pp"),
+            name=f"A/A passes[{index}].accuracy_delta_pp",
+        )
+        absolute_deltas.append(abs(delta))
+    return absolute_deltas
+
+
+def _validate_aa_metrics(raw: dict[str, Any], absolute_deltas: list[float]) -> None:
+    observed_span = max(absolute_deltas)
+    first_three_span = max(absolute_deltas[:INITIAL_AA_PASS_COUNT])
+    expected_status, expected_stable = _aa_outcome(absolute_deltas)
+    noise_floor = max(INITIAL_NOISE_FLOOR_PP, observed_span)
+    if raw.get("status") != expected_status or raw.get("stabilized") is not expected_stable:
+        raise RigInputError("A/A receipt status does not match its pass deltas")
+    if raw.get("paid_benchmark_allowed") is not (expected_status == "PASS"):
+        raise RigInputError("A/A paid-work verdict does not match its status")
+    if raw.get("score_claim_allowed") is not False:
+        raise RigInputError("A/A receipt cannot authorize a score claim")
+    for field, expected in (
+        ("observed_span_pp", observed_span),
+        ("first_three_span_pp", first_three_span),
+        ("noise_floor_pp", noise_floor),
+    ):
+        actual = _finite_number(raw.get(field), name=f"A/A {field}", minimum=0)
+        if not math.isclose(actual, expected, abs_tol=1e-9):
+            raise RigInputError(f"A/A {field} does not match its pass deltas")
+
+
+def _validate_aa_arm_contract(raw: dict[str, Any]) -> None:
+    arm_contract = raw.get("arm_contract")
+    if not isinstance(arm_contract, dict):
+        raise RigInputError("A/A arm contract is missing")
+    _nonempty_string(arm_contract.get("name"), name="A/A arm name")
+    configuration = arm_contract.get("configuration")
+    geometry = arm_contract.get("geometry")
+    if not isinstance(configuration, dict) or not configuration:
+        raise RigInputError("A/A arm configuration is missing")
+    _nonempty_string(configuration.get("retrieval_mode"), name="A/A retrieval mode")
+    if not isinstance(geometry, dict):
+        raise RigInputError("A/A arm geometry is missing")
+    _positive_int(geometry.get("max_context_items"), name="A/A max_context_items")
+    _positive_int(
+        geometry.get("max_context_total_chars"),
+        name="A/A max_context_total_chars",
+    )
+
+
+def validate_aa_receipt(raw: object) -> dict[str, Any]:
+    if not isinstance(raw, dict) or raw.get("schema_version") != AA_SCHEMA_VERSION:
+        raise RigInputError("A/A receipt is missing or invalid")
+    digest = raw.get("aa_receipt_sha256")
+    unsigned = {key: value for key, value in raw.items() if key != "aa_receipt_sha256"}
+    if digest != canonical_sha256(unsigned):
+        raise RigInputError("A/A receipt digest does not bind its content")
+    stack = validate_stack(raw.get("stack"))
+    absolute_deltas = _aa_receipt_deltas(raw)
+    _validate_aa_metrics(raw, absolute_deltas)
+    _validate_aa_arm_contract(raw)
+    return {**raw, "stack": stack}
+
+
+def _require_passing_aa_receipt(raw: object) -> dict[str, Any]:
+    receipt = validate_aa_receipt(raw)
+    if receipt["status"] != "PASS" or receipt["paid_benchmark_allowed"] is not True:
+        raise RigInputError("paid benchmark work requires a stabilized PASS A/A receipt")
+    return receipt
 
 
 def build_anchor_receipt(
     raw_pass: dict[str, Any],
     *,
     arm_side: str,
-    noise_floor_pp: float,
+    aa_receipt: dict[str, Any],
 ) -> dict[str, Any]:
     paired_pass = validate_pass(raw_pass)
+    validated_aa = _require_passing_aa_receipt(aa_receipt)
+    if paired_pass["stack"] != validated_aa["stack"]:
+        raise RigInputError("anchor stack does not match its A/A receipt")
     if arm_side not in {"left", "right"}:
         raise RigInputError("anchor arm side must be left or right")
     arm = paired_pass["arms"][arm_side]
+    arm_contract = {
+        "name": arm["name"],
+        "configuration": arm["configuration"],
+        "geometry": arm["geometry"],
+    }
+    if arm_contract != validated_aa["arm_contract"]:
+        raise RigInputError("anchor arm configuration or geometry differs from A/A")
     summary = arm_summary(arm)
     lafs = _finite_number(arm.get("official_lafs"), name="anchor official_lafs")
-    noise_floor = _finite_number(noise_floor_pp, name="anchor noise floor", minimum=3.0)
+    noise_floor = float(validated_aa["noise_floor_pp"])
     if lafs <= 0:
         raise RigInputError("anchor cannot support a claim without positive official LAFS")
     return {
@@ -385,11 +501,8 @@ def build_anchor_receipt(
         "claim_allowed": True,
         "historical_denominator_allowed": False,
         "stack": paired_pass["stack"],
-        "arm": {
-            "name": arm["name"],
-            "configuration": arm["configuration"],
-            "geometry": arm["geometry"],
-        },
+        "aa_receipt_sha256": validated_aa["aa_receipt_sha256"],
+        "arm": arm_contract,
         "metrics": {**summary, "official_lafs": lafs, "noise_floor_pp": noise_floor},
     }
 
@@ -409,8 +522,13 @@ def freeze_preregistration(raw: dict[str, Any], *, kind: str) -> dict[str, Any]:
             for index, nested in enumerate(value):
                 reject_scores(nested, f"{path}[{index}]")
 
-    reject_scores(raw)
+    if {"aa_span_pp", "noise_floor_pp", "aa_receipt_sha256"}.intersection(raw):
+        raise RigInputError("A/A thresholds are derived from the bound receipt")
+    aa_receipt = _require_passing_aa_receipt(raw.get("aa_receipt"))
+    reject_scores({key: value for key, value in raw.items() if key != "aa_receipt"})
     stack = validate_stack(raw.get("stack"))
+    if stack != aa_receipt["stack"]:
+        raise RigInputError("preregistration stack does not match its A/A receipt")
     seeds = raw.get("seeds")
     if not isinstance(seeds, list) or len(seeds) != PAIRED_PASS_COUNT:
         raise RigInputError("preregistration must freeze exactly three seeds")
@@ -420,8 +538,6 @@ def freeze_preregistration(raw: dict[str, Any], *, kind: str) -> dict[str, Any]:
     expected_rule = RACE_DECISION_RULE if kind == "race" else RENDER_DECISION_RULE
     if raw.get("decision_rule") != expected_rule:
         raise RigInputError(f"{kind} decision rule does not match the v1.3 contract")
-    _finite_number(raw.get("aa_span_pp"), name="aa_span_pp", minimum=0)
-    _finite_number(raw.get("noise_floor_pp"), name="noise_floor_pp", minimum=3)
     required = (
         {"machine_configuration", "naive_configuration", "shipping_geometry", "matched_geometry"}
         if kind == "race"
@@ -442,6 +558,10 @@ def freeze_preregistration(raw: dict[str, Any], *, kind: str) -> dict[str, Any]:
         "kind": kind,
         "stack": stack,
         "seeds": normalized_seeds,
+        "aa_receipt": aa_receipt,
+        "aa_receipt_sha256": aa_receipt["aa_receipt_sha256"],
+        "aa_span_pp": aa_receipt["observed_span_pp"],
+        "noise_floor_pp": aa_receipt["noise_floor_pp"],
     }
     payload["preregistration_sha256"] = canonical_sha256(payload)
     return payload
@@ -453,7 +573,18 @@ def validate_preregistration(raw: dict[str, Any], *, kind: str) -> dict[str, Any
     if digest != canonical_sha256(unsigned):
         raise RigInputError("preregistration digest does not bind its content")
     refrozen = freeze_preregistration(
-        {key: value for key, value in unsigned.items() if key not in {"schema_version", "kind"}},
+        {
+            key: value
+            for key, value in unsigned.items()
+            if key
+            not in {
+                "schema_version",
+                "kind",
+                "aa_receipt_sha256",
+                "aa_span_pp",
+                "noise_floor_pp",
+            }
+        },
         kind=kind,
     )
     if refrozen != raw:
@@ -699,7 +830,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     anchor = subparsers.add_parser("anchor")
     anchor.add_argument("--pass", dest="paired_pass", required=True)
     anchor.add_argument("--arm-side", choices=("left", "right"), required=True)
-    anchor.add_argument("--noise-floor-pp", type=float, required=True)
+    anchor.add_argument("--aa-receipt", required=True)
     anchor.add_argument("--output", required=True)
 
     race = subparsers.add_parser("race")
@@ -727,7 +858,7 @@ def main(argv: list[str] | None = None) -> int:
             payload = build_anchor_receipt(
                 load_json(Path(args.paired_pass)),
                 arm_side=args.arm_side,
-                noise_floor_pp=args.noise_floor_pp,
+                aa_receipt=load_json(Path(args.aa_receipt)),
             )
         elif args.command == "race":
             payload = build_race_receipt(

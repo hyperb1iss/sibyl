@@ -138,6 +138,36 @@ def test_aa_receipt_blocks_when_five_pass_span_keeps_expanding() -> None:
     assert receipt["noise_floor_pp"] == pytest.approx(30.0)
 
 
+def test_aa_receipt_rejects_configuration_and_geometry_drift_between_passes() -> None:
+    passes = [
+        _paired_pass(
+            str(index),
+            left=_arm(
+                "machine",
+                mode="accurate" if index == 1 else "fast",
+                accuracy=0.5,
+                geometry={
+                    "max_context_items": 8 + index,
+                    "max_context_total_chars": 60_000 + 10_000 * index,
+                },
+            ),
+            right=_arm(
+                "machine",
+                mode="accurate" if index == 1 else "fast",
+                accuracy=0.5,
+                geometry={
+                    "max_context_items": 8 + index,
+                    "max_context_total_chars": 60_000 + 10_000 * index,
+                },
+            ),
+        )
+        for index in range(3)
+    ]
+
+    with pytest.raises(rig.RigInputError, match="changed between passes"):
+        rig.build_aa_receipt(passes)
+
+
 def test_failed_rows_and_inactive_arms_fail_closed() -> None:
     failed = _paired_pass(
         "failed",
@@ -158,28 +188,99 @@ def test_failed_rows_and_inactive_arms_fail_closed() -> None:
         rig.validate_pass(inactive)
 
 
-def _race_preregistration() -> dict[str, Any]:
-    return rig.freeze_preregistration(
-        {
-            "created_at": "2026-08-20T00:00:00Z",
-            "stack": _stack(),
-            "seeds": ["seed-0", "seed-1", "seed-2"],
-            "aa_span_pp": 2.0,
-            "noise_floor_pp": 3.0,
-            "machine_configuration": {"retrieval_mode": "fast"},
-            "naive_configuration": {"retrieval_mode": "naive"},
-            "shipping_geometry": {
-                "machine": {"max_context_items": 8, "max_context_total_chars": 60_000},
-                "naive": {"max_context_items": 8, "max_context_total_chars": 60_000},
-            },
-            "matched_geometry": {
-                "max_context_items": 8,
-                "max_context_total_chars": 50_000,
-            },
-            "decision_rule": rig.RACE_DECISION_RULE,
-        },
-        kind="race",
+def _aa_receipt() -> dict[str, Any]:
+    return rig.build_aa_receipt(
+        [
+            _paired_pass(
+                str(index),
+                left=_arm("machine", mode="fast", accuracy=0.5),
+                right=_arm("machine", mode="fast", accuracy=0.5),
+            )
+            for index in range(3)
+        ]
     )
+
+
+def _race_preregistration_input() -> dict[str, Any]:
+    return {
+        "created_at": "2026-08-20T00:00:00Z",
+        "stack": _stack(),
+        "seeds": ["seed-0", "seed-1", "seed-2"],
+        "aa_receipt": _aa_receipt(),
+        "machine_configuration": {"retrieval_mode": "fast"},
+        "naive_configuration": {"retrieval_mode": "naive"},
+        "shipping_geometry": {
+            "machine": {"max_context_items": 8, "max_context_total_chars": 60_000},
+            "naive": {"max_context_items": 8, "max_context_total_chars": 60_000},
+        },
+        "matched_geometry": {
+            "max_context_items": 8,
+            "max_context_total_chars": 50_000,
+        },
+        "decision_rule": rig.RACE_DECISION_RULE,
+    }
+
+
+def _race_preregistration() -> dict[str, Any]:
+    return rig.freeze_preregistration(_race_preregistration_input(), kind="race")
+
+
+def test_anchor_derives_noise_floor_and_contract_from_aa_receipt() -> None:
+    aa_receipt = _aa_receipt()
+    anchor_pass = _paired_pass(
+        "anchor",
+        left=_arm("machine", mode="fast", accuracy=0.6),
+        right=_arm("machine", mode="fast", accuracy=0.6),
+    )
+
+    receipt = rig.build_anchor_receipt(
+        anchor_pass,
+        arm_side="left",
+        aa_receipt=aa_receipt,
+    )
+
+    assert receipt["status"] == "PASS"
+    assert receipt["aa_receipt_sha256"] == aa_receipt["aa_receipt_sha256"]
+    assert receipt["metrics"]["noise_floor_pp"] == aa_receipt["noise_floor_pp"]
+
+
+def test_anchor_rejects_tampered_or_drifted_aa_lineage() -> None:
+    aa_receipt = _aa_receipt()
+    tampered = deepcopy(aa_receipt)
+    tampered["noise_floor_pp"] = 9.0
+    anchor_pass = _paired_pass(
+        "anchor",
+        left=_arm("machine", mode="fast", accuracy=0.6),
+        right=_arm("machine", mode="fast", accuracy=0.6),
+    )
+
+    with pytest.raises(rig.RigInputError, match="digest does not bind"):
+        rig.build_anchor_receipt(anchor_pass, arm_side="left", aa_receipt=tampered)
+
+    drifted_pass = _paired_pass(
+        "anchor-drifted",
+        left=_arm("machine", mode="accurate", accuracy=0.6),
+        right=_arm("machine", mode="accurate", accuracy=0.6),
+    )
+    with pytest.raises(rig.RigInputError, match="differs from A/A"):
+        rig.build_anchor_receipt(drifted_pass, arm_side="left", aa_receipt=aa_receipt)
+
+
+def test_preregistration_requires_untampered_aa_lineage() -> None:
+    missing = _race_preregistration_input()
+    missing.pop("aa_receipt")
+    with pytest.raises(rig.RigInputError, match="A/A receipt is missing"):
+        rig.freeze_preregistration(missing, kind="race")
+
+    tampered = _race_preregistration_input()
+    tampered["aa_receipt"]["noise_floor_pp"] = 9.0
+    with pytest.raises(rig.RigInputError, match="digest does not bind"):
+        rig.freeze_preregistration(tampered, kind="race")
+
+    manual_threshold = _race_preregistration_input()
+    manual_threshold["noise_floor_pp"] = 9.0
+    with pytest.raises(rig.RigInputError, match="derived from the bound receipt"):
+        rig.freeze_preregistration(manual_threshold, kind="race")
 
 
 def test_race_is_preregistered_and_keeps_deletion_out_of_v13() -> None:
@@ -225,8 +326,7 @@ def _render_preregistration() -> dict[str, Any]:
             "created_at": "2026-08-20T00:00:00Z",
             "stack": _stack(),
             "seeds": ["seed-0", "seed-1", "seed-2"],
-            "aa_span_pp": 2.0,
-            "noise_floor_pp": 3.0,
+            "aa_receipt": _aa_receipt(),
             "control_configuration": {"retrieval_mode": "fast", "render": "control"},
             "treatment_configuration": {
                 "retrieval_mode": "fast",
@@ -281,10 +381,7 @@ def test_render_bundle_ships_only_when_every_gate_passes() -> None:
 
 
 def test_preregistration_rejects_score_bearing_input() -> None:
-    raw = deepcopy(_race_preregistration())
-    raw.pop("preregistration_sha256")
-    raw.pop("schema_version")
-    raw.pop("kind")
+    raw = _race_preregistration_input()
     raw["accuracy"] = 0.9
 
     with pytest.raises(rig.RigInputError, match="score-bearing"):
@@ -303,8 +400,8 @@ def test_cli_writes_failure_receipt_and_returns_nonzero(tmp_path: Path) -> None:
             str(invalid),
             "--arm-side",
             "left",
-            "--noise-floor-pp",
-            "3",
+            "--aa-receipt",
+            str(invalid),
             "--output",
             str(output),
         ]
