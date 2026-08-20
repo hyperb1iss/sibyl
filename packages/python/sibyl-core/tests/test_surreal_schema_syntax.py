@@ -43,6 +43,7 @@ from sibyl_core.backends.surreal.content_schema import (
     CONTENT_SCHEMA_CURRENT_VERSION,
     CONTENT_SCHEMA_DEFINITIONS,
     CONTENT_SOURCE_IMPORT_RECEIPT_MIGRATION_DEFINITIONS,
+    CONTENT_SOURCE_IMPORT_REVISION_MIGRATION_DEFINITIONS,
     CONTENT_TABLES,
     CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS,
     _content_schema_migrations,
@@ -584,6 +585,26 @@ def test_content_raw_capture_revision_is_versioned() -> None:
     assert "DEFINE FIELD OVERWRITE revision ON raw_captures TYPE option<int>" in migration_sql
     assert "UPDATE raw_captures SET revision = 1" in migration_sql
     assert CONTENT_RAW_CAPTURE_REVISION_MIGRATION_DEFINITIONS.strip().splitlines()[0] in (
+        migration_sql
+    )
+
+
+def test_content_source_import_revision_is_versioned() -> None:
+    migrations = _content_schema_migrations(url="memory://")
+    migration = next(item for item in migrations if item.name == "content_source_import_revision")
+    migration_sql = "\n".join(migration.statements)
+
+    assert CONTENT_SCHEMA_CURRENT_VERSION >= 25
+    assert migration.version == 25
+    assert "DEFINE FIELD IF NOT EXISTS revision ON source_imports TYPE option<int>" in (
+        migration_sql
+    )
+    assert "UPDATE source_imports SET revision = 0 WHERE revision = NONE" in migration_sql
+    assert "DEFINE FIELD OVERWRITE revision ON source_imports TYPE int DEFAULT 0" in migration_sql
+    assert "DEFINE FIELD IF NOT EXISTS revision ON source_imports TYPE int DEFAULT 0" in (
+        CONTENT_SCHEMA_DEFINITIONS
+    )
+    assert CONTENT_SOURCE_IMPORT_REVISION_MIGRATION_DEFINITIONS.strip().splitlines()[0] in (
         migration_sql
     )
 

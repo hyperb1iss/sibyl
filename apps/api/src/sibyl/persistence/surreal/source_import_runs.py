@@ -64,8 +64,7 @@ class SurrealSourceImportRunRepository:
                 "UPDATE source_imports CONTENT $record "
                 "WHERE uuid = $import_id "
                 "AND organization_id = $organization_id "
-                "AND (revision = $expected_revision "
-                "OR (revision = NONE AND $expected_revision = 0));"
+                "AND revision = $expected_revision;"
             )
             params = {
                 "record": persisted,

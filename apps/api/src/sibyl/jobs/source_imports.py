@@ -992,16 +992,35 @@ async def cancel_source_import(
         organization_id=organization_id,
         principal_id=principal_id,
     )
-    if run.status is not SourceImportStatus.COMPLETED:
+    while run.status not in {
+        SourceImportStatus.COMPLETED,
+        SourceImportStatus.CANCELED,
+    }:
+        expected_revision = run.revision
         run.status = SourceImportStatus.CANCELED
         run.completed_at = datetime.now(UTC)
         try:
-            await _persist_run(run, expected_revision=run.revision)
+            await _persist_run(run, expected_revision=expected_revision)
         except SourceImportRevisionConflictError:
             latest = await _load_persisted_run(import_id, organization_id=run.organization_id)
-            if latest is not None and latest.status is SourceImportStatus.CANCELED:
+            if latest is not None and latest.status in {
+                SourceImportStatus.COMPLETED,
+                SourceImportStatus.CANCELED,
+            }:
                 return latest.status_payload()
-            raise
+            if (
+                latest is None
+                or latest.revision <= expected_revision
+                or latest.status
+                not in {
+                    SourceImportStatus.RUNNING,
+                    SourceImportStatus.PAUSED,
+                }
+            ):
+                raise
+            run = latest
+            continue
+        break
     return run.status_payload()
 
 

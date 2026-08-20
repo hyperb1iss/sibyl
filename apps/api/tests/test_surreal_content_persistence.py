@@ -1505,6 +1505,47 @@ async def test_content_schema_migration_backfills_legacy_raw_capture_defaults() 
 
 
 @pytest.mark.asyncio
+async def test_content_schema_migration_backfills_source_import_revision() -> None:
+    client = SurrealContentClient(url="memory://")
+    import_id = f"source_import:{uuid4()}"
+    try:
+        await bootstrap_content_schema(client, reset=True)
+        await client.execute_query("REMOVE FIELD revision ON source_imports;")
+        await client.execute_query(
+            "CREATE source_imports CONTENT $record;",
+            record={
+                "uuid": import_id,
+                "organization_id": str(uuid4()),
+                "principal_id": str(uuid4()),
+                "adapter_name": "mbox",
+                "status": "paused",
+            },
+        )
+        await client.execute_query("UPDATE schema_version SET version = 24 WHERE name = 'content';")
+
+        await bootstrap_content_schema(client)
+
+        rows = _normalize_records(
+            await client.execute_query(
+                "SELECT revision FROM source_imports WHERE uuid = $uuid LIMIT 1;",
+                uuid=import_id,
+            )
+        )
+        version_rows = _normalize_records(
+            await client.execute_query(
+                "SELECT version FROM schema_version WHERE name = 'content' LIMIT 1;",
+            )
+        )
+        table_info = await client.execute_query("INFO FOR TABLE source_imports;")
+        assert rows == [{"revision": 0}]
+        assert version_rows == [{"version": CONTENT_SCHEMA_CURRENT_VERSION}]
+        assert "TYPE int" in str(table_info)
+        assert "revision" in str(table_info)
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_content_schema_migration_normalizes_memory_quality_metadata() -> None:
     client = SurrealContentClient(url="memory://")
     capture_id = str(uuid4())
