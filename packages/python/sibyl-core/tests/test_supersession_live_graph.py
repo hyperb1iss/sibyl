@@ -16,6 +16,7 @@ still had, so the bypass tests here call the pack.
 
 from __future__ import annotations
 
+import os
 import uuid as uuid_module
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -60,7 +61,12 @@ async def graph(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[_Runtime]:
     # a shared group id leaks rows and edges between tests and turns a
     # supersession assertion into a function of test ordering.
     group_id = f"supersession-live-{uuid_module.uuid4().hex[:12]}"
-    client = SurrealGraphClient(group_id=group_id, url="memory://")
+    client = SurrealGraphClient(
+        group_id=group_id,
+        url=os.getenv("SIBYL_TEST_SURREAL_URL", "memory://"),
+        username=os.getenv("SIBYL_TEST_SURREAL_USERNAME", ""),
+        password=os.getenv("SIBYL_TEST_SURREAL_PASSWORD", ""),
+    )
     await client.connect()
     await prepare_graph_schema(client)
     runtime = _Runtime(
@@ -259,6 +265,34 @@ async def test_a_real_self_supersession_retires_nothing(graph: _Runtime) -> None
     response = await _search(graph, "self superseding hosting")
 
     assert "selfie" in {result.id for result in response.results}
+
+
+@pytest.mark.asyncio
+async def test_dense_supersession_edges_use_the_real_keyset_query(
+    graph: _Runtime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The production parser and driver must return every dense-history page."""
+
+    monkeypatch.setattr(search_module, "_SUPERSESSION_EDGE_PAGE_SIZE", 2)
+    await graph.entity_manager.create_direct(
+        _entity(graph, "dense-retired", "Dense Retired", "dense retired decision")
+    )
+    for index in range(5):
+        survivor = f"dense-survivor-{index}"
+        await graph.entity_manager.create_direct(
+            _entity(graph, survivor, f"Dense Survivor {index}", "dense current decision")
+        )
+        await _supersede(graph, survivor=survivor, retired="dense-retired")
+
+    superseded, edge_count = await search_module._superseded_candidate_uuids(
+        graph.client,
+        group_id=graph.group_id,
+        uuids=["dense-retired"],
+    )
+
+    assert superseded == {"dense-retired"}
+    assert edge_count == 5
 
 
 @pytest.mark.asyncio

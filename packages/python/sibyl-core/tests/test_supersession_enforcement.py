@@ -1161,7 +1161,7 @@ async def test_supersession_lookup_pages_every_inbound_edge(
         ]
         for start, end in ((0, 2), (2, 4), (4, 5))
     ]
-    client = SimpleNamespace(execute_query=AsyncMock(side_effect=pages))
+    client = SimpleNamespace(execute_query=AsyncMock(side_effect=[[pages[-1][-1]], *pages]))
 
     superseded, edge_count = await search_module._superseded_candidate_uuids(
         client,
@@ -1171,7 +1171,10 @@ async def test_supersession_lookup_pages_every_inbound_edge(
 
     assert superseded == {"entity-retired"}
     assert edge_count == 5
-    assert [call.kwargs["start"] for call in client.execute_query.await_args_list] == [0, 2, 4]
+    page_calls = client.execute_query.await_args_list[1:]
+    assert "after_uuid" not in page_calls[0].kwargs
+    assert [call.kwargs.get("after_uuid") for call in page_calls[1:]] == ["edge-1", "edge-3"]
+    assert all(call.kwargs["upper_uuid"] == "edge-4" for call in page_calls)
 
 
 def test_a_self_supersession_retires_nothing() -> None:

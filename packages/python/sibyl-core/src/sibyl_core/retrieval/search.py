@@ -892,30 +892,98 @@ async def _superseded_candidate_uuids(
     rows: list[dict[str, object]] = []
     for batch_start in range(0, len(uuids), _SUPERSESSION_LOOKUP_BATCH_SIZE):
         batch = list(uuids[batch_start : batch_start + _SUPERSESSION_LOOKUP_BATCH_SIZE])
-        page_start = 0
+        upper_rows = await _execute_query_records(
+            client,
+            """
+            SELECT uuid, target_id, source_id, created_at
+            FROM relates_to
+            WHERE name = $predicate
+              AND target_id IN $uuids
+              AND group_id = $group_id
+            ORDER BY created_at DESC, uuid DESC
+            LIMIT 1;
+            """,
+            predicate=_SUPERSEDES_PREDICATE,
+            uuids=batch,
+            group_id=group_id,
+        )
+        if not upper_rows:
+            continue
+        upper_created_at, upper_uuid, upper_key = _supersession_edge_cursor(upper_rows[0])
+        after_created_at: object | None = None
+        after_uuid: str | None = None
+        after_key: tuple[str, str] | None = None
         while True:
-            page = await _execute_query_records(
-                client,
-                """
-                SELECT uuid, target_id, source_id, created_at
-                FROM relates_to
-                WHERE name = $predicate
-                  AND target_id IN $uuids
-                  AND group_id = $group_id
-                ORDER BY created_at, uuid
-                LIMIT $limit START $start;
-                """,
-                predicate=_SUPERSEDES_PREDICATE,
-                uuids=batch,
-                group_id=group_id,
-                limit=_SUPERSESSION_EDGE_PAGE_SIZE,
-                start=page_start,
-            )
+            if after_key is None:
+                page = await _execute_query_records(
+                    client,
+                    """
+                    SELECT uuid, target_id, source_id, created_at
+                    FROM relates_to
+                    WHERE name = $predicate
+                      AND target_id IN $uuids
+                      AND group_id = $group_id
+                      AND (
+                        created_at < $upper_created_at
+                        OR (created_at = $upper_created_at AND uuid <= $upper_uuid)
+                      )
+                    ORDER BY created_at, uuid
+                    LIMIT $limit;
+                    """,
+                    predicate=_SUPERSEDES_PREDICATE,
+                    uuids=batch,
+                    group_id=group_id,
+                    upper_created_at=upper_created_at,
+                    upper_uuid=upper_uuid,
+                    limit=_SUPERSESSION_EDGE_PAGE_SIZE,
+                )
+            else:
+                page = await _execute_query_records(
+                    client,
+                    """
+                    SELECT uuid, target_id, source_id, created_at
+                    FROM relates_to
+                    WHERE name = $predicate
+                      AND target_id IN $uuids
+                      AND group_id = $group_id
+                      AND (
+                        created_at > $after_created_at
+                        OR (created_at = $after_created_at AND uuid > $after_uuid)
+                      )
+                      AND (
+                        created_at < $upper_created_at
+                        OR (created_at = $upper_created_at AND uuid <= $upper_uuid)
+                      )
+                    ORDER BY created_at, uuid
+                    LIMIT $limit;
+                    """,
+                    predicate=_SUPERSEDES_PREDICATE,
+                    uuids=batch,
+                    group_id=group_id,
+                    after_created_at=after_created_at,
+                    after_uuid=after_uuid,
+                    upper_created_at=upper_created_at,
+                    upper_uuid=upper_uuid,
+                    limit=_SUPERSESSION_EDGE_PAGE_SIZE,
+                )
             rows.extend(page)
             if len(page) < _SUPERSESSION_EDGE_PAGE_SIZE:
                 break
-            page_start += len(page)
+            after_created_at, after_uuid, next_key = _supersession_edge_cursor(page[-1])
+            if after_key is not None and next_key <= after_key:
+                raise RuntimeError("supersession edge cursor did not advance")
+            if next_key > upper_key:
+                raise RuntimeError("supersession edge cursor advanced beyond its snapshot")
+            after_key = next_key
     return _resolve_superseded(rows), len(rows)
+
+
+def _supersession_edge_cursor(row: Mapping[str, object]) -> tuple[object, str, tuple[str, str]]:
+    created_at = row.get("created_at")
+    uuid = _string_value(row.get("uuid"))
+    if created_at is None or not uuid:
+        raise RuntimeError("supersession edge is missing its pagination cursor")
+    return created_at, uuid, (_edge_sort_key(created_at), uuid)
 
 
 def _resolve_superseded(rows: Sequence[Mapping[str, object]]) -> set[str]:
