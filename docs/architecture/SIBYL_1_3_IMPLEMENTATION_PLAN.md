@@ -118,7 +118,7 @@ One two-row supersession fixture must exercise all six observations:
 2. context-pack fast evidence;
 3. context-pack naive evidence;
 4. REST search;
-5. CLI search;
+5. CLI context;
 6. MCP search.
 
 The fixture writes a current successor with a `SUPERSEDES` edge to a retired target. Every

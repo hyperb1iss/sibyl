@@ -229,12 +229,13 @@ async def test_one_supersession_fixture_governs_all_six_public_observations(
         )
 
         cli_result = cli.run(
-            "graph-search",
+            "context",
             marker,
-            "--type",
-            "decision",
-            "--graph-only",
-            "--all",
+            "--project",
+            project_id,
+            "--limit",
+            "50",
+            "--no-related",
             "--json",
         )
         cli_output = cli_result.stdout or cli_result.stderr
@@ -243,8 +244,8 @@ async def test_one_supersession_fixture_governs_all_six_public_observations(
         cli_payload = cli_result.json()
         assert isinstance(cli_payload, dict)
         _assert_current_only(
-            surface="CLI graph-search",
-            ids=_result_ids(cli_payload),
+            surface="CLI context",
+            ids=_section_ids(cli_payload),
             current_id=current_id,
             retired_id=retired_id,
         )

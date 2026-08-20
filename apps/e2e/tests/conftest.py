@@ -396,7 +396,7 @@ def e2e_auth_token() -> str:
             },
         )
 
-        if signup_response.status_code == 200:
+        if signup_response.status_code in {200, 201}:
             return signup_response.json()["access_token"]
 
         # If signup also failed, raise error with details
