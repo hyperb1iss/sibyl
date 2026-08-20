@@ -2820,6 +2820,25 @@ class TestGraphTraversal:
         ]
 
     @pytest.mark.asyncio
+    async def test_hybrid_current_gate_fails_closed_when_edge_lookup_fails(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        edge_only_retired = make_entity_for_test("edge_only_retired")
+        monkeypatch.setattr(
+            search_module,
+            "_superseded_candidate_uuids",
+            AsyncMock(side_effect=RuntimeError("surreal is unhappy")),
+        )
+
+        with pytest.raises(RuntimeError, match="hybrid supersession lifecycle lookup failed"):
+            await hybrid_module._apply_current_entity_gate(
+                [(edge_only_retired, 0.9)],
+                client=object(),
+                group_id="org-123",
+            )
+
+    @pytest.mark.asyncio
     async def test_graph_traversal_keeps_strongest_same_tier_parent_edge(
         self,
         monkeypatch: pytest.MonkeyPatch,

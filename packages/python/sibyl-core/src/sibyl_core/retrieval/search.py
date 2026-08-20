@@ -887,6 +887,11 @@ async def _superseded_candidate_uuids(
 
     if not uuids:
         return set(), 0
+    if len(uuids) > _SUPERSESSION_LOOKUP_LIMIT:
+        raise RuntimeError(
+            "supersession candidate set exceeds the complete lookup limit "
+            f"({len(uuids)} > {_SUPERSESSION_LOOKUP_LIMIT})"
+        )
     rows = await _execute_query_records(
         client,
         """
@@ -901,8 +906,13 @@ async def _superseded_candidate_uuids(
         predicate=_SUPERSEDES_PREDICATE,
         uuids=list(uuids),
         group_id=group_id,
-        limit=_SUPERSESSION_LOOKUP_LIMIT,
+        limit=_SUPERSESSION_LOOKUP_LIMIT + 1,
     )
+    if len(rows) > _SUPERSESSION_LOOKUP_LIMIT:
+        raise RuntimeError(
+            "supersession edge set exceeds the complete lookup limit "
+            f"({len(rows)} > {_SUPERSESSION_LOOKUP_LIMIT})"
+        )
     return _resolve_superseded(rows), len(rows)
 
 
@@ -1007,27 +1017,24 @@ async def _apply_supersession_gate(
         if candidate.type not in _NON_ENTITY_CANDIDATE_TYPES
     )
     superseded: set[str] = set()
-    lookup_failed: str | None = None
-    # Both caps fail open: a candidate past the slice is never checked, and a
-    # retired row can carry several inbound edges so the row cap can bite
-    # before the candidate cap does. Neither is reachable at current pool
-    # sizes, and neither may pass silently if it ever becomes reachable.
-    truncated = len(node_uuids) > _SUPERSESSION_LOOKUP_LIMIT
     edge_rows = 0
     if node_uuids:
+        if len(node_uuids) > _SUPERSESSION_LOOKUP_LIMIT:
+            raise RuntimeError(
+                f"supersession lifecycle gate cannot completely check {len(node_uuids)} candidates"
+            )
         try:
             superseded, edge_rows = await _superseded_candidate_uuids(
                 client,
                 group_id=group_id,
-                uuids=node_uuids[:_SUPERSESSION_LOOKUP_LIMIT],
+                uuids=node_uuids,
             )
         except Exception as exc:
-            # A gate that cannot read its own edges must not silently pass
-            # every stale row as fresh, but it also must not fail the search
-            # outright: lifecycle metadata still applies and the receipt says
-            # the edge half did not run.
-            lookup_failed = type(exc).__name__
-            log.warning("supersession_lookup_failed", error_type=lookup_failed)
+            error_type = type(exc).__name__
+            log.error("supersession_lookup_failed", error_type=error_type)
+            raise RuntimeError("supersession lifecycle lookup failed") from exc
+        if edge_rows > _SUPERSESSION_LOOKUP_LIMIT:
+            raise RuntimeError("supersession lifecycle gate received an incomplete edge set")
 
     edge_dropped = 0
     if superseded:
@@ -1043,13 +1050,6 @@ async def _apply_supersession_gate(
         "superseded_dropped": edge_dropped,
         "superseded_uuids": sorted(superseded),
     }
-    if truncated or edge_rows >= _SUPERSESSION_LOOKUP_LIMIT:
-        receipt["truncated"] = True
-        receipt["checked_candidates"] = min(len(node_uuids), _SUPERSESSION_LOOKUP_LIMIT)
-        receipt["total_candidates"] = len(node_uuids)
-        receipt["edge_rows_read"] = edge_rows
-    if lookup_failed is not None:
-        receipt["lookup_error_type"] = lookup_failed
     return surviving, {"supersession_gate": receipt}
 
 

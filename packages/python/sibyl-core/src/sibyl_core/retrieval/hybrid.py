@@ -333,7 +333,6 @@ async def _apply_current_entity_gate(
     metadata_filtered = _filter_recallable_entity_results(results)
     lifecycle_dropped = len(results) - len(metadata_filtered)
     superseded: set[str] = set()
-    lookup_failed: str | None = None
     entity_ids = [_entity_id(entity) for entity, _score in metadata_filtered if _entity_id(entity)]
     if entity_ids:
         try:
@@ -345,8 +344,9 @@ async def _apply_current_entity_gate(
                 uuids=entity_ids,
             )
         except Exception as exc:
-            lookup_failed = type(exc).__name__
-            log.warning("hybrid_supersession_lookup_failed", error_type=lookup_failed)
+            error_type = type(exc).__name__
+            log.error("hybrid_supersession_lookup_failed", error_type=error_type)
+            raise RuntimeError("hybrid supersession lifecycle lookup failed") from exc
     current = [
         (entity, score)
         for entity, score in metadata_filtered
@@ -357,8 +357,6 @@ async def _apply_current_entity_gate(
         "superseded_dropped": len(metadata_filtered) - len(current),
         "superseded_uuids": sorted(superseded),
     }
-    if lookup_failed is not None:
-        receipt["lookup_error_type"] = lookup_failed
     return current, {"lifecycle_gate": receipt}
 
 

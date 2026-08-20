@@ -364,26 +364,16 @@ async def test_a_retired_row_does_not_spend_a_pack_slot(
 
 
 @pytest.mark.asyncio
-async def test_supersession_lookup_failure_degrades_without_failing_the_search(
+async def test_supersession_lookup_failure_fails_closed_for_edge_only_retirement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A gate that cannot read its edges still applies the metadata verdict."""
+    """An unchecked edge-only retirement must never be presented as current."""
 
-    async def exploding_lookup(*_args: object, **_kwargs: object) -> set[str]:
+    async def exploding_lookup(*_args: object, **_kwargs: object) -> tuple[set[str], int]:
         raise RuntimeError("surreal is unhappy")
 
     monkeypatch.setattr(search_module, "_superseded_candidate_uuids", exploding_lookup)
 
-    survivor = RetrievalCandidate(
-        id=SUCCESSOR_ID,
-        type="decision",
-        name="Deploy to Hetzner",
-        content="we deploy to hetzner",
-        score=1.0,
-        source=None,
-        metadata={},
-        project_id="project_123",
-    )
     retired = RetrievalCandidate(
         id=SUPERSEDED_ID,
         type="decision",
@@ -391,21 +381,16 @@ async def test_supersession_lookup_failure_degrades_without_failing_the_search(
         content="we deploy to fly.io",
         score=0.9,
         source=None,
-        metadata={"lifecycle_state": "superseded"},
+        metadata={},
         project_id="project_123",
     )
 
-    surviving, metadata = await search_module._apply_supersession_gate(
-        client=_SupersessionGraphClient(),
-        group_id="org-123",
-        source_lists=[(RetrievalSignal.NODE_FULLTEXT, [survivor, retired])],
-    )
-
-    assert [candidate.id for _signal, candidates in surviving for candidate in candidates] == [
-        SUCCESSOR_ID
-    ]
-    assert metadata["supersession_gate"]["lifecycle_dropped"] == 1
-    assert metadata["supersession_gate"]["lookup_error_type"] == "RuntimeError"
+    with pytest.raises(RuntimeError, match="supersession lifecycle lookup failed"):
+        await search_module._apply_supersession_gate(
+            client=_SupersessionGraphClient(),
+            group_id="org-123",
+            source_lists=[(RetrievalSignal.NODE_FULLTEXT, [retired])],
+        )
 
 
 class _CorrectionGraphRuntime:
@@ -934,10 +919,10 @@ def test_dict_shaped_lifecycle_flags_are_not_read_as_set_flags() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_truncated_supersession_check_says_so_in_the_receipt(
+async def test_a_truncated_supersession_check_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The cap fails open, so it must never fail silently."""
+    """Candidates beyond the complete lookup limit cannot receive a verdict."""
 
     monkeypatch.setattr(search_module, "_SUPERSESSION_LOOKUP_LIMIT", 2)
 
@@ -958,18 +943,17 @@ async def test_a_truncated_supersession_check_says_so_in_the_receipt(
             project_id="project_123",
         )
 
-    _surviving, metadata = await search_module._apply_supersession_gate(
-        client=_SupersessionGraphClient(),
-        group_id="org-123",
-        source_lists=[
-            (RetrievalSignal.NODE_FULLTEXT, [candidate(f"entity-{index}") for index in range(5)])
-        ],
-    )
-
-    gate = metadata["supersession_gate"]
-    assert gate["truncated"] is True
-    assert gate["checked_candidates"] == 2
-    assert gate["total_candidates"] == 5
+    with pytest.raises(RuntimeError, match="cannot completely check 5 candidates"):
+        await search_module._apply_supersession_gate(
+            client=_SupersessionGraphClient(),
+            group_id="org-123",
+            source_lists=[
+                (
+                    RetrievalSignal.NODE_FULLTEXT,
+                    [candidate(f"entity-{index}") for index in range(5)],
+                )
+            ],
+        )
 
 
 @pytest.mark.asyncio
@@ -1173,7 +1157,7 @@ async def test_a_refused_target_is_reported_rather_than_silently_skipped(
 
 
 @pytest.mark.asyncio
-async def test_the_row_cap_is_detected_even_when_dedup_hides_it(
+async def test_the_row_cap_fails_closed_even_when_dedup_hides_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """One retired row can carry many inbound edges, so rows bind before uuids do."""
@@ -1181,37 +1165,33 @@ async def test_the_row_cap_is_detected_even_when_dedup_hides_it(
     monkeypatch.setattr(search_module, "_SUPERSESSION_LOOKUP_LIMIT", 4)
 
     async def saturated_lookup(*_args: object, **_kwargs: object) -> tuple[set[str], int]:
-        # Four rows read, all pointing at the same retired row.
-        return {"entity-retired"}, 4
+        # Five rows read, all pointing at the same retired row.
+        return {"entity-retired"}, 5
 
     monkeypatch.setattr(search_module, "_superseded_candidate_uuids", saturated_lookup)
 
-    _surviving, metadata = await search_module._apply_supersession_gate(
-        client=_SupersessionGraphClient(),
-        group_id="org-123",
-        source_lists=[
-            (
-                RetrievalSignal.NODE_FULLTEXT,
-                [
-                    RetrievalCandidate(
-                        id="entity-retired",
-                        type="decision",
-                        name="retired",
-                        content="body",
-                        score=1.0,
-                        source=None,
-                        metadata={},
-                        project_id="project_123",
-                    )
-                ],
-            )
-        ],
-    )
-
-    gate = metadata["supersession_gate"]
-    assert gate["truncated"] is True
-    assert gate["edge_rows_read"] == 4
-    assert gate["total_candidates"] == 1
+    with pytest.raises(RuntimeError, match="incomplete edge set"):
+        await search_module._apply_supersession_gate(
+            client=_SupersessionGraphClient(),
+            group_id="org-123",
+            source_lists=[
+                (
+                    RetrievalSignal.NODE_FULLTEXT,
+                    [
+                        RetrievalCandidate(
+                            id="entity-retired",
+                            type="decision",
+                            name="retired",
+                            content="body",
+                            score=1.0,
+                            source=None,
+                            metadata={},
+                            project_id="project_123",
+                        )
+                    ],
+                )
+            ],
+        )
 
 
 def test_a_self_supersession_retires_nothing() -> None:
