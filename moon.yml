@@ -591,6 +591,7 @@ tasks:
       - tools/tests/test_ci_changes.py
       - tools/tests/test_release_workflow.py
       - tools/release/*.py
+      - apps/e2e/moon.yml
       - .github/workflows/release.yml
       - .github/workflows/publish.yml
       - VERSION

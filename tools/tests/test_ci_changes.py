@@ -114,4 +114,9 @@ def test_e2e_ci_tasks_are_finite_tasks() -> None:
         "playwright-install",
         "format",
     ):
-        assert config["tasks"][task_name].get("preset") != "server"
+        task = config["tasks"][task_name]
+        options = task.get("options", {})
+
+        assert task.get("preset") is None
+        assert options.get("runInCI", True) is True
+        assert options.get("persistent", False) is False
