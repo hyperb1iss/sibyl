@@ -2589,7 +2589,8 @@ def _register_tools(mcp: FastMCP) -> None:
                 artifact, procedure, task, epic, or project
             category: Category for organization (e.g., "debugging", "architecture")
             languages: Applicable programming languages
-            tags: Searchable tags for discovery
+            tags: Browse-only metadata tags for filtering and organization.
+                Tags do not affect ranked recall.
             related_to: IDs of related entities to link. A bare ID links
                 untyped; prefixing an ID with a predicate declares what this
                 memory does to that one and retrieval weights the declared

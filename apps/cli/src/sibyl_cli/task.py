@@ -329,7 +329,10 @@ def list_tasks(
     ] = None,
     tags: Annotated[
         str | None,
-        typer.Option("--tags", help="Filter by tags (comma-separated, matches ANY)"),
+        typer.Option(
+            "--tags",
+            help="Browse by metadata tags (comma-separated, matches ANY)",
+        ),
     ] = None,
     project: Annotated[str | None, typer.Option("-p", "--project", help="Project ID")] = None,
     epic: Annotated[
@@ -952,7 +955,10 @@ def create_task(
         ),
     ] = None,
     feature: Annotated[str | None, typer.Option("--feature", "-f", help="Feature area")] = None,
-    tags: Annotated[str | None, typer.Option("--tags", help="Comma-separated tags")] = None,
+    tags: Annotated[
+        str | None,
+        typer.Option("--tags", help="Comma-separated browse-only metadata tags"),
+    ] = None,
     technologies: Annotated[
         str | None, typer.Option("--tech", help="Comma-separated technologies")
     ] = None,
@@ -1071,7 +1077,11 @@ def update_task(
     epic: Annotated[str | None, typer.Option("-e", "--epic", help="Epic ID to group under")] = None,
     feature: Annotated[str | None, typer.Option("-f", "--feature", help="Feature area")] = None,
     tags: Annotated[
-        str | None, typer.Option("--tags", help="Comma-separated tags (replaces existing)")
+        str | None,
+        typer.Option(
+            "--tags",
+            help="Comma-separated browse-only metadata tags (replaces existing)",
+        ),
     ] = None,
     technologies: Annotated[
         str | None, typer.Option("--tech", help="Comma-separated technologies (replaces existing)")

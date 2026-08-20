@@ -405,7 +405,8 @@ async def add(
         entity_type: Type to create - episode (default), pattern, task, epic, project.
         category: Domain category (authentication, database, api, debugging, etc.).
         languages: Programming languages (python, typescript, rust, etc.).
-        tags: Searchable tags for discovery.
+        tags: Browse-only metadata tags for filtering and organization. Tags do
+              not affect ranked recall.
         related_to: Entity IDs to explicitly link. A bare ID creates an untyped
               RELATED_TO edge. Prefixing an ID with a predicate from the closed
               vocabulary declares what this memory does to that one, and

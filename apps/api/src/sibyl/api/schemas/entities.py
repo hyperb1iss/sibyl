@@ -59,7 +59,10 @@ class EntityBase(BaseModel):
     content: str = Field(default="", max_length=50000, description="Full content")
     category: str | None = Field(default=None, description="Category for organization")
     languages: list[str] = Field(default_factory=list, description="Programming languages")
-    tags: list[str] = Field(default_factory=list, description="Searchable tags")
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Browse-only metadata tags; tags do not affect ranked recall",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
 
