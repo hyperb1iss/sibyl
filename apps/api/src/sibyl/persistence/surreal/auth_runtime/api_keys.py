@@ -79,7 +79,7 @@ async def authenticate_api_key(raw_key: str):
             ]
             project_records = (
                 await repo.select_many(
-                    "SELECT uuid, graph_project_id FROM projects "
+                    "SELECT uuid, graph_project_id, created_at FROM projects "
                     "WHERE uuid IN $project_ids ORDER BY created_at ASC;",
                     project_ids=project_record_ids,
                 )
@@ -103,7 +103,7 @@ async def authenticate_api_key(raw_key: str):
             ]
             memory_space_records = (
                 await repo.select_many(
-                    "SELECT uuid, memory_scope, scope_key FROM memory_spaces "
+                    "SELECT uuid, memory_scope, scope_key, created_at FROM memory_spaces "
                     "WHERE uuid IN $memory_space_ids AND organization_id = $organization_id "
                     "ORDER BY created_at ASC;",
                     memory_space_ids=memory_space_ids,
@@ -137,7 +137,7 @@ async def _resolve_api_key_project_record_ids(
     if not normalized:
         return []
     records = await repo.select_many(
-        "SELECT uuid, graph_project_id FROM projects "
+        "SELECT uuid, graph_project_id, created_at FROM projects "
         "WHERE organization_id = $organization_id AND graph_project_id IN $project_ids "
         "ORDER BY created_at ASC;",
         organization_id=str(organization_id),
@@ -160,7 +160,7 @@ async def _resolve_api_key_memory_space_ids(
     if not normalized:
         return []
     records = await repo.select_many(
-        "SELECT uuid FROM memory_spaces "
+        "SELECT uuid, created_at FROM memory_spaces "
         "WHERE organization_id = $organization_id AND uuid IN $memory_space_ids "
         "ORDER BY created_at ASC;",
         organization_id=str(organization_id),

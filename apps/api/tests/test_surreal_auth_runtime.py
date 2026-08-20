@@ -1243,9 +1243,11 @@ async def test_create_api_key_writes_project_and_memory_space_scopes(
     assert len(client.calls) == 6
     project_query, project_params = client.calls[0]
     assert "FROM projects" in project_query
+    assert project_query.startswith("SELECT uuid, graph_project_id, created_at")
     assert project_params["project_ids"] == ["project-alpha"]
     memory_query, memory_params = client.calls[1]
     assert "FROM memory_spaces" in memory_query
+    assert memory_query.startswith("SELECT uuid, created_at")
     assert memory_params["memory_space_ids"] == [str(memory_space_id)]
     scope_query, scope_params = client.calls[3]
     assert scope_query == "CREATE api_key_project_scopes CONTENT $record;"
