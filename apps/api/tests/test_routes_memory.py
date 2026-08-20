@@ -188,9 +188,11 @@ async def test_memory_source_import_status_returns_source_safe_progress() -> Non
         skipped_count=2,
         dedupe_count=1,
     )
-    source_imports._SOURCE_IMPORT_RUNS[run.import_id] = run
-
-    response = await get_memory_source_import_status(run.import_id, org=org, ctx=_ctx())
+    with patch(
+        "sibyl.jobs.source_imports._load_persisted_run",
+        AsyncMock(return_value=run),
+    ):
+        response = await get_memory_source_import_status(run.import_id, org=org, ctx=_ctx())
 
     assert response.import_id == run.import_id
     assert response.status == "paused"

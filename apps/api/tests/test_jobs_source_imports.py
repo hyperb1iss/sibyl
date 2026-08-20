@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from email.message import EmailMessage
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -16,6 +17,11 @@ from sibyl.jobs.raw_changefeed import (
 )
 from sibyl.jobs.raw_promotion import promote_raw_captures
 from sibyl.jobs.worker import WorkerSettings
+from sibyl.persistence.surreal.source_import_runs import (
+    SourceImportRevisionConflictError,
+    SurrealSourceImportRunRepository,
+)
+from sibyl_core.backends.surreal.records import SurrealQueryError
 from sibyl_core.models.sources import SourceRecord
 from sibyl_core.services.mailbox_adapter import IMAP_ADAPTER_NAME
 from sibyl_core.services.source_adapters import (
@@ -300,6 +306,99 @@ def _source_import_result_payload(**overrides: object) -> dict[str, object]:
     }
     values.update(overrides)
     return values
+
+
+def _source_import_run(**overrides: object) -> source_imports.SourceImportRun:
+    run = source_imports.SourceImportRun(
+        import_id="source_import:test",
+        organization_id="org-1",
+        principal_id="user-1",
+        source_uri="/imports/source.mbox",
+        adapter_name="mbox",
+        options={},
+        policy_context=_policy_context(),
+        batch_size=100,
+        promotion_preview_approved=False,
+    )
+    for field_name, value in overrides.items():
+        setattr(run, field_name, value)
+    return run
+
+
+@pytest.mark.asyncio
+async def test_source_import_repository_rejects_stale_revision() -> None:
+    client = SimpleNamespace(execute_query=AsyncMock(return_value=[]))
+    repository = SurrealSourceImportRunRepository(client)
+
+    with pytest.raises(SourceImportRevisionConflictError, match="revision 4 is stale"):
+        await repository.save(
+            {
+                "uuid": "source_import:test",
+                "organization_id": "org-1",
+                "revision": 5,
+            },
+            expected_revision=4,
+        )
+
+    query, params = client.execute_query.await_args.args[0], client.execute_query.await_args.kwargs
+    assert "revision = $expected_revision" in query
+    assert params["expected_revision"] == 4
+
+
+@pytest.mark.asyncio
+async def test_source_import_repository_propagates_checked_write_error() -> None:
+    client = SimpleNamespace(
+        execute_query=AsyncMock(
+            return_value={"status": "ERR", "detail": "durable write unavailable"}
+        )
+    )
+    repository = SurrealSourceImportRunRepository(client)
+
+    with pytest.raises(SurrealQueryError, match="durable write unavailable"):
+        await repository.save(
+            {
+                "uuid": "source_import:test",
+                "organization_id": "org-1",
+                "revision": 0,
+            },
+            expected_revision=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_source_import_persistence_precedes_cache_and_broadcast() -> None:
+    run = _source_import_run()
+    broadcast = AsyncMock()
+    with (
+        patch(
+            "sibyl.jobs.source_imports.save_source_import_run_record",
+            AsyncMock(side_effect=RuntimeError("durable write unavailable")),
+        ),
+        patch("sibyl.jobs.source_imports._safe_broadcast_source_import", broadcast),
+        pytest.raises(RuntimeError, match="durable write unavailable"),
+    ):
+        await source_imports._persist_run(run, expected_revision=None)
+
+    assert source_imports._SOURCE_IMPORT_RUNS == {}
+    broadcast.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_source_import_load_failure_propagates_without_cache_fallback() -> None:
+    source_imports._SOURCE_IMPORT_RUNS["source_import:test"] = _source_import_run()
+    with (
+        patch(
+            "sibyl.jobs.source_imports.load_source_import_run_record",
+            AsyncMock(side_effect=RuntimeError("durable read unavailable")),
+        ),
+        pytest.raises(RuntimeError, match="durable read unavailable"),
+    ):
+        await source_imports._get_run(
+            "source_import:test",
+            organization_id="org-1",
+        )
+
+    assert source_imports._SOURCE_IMPORT_RUNS["source_import:test"].revision == 0
 
 
 @pytest.mark.asyncio
@@ -901,9 +1000,11 @@ async def test_source_import_run_records_dedupe_without_duplicate_write(
         )
     assert completed["status"] == "completed"
     run = source_imports._SOURCE_IMPORT_RUNS[first["import_id"]]
+    expected_revision = run.revision
     run.checkpoint = None
     run.status = source_imports.SourceImportStatus.PAUSED
     run.completed_at = None
+    await source_imports._persist_run(run, expected_revision=expected_revision)
 
     with (
         patch(
@@ -996,9 +1097,16 @@ async def test_resume_source_import_preserves_external_cancel_after_batch(
         completed_at=datetime.now(UTC),
     )
 
-    async def load_canceled(import_id: str, *, organization_id: str):
+    persisted = source_imports._SOURCE_IMPORT_RUNS[str(first["import_id"])]
+    load_count = 0
+
+    async def load_state(import_id: str, *, organization_id: str):
+        nonlocal load_count
         assert import_id == first["import_id"]
         assert organization_id == "org-1"
+        load_count += 1
+        if load_count == 1:
+            return persisted
         source_imports._SOURCE_IMPORT_RUNS[import_id] = canceled
         return canceled
 
@@ -1009,7 +1117,7 @@ async def test_resume_source_import_preserves_external_cancel_after_batch(
         ),
         patch(
             "sibyl.jobs.source_imports._load_persisted_run",
-            AsyncMock(side_effect=load_canceled),
+            AsyncMock(side_effect=load_state),
         ),
     ):
         result = await source_imports.resume_source_import(
@@ -1024,6 +1132,61 @@ async def test_resume_source_import_preserves_external_cancel_after_batch(
     assert source_imports._SOURCE_IMPORT_RUNS[str(first["import_id"])].status == (
         source_imports.SourceImportStatus.CANCELED
     )
+
+
+@pytest.mark.asyncio
+async def test_resume_source_import_cannot_overwrite_cancel_after_checkpoint_check() -> None:
+    import_id = "source_import:revision-race"
+    initial = _source_import_run(
+        import_id=import_id,
+        revision=7,
+        status=source_imports.SourceImportStatus.PAUSED,
+    )
+    source_imports._SOURCE_IMPORT_RUNS[import_id] = initial
+    still_running = _source_import_run(
+        import_id=import_id,
+        revision=8,
+        status=source_imports.SourceImportStatus.RUNNING,
+    )
+    canceled = _source_import_run(
+        import_id=import_id,
+        revision=9,
+        status=source_imports.SourceImportStatus.CANCELED,
+        completed_at=datetime.now(UTC),
+    )
+    save = AsyncMock(
+        side_effect=[
+            {"uuid": import_id, "revision": 8},
+            SourceImportRevisionConflictError("checkpoint lost cancellation race"),
+        ]
+    )
+    load = AsyncMock(side_effect=[initial, still_running, canceled])
+    enqueue = AsyncMock()
+
+    with (
+        patch(
+            "sibyl.jobs.source_imports.import_source_archive",
+            AsyncMock(return_value=_source_import_result_payload()),
+        ),
+        patch("sibyl.jobs.source_imports.save_source_import_run_record", save),
+        patch("sibyl.jobs.source_imports._load_persisted_run", load),
+        patch("sibyl.jobs.source_imports._safe_broadcast_source_import", AsyncMock()),
+        patch("sibyl.jobs.source_imports._enqueue_raw_promotion_after_import", enqueue),
+    ):
+        result = await source_imports.resume_source_import(
+            import_id,
+            organization_id="org-1",
+            principal_id="user-1",
+            policy_context=_policy_context(),
+        )
+
+    assert result["status"] == source_imports.SourceImportStatus.CANCELED.value
+    assert [call.kwargs["expected_revision"] for call in save.await_args_list] == [7, 8]
+    cached = source_imports._SOURCE_IMPORT_RUNS[import_id]
+    assert cached.status is source_imports.SourceImportStatus.RUNNING
+    assert cached.revision == 8
+    assert cached.checkpoint is None
+    enqueue.assert_not_awaited()
 
 
 @pytest.mark.asyncio
