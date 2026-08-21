@@ -87,7 +87,7 @@ jobs:
           sudo apt-get install -y libxml2-dev libxslt-dev
 
       - name: "◇ Setup moonrepo toolchain"
-        uses: moonrepo/setup-toolchain@v0.6
+        uses: moonrepo/setup-toolchain@v0.6.4
         with:
           auto-install: true
           auto-setup: true
