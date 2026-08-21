@@ -760,7 +760,9 @@ def build_rig_activity(
 ) -> dict[str, object]:
     """Publish explicit arm activity for the artifact bridge on every row."""
     normalized_levers = {
-        str(lever): _nonnegative_int(value) for lever, value in lever_activity.items()
+        str(lever): count
+        for lever, value in lever_activity.items()
+        if (count := _nonnegative_int(value)) > 0
     }
     return {
         **lane_activity,
@@ -819,13 +821,46 @@ def production_profile_treatment_activity(
                 raise RuntimeError(
                     f"production render lever {lever} failed closed: {screen.get('status')}"
                 )
-            lever_activity[lever] = _nonnegative_int(screen.get("activity_events"))
             treatment[lever] = {
                 "source": DISTILLATION_RECEIPT_FILENAME,
                 "receipt_set_sha256": receipt_set_sha256,
                 "screen": screen,
             }
     return lever_activity, treatment
+
+
+def rendered_distillation_treatment_activity(
+    *,
+    evidence_set: list[dict[str, object]],
+    rendered_entity_ids: set[str],
+    distillation_receipts: dict[str, dict[str, object]],
+) -> dict[str, int]:
+    """Count render-profile notes that actually reached the reader."""
+    observed_absence = 0
+    digest_roles_budget = 0
+    for item in evidence_set:
+        entity_id = _stripped_str(item.get("id"))
+        if not entity_id or entity_id not in rendered_entity_ids:
+            continue
+        metadata = _flatten_operational_metadata(item.get("metadata"))
+        if metadata.get("operational_note_distillation_profile") != "render_v1":
+            continue
+        source_id = _stripped_str(metadata.get("operational_source_id"))
+        if source_id not in distillation_receipts:
+            raise RuntimeError(
+                f"rendered operational note has no bound distillation receipt: {entity_id}"
+            )
+        digest_roles_budget += 1
+        if metadata.get("note_kind") == LEVER_OBSERVED_ABSENCE:
+            observed_absence += 1
+    return {
+        lever: count
+        for lever, count in (
+            (LEVER_OBSERVED_ABSENCE, observed_absence),
+            (LEVER_DIGEST_ROLES_BUDGET, digest_roles_budget),
+        )
+        if count > 0
+    }
 
 
 def _source_supports(item: dict[str, object]) -> list[dict[str, object]]:
@@ -5096,6 +5131,25 @@ class SibylLiveApiMemory(Memory):
             for item in context_budget.get("items", [])
             if isinstance(item, dict) and not item.get("dropped")
         }
+        if (
+            getattr(
+                self,
+                "operational_note_distillation_profile",
+                DEFAULT_OPERATIONAL_NOTE_DISTILLATION_PROFILE,
+            )
+            != DEFAULT_OPERATIONAL_NOTE_DISTILLATION_PROFILE
+        ):
+            render_lever_activity.update(
+                rendered_distillation_treatment_activity(
+                    evidence_set=evidence_set,
+                    rendered_entity_ids=rendered_entity_ids,
+                    distillation_receipts=getattr(
+                        self,
+                        "ingest_note_distillation_receipts",
+                        {},
+                    ),
+                )
+            )
         if lane_receipt is not None:
             render_lever_activity[LEVER_ENGLISH_LANE_GROUPING] = len(rendered_entity_ids)
         if action_spine_receipt is not None:

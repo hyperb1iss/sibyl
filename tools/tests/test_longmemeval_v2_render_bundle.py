@@ -211,6 +211,51 @@ def test_rig_activity_is_explicit_for_control_and_aggregates_treatment() -> None
     }
 
 
+def test_distillation_activity_requires_rendered_treated_entities() -> None:
+    receipt = _render_v1_distillation_receipt()
+    activity, treatment = sibyl_memory.production_profile_treatment_activity(
+        search_metadata={},
+        operational_note_dedupe_mode="source",
+        operational_note_lane_mode="reserved",
+        distillation_profile="render_v1",
+        distillation_receipts={"trajectory-1": receipt},
+    )
+
+    assert activity == {}
+    assert set(treatment) == {"observed_absence", "digest_roles_budget"}
+    evidence_set: list[dict[str, object]] = [
+        {
+            "id": "note-absence",
+            "metadata": {
+                "operational_source_id": "trajectory-1",
+                "operational_note_distillation_profile": "render_v1",
+                "note_kind": "observed_absence",
+            },
+        },
+        {
+            "id": "note-facts",
+            "metadata": {
+                "operational_source_id": "trajectory-1",
+                "operational_note_distillation_profile": "render_v1",
+                "note_kind": "facts",
+            },
+        },
+    ]
+    assert (
+        sibyl_memory.rendered_distillation_treatment_activity(
+            evidence_set=evidence_set,
+            rendered_entity_ids=set(),
+            distillation_receipts={"trajectory-1": receipt},
+        )
+        == {}
+    )
+    assert sibyl_memory.rendered_distillation_treatment_activity(
+        evidence_set=evidence_set,
+        rendered_entity_ids={"note-absence", "note-facts"},
+        distillation_receipts={"trajectory-1": receipt},
+    ) == {"observed_absence": 1, "digest_roles_budget": 2}
+
+
 def test_adapter_renders_bundle_and_emits_explicit_per_lever_activity(  # noqa: PLR0915
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
