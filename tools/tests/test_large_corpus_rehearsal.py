@@ -75,7 +75,10 @@ def test_rehearsal_writes_release_citable_receipt(tmp_path: Path) -> None:
     written = json.loads(artifact_path.read_text(encoding="utf-8"))
     assert receipt["status"] == "PASS"
     assert written == receipt
-    assert receipt["artifact_path"] == str(artifact_path)
+    displayed_artifact_path = Path(cast(str, receipt["artifact_path"]))
+    if not displayed_artifact_path.is_absolute():
+        displayed_artifact_path = REPO_ROOT / displayed_artifact_path
+    assert displayed_artifact_path.resolve() == artifact_path.resolve()
     assert receipt["totals"]["imported_count"] == EXPECTED_IMPORTED_COUNT
     assert receipt["totals"]["skipped_count"] == EXPECTED_SKIPPED_COUNT
     assert receipt["totals"]["dedupe_count"] == EXPECTED_DEDUPE_COUNT

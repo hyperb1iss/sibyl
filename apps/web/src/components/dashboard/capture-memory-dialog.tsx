@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { EditPencil, Xmark } from '@/components/ui/icons';
-import { useCreateEntity } from '@/lib/hooks';
+import { useCreateEntity } from '@/lib/hooks/graph';
 
 const CAPTURE_TITLE_CHARS = 72;
 

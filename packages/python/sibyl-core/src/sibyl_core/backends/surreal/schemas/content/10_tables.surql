@@ -231,6 +231,7 @@ DEFINE FIELD IF NOT EXISTS privacy_class ON source_imports TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS target_memory_scope ON source_imports TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS target_scope_key ON source_imports TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS status ON source_imports TYPE string DEFAULT 'pending';
+DEFINE FIELD IF NOT EXISTS revision ON source_imports TYPE int DEFAULT 0 ASSERT $value >= 0;
 DEFINE FIELD IF NOT EXISTS checkpoint ON source_imports TYPE option<object> FLEXIBLE;
 DEFINE FIELD IF NOT EXISTS options ON source_imports TYPE object FLEXIBLE DEFAULT {{}};
 DEFINE FIELD IF NOT EXISTS policy_context ON source_imports TYPE object FLEXIBLE DEFAULT {{}};

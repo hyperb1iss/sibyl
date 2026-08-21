@@ -8,7 +8,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from sibyl.api.routes.memory import _api_key_memory_scope_allowed, _inspect_content_policy
+from sibyl.api.routes import memory_auth
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import (
     get_auth_context,
@@ -183,13 +183,13 @@ async def _filter_visible_raw_memories(
 ) -> list[RawMemory]:
     visible: list[RawMemory] = []
     for memory in memories:
-        if not _api_key_memory_scope_allowed(
+        if not memory_auth.api_key_memory_scope_allowed(
             ctx,
             memory_scope=memory.memory_scope.value,
             scope_key=memory.scope_key,
         ):
             continue
-        decision = await _inspect_content_policy(ctx=ctx, memory=memory)
+        decision = await memory_auth.inspect_content_policy(ctx=ctx, memory=memory)
         if decision.allowed:
             visible.append(memory)
     return visible

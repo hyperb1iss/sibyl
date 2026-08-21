@@ -31,8 +31,8 @@ import type {
   SynthesisOutputType,
   SynthesisPlanResponse,
   SynthesisSectionRequest,
-} from '@/lib/api';
-import { useSynthesisDraft, useSynthesisPlan } from '@/lib/hooks';
+} from '@/lib/api/memory';
+import { useSynthesisDraft, useSynthesisPlan } from '@/lib/hooks/memory';
 import { SynthesisOutlineEditor } from './synthesis-outline-editor';
 import { SynthesisVerificationPanel } from './synthesis-verification-panel';
 

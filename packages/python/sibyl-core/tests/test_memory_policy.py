@@ -461,7 +461,7 @@ def test_promoted_candidate_cannot_inherit_a_forged_owner_from_its_capture() -> 
     bag alone.
     """
     from sibyl_core.models.reflection import ReflectionCandidate
-    from sibyl_core.services.memory import _entity_from_candidate
+    from sibyl_core.services.memory_promotion import _entity_from_candidate
 
     candidate = ReflectionCandidate(
         kind="decision",
@@ -584,9 +584,9 @@ _SCOPE_READERS_THAT_DO_NOT_AUTHORIZE = {
     "projection/memory.py::_projected_fact_entity": "write stamp: mirrors an inherited scope",
     "projection/memory.py::_projection_allowed": "derivation gate: refuses to project private and delegated sources at all",
     "projection/memory.py::_projection_identity_scope": "builds a dedupe identity for a projection",
-    "services/surreal_content.py::_raw_memory_from_record": "deserializes a raw memory's stored scope",
-    "services/surreal_content.py::get_raw_memory_by_dedupe_key": "matches a stored dedupe key",
-    "services/surreal_content.py::get_raw_memory_by_source_id": "matches a stored source id",
+    "services/content_models.py::raw_memory_from_record": "deserializes a raw memory's stored scope",
+    "services/content_raw_persistence.py::get_raw_memory_by_dedupe_key": "matches a stored dedupe key",
+    "services/content_raw_persistence.py::get_raw_memory_by_source_id": "matches a stored source id",
     "session_bundle.py::summarize_memory": "serializes the scope for display",
     "session_bundle.py::summarize_raw_memory": "serializes the scope for display",
     "tools/add.py::add": "write guard: refuses a scope it was not authorized to keep",

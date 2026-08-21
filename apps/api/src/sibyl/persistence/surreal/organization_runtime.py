@@ -112,6 +112,39 @@ async def _execute_checked(client: QueryClient, query: str, **params: object) ->
     return result
 
 
+def _require_created_org_records(
+    result: object,
+    *,
+    organization: Mapping[str, object],
+    membership: Mapping[str, object],
+) -> None:
+    payload = _record_payload(result)
+    statement_results = payload.get("result")
+    normalized_input = statement_results if isinstance(statement_results, list) else result
+    records = _normalize_records(normalized_input)
+    organization_id = str(organization["uuid"])
+    membership_id = str(membership["uuid"])
+    organization_records = [
+        record for record in records if str(record.get("uuid") or "") == organization_id
+    ]
+    membership_records = [
+        record for record in records if str(record.get("uuid") or "") == membership_id
+    ]
+    if len(organization_records) != 1 or len(membership_records) != 1:
+        raise RuntimeError("organization create transaction returned incomplete results")
+
+    created_org = organization_records[0]
+    created_membership = membership_records[0]
+    if (
+        str(created_org.get("slug") or "") != str(organization["slug"])
+        or str(created_org.get("name") or "") != str(organization["name"])
+        or str(created_membership.get("organization_id") or "") != organization_id
+        or str(created_membership.get("user_id") or "") != str(membership["user_id"])
+        or str(created_membership.get("role") or "") != OrganizationRole.OWNER.value
+    ):
+        raise RuntimeError("organization create transaction returned incomplete results")
+
+
 async def _list_user_records_by_id(
     client: QueryClient,
     user_ids: list[UUID],
@@ -641,60 +674,49 @@ async def create_org(
 ) -> OrgAuthResult:
     async with _auth_client_scope() as client:
         resolved_slug = slugify(slug or name)
-        existing = _normalize_records(
-            await client.execute_query(
-                "SELECT uuid FROM organizations WHERE slug = $slug LIMIT 1;",
-                slug=resolved_slug,
-            )
-        )
-        if existing:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Slug already taken")
-
         now = _utcnow()
-        create_result = await client.execute_query(
-            "CREATE organizations CONTENT $record;",
-            record={
-                "uuid": str(uuid4()),
-                "name": name,
-                "slug": resolved_slug,
-                "is_personal": False,
-                "settings": {},
-                "created_at": now,
-                "updated_at": now,
-            },
-        )
-        error = _query_error(create_result)
-        if error is not None:
-            if _is_uniqueness_error(error):
+        organization_id = uuid4()
+        membership_id = uuid4()
+        organization = {
+            "uuid": str(organization_id),
+            "name": name,
+            "slug": resolved_slug,
+            "is_personal": False,
+            "settings": {},
+            "created_at": now,
+            "updated_at": now,
+        }
+        membership = {
+            "uuid": str(membership_id),
+            "organization_id": str(organization_id),
+            "user_id": str(user_id),
+            "role": OrganizationRole.OWNER.value,
+            "created_at": now,
+            "updated_at": now,
+        }
+        try:
+            transaction_result = await _execute_checked(
+                client,
+                "BEGIN TRANSACTION;\n"
+                "CREATE organizations CONTENT $organization;\n"
+                "CREATE organization_members CONTENT $membership;\n"
+                "COMMIT TRANSACTION;",
+                organization=organization,
+                membership=membership,
+            )
+        except Exception as exc:
+            if _is_uniqueness_error(str(exc)):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Slug already taken",
-                )
-            raise RuntimeError(error)
-        created = _normalize_records(create_result)
-        if not created:
-            msg = "Failed to create organization"
-            raise RuntimeError(msg)
-        organization = created[0]
-        organization_id = _coerce_uuid(organization.get("uuid"), field_name="organization.uuid")
+                ) from exc
+            raise
 
-        membership_result = await client.execute_query(
-            "CREATE organization_members CONTENT $record;",
-            record={
-                "uuid": str(uuid4()),
-                "organization_id": str(organization_id),
-                "user_id": str(user_id),
-                "role": OrganizationRole.OWNER.value,
-                "created_at": now,
-                "updated_at": now,
-            },
+        _require_created_org_records(
+            transaction_result,
+            organization=organization,
+            membership=membership,
         )
-        error = _query_error(membership_result)
-        if error is not None:
-            raise RuntimeError(error)
-        if not _normalize_records(membership_result):
-            msg = "Failed to create organization owner membership"
-            raise RuntimeError(msg)
 
         try:
             await ensure_graph_indexes(str(organization_id))

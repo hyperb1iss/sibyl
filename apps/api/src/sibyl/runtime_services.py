@@ -159,18 +159,24 @@ class RuntimeServices:
         await stop_surreal_connectivity_monitor()
 
     async def _close_shared_surreal_clients(self) -> None:
+        errors: dict[str, str] = {}
+
         try:
             from sibyl.persistence.surreal.auth import close_shared_surreal_auth_client
-            from sibyl.persistence.surreal.content import close_shared_surreal_content_client
-            from sibyl_core.services.surreal_content import (
-                close_shared_surreal_content_client as close_core_surreal_content_client,
-            )
 
             await close_shared_surreal_auth_client()
-            await close_shared_surreal_content_client()
-            await close_core_surreal_content_client()
         except Exception as e:
-            self._log.debug("Shared Surreal client shutdown error", error=str(e))
+            errors["auth"] = str(e)
+
+        try:
+            from sibyl.persistence.surreal.content import close_shared_surreal_content_client
+
+            await close_shared_surreal_content_client()
+        except Exception as e:
+            errors["content"] = str(e)
+
+        if errors:
+            self._log.debug("Shared Surreal client shutdown errors", errors=errors)
 
     async def _shutdown_pubsub(self) -> None:
         if not self._pubsub_initialized:

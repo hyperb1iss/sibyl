@@ -10,7 +10,8 @@ const storage = vi.hoisted(() => ({
   setItem: vi.fn(),
 }));
 
-vi.mock('@/lib/hooks', () => hooks);
+vi.mock('@/lib/hooks/admin', () => ({ useSetupStatus: hooks.useSetupStatus }));
+vi.mock('@/lib/hooks/auth', () => ({ useOnboardingProgress: hooks.useOnboardingProgress }));
 vi.mock('@/components/dashboard/connect-agent-modal', () => ({
   ConnectAgentModal: () => <div data-testid="connect-agent-modal" />,
 }));

@@ -491,8 +491,9 @@ class TestSynthesisOverMcpGrant:
     async def _render(self, grants: set[str] | None) -> str:
         import json
 
-        import sibyl.server as server_module
-        from sibyl.server import McpContext
+        import sibyl.mcp_tools.context as mcp_context_module
+        import sibyl.mcp_tools.synthesis as synthesis_module
+        from sibyl.mcp_tools.context import McpContext
 
         ctx = McpContext(
             org_id="00000000-0000-0000-0000-000000000111",
@@ -505,13 +506,13 @@ class TestSynthesisOverMcpGrant:
             return self._pack()
 
         with (
-            patch.object(server_module, "_require_mcp_context", AsyncMock(return_value=ctx)),
+            patch.object(mcp_context_module, "require_context", AsyncMock(return_value=ctx)),
             patch.object(
-                server_module, "_resolve_mcp_project_scope", AsyncMock(return_value=set())
+                mcp_context_module, "resolve_project_scope", AsyncMock(return_value=set())
             ),
             patch("sibyl_core.services.synthesis.default_context_pack", _context),
         ):
-            plan = await server_module._synthesis_mcp_plan(goal="ship", project=None)
+            plan = await synthesis_module._synthesis_mcp_plan(goal="ship", project=None)
         return json.dumps(plan, default=str)
 
     @pytest.mark.asyncio
@@ -593,24 +594,25 @@ class TestGrantContractDrift:
 
     @pytest.mark.asyncio
     async def test_a_context_missing_the_grant_raises(self) -> None:
-        import sibyl.server as server_module
+        import sibyl.mcp_tools.context as mcp_context_module
+        import sibyl.mcp_tools.synthesis as synthesis_module
 
         async def _context(**_kwargs: Any):
             return self._pack()
 
         with (
             patch.object(
-                server_module,
-                "_require_mcp_context",
+                mcp_context_module,
+                "require_context",
                 AsyncMock(return_value=self._DriftedContext()),
             ),
             patch.object(
-                server_module, "_resolve_mcp_project_scope", AsyncMock(return_value=set())
+                mcp_context_module, "resolve_project_scope", AsyncMock(return_value=set())
             ),
             patch("sibyl_core.services.synthesis.default_context_pack", _context),
             pytest.raises(AttributeError, match="api_key_memory_scope_keys"),
         ):
-            await server_module._synthesis_mcp_plan(goal="ship", project=None)
+            await synthesis_module._synthesis_mcp_plan(goal="ship", project=None)
 
     def test_no_site_reads_the_grant_defensively(self) -> None:
         """The fallback is what made drift silent, so none may come back."""

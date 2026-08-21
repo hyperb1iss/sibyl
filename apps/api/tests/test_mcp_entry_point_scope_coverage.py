@@ -27,7 +27,8 @@ from uuid import uuid4
 
 import pytest
 
-from sibyl.server import McpContext, create_mcp_server
+from sibyl.mcp_tools.context import McpContext
+from sibyl.server import create_mcp_server
 
 # Tools that mutate state. Registering a tool without listing it here fails the
 # inventory test, which is what forces a new tool to be classified and gated.
@@ -59,16 +60,16 @@ STORE_BOUNDARIES: tuple[tuple[str, str], ...] = (
     ("sibyl_core.services.surreal_content", "remember_raw_memory"),
     ("sibyl_core.tools.manage", "manage"),
     ("sibyl_core.services.memory", "apply_memory_correction"),
-    ("sibyl.server", "log_memory_audit_event"),
+    ("sibyl.mcp_tools.management", "log_memory_audit_event"),
     ("sibyl.services.work_item_workflow", "transition_work_item"),
 )
 
 # Reads the gated code performs on its way to the store boundaries above.
 # Stubbed so the probes run without a live graph; none of them are mutations.
 READ_SCAFFOLDING: tuple[tuple[str, str, Any], ...] = (
-    ("sibyl.server", "_get_accessible_projects", {"project-a"}),
-    ("sibyl.server", "has_owner_membership", True),
-    ("sibyl.server", "resolve_accessible_project_graph_ids", {"project-a"}),
+    ("sibyl.mcp_tools.context", "get_accessible_projects", {"project-a"}),
+    ("sibyl.mcp_tools.observability", "has_owner_membership", True),
+    ("sibyl.mcp_tools.context", "resolve_accessible_project_graph_ids", {"project-a"}),
 )
 
 TOOL_ARGUMENTS: dict[str, dict[str, Any]] = {
@@ -182,7 +183,7 @@ async def _invoke(fn: Callable[..., object], scopes: list[str]) -> BaseException
     arguments = TOOL_ARGUMENTS.get(getattr(fn, "__name__", ""))
     if arguments is None:
         arguments = _fallback_arguments(fn)
-    with patch("sibyl.server._get_mcp_context", AsyncMock(return_value=_context(scopes))):
+    with patch("sibyl.mcp_tools.context.get_context", AsyncMock(return_value=_context(scopes))):
         try:
             result = fn(**arguments)
             if inspect.isawaitable(result):

@@ -33,28 +33,29 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from sibyl_core.retrieval.candidates import RetrievalCandidate, VectorCandidateFetch
-from sibyl_core.retrieval.fusion import rrf_merge_with_metadata
-from sibyl_core.retrieval.search import (
+from sibyl_core.retrieval._search_candidates import _candidate_allowed
+from sibyl_core.retrieval._search_database import _get_read_only_graph_runtime
+from sibyl_core.retrieval._search_expansion import _predicate_hop_receipt
+from sibyl_core.retrieval._search_fusion import _search_result_from_candidate
+from sibyl_core.retrieval._search_lifecycle import _apply_supersession_gate
+from sibyl_core.retrieval._search_plan import (
     MAX_RETRIEVAL_LIMIT,
     RetrievalPlan,
     RetrievalSignal,
-    _apply_supersession_gate,
-    _candidate_allowed,
+    _episode_sources_allowed,
+    _node_sources_allowed,
+    _search_filter_for_plan,
+)
+from sibyl_core.retrieval._search_sources import (
     _candidate_source_metadata,
     _candidate_source_result,
-    _elapsed_ms,
     _empty_candidate_source,
     _episode_fulltext_candidates,
-    _episode_sources_allowed,
-    _get_read_only_graph_runtime,
     _node_fulltext_candidates,
-    _node_sources_allowed,
-    _predicate_hop_receipt,
-    _search_filter_for_plan,
-    _search_result_from_candidate,
     _vector_candidate_sources_detailed,
 )
+from sibyl_core.retrieval.candidates import RetrievalCandidate, VectorCandidateFetch
+from sibyl_core.retrieval.fusion import rrf_merge_with_metadata
 
 if TYPE_CHECKING:
     from sibyl_core.embeddings.providers import EmbeddingProvider
@@ -62,6 +63,11 @@ if TYPE_CHECKING:
     from sibyl_core.tools.responses import SearchResponse, SearchResult
 
 log = structlog.get_logger()
+
+
+def _elapsed_ms(started_at: float) -> float:
+    return (time.perf_counter() - started_at) * 1000.0
+
 
 # The RRF paper's default, and the arm's only tunable. It is stated once, as a
 # constant rather than a parameter, because a per-request k would reintroduce

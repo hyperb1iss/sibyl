@@ -2,7 +2,7 @@
 
 import { EntityBadge } from '@/components/ui/badge';
 import { AlertTriangle, Eye, Eye as EyeOpen, Key, WarningCircle } from '@/components/ui/icons';
-import type { MemorySourceInspectResponse } from '@/lib/api';
+import type { MemorySourceInspectResponse } from '@/lib/api/memory';
 
 interface SourceVisibilitySummaryProps {
   source: MemorySourceInspectResponse;

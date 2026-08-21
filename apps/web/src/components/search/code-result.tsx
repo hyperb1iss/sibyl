@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { ExternalLink } from '@/components/ui/icons';
-import type { CodeExampleResult } from '@/lib/api';
+import type { CodeExampleResult } from '@/lib/api/search';
 
 // Language identity mapped onto the SilkCircuit palette so the chips stay
 // distinguishable yet theme-correct in both neon and dawn (no frozen brand hex).

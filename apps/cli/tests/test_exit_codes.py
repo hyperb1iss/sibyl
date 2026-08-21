@@ -137,8 +137,8 @@ def test_note_alias_exits_nonzero_when_the_write_is_refused() -> None:
     client = _client(create_note={})
 
     with (
-        patch("sibyl_cli.main.get_client", return_value=client),
-        patch("sibyl_cli.main.resolve_id_prefix", AsyncMock(side_effect=lambda _c, i, **_k: i)),
+        patch("sibyl_cli.capture.get_client", return_value=client),
+        patch("sibyl_cli.capture.resolve_id_prefix", AsyncMock(side_effect=lambda _c, i, **_k: i)),
     ):
         result = CliRunner().invoke(main_app, ["note", TASK_ID, "body"])
 
@@ -379,7 +379,7 @@ def test_synthesis_remember_exits_nonzero_when_nothing_was_remembered(
     """The command's whole job is to remember; a run that did not is a failure."""
     drafted = {"artifact": {"title": "x", "remembered_memory_id": None}}
 
-    with patch("sibyl_cli.main.get_client", return_value=_client(synthesis_draft=drafted)):
+    with patch("sibyl_cli.synthesis.get_client", return_value=_client(synthesis_draft=drafted)):
         result = CliRunner().invoke(main_app, ["synthesis", "remember", "a goal", *json_flag])
 
     assert result.exit_code == 1
@@ -396,7 +396,7 @@ def test_synthesis_remember_exits_zero_when_it_lands(json_flag: list[str]) -> No
         }
     }
 
-    with patch("sibyl_cli.main.get_client", return_value=_client(synthesis_draft=remembered)):
+    with patch("sibyl_cli.synthesis.get_client", return_value=_client(synthesis_draft=remembered)):
         result = CliRunner().invoke(main_app, ["synthesis", "remember", "a goal", *json_flag])
 
     assert result.exit_code == 0
@@ -564,7 +564,7 @@ def test_the_recall_command_is_not_a_repair_command(
     _contexts(tmp_path, monkeypatch)
     monkeypatch.setattr(state, "_ignore_selection", False)
 
-    with patch("sibyl_cli.main.get_client") as get:
+    with patch("sibyl_cli.recall.get_client") as get:
         result = CliRunner().invoke(main_app, ["-C", "stagingg", "context", "list"])
 
     assert result.exit_code == 1
@@ -711,7 +711,7 @@ def test_synthesis_verify_exits_nonzero_when_verification_fails(json_flag: list[
     """Five sweep rounds passed over this one; it reports a verdict AND a failure."""
     failed = {"verification": {"status": "gaps", "gap_count": 3, "gaps": []}}
 
-    with patch("sibyl_cli.main.get_client", return_value=_client(synthesis_draft=failed)):
+    with patch("sibyl_cli.synthesis.get_client", return_value=_client(synthesis_draft=failed)):
         result = CliRunner().invoke(main_app, ["synthesis", "verify", "a goal", *json_flag])
 
     assert result.exit_code == 1
@@ -721,7 +721,7 @@ def test_synthesis_verify_exits_nonzero_when_verification_fails(json_flag: list[
 def test_synthesis_verify_exits_zero_when_verification_passes(json_flag: list[str]) -> None:
     passed = {"verification": {"status": "pass", "source_count": 4, "gaps": []}}
 
-    with patch("sibyl_cli.main.get_client", return_value=_client(synthesis_draft=passed)):
+    with patch("sibyl_cli.synthesis.get_client", return_value=_client(synthesis_draft=passed)):
         result = CliRunner().invoke(main_app, ["synthesis", "verify", "a goal", *json_flag])
 
     assert result.exit_code == 0

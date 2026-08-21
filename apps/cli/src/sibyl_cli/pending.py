@@ -22,8 +22,11 @@ from sibyl_cli.common import (
 from sibyl_cli.pending_writes import (
     delete_pending_write,
     increment_attempts,
+    is_canonical_pending_write_id,
+    is_corrupt_pending_write,
     list_pending_writes,
     pending_write_label,
+    pending_writes_dir,
     read_pending_write,
     record_pending_metric,
 )
@@ -32,6 +35,13 @@ app = typer.Typer(help="Inspect and replay locally buffered writes")
 
 
 def _summary(item: dict[str, Any]) -> dict[str, Any]:
+    if is_corrupt_pending_write(item):
+        return {
+            "id": item["id"],
+            "status": "corrupt",
+            "filename": item["filename"],
+            "error": item["error"],
+        }
     title, kind = pending_write_label(item)
     return {
         "id": item.get("id"),
@@ -106,6 +116,16 @@ def list_writes(
     table.add_column("Title")
     table.add_column("Attempts", justify="right")
     for item in summaries:
+        if item.get("status") == "corrupt":
+            table.add_row(
+                str(item["id"])[:12],
+                "CORRUPT",
+                str(item["filename"]),
+                "repair",
+                str(item["error"]),
+                "-",
+            )
+            continue
         table.add_row(
             str(item["id"])[:12],
             str(item["method"]),
@@ -182,7 +202,20 @@ def flush_writes(
     if not selected:
         success("No pending writes")
         return
-    replayable, skipped = _partition_replayable(selected)
+    corrupt = [item for item in selected if is_corrupt_pending_write(item)]
+    valid = [item for item in selected if not is_corrupt_pending_write(item)]
+    for item in corrupt:
+        error(f"Cannot replay {item['filename']}: {item['error']}")
+        path = pending_writes_dir() / str(item["filename"])
+        if is_canonical_pending_write_id(str(item["id"])):
+            warn(
+                f"Repair {path}, or discard it explicitly with: "
+                f"sibyl pending-writes discard {item['id']}"
+            )
+        else:
+            warn(f"Inspect and remove this exact file manually: {path}")
+
+    replayable, skipped = _partition_replayable(valid)
     if skipped:
         warn(
             f"Skipped {len(skipped)} read-like pending request"
@@ -190,12 +223,15 @@ def flush_writes(
         )
         warn("To drop them from the queue: sibyl pending-writes discard --read-like")
     if not replayable:
+        if corrupt:
+            raise typer.Exit(code=1)
         success("No replayable pending writes")
         return
 
     @run_async
     async def run_flush() -> None:
-        failures = 0
+        failures = len(corrupt)
+        replay_failures = 0
         replayed = 0
         contended = 0
         async with AsyncExitStack() as stack:
@@ -227,6 +263,7 @@ def flush_writes(
                     success(f"Flushed {write_id[:12]}")
                 except SibylClientError as exc:
                     failures += 1
+                    replay_failures += 1
                     error(f"Failed {write_id[:12]}: {exc.detail or exc}")
                     if exc.status_code == 409:
                         contended += 1
@@ -234,10 +271,18 @@ def flush_writes(
                         error("Stopping flush; remaining writes are still buffered.")
                         break
         if failures:
-            warn(
-                f"{replayed} replayed, {failures} failed; failed writes stay "
-                "buffered and are safe to flush again."
-            )
+            warn(f"{replayed} replayed, {failures} failed; all failed entries stay buffered.")
+            if replay_failures:
+                warn(
+                    f"{replay_failures} replay failure"
+                    f"{'s are' if replay_failures != 1 else ' is'} safe to flush again."
+                )
+            if corrupt:
+                warn(
+                    f"{len(corrupt)} corrupt queue entr"
+                    f"{'ies' if len(corrupt) != 1 else 'y'} cannot replay until repaired "
+                    "or explicitly discarded."
+                )
             if contended:
                 warn(
                     f"{contended} hit an identical request still executing on the "

@@ -9,29 +9,31 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-from sibyl.api.routes.memory import (
-    add_memory_space_member_record,
-    apply_memory_correction_route,
-    auto_review_reflection_candidate,
-    blame_memory_source,
-    cite_memory,
-    create_memory_space_record,
-    drain_reflection_review,
-    get_memory_source_import_status,
-    get_memory_space_record,
-    inspect_memory_source,
-    list_memory_audit,
-    list_memory_space_records,
-    preview_memory_correction_route,
+from sibyl.api.routes.memory_promotion import (
     preview_memory_promotion,
-    preview_memory_share_route,
-    preview_memory_space_member_access,
     preview_reflection_promotion,
     promote_memory,
     promote_reflection_candidate,
-    recall_raw,
-    remember_raw,
-    share_memory_route,
+)
+from sibyl.api.routes.memory_raw import cite_memory, list_memory_audit, recall_raw, remember_raw
+from sibyl.api.routes.memory_review import (
+    auto_review_reflection_candidate,
+    drain_reflection_review,
+)
+from sibyl.api.routes.memory_sharing import preview_memory_share_route, share_memory_route
+from sibyl.api.routes.memory_sources import (
+    apply_memory_correction_route,
+    blame_memory_source,
+    get_memory_source_import_status,
+    inspect_memory_source,
+    preview_memory_correction_route,
+)
+from sibyl.api.routes.memory_spaces import (
+    add_memory_space_member_record,
+    create_memory_space_record,
+    get_memory_space_record,
+    list_memory_space_records,
+    preview_memory_space_member_access,
     update_memory_space_record,
 )
 from sibyl.api.schemas import (
@@ -186,9 +188,11 @@ async def test_memory_source_import_status_returns_source_safe_progress() -> Non
         skipped_count=2,
         dedupe_count=1,
     )
-    source_imports._SOURCE_IMPORT_RUNS[run.import_id] = run
-
-    response = await get_memory_source_import_status(run.import_id, org=org, ctx=_ctx())
+    with patch(
+        "sibyl.jobs.source_imports._load_persisted_run",
+        AsyncMock(return_value=run),
+    ):
+        response = await get_memory_source_import_status(run.import_id, org=org, ctx=_ctx())
 
     assert response.import_id == run.import_id
     assert response.status == "paused"
@@ -204,12 +208,12 @@ async def test_remember_raw_uses_current_org_and_principal() -> None:
     http_request = _http_request()
     with (
         patch(
-            "sibyl.api.routes.memory.remember_raw_memory",
+            "sibyl.api.routes.memory_raw.remember_raw_memory",
             AsyncMock(return_value=_memory(organization_id=str(org.id), source_id="source-1")),
         ) as remember,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
         patch(
-            "sibyl.api.routes.memory.publish_raw_capture_changed",
+            "sibyl.api.routes.memory_raw.publish_raw_capture_changed",
             AsyncMock(),
         ) as publish_changed,
     ):
@@ -293,12 +297,12 @@ async def test_cite_memory_records_usage_and_audit() -> None:
     )
 
     with (
-        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()) as verify,
+        patch("sibyl.api.routes.memory_raw.verify_entity_project_access", AsyncMock()) as verify,
         patch(
             "sibyl_core.tools.usage_citation.record_cited_item_usages",
             record_citations,
         ),
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await cite_memory(
             MemoryCitationRequest(
@@ -343,7 +347,7 @@ async def test_cite_memory_records_misleading_feedback_and_audit() -> None:
             "sibyl_core.tools.usage_citation.record_cited_item_usages",
             record_citations,
         ),
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await cite_memory(
             MemoryCitationRequest(cited_ids=["decision-1"], misled=True),
@@ -387,11 +391,11 @@ async def test_remember_raw_audits_project_filter_denial() -> None:
     denial = HTTPException(status_code=403, detail="project_access_denied")
     with (
         patch(
-            "sibyl.api.routes.memory.verify_entity_project_access",
+            "sibyl.api.routes.memory_auth.verify_entity_project_access",
             AsyncMock(side_effect=denial),
         ) as verify,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
-        patch("sibyl.api.routes.memory.remember_raw_memory", AsyncMock()) as remember,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_raw.remember_raw_memory", AsyncMock()) as remember,
         pytest.raises(HTTPException) as exc,
     ):
         await remember_raw(
@@ -440,9 +444,9 @@ async def test_remember_raw_diary_sets_agent_metadata_and_surface() -> None:
     org = _org()
     ctx = _ctx()
     with (
-        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()) as verify,
+        patch("sibyl.api.routes.memory_auth.verify_entity_project_access", AsyncMock()) as verify,
         patch(
-            "sibyl.api.routes.memory.remember_raw_memory",
+            "sibyl.api.routes.memory_raw.remember_raw_memory",
             AsyncMock(
                 return_value=_memory(
                     organization_id=str(org.id),
@@ -501,7 +505,7 @@ async def test_remember_raw_diary_sets_agent_metadata_and_surface() -> None:
 @pytest.mark.asyncio
 async def test_remember_raw_diary_requires_agent_id() -> None:
     with (
-        patch("sibyl.api.routes.memory.remember_raw_memory", AsyncMock()) as remember,
+        patch("sibyl.api.routes.memory_raw.remember_raw_memory", AsyncMock()) as remember,
         pytest.raises(HTTPException) as exc,
     ):
         await remember_raw(
@@ -517,7 +521,7 @@ async def test_remember_raw_diary_requires_agent_id() -> None:
 @pytest.mark.asyncio
 async def test_remember_raw_diary_requires_private_scope() -> None:
     with (
-        patch("sibyl.api.routes.memory.remember_raw_memory", AsyncMock()) as remember,
+        patch("sibyl.api.routes.memory_raw.remember_raw_memory", AsyncMock()) as remember,
         pytest.raises(HTTPException) as exc,
     ):
         await remember_raw(
@@ -540,7 +544,7 @@ async def test_remember_raw_diary_requires_private_scope() -> None:
 async def test_remember_raw_defaults_source_id_from_surface() -> None:
     org = _org()
     with patch(
-        "sibyl.api.routes.memory.remember_raw_memory",
+        "sibyl.api.routes.memory_raw.remember_raw_memory",
         AsyncMock(return_value=_memory(source_id="api:manual")),
     ) as remember:
         await remember_raw(
@@ -558,16 +562,16 @@ async def test_remember_raw_uses_shared_policy_for_project_scope_write() -> None
     ctx = _ctx()
     with (
         patch(
-            "sibyl.api.routes.memory.verify_entity_project_access",
+            "sibyl.api.routes.memory_auth.verify_entity_project_access",
             AsyncMock(),
         ) as verify_access,
         patch(
-            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project_123"}),
         ) as accessible_projects,
-        patch("sibyl.api.routes.memory.log") as route_log,
+        patch("sibyl.api.routes.memory_auth.log") as route_log,
         patch(
-            "sibyl.api.routes.memory.remember_raw_memory",
+            "sibyl.api.routes.memory_raw.remember_raw_memory",
             AsyncMock(return_value=_memory(organization_id=str(org.id), scope_key="project_123")),
         ),
     ):
@@ -608,13 +612,13 @@ async def test_remember_raw_denies_disallowed_api_key_memory_space() -> None:
     ctx = _ctx()
     ctx.api_key_memory_scope_keys = [api_key_memory_scope_key("project", "project_allowed")]
     with (
-        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.memory_auth.verify_entity_project_access", AsyncMock()),
         patch(
-            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project_123"}),
         ),
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
-        patch("sibyl.api.routes.memory.remember_raw_memory", AsyncMock()) as remember,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_raw.remember_raw_memory", AsyncMock()) as remember,
         pytest.raises(HTTPException) as exc,
     ):
         await remember_raw(
@@ -638,14 +642,14 @@ async def test_remember_raw_denies_disallowed_api_key_memory_space() -> None:
 async def test_remember_raw_denies_project_scope_without_policy_membership() -> None:
     http_request = _http_request()
     with (
-        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.memory_auth.verify_entity_project_access", AsyncMock()),
         patch(
-            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project_other"}),
         ),
-        patch("sibyl.api.routes.memory.log") as route_log,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
-        patch("sibyl.api.routes.memory.remember_raw_memory", AsyncMock()) as remember,
+        patch("sibyl.api.routes.memory_auth.log") as route_log,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_raw.remember_raw_memory", AsyncMock()) as remember,
         pytest.raises(HTTPException) as exc,
     ):
         await remember_raw(
@@ -694,10 +698,10 @@ async def test_remember_raw_denies_project_scope_without_policy_membership() -> 
 async def test_remember_raw_denies_project_scope_without_contributor_role() -> None:
     with (
         patch(
-            "sibyl.api.routes.memory.verify_entity_project_access",
+            "sibyl.api.routes.memory_auth.verify_entity_project_access",
             AsyncMock(side_effect=HTTPException(status_code=403, detail="project_access_denied")),
         ),
-        patch("sibyl.api.routes.memory.remember_raw_memory", AsyncMock()) as remember,
+        patch("sibyl.api.routes.memory_raw.remember_raw_memory", AsyncMock()) as remember,
         pytest.raises(HTTPException) as exc,
     ):
         await remember_raw(
@@ -721,7 +725,7 @@ async def test_recall_raw_returns_scoped_memories() -> None:
     http_request = _http_request()
     with (
         patch(
-            "sibyl.api.routes.memory.recall_raw_memory",
+            "sibyl.api.routes.memory_raw.recall_raw_memory",
             AsyncMock(
                 return_value=[
                     _memory(
@@ -731,7 +735,7 @@ async def test_recall_raw_returns_scoped_memories() -> None:
                 ]
             ),
         ) as recall,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await recall_raw(
             RawMemoryRecallRequest(query="raw memory", limit=5),
@@ -789,10 +793,10 @@ async def test_recall_raw_response_reports_degraded_sources() -> None:
     )
     with (
         patch(
-            "sibyl.api.routes.memory.recall_raw_memory",
+            "sibyl.api.routes.memory_raw.recall_raw_memory",
             AsyncMock(return_value=recall_result),
         ),
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()),
     ):
         response = await recall_raw(
             RawMemoryRecallRequest(query="raw memory", limit=5),
@@ -815,8 +819,10 @@ async def test_recall_raw_forwards_import_metadata_filters() -> None:
     occurred_before = datetime(2014, 12, 31, 23, 59, 59, tzinfo=UTC)
     as_of = datetime(2014, 7, 1, tzinfo=UTC)
     with (
-        patch("sibyl.api.routes.memory.recall_raw_memory", AsyncMock(return_value=[])) as recall,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch(
+            "sibyl.api.routes.memory_raw.recall_raw_memory", AsyncMock(return_value=[])
+        ) as recall,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
     ):
         await recall_raw(
             RawMemoryRecallRequest(
@@ -861,13 +867,13 @@ async def test_recall_raw_forwards_import_metadata_filters() -> None:
 async def test_recall_raw_rate_limits_concurrent_member_recall() -> None:
     with (
         patch(
-            "sibyl.api.routes.memory.recall_concurrency_slot",
+            "sibyl.api.routes.memory_raw.recall_concurrency_slot",
             side_effect=RecallConcurrencyLimitExceededError(
                 user_id="user-123",
                 max_concurrent=3,
             ),
         ),
-        patch("sibyl.api.routes.memory.recall_raw_memory", AsyncMock()) as recall,
+        patch("sibyl.api.routes.memory_raw.recall_raw_memory", AsyncMock()) as recall,
         pytest.raises(HTTPException) as exc,
     ):
         await recall_raw(
@@ -889,8 +895,10 @@ async def test_recall_raw_diary_filters_agent_and_project() -> None:
     org = _org()
     ctx = _ctx()
     with (
-        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()) as verify,
-        patch("sibyl.api.routes.memory.recall_raw_memory", AsyncMock(return_value=[])) as recall,
+        patch("sibyl.api.routes.memory_auth.verify_entity_project_access", AsyncMock()) as verify,
+        patch(
+            "sibyl.api.routes.memory_raw.recall_raw_memory", AsyncMock(return_value=[])
+        ) as recall,
     ):
         response = await recall_raw(
             RawMemoryRecallRequest(
@@ -926,7 +934,7 @@ async def test_recall_raw_diary_filters_agent_and_project() -> None:
 @pytest.mark.asyncio
 async def test_recall_raw_diary_requires_agent_id() -> None:
     with (
-        patch("sibyl.api.routes.memory.recall_raw_memory", AsyncMock()) as recall,
+        patch("sibyl.api.routes.memory_raw.recall_raw_memory", AsyncMock()) as recall,
         pytest.raises(HTTPException) as exc,
     ):
         await recall_raw(
@@ -942,7 +950,7 @@ async def test_recall_raw_diary_requires_agent_id() -> None:
 @pytest.mark.asyncio
 async def test_recall_raw_diary_requires_private_scope() -> None:
     with (
-        patch("sibyl.api.routes.memory.recall_raw_memory", AsyncMock()) as recall,
+        patch("sibyl.api.routes.memory_raw.recall_raw_memory", AsyncMock()) as recall,
         pytest.raises(HTTPException) as exc,
     ):
         await recall_raw(
@@ -967,10 +975,10 @@ async def test_recall_raw_uses_shared_policy_for_project_scope_read() -> None:
     ctx = _ctx()
     with (
         patch(
-            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project_123"}),
         ) as accessible_projects,
-        patch("sibyl.api.routes.memory.recall_raw_memory", AsyncMock(return_value=[])),
+        patch("sibyl.api.routes.memory_raw.recall_raw_memory", AsyncMock(return_value=[])),
     ):
         response = await recall_raw(
             RawMemoryRecallRequest(
@@ -993,10 +1001,12 @@ async def test_recall_raw_allows_matching_api_key_memory_space() -> None:
     ctx.api_key_memory_scope_keys = [api_key_memory_scope_key("project", "project_123")]
     with (
         patch(
-            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project_123"}),
         ),
-        patch("sibyl.api.routes.memory.recall_raw_memory", AsyncMock(return_value=[])) as recall,
+        patch(
+            "sibyl.api.routes.memory_raw.recall_raw_memory", AsyncMock(return_value=[])
+        ) as recall,
     ):
         response = await recall_raw(
             RawMemoryRecallRequest(
@@ -1016,10 +1026,10 @@ async def test_recall_raw_allows_matching_api_key_memory_space() -> None:
 async def test_recall_raw_denies_unverified_team_scope() -> None:
     with (
         patch(
-            "sibyl.api.routes.memory.list_accessible_team_scope_keys",
+            "sibyl.api.routes.memory_auth.list_accessible_team_scope_keys",
             AsyncMock(return_value={"team_other"}),
         ) as accessible_teams,
-        patch("sibyl.api.routes.memory.recall_raw_memory", AsyncMock()) as recall,
+        patch("sibyl.api.routes.memory_raw.recall_raw_memory", AsyncMock()) as recall,
         pytest.raises(HTTPException) as exc,
     ):
         await recall_raw(
@@ -1040,10 +1050,10 @@ async def test_recall_raw_uses_shared_policy_for_team_scope_read() -> None:
     ctx = _ctx()
     with (
         patch(
-            "sibyl.api.routes.memory.list_accessible_team_scope_keys",
+            "sibyl.api.routes.memory_auth.list_accessible_team_scope_keys",
             AsyncMock(return_value={"team_123"}),
         ) as accessible_teams,
-        patch("sibyl.api.routes.memory.recall_raw_memory", AsyncMock(return_value=[])),
+        patch("sibyl.api.routes.memory_raw.recall_raw_memory", AsyncMock(return_value=[])),
     ):
         response = await recall_raw(
             RawMemoryRecallRequest(
@@ -1062,7 +1072,7 @@ async def test_recall_raw_uses_shared_policy_for_team_scope_read() -> None:
 @pytest.mark.asyncio
 async def test_recall_raw_maps_scope_errors_to_400() -> None:
     with (
-        patch("sibyl.api.routes.memory.recall_raw_memory", AsyncMock()) as recall,
+        patch("sibyl.api.routes.memory_raw.recall_raw_memory", AsyncMock()) as recall,
         pytest.raises(HTTPException) as exc,
     ):
         await recall_raw(
@@ -1087,7 +1097,7 @@ async def test_list_memory_space_records_returns_disabled_reason() -> None:
     )
 
     with patch(
-        "sibyl.api.routes.memory.list_memory_spaces",
+        "sibyl.api.routes.memory_spaces.list_memory_spaces",
         AsyncMock(return_value=[space]),
     ) as list_spaces:
         response = await list_memory_space_records(org=org)
@@ -1113,7 +1123,7 @@ async def test_create_memory_space_record_uses_authenticated_actor() -> None:
     )
 
     with patch(
-        "sibyl.api.routes.memory.create_memory_space",
+        "sibyl.api.routes.memory_spaces.create_memory_space",
         AsyncMock(return_value=space),
     ) as create_space:
         response = await create_memory_space_record(
@@ -1155,11 +1165,11 @@ async def test_get_memory_space_record_includes_memberships() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.memory.get_memory_space",
+            "sibyl.api.routes.memory_spaces.get_memory_space",
             AsyncMock(return_value=space),
         ) as get_space,
         patch(
-            "sibyl.api.routes.memory.list_memory_space_members",
+            "sibyl.api.routes.memory_spaces.list_memory_space_members",
             AsyncMock(return_value=[member]),
         ) as list_members,
     ):
@@ -1181,11 +1191,11 @@ async def test_update_memory_space_record_returns_memberships() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.memory.update_memory_space",
+            "sibyl.api.routes.memory_spaces.update_memory_space",
             AsyncMock(return_value=space),
         ) as update_space,
         patch(
-            "sibyl.api.routes.memory.list_memory_space_members",
+            "sibyl.api.routes.memory_spaces.list_memory_space_members",
             AsyncMock(return_value=[member]),
         ) as list_members,
     ):
@@ -1222,7 +1232,7 @@ async def test_add_memory_space_member_record_returns_grant() -> None:
     )
 
     with patch(
-        "sibyl.api.routes.memory.add_memory_space_member",
+        "sibyl.api.routes.memory_spaces.add_memory_space_member",
         AsyncMock(return_value=member),
     ) as add_member:
         response = await add_memory_space_member_record(
@@ -1277,14 +1287,14 @@ async def test_preview_memory_space_member_access_audits_agent_visibility() -> N
 
     with (
         patch(
-            "sibyl.api.routes.memory.get_memory_space",
+            "sibyl.api.routes.memory_spaces.get_memory_space",
             AsyncMock(return_value=space),
         ) as get_space,
         patch(
-            "sibyl.api.routes.memory.preview_memory_access",
+            "sibyl.api.routes.memory_spaces.preview_memory_access",
             AsyncMock(return_value=result),
         ) as preview_access,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await preview_memory_space_member_access(
             space_id,
@@ -1319,7 +1329,7 @@ async def test_list_memory_audit_returns_inspectable_events() -> None:
     org = _org()
     created_at = datetime(2026, 5, 13, 12, 0, 0, tzinfo=UTC)
     with patch(
-        "sibyl.api.routes.memory.list_memory_audit_events",
+        "sibyl.api.routes.memory_raw.list_memory_audit_events",
         AsyncMock(
             return_value=[
                 {
@@ -1484,16 +1494,18 @@ async def test_inspect_memory_source_returns_metadata_and_visible_content() -> N
         return []
 
     with (
-        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)) as get_raw,
         patch(
-            "sibyl.api.routes.memory.get_raw_memory_by_source_id",
+            "sibyl.api.routes.memory_auth.get_raw_memory", AsyncMock(return_value=memory)
+        ) as get_raw,
+        patch(
+            "sibyl.api.routes.memory_auth.get_raw_memory_by_source_id",
             AsyncMock(),
         ) as get_by_source,
         patch(
-            "sibyl.api.routes.memory.list_memory_audit_events",
+            "sibyl.api.routes.memory_serialization.list_memory_audit_events",
             AsyncMock(side_effect=list_events),
         ) as audit_events,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await inspect_memory_source(
             "memory-1",
@@ -1570,16 +1582,16 @@ async def test_inspect_memory_source_redacts_project_content_without_access() ->
     }
 
     with (
-        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch("sibyl.api.routes.memory_auth.get_raw_memory", AsyncMock(return_value=memory)),
         patch(
-            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
             AsyncMock(return_value=set()),
         ) as accessible_projects,
         patch(
-            "sibyl.api.routes.memory.list_memory_audit_events",
+            "sibyl.api.routes.memory_serialization.list_memory_audit_events",
             AsyncMock(return_value=[event]),
         ),
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await inspect_memory_source(
             "memory-1",
@@ -1623,12 +1635,12 @@ async def test_inspect_memory_source_redacts_other_private_principal() -> None:
     )
 
     with (
-        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch("sibyl.api.routes.memory_auth.get_raw_memory", AsyncMock(return_value=memory)),
         patch(
-            "sibyl.api.routes.memory.list_memory_audit_events",
+            "sibyl.api.routes.memory_serialization.list_memory_audit_events",
             AsyncMock(return_value=[]),
         ),
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await inspect_memory_source(
             "memory-1",
@@ -1659,16 +1671,18 @@ async def test_inspect_memory_source_can_lookup_by_provenance_source_id() -> Non
     )
 
     with (
-        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=None)) as get_raw,
         patch(
-            "sibyl.api.routes.memory.get_raw_memory_by_source_id",
+            "sibyl.api.routes.memory_auth.get_raw_memory", AsyncMock(return_value=None)
+        ) as get_raw,
+        patch(
+            "sibyl.api.routes.memory_auth.get_raw_memory_by_source_id",
             AsyncMock(return_value=memory),
         ) as get_by_source,
         patch(
-            "sibyl.api.routes.memory.list_memory_audit_events",
+            "sibyl.api.routes.memory_serialization.list_memory_audit_events",
             AsyncMock(return_value=[]),
         ),
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()),
     ):
         response = await inspect_memory_source(
             "source/provenance",
@@ -1692,9 +1706,9 @@ async def test_inspect_memory_source_can_lookup_by_provenance_source_id() -> Non
 @pytest.mark.asyncio
 async def test_inspect_memory_source_returns_404_for_missing_source() -> None:
     with (
-        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=None)),
+        patch("sibyl.api.routes.memory_auth.get_raw_memory", AsyncMock(return_value=None)),
         patch(
-            "sibyl.api.routes.memory.get_raw_memory_by_source_id",
+            "sibyl.api.routes.memory_auth.get_raw_memory_by_source_id",
             AsyncMock(return_value=None),
         ),
         pytest.raises(HTTPException) as exc,
@@ -1747,16 +1761,16 @@ async def test_blame_memory_source_returns_revisions_audits_and_lineage() -> Non
     }
 
     with (
-        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch("sibyl.api.routes.memory_auth.get_raw_memory", AsyncMock(return_value=memory)),
         patch(
-            "sibyl.api.routes.memory.list_memory_audit_events",
+            "sibyl.api.routes.memory_serialization.list_memory_audit_events",
             AsyncMock(return_value=[]),
         ),
         patch(
-            "sibyl.api.routes.memory.get_raw_memory_lineage",
+            "sibyl.api.routes.memory_sources.get_raw_memory_lineage",
             AsyncMock(return_value=lineage),
         ) as get_lineage,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await blame_memory_source(
             "memory-1",
@@ -1798,16 +1812,16 @@ async def test_blame_memory_source_hides_revision_bodies_after_redaction() -> No
     )
 
     with (
-        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch("sibyl.api.routes.memory_auth.get_raw_memory", AsyncMock(return_value=memory)),
         patch(
-            "sibyl.api.routes.memory.list_memory_audit_events",
+            "sibyl.api.routes.memory_serialization.list_memory_audit_events",
             AsyncMock(return_value=[]),
         ),
         patch(
-            "sibyl.api.routes.memory.get_raw_memory_lineage",
+            "sibyl.api.routes.memory_sources.get_raw_memory_lineage",
             AsyncMock(return_value={"derived_from": [], "supersessions": []}),
         ),
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()),
     ):
         response = await blame_memory_source(
             "memory-1",
@@ -1843,12 +1857,12 @@ async def test_preview_memory_correction_audits_lifecycle_action() -> None:
     )
 
     with (
-        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch("sibyl.api.routes.memory_auth.get_raw_memory", AsyncMock(return_value=memory)),
         patch(
-            "sibyl.api.routes.memory.preview_memory_correction",
+            "sibyl.api.routes.memory_sources.preview_memory_correction",
             AsyncMock(return_value=preview),
         ) as preview_call,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await preview_memory_correction_route(
             "memory-1",
@@ -1926,12 +1940,12 @@ async def test_apply_memory_correction_returns_updated_review_state() -> None:
     result = MemoryCorrectionResult(applied=True, preview=preview, updated_memory=updated)
 
     with (
-        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch("sibyl.api.routes.memory_auth.get_raw_memory", AsyncMock(return_value=memory)),
         patch(
-            "sibyl.api.routes.memory.apply_memory_correction",
+            "sibyl.api.routes.memory_sources.apply_memory_correction",
             AsyncMock(return_value=result),
         ) as apply_call,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await apply_memory_correction_route(
             "memory-1",
@@ -2010,12 +2024,12 @@ async def test_correction_receipt_names_the_graph_rows_it_retired() -> None:
     )
 
     with (
-        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch("sibyl.api.routes.memory_auth.get_raw_memory", AsyncMock(return_value=memory)),
         patch(
-            "sibyl.api.routes.memory.apply_memory_correction",
+            "sibyl.api.routes.memory_sources.apply_memory_correction",
             AsyncMock(return_value=result),
         ),
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()),
     ):
         response = await apply_memory_correction_route(
             "memory-1",
@@ -2072,12 +2086,12 @@ async def test_a_partially_applied_correction_says_so_in_recall_impact() -> None
     )
 
     with (
-        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch("sibyl.api.routes.memory_auth.get_raw_memory", AsyncMock(return_value=memory)),
         patch(
-            "sibyl.api.routes.memory.apply_memory_correction",
+            "sibyl.api.routes.memory_sources.apply_memory_correction",
             AsyncMock(return_value=result),
         ),
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()),
     ):
         response = await apply_memory_correction_route(
             "memory-1",
@@ -2114,12 +2128,12 @@ async def test_denied_memory_correction_receipt_reports_no_write() -> None:
     result = MemoryCorrectionResult(applied=False, preview=preview)
 
     with (
-        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch("sibyl.api.routes.memory_auth.get_raw_memory", AsyncMock(return_value=memory)),
         patch(
-            "sibyl.api.routes.memory.apply_memory_correction",
+            "sibyl.api.routes.memory_sources.apply_memory_correction",
             AsyncMock(return_value=result),
         ),
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()),
     ):
         response = await apply_memory_correction_route(
             "memory-1",
@@ -2171,18 +2185,18 @@ async def test_preview_memory_share_returns_disabled_contract_and_audit() -> Non
     )
     with (
         patch(
-            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project_123"}),
         ) as accessible,
         patch(
-            "sibyl.api.routes.memory.list_accessible_team_scope_keys",
+            "sibyl.api.routes.memory_auth.list_accessible_team_scope_keys",
             AsyncMock(return_value=set()),
         ) as accessible_teams,
         patch(
-            "sibyl.api.routes.memory.preview_memory_share",
+            "sibyl.api.routes.memory_sharing.preview_memory_share",
             AsyncMock(return_value=result),
         ) as preview,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await preview_memory_share_route(
             MemorySharePreviewRequest(
@@ -2251,14 +2265,14 @@ async def test_preview_memory_share_denies_disallowed_api_key_target_space() -> 
     http_request = _http_request()
 
     with (
-        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.memory_auth.verify_entity_project_access", AsyncMock()),
         patch(
-            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project_secret"}),
         ),
-        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock()) as get_raw,
-        patch("sibyl.api.routes.memory.preview_memory_share", AsyncMock()) as preview,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.get_raw_memory", AsyncMock()) as get_raw,
+        patch("sibyl.api.routes.memory_sharing.preview_memory_share", AsyncMock()) as preview,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
         pytest.raises(HTTPException) as exc,
     ):
         await preview_memory_share_route(
@@ -2331,17 +2345,19 @@ async def test_share_memory_applies_promotions_and_returns_audit_receipt() -> No
     )
     with (
         patch(
-            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project_123"}),
         ),
         patch(
-            "sibyl.api.routes.memory.list_accessible_team_scope_keys",
+            "sibyl.api.routes.memory_auth.list_accessible_team_scope_keys",
             AsyncMock(return_value=set()),
         ) as accessible_teams,
-        patch("sibyl.api.routes.memory._authorize_project_filter", AsyncMock()),
-        patch("sibyl.api.routes.memory.share_memory", AsyncMock(return_value=result)) as share,
+        patch("sibyl.api.routes.memory_auth.authorize_project_filter", AsyncMock()),
         patch(
-            "sibyl.api.routes.memory.log_memory_audit_event",
+            "sibyl.api.routes.memory_sharing.share_memory", AsyncMock(return_value=result)
+        ) as share,
+        patch(
+            "sibyl.api.routes.memory_auth.log_memory_audit_event",
             AsyncMock(return_value="audit-1"),
         ) as audit,
     ):
@@ -2430,16 +2446,18 @@ async def test_share_memory_applies_team_promotions_with_membership_scope() -> N
     )
     with (
         patch(
-            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project_123"}),
         ),
         patch(
-            "sibyl.api.routes.memory.list_accessible_team_scope_keys",
+            "sibyl.api.routes.memory_auth.list_accessible_team_scope_keys",
             AsyncMock(return_value={"team_123"}),
         ) as accessible_teams,
-        patch("sibyl.api.routes.memory.share_memory", AsyncMock(return_value=result)) as share,
         patch(
-            "sibyl.api.routes.memory.log_memory_audit_event",
+            "sibyl.api.routes.memory_sharing.share_memory", AsyncMock(return_value=result)
+        ) as share,
+        patch(
+            "sibyl.api.routes.memory_auth.log_memory_audit_event",
             AsyncMock(return_value="audit-1"),
         ) as audit,
     ):
@@ -2485,17 +2503,17 @@ async def test_share_memory_denies_disallowed_api_key_source_space() -> None:
     http_request = _http_request()
 
     with (
-        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.memory_auth.verify_entity_project_access", AsyncMock()),
         patch(
-            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project_allowed"}),
         ),
         patch(
-            "sibyl.api.routes.memory.list_accessible_team_scope_keys",
+            "sibyl.api.routes.memory_auth.list_accessible_team_scope_keys",
             AsyncMock(return_value=set()),
         ) as accessible_teams,
         patch(
-            "sibyl.api.routes.memory.get_raw_memory",
+            "sibyl.api.routes.memory_auth.get_raw_memory",
             AsyncMock(
                 return_value=_memory(
                     id="memory-1",
@@ -2505,8 +2523,8 @@ async def test_share_memory_denies_disallowed_api_key_source_space() -> None:
                 )
             ),
         ),
-        patch("sibyl.api.routes.memory.share_memory", AsyncMock()) as share,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_sharing.share_memory", AsyncMock()) as share,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
         pytest.raises(HTTPException) as exc,
     ):
         await share_memory_route(
@@ -2581,12 +2599,12 @@ async def test_preview_reflection_promotion_verifies_project_target() -> None:
         },
     )
     with (
-        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()) as verify,
+        patch("sibyl.api.routes.memory_auth.verify_entity_project_access", AsyncMock()) as verify,
         patch(
-            "sibyl.api.routes.memory.preview_reflection_candidate_promotion",
+            "sibyl.api.routes.memory_promotion.preview_reflection_candidate_promotion",
             AsyncMock(return_value=result),
         ) as preview,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await preview_reflection_promotion(
             ReflectionPromotionRequest(
@@ -2677,16 +2695,16 @@ async def test_preview_memory_promotion_routes_imported_raw_memory() -> None:
     )
 
     with (
-        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.memory_auth.verify_entity_project_access", AsyncMock()),
         patch(
-            "sibyl.api.routes.memory.preview_reflection_candidate_promotion",
+            "sibyl.api.routes.memory_promotion.preview_reflection_candidate_promotion",
             AsyncMock(return_value=reflection_result),
         ) as reflection_preview,
         patch(
-            "sibyl.api.routes.memory.preview_raw_memory_promotion",
+            "sibyl.api.routes.memory_promotion.preview_raw_memory_promotion",
             AsyncMock(return_value=raw_result),
         ) as raw_preview,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await preview_memory_promotion(
             ReflectionPromotionRequest(
@@ -2733,13 +2751,13 @@ async def test_preview_memory_promotion_denies_raw_source_outside_api_key_memory
     )
 
     with (
-        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.memory_auth.verify_entity_project_access", AsyncMock()),
         patch(
-            "sibyl.api.routes.memory.preview_reflection_candidate_promotion",
+            "sibyl.api.routes.memory_promotion.preview_reflection_candidate_promotion",
             AsyncMock(return_value=reflection_result),
         ),
         patch(
-            "sibyl.api.routes.memory.get_raw_memory",
+            "sibyl.api.routes.memory_auth.get_raw_memory",
             AsyncMock(
                 return_value=_memory(
                     id="raw-1",
@@ -2749,8 +2767,10 @@ async def test_preview_memory_promotion_denies_raw_source_outside_api_key_memory
                 )
             ),
         ),
-        patch("sibyl.api.routes.memory.preview_raw_memory_promotion", AsyncMock()) as raw_preview,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch(
+            "sibyl.api.routes.memory_promotion.preview_raw_memory_promotion", AsyncMock()
+        ) as raw_preview,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
         pytest.raises(HTTPException) as exc,
     ):
         await preview_memory_promotion(
@@ -2791,13 +2811,13 @@ async def test_promote_memory_denies_raw_target_outside_api_key_memory_space() -
     )
 
     with (
-        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.memory_auth.verify_entity_project_access", AsyncMock()),
         patch(
-            "sibyl.api.routes.memory.promote_reflection_candidate_review",
+            "sibyl.api.routes.memory_promotion.promote_reflection_candidate_review",
             AsyncMock(return_value=reflection_result),
         ),
         patch(
-            "sibyl.api.routes.memory.get_raw_memory",
+            "sibyl.api.routes.memory_auth.get_raw_memory",
             AsyncMock(
                 return_value=_memory(
                     id="raw-1",
@@ -2807,8 +2827,8 @@ async def test_promote_memory_denies_raw_target_outside_api_key_memory_space() -
                 )
             ),
         ),
-        patch("sibyl.api.routes.memory.promote_raw_memory", AsyncMock()) as raw_promote,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_promotion.promote_raw_memory", AsyncMock()) as raw_promote,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
         pytest.raises(HTTPException) as exc,
     ):
         await promote_memory(
@@ -2871,16 +2891,16 @@ async def test_auto_review_reflection_candidate_promotes_safe_candidate() -> Non
         },
     )
     with (
-        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()) as verify,
+        patch("sibyl.api.routes.memory_auth.verify_entity_project_access", AsyncMock()) as verify,
         patch(
-            "sibyl.api.routes.memory.preview_reflection_candidate_promotion",
+            "sibyl.api.routes.memory_review.preview_reflection_candidate_promotion",
             AsyncMock(return_value=preview),
         ) as preview_call,
         patch(
-            "sibyl.api.routes.memory.promote_reflection_candidate_review",
+            "sibyl.api.routes.memory_review.promote_reflection_candidate_review",
             AsyncMock(return_value=promotion),
         ) as promote,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await auto_review_reflection_candidate(
             ReflectionAutonomyRequest(
@@ -2978,18 +2998,18 @@ async def test_auto_review_reflection_candidate_dry_run_does_not_promote() -> No
     )
     with (
         patch(
-            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
             AsyncMock(return_value=set()),
         ),
         patch(
-            "sibyl.api.routes.memory.preview_reflection_candidate_promotion",
+            "sibyl.api.routes.memory_review.preview_reflection_candidate_promotion",
             AsyncMock(return_value=preview),
         ),
         patch(
-            "sibyl.api.routes.memory.promote_reflection_candidate_review",
+            "sibyl.api.routes.memory_review.promote_reflection_candidate_review",
             AsyncMock(),
         ) as promote,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()),
     ):
         response = await auto_review_reflection_candidate(
             ReflectionAutonomyRequest(
@@ -3025,20 +3045,20 @@ async def test_auto_review_reflection_candidate_routes_exceptions() -> None:
         },
     )
     with (
-        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.memory_auth.verify_entity_project_access", AsyncMock()),
         patch(
-            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project_other"}),
         ),
         patch(
-            "sibyl.api.routes.memory.preview_reflection_candidate_promotion",
+            "sibyl.api.routes.memory_review.preview_reflection_candidate_promotion",
             AsyncMock(return_value=preview),
         ),
         patch(
-            "sibyl.api.routes.memory.promote_reflection_candidate_review",
+            "sibyl.api.routes.memory_review.promote_reflection_candidate_review",
             AsyncMock(),
         ) as promote,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await auto_review_reflection_candidate(
             ReflectionAutonomyRequest(
@@ -3103,22 +3123,22 @@ async def test_drain_reflection_review_dry_run_summarizes_pending_candidates() -
     org = _org()
     with (
         patch(
-            "sibyl.api.routes.memory.list_reflection_candidate_reviews",
+            "sibyl.api.routes.memory_review.list_reflection_candidate_reviews",
             AsyncMock(return_value=candidates),
         ) as list_candidates,
         patch(
-            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
             AsyncMock(return_value=set()),
         ) as access,
         patch(
-            "sibyl.api.routes.memory.preview_reflection_candidate_promotion",
+            "sibyl.api.routes.memory_review.preview_reflection_candidate_promotion",
             AsyncMock(side_effect=[safe_preview, exception_preview]),
         ),
         patch(
-            "sibyl.api.routes.memory.promote_reflection_candidate_review",
+            "sibyl.api.routes.memory_review.promote_reflection_candidate_review",
             AsyncMock(),
         ) as promote,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()),
     ):
         response = await drain_reflection_review(
             ReflectionReviewDrainRequest(
@@ -3161,22 +3181,22 @@ async def test_drain_reflection_review_skips_inaccessible_candidate_scope() -> N
     )
     with (
         patch(
-            "sibyl.api.routes.memory.list_reflection_candidate_reviews",
+            "sibyl.api.routes.memory_review.list_reflection_candidate_reviews",
             AsyncMock(return_value=[inaccessible_candidate]),
         ),
         patch(
-            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
             AsyncMock(return_value={"open-project"}),
         ),
         patch(
-            "sibyl.api.routes.memory._accessible_projects_for_promotion",
+            "sibyl.api.routes.memory_auth.accessible_projects_for_promotion",
             AsyncMock(return_value={"open-project"}),
         ),
         patch(
-            "sibyl.api.routes.memory.preview_reflection_candidate_promotion",
+            "sibyl.api.routes.memory_review.preview_reflection_candidate_promotion",
             AsyncMock(),
         ) as preview,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()),
     ):
         response = await drain_reflection_review(
             ReflectionReviewDrainRequest(
@@ -3229,24 +3249,26 @@ async def test_drain_reflection_review_archives_terminal_exceptions() -> None:
     )
     with (
         patch(
-            "sibyl.api.routes.memory.list_reflection_candidate_reviews",
+            "sibyl.api.routes.memory_review.list_reflection_candidate_reviews",
             AsyncMock(return_value=[candidate]),
         ),
         patch(
-            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
             AsyncMock(return_value=set()),
         ),
         patch(
-            "sibyl.api.routes.memory.preview_reflection_candidate_promotion",
+            "sibyl.api.routes.memory_review.preview_reflection_candidate_promotion",
             AsyncMock(return_value=preview),
         ),
         patch(
-            "sibyl.api.routes.memory.promote_reflection_candidate_review",
+            "sibyl.api.routes.memory_review.promote_reflection_candidate_review",
             AsyncMock(),
         ) as promote,
-        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=candidate)),
-        patch("sibyl.api.routes.memory.save_raw_memory", AsyncMock(return_value=archived)) as save,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.get_raw_memory", AsyncMock(return_value=candidate)),
+        patch(
+            "sibyl.api.routes.memory_review.save_raw_memory", AsyncMock(return_value=archived)
+        ) as save,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await drain_reflection_review(
             ReflectionReviewDrainRequest(
@@ -3290,12 +3312,12 @@ async def test_promote_reflection_candidate_verifies_project_target() -> None:
         },
     )
     with (
-        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()) as verify,
+        patch("sibyl.api.routes.memory_auth.verify_entity_project_access", AsyncMock()) as verify,
         patch(
-            "sibyl.api.routes.memory.promote_reflection_candidate_review",
+            "sibyl.api.routes.memory_promotion.promote_reflection_candidate_review",
             AsyncMock(return_value=result),
         ) as promote,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await promote_reflection_candidate(
             ReflectionPromotionRequest(
@@ -3382,16 +3404,16 @@ async def test_promote_memory_routes_imported_raw_memory() -> None:
         raw_source_ids=[],
     )
     with (
-        patch("sibyl.api.routes.memory.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.memory_auth.verify_entity_project_access", AsyncMock()),
         patch(
-            "sibyl.api.routes.memory.promote_reflection_candidate_review",
+            "sibyl.api.routes.memory_promotion.promote_reflection_candidate_review",
             AsyncMock(return_value=reflection_result),
         ) as reflection_promote,
         patch(
-            "sibyl.api.routes.memory.promote_raw_memory",
+            "sibyl.api.routes.memory_promotion.promote_raw_memory",
             AsyncMock(return_value=raw_result),
         ) as raw_promote,
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await promote_memory(
             ReflectionPromotionRequest(
@@ -3439,14 +3461,14 @@ async def test_promote_reflection_candidate_returns_policy_denial() -> None:
     )
     with (
         patch(
-            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project_123"}),
         ),
         patch(
-            "sibyl.api.routes.memory.promote_reflection_candidate_review",
+            "sibyl.api.routes.memory_promotion.promote_reflection_candidate_review",
             AsyncMock(return_value=result),
         ),
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
     ):
         response = await promote_reflection_candidate(
             ReflectionPromotionRequest(candidate_id="candidate-1"),
@@ -3493,14 +3515,14 @@ async def test_promote_reflection_candidate_returns_404_for_missing_candidate() 
     )
     with (
         patch(
-            "sibyl.api.routes.memory.list_accessible_project_graph_ids",
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
             AsyncMock(return_value=set()),
         ),
         patch(
-            "sibyl.api.routes.memory.promote_reflection_candidate_review",
+            "sibyl.api.routes.memory_promotion.promote_reflection_candidate_review",
             AsyncMock(return_value=result),
         ),
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()) as audit,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()) as audit,
         pytest.raises(HTTPException) as exc,
     ):
         await promote_reflection_candidate(
@@ -3574,12 +3596,12 @@ async def test_a_truncated_projection_walk_says_the_correction_was_partial() -> 
     )
 
     with (
-        patch("sibyl.api.routes.memory.get_raw_memory", AsyncMock(return_value=memory)),
+        patch("sibyl.api.routes.memory_auth.get_raw_memory", AsyncMock(return_value=memory)),
         patch(
-            "sibyl.api.routes.memory.apply_memory_correction",
+            "sibyl.api.routes.memory_sources.apply_memory_correction",
             AsyncMock(return_value=result),
         ),
-        patch("sibyl.api.routes.memory.log_memory_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()),
     ):
         response = await apply_memory_correction_route(
             "memory-1",

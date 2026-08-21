@@ -27,9 +27,9 @@ RAW_READERS = {"get_active_context", "get_active_context_name"}
 ALLOWED_ACTIVE_CONTEXT_READERS = {
     # The resolver itself, and the two settings that travel with the context it
     # picks (credential key, TLS verification).
-    ("client.py", "resolve_api_base_url"),
-    ("client.py", "_auth_credential_scope"),
-    ("client.py", "SibylClient._get_insecure_from_context"),
+    ("client_transport.py", "resolve_api_base_url"),
+    ("client_transport.py", "_auth_credential_scope"),
+    ("client_transport.py", "ClientTransportMixin._get_insecure_from_context"),
     # The store defines the active-context accessors and its own selection order.
     ("config_store.py", "get_active_context"),
     ("config_store.py", "resolve_context_name"),
@@ -46,12 +46,12 @@ ALLOWED_ACTIVE_CONTEXT_READERS = {
 # (module, enclosing function) pairs allowed to read SIBYL_API_URL.
 ALLOWED_ENV_READERS = {
     # A paired URL and token form the explicit automation target.
-    ("client.py", "_paired_automation_api_url"),
+    ("client_transport.py", "_paired_automation_api_url"),
     # Rank 3 of the one resolution order.
-    ("client.py", "resolve_api_base_url"),
+    ("client_transport.py", "resolve_api_base_url"),
     # Presence check, not a resolution: an implicit-localhost write is refused
     # unless a context or this legacy variable exists.
-    ("client.py", "SibylClient._request"),
+    ("client_transport.py", "ClientTransportMixin._request"),
 }
 
 ENV_KEY = "SIBYL_API_URL"

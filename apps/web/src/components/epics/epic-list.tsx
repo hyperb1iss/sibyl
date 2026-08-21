@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { EpicsEmptyState } from '@/components/ui/empty-state';
-import type { EpicSummary } from '@/lib/api';
+import type { EpicSummary } from '@/lib/api/work-items';
 import { EpicCard, EpicCardSkeleton } from './epic-card';
 
 interface EpicListProps {

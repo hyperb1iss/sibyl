@@ -13,7 +13,7 @@ Usage:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from fastapi import Depends
 
@@ -27,35 +27,6 @@ if TYPE_CHECKING:
         EntityManager,
         SurrealGraphClient,
     )
-    from sibyl_core.storage import GraphStore
-
-
-class _ActiveGraphStoreProxy:
-    @staticmethod
-    def from_client(
-        client: SurrealGraphClient,
-        group_id: str,
-    ) -> ActiveGraphStoreType:
-        from sibyl.persistence.graph_runtime import ActiveGraphStore
-
-        return ActiveGraphStore.from_client(client, group_id)
-
-    @staticmethod
-    def from_runtime(runtime: Any, group_id: str) -> ActiveGraphStoreType:
-        from sibyl.persistence.graph_runtime import ActiveGraphStore
-
-        return ActiveGraphStore.from_runtime(runtime, group_id)
-
-
-class _GraphReadServiceAdapterProxy:
-    def __new__(cls, graph_store: GraphStore) -> KnowledgeReadService:
-        from sibyl.persistence.graph_runtime import GraphReadServiceAdapter
-
-        return GraphReadServiceAdapter(graph_store)
-
-
-ActiveGraphStore = _ActiveGraphStoreProxy
-GraphReadServiceAdapter = _GraphReadServiceAdapterProxy
 
 
 async def get_graph_client() -> SurrealGraphClient:
@@ -104,4 +75,6 @@ async def get_knowledge_read_service(
     graph_store: ActiveGraphStoreType = Depends(get_graph_store),
 ) -> KnowledgeReadService:
     """Get the seam-based graph read service backed by the active runtime."""
+    from sibyl.persistence.graph_runtime import GraphReadServiceAdapter
+
     return GraphReadServiceAdapter(graph_store)

@@ -138,9 +138,7 @@ def config_edit() -> None:
 
     path = config_store.config_path()
 
-    # Ensure config exists
-    if not path.exists():
-        config_store.save_config(config_store.load_config())
+    if config_store.ensure_config_file():
         info(f"Created default config at {path}")
 
     # Get editor

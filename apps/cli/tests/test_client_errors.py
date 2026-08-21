@@ -9,6 +9,7 @@ import pytest
 import typer
 
 import sibyl_cli.client as client_module
+import sibyl_cli.client_transport as client_transport_module
 from sibyl_cli import config_store
 from sibyl_cli import pending_writes
 from sibyl_cli.client import SibylClient, SibylClientError
@@ -77,9 +78,9 @@ async def test_client_circuit_breaker_sleeps_after_repeated_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client_module._FAILURE_WINDOWS.clear()
-    monkeypatch.setattr(client_module.sys, "argv", ["sibyl", "add"])
+    monkeypatch.setattr(client_transport_module.sys, "argv", ["sibyl", "add"])
     sleep = AsyncMock()
-    monkeypatch.setattr(client_module, "anyio_sleep", sleep)
+    monkeypatch.setattr(client_transport_module, "anyio_sleep", sleep)
     transport = httpx.MockTransport(
         lambda _request: httpx.Response(
             500,
@@ -233,7 +234,11 @@ async def test_expired_token_refresh_failure_skips_expired_request(
     client = _client_with_transport(httpx.MockTransport(unexpected_request))
     client._uses_stored_auth = True
     refresh = AsyncMock(return_value=(False, "Authentication storage temporarily unavailable"))
-    monkeypatch.setattr(client_module, "is_access_token_expired", lambda _api_url, **_kwargs: True)
+    monkeypatch.setattr(
+        client_transport_module,
+        "is_access_token_expired",
+        lambda _api_url, **_kwargs: True,
+    )
     monkeypatch.setattr(client, "_refresh_token", refresh)
 
     with pytest.raises(SibylClientError) as exc:
@@ -263,7 +268,11 @@ async def test_expired_token_refresh_failure_keeps_pending_write(
     client = _client_with_transport(httpx.MockTransport(unexpected_request))
     client._uses_stored_auth = True
     refresh = AsyncMock(return_value=(False, "Authentication storage temporarily unavailable"))
-    monkeypatch.setattr(client_module, "is_access_token_expired", lambda _api_url, **_kwargs: True)
+    monkeypatch.setattr(
+        client_transport_module,
+        "is_access_token_expired",
+        lambda _api_url, **_kwargs: True,
+    )
     monkeypatch.setattr(client, "_refresh_token", refresh)
 
     with pytest.raises(SibylClientError) as exc:

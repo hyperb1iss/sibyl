@@ -4,8 +4,8 @@ import { useCallback, useState } from 'react';
 import { Button } from '@/components/ui';
 import { Check, HelpCircle, Key, WarningTriangle, Xmark } from '@/components/ui/icons';
 import { Spinner } from '@/components/ui/spinner';
-import type { SetupStatus, UpdateSettingsRequest } from '@/lib/api';
-import { useSettings, useUpdateSettings, useValidateApiKeys } from '@/lib/hooks';
+import type { SetupStatus, UpdateSettingsRequest } from '@/lib/api/admin';
+import { useSettings, useUpdateSettings, useValidateApiKeys } from '@/lib/hooks/admin';
 
 interface ApiKeysStepProps {
   initialStatus: SetupStatus | undefined;

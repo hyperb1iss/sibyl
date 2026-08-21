@@ -30,7 +30,7 @@ import {
 } from '@/components/ui/select';
 import { LoadingState } from '@/components/ui/spinner';
 import { formatDateTime, formatDistanceToNow } from '@/lib/constants/formatting';
-import { useRawCapture, useRawCaptures, useUpdateRawCaptureReviewState } from '@/lib/hooks';
+import { useRawCapture, useRawCaptures, useUpdateRawCaptureReviewState } from '@/lib/hooks/memory';
 
 const MAX_CAPTURE_RESULTS = 200;
 const DEFAULT_TITLE = 'Memory Captures';

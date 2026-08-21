@@ -64,7 +64,7 @@ class TestGetLinkGraphStatusData:
             yield client
 
         with patch(
-            "sibyl_core.services.link_graph_status.surreal_content_client",
+            "sibyl_core.services.content_client.surreal_content_client",
             client_scope,
         ):
             status = await get_link_graph_status_data(None, organization_id)

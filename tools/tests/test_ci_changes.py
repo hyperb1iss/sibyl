@@ -8,6 +8,15 @@ import yaml
 from tools.release.ci_changes import UnmatchedPathsError, classify_changed_paths, main
 from tools.tests.conftest import REPO_ROOT
 
+PYTHON_MOON_PROJECTS = (
+    "moon.yml",
+    "apps/api/moon.yml",
+    "apps/cli/moon.yml",
+    "apps/e2e/moon.yml",
+    "packages/python/sibyl-core/moon.yml",
+)
+PYTEST_TASK_OPTIONS = "${PYTEST_ADDOPTS} -p sibyl_core.pytest_isolation"
+
 
 @pytest.mark.parametrize(
     "path",
@@ -101,6 +110,13 @@ def test_ci_runs_release_and_helm_contract_jobs() -> None:
     assert "moon run e2e:test-browser" in workflow
     assert "profile: defaults" in workflow
     assert "profile: production-redis" in workflow
+
+
+@pytest.mark.parametrize("project_file", PYTHON_MOON_PROJECTS)
+def test_parallel_pytest_tasks_load_temp_root_isolation(project_file: str) -> None:
+    project = yaml.safe_load((REPO_ROOT / project_file).read_text(encoding="utf-8"))
+
+    assert project["env"]["PYTEST_ADDOPTS"] == PYTEST_TASK_OPTIONS
 
 
 def test_e2e_ci_tasks_are_finite_tasks() -> None:

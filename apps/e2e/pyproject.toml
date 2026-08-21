@@ -31,7 +31,11 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "ruff",
+    "sibyl-core",
 ]
+
+[tool.uv.sources]
+sibyl-core = { path = "../../packages/python/sibyl-core", editable = true }
 
 # =============================================================================
 # Build Configuration (test-only package)

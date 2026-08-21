@@ -11,7 +11,7 @@ const toast = vi.hoisted(() => ({
   error: vi.fn(),
 }));
 
-vi.mock('@/lib/hooks', () => hooks);
+vi.mock('@/lib/hooks/memory', () => hooks);
 vi.mock('sonner', () => ({ toast }));
 vi.mock('@/components/ui/markdown', () => ({
   Markdown: ({ content }: { content: string }) => <div>{content}</div>,

@@ -22,12 +22,17 @@ import sibyl_core.tools.context as context_module
 from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.models.entities import RelationshipType
+from sibyl_core.retrieval import _search_database as database_module
+from sibyl_core.retrieval import _search_expansion as expansion_module
+from sibyl_core.retrieval import _search_lifecycle as lifecycle_module
+from sibyl_core.retrieval import _search_sources as source_module
+from sibyl_core.retrieval.candidates import RetrievalCandidate
 from sibyl_core.retrieval.search import (
-    RetrievalCandidate,
     RetrievalSignal,
     build_context_retrieval_plan,
 )
-from sibyl_core.services import memory as memory_module
+from sibyl_core.services import memory_correction as memory_module
+from sibyl_core.services import memory_lifecycle as memory_lifecycle_module
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 from sibyl_core.tools.context import compile_context
 from sibyl_core.tools.responses import SearchResponse, SearchResult
@@ -111,7 +116,7 @@ async def test_outgoing_supersedes_edge_no_longer_expands_into_the_retired_row()
     """Traversal gate: the walk must not carry back the row it just retired."""
 
     client = _SupersessionGraphClient()
-    candidates = await search_module._graph_expansion_candidates(
+    candidates = await expansion_module._graph_expansion_candidates(
         client=client,
         plan=_plan(),
         search_filter=search_module.SearchFilter(
@@ -148,7 +153,7 @@ async def test_explicit_outgoing_supersedes_walk_cannot_revive_the_retired_row()
     """Predicate filters narrow current recall; they do not request history."""
 
     client = _SupersessionGraphClient()
-    rows = await search_module._node_bfs_records(
+    rows = await expansion_module._node_bfs_records(
         client=client,
         origin_uuids=[SUCCESSOR_ID],
         search_filter=search_module.SearchFilter(node_types=("decision",)),
@@ -204,9 +209,9 @@ async def test_successor_wins_admission_when_both_rows_match(
     async def no_expansion(**_kwargs: object) -> list[RetrievalCandidate]:
         return []
 
-    monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
-    monkeypatch.setattr(search_module, "_node_fulltext_candidates", fake_node_fulltext)
-    monkeypatch.setattr(search_module, "_graph_expansion_candidates", no_expansion)
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(source_module, "_node_fulltext_candidates", fake_node_fulltext)
+    monkeypatch.setattr(expansion_module, "_graph_expansion_candidates", no_expansion)
 
     response = await search_module.context_search(
         plan=_plan(),
@@ -255,9 +260,9 @@ async def test_corrected_row_is_refused_admission_even_with_a_winning_score(
     async def no_expansion(**_kwargs: object) -> list[RetrievalCandidate]:
         return []
 
-    monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
-    monkeypatch.setattr(search_module, "_node_fulltext_candidates", fake_node_fulltext)
-    monkeypatch.setattr(search_module, "_graph_expansion_candidates", no_expansion)
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(source_module, "_node_fulltext_candidates", fake_node_fulltext)
+    monkeypatch.setattr(expansion_module, "_graph_expansion_candidates", no_expansion)
 
     response = await search_module.context_search(
         plan=_plan(),
@@ -372,7 +377,7 @@ async def test_supersession_lookup_failure_fails_closed_for_edge_only_retirement
     async def exploding_lookup(*_args: object, **_kwargs: object) -> tuple[set[str], int]:
         raise RuntimeError("surreal is unhappy")
 
-    monkeypatch.setattr(search_module, "_superseded_candidate_uuids", exploding_lookup)
+    monkeypatch.setattr(lifecycle_module, "_superseded_candidate_uuids", exploding_lookup)
 
     retired = RetrievalCandidate(
         id=SUPERSEDED_ID,
@@ -386,7 +391,7 @@ async def test_supersession_lookup_failure_fails_closed_for_edge_only_retirement
     )
 
     with pytest.raises(RuntimeError, match="supersession lifecycle lookup failed"):
-        await search_module._apply_supersession_gate(
+        await lifecycle_module._apply_supersession_gate(
             client=_SupersessionGraphClient(),
             group_id="org-123",
             source_lists=[(RetrievalSignal.NODE_FULLTEXT, [retired])],
@@ -480,7 +485,7 @@ async def test_correction_stamps_the_graph_row_so_recall_stops_serving_it(
         "save_raw_memory",
         AsyncMock(side_effect=lambda updated, **_kwargs: updated),
     )
-    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(memory_lifecycle_module, "get_surreal_graph_runtime", fake_runtime)
 
     result = await memory_module.apply_memory_correction(
         organization_id="org-1",
@@ -537,11 +542,16 @@ async def test_supersede_writes_the_replacement_edge_in_the_direction_retrieval_
         AsyncMock(return_value=replacement),
     )
     monkeypatch.setattr(
+        memory_lifecycle_module,
+        "get_raw_memory_by_source_id",
+        AsyncMock(return_value=replacement),
+    )
+    monkeypatch.setattr(
         memory_module,
         "save_raw_memory",
         AsyncMock(side_effect=lambda updated, **_kwargs: updated),
     )
-    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(memory_lifecycle_module, "get_surreal_graph_runtime", fake_runtime)
 
     result = await memory_module.apply_memory_correction(
         organization_id="org-1",
@@ -598,11 +608,16 @@ async def test_a_span_takes_the_stamp_but_never_the_supersession_edge(
         AsyncMock(return_value=replacement),
     )
     monkeypatch.setattr(
+        memory_lifecycle_module,
+        "get_raw_memory_by_source_id",
+        AsyncMock(return_value=replacement),
+    )
+    monkeypatch.setattr(
         memory_module,
         "save_raw_memory",
         AsyncMock(side_effect=lambda updated, **_kwargs: updated),
     )
-    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(memory_lifecycle_module, "get_surreal_graph_runtime", fake_runtime)
 
     result = await memory_module.apply_memory_correction(
         organization_id="org-1",
@@ -645,7 +660,7 @@ async def test_restore_clears_the_graph_stamp_it_wrote(
         "save_raw_memory",
         AsyncMock(side_effect=lambda updated, **_kwargs: updated),
     )
-    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(memory_lifecycle_module, "get_surreal_graph_runtime", fake_runtime)
 
     result = await memory_module.apply_memory_correction(
         organization_id="org-1",
@@ -679,7 +694,7 @@ async def test_correction_still_applies_when_the_graph_is_unreachable(
         "save_raw_memory",
         AsyncMock(side_effect=lambda updated, **_kwargs: updated),
     )
-    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", exploding_runtime)
+    monkeypatch.setattr(memory_lifecycle_module, "get_surreal_graph_runtime", exploding_runtime)
 
     result = await memory_module.apply_memory_correction(
         organization_id="org-1",
@@ -723,7 +738,7 @@ async def test_correction_resolves_only_its_own_capture_not_its_source_group(
         "save_raw_memory",
         AsyncMock(side_effect=lambda updated, **_kwargs: updated),
     )
-    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(memory_lifecycle_module, "get_surreal_graph_runtime", fake_runtime)
 
     result = await memory_module.apply_memory_correction(
         organization_id="org-1",
@@ -737,7 +752,7 @@ async def test_correction_resolves_only_its_own_capture_not_its_source_group(
     assert "raw_source_id" not in query
     assert params["raw_memory_id"] == "candidate-1"
     assert params["group_id"] == "org-1"
-    assert params["limit"] == memory_module._GRAPH_CORRECTION_LOOKUP_LIMIT
+    assert params["limit"] == memory_lifecycle_module._GRAPH_CORRECTION_LOOKUP_LIMIT
 
 
 @pytest.mark.asyncio
@@ -763,7 +778,7 @@ async def test_the_edge_lookup_is_not_fed_ids_that_cannot_be_edge_endpoints() ->
             project_id="project_123",
         )
 
-    await search_module._apply_supersession_gate(
+    await lifecycle_module._apply_supersession_gate(
         client=RecordingClient(),
         group_id="org-123",
         source_lists=[
@@ -817,7 +832,7 @@ async def test_the_receipt_names_only_rows_that_were_really_stamped(
         "save_raw_memory",
         AsyncMock(side_effect=lambda updated, **_kwargs: updated),
     )
-    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(memory_lifecycle_module, "get_surreal_graph_runtime", fake_runtime)
 
     result = await memory_module.apply_memory_correction(
         organization_id="org-1",
@@ -865,7 +880,7 @@ async def test_a_correction_cannot_retire_an_entity_the_caller_cannot_write(
         "save_raw_memory",
         AsyncMock(side_effect=lambda updated, **_kwargs: updated),
     )
-    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(memory_lifecycle_module, "get_surreal_graph_runtime", fake_runtime)
 
     result = await memory_module.apply_memory_correction(
         organization_id="org-1",
@@ -924,10 +939,10 @@ async def test_supersession_lookup_batches_every_candidate(
 ) -> None:
     """A wide result set is checked completely without turning width into an outage."""
 
-    monkeypatch.setattr(search_module, "_SUPERSESSION_LOOKUP_BATCH_SIZE", 2)
+    monkeypatch.setattr(lifecycle_module, "_SUPERSESSION_LOOKUP_BATCH_SIZE", 2)
     client = SimpleNamespace(execute_query=AsyncMock(return_value=[]))
 
-    superseded, edge_count = await search_module._superseded_candidate_uuids(
+    superseded, edge_count = await lifecycle_module._superseded_candidate_uuids(
         client,
         group_id="org-123",
         uuids=[f"entity-{index}" for index in range(5)],
@@ -949,9 +964,9 @@ async def test_an_untruncated_check_carries_no_truncation_receipt(
     async def empty_lookup(*_args: object, **_kwargs: object) -> tuple[set[str], int]:
         return set(), 0
 
-    monkeypatch.setattr(search_module, "_superseded_candidate_uuids", empty_lookup)
+    monkeypatch.setattr(lifecycle_module, "_superseded_candidate_uuids", empty_lookup)
 
-    _surviving, metadata = await search_module._apply_supersession_gate(
+    _surviving, metadata = await lifecycle_module._apply_supersession_gate(
         client=_SupersessionGraphClient(),
         group_id="org-123",
         source_lists=[
@@ -1079,7 +1094,7 @@ async def test_a_correction_retires_only_projected_rows_it_can_still_see(
         "save_raw_memory",
         AsyncMock(side_effect=lambda updated, **_kwargs: updated),
     )
-    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(memory_lifecycle_module, "get_surreal_graph_runtime", fake_runtime)
 
     result = await memory_module.apply_memory_correction(
         organization_id="org-1",
@@ -1129,7 +1144,7 @@ async def test_a_refused_target_is_reported_rather_than_silently_skipped(
         "save_raw_memory",
         AsyncMock(side_effect=lambda updated, **_kwargs: updated),
     )
-    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(memory_lifecycle_module, "get_surreal_graph_runtime", fake_runtime)
 
     result = await memory_module.apply_memory_correction(
         organization_id="org-1",
@@ -1148,7 +1163,7 @@ async def test_supersession_lookup_pages_every_inbound_edge(
 ) -> None:
     """Many declarations for one row are consumed instead of capped or truncated."""
 
-    monkeypatch.setattr(search_module, "_SUPERSESSION_EDGE_PAGE_SIZE", 2)
+    monkeypatch.setattr(lifecycle_module, "_SUPERSESSION_EDGE_PAGE_SIZE", 2)
     pages = [
         [
             {
@@ -1163,7 +1178,7 @@ async def test_supersession_lookup_pages_every_inbound_edge(
     ]
     client = SimpleNamespace(execute_query=AsyncMock(side_effect=[[pages[-1][-1]], *pages]))
 
-    superseded, edge_count = await search_module._superseded_candidate_uuids(
+    superseded, edge_count = await lifecycle_module._superseded_candidate_uuids(
         client,
         group_id="org-123",
         uuids=["entity-retired"],
@@ -1185,7 +1200,7 @@ def test_a_self_supersession_retires_nothing() -> None:
     """A row replacing itself says nothing, and must not black itself out."""
 
     rows = [{"uuid": "edge-1", "target_id": "a", "source_id": "a"}]
-    assert search_module._resolve_superseded(rows) == set()
+    assert lifecycle_module._resolve_superseded(rows) == set()
 
 
 def test_a_supersession_cycle_retires_only_the_newest_edges_target() -> None:
@@ -1196,7 +1211,7 @@ def test_a_supersession_cycle_retires_only_the_newest_edges_target() -> None:
     pre-branch behavior of serving both.
     """
 
-    retired = search_module._resolve_superseded(
+    retired = lifecycle_module._resolve_superseded(
         [
             {
                 "uuid": "edge-a-supersedes-b",
@@ -1240,8 +1255,8 @@ def test_cycle_resolution_does_not_depend_on_the_order_rows_arrive_in() -> None:
         },
     ]
 
-    forward = search_module._resolve_superseded(rows)
-    reverse = search_module._resolve_superseded(list(reversed(rows)))
+    forward = lifecycle_module._resolve_superseded(rows)
+    reverse = lifecycle_module._resolve_superseded(list(reversed(rows)))
 
     assert forward == reverse == {"A"}
 
@@ -1249,7 +1264,7 @@ def test_cycle_resolution_does_not_depend_on_the_order_rows_arrive_in() -> None:
 def test_an_edge_with_no_recorded_source_still_retires_its_target() -> None:
     """Cycle resolution is a refinement, not a way to escape the gate."""
 
-    assert search_module._resolve_superseded([{"target_id": "old"}]) == {"old"}
+    assert lifecycle_module._resolve_superseded([{"target_id": "old"}]) == {"old"}
 
 
 @pytest.mark.asyncio
@@ -1293,7 +1308,7 @@ async def test_restore_deletes_the_supersession_edge_the_correction_minted(
         "save_raw_memory",
         AsyncMock(side_effect=lambda updated, **_kwargs: updated),
     )
-    monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(memory_lifecycle_module, "get_surreal_graph_runtime", fake_runtime)
 
     result = await memory_module.apply_memory_correction(
         organization_id="org-1",
@@ -1311,7 +1326,7 @@ async def test_restore_deletes_the_supersession_edge_the_correction_minted(
     assert params["predicate"] == "SUPERSEDES"
     # Only edges this path wrote are removed; a reflection-promoted
     # supersession is a different claim that restore has no opinion about.
-    assert params["write_path"] == memory_module._CORRECTION_NATIVE_WRITE_PATH
+    assert params["write_path"] == memory_lifecycle_module._CORRECTION_NATIVE_WRITE_PATH
     assert params["group_id"] == "org-1"
     _entity_id, stamped = runtime.updates[0]
     assert graph_metadata_recallable(stamped) is True
@@ -1364,7 +1379,7 @@ async def test_a_missing_id_and_a_denied_id_are_reported_identically(
             "save_raw_memory",
             AsyncMock(side_effect=lambda updated, **_kwargs: updated),
         )
-        monkeypatch.setattr(memory_module, "get_surreal_graph_runtime", fake_runtime)
+        monkeypatch.setattr(memory_lifecycle_module, "get_surreal_graph_runtime", fake_runtime)
 
         result = await memory_module.apply_memory_correction(
             organization_id="org-1",
@@ -1399,7 +1414,7 @@ async def test_a_synchronous_create_reconciles_the_capture_before_writing_the_ro
     from sibyl_core.models.entities import Entity, EntityType
 
     monkeypatch.setattr(
-        memory_module,
+        memory_lifecycle_module,
         "get_raw_memory",
         AsyncMock(
             return_value=_raw_capture(
@@ -1453,7 +1468,7 @@ async def test_a_synchronous_create_reads_nothing_for_a_row_with_no_provenance(
     from sibyl_core.models.entities import Entity, EntityType
 
     lookup = AsyncMock(side_effect=AssertionError("no capture read should happen"))
-    monkeypatch.setattr(memory_module, "get_raw_memory", lookup)
+    monkeypatch.setattr(memory_lifecycle_module, "get_raw_memory", lookup)
 
     class _Manager:
         async def create_direct(self, entity: Entity, *, generate_embedding: bool = True) -> str:
@@ -1541,7 +1556,7 @@ async def test_the_lineage_walk_pages_past_a_single_query_limit(
     fixed, just quieter.
     """
 
-    page_size = memory_module._GRAPH_CORRECTION_PROJECTION_PAGE_SIZE
+    page_size = memory_lifecycle_module._GRAPH_CORRECTION_PROJECTION_PAGE_SIZE
     total = page_size + 7
     all_ids = [f"projected-{index:05d}" for index in range(total)]
     cursors: list[str] = []
@@ -1569,7 +1584,7 @@ async def test_the_lineage_walk_pages_past_a_single_query_limit(
     runtime = _Runtime()
     memory = _raw_capture()
 
-    targets = await memory_module._correction_graph_entity_ids(
+    targets = await memory_lifecycle_module._correction_graph_entity_ids(
         runtime,
         organization_id="org-1",
         memory=memory,
@@ -1609,7 +1624,7 @@ async def test_an_unreadable_verdict_retires_the_row_instead_of_poisoning_the_jo
         msg = "content store unreachable"
         raise ConnectionError(msg)
 
-    monkeypatch.setattr(memory_module, "get_raw_memory", exploding_lookup)
+    monkeypatch.setattr(memory_lifecycle_module, "get_raw_memory", exploding_lookup)
     monkeypatch.setattr("asyncio.sleep", AsyncMock())
 
     class _Manager:
@@ -1682,8 +1697,8 @@ async def test_a_walk_that_hits_its_ceiling_reports_a_partial_correction(
     receipt on the retrieval gate exists to prevent.
     """
 
-    page_size = memory_module._GRAPH_CORRECTION_PROJECTION_PAGE_SIZE
-    max_pages = memory_module._GRAPH_CORRECTION_PROJECTION_MAX_PAGES
+    page_size = memory_lifecycle_module._GRAPH_CORRECTION_PROJECTION_PAGE_SIZE
+    max_pages = memory_lifecycle_module._GRAPH_CORRECTION_PROJECTION_MAX_PAGES
 
     class _Runtime:
         def __init__(self) -> None:
@@ -1705,7 +1720,7 @@ async def test_a_walk_that_hits_its_ceiling_reports_a_partial_correction(
                 metadata={"memory_scope": "private", "principal_id": "user-1"},
             )
 
-    targets = await memory_module._correction_graph_entity_ids(
+    targets = await memory_lifecycle_module._correction_graph_entity_ids(
         _Runtime(),
         organization_id="org-1",
         memory=_raw_capture(),

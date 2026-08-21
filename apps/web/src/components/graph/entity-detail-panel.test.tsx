@@ -5,8 +5,8 @@ const hooks = vi.hoisted(() => ({
   useEntity: vi.fn(),
 }));
 
-vi.mock('@/lib/hooks', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/hooks')>('@/lib/hooks');
+vi.mock('@/lib/hooks/graph', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/hooks/graph')>('@/lib/hooks/graph');
   return {
     ...actual,
     useEntity: hooks.useEntity,

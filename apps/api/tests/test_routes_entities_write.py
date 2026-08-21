@@ -11,15 +11,12 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from sibyl.api.routes.entities import (
-    _bulk_create_metadata,
-    _entity_from_bulk_create,
-    _reject_unsupported_bulk_entry,
-    create_entities_bulk,
-    create_entity,
-    delete_entity,
-    requeue_entity_background_jobs,
-    update_entity,
+from sibyl.api.routes.entity_bulk import create_entities_bulk, requeue_entity_background_jobs
+from sibyl.api.routes.entity_mutations import create_entity, delete_entity, update_entity
+from sibyl.api.routes.entity_serialization import (
+    bulk_create_metadata,
+    entity_from_bulk_create,
+    reject_unsupported_bulk_entry,
 )
 from sibyl.api.schemas import (
     EntityBackgroundJobsRequeueRequest,
@@ -58,7 +55,7 @@ def test_bulk_entity_ids_are_idempotent_within_project_and_isolated_between_proj
     now = datetime.now(UTC)
 
     def build(project_id: str) -> Entity:
-        return _entity_from_bulk_create(
+        return entity_from_bulk_create(
             EntityCreate(
                 name="Shared session",
                 content="same source content",
@@ -119,11 +116,14 @@ async def test_create_project_routes_through_runtime_project_record() -> None:
     with (
         patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)),
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock(return_value=runtime)
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
         ),
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
-        patch("sibyl.api.routes.entities.create_project_record", AsyncMock()) as create_project,
-        patch("sibyl.api.routes.entities.log_audit_event", AsyncMock()) as audit_log,
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
+        patch(
+            "sibyl.api.routes.entity_mutations.create_project_record", AsyncMock()
+        ) as create_project,
+        patch("sibyl.api.routes.entity_mutations.log_audit_event", AsyncMock()) as audit_log,
     ):
         response = await create_entity(
             request=_request(),
@@ -174,10 +174,10 @@ async def test_create_entity_can_defer_embeddings_to_background_backfill() -> No
     with (
         patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)) as add,
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
     ):
         response = await create_entity(
             request=_request(),
@@ -210,10 +210,10 @@ async def test_create_entity_forwards_declared_retrieval_keys() -> None:
     with (
         patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)) as add,
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
     ):
         response = await create_entity(
             request=_request(),
@@ -266,7 +266,7 @@ def test_bulk_create_metadata_normalizes_declared_retrieval_keys() -> None:
         retrieval_keys=["  ERR_X  ", "err_x", ""],
     )
 
-    metadata = _bulk_create_metadata(
+    metadata = bulk_create_metadata(
         entity,
         group_id="org-123",
         now=datetime(2026, 8, 3, tzinfo=UTC),
@@ -279,7 +279,7 @@ def test_bulk_create_metadata_normalizes_declared_retrieval_keys() -> None:
 def test_bulk_create_metadata_omits_the_field_without_a_declaration() -> None:
     entity = EntityCreate(name="Plain note", content="Body", entity_type=EntityType.NOTE)
 
-    metadata = _bulk_create_metadata(
+    metadata = bulk_create_metadata(
         entity,
         group_id="org-123",
         now=datetime(2026, 8, 3, tzinfo=UTC),
@@ -316,10 +316,10 @@ async def test_create_entity_broadcast_carries_no_memory_content() -> None:
     with (
         patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)),
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
-        patch("sibyl.api.routes.entities.broadcast_event", broadcast),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", broadcast),
     ):
         response = await create_entity(
             request=_request(),
@@ -369,7 +369,7 @@ async def test_create_entities_bulk_uses_runtime_bulk_create() -> None:
     )
 
     with patch(
-        "sibyl.api.routes.entities.get_entity_graph_runtime",
+        "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
         AsyncMock(return_value=runtime),
     ):
         response = await create_entities_bulk(
@@ -412,11 +412,11 @@ async def test_create_entities_bulk_verifies_each_project_once() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch(
-            "sibyl.api.routes.entities.verify_entity_project_access",
+            "sibyl.api.routes.entity_bulk.verify_entity_project_access",
             AsyncMock(),
         ) as verify_access,
     ):
@@ -475,7 +475,7 @@ async def test_create_entities_bulk_can_defer_embeddings_to_backfill_job() -> No
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch(
@@ -535,19 +535,19 @@ async def test_requeue_entity_background_jobs_uses_persisted_entities() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch(
-            "sibyl.api.routes.entities.verify_entity_project_access",
+            "sibyl.api.routes.entity_bulk.verify_entity_project_access",
             AsyncMock(),
         ) as verify_access,
         patch(
-            "sibyl.api.routes.entities._require_entity_read_access",
+            "sibyl.api.routes.entity_policy.require_entity_read_access",
             AsyncMock(return_value={"project_shared"}),
         ) as require_read_access,
         patch(
-            "sibyl.api.routes.entities.extract_projected_memory_entities",
+            "sibyl.api.routes.entity_bulk.extract_projected_memory_entities",
             MagicMock(return_value=[{"entity_type": "fact"}]),
         ),
         patch(
@@ -656,15 +656,15 @@ async def test_requeue_operational_embedding_job_restores_manifest_completion() 
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch(
-            "sibyl.api.routes.entities.verify_entity_project_access",
+            "sibyl.api.routes.entity_bulk.verify_entity_project_access",
             AsyncMock(),
         ),
         patch(
-            "sibyl.api.routes.entities._require_entity_read_access",
+            "sibyl.api.routes.entity_policy.require_entity_read_access",
             AsyncMock(return_value={"project_shared"}),
         ),
         patch(
@@ -727,15 +727,15 @@ async def test_requeue_completed_operational_manifest_is_idempotent() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch(
-            "sibyl.api.routes.entities.verify_entity_project_access",
+            "sibyl.api.routes.entity_bulk.verify_entity_project_access",
             AsyncMock(),
         ),
         patch(
-            "sibyl.api.routes.entities._require_entity_read_access",
+            "sibyl.api.routes.entity_policy.require_entity_read_access",
             AsyncMock(return_value={"project_shared"}),
         ),
         patch(
@@ -786,11 +786,11 @@ async def test_requeue_operational_manifest_requires_itself_in_inventory() -> No
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch(
-            "sibyl.api.routes.entities._require_entity_read_access",
+            "sibyl.api.routes.entity_policy.require_entity_read_access",
             AsyncMock(return_value=set()),
         ),
         pytest.raises(
@@ -830,11 +830,11 @@ async def test_requeue_operational_manifest_hides_unreadable_metadata() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch(
-            "sibyl.api.routes.entities._require_entity_read_access",
+            "sibyl.api.routes.entity_policy.require_entity_read_access",
             AsyncMock(side_effect=HTTPException(status_code=404, detail="Entity not found")),
         ),
         pytest.raises(HTTPException) as exc_info,
@@ -895,15 +895,15 @@ async def test_requeue_operational_embedding_job_resolves_large_manifest_invento
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch(
-            "sibyl.api.routes.entities.verify_entity_project_access",
+            "sibyl.api.routes.entity_bulk.verify_entity_project_access",
             AsyncMock(),
         ),
         patch(
-            "sibyl.api.routes.entities._require_entity_read_access",
+            "sibyl.api.routes.entity_policy.require_entity_read_access",
             AsyncMock(return_value={"project_shared"}),
         ),
         patch(
@@ -968,15 +968,15 @@ async def test_requeue_operational_embedding_job_requires_exact_inventory() -> N
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch(
-            "sibyl.api.routes.entities.verify_entity_project_access",
+            "sibyl.api.routes.entity_bulk.verify_entity_project_access",
             AsyncMock(),
         ),
         patch(
-            "sibyl.api.routes.entities._require_entity_read_access",
+            "sibyl.api.routes.entity_policy.require_entity_read_access",
             AsyncMock(return_value={"project_shared"}),
         ),
         patch(
@@ -1014,11 +1014,11 @@ async def test_requeue_entity_background_jobs_hides_unreadable_entities() -> Non
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch(
-            "sibyl.api.routes.entities._require_entity_read_access",
+            "sibyl.api.routes.entity_policy.require_entity_read_access",
             AsyncMock(side_effect=HTTPException(status_code=404, detail="Entity not found")),
         ),
         patch(
@@ -1049,7 +1049,7 @@ async def test_requeue_entity_background_jobs_returns_not_found_for_deleted_enti
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         pytest.raises(HTTPException, match="Entity not found: session_deleted") as exc_info,
@@ -1089,7 +1089,7 @@ async def test_create_entities_bulk_enqueues_memory_projection() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch("sibyl.jobs.queue.enqueue_memory_projection", AsyncMock()) as enqueue_projection,
@@ -1138,7 +1138,7 @@ async def test_create_entities_bulk_returns_memory_extraction_jobs() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch(
@@ -1190,7 +1190,7 @@ async def test_create_entities_bulk_reports_partial_memory_extraction() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch(
@@ -1242,7 +1242,7 @@ async def test_create_entities_bulk_reports_every_failed_derived_enqueue() -> No
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch(
@@ -1309,11 +1309,11 @@ async def test_requeue_entity_background_jobs_recovers_memory_extraction() -> No
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         patch(
-            "sibyl.api.routes.entities._require_entity_read_access",
+            "sibyl.api.routes.entity_policy.require_entity_read_access",
             AsyncMock(return_value=set()),
         ),
         patch(
@@ -1358,7 +1358,7 @@ async def test_create_entities_bulk_requires_explicit_conflict_skip() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=runtime),
         ),
         pytest.raises(HTTPException) as exc,
@@ -1395,7 +1395,7 @@ async def test_create_entity_verifies_metadata_project_id_before_add() -> None:
 
     with (
         patch("sibyl_core.tools.core.add", add),
-        patch("sibyl.api.routes.entities.verify_entity_project_access", verify_access),
+        patch("sibyl.api.routes.entity_mutations.verify_entity_project_access", verify_access),
         pytest.raises(ProjectAccessDeniedError),
     ):
         await create_entity(
@@ -1433,18 +1433,21 @@ async def test_update_project_routes_through_runtime_project_record() -> None:
     with (
         patch("sibyl.locks.entity_lock", _locked_entity),
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock(return_value=runtime)
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
         ),
         patch(
-            "sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()
+            "sibyl.api.routes.entity_mutations.verify_entity_project_access", AsyncMock()
         ) as verify_access,
         patch(
-            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project_new"}),
         ),
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
-        patch("sibyl.api.routes.entities.update_project_record", AsyncMock()) as update_project,
-        patch("sibyl.api.routes.entities.log_audit_event", AsyncMock()) as audit_log,
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
+        patch(
+            "sibyl.api.routes.entity_mutations.update_project_record", AsyncMock()
+        ) as update_project,
+        patch("sibyl.api.routes.entity_mutations.log_audit_event", AsyncMock()) as audit_log,
     ):
         response = await update_entity(
             entity_id="project_new",
@@ -1487,18 +1490,21 @@ async def test_delete_project_routes_through_runtime_project_record() -> None:
     with (
         patch("sibyl.locks.entity_lock", _locked_entity),
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock(return_value=runtime)
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
         ),
         patch(
-            "sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()
+            "sibyl.api.routes.entity_mutations.verify_entity_project_access", AsyncMock()
         ) as verify_access,
         patch(
-            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project_new"}),
         ),
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
-        patch("sibyl.api.routes.entities.delete_project_record", AsyncMock()) as delete_project,
-        patch("sibyl.api.routes.entities.log_audit_event", AsyncMock()) as audit_log,
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
+        patch(
+            "sibyl.api.routes.entity_mutations.delete_project_record", AsyncMock()
+        ) as delete_project,
+        patch("sibyl.api.routes.entity_mutations.log_audit_event", AsyncMock()) as audit_log,
     ):
         await delete_entity(
             entity_id="project_new",
@@ -1554,16 +1560,19 @@ async def test_delete_entity_keeps_the_parent_when_a_span_cannot_be_retired() ->
     with (
         patch("sibyl.locks.entity_lock", _locked_entity),
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock(return_value=runtime)
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
         ),
-        patch("sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.verify_entity_project_access", AsyncMock()),
         patch(
-            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project_new"}),
         ),
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()) as broadcast,
-        patch("sibyl.api.routes.entities.delete_project_record", AsyncMock()) as delete_project,
-        patch("sibyl.api.routes.entities.log_audit_event", AsyncMock()) as audit_log,
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()) as broadcast,
+        patch(
+            "sibyl.api.routes.entity_mutations.delete_project_record", AsyncMock()
+        ) as delete_project,
+        patch("sibyl.api.routes.entity_mutations.log_audit_event", AsyncMock()) as audit_log,
         pytest.raises(HTTPException) as raised,
     ):
         await delete_entity(
@@ -1608,12 +1617,12 @@ async def test_create_entity_binds_scoped_metadata_to_authenticated_principal() 
     add_mock = AsyncMock(return_value=add_result)
 
     with (
-        patch("sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.verify_entity_project_access", AsyncMock()),
         patch("sibyl_core.tools.core.add", add_mock),
-        patch("sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock()),
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
-        patch("sibyl.api.routes.entities.log_audit_event", AsyncMock()),
-        patch("sibyl.api.routes.entities._archive_raw_capture", AsyncMock()),
+        patch("sibyl.api.routes.entity_policy.get_entity_graph_runtime", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.log_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_captures.archive_raw_capture", AsyncMock()),
     ):
         await create_entity(
             request=_request(),
@@ -1647,12 +1656,12 @@ async def test_create_entity_drops_scope_principal_without_authenticated_user() 
     add_mock = AsyncMock(return_value=add_result)
 
     with (
-        patch("sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.verify_entity_project_access", AsyncMock()),
         patch("sibyl_core.tools.core.add", add_mock),
-        patch("sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock()),
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
-        patch("sibyl.api.routes.entities.log_audit_event", AsyncMock()),
-        patch("sibyl.api.routes.entities._archive_raw_capture", AsyncMock()),
+        patch("sibyl.api.routes.entity_policy.get_entity_graph_runtime", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.log_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_captures.archive_raw_capture", AsyncMock()),
     ):
         await create_entity(
             request=_request(),
@@ -1694,12 +1703,14 @@ async def test_create_entity_sanitizes_raw_capture_scope_metadata() -> None:
     add_result = SimpleNamespace(success=True, id="decision_1", message="ok")
 
     with (
-        patch("sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.verify_entity_project_access", AsyncMock()),
         patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)),
-        patch("sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock()),
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
-        patch("sibyl.api.routes.entities.log_audit_event", AsyncMock()),
-        patch("sibyl.api.routes.entities._archive_raw_capture", AsyncMock()) as archive_capture,
+        patch("sibyl.api.routes.entity_policy.get_entity_graph_runtime", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.log_audit_event", AsyncMock()),
+        patch(
+            "sibyl.api.routes.entity_captures.archive_raw_capture", AsyncMock()
+        ) as archive_capture,
     ):
         await create_entity(
             request=_request(),
@@ -1744,11 +1755,11 @@ async def test_create_entity_drops_project_scope_key_without_a_verified_project(
     verify_access = AsyncMock()
 
     with (
-        patch("sibyl.api.routes.entities.verify_entity_project_access", verify_access),
+        patch("sibyl.api.routes.entity_mutations.verify_entity_project_access", verify_access),
         patch("sibyl_core.tools.core.add", add_mock),
-        patch("sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock()),
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
-        patch("sibyl.api.routes.entities.log_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_policy.get_entity_graph_runtime", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.log_audit_event", AsyncMock()),
     ):
         await create_entity(
             request=_request(),
@@ -1774,7 +1785,7 @@ def test_bulk_create_binds_scoped_metadata_to_the_authenticated_principal() -> N
         metadata={"memory_scope": "private", "principal_id": "victim", "scope_key": "victim"},
     )
 
-    built = _entity_from_bulk_create(
+    built = entity_from_bulk_create(
         entity,
         group_id=str(_org().id),
         now=datetime.now(UTC),
@@ -1795,7 +1806,7 @@ def test_bulk_create_drops_a_scope_key_the_request_never_verified() -> None:
         metadata={"memory_scope": "project", "scope_key": "project_victim"},
     )
 
-    built = _entity_from_bulk_create(
+    built = entity_from_bulk_create(
         entity,
         group_id=str(_org().id),
         now=datetime.now(UTC),
@@ -1819,7 +1830,7 @@ def test_bulk_create_scopes_a_project_row_to_the_verified_project() -> None:
         },
     )
 
-    built = _entity_from_bulk_create(
+    built = entity_from_bulk_create(
         entity,
         group_id=str(_org().id),
         now=datetime.now(UTC),
@@ -1850,7 +1861,7 @@ async def test_create_entities_bulk_stamps_the_caller_onto_scoped_rows() -> None
     )
 
     with patch(
-        "sibyl.api.routes.entities.get_entity_graph_runtime",
+        "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
         AsyncMock(return_value=runtime),
     ):
         response = await create_entities_bulk(
@@ -1903,14 +1914,15 @@ async def test_update_entity_refuses_a_private_row_owned_by_another_principal() 
     with (
         patch("sibyl.locks.entity_lock", _locked_entity),
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock(return_value=runtime)
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
         ),
-        patch("sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.verify_entity_project_access", AsyncMock()),
         patch(
-            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
             AsyncMock(return_value=set()),
         ),
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
         pytest.raises(HTTPException) as excinfo,
     ):
         await update_entity(
@@ -1943,14 +1955,15 @@ async def test_update_entity_keeps_owner_metadata_out_of_the_caller_merge() -> N
     with (
         patch("sibyl.locks.entity_lock", _locked_entity),
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock(return_value=runtime)
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
         ),
-        patch("sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.verify_entity_project_access", AsyncMock()),
         patch(
-            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
             AsyncMock(return_value=set()),
         ),
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
     ):
         await update_entity(
             entity_id="decision_private",
@@ -2004,14 +2017,15 @@ async def test_update_entity_refuses_a_project_row_keyed_outside_accessible_proj
     with (
         patch("sibyl.locks.entity_lock", _locked_entity),
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock(return_value=runtime)
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
         ),
-        patch("sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.verify_entity_project_access", AsyncMock()),
         patch(
-            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
             AsyncMock(return_value={"project_mine"}),
         ),
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
         pytest.raises(HTTPException) as excinfo,
     ):
         await update_entity(
@@ -2043,14 +2057,15 @@ async def test_delete_entity_refuses_a_private_row_owned_by_another_principal() 
     with (
         patch("sibyl.locks.entity_lock", _locked_entity),
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime", AsyncMock(return_value=runtime)
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
+            AsyncMock(return_value=runtime),
         ),
-        patch("sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.verify_entity_project_access", AsyncMock()),
         patch(
-            "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+            "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
             AsyncMock(return_value=set()),
         ),
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
         pytest.raises(HTTPException) as excinfo,
     ):
         await delete_entity(
@@ -2073,15 +2088,15 @@ def test_project_screen_gates_a_note_carrying_only_a_project() -> None:
     """
     from types import SimpleNamespace
 
-    from sibyl.api.routes.entities import _entity_visible_to_projects
+    from sibyl.api.routes.entity_policy import entity_visible_to_projects
 
     note = SimpleNamespace(
         entity_type=SimpleNamespace(value="note"),
         metadata={"project_id": "proj-secret"},
     )
 
-    assert not _entity_visible_to_projects(note, set())
-    assert _entity_visible_to_projects(note, {"proj-secret"})
+    assert not entity_visible_to_projects(note, set())
+    assert entity_visible_to_projects(note, {"proj-secret"})
 
 
 # =============================================================================
@@ -2126,17 +2141,17 @@ def _update_patches(runtime: SimpleNamespace, *, passages: int = 0):
         for context in (
             patch("sibyl.locks.entity_lock", _locked_entity),
             patch(
-                "sibyl.api.routes.entities.get_entity_graph_runtime",
+                "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
                 AsyncMock(return_value=runtime),
             ),
-            patch("sibyl.api.routes.entities.verify_entity_project_access", AsyncMock()),
+            patch("sibyl.api.routes.entity_mutations.verify_entity_project_access", AsyncMock()),
             patch(
-                "sibyl.api.routes.entities.list_accessible_project_graph_ids",
+                "sibyl.api.routes.entity_policy.list_accessible_project_graph_ids",
                 AsyncMock(return_value=set()),
             ),
-            patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
-            patch("sibyl.api.routes.entities.reproject_entity_passages", reproject),
-            patch("sibyl.api.routes.entities.restamp_entity_passages", restamp),
+            patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
+            patch("sibyl.api.routes.entity_mutations.reproject_entity_passages", reproject),
+            patch("sibyl.api.routes.entity_mutations.restamp_entity_passages", restamp),
         ):
             stack.enter_context(context)
         yield reproject, restamp
@@ -2162,9 +2177,9 @@ async def test_create_entity_forwards_agent_structure_to_the_writer() -> None:
 
     with (
         patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)) as add_mock,
-        patch("sibyl.api.routes.entities.broadcast_event", AsyncMock()),
+        patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=SimpleNamespace(entity_manager=SimpleNamespace())),
         ),
     ):
@@ -2199,7 +2214,7 @@ async def test_create_entity_refuses_a_plan_that_does_not_tile_the_body() -> Non
 
     with (
         patch(
-            "sibyl.api.routes.entities.get_entity_graph_runtime",
+            "sibyl.api.routes.entity_policy.get_entity_graph_runtime",
             AsyncMock(return_value=SimpleNamespace(entity_manager=SimpleNamespace())),
         ),
         pytest.raises(HTTPException) as excinfo,
@@ -2591,7 +2606,7 @@ def test_bulk_create_refuses_declared_structure_it_cannot_honor(
 ) -> None:
     """The batch path mints no passages, so accepting a plan would store a no-op."""
     with pytest.raises(HTTPException) as excinfo:
-        _reject_unsupported_bulk_entry(
+        reject_unsupported_bulk_entry(
             EntityCreate(
                 name="Batch memory",
                 content=_SPANNED_BODY,
@@ -2607,7 +2622,7 @@ def test_bulk_create_refuses_declared_structure_it_cannot_honor(
 
 
 def test_bulk_create_cannot_have_structure_planted_through_metadata() -> None:
-    built = _entity_from_bulk_create(
+    built = entity_from_bulk_create(
         EntityCreate(
             name="Batch memory",
             content=_SPANNED_BODY,

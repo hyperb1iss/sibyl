@@ -4,12 +4,13 @@ import asyncio
 
 import pytest
 
-import sibyl_core.services.graph_communities as communities
+import sibyl_core.services.graph_community_snapshot as community_snapshot
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
-from sibyl_core.services.graph_communities import (
-    GRAPH_RESOLUTION_OVERVIEW,
+from sibyl_core.services.graph_communities import GRAPH_RESOLUTION_OVERVIEW, GraphSnapshot
+from sibyl_core.services.graph_community_selection import (
     _build_cluster_detail_graph_from_snapshot,
     _build_overview_graph_from_snapshot,
+    _snapshot_to_networkx,
 )
 
 
@@ -93,6 +94,24 @@ def test_build_overview_graph_emits_aggregate_cluster_bubbles() -> None:
     assert cluster_a["type_distribution"]["episode"] == 1
 
 
+def test_snapshot_graph_order_is_stable_across_database_page_order() -> None:
+    entities = [
+        _entity("task-2", EntityType.TASK),
+        _entity("task-1", EntityType.TASK),
+        _entity("project-1", EntityType.PROJECT),
+    ]
+    relationships = [
+        _relationship("rel-2", "task-2", "project-1", RelationshipType.BELONGS_TO),
+        _relationship("rel-1", "task-1", "task-2"),
+    ]
+
+    first = _snapshot_to_networkx(entities, relationships)
+    restarted = _snapshot_to_networkx(list(reversed(entities)), list(reversed(relationships)))
+
+    assert list(first.nodes) == list(restarted.nodes)
+    assert list(first.edges) == list(restarted.edges)
+
+
 def test_build_cluster_detail_graph_includes_cluster_members_and_neighbors() -> None:
     entities = [
         _entity("task-1", EntityType.TASK),
@@ -148,12 +167,12 @@ async def test_get_graph_snapshot_fetches_entities_and_edges_concurrently(
         await entities_started.wait()
         return []
 
-    communities.GRAPH_SNAPSHOT_CACHE.clear()
-    monkeypatch.setattr(communities, "_list_all_entities", fake_list_all_entities)
-    monkeypatch.setattr(communities, "_list_all_relationships", fake_list_all_relationships)
+    community_snapshot.GRAPH_SNAPSHOT_CACHE.clear()
+    monkeypatch.setattr(community_snapshot, "_list_all_entities", fake_list_all_entities)
+    monkeypatch.setattr(community_snapshot, "_list_all_relationships", fake_list_all_relationships)
 
     snapshot = await asyncio.wait_for(
-        communities._get_graph_snapshot(object(), "org-concurrent"),
+        community_snapshot._get_graph_snapshot(object(), "org-concurrent"),
         timeout=1,
     )
 
@@ -176,19 +195,19 @@ async def test_get_graph_snapshot_joins_concurrent_loads(
         await asyncio.sleep(0)
         return []
 
-    communities.GRAPH_SNAPSHOT_CACHE.clear()
-    communities.GRAPH_SNAPSHOT_LOADS.clear()
-    monkeypatch.setattr(communities, "_list_all_entities", fake_list_all_entities)
-    monkeypatch.setattr(communities, "_list_all_relationships", fake_list_all_relationships)
+    community_snapshot.GRAPH_SNAPSHOT_CACHE.clear()
+    community_snapshot.GRAPH_SNAPSHOT_LOADS.clear()
+    monkeypatch.setattr(community_snapshot, "_list_all_entities", fake_list_all_entities)
+    monkeypatch.setattr(community_snapshot, "_list_all_relationships", fake_list_all_relationships)
 
     first, second = await asyncio.gather(
-        communities._get_graph_snapshot(
+        community_snapshot._get_graph_snapshot(
             object(),
             "org-single-flight",
             max_entities=100,
             max_relationships=200,
         ),
-        communities._get_graph_snapshot(
+        community_snapshot._get_graph_snapshot(
             object(),
             "org-single-flight",
             max_entities=100,
@@ -207,7 +226,7 @@ async def test_get_graph_snapshot_cancels_inflight_load_on_request_cancel(
     started = asyncio.Event()
     cancelled = asyncio.Event()
 
-    async def fake_load_graph_snapshot(*args, **kwargs) -> communities.GraphSnapshot:
+    async def fake_load_graph_snapshot(*args, **kwargs) -> GraphSnapshot:
         started.set()
         try:
             await asyncio.sleep(10)
@@ -216,12 +235,12 @@ async def test_get_graph_snapshot_cancels_inflight_load_on_request_cancel(
             raise
         raise AssertionError("snapshot load should have been cancelled")
 
-    communities.GRAPH_SNAPSHOT_CACHE.clear()
-    communities.GRAPH_SNAPSHOT_LOADS.clear()
-    monkeypatch.setattr(communities, "_load_graph_snapshot", fake_load_graph_snapshot)
+    community_snapshot.GRAPH_SNAPSHOT_CACHE.clear()
+    community_snapshot.GRAPH_SNAPSHOT_LOADS.clear()
+    monkeypatch.setattr(community_snapshot, "_load_graph_snapshot", fake_load_graph_snapshot)
 
     task = asyncio.create_task(
-        communities._get_graph_snapshot(
+        community_snapshot._get_graph_snapshot(
             object(),
             "org-cancel",
             max_entities=100,
@@ -235,7 +254,7 @@ async def test_get_graph_snapshot_cancels_inflight_load_on_request_cancel(
         await task
 
     assert cancelled.is_set()
-    assert communities.GRAPH_SNAPSHOT_LOADS == {}
+    assert community_snapshot.GRAPH_SNAPSHOT_LOADS == {}
 
 
 @pytest.mark.asyncio
@@ -245,17 +264,17 @@ async def test_get_graph_snapshot_joiner_cancel_does_not_cancel_shared_load(
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def fake_load_graph_snapshot(*args, **kwargs) -> communities.GraphSnapshot:
+    async def fake_load_graph_snapshot(*args, **kwargs) -> GraphSnapshot:
         started.set()
         await release.wait()
-        return communities.GraphSnapshot(entities=[], relationships=[], entity_by_id={})
+        return GraphSnapshot(entities=[], relationships=[], entity_by_id={})
 
-    communities.GRAPH_SNAPSHOT_CACHE.clear()
-    communities.GRAPH_SNAPSHOT_LOADS.clear()
-    monkeypatch.setattr(communities, "_load_graph_snapshot", fake_load_graph_snapshot)
+    community_snapshot.GRAPH_SNAPSHOT_CACHE.clear()
+    community_snapshot.GRAPH_SNAPSHOT_LOADS.clear()
+    monkeypatch.setattr(community_snapshot, "_load_graph_snapshot", fake_load_graph_snapshot)
 
     owner = asyncio.create_task(
-        communities._get_graph_snapshot(
+        community_snapshot._get_graph_snapshot(
             object(),
             "org-join-cancel",
             max_entities=100,
@@ -265,7 +284,7 @@ async def test_get_graph_snapshot_joiner_cancel_does_not_cancel_shared_load(
     await started.wait()
 
     joiner = asyncio.create_task(
-        communities._get_graph_snapshot(
+        community_snapshot._get_graph_snapshot(
             object(),
             "org-join-cancel",
             max_entities=100,

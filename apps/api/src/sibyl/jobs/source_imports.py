@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -15,6 +16,11 @@ import structlog
 
 from sibyl.api.event_types import WSEvent
 from sibyl.config import settings
+from sibyl.persistence.source_import_runtime import (
+    SourceImportRevisionConflictError,
+    load_source_import_run_record,
+    save_source_import_run_record,
+)
 from sibyl.services.document_adapters import (
     DOCUMENT_TEXT_ADAPTER_NAME,
     DOCUMENT_URL_ADAPTER_NAME,
@@ -72,6 +78,7 @@ class SourceImportRun:
     policy_context: dict[str, Any]
     batch_size: int
     promotion_preview_approved: bool
+    revision: int = 0
     status: SourceImportStatus = SourceImportStatus.PENDING
     adapter_version: str | None = None
     source_identity: str | None = None
@@ -157,8 +164,7 @@ _SOURCE_IMPORT_PRIVILEGED_OPTIONS = frozenset({"allow_private_network"})
 
 
 def _store_run(run: SourceImportRun) -> None:
-    run.touch()
-    _SOURCE_IMPORT_RUNS[run.import_id] = run
+    _SOURCE_IMPORT_RUNS[run.import_id] = deepcopy(run)
 
 
 def _source_import_event_payload(run: SourceImportRun) -> dict[str, Any]:
@@ -256,6 +262,7 @@ def _run_record(run: SourceImportRun) -> dict[str, object]:
         "raw_memory_by_source_id": dict(run.raw_memory_by_source_id),
         "batch_size": run.batch_size,
         "promotion_preview_approved": run.promotion_preview_approved,
+        "revision": run.revision,
         "created_at": run.created_at,
         "updated_at": run.updated_at,
         "completed_at": run.completed_at,
@@ -270,7 +277,7 @@ def _run_from_record(record: dict[str, object]) -> SourceImportRun:
         if isinstance(checkpoint_payload, dict)
         else None
     )
-    run = SourceImportRun(
+    return SourceImportRun(
         import_id=str(record.get("uuid") or ""),
         organization_id=str(record.get("organization_id") or ""),
         principal_id=str(record.get("principal_id") or ""),
@@ -280,6 +287,7 @@ def _run_from_record(record: dict[str, object]) -> SourceImportRun:
         policy_context=_dict_from_record(record.get("policy_context")),
         batch_size=int(record.get("batch_size") or 100),
         promotion_preview_approved=bool(record.get("promotion_preview_approved")),
+        revision=int(record.get("revision") or 0),
         status=SourceImportStatus(str(record.get("status") or SourceImportStatus.PENDING)),
         adapter_version=(
             str(record["adapter_version"]) if record.get("adapter_version") is not None else None
@@ -322,28 +330,20 @@ def _run_from_record(record: dict[str, object]) -> SourceImportRun:
         updated_at=_datetime_from_record(record.get("updated_at")) or datetime.now(UTC),
         completed_at=_datetime_from_record(record.get("completed_at")),
     )
-    _SOURCE_IMPORT_RUNS[run.import_id] = run
-    return run
 
 
-async def _persist_run(run: SourceImportRun) -> None:
+async def _persist_run(
+    run: SourceImportRun,
+    *,
+    expected_revision: int | None,
+) -> None:
+    run.touch()
+    run.revision = 0 if expected_revision is None else expected_revision + 1
+    await save_source_import_run_record(
+        _run_record(run),
+        expected_revision=expected_revision,
+    )
     _store_run(run)
-    try:
-        from sibyl.persistence.surreal.content import _replace_record, surreal_content_client
-
-        async with surreal_content_client() as client:
-            await _replace_record(
-                client,
-                "source_imports",
-                uuid=run.import_id,
-                record=_run_record(run),
-            )
-    except Exception as exc:
-        log.warning(
-            "source_import_state_persist_failed",
-            error=str(exc),
-            import_id=run.import_id,
-        )
     await _safe_broadcast_source_import(run)
 
 
@@ -352,25 +352,15 @@ async def _load_persisted_run(
     *,
     organization_id: str,
 ) -> SourceImportRun | None:
-    try:
-        from sibyl.persistence.surreal.content import _select_one, surreal_content_client
-
-        async with surreal_content_client() as client:
-            record = await _select_one(
-                client,
-                "SELECT * FROM source_imports "
-                "WHERE uuid = $import_id AND organization_id = $organization_id LIMIT 1;",
-                import_id=import_id,
-                organization_id=organization_id,
-            )
-    except Exception as exc:
-        log.warning(
-            "source_import_state_load_failed",
-            error=str(exc),
-            import_id=import_id,
-        )
+    record = await load_source_import_run_record(
+        import_id,
+        organization_id=organization_id,
+    )
+    if record is None:
         return None
-    return _run_from_record(record) if record is not None else None
+    run = _run_from_record(record)
+    _store_run(run)
+    return run
 
 
 def clear_source_import_runs() -> None:
@@ -758,14 +748,12 @@ async def _get_run(
     organization_id: str,
     principal_id: str | None = None,
 ) -> SourceImportRun:
-    run = _SOURCE_IMPORT_RUNS.get(import_id)
-    if run is None:
-        run = await _load_persisted_run(import_id, organization_id=organization_id)
+    run = await _load_persisted_run(import_id, organization_id=organization_id)
     if run is None or run.organization_id != organization_id:
         raise KeyError("source_import_not_found")
     if principal_id is not None and run.principal_id != principal_id:
         raise PermissionError("source_import_forbidden")
-    return run
+    return deepcopy(run)
 
 
 async def get_source_import_status(
@@ -812,7 +800,7 @@ async def start_source_import(
         batch_size=batch_size,
         promotion_preview_approved=promotion_preview_approved,
     )
-    await _persist_run(run)
+    await _persist_run(run, expected_revision=None)
     return run.status_payload()
 
 
@@ -873,9 +861,10 @@ async def resume_source_import(
     if run.status is SourceImportStatus.COMPLETED:
         return run.status_payload()
 
+    expected_revision = run.revision
     run.status = SourceImportStatus.RUNNING
     run.policy_context = dict(policy_context)
-    await _persist_run(run)
+    await _persist_run(run, expected_revision=expected_revision)
     try:
         dedupe_checker = _default_duplicate_checker(
             organization_id=run.organization_id,
@@ -910,7 +899,13 @@ async def resume_source_import(
                 "timestamp": datetime.now(UTC).isoformat(),
             }
         )
-        await _persist_run(run)
+        try:
+            await _persist_run(run, expected_revision=run.revision)
+        except SourceImportRevisionConflictError:
+            latest = await _load_persisted_run(import_id, organization_id=run.organization_id)
+            if latest is not None and latest.status is SourceImportStatus.CANCELED:
+                return latest.status_payload()
+            raise
         raise
 
     if run.status is SourceImportStatus.CANCELED:
@@ -949,7 +944,13 @@ async def resume_source_import(
         run.completed_at = datetime.now(UTC)
     else:
         run.status = SourceImportStatus.PAUSED
-    await _persist_run(run)
+    try:
+        await _persist_run(run, expected_revision=run.revision)
+    except SourceImportRevisionConflictError:
+        latest = await _load_persisted_run(import_id, organization_id=run.organization_id)
+        if latest is not None and latest.status is SourceImportStatus.CANCELED:
+            return latest.status_payload()
+        raise
     await _enqueue_raw_promotion_after_import(
         organization_id=run.organization_id,
         raw_memory_ids=[str(raw_id) for raw_id in result["raw_memory_ids"]],
@@ -991,10 +992,35 @@ async def cancel_source_import(
         organization_id=organization_id,
         principal_id=principal_id,
     )
-    if run.status is not SourceImportStatus.COMPLETED:
+    while run.status not in {
+        SourceImportStatus.COMPLETED,
+        SourceImportStatus.CANCELED,
+    }:
+        expected_revision = run.revision
         run.status = SourceImportStatus.CANCELED
         run.completed_at = datetime.now(UTC)
-        await _persist_run(run)
+        try:
+            await _persist_run(run, expected_revision=expected_revision)
+        except SourceImportRevisionConflictError:
+            latest = await _load_persisted_run(import_id, organization_id=run.organization_id)
+            if latest is not None and latest.status in {
+                SourceImportStatus.COMPLETED,
+                SourceImportStatus.CANCELED,
+            }:
+                return latest.status_payload()
+            if (
+                latest is None
+                or latest.revision <= expected_revision
+                or latest.status
+                not in {
+                    SourceImportStatus.RUNNING,
+                    SourceImportStatus.PAUSED,
+                }
+            ):
+                raise
+            run = latest
+            continue
+        break
     return run.status_payload()
 
 

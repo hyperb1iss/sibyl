@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, get_args
-from uuid import uuid4
+from urllib.parse import urlsplit
+from uuid import UUID, uuid4
 
 # Every buffered write leaves the queue through exactly one of these outcomes,
 # so `attempted` should equal their sum plus whatever is still queued. A gap
@@ -17,6 +19,18 @@ from uuid import uuid4
 # these names, so an unlisted one would be written and then silently dropped.
 PendingMetric = Literal["attempted", "completed", "replayed", "dropped", "discarded"]
 PENDING_METRIC_NAMES: tuple[PendingMetric, ...] = get_args(PendingMetric)
+CORRUPT_PENDING_WRITE_STATUS = "corrupt"
+_REQUIRED_STRING_FIELDS = (
+    "id",
+    "idempotency_key",
+    "created_at",
+    "base_url",
+    "method",
+    "path",
+)
+_CANONICAL_WRITE_ID = re.compile(r"^[0-9a-f]{32}$")
+_CANONICAL_WRITE_ID_PREFIX = re.compile(r"^[0-9a-f]{1,32}$")
+_REPLAYABLE_METHODS = {"POST", "PATCH", "DELETE"}
 
 
 def pending_writes_dir() -> Path:
@@ -70,7 +84,113 @@ def _secure_write_json(path: Path, data: dict[str, Any]) -> None:
 
 
 def _pending_path(write_id: str) -> Path:
+    if not is_canonical_pending_write_id(write_id):
+        raise ValueError(f"Invalid pending write ID: {write_id}")
     return pending_writes_dir() / f"{write_id}.json"
+
+
+def is_canonical_pending_write_id(write_id: str, *, allow_prefix: bool = False) -> bool:
+    pattern = _CANONICAL_WRITE_ID_PREFIX if allow_prefix else _CANONICAL_WRITE_ID
+    return pattern.fullmatch(write_id) is not None
+
+
+def _corrupt_pending_write(path: Path, error: str) -> dict[str, Any]:
+    return {
+        "id": path.stem,
+        "status": CORRUPT_PENDING_WRITE_STATUS,
+        "filename": path.name,
+        "error": error,
+    }
+
+
+def is_corrupt_pending_write(item: dict[str, Any]) -> bool:
+    return (
+        item.get("status") == CORRUPT_PENDING_WRITE_STATUS
+        and isinstance(item.get("filename"), str)
+        and isinstance(item.get("error"), str)
+    )
+
+
+def _read_pending_path(path: Path) -> dict[str, Any]:
+    if not is_canonical_pending_write_id(path.stem):
+        return _corrupt_pending_write(path, "Queue filename is not a canonical pending write ID")
+    try:
+        data = json.loads(
+            path.read_text(encoding="utf-8"),
+            parse_constant=_reject_nonstandard_json_constant,
+        )
+    except json.JSONDecodeError as exc:
+        return _corrupt_pending_write(
+            path,
+            f"Invalid JSON at line {exc.lineno}, column {exc.colno}: {exc.msg}",
+        )
+    except ValueError as exc:
+        return _corrupt_pending_write(path, f"Invalid JSON: {exc}")
+    except (OSError, UnicodeError) as exc:
+        return _corrupt_pending_write(path, f"{type(exc).__name__}: {exc}")
+
+    if not isinstance(data, dict):
+        return _corrupt_pending_write(
+            path,
+            f"Expected a JSON object, found {type(data).__name__}",
+        )
+    missing = [
+        field
+        for field in _REQUIRED_STRING_FIELDS
+        if not isinstance(data.get(field), str) or not data[field]
+    ]
+    if missing:
+        return _corrupt_pending_write(
+            path,
+            f"Missing or invalid required fields: {', '.join(missing)}",
+        )
+    if data["id"] != path.stem:
+        return _corrupt_pending_write(path, "Stored id does not match the queue filename")
+    try:
+        idempotency_key = str(UUID(data["idempotency_key"]))
+    except ValueError:
+        return _corrupt_pending_write(path, "Missing or invalid required field: idempotency_key")
+    if idempotency_key != data["idempotency_key"]:
+        return _corrupt_pending_write(path, "Missing or invalid required field: idempotency_key")
+
+    if data["method"] not in _REPLAYABLE_METHODS:
+        return _corrupt_pending_write(path, "Missing or invalid required field: method")
+    if not data["path"].startswith("/") or data["path"].startswith("//"):
+        return _corrupt_pending_write(path, "Missing or invalid required field: path")
+    try:
+        parsed_url = urlsplit(data["base_url"])
+    except ValueError:
+        return _corrupt_pending_write(path, "Missing or invalid required field: base_url")
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        return _corrupt_pending_write(path, "Missing or invalid required field: base_url")
+
+    payload = data.get("json")
+    if payload is not None and not isinstance(payload, dict):
+        return _corrupt_pending_write(path, "Missing or invalid required field: json")
+    params = data.get("params")
+    if params is not None and (not isinstance(params, dict) or not _valid_query_params(params)):
+        return _corrupt_pending_write(path, "Missing or invalid required field: params")
+    attempts = data.get("attempts", 0)
+    if type(attempts) is not int or attempts < 0:
+        return _corrupt_pending_write(path, "Missing or invalid required field: attempts")
+    return data
+
+
+def _reject_nonstandard_json_constant(value: str) -> None:
+    raise ValueError(f"Non-standard numeric constant: {value}")
+
+
+def _valid_query_params(params: dict[str, Any]) -> bool:
+    scalar_types = (str, int, float, bool, type(None))
+    for key, value in params.items():
+        if not isinstance(key, str):
+            return False
+        if isinstance(value, scalar_types):
+            continue
+        if isinstance(value, list) and all(isinstance(item, scalar_types) for item in value):
+            continue
+        return False
+    return True
 
 
 def create_pending_write(
@@ -101,20 +221,14 @@ def create_pending_write(
 
 def read_pending_write(write_id: str) -> dict[str, Any]:
     path = resolve_pending_write_path(write_id)
-    return json.loads(path.read_text(encoding="utf-8"))
+    return _read_pending_path(path)
 
 
 def list_pending_writes() -> list[dict[str, Any]]:
     root = pending_writes_dir()
     if not root.exists():
         return []
-    writes: list[dict[str, Any]] = []
-    for path in sorted(root.glob("*.json")):
-        try:
-            writes.append(json.loads(path.read_text(encoding="utf-8")))
-        except Exception:
-            continue
-    return writes
+    return [_read_pending_path(path) for path in sorted(root.glob("*.json"))]
 
 
 def pending_write_count() -> int:
@@ -143,11 +257,23 @@ def delete_pending_write(write_id: str) -> bool:
 
 
 def resolve_pending_write_path(write_id: str) -> Path:
+    if not is_canonical_pending_write_id(write_id, allow_prefix=True):
+        raise ValueError(f"Invalid pending write ID or prefix: {write_id}")
     root = pending_writes_dir()
-    direct = _pending_path(write_id)
-    if direct.exists():
-        return direct
-    matches = sorted(root.glob(f"{write_id}*.json")) if root.exists() else []
+    if is_canonical_pending_write_id(write_id):
+        direct = _pending_path(write_id)
+        if direct.exists():
+            return direct
+        raise FileNotFoundError(write_id)
+    matches = (
+        sorted(
+            path
+            for path in root.glob(f"{write_id}*.json")
+            if is_canonical_pending_write_id(path.stem)
+        )
+        if root.exists()
+        else []
+    )
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
@@ -156,10 +282,13 @@ def resolve_pending_write_path(write_id: str) -> Path:
 
 
 def increment_attempts(write_id: str) -> dict[str, Any]:
-    data = read_pending_write(write_id)
+    path = resolve_pending_write_path(write_id)
+    data = _read_pending_path(path)
+    if is_corrupt_pending_write(data):
+        raise ValueError(f"Cannot update corrupt pending write {data['filename']}: {data['error']}")
     data["attempts"] = int(data.get("attempts") or 0) + 1
     data["last_attempt_at"] = datetime.now(UTC).isoformat()
-    _secure_write_json(resolve_pending_write_path(write_id), data)
+    _secure_write_json(path, data)
     return data
 
 
@@ -189,8 +318,14 @@ def record_pending_metric(name: PendingMetric, count: int = 1) -> dict[str, int]
 
 
 def pending_write_status() -> dict[str, Any]:
+    writes = list_pending_writes()
     return {
-        "count": len(list_pending_writes()),
+        "count": len(writes),
+        "failures": [
+            {"filename": item["filename"], "error": item["error"]}
+            for item in writes
+            if is_corrupt_pending_write(item)
+        ],
         "metrics": read_pending_metrics(),
     }
 

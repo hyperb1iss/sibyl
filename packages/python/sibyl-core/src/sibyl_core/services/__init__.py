@@ -6,7 +6,7 @@ from typing import Any
 from sibyl_core.services.contracts import KnowledgeReadService, KnowledgeWriteService
 
 _EXPORTS = {
-    "ActiveGraphRuntime": ("sibyl_core.services.graph_runtime", "ActiveGraphRuntime"),
+    "GraphRuntime": ("sibyl_core.services.graph_runtime", "GraphRuntime"),
     "count_entities_by_type": ("sibyl_core.services.graph_runtime", "count_entities_by_type"),
     "execute_graph_query": ("sibyl_core.services.graph_runtime", "execute_graph_query"),
     "get_graph_client": ("sibyl_core.services.graph_runtime", "get_graph_client"),
@@ -14,7 +14,7 @@ _EXPORTS = {
 }
 
 __all__ = [
-    "ActiveGraphRuntime",
+    "GraphRuntime",
     "KnowledgeReadService",
     "KnowledgeWriteService",
     "count_entities_by_type",

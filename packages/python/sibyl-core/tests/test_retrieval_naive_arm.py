@@ -17,6 +17,10 @@ import pytest
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
 from sibyl_core.embeddings.providers import DeterministicEmbeddingProvider, EmbeddingMetadata
 from sibyl_core.models.context import ContextFacet
+from sibyl_core.retrieval import _search_candidates as candidate_module
+from sibyl_core.retrieval import _search_database as database_module
+from sibyl_core.retrieval import _search_expansion as expansion_module
+from sibyl_core.retrieval import _search_sources as source_module
 from sibyl_core.retrieval import naive as naive_module
 from sibyl_core.retrieval import search as search_module
 from sibyl_core.retrieval.candidates import CandidateKind, CandidateScope, RetrievalCandidate
@@ -479,7 +483,7 @@ async def test_the_arm_withholds_a_row_the_reader_does_not_own(
         async def fake_runtime(_organization_id: str, **_kwargs: object) -> Any:
             return runtime
 
-        monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+        monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
 
         stranger = await naive_search(
             plan=_plan(query=CORPUS_QUERY, organization_id=client.group_id),
@@ -535,7 +539,7 @@ async def test_vector_diagnostics_count_only_authorized_rows(
         async def fake_runtime(_organization_id: str, **_kwargs: object) -> Any:
             return runtime
 
-        monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+        monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
 
         denied = await naive_search(
             plan=_plan(query=CORPUS_QUERY, organization_id=client.group_id),
@@ -592,7 +596,7 @@ async def test_lanes_read_deeper_than_the_limit_so_fusion_can_promote(
         async def fake_runtime(_organization_id: str, **_kwargs: object) -> Any:
             return runtime
 
-        monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+        monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
 
         narrow = await naive_search(
             plan=_plan(query=CORPUS_QUERY, organization_id=client.group_id, limit=1),
@@ -623,7 +627,7 @@ async def test_the_arm_authorizes_every_lane_before_fusion(
     """Filtering after fusion would let a denied row displace an allowed one."""
 
     seen: list[str] = []
-    real_allowed = search_module._candidate_allowed
+    real_allowed = candidate_module._candidate_allowed
 
     def recording_allowed(candidate: Any, **kwargs: Any) -> bool:
         seen.append(candidate.id)
@@ -643,7 +647,7 @@ async def test_the_arm_authorizes_every_lane_before_fusion(
         async def fake_runtime(_organization_id: str, **_kwargs: object) -> Any:
             return runtime
 
-        monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+        monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
         monkeypatch.setattr(naive_module, "_candidate_allowed", recording_allowed)
 
         response = await naive_search(
@@ -672,7 +676,7 @@ async def test_naive_arm_returns_rows_fused_from_both_lanes(
         async def fake_runtime(_organization_id: str, **_kwargs: object) -> Any:
             return runtime
 
-        monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+        monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
 
         response = await naive_search(
             plan=_plan(query=CORPUS_QUERY),
@@ -729,7 +733,7 @@ async def test_naive_arm_filters_retired_rows_before_fusion(
             attempted=True,
         )
 
-    monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
     monkeypatch.setattr(naive_module, "_node_fulltext_candidates", node_fulltext)
     monkeypatch.setattr(naive_module, "_episode_fulltext_candidates", episode_fulltext)
     monkeypatch.setattr(
@@ -762,7 +766,7 @@ async def test_naive_arm_honors_the_char_budget_end_to_end(
         async def fake_runtime(_organization_id: str, **_kwargs: object) -> Any:
             return runtime
 
-        monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+        monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
         plan = _plan(query=CORPUS_QUERY, organization_id=client.group_id)
 
         unbounded = await naive_search(
@@ -809,12 +813,12 @@ async def test_naive_arm_never_reads_the_machines_deleted_lanes(
         async def fake_runtime(_organization_id: str, **_kwargs: object) -> Any:
             return runtime
 
-        monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
-        monkeypatch.setattr(search_module, "_graph_expansion_candidates", forbidden)
-        monkeypatch.setattr(search_module, "_exact_key_candidates", forbidden)
-        monkeypatch.setattr(search_module, "_edge_fulltext_candidates", forbidden)
-        monkeypatch.setattr(search_module, "_edge_vector_candidates", forbidden)
-        monkeypatch.setattr(search_module, "_recall_raw_candidates", forbidden)
+        monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
+        monkeypatch.setattr(expansion_module, "_graph_expansion_candidates", forbidden)
+        monkeypatch.setattr(source_module, "_exact_key_candidates", forbidden)
+        monkeypatch.setattr(source_module, "_edge_fulltext_candidates", forbidden)
+        monkeypatch.setattr(source_module, "_edge_vector_candidates", forbidden)
+        monkeypatch.setattr(source_module, "_recall_raw_candidates", forbidden)
 
         response = await naive_search(
             plan=_plan(
@@ -852,7 +856,7 @@ async def test_naive_arm_applies_no_boost_to_the_fused_score(
         async def fake_runtime(_organization_id: str, **_kwargs: object) -> Any:
             return runtime
 
-        monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+        monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
         response = await naive_search(
             plan=_plan(query=CORPUS_QUERY, organization_id=client.group_id),
             types=["session"],
@@ -952,7 +956,7 @@ async def test_the_machine_returns_the_same_results_after_the_arm_has_run(
         async def fake_runtime(_organization_id: str, **_kwargs: object) -> Any:
             return runtime
 
-        monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+        monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
         plan = _plan(query=CORPUS_QUERY, organization_id=client.group_id)
 
         async def machine_run() -> list[tuple[str, float, tuple[str, ...], str]]:
@@ -1247,7 +1251,7 @@ async def test_every_lane_reads_to_the_ceiling_whatever_the_caller_asked_for(
     async def fake_runtime(_organization_id: str, **_kwargs: object) -> Any:
         return Runtime()
 
-    monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
     monkeypatch.setattr(naive_module, "_node_fulltext_candidates", recording_fulltext)
     monkeypatch.setattr(naive_module, "_episode_fulltext_candidates", recording_fulltext)
     monkeypatch.setattr(naive_module, "_vector_candidate_sources_detailed", recording_vector)
@@ -1274,7 +1278,7 @@ async def test_a_dead_lane_fails_the_request_instead_of_thinning_the_pack(
         async def fake_runtime(_organization_id: str, **_kwargs: object) -> Any:
             return runtime
 
-        monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+        monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
         monkeypatch.setattr(naive_module, "_node_fulltext_candidates", dead_lane)
 
         with pytest.raises(RuntimeError, match="fulltext lane is down"):
@@ -1314,7 +1318,7 @@ async def test_a_degraded_vector_lane_fails_the_request(
     async def empty_lane(**_kwargs: object) -> list[RetrievalCandidate]:
         return []
 
-    monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
     monkeypatch.setattr(naive_module, "_node_fulltext_candidates", empty_lane)
     monkeypatch.setattr(naive_module, "_episode_fulltext_candidates", empty_lane)
     monkeypatch.setattr(naive_module, "_vector_candidate_sources_detailed", degraded_vector)
@@ -1344,7 +1348,7 @@ async def test_the_response_publishes_no_stage_timings(
         async def fake_runtime(_organization_id: str, **_kwargs: object) -> Any:
             return runtime
 
-        monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_runtime)
+        monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_runtime)
         response = await naive_search(
             plan=_plan(query=CORPUS_QUERY, organization_id=client.group_id),
             types=["session"],

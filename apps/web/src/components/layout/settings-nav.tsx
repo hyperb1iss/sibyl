@@ -15,7 +15,7 @@ import {
   User,
   Users,
 } from '@/components/ui/icons';
-import { useMe } from '@/lib/hooks';
+import { useMe } from '@/lib/hooks/auth';
 
 interface SettingsNavItem {
   name: string;

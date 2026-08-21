@@ -73,6 +73,8 @@ class QueuePort(Protocol):
 
 
 class ContentPort(Protocol):
+    async def get_shared_client(self) -> Any: ...
+
     def read_session(self) -> AbstractAsyncContextManager[Any]: ...
 
     async def create_or_get_crawl_source(

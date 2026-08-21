@@ -13,7 +13,13 @@ const hooks = vi.hoisted(() => ({
   useSwitchOrg: vi.fn(),
 }));
 
-vi.mock('@/lib/hooks', () => hooks);
+vi.mock('@/lib/hooks/auth', () => ({
+  useMe: hooks.useMe,
+  useOrgs: hooks.useOrgs,
+  useSwitchOrg: hooks.useSwitchOrg,
+}));
+vi.mock('@/lib/hooks/graph', () => ({ useCreateEntity: hooks.useCreateEntity }));
+vi.mock('@/lib/hooks/work-items', () => ({ useProjects: hooks.useProjects }));
 vi.mock('@/lib/project-context', () => ({
   useProjectContext: hooks.useProjectContext,
 }));

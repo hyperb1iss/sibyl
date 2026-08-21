@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,138 @@ def test_pending_writes_list_redacts_payload_body(
     assert result.exit_code == 0
     assert "Visible title" in result.stdout
     assert "Sensitive body" not in result.stdout
+
+
+def test_pending_writes_list_keeps_corrupt_entry_visible_in_json(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    root = pending_writes.pending_writes_dir()
+    root.mkdir(parents=True)
+    write_id = "c" * 32
+    (root / f"{write_id}.json").write_text("{", encoding="utf-8")
+
+    result = CliRunner().invoke(pending.app, ["list", "--json"])
+
+    assert result.exit_code == 0
+    item = json.loads(result.stdout)["pending_writes"][0]
+    assert item["id"] == write_id
+    assert item["status"] == "corrupt"
+    assert item["filename"] == f"{write_id}.json"
+    assert "Invalid JSON" in item["error"]
+
+
+def test_pending_writes_flush_refuses_corrupt_entry_with_remediation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    root = pending_writes.pending_writes_dir()
+    root.mkdir(parents=True)
+    write_id = "d" * 32
+    path = root / f"{write_id}.json"
+    path.write_text("{", encoding="utf-8")
+
+    result = CliRunner().invoke(pending.app, ["flush"])
+
+    assert result.exit_code == 1
+    assert f"Cannot replay {write_id}.json" in result.stdout
+    assert "Repair" in result.stdout
+    assert f"sibyl pending-writes discard {write_id}" in result.stdout
+    assert path.exists()
+    assert pending_writes.pending_write_count() == 1
+
+
+def test_pending_writes_flush_replays_valid_entries_but_keeps_corrupt_ones(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    valid = _create_pending()
+    root = pending_writes.pending_writes_dir()
+    corrupt_path = root / f"{'e' * 32}.json"
+    corrupt_path.write_text("{", encoding="utf-8")
+    calls: list[str] = []
+
+    class FakeClient:
+        def __init__(self, *, base_url: str, context_name: str | None = None) -> None:
+            self.base_url = base_url
+            self.context_name = context_name
+
+        async def __aenter__(self) -> FakeClient:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+            calls.append(path)
+            pending_writes.delete_pending_write(str(kwargs["_pending_write_id"]))
+            return {"ok": True}
+
+    monkeypatch.setattr(pending, "SibylClient", FakeClient)
+
+    result = CliRunner().invoke(pending.app, ["flush"])
+
+    assert result.exit_code == 1
+    assert calls == ["/memory/raw"]
+    with pytest.raises(FileNotFoundError):
+        pending_writes.resolve_pending_write_path(str(valid["id"]))
+    remaining = pending_writes.list_pending_writes()
+    assert len(remaining) == 1
+    assert remaining[0]["status"] == "corrupt"
+    assert corrupt_path.exists()
+    assert "1 replayed, 1 failed" in result.stdout
+
+
+@pytest.mark.parametrize(("field", "value"), [("json", []), ("params", {"nested": {}})])
+def test_pending_writes_flush_never_sends_an_invalid_request_body(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: object,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    item = _create_pending()
+    path = pending_writes.resolve_pending_write_path(str(item["id"]))
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    stored[field] = value
+    path.write_text(json.dumps(stored), encoding="utf-8")
+    hostile = path.read_bytes()
+
+    class ForbiddenClient:
+        def __init__(self, **_kwargs: object) -> None:
+            raise AssertionError("invalid pending body reached the HTTP client")
+
+    monkeypatch.setattr(pending, "SibylClient", ForbiddenClient)
+
+    result = CliRunner().invoke(pending.app, ["flush"])
+
+    assert result.exit_code == 1
+    assert result.exception is not None
+    assert not isinstance(result.exception, AssertionError)
+    assert "Cannot replay" in result.stdout
+    assert path.read_bytes() == hostile
+
+
+def test_noncanonical_queue_filename_gets_manual_exact_path_remediation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    root = pending_writes.pending_writes_dir()
+    root.mkdir(parents=True)
+    path = root / "not-a-queue-id.json"
+    path.write_text("{", encoding="utf-8")
+
+    result = CliRunner().invoke(pending.app, ["flush"])
+
+    assert result.exit_code == 1
+    assert "Inspect and remove this exact file manually" in result.stdout
+    assert str(path) in "".join(result.stdout.split())
+    assert "pending-writes discard not-a-queue-id" not in result.stdout
+    assert path.exists()
 
 
 def test_pending_writes_discard_removes_by_prefix(

@@ -1,7 +1,12 @@
 """Tests for CLI config store."""
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from sibyl_cli import config_store
 
@@ -55,6 +60,200 @@ class TestConfigStore:
         assert base["a"]["b"] == 10
         assert base["a"]["c"] == 2
         assert base["a"]["d"] == 3
+
+    def test_corrupt_config_is_a_typed_failure_without_overwrite(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        config_path = tmp_path / "config.toml"
+        corrupt = b"[server\nurl = 'https://broken.example.com'\n"
+        config_path.write_bytes(corrupt)
+
+        with (
+            patch.object(config_store, "config_dir", return_value=tmp_path),
+            pytest.raises(config_store.ConfigCorruptionError) as exc_info,
+        ):
+            config_store.set_value("server.url", "https://new.example.com")
+
+        assert exc_info.value.path == config_path
+        assert "sibyl config reset" in str(exc_info.value)
+        assert config_path.read_bytes() == corrupt
+
+    def test_non_utf8_config_is_a_typed_failure_without_overwrite(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        config_path = tmp_path / "config.toml"
+        corrupt = b"[server]\nurl = \"\xff\"\n"
+        config_path.write_bytes(corrupt)
+
+        with (
+            patch.object(config_store, "config_dir", return_value=tmp_path),
+            pytest.raises(config_store.ConfigCorruptionError) as exc_info,
+        ):
+            config_store.set_value("server.url", "https://new.example.com")
+
+        assert isinstance(exc_info.value.cause, UnicodeDecodeError)
+        assert config_path.read_bytes() == corrupt
+
+    @pytest.mark.parametrize(
+        "content,field",
+        [
+            ('server = "production"\n', "server"),
+            ("[server]\nurl = 42\n", "server.url"),
+            ("active_context = 42\n", "active_context"),
+            ('paths = ["/repo"]\n', "paths"),
+            ('[paths]\n"/repo" = 42\n', "paths./repo"),
+            ('contexts = ["production"]\n', "contexts"),
+            ("[contexts.production]\nserver_url = 42\n", "contexts.production.server_url"),
+            (
+                '[contexts.production]\nserver_url = "https://example.com"\ninsecure = "yes"\n',
+                "contexts.production.insecure",
+            ),
+        ],
+    )
+    def test_valid_toml_with_wrong_known_shapes_never_defaults_or_retargets(
+        self,
+        tmp_path: Path,
+        content: str,
+        field: str,
+    ) -> None:
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(content, encoding="utf-8")
+        original = config_path.read_bytes()
+
+        with (
+            patch.object(config_store, "config_dir", return_value=tmp_path),
+            pytest.raises(config_store.ConfigCorruptionError) as exc_info,
+        ):
+            config_store.set_value("defaults.project", "project_safe")
+
+        assert field in str(exc_info.value)
+        assert "invalid schema" in str(exc_info.value)
+        assert config_path.read_bytes() == original
+
+    def test_mutation_cannot_write_an_invalid_known_shape(self, tmp_path: Path) -> None:
+        with patch.object(config_store, "config_dir", return_value=tmp_path):
+            config_store.set_value("defaults.project", "project_safe")
+            original = config_store.config_path().read_bytes()
+
+            with pytest.raises(config_store.ConfigCorruptionError, match="server"):
+                config_store.set_value("server", "production")
+
+            assert config_store.config_path().read_bytes() == original
+            assert config_store.get_default_project() == "project_safe"
+
+    def test_save_uses_same_directory_replace_and_fsync(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        replacements: list[tuple[Path, Path]] = []
+        fsync_calls: list[int] = []
+        original_replace = os.replace
+        original_fsync = os.fsync
+
+        def replace(source: str | Path, destination: str | Path) -> None:
+            replacements.append((Path(source), Path(destination)))
+            original_replace(source, destination)
+
+        def fsync(fd: int) -> None:
+            fsync_calls.append(fd)
+            original_fsync(fd)
+
+        monkeypatch.setattr(config_store.os, "replace", replace)
+        monkeypatch.setattr(config_store.os, "fsync", fsync)
+
+        with patch.object(config_store, "config_dir", return_value=tmp_path):
+            config_store.save_config({"server": {"url": "https://safe.example.com"}})
+
+        assert len(replacements) == 1
+        temporary, destination = replacements[0]
+        assert temporary.parent == destination.parent == tmp_path
+        assert destination == tmp_path / "config.toml"
+        assert len(fsync_calls) >= 1
+        assert config_store._load_config_unlocked(destination)["server"]["url"] == (
+            "https://safe.example.com"
+        )
+
+    def test_update_config_serializes_competing_processes(self, tmp_path: Path) -> None:
+        script = """
+import sys
+import time
+from pathlib import Path
+from sibyl_cli import config_store
+
+config_store.config_dir = lambda: Path(sys.argv[1])
+
+def append(config):
+    updates = config.setdefault("updates", [])
+    time.sleep(0.2)
+    updates.append(sys.argv[2])
+
+config_store.update_config(append)
+"""
+        first = subprocess.Popen([sys.executable, "-c", script, str(tmp_path), "first"])
+        second = subprocess.Popen([sys.executable, "-c", script, str(tmp_path), "second"])
+
+        assert first.wait(timeout=10) == 0
+        assert second.wait(timeout=10) == 0
+        with patch.object(config_store, "config_dir", return_value=tmp_path):
+            assert sorted(config_store.load_config()["updates"]) == ["first", "second"]
+
+    def test_ensure_config_file_preserves_an_existing_writer(self, tmp_path: Path) -> None:
+        with patch.object(config_store, "config_dir", return_value=tmp_path):
+            assert config_store.ensure_config_file() is True
+            config_store.set_value("defaults.project", "project_concurrent")
+            before = config_store.config_path().read_bytes()
+
+            assert config_store.ensure_config_file() is False
+            assert config_store.config_path().read_bytes() == before
+            assert config_store.get_default_project() == "project_concurrent"
+
+    def test_config_edit_uses_locked_file_creation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from typer.testing import CliRunner
+
+        from sibyl_cli import config_cmd
+
+        path = tmp_path / "config.toml"
+        with (
+            patch.object(config_store, "config_path", return_value=path),
+            patch.object(config_store, "ensure_config_file", return_value=True) as ensure,
+            patch("subprocess.run") as run,
+        ):
+            result = CliRunner().invoke(config_cmd.app, ["edit"])
+
+        assert result.exit_code == 0
+        ensure.assert_called_once_with()
+        run.assert_called_once()
+        assert "Created default config" in result.stdout
+
+    def test_cli_renders_corruption_without_a_traceback(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        from sibyl_cli.main import main as cli_main
+
+        config_home = tmp_path / ".sibyl"
+        config_home.mkdir()
+        (config_home / "config.toml").write_text("[broken", encoding="utf-8")
+        monkeypatch.setattr(config_store.Path, "home", lambda: tmp_path)
+        monkeypatch.setattr(sys, "argv", ["sibyl", "config", "show"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            cli_main()
+
+        captured = capsys.readouterr()
+        assert exc_info.value.code == 1
+        assert "invalid" in captured.out
+        assert "TOML" in captured.out
+        assert "sibyl config reset" in captured.out
+        assert "Traceback" not in captured.out + captured.err
 
 
 class TestContext:

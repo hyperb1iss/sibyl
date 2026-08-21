@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { FormField } from '@/components/ui/form-field';
 import { Input, Textarea } from '@/components/ui/input';
-import type { SynthesisSectionRequest, SynthesisSourcePack } from '@/lib/api';
+import type { SynthesisSectionRequest, SynthesisSourcePack } from '@/lib/api/memory';
 
 function sourceIdsToText(sourceIds: string[] | undefined): string {
   return (sourceIds ?? []).join(', ');

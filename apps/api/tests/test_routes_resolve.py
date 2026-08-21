@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import pytest
 
-from sibyl.api.routes import resolve as resolve_route
+from sibyl.api.routes import memory_auth, resolve as resolve_route
 from sibyl.auth.context import AuthContext
 from sibyl_core.auth import AuthOrganization, AuthUser, OrganizationRole
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
@@ -206,7 +206,7 @@ async def test_resolve_raw_memory_prefix_filters_policy_denied_matches(
         return SimpleNamespace(allowed=memory.id == "memory-visible")
 
     monkeypatch.setattr(resolve_route, "resolve_raw_memory_prefix", fake_resolve_raw)
-    monkeypatch.setattr(resolve_route, "_inspect_content_policy", fake_policy)
+    monkeypatch.setattr(memory_auth, "inspect_content_policy", fake_policy)
 
     response = await resolve_route.resolve_id_prefix(
         "memory",
@@ -265,7 +265,7 @@ async def test_resolve_raw_memory_prefix_filters_api_key_memory_scope_matches(
         return SimpleNamespace(allowed=True)
 
     monkeypatch.setattr(resolve_route, "resolve_raw_memory_prefix", fake_resolve_raw)
-    monkeypatch.setattr(resolve_route, "_inspect_content_policy", fake_policy)
+    monkeypatch.setattr(memory_auth, "inspect_content_policy", fake_policy)
 
     response = await resolve_route.resolve_id_prefix(
         "memory",

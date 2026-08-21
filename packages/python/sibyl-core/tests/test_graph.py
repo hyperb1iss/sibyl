@@ -11,6 +11,9 @@ import pytest
 
 import sibyl_core.services.graph as graph_module
 import sibyl_core.services.graph_client as graph_client_module
+import sibyl_core.services.graph_entity_search as graph_entity_search_module
+import sibyl_core.services.graph_entity_store as graph_entity_store_module
+import sibyl_core.services.graph_runtime as graph_runtime_module
 from sibyl_core.backends.surreal.connection import SurrealQueryError
 from sibyl_core.backends.surreal.records import coerce_datetime
 from sibyl_core.backends.surreal.schema import (
@@ -38,17 +41,21 @@ from sibyl_core.models.tasks import EpicStatus, TaskPriority
 from sibyl_core.retrieval.dedup import EntityDeduplicator
 from sibyl_core.services.graph import (
     CLEAR_MEMORY_SCOPE,
-    EntityManager,
-    RelationshipManager,
     SurrealGraphClient,
-    _execute_graph_transaction,
-    _validate_native_embedding_dimensions,
     entity_from_surreal_row,
     get_surreal_graph_runtime,
     normalize_records,
     prepare_graph_schema,
     relationship_from_surreal_row,
 )
+from sibyl_core.services.graph_client import (
+    validate_native_embedding_dimensions as _validate_native_embedding_dimensions,
+)
+from sibyl_core.services.graph_common import (
+    execute_graph_transaction as _execute_graph_transaction,
+)
+from sibyl_core.services.graph_entities import EntityManager
+from sibyl_core.services.graph_relationships import RelationshipManager
 from sibyl_core.services.usage import (
     MemoryUsageItemKind,
     MemoryUsageStamp,
@@ -577,7 +584,7 @@ async def test_replace_entity_retries_transient_surreal_query_id_keyerror(
     graph_client_module._prepared_groups.add(client.group_id)
 
     try:
-        row = await graph_module._replace_entity(
+        row = await graph_entity_store_module._replace_entity(
             cast("Any", client),
             Entity(id="entity-retry", entity_type=EntityType.SESSION, name="Retry Session"),
             group_id=client.group_id,
@@ -595,7 +602,7 @@ async def test_replace_entities_retries_legacy_updated_at_string_schema() -> Non
     client = _LegacyUpdatedAtEntityWriteClient()
     explicit_updated_at = datetime(2026, 5, 31, 2, 52, tzinfo=UTC)
 
-    rows = await graph_module._replace_entities_bulk(
+    rows = await graph_entity_store_module._replace_entities_bulk(
         cast("Any", client),
         [
             Entity(id="entity-legacy-one", entity_type=EntityType.SESSION, name="Legacy One"),
@@ -628,7 +635,7 @@ async def test_graph_runtime_can_skip_schema_preparation(
     bootstrap_schema = AsyncMock()
     monkeypatch.setattr(graph_client_module, "bootstrap_schema", bootstrap_schema)
     monkeypatch.setattr(
-        graph_module,
+        graph_runtime_module,
         "get_surreal_graph_client",
         AsyncMock(return_value=client),
     )
@@ -1735,7 +1742,7 @@ async def test_native_entity_manager_search_uses_short_query_embedding_timeout(
         embedding_provider=_SlowEmbeddingProvider(),
     )
     monkeypatch.setattr(
-        graph_module.settings,
+        graph_entity_search_module.settings,
         "graph_search_embedding_timeout_seconds",
         0.01,
     )
@@ -1766,7 +1773,7 @@ async def test_native_entity_manager_search_uses_configured_knn_effort(
         group_id=client.group_id,
         embedding_provider=provider,
     )
-    monkeypatch.setattr(graph_module.settings, "graph_knn_ef", 88)
+    monkeypatch.setattr(graph_entity_search_module.settings, "graph_knn_ef", 88)
 
     await manager.search(query="configured vector effort", limit=5)
 
@@ -1794,7 +1801,7 @@ async def test_native_entity_manager_search_raises_knn_effort_to_the_candidate_p
         group_id=client.group_id,
         embedding_provider=provider,
     )
-    monkeypatch.setattr(graph_module.settings, "graph_knn_ef", 40)
+    monkeypatch.setattr(graph_entity_search_module.settings, "graph_knn_ef", 40)
 
     await manager.search(query="deep vector pool", limit=50)
 

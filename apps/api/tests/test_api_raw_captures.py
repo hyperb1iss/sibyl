@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi import HTTPException
 
-from sibyl.api.routes.entities import (
+from sibyl.api.routes.entity_captures import (
     get_raw_capture,
     list_raw_captures,
     update_raw_capture_review_state,
@@ -78,7 +78,7 @@ async def test_list_raw_captures_returns_paginated_summaries() -> None:
     ]
 
     with patch(
-        "sibyl.api.routes.entities.content_runtime.list_raw_captures",
+        "sibyl.api.routes.entity_captures.content_runtime.list_raw_captures",
         AsyncMock(return_value=(captures, True)),
     ) as list_captures:
         response = await list_raw_captures(
@@ -118,7 +118,7 @@ async def test_list_raw_captures_supports_review_state_filter() -> None:
     ]
 
     with patch(
-        "sibyl.api.routes.entities.content_runtime.list_raw_captures",
+        "sibyl.api.routes.entity_captures.content_runtime.list_raw_captures",
         AsyncMock(return_value=(captures, False)),
     ) as list_captures:
         response = await list_raw_captures(
@@ -143,7 +143,7 @@ async def test_get_raw_capture_returns_verbatim_content() -> None:
     session = MagicMock()
 
     with patch(
-        "sibyl.api.routes.entities.content_runtime.get_raw_capture",
+        "sibyl.api.routes.entity_captures.content_runtime.get_raw_capture",
         AsyncMock(return_value=capture),
     ) as load_capture:
         response = await get_raw_capture(
@@ -191,7 +191,7 @@ async def test_get_raw_capture_hides_other_users_private_capture() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.content_runtime.get_raw_capture",
+            "sibyl.api.routes.entity_captures.content_runtime.get_raw_capture",
             AsyncMock(return_value=capture),
         ),
         pytest.raises(HTTPException) as exc,
@@ -226,11 +226,11 @@ async def test_update_raw_capture_review_state_updates_metadata() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.content_runtime.get_raw_capture",
+            "sibyl.api.routes.entity_captures.content_runtime.get_raw_capture",
             AsyncMock(return_value=capture),
         ),
         patch(
-            "sibyl.api.routes.entities.content_runtime.update_raw_capture_review_state",
+            "sibyl.api.routes.entity_captures.content_runtime.update_raw_capture_review_state",
             AsyncMock(
                 side_effect=lambda _session, **_kwargs: replace(
                     capture,
@@ -270,11 +270,11 @@ async def test_update_raw_capture_review_state_hidden_for_other_user() -> None:
 
     with (
         patch(
-            "sibyl.api.routes.entities.content_runtime.get_raw_capture",
+            "sibyl.api.routes.entity_captures.content_runtime.get_raw_capture",
             AsyncMock(return_value=capture),
         ),
         patch(
-            "sibyl.api.routes.entities.content_runtime.update_raw_capture_review_state",
+            "sibyl.api.routes.entity_captures.content_runtime.update_raw_capture_review_state",
             AsyncMock(),
         ) as update_capture,
         pytest.raises(HTTPException) as exc,

@@ -6,6 +6,9 @@ layer: application
 toolchains:
   default: system
 
+env:
+  PYTEST_ADDOPTS: "${PYTEST_ADDOPTS} -p sibyl_core.pytest_isolation"
+
 fileGroups:
   sources:
     - src/**/*

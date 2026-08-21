@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from sibyl.persistence import organization_common, organization_runtime
 from sibyl.persistence.surreal import organization_runtime as surreal_organization_runtime
 from sibyl_core.auth import OrganizationRole, ProjectRole
+from sibyl_core.backends.surreal.records import SurrealQueryError
 
 
 def _request(*, authorization: str | None = "Bearer current-token") -> SimpleNamespace:
@@ -590,6 +591,7 @@ async def test_surreal_create_org_rotates_current_session(
         slug="electric-coven",
         name="Electric Coven",
     )
+    membership_id = UUID("00000000-0000-0000-0000-000000000654")
     refresh_expires = datetime(2026, 4, 29, 12, 0, tzinfo=UTC)
 
     class FakeClient:
@@ -598,20 +600,7 @@ async def test_surreal_create_org_rotates_current_session(
 
         async def execute_query(self, query: str, **params):
             self.calls.append((query, params))
-            if "SELECT uuid FROM organizations" in query:
-                return []
-            if "CREATE organizations CONTENT $record" in query:
-                return [
-                    {
-                        "uuid": str(organization.id),
-                        "slug": organization.slug,
-                        "name": organization.name,
-                        "is_personal": False,
-                    }
-                ]
-            if "CREATE organization_members CONTENT $record" in query:
-                return [params["record"]]
-            raise AssertionError(query)
+            return [params["organization"], params["membership"]]
 
     fake_client = FakeClient()
 
@@ -628,6 +617,8 @@ async def test_surreal_create_org_rotates_current_session(
     audit_log = AsyncMock()
 
     monkeypatch.setattr(surreal_organization_runtime, "_auth_client_scope", fake_scope)
+    generated_ids = iter((organization.id, membership_id))
+    monkeypatch.setattr(surreal_organization_runtime, "uuid4", lambda: next(generated_ids))
     monkeypatch.setattr(
         surreal_organization_runtime.SurrealSessionRepository,
         "from_client",
@@ -661,11 +652,17 @@ async def test_surreal_create_org_rotates_current_session(
         name="Electric Coven",
     )
 
-    assert len(fake_client.calls) == 3
-    assert "SELECT uuid FROM organizations" in fake_client.calls[0][0]
-    assert "CREATE organizations CONTENT $record" in fake_client.calls[1][0]
-    assert "CREATE organization_members CONTENT $record" in fake_client.calls[2][0]
-    membership_record = fake_client.calls[2][1]["record"]
+    assert len(fake_client.calls) == 1
+    transaction, params = fake_client.calls[0]
+    assert transaction.startswith("BEGIN TRANSACTION;")
+    assert "CREATE organizations CONTENT $organization;" in transaction
+    assert "CREATE organization_members CONTENT $membership;" in transaction
+    assert transaction.endswith("COMMIT TRANSACTION;")
+    organization_record = params["organization"]
+    membership_record = params["membership"]
+    assert organization_record["uuid"] == str(organization.id)
+    assert organization_record["slug"] == organization.slug
+    assert membership_record["uuid"] == str(membership_id)
     assert membership_record["organization_id"] == str(organization.id)
     assert membership_record["user_id"] == str(user_id)
     assert membership_record["role"] == OrganizationRole.OWNER.value
@@ -674,6 +671,172 @@ async def test_surreal_create_org_rotates_current_session(
     session_repo.create_session.assert_not_awaited()
     assert result.id == organization.id
     assert result.access_token == "access-token"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "result_case",
+    ["empty", "organization_only", "membership_only", "duplicate_membership", "non_owner"],
+)
+async def test_surreal_create_org_rejects_incomplete_success_results(
+    monkeypatch: pytest.MonkeyPatch,
+    result_case: str,
+) -> None:
+    class IncompleteClient:
+        async def execute_query_raw(self, query: str, **params: object) -> object:
+            del query
+            organization = params["organization"]
+            membership = params["membership"]
+            assert isinstance(organization, dict)
+            assert isinstance(membership, dict)
+            result_records: list[dict[str, object]]
+            if result_case == "empty":
+                result_records = []
+            elif result_case == "organization_only":
+                result_records = [organization]
+            elif result_case == "membership_only":
+                result_records = [membership]
+            elif result_case == "duplicate_membership":
+                result_records = [organization, membership, membership]
+            else:
+                result_records = [organization, {**membership, "role": "member"}]
+            return {
+                "result": [
+                    {"status": "OK", "result": []},
+                    {"status": "OK", "result": result_records},
+                    {"status": "OK", "result": []},
+                ]
+            }
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield IncompleteClient()
+
+    rotate_session = AsyncMock()
+    ensure_indexes = AsyncMock()
+    audit_log = AsyncMock()
+    monkeypatch.setattr(surreal_organization_runtime, "_auth_client_scope", fake_scope)
+    monkeypatch.setattr(
+        surreal_organization_runtime,
+        "_rotate_or_create_org_session",
+        rotate_session,
+    )
+    monkeypatch.setattr(surreal_organization_runtime, "ensure_graph_indexes", ensure_indexes)
+    monkeypatch.setattr(surreal_organization_runtime, "log_audit_event", audit_log)
+
+    with pytest.raises(
+        RuntimeError,
+        match="organization create transaction returned incomplete results",
+    ):
+        await surreal_organization_runtime.create_org(
+            request=_request(),
+            user_id=uuid4(),
+            name="Electric Coven",
+        )
+
+    rotate_session.assert_not_awaited()
+    ensure_indexes.assert_not_awaited()
+    audit_log.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_surreal_create_org_does_not_rotate_session_after_transaction_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = uuid4()
+
+    class FailingClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def execute_query_raw(self, query: str, **params: object) -> object:
+            self.calls.append((query, params))
+            return {
+                "result": [
+                    {"status": "OK", "result": []},
+                    {"status": "OK", "result": [{"uuid": "org-created"}]},
+                    {"status": "ERR", "result": "owner membership unavailable"},
+                    {"status": "OK", "result": []},
+                ]
+            }
+
+        async def execute_query(self, query: str, **params: object) -> object:
+            raise AssertionError(f"transaction must use the raw checked path: {query} {params}")
+
+    client = FailingClient()
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield client
+
+    rotate_session = AsyncMock()
+    ensure_indexes = AsyncMock()
+    audit_log = AsyncMock()
+    monkeypatch.setattr(surreal_organization_runtime, "_auth_client_scope", fake_scope)
+    monkeypatch.setattr(
+        surreal_organization_runtime,
+        "_rotate_or_create_org_session",
+        rotate_session,
+    )
+    monkeypatch.setattr(surreal_organization_runtime, "ensure_graph_indexes", ensure_indexes)
+    monkeypatch.setattr(surreal_organization_runtime, "log_audit_event", audit_log)
+
+    with pytest.raises(SurrealQueryError, match="owner membership unavailable"):
+        await surreal_organization_runtime.create_org(
+            request=_request(),
+            user_id=user_id,
+            name="Electric Coven",
+        )
+
+    assert len(client.calls) == 1
+    transaction, _params = client.calls[0]
+    assert "BEGIN TRANSACTION;" in transaction
+    assert "COMMIT TRANSACTION;" in transaction
+    rotate_session.assert_not_awaited()
+    ensure_indexes.assert_not_awaited()
+    audit_log.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_surreal_create_org_maps_transaction_slug_conflict_to_409(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ConflictingClient:
+        async def execute_query_raw(self, query: str, **params: object) -> object:
+            del query, params
+            return {
+                "result": [
+                    {"status": "OK", "result": []},
+                    {
+                        "status": "ERR",
+                        "result": "unique index already contains electric-coven",
+                    },
+                    {"status": "OK", "result": []},
+                ]
+            }
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield ConflictingClient()
+
+    rotate_session = AsyncMock()
+    monkeypatch.setattr(surreal_organization_runtime, "_auth_client_scope", fake_scope)
+    monkeypatch.setattr(
+        surreal_organization_runtime,
+        "_rotate_or_create_org_session",
+        rotate_session,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await surreal_organization_runtime.create_org(
+            request=_request(),
+            user_id=uuid4(),
+            name="Electric Coven",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "Slug already taken"
+    rotate_session.assert_not_awaited()
 
 
 @pytest.mark.asyncio

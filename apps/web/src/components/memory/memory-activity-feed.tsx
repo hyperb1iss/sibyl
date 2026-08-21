@@ -11,7 +11,7 @@ import {
   Users,
   WarningCircle,
 } from '@/components/ui/icons';
-import type { MemoryAuditEvent } from '@/lib/api';
+import type { MemoryAuditEvent } from '@/lib/api/memory';
 import { formatDistanceToNow } from '@/lib/constants/formatting';
 
 interface MemoryActivityFeedProps {

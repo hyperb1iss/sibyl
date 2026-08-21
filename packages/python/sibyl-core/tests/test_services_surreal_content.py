@@ -11,7 +11,6 @@ from datetime import UTC, datetime
 import pytest
 from surrealdb import AsyncSurreal
 
-import sibyl_core.services.surreal_content as surreal_content_module
 from sibyl_core.backends.surreal.content_client import SurrealContentClient
 from sibyl_core.backends.surreal.content_schema import (
     CONTENT_ENTITY_ANCHOR_MIGRATION_DEFINITIONS,
@@ -22,12 +21,19 @@ from sibyl_core.backends.surreal.records import normalize_record, normalize_reco
 from sibyl_core.embeddings.providers import EmbeddingMetadata
 from sibyl_core.errors import RevisionConflictError
 from sibyl_core.models.reflection import ReflectionCandidate
+from sibyl_core.runtime_ports import install_content_port, reset_runtime_ports
+from sibyl_core.services import (
+    content_client,
+    content_models,
+    content_raw_persistence,
+    content_raw_recall,
+)
+from sibyl_core.services.content_client import replace_record
+from sibyl_core.services.content_models import raw_memory_from_record
 from sibyl_core.services.surreal_content import (
     MemoryScope,
     RawMemory,
     RawMemoryWrite,
-    _raw_memory_from_record,
-    _replace_record,
     get_or_create_source,
     get_raw_memory_by_dedupe_key,
     get_raw_memory_by_source_id,
@@ -50,8 +56,8 @@ from sibyl_core.services.surreal_content import (
 
 
 def test_surreal_content_uses_canonical_record_normalizers() -> None:
-    assert surreal_content_module._normalize_record is normalize_record
-    assert surreal_content_module._normalize_records is normalize_records
+    assert content_client.normalize_record is normalize_record
+    assert content_client.normalize_records is normalize_records
 
 
 def _query_result(records: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -108,6 +114,14 @@ class FakeClient:
 
     async def close(self) -> None:
         self.closed += 1
+
+
+class _HostContentPort:
+    def __init__(self, client: FakeClient) -> None:
+        self._client = client
+
+    async def get_shared_client(self) -> FakeClient:
+        return self._client
 
 
 class FakeLog:
@@ -187,9 +201,7 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield client
 
-        from sibyl_core.services import surreal_content as content_service
-
-        monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+        monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
 
         result = await get_raw_memory_lineage(
             organization_id="org-1",
@@ -220,9 +232,7 @@ class TestSurrealContentHelpers:
             async def fake_session():
                 yield client
 
-            from sibyl_core.services import surreal_content as content_service
-
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             created = await remember_raw_memory(
                 organization_id="org-revision",
                 principal_id="bliss",
@@ -280,9 +290,7 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield client
 
-        from sibyl_core.services import surreal_content as content_service
-
-        monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+        monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
         saved = await save_raw_memory(
             RawMemory(
                 id="raw-1",
@@ -313,9 +321,7 @@ class TestSurrealContentHelpers:
             async def fake_session():
                 yield client
 
-            from sibyl_core.services import surreal_content as content_service
-
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             superseded = await remember_raw_memory(
                 organization_id="org-supersession",
                 principal_id="bliss",
@@ -673,28 +679,41 @@ class TestSurrealContentHelpers:
         first_client = FakeClient([])
         second_client = FakeClient([])
 
-        from sibyl_core.services import surreal_content as content_service
-
-        await content_service.close_shared_surreal_content_client()
+        await content_client.close_shared_surreal_content_client()
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(
-                content_service,
+                content_client,
                 "build_surreal_content_client",
                 lambda: first_client if first_client.closed == 0 else second_client,
             )
             try:
                 async with (
-                    content_service.surreal_content_client() as first,
-                    content_service.surreal_content_client() as second,
+                    content_client.surreal_content_client() as first,
+                    content_client.surreal_content_client() as second,
                 ):
                     assert first is second
                 assert first is first_client
                 assert first_client.closed == 0
             finally:
-                await content_service.close_shared_surreal_content_client()
+                await content_client.close_shared_surreal_content_client()
 
         assert first_client.closed == 1
         assert second_client.closed == 0
+
+    @pytest.mark.asyncio
+    async def test_host_content_port_owns_the_shared_client_lifecycle(self) -> None:
+        hosted_client = FakeClient([])
+        await content_client.close_shared_surreal_content_client()
+        install_content_port(_HostContentPort(hosted_client))
+
+        try:
+            resolved = await content_client.get_shared_surreal_content_client()
+            await content_client.close_shared_surreal_content_client()
+        finally:
+            reset_runtime_ports()
+
+        assert resolved is hosted_client
+        assert hosted_client.closed == 0
 
     def test_build_surreal_content_client_uses_configured_pool_size(
         self,
@@ -706,13 +725,11 @@ class TestSurrealContentHelpers:
             def __init__(self, **kwargs: object) -> None:
                 captured.update(kwargs)
 
-        from sibyl_core.services import surreal_content as content_service
+        monkeypatch.setattr(content_client, "SurrealContentClient", FakeSurrealContentClient)
+        monkeypatch.setattr(content_client.settings, "surreal_pool_size", 8)
+        monkeypatch.setattr(content_client.settings, "surreal_content_pool_size", 21)
 
-        monkeypatch.setattr(content_service, "SurrealContentClient", FakeSurrealContentClient)
-        monkeypatch.setattr(content_service.settings, "surreal_pool_size", 8)
-        monkeypatch.setattr(content_service.settings, "surreal_content_pool_size", 21)
-
-        content_service.build_surreal_content_client()
+        content_client.build_surreal_content_client()
 
         assert captured["pool_size"] == 21
 
@@ -725,7 +742,7 @@ class TestSurrealContentHelpers:
         }
         fake_client = FakeClient([_query_result([record])])
 
-        saved = await _replace_record(fake_client, "crawl_sources", uuid="src-1", record=record)
+        saved = await replace_record(fake_client, "crawl_sources", uuid="src-1", record=record)
 
         assert saved["uuid"] == "src-1"
         assert len(fake_client.calls) == 1
@@ -750,7 +767,7 @@ class TestSurrealContentHelpers:
         }
         fake_client = FakeClient([_query_result([]), _query_result([record])])
 
-        saved = await _replace_record(fake_client, "crawl_sources", uuid="src-1", record=record)
+        saved = await replace_record(fake_client, "crawl_sources", uuid="src-1", record=record)
 
         assert saved["uuid"] == "src-1"
         assert len(fake_client.calls) == 2
@@ -772,7 +789,7 @@ class TestSurrealContentHelpers:
             [_query_result([]), RuntimeError("unique conflict"), _query_result([record])]
         )
 
-        saved = await _replace_record(fake_client, "crawl_sources", uuid="src-1", record=record)
+        saved = await replace_record(fake_client, "crawl_sources", uuid="src-1", record=record)
 
         assert saved["uuid"] == "src-1"
         assert len(fake_client.calls) == 3
@@ -797,7 +814,7 @@ class TestSurrealContentHelpers:
         fake_client = FakeClient([_query_result([]), _query_result([])])
 
         with pytest.raises(RuntimeError, match="failed to persist crawl_sources record src-1"):
-            await _replace_record(fake_client, "crawl_sources", uuid="src-1", record=record)
+            await replace_record(fake_client, "crawl_sources", uuid="src-1", record=record)
 
         assert len(fake_client.calls) == 2
         assert (
@@ -811,7 +828,7 @@ class TestSurrealContentHelpers:
         fake_client = FakeClient([])
 
         with pytest.raises(RuntimeError, match="requires organization_id"):
-            await _replace_record(
+            await replace_record(
                 fake_client,
                 "raw_captures",
                 uuid="capture-1",
@@ -843,10 +860,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             source, created = await get_or_create_source(
                 "https://docs.example.com",
                 2,
@@ -887,10 +902,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             chunks = await list_unlinked_document_chunks(
                 organization_id="org-1",
                 source_id="src-1",
@@ -964,10 +977,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             vector_rows, lexical_rows = await search_document_chunks(
                 organization_id="org-1",
                 query_text="alpha",
@@ -1024,10 +1035,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             await search_document_chunks(
                 organization_id="org-1",
                 query_text="alpha",
@@ -1082,10 +1091,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             vector_rows, lexical_rows = await search_document_chunks(
                 organization_id="org-1",
                 query_text="alpha",
@@ -1145,10 +1152,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             vector_rows, lexical_rows = await search_document_chunks(
                 organization_id="org-1",
                 query_text='alpha "beta"\x00',
@@ -1184,10 +1189,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             vector_rows, lexical_rows = await search_document_chunks(
                 organization_id="org-1",
                 query_text='"\x00',
@@ -1212,10 +1215,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             vector_rows, lexical_rows = await search_document_chunks(
                 organization_id="org-1",
                 query_text="alpha",
@@ -1243,10 +1244,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             vector_rows, lexical_rows = await search_document_chunks(
                 organization_id="org-1",
                 query_text="alpha",
@@ -1274,10 +1273,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             sources, sources_by_id, documents_by_id, chunks = await load_search_scope(
                 organization_id="org-1",
                 source_id=None,
@@ -1306,10 +1303,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             sources, sources_by_id, documents_by_id, chunks = await load_search_scope(
                 organization_id="org-1",
                 source_id=None,
@@ -1337,10 +1332,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             await load_search_scope(
                 organization_id="org-1",
                 source_id="src-1",
@@ -1397,10 +1390,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             _sources, _sources_by_id, _documents_by_id, chunks = await load_search_scope(
                 organization_id="org-1",
                 source_id="src-1",
@@ -1437,10 +1428,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             with pytest.raises(RuntimeError, match="vector index unavailable"):
                 await search_document_chunks(
                     organization_id="org-1",
@@ -1505,12 +1494,10 @@ class TestSurrealContentHelpers:
                 }
             ]
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
-            monkeypatch.setattr(content_service, "_select_many_raw", slow_then_lexical)
-            monkeypatch.setattr(content_service, "_DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS", 0.01)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "select_many_raw", slow_then_lexical)
+            monkeypatch.setattr(content_client, "DIRECT_SEARCH_QUERY_TIMEOUT_SECONDS", 0.01)
             with pytest.raises(RuntimeError, match="surreal_document_vector_search timed out"):
                 await search_document_chunks(
                     organization_id="org-1",
@@ -1541,10 +1528,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             memory = await remember_raw_memory(
                 organization_id="org-1",
                 principal_id="user-bliss",
@@ -1620,10 +1605,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             memories = await list_raw_memories_for_promotion(organization_id="org-1", limit=10)
 
         assert [memory.id for memory in memories] == ["memory-1"]
@@ -1669,10 +1652,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             memories = await list_raw_memories_for_promotion(
                 organization_id="org-1",
                 raw_memory_ids=["memory-private", "memory-org"],
@@ -1717,10 +1698,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             memories = await list_raw_memories_for_scope(
                 organization_id="org-1",
                 principal_id="user-bliss",
@@ -1761,10 +1740,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             memory = await remember_raw_memory(
                 organization_id="org-1",
                 principal_id="user-bliss",
@@ -1825,12 +1802,10 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
-        memory = _raw_memory_from_record(existing_memory)
+        memory = raw_memory_from_record(existing_memory)
         memory.raw_content = "Updated Surreal write path."
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             saved = await save_raw_memory(memory, embedding_provider=provider)
 
         saved_record = fake_client.calls[1][1]["record"]
@@ -1868,12 +1843,10 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
-        memory = _raw_memory_from_record(existing_memory)
+        memory = raw_memory_from_record(existing_memory)
         memory.review_state = "superseded"
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             saved = await save_raw_memory(memory, embedding_provider=provider)
 
         saved_record = fake_client.calls[1][1]["record"]
@@ -1907,12 +1880,10 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
-        memory = _raw_memory_from_record(hidden_memory)
+        memory = raw_memory_from_record(hidden_memory)
         memory.review_state = "pending"
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             saved = await save_raw_memory(memory, embedding_provider=provider)
 
         saved_record = fake_client.calls[1][1]["record"]
@@ -1953,13 +1924,11 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             monkeypatch.setattr(
-                content_service,
-                "_configured_raw_memory_embedding_provider",
+                content_models,
+                "configured_raw_memory_embedding_provider",
                 lambda: provider,
             )
             await remember_raw_memory(
@@ -2008,12 +1977,10 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
             ids = iter(["memory-1", "memory-2"])
-            monkeypatch.setattr(content_service, "uuid4", lambda: next(ids))
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_raw_persistence, "uuid4", lambda: next(ids))
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             memories = await remember_raw_memories(
                 [
                     RawMemoryWrite(
@@ -2080,12 +2047,10 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
             ids = iter(["memory-1", "memory-2"])
-            monkeypatch.setattr(content_service, "uuid4", lambda: next(ids))
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_raw_persistence, "uuid4", lambda: next(ids))
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             memories = await remember_raw_memories(
                 [
                     RawMemoryWrite(
@@ -2150,8 +2115,6 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         candidate = ReflectionCandidate(
             kind="decision",
             title="Decision: Native queue",
@@ -2163,7 +2126,7 @@ class TestSurrealContentHelpers:
         )
 
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             memory = await remember_reflection_candidate_review(
                 organization_id="org-1",
                 principal_id="user-bliss",
@@ -2243,10 +2206,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             memories = await list_reflection_dream_source_memories(
                 organization_id="org-1",
                 limit=10,
@@ -2284,10 +2245,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             memories = await recall_raw_memory(
                 organization_id="org-1",
                 principal_id="user-a",
@@ -2340,11 +2299,9 @@ class TestSurrealContentHelpers:
         async def no_embedding(_query: str):
             return None
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
-            monkeypatch.setattr(content_service, "_raw_memory_query_embedding", no_embedding)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_raw_recall, "raw_memory_query_embedding", no_embedding)
             memories = await recall_raw_memory(
                 organization_id="org-1",
                 principal_id="user-a",
@@ -2441,11 +2398,9 @@ class TestSurrealContentHelpers:
         async def no_embedding(_query: str):
             return None
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
-            monkeypatch.setattr(content_service, "_raw_memory_query_embedding", no_embedding)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_raw_recall, "raw_memory_query_embedding", no_embedding)
             memories = await recall_raw_memory(
                 organization_id="org-1",
                 principal_id="user-a",
@@ -2498,11 +2453,9 @@ class TestSurrealContentHelpers:
         async def no_embedding(_query: str):
             return None
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
-            monkeypatch.setattr(content_service, "_raw_memory_query_embedding", no_embedding)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_raw_recall, "raw_memory_query_embedding", no_embedding)
             memories = await recall_raw_memory(
                 organization_id="org-1",
                 principal_id="user-a",
@@ -2517,7 +2470,7 @@ class TestSurrealContentHelpers:
         assert isinstance(params["as_of_text"], str)
 
     def test_raw_memory_snippet_prefers_marked_title_over_plain_content(self) -> None:
-        memory = _raw_memory_from_record(
+        memory = raw_memory_from_record(
             {
                 "uuid": "memory-title-hit",
                 "organization_id": "org-1",
@@ -2581,11 +2534,9 @@ class TestSurrealContentHelpers:
         async def query_embedding(_query: str):
             return [1.0, 0.0]
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
-            monkeypatch.setattr(content_service, "_raw_memory_query_embedding", query_embedding)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_raw_recall, "raw_memory_query_embedding", query_embedding)
             memories = await recall_raw_memory(
                 organization_id="org-1",
                 principal_id="user-a",
@@ -2625,11 +2576,9 @@ class TestSurrealContentHelpers:
         async def query_embedding(_query: str):
             return [1.0, 0.0]
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
-            monkeypatch.setattr(content_service, "_raw_memory_query_embedding", query_embedding)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_raw_recall, "raw_memory_query_embedding", query_embedding)
             await recall_raw_memory(
                 organization_id="org-1",
                 principal_id="user-a",
@@ -2671,12 +2620,10 @@ class TestSurrealContentHelpers:
 
         fake_log = FakeLog()
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "log", fake_log)
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
-            monkeypatch.setattr(content_service, "_raw_memory_query_embedding", query_embedding)
+            monkeypatch.setattr(content_raw_recall, "log", fake_log)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_raw_recall, "raw_memory_query_embedding", query_embedding)
             memories = await recall_raw_memory(
                 organization_id="org-1",
                 principal_id="user-a",
@@ -2731,12 +2678,10 @@ class TestSurrealContentHelpers:
 
         fake_log = FakeLog()
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "log", fake_log)
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
-            monkeypatch.setattr(content_service, "_raw_memory_query_embedding", query_embedding)
+            monkeypatch.setattr(content_raw_recall, "log", fake_log)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_raw_recall, "raw_memory_query_embedding", query_embedding)
             memories = await recall_raw_memory(
                 organization_id="org-1",
                 principal_id="user-a",
@@ -2786,11 +2731,9 @@ class TestSurrealContentHelpers:
         async def query_embedding(_query: str):
             return [1.0, 0.0]
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
-            monkeypatch.setattr(content_service, "_raw_memory_query_embedding", query_embedding)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_raw_recall, "raw_memory_query_embedding", query_embedding)
             result = await recall_raw_memory_with_sources(
                 organization_id="org-1",
                 principal_id="user-a",
@@ -2846,14 +2789,12 @@ class TestSurrealContentHelpers:
 
         fake_log = FakeLog()
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "log", fake_log)
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_raw_recall, "log", fake_log)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             monkeypatch.setattr(
-                content_service,
-                "_configured_raw_memory_embedding_provider",
+                content_models,
+                "configured_raw_memory_embedding_provider",
                 FailingEmbeddingProvider,
             )
             memories = await recall_raw_memory(
@@ -2915,14 +2856,12 @@ class TestSurrealContentHelpers:
 
         fake_log = FakeLog()
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "log", fake_log)
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_raw_recall, "log", fake_log)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             monkeypatch.setattr(
-                content_service,
-                "_configured_raw_memory_embedding_provider",
+                content_models,
+                "configured_raw_memory_embedding_provider",
                 failing_provider,
             )
             memories = await recall_raw_memory(
@@ -2974,10 +2913,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             memories = await recall_raw_memory(
                 organization_id="org-1",
                 principal_id="user-a",
@@ -3030,10 +2967,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             memories = await recall_raw_memory(
                 organization_id="org-1",
                 principal_id="user-a",
@@ -3089,10 +3024,8 @@ class TestSurrealContentHelpers:
         async def fake_session():
             yield fake_client
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(content_service, "surreal_content_client", fake_session)
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
             memories = await recall_raw_memory(
                 organization_id="org-1",
                 principal_id="user-a",
@@ -3147,11 +3080,9 @@ class TestGetRawMemoryBySourceId:
     async def test_unscoped_lookup_does_not_filter_by_scope(self) -> None:
         fake_client = FakeClient([_query_result([])])
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(
-                content_service,
+                content_client,
                 "surreal_content_client",
                 lambda: _yield_client(fake_client),
             )
@@ -3170,11 +3101,9 @@ class TestGetRawMemoryBySourceId:
     async def test_private_scope_lookup_filters_principal_and_null_scope_key(self) -> None:
         fake_client = FakeClient([_query_result([])])
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(
-                content_service,
+                content_client,
                 "surreal_content_client",
                 lambda: _yield_client(fake_client),
             )
@@ -3201,11 +3130,9 @@ class TestGetRawMemoryBySourceId:
     async def test_keyed_scope_lookup_filters_scope_key_value(self) -> None:
         fake_client = FakeClient([_query_result([])])
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(
-                content_service,
+                content_client,
                 "surreal_content_client",
                 lambda: _yield_client(fake_client),
             )
@@ -3228,11 +3155,9 @@ class TestGetRawMemoryByDedupeKey:
     async def test_lookup_filters_by_org_and_metadata_key(self) -> None:
         fake_client = FakeClient([_query_result([])])
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(
-                content_service,
+                content_client,
                 "surreal_content_client",
                 lambda: _yield_client(fake_client),
             )
@@ -3250,11 +3175,9 @@ class TestGetRawMemoryByDedupeKey:
     async def test_lookup_can_filter_import_visibility_scope(self) -> None:
         fake_client = FakeClient([_query_result([])])
 
-        from sibyl_core.services import surreal_content as content_service
-
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(
-                content_service,
+                content_client,
                 "surreal_content_client",
                 lambda: _yield_client(fake_client),
             )

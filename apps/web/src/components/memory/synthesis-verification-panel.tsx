@@ -1,6 +1,6 @@
 'use client';
 
-import type { SynthesisSourcePack, SynthesisVerification } from '@/lib/api';
+import type { SynthesisSourcePack, SynthesisVerification } from '@/lib/api/memory';
 
 const STATUS_STYLES: Record<SynthesisVerification['status'], string> = {
   pending: 'border-sc-fg-subtle/20 bg-sc-fg-subtle/10 text-sc-fg-muted',

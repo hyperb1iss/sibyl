@@ -14,7 +14,7 @@ import {
   Upload,
   X,
 } from '@/components/ui/icons';
-import { api } from '@/lib/api';
+import { sourcesApi } from '@/lib/api/sources';
 
 interface AddSourceDialogProps {
   isOpen: boolean;
@@ -262,7 +262,7 @@ export function AddSourceDialog({
 
       setIsFetchingTitle(true);
       try {
-        const preview = await api.sources.preview(url);
+        const preview = await sourcesApi.preview(url);
         // Only update if we got a good suggested name
         if (preview.suggested_name) {
           setUrlName(preview.suggested_name);

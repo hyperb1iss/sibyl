@@ -20,7 +20,7 @@ from sibyl_core.auth.memory_policy import (
     memory_row_project_id,
     private_scope_granted_for,
 )
-from sibyl_core.services.graph import get_surreal_graph_runtime
+from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
 from sibyl_core.tools.responses import ConflictWarning
 
 if TYPE_CHECKING:

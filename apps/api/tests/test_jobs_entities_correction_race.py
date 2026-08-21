@@ -63,10 +63,10 @@ async def graph(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[_Runtime]:
         return runtime
 
     import sibyl.jobs.entities as jobs_entities
-    import sibyl_core.retrieval.search as search_module
+    from sibyl_core.retrieval import _search_database as search_database
 
     monkeypatch.setattr(jobs_entities, "get_surreal_graph_runtime", runtime_factory)
-    monkeypatch.setattr(search_module, "get_surreal_graph_runtime", runtime_factory)
+    monkeypatch.setattr(search_database, "get_surreal_graph_runtime", runtime_factory)
     monkeypatch.setattr(context_module, "get_surreal_graph_runtime", runtime_factory)
     monkeypatch.setattr(context_module, "get_graph_runtime", runtime_factory, raising=False)
     monkeypatch.setattr(context_module, "configured_embedding_provider", lambda: None)
@@ -245,10 +245,10 @@ async def test_a_row_projected_after_its_capture_was_corrected_is_born_retired(
     where the two are reconciled.
     """
 
-    import sibyl_core.services.memory as memory_module
+    from sibyl_core.services import memory_lifecycle
 
     monkeypatch.setattr(
-        memory_module,
+        memory_lifecycle,
         "get_raw_memory",
         AsyncMock(return_value=_corrected_capture()),
     )
@@ -277,10 +277,10 @@ async def test_an_uncorrected_capture_still_projects_a_recallable_row(
     silently failed to project at all, would pass the test above.
     """
 
-    import sibyl_core.services.memory as memory_module
+    from sibyl_core.services import memory_lifecycle
 
     monkeypatch.setattr(
-        memory_module,
+        memory_lifecycle,
         "get_raw_memory",
         AsyncMock(return_value=_corrected_capture(metadata={})),
     )
@@ -311,10 +311,10 @@ async def test_a_correction_landing_inside_the_write_still_retires_the_row(
     only place it can land to reproduce this.
     """
 
-    import sibyl_core.services.memory as memory_module
+    from sibyl_core.services import memory_lifecycle
 
     capture = _corrected_capture(metadata={})
-    monkeypatch.setattr(memory_module, "get_raw_memory", AsyncMock(return_value=capture))
+    monkeypatch.setattr(memory_lifecycle, "get_raw_memory", AsyncMock(return_value=capture))
 
     original_create = graph.entity_manager.create_direct
     corrected: dict[str, bool] = {}
@@ -326,7 +326,7 @@ async def test_a_correction_landing_inside_the_write_still_retires_the_row(
             # written, so the correction's own cascade cannot see it.
             corrected["done"] = True
             monkeypatch.setattr(
-                memory_module,
+                memory_lifecycle,
                 "get_raw_memory",
                 AsyncMock(return_value=_corrected_capture()),
             )

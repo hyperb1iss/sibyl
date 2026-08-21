@@ -337,7 +337,7 @@ async def _apply_current_entity_gate(
     entity_ids = [_entity_id(entity) for entity, _score in metadata_filtered if _entity_id(entity)]
     if entity_ids:
         try:
-            from sibyl_core.retrieval.search import _superseded_candidate_uuids
+            from sibyl_core.retrieval._search_lifecycle import _superseded_candidate_uuids
 
             superseded, edge_rows = await _superseded_candidate_uuids(
                 client,

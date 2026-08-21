@@ -25,14 +25,13 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-
+import type { TelemetryTrendPoint } from '@/lib/api/admin';
 import type {
   AssigneeStats,
   TaskPriorityDistribution,
   TaskStatusDistribution,
-  TelemetryTrendPoint,
   TimeSeriesPoint,
-} from '@/lib/api';
+} from '@/lib/api/work-items';
 import { useTheme } from '@/lib/theme';
 
 interface ChartPalette {

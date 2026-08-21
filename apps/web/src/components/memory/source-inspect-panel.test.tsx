@@ -11,7 +11,7 @@ const toast = vi.hoisted(() => ({
   success: vi.fn(),
 }));
 
-vi.mock('@/lib/hooks', () => hooks);
+vi.mock('@/lib/hooks/memory', () => hooks);
 vi.mock('sonner', () => ({ toast }));
 
 import { SourceInspectPanel } from './source-inspect-panel';

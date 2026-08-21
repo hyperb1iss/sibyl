@@ -62,7 +62,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 24
+CONTENT_SCHEMA_CURRENT_VERSION = 25
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -457,6 +457,12 @@ DEFINE FIELD OVERWRITE skipped_records.* ON source_imports TYPE object FLEXIBLE;
 DEFINE FIELD OVERWRITE errors.* ON source_imports TYPE object FLEXIBLE;
 """
 
+CONTENT_SOURCE_IMPORT_REVISION_MIGRATION_DEFINITIONS = """
+DEFINE FIELD IF NOT EXISTS revision ON source_imports TYPE option<int>;
+UPDATE source_imports SET revision = 0 WHERE revision = NONE;
+DEFINE FIELD OVERWRITE revision ON source_imports TYPE int DEFAULT 0 ASSERT $value >= 0;
+"""
+
 CONTENT_RAW_CAPTURE_LOOKUP_MIGRATION_DEFINITIONS = """
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_dedupe_lookup
     ON raw_captures FIELDS metadata.dedupe_key, organization_id, memory_scope, scope_key;
@@ -730,6 +736,13 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=24,
             name="content_schemafull_repair",
             statements=tuple(split_statements(CONTENT_SCHEMAFULL_REPAIR_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=25,
+            name="content_source_import_revision",
+            statements=tuple(
+                split_statements(CONTENT_SOURCE_IMPORT_REVISION_MIGRATION_DEFINITIONS)
+            ),
         ),
     )
 
@@ -1094,6 +1107,7 @@ __all__ = [
     "CONTENT_SCHEMA_DEFINITIONS",
     "CONTENT_SCHEMA_NAME",
     "CONTENT_SOURCE_IMPORT_RECEIPT_MIGRATION_DEFINITIONS",
+    "CONTENT_SOURCE_IMPORT_REVISION_MIGRATION_DEFINITIONS",
     "CONTENT_SOURCE_URL_SCOPE_MIGRATION_DEFINITIONS",
     "CONTENT_TABLES",
     "CONTENT_USAGE_SIGNAL_MIGRATION_DEFINITIONS",

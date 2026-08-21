@@ -142,6 +142,11 @@ class ApiQueuePort:
 
 
 class ApiContentPort:
+    async def get_shared_client(self) -> Any:
+        from sibyl.persistence.surreal.content import get_shared_surreal_content_client
+
+        return await get_shared_surreal_content_client()
+
     def read_session(self) -> AbstractAsyncContextManager[Any]:
         from sibyl.persistence.content_runtime import get_content_read_session
 

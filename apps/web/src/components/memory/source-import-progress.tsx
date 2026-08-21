@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import type { SourceImportStatus, SourceImportStatusResponse } from '@/lib/api';
+import type { SourceImportStatus, SourceImportStatusResponse } from '@/lib/api/memory';
 import { formatDateTime, formatDistanceToNow } from '@/lib/constants/formatting';
 
 const STATUS_STYLES: Record<SourceImportStatus, string> = {

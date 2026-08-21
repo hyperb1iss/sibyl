@@ -2,15 +2,11 @@ import 'server-only';
 
 import { cookies } from 'next/headers';
 import { serverOnly } from 'next-dynenv';
-import type {
-  Entity,
-  EntityListResponse,
-  MemoryScope,
-  ProjectSummariesResponse,
-  SearchResponse,
-  StatsResponse,
-  TaskListResponse,
-} from './api';
+import type { StatsResponse } from './api/admin';
+import type { Entity, EntityListResponse } from './api/graph';
+import type { MemoryScope } from './api/memory';
+import type { SearchResponse } from './api/search';
+import type { ProjectSummariesResponse, TaskListResponse } from './api/work-items';
 
 // =============================================================================
 // Server-Side API Configuration

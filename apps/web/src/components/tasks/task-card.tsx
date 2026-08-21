@@ -2,7 +2,7 @@
 
 import { memo } from 'react';
 import { AlertTriangle, Calendar, Clock, LightBulb, Pause, Zap } from '@/components/ui/icons';
-import type { TaskPriority, TaskStatus, TaskSummary } from '@/lib/api';
+import type { TaskPriority, TaskStatus, TaskSummary } from '@/lib/api/work-items';
 import { TASK_STATUS_CONFIG } from '@/lib/constants/tasks';
 
 interface TaskCardProps {

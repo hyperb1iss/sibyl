@@ -25,8 +25,8 @@ import type {
   MemoryCorrectionAction,
   MemoryCorrectionResponse,
   MemorySourceInspectResponse,
-} from '@/lib/api';
-import { useApplyMemoryCorrection, usePreviewMemoryCorrection } from '@/lib/hooks';
+} from '@/lib/api/memory';
+import { useApplyMemoryCorrection, usePreviewMemoryCorrection } from '@/lib/hooks/memory';
 
 const CORRECTION_ACTIONS: Array<{ value: MemoryCorrectionAction; label: string }> = [
   { value: 'hide', label: 'Hide' },

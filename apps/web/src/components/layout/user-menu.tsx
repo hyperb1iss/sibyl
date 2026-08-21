@@ -5,8 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Folder, Settings, User, Users } from '@/components/ui/icons';
-import { api } from '@/lib/api';
-import { useMe, useOrgs, useSwitchOrg } from '@/lib/hooks';
+import { authApi } from '@/lib/api/auth';
+import { useMe, useOrgs, useSwitchOrg } from '@/lib/hooks/auth';
 
 export function UserMenu() {
   const router = useRouter();
@@ -43,7 +43,7 @@ export function UserMenu() {
 
   const handleSignOut = useCallback(async () => {
     try {
-      await api.auth.logout();
+      await authApi.logout();
       router.push('/login');
       router.refresh();
     } catch {

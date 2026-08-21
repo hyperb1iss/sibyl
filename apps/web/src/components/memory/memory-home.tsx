@@ -19,9 +19,14 @@ import {
   WarningCircle,
   Xmark,
 } from '@/components/ui/icons';
-import type { MemoryAuditEvent, MemoryScope, MemorySpace, RawCaptureSummary } from '@/lib/api';
+import type {
+  MemoryAuditEvent,
+  MemoryScope,
+  MemorySpace,
+  RawCaptureSummary,
+} from '@/lib/api/memory';
 import { formatDistanceToNow } from '@/lib/constants/formatting';
-import { useMemoryAudit, useMemorySpaces, useRawCaptures } from '@/lib/hooks';
+import { useMemoryAudit, useMemorySpaces, useRawCaptures } from '@/lib/hooks/memory';
 import { MemoryActivityFeed } from './memory-activity-feed';
 import { type MemoryScopeFilter, MemoryScopeSwitcher } from './memory-scope-switcher';
 

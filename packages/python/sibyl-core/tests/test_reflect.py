@@ -364,7 +364,7 @@ async def test_reflect_memory_native_write_uses_policy_and_direct_graph(
 
     monkeypatch.setenv("SIBYL_NATIVE_WRITE", "enabled")
     monkeypatch.setattr(
-        "sibyl_core.services.memory.get_surreal_graph_runtime",
+        "sibyl_core.services.memory_reflection.get_surreal_graph_runtime",
         fake_get_graph_runtime,
     )
 
@@ -423,7 +423,7 @@ async def test_reflect_memory_native_write_denies_unverified_project(
 
     monkeypatch.setenv("SIBYL_NATIVE_WRITE", "enabled")
     monkeypatch.setattr(
-        "sibyl_core.services.memory.get_surreal_graph_runtime",
+        "sibyl_core.services.memory_reflection.get_surreal_graph_runtime",
         fake_get_graph_runtime,
     )
 

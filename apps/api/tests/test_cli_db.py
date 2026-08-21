@@ -17,6 +17,12 @@ from sibyl.cli import db as db_cli
 runner = CliRunner()
 
 
+def test_legacy_fix_embeddings_command_is_not_registered() -> None:
+    command_names = {command.name for command in db_cli.app.registered_commands}
+
+    assert "fix-embeddings" not in command_names
+
+
 def test_first_count_handles_dict_and_tuple_rows() -> None:
     assert db_cli._first_count([{"count": 3}]) == 3
     assert db_cli._first_count([{"deleted": 2}]) == 2

@@ -30,7 +30,7 @@ __all__ = ["find_conflicts", "get_entity_history", "temporal_query"]
 
 
 async def get_graph_runtime(organization_id: str) -> Any:
-    from sibyl_core.services.graph import get_surreal_graph_runtime
+    from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
 
     return await get_surreal_graph_runtime(organization_id)
 
@@ -419,7 +419,7 @@ async def _load_native_temporal_edges(
     accessible_projects: set[str] | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
 ) -> list[TemporalEdge]:
-    from sibyl_core.services.graph import normalize_records
+    from sibyl_core.services.graph_common import normalize_graph_records
 
     clauses = ["group_id = $group_id"]
     if entity_id:
@@ -433,7 +433,7 @@ async def _load_native_temporal_edges(
         else "created_at DESC, uuid DESC"
     )
 
-    rows = normalize_records(
+    rows = normalize_graph_records(
         await client.execute_query(
             f"""
             SELECT uuid AS edge_id,

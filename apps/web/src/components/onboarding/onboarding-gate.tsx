@@ -1,7 +1,7 @@
 'use client';
 
 import { type ReactNode, useState } from 'react';
-import { usePreferences } from '@/lib/hooks';
+import { usePreferences } from '@/lib/hooks/auth';
 import { OnboardingWizard } from './onboarding-wizard';
 
 interface OnboardingGateProps {

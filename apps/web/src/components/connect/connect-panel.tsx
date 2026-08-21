@@ -4,8 +4,8 @@ import { useState } from 'react';
 import { Check, Copy, Download, Network, Page } from '@/components/ui/icons';
 import { Spinner } from '@/components/ui/spinner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import type { McpClientConfig } from '@/lib/api';
-import { useIntegration } from '@/lib/hooks';
+import type { McpClientConfig } from '@/lib/api/admin';
+import { useIntegration } from '@/lib/hooks/admin';
 
 /** Duration to show "Copied!" feedback in milliseconds */
 const COPY_FEEDBACK_DURATION_MS = 2000;

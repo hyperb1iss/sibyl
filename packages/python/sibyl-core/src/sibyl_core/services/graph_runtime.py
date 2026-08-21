@@ -6,16 +6,20 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from sibyl_core.embeddings.providers import configured_embedding_provider
+from sibyl_core.embeddings.providers import (
+    EmbeddingProvider,
+    configured_embedding_provider,
+)
 from sibyl_core.models.entities import EntityType
-from sibyl_core.services.graph import (
-    EntityManager,
-    RelationshipManager,
+from sibyl_core.services.graph_client import (
     SurrealGraphClient,
     get_surreal_graph_client,
-    get_surreal_graph_runtime,
-    normalize_records,
+    prepare_graph_schema,
+    validate_native_embedding_dimensions,
 )
+from sibyl_core.services.graph_common import normalize_graph_records
+from sibyl_core.services.graph_entities import EntityManager
+from sibyl_core.services.graph_relationships import RelationshipManager
 from sibyl_core.utils.query import upper_query_tokens
 
 
@@ -34,7 +38,7 @@ class EntityManagerLike(Protocol):
 
 
 @dataclass(frozen=True)
-class ActiveGraphRuntime:
+class GraphRuntime:
     """Bound graph collaborators for a single organization."""
 
     client: SurrealGraphClient
@@ -42,26 +46,36 @@ class ActiveGraphRuntime:
     relationship_manager: RelationshipManager
 
 
-def _query_tokens(query: str) -> set[str]:
-    return upper_query_tokens(query)
-
-
 def _assert_surreal_query_dialect(query: str) -> None:
-    if not _query_tokens(query).isdisjoint({"CALL", "MATCH", "UNWIND"}):
+    if not upper_query_tokens(query).isdisjoint({"CALL", "MATCH", "UNWIND"}):
         raise ValueError("Surreal runtime graph queries must use SurrealQL")
 
 
-def _count_value(value: object) -> int:
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return 0
-    return 0
+async def get_surreal_graph_runtime(
+    group_id: str,
+    *,
+    embedding_provider: EmbeddingProvider | None = None,
+    ensure_schema: bool = True,
+) -> GraphRuntime:
+    """Bind native graph collaborators for one organization."""
+
+    client = await get_surreal_graph_client(group_id)
+    if ensure_schema:
+        await prepare_graph_schema(client)
+    validate_native_embedding_dimensions(embedding_provider)
+    return GraphRuntime(
+        client=client,
+        entity_manager=EntityManager(
+            client,
+            group_id=group_id,
+            embedding_provider=embedding_provider,
+        ),
+        relationship_manager=RelationshipManager(
+            client,
+            group_id=group_id,
+            embedding_provider=embedding_provider,
+        ),
+    )
 
 
 async def get_graph_client(group_id: str = "default") -> SurrealGraphClient:
@@ -72,18 +86,17 @@ async def get_graph_client(group_id: str = "default") -> SurrealGraphClient:
     return client
 
 
-async def get_graph_runtime(group_id: str) -> ActiveGraphRuntime:
-    """Bind the native graph managers for a single organization."""
+async def get_graph_runtime(group_id: str) -> GraphRuntime:
+    """Bind the configured native graph runtime for one organization."""
 
     embedding_provider = configured_embedding_provider()
     if embedding_provider is None:
         runtime = await get_surreal_graph_runtime(str(group_id))
     else:
         runtime = await get_surreal_graph_runtime(
-            str(group_id),
-            embedding_provider=embedding_provider,
+            str(group_id), embedding_provider=embedding_provider
         )
-    return ActiveGraphRuntime(
+    return GraphRuntime(
         client=runtime.client,
         entity_manager=runtime.entity_manager,
         relationship_manager=runtime.relationship_manager,
@@ -96,43 +109,14 @@ async def count_entities_by_type(
     include_archived: bool = False,
     page_size: int = 1000,
 ) -> dict[str, int]:
-    """Count entities by type without assuming backend-specific aggregations."""
+    """Count entities by type, using native aggregation when available."""
 
     counter = getattr(entity_manager, "count_by_type", None)
     if callable(counter):
         return await counter(include_archived=include_archived)
 
     counts = {entity_type.value: 0 for entity_type in EntityType}
-
-    driver = getattr(entity_manager, "_driver", None)
-    execute_query = getattr(driver, "execute_query", None)
-    group_id = getattr(entity_manager, "_group_id", None)
-    if callable(execute_query) and group_id:
-        where_clauses = ["group_id = $group_id"]
-        if not include_archived:
-            where_clauses.append("(status IS NONE OR status = '' OR status != 'archived')")
-        rows = normalize_records(
-            await execute_query(
-                """
-                SELECT entity_type, count() AS cnt
-                FROM entity
-                WHERE """
-                + " AND ".join(where_clauses)
-                + """
-                GROUP BY entity_type;
-                """,
-                group_id=str(group_id),
-            )
-        )
-        for row in rows:
-            entity_type = row.get("entity_type")
-            if isinstance(entity_type, str) and entity_type:
-                count = row.get("cnt", row.get("entity_count", 0))
-                counts[entity_type] = _count_value(count)
-        return counts
-
     offset = 0
-
     while True:
         entities = await entity_manager.list_all(
             limit=page_size,
@@ -141,16 +125,9 @@ async def count_entities_by_type(
         )
         if not entities:
             break
-
-        page_count = len(entities)
-        if page_count == 0:
-            break
-
         for entity in entities:
             counts[entity.entity_type.value] = counts.get(entity.entity_type.value, 0) + 1
-
-        offset += page_count
-
+        offset += len(entities)
     return counts
 
 
@@ -164,4 +141,14 @@ async def execute_graph_query(
     runtime = await get_graph_runtime(str(group_id))
     _assert_surreal_query_dialect(query)
     result = await runtime.client.execute_query(query, group_id=str(group_id), **params)
-    return normalize_records(result)
+    return normalize_graph_records(result)
+
+
+__all__ = [
+    "GraphRuntime",
+    "count_entities_by_type",
+    "execute_graph_query",
+    "get_graph_client",
+    "get_graph_runtime",
+    "get_surreal_graph_runtime",
+]

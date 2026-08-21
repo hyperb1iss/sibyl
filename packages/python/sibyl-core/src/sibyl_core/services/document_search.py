@@ -1,7 +1,5 @@
 """Document search helpers for unified search."""
 
-import hashlib
-import os
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Protocol
@@ -9,10 +7,9 @@ from uuid import UUID
 
 import structlog
 
-from sibyl_core.config import settings
+from sibyl_core.embeddings import content as content_embeddings
 from sibyl_core.embeddings.providers import (
     EmbeddingProvider,
-    EmbeddingProviderName,
     create_embedding_provider,
 )
 from sibyl_core.retrieval.candidates import (
@@ -40,7 +37,7 @@ DOCUMENT_EMBEDDING_TIMEOUT_SECONDS = 2.0
 DOCUMENT_EMBEDDING_CACHE_SIZE = 1000
 
 _document_embedding_provider: EmbeddingProvider | None = None
-_document_embedding_fingerprint: tuple[EmbeddingProviderName, str, int, str] | None = None
+_document_embedding_fingerprint: tuple[str, str, int, str] | None = None
 
 
 def reset_document_embedding_provider_cache() -> None:
@@ -59,71 +56,22 @@ async def _embed_text(text: str) -> list[float]:
 
 def _get_document_embedding_provider() -> EmbeddingProvider:
     global _document_embedding_fingerprint, _document_embedding_provider
-    provider_name = _document_embedding_provider_name()
-    model = _document_embedding_model(provider_name)
-    dimensions = _document_embedding_dimensions()
-    api_key = _document_embedding_api_key(provider_name)
-    fingerprint = (provider_name, model, dimensions, _secret_fingerprint(api_key))
-    if _document_embedding_provider is None or fingerprint != _document_embedding_fingerprint:
+    config = content_embeddings.configured_content_embedding()
+    if (
+        _document_embedding_provider is None
+        or config.fingerprint != _document_embedding_fingerprint
+    ):
         _document_embedding_provider = create_embedding_provider(
-            provider=provider_name,
-            model=model,
-            dimensions=dimensions,
+            provider=config.provider,
+            model=config.model,
+            dimensions=config.dimensions,
             cache_namespace="document",
-            api_key=api_key,
+            api_key=config.api_key,
             max_cache_size=DOCUMENT_EMBEDDING_CACHE_SIZE,
         )
-        _document_embedding_fingerprint = fingerprint
+        _document_embedding_fingerprint = config.fingerprint
     assert _document_embedding_provider is not None
     return _document_embedding_provider
-
-
-def _document_embedding_provider_name() -> EmbeddingProviderName:
-    raw_provider = os.getenv("SIBYL_EMBEDDING_PROVIDER") or settings.embedding_provider
-    if raw_provider == "openai":
-        return "openai"
-    if raw_provider == "gemini":
-        return "gemini"
-    raise ValueError(f"Unsupported embedding provider: {raw_provider}")
-
-
-def _document_embedding_model(provider: EmbeddingProviderName) -> str:
-    env_model = os.getenv("SIBYL_EMBEDDING_MODEL")
-    if env_model:
-        return env_model
-    if provider == "gemini" and settings.embedding_model == "text-embedding-3-small":
-        return "gemini-embedding-2"
-    return settings.embedding_model
-
-
-def _document_embedding_dimensions() -> int:
-    raw_dimensions = os.getenv("SIBYL_EMBEDDING_DIMENSIONS")
-    if raw_dimensions:
-        return int(raw_dimensions)
-    return settings.embedding_dimensions
-
-
-def _document_embedding_api_key(provider: EmbeddingProviderName) -> str | None:
-    if provider == "gemini":
-        return (
-            os.getenv("SIBYL_GEMINI_API_KEY", "")
-            or os.getenv("GEMINI_API_KEY", "")
-            or os.getenv("GOOGLE_API_KEY", "")
-            or settings.gemini_api_key.get_secret_value()
-            or None
-        )
-    return (
-        os.getenv("SIBYL_OPENAI_API_KEY", "")
-        or os.getenv("OPENAI_API_KEY", "")
-        or settings.openai_api_key.get_secret_value()
-        or None
-    )
-
-
-def _secret_fingerprint(secret: str | None) -> str:
-    if not secret:
-        return ""
-    return hashlib.sha256(secret.encode()).hexdigest()
 
 
 class DocumentSearchChunk(Protocol):

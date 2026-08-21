@@ -3,14 +3,7 @@
 from dataclasses import dataclass
 from uuid import UUID
 
-from sibyl_core.services.surreal_content import (
-    _coerce_int,
-    _coerce_optional_str,
-    _load_sources_for_org,
-    _select_many,
-    _select_one,
-    surreal_content_client,
-)
+from sibyl_core.services import content_client, content_documents, content_models
 
 
 @dataclass(frozen=True)
@@ -41,21 +34,23 @@ async def get_link_graph_status_data(
 ) -> LinkGraphStatusData:
     """Aggregate link-graph status for the given organization."""
 
-    async with surreal_content_client() as client:
-        sources = await _load_sources_for_org(client, organization_id=str(organization_id))
-        total_row = await _select_one(
+    async with content_client.surreal_content_client() as client:
+        sources = await content_documents.load_sources_for_org(
+            client, organization_id=str(organization_id)
+        )
+        total_row = await content_client.select_one(
             client,
             "SELECT count() AS total FROM document_chunks "
             "WHERE organization_id = $organization_id GROUP ALL;",
             organization_id=str(organization_id),
         )
-        linked_row = await _select_one(
+        linked_row = await content_client.select_one(
             client,
             "SELECT count() AS total FROM document_chunks "
             "WHERE organization_id = $organization_id AND has_entities = true GROUP ALL;",
             organization_id=str(organization_id),
         )
-        pending_rows = await _select_many(
+        pending_rows = await content_client.select_many(
             client,
             "SELECT source_id, count() AS pending FROM document_chunks "
             "WHERE organization_id = $organization_id AND source_id != NONE "
@@ -66,13 +61,15 @@ async def get_link_graph_status_data(
 
     pending_by_source = {source.id: 0 for source in sources}
     for row in pending_rows:
-        source_id = _coerce_optional_str(row.get("source_id"))
+        source_id = content_models.coerce_optional_str(row.get("source_id"))
         if source_id:
-            pending_by_source[source_id] = _coerce_int(row.get("pending"))
+            pending_by_source[source_id] = content_models.coerce_int(row.get("pending"))
 
     return LinkGraphStatusData(
-        total_chunks=_coerce_int(total_row.get("total") if total_row is not None else None),
-        chunks_with_entities=_coerce_int(
+        total_chunks=content_models.coerce_int(
+            total_row.get("total") if total_row is not None else None
+        ),
+        chunks_with_entities=content_models.coerce_int(
             linked_row.get("total") if linked_row is not None else None
         ),
         sources=[

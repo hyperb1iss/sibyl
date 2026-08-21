@@ -9,6 +9,10 @@ organization, and default project settings.
 
 from __future__ import annotations
 
+import os
+import tempfile
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,6 +23,23 @@ except ImportError:
     import tomli as tomllib
 
 import tomli_w
+
+
+class ConfigStoreError(Exception):
+    """Base class for configuration failures safe to show at the CLI boundary."""
+
+
+class ConfigCorruptionError(ConfigStoreError):
+    """The on-disk configuration is malformed or has invalid known fields."""
+
+    def __init__(self, path: Path, cause: Exception, *, problem: str = "invalid TOML") -> None:
+        self.path = path
+        self.cause = cause
+        super().__init__(
+            f"Config file {path} has {problem}: {cause}. "
+            "Repair it or run 'sibyl config reset' to replace it."
+        )
+
 
 # =============================================================================
 # Context Model
@@ -106,34 +127,192 @@ def ensure_config_dir() -> Path:
     return path
 
 
+@contextmanager
+def _config_file_lock(path: Path | None = None) -> Iterator[None]:
+    """Serialize read-modify-write operations through a sidecar lock file."""
+    target = path or config_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = target.with_name(f"{target.name}.lock")
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    locked = False
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            if os.fstat(fd).st_size == 0:
+                os.write(fd, b"\0")
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        locked = True
+        yield
+    finally:
+        if locked and os.name == "nt":
+            import msvcrt
+
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        elif locked:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def _load_config_unlocked(path: Path) -> dict[str, Any]:
+    config = _deep_copy(DEFAULT_CONFIG)
+    if not path.exists():
+        return config
+
+    try:
+        with path.open("rb") as file:
+            file_config = tomllib.load(file)
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise ConfigCorruptionError(path, exc) from exc
+
+    _deep_merge(config, file_config)
+    _validate_config_schema(config, path)
+    return config
+
+
+def _schema_failure(path: Path, field: str, expected: str, value: Any) -> None:
+    actual = type(value).__name__
+    cause = ValueError(f"{field} must be {expected}, found {actual}")
+    raise ConfigCorruptionError(path, cause, problem="an invalid schema") from cause
+
+
+def _validate_config_schema(config: dict[str, Any], path: Path) -> None:
+    """Validate every known config container before it can steer a command."""
+    server = config.get("server")
+    if not isinstance(server, dict):
+        _schema_failure(path, "server", "a table", server)
+    server_url = server.get("url")
+    if not isinstance(server_url, str) or not server_url:
+        _schema_failure(path, "server.url", "a non-empty string", server_url)
+
+    defaults = config.get("defaults")
+    if not isinstance(defaults, dict):
+        _schema_failure(path, "defaults", "a table", defaults)
+    default_project = defaults.get("project")
+    if not isinstance(default_project, str):
+        _schema_failure(path, "defaults.project", "a string", default_project)
+
+    active_context = config.get("active_context")
+    if not isinstance(active_context, str):
+        _schema_failure(path, "active_context", "a string", active_context)
+
+    paths = config.get("paths")
+    if not isinstance(paths, dict):
+        _schema_failure(path, "paths", "a table", paths)
+    for mapped_path, entry in paths.items():
+        if isinstance(entry, str):
+            continue
+        if not isinstance(entry, dict):
+            _schema_failure(path, f"paths.{mapped_path}", "a string or table", entry)
+        for field in ("project", "context"):
+            value = entry.get(field)
+            if value is not None and not isinstance(value, str):
+                _schema_failure(path, f"paths.{mapped_path}.{field}", "a string", value)
+
+    contexts = config.get("contexts")
+    if not isinstance(contexts, dict):
+        _schema_failure(path, "contexts", "a table", contexts)
+    for name, context in contexts.items():
+        if not isinstance(context, dict):
+            _schema_failure(path, f"contexts.{name}", "a table", context)
+        context_url = context.get("server_url")
+        if not isinstance(context_url, str) or not context_url:
+            _schema_failure(
+                path,
+                f"contexts.{name}.server_url",
+                "a non-empty string",
+                context_url,
+            )
+        for field in ("org_slug", "default_project"):
+            value = context.get(field)
+            if value is not None and not isinstance(value, str):
+                _schema_failure(path, f"contexts.{name}.{field}", "a string", value)
+        insecure = context.get("insecure")
+        if insecure is not None and not isinstance(insecure, bool):
+            _schema_failure(path, f"contexts.{name}.insecure", "a boolean", insecure)
+
+
 def load_config() -> dict[str, Any]:
     """Load config from TOML file.
 
     Returns default config merged with file contents.
     Missing keys get default values.
     """
-    config = _deep_copy(DEFAULT_CONFIG)
+    return _load_config_unlocked(config_path())
 
-    path = config_path()
-    if path.exists():
-        try:
-            with open(path, "rb") as f:
-                file_config = tomllib.load(f)
-            _deep_merge(config, file_config)
-        except (OSError, tomllib.TOMLDecodeError):
-            # If file is missing/corrupted, return defaults
-            pass
 
-    return config
+def _write_config_unlocked(path: Path, config: dict[str, Any]) -> None:
+    """Durably replace a config file without exposing partial TOML."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    validated = _deep_copy(DEFAULT_CONFIG)
+    _deep_merge(validated, config)
+    _validate_config_schema(validated, path)
+    content = tomli_w.dumps(config).encode("utf-8")
+    fd: int | None = None
+    temporary: str | None = None
+    try:
+        fd, temporary = tempfile.mkstemp(
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        )
+        if os.name != "nt":
+            os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as file:
+            fd = None
+            file.write(content)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, path)
+        temporary = None
+        if os.name != "nt":
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+    finally:
+        if fd is not None:
+            os.close(fd)
+        if temporary is not None:
+            with suppress(FileNotFoundError):
+                os.unlink(temporary)
 
 
 def save_config(config: dict[str, Any]) -> None:
-    """Save config to TOML file."""
-    ensure_config_dir()
+    """Atomically replace the complete config under the mutation lock."""
     path = config_path()
+    with _config_file_lock(path):
+        _write_config_unlocked(path, config)
 
-    with open(path, "wb") as f:
-        tomli_w.dump(config, f)
+
+def update_config[Result](mutation: Callable[[dict[str, Any]], Result]) -> Result:
+    """Apply one locked read-modify-write transaction to the CLI config."""
+    path = config_path()
+    with _config_file_lock(path):
+        config = _load_config_unlocked(path)
+        result = mutation(config)
+        _write_config_unlocked(path, config)
+    return result
+
+
+def ensure_config_file() -> bool:
+    """Create the default config once under lock, preserving a concurrent writer."""
+    path = config_path()
+    with _config_file_lock(path):
+        if path.exists():
+            _load_config_unlocked(path)
+            return False
+        _write_config_unlocked(path, _deep_copy(DEFAULT_CONFIG))
+        return True
 
 
 def get(key: str, default: Any = None) -> Any:
@@ -154,9 +333,11 @@ def set_value(key: str, value: Any) -> None:
         set_value("server.url", "http://example.com:3334")
         set_value("defaults.project", "my-project")
     """
-    config = load_config()
-    _set_nested(config, key, value)
-    save_config(config)
+
+    def mutation(config: dict[str, Any]) -> None:
+        _set_nested(config, key, value)
+
+    update_config(mutation)
 
 
 def get_server_url() -> str:
@@ -209,17 +390,6 @@ def _make_path_entry(project_id: str | None, context: str | None) -> str | dict[
     return project_id or ""
 
 
-def _set_path_entry(path: str, project_id: str | None, context: str | None) -> None:
-    normalized = str(Path(path).expanduser().resolve())
-    config = load_config()
-    paths = config.setdefault("paths", {})
-    if not project_id and not context:
-        paths.pop(normalized, None)
-    else:
-        paths[normalized] = _make_path_entry(project_id, context)
-    save_config(config)
-
-
 def get_path_mappings() -> dict[str, str]:
     """Get all path -> project_id mappings (context-only links omitted)."""
     config = load_config()
@@ -258,15 +428,27 @@ def set_path_mapping(path: str, project_id: str, *, context: str | _Unset | None
         context: Context name the project lives on. ``_UNSET`` keeps any existing
             context pin; ``None`` clears it; a name pins project + context together.
     """
-    _, existing_context = get_path_link(path)
-    new_context = existing_context if isinstance(context, _Unset) else context
-    _set_path_entry(path, project_id, new_context)
+    normalized = str(Path(path).expanduser().resolve())
+
+    def mutation(config: dict[str, Any]) -> None:
+        paths = config.setdefault("paths", {})
+        _, existing_context = _path_entry_fields(paths.get(normalized))
+        new_context = existing_context if isinstance(context, _Unset) else context
+        paths[normalized] = _make_path_entry(project_id, new_context)
+
+    update_config(mutation)
 
 
 def set_path_context(path: str, context: str) -> None:
     """Pin a directory tree to a context, preserving any existing project link."""
-    existing_project, _ = get_path_link(path)
-    _set_path_entry(path, existing_project, context)
+    normalized = str(Path(path).expanduser().resolve())
+
+    def mutation(config: dict[str, Any]) -> None:
+        paths = config.setdefault("paths", {})
+        existing_project, _ = _path_entry_fields(paths.get(normalized))
+        paths[normalized] = _make_path_entry(existing_project, context)
+
+    update_config(mutation)
 
 
 def remove_path_context(path: str) -> bool:
@@ -274,11 +456,17 @@ def remove_path_context(path: str) -> bool:
 
     Returns True if a context pin was removed, False if there was none.
     """
-    existing_project, existing_context = get_path_link(path)
-    if not existing_context:
-        return False
-    _set_path_entry(path, existing_project, None)
-    return True
+    normalized = str(Path(path).expanduser().resolve())
+
+    def mutation(config: dict[str, Any]) -> bool:
+        paths = config.setdefault("paths", {})
+        existing_project, existing_context = _path_entry_fields(paths.get(normalized))
+        if not existing_context:
+            return False
+        paths[normalized] = _make_path_entry(existing_project, None)
+        return True
+
+    return update_config(mutation)
 
 
 def remove_path_mapping(path: str) -> bool:
@@ -289,13 +477,14 @@ def remove_path_mapping(path: str) -> bool:
     """
     normalized = str(Path(path).expanduser().resolve())
 
-    config = load_config()
-    paths = config.get("paths", {})
-    if normalized in paths:
+    def mutation(config: dict[str, Any]) -> bool:
+        paths = config.setdefault("paths", {})
+        if normalized not in paths:
+            return False
         del paths[normalized]
-        save_config(config)
         return True
-    return False
+
+    return update_config(mutation)
 
 
 def _resolve_worktree_main_repo(start_path: Path) -> Path | None:
@@ -614,12 +803,6 @@ def create_context(
     Raises:
         ValueError: If context with this name already exists.
     """
-    config = load_config()
-    contexts = config.get("contexts", {})
-
-    if name in contexts:
-        raise ValueError(f"Context '{name}' already exists")
-
     context = Context(
         name=name,
         server_url=server_url,
@@ -628,14 +811,16 @@ def create_context(
         insecure=insecure,
     )
 
-    contexts[name] = context.to_dict()
-    config["contexts"] = contexts
-    save_config(config)
+    def mutation(config: dict[str, Any]) -> Context:
+        contexts = config.setdefault("contexts", {})
+        if name in contexts:
+            raise ValueError(f"Context '{name}' already exists")
+        contexts[name] = context.to_dict()
+        if set_active:
+            config["active_context"] = name
+        return context
 
-    if set_active:
-        set_active_context(name)
-
-    return context
+    return update_config(mutation)
 
 
 def update_context(
@@ -660,27 +845,23 @@ def update_context(
     Raises:
         ValueError: If context doesn't exist.
     """
-    config = load_config()
-    contexts = config.get("contexts", {})
 
-    if name not in contexts:
-        raise ValueError(f"Context '{name}' not found")
+    def mutation(config: dict[str, Any]) -> Context:
+        contexts = config.setdefault("contexts", {})
+        if name not in contexts:
+            raise ValueError(f"Context '{name}' not found")
+        ctx_data = contexts[name]
+        if server_url is not None:
+            ctx_data["server_url"] = server_url
+        if not isinstance(org_slug, _Unset):
+            ctx_data["org_slug"] = org_slug or ""
+        if not isinstance(default_project, _Unset):
+            ctx_data["default_project"] = default_project or ""
+        if insecure is not None:
+            ctx_data["insecure"] = insecure
+        return Context.from_dict(name, ctx_data)
 
-    ctx_data = contexts[name]
-
-    if server_url is not None:
-        ctx_data["server_url"] = server_url
-    if not isinstance(org_slug, _Unset):
-        ctx_data["org_slug"] = org_slug or ""
-    if not isinstance(default_project, _Unset):
-        ctx_data["default_project"] = default_project or ""
-    if insecure is not None:
-        ctx_data["insecure"] = insecure
-
-    config["contexts"] = contexts
-    save_config(config)
-
-    return Context.from_dict(name, ctx_data)
+    return update_config(mutation)
 
 
 def delete_context(name: str) -> bool:
@@ -692,21 +873,17 @@ def delete_context(name: str) -> bool:
     Returns:
         True if deleted, False if not found.
     """
-    config = load_config()
-    contexts = config.get("contexts", {})
 
-    if name not in contexts:
-        return False
+    def mutation(config: dict[str, Any]) -> bool:
+        contexts = config.setdefault("contexts", {})
+        if name not in contexts:
+            return False
+        del contexts[name]
+        if config.get("active_context") == name:
+            config["active_context"] = ""
+        return True
 
-    del contexts[name]
-    config["contexts"] = contexts
-
-    # Clear active context if it was the deleted one
-    if config.get("active_context") == name:
-        config["active_context"] = ""
-
-    save_config(config)
-    return True
+    return update_config(mutation)
 
 
 class UnknownContextError(Exception):

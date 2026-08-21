@@ -145,9 +145,8 @@ def _load_config_context() -> tuple[list[DoctorCheck], DoctorContext | None]:
         ], None
 
     try:
-        with open(path, "rb") as stream:
-            raw_config = tomllib.load(stream)
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+        config = config_store.load_config()
+    except (OSError, config_store.ConfigStoreError) as exc:
         return [
             DoctorCheck(
                 "config",
@@ -157,9 +156,8 @@ def _load_config_context() -> tuple[list[DoctorCheck], DoctorContext | None]:
             )
         ], None
 
-    config = config_store.load_config()
     active_name = str(config.get("active_context") or "").strip()
-    contexts = raw_config.get("contexts", {})
+    contexts = config.get("contexts", {})
     checks: list[DoctorCheck] = [DoctorCheck("config", "pass", f"Config file is readable: {path}")]
 
     if active_name:

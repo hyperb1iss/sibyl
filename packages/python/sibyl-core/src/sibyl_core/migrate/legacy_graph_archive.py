@@ -8,7 +8,7 @@ from typing import Any
 
 from surrealdb import RecordID
 
-from sibyl_core.services.graph import normalize_records
+from sibyl_core.services.graph_common import normalize_graph_records as normalize_records
 
 ARCHIVE_GRAPH_TABLES = ("episode",)
 ARCHIVE_GRAPH_EDGES = ("mentions",)

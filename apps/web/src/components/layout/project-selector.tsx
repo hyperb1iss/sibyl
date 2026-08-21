@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Folder, X } from '@/components/ui/icons';
-import { useProjects } from '@/lib/hooks';
+import { useProjects } from '@/lib/hooks/work-items';
 import { useProjectContext } from '@/lib/project-context';
 
 /**

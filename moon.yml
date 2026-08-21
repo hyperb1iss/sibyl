@@ -4,6 +4,9 @@ $schema: https://moonrepo.dev/schemas/project.json
 language: other
 layer: configuration
 
+env:
+  PYTEST_ADDOPTS: "${PYTEST_ADDOPTS} -p sibyl_core.pytest_isolation"
+
 tasks:
   # ==========================================================================
   # Development

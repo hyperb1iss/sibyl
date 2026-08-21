@@ -23,6 +23,10 @@ from sibyl_core.memory_pipeline.retrieval_keys import (
     retrieval_key_match_form,
 )
 from sibyl_core.models.context import ContextFacet
+from sibyl_core.retrieval import _search_candidates as candidate_module
+from sibyl_core.retrieval import _search_fusion as fusion_module
+from sibyl_core.retrieval import _search_plan as plan_module
+from sibyl_core.retrieval import _search_sources as source_module
 from sibyl_core.retrieval import search as search_module
 from sibyl_core.retrieval.identifier_query import identifier_probe_tokens
 from sibyl_core.retrieval.search import RetrievalSignal, build_context_retrieval_plan
@@ -145,17 +149,17 @@ async def test_arm_returns_the_expected_memory(case: dict[str, Any]) -> None:
     plan = _plan(case["query"])
     client = _KeyIndexClient(_row_for(case))
 
-    candidates = await search_module._exact_key_candidates(
+    candidates = await source_module._exact_key_candidates(
         client=client,
         plan=plan,
-        search_filter=search_module._search_filter_for_plan(plan),
+        search_filter=plan_module._search_filter_for_plan(plan),
         limit=plan.candidate_limits.exact_key,
         probe_tokens=identifier_probe_tokens(case["query"]),
     )
 
     assert [candidate.id for candidate in candidates] == [f"note_{case['id']}"]
     assert candidates[0].retrieval_signals == (RetrievalSignal.EXACT_KEY.value,)
-    assert search_module._candidate_allowed(
+    assert candidate_module._candidate_allowed(
         candidates[0],
         plan=plan,
         requested_types=set(),
@@ -172,14 +176,14 @@ async def test_expected_memory_survives_fusion_against_a_lexical_rival(
 
     plan = _plan(case["query"])
     client = _KeyIndexClient(_row_for(case))
-    exact = await search_module._exact_key_candidates(
+    exact = await source_module._exact_key_candidates(
         client=client,
         plan=plan,
-        search_filter=search_module._search_filter_for_plan(plan),
+        search_filter=plan_module._search_filter_for_plan(plan),
         limit=plan.candidate_limits.exact_key,
         probe_tokens=identifier_probe_tokens(case["query"]),
     )
-    rival = search_module._candidate_from_node_record(
+    rival = candidate_module._candidate_from_node_record(
         {
             "uuid": "lexical_rival",
             "name": "Something the query words happen to touch",
@@ -192,7 +196,7 @@ async def test_expected_memory_survives_fusion_against_a_lexical_rival(
         score=1.0,
     )
 
-    ranked = search_module._fuse_candidates(
+    ranked = fusion_module._fuse_candidates(
         [
             (RetrievalSignal.NODE_FULLTEXT, [rival]),
             (RetrievalSignal.EXACT_KEY, exact),
@@ -211,10 +215,10 @@ async def test_inert_case_issues_no_read(case: dict[str, Any]) -> None:
     plan = _plan(case["query"])
     client = _KeyIndexClient({"uuid": "must-not-be-read"})
 
-    candidates = await search_module._exact_key_candidates(
+    candidates = await source_module._exact_key_candidates(
         client=client,
         plan=plan,
-        search_filter=search_module._search_filter_for_plan(plan),
+        search_filter=plan_module._search_filter_for_plan(plan),
         limit=plan.candidate_limits.exact_key,
         probe_tokens=identifier_probe_tokens(case["query"]),
     )

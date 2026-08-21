@@ -2,7 +2,7 @@
 
 import { CheckSquare, Loader2 } from 'lucide-react';
 import { useState } from 'react';
-import { useCreateEntity } from '@/lib/hooks';
+import { useCreateEntity } from '@/lib/hooks/graph';
 
 interface TaskStepProps {
   projectId: string | null;

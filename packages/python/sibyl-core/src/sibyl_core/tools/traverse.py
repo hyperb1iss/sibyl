@@ -34,11 +34,9 @@ from sibyl_core.projection.passages import (
     PASSAGE_COVERS_PARENT_KEY,
     spans_cover_parent,
 )
+from sibyl_core.retrieval._search_expansion import expand_neighbor_records
+from sibyl_core.retrieval._search_plan import DEFAULT_CANDIDATES_PER_SIGNAL
 from sibyl_core.retrieval.operational_sources import PASSAGE_WINDOW_UNITS
-from sibyl_core.retrieval.search import (
-    DEFAULT_CANDIDATES_PER_SIGNAL,
-    expand_neighbor_records,
-)
 from sibyl_core.tools.helpers import ScopeGuard, memory_scope_guard
 from sibyl_core.tools.responses import (
     ExpandNeighborsResponse,
@@ -95,7 +93,7 @@ _TRAVERSAL_ROUND_BUDGET = 3
 
 
 async def get_graph_runtime(group_id: str) -> Any:
-    from sibyl_core.services.graph import get_surreal_graph_runtime
+    from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
 
     return await get_surreal_graph_runtime(group_id)
 
@@ -164,7 +162,7 @@ def _row_scope_entity(row: Mapping[str, object]) -> Entity:
     write that sets only the column rather than a repair of a known divergence:
     it can only add a scope where metadata had none, never relax one.
     """
-    from sibyl_core.services.graph import entity_from_surreal_row
+    from sibyl_core.services.graph_records import entity_from_surreal_row
 
     entity = entity_from_surreal_row(row)
     column_scope = row.get("memory_scope")

@@ -198,7 +198,9 @@ def _extract_indented_block(path: Path, marker: str) -> tuple[int, str]:
 
 
 def _source_semantics() -> dict[str, Any]:
-    graph_source = ROOT / "packages/python/sibyl-core/src/sibyl_core/services/graph.py"
+    graph_source = (
+        ROOT / "packages/python/sibyl-core/src/sibyl_core/services/graph_entity_search.py"
+    )
     context_tool = ROOT / "packages/python/sibyl-core/src/sibyl_core/tools/context.py"
     graph_start, graph_search = _extract_indented_block(graph_source, "    async def search(")
     _fulltext_start, graph_fulltext_search = _extract_indented_block(

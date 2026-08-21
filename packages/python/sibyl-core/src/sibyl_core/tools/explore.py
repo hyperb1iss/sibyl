@@ -32,7 +32,7 @@ __all__ = ["DependencyNode", "explore"]
 
 
 async def get_graph_runtime(group_id: str):
-    from sibyl_core.services.graph import get_surreal_graph_runtime
+    from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
 
     return await get_surreal_graph_runtime(group_id)
 

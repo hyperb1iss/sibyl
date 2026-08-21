@@ -15,7 +15,7 @@ import {
   Trash2,
   Users,
 } from '@/components/ui/icons';
-import type { Entity } from '@/lib/api';
+import type { Entity } from '@/lib/api/graph';
 import { formatDateTime } from '@/lib/constants/formatting';
 import type { ProjectOption } from './task-detail-types';
 

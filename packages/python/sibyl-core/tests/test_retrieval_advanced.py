@@ -19,7 +19,6 @@ import pytest
 import sibyl_core.retrieval.dedup as dedup_module
 import sibyl_core.retrieval.hybrid as hybrid_module
 import sibyl_core.retrieval.query_ranking as query_ranking_module
-import sibyl_core.retrieval.search as search_module
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
 from sibyl_core.models.context import ContextFacet
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
@@ -28,6 +27,9 @@ from sibyl_core.query_anchors import (
     keyword_tokens_from_text,
     sense_tokens_from_text,
 )
+from sibyl_core.retrieval import _search_candidates as candidate_module
+from sibyl_core.retrieval import _search_fusion as fusion_module
+from sibyl_core.retrieval import _search_lifecycle as lifecycle_module
 from sibyl_core.retrieval.candidates import CandidateKind, RetrievalCandidate
 from sibyl_core.retrieval.dedup import (
     DedupConfig,
@@ -357,7 +359,7 @@ def test_native_candidate_ranking_applies_usage_aware_decay() -> None:
         weights=RetrievalWeights(freshness_boost_cap=1.0),
     )
 
-    ranked = search_module._rank_fused_candidates(
+    ranked = fusion_module._rank_fused_candidates(
         [(RetrievalSignal.NODE_FULLTEXT, [uncited, cited])],
         plan=plan,
         limit=2,
@@ -391,7 +393,7 @@ def test_native_candidate_ranking_preserves_explicit_temporal_target() -> None:
         weights=RetrievalWeights(freshness_boost_cap=1.0),
     )
 
-    ranked = search_module._rank_fused_candidates(
+    ranked = fusion_module._rank_fused_candidates(
         [(RetrievalSignal.NODE_FULLTEXT, [old_target_match])],
         plan=plan,
         limit=1,
@@ -416,7 +418,7 @@ def test_episode_record_candidates_keep_usage_metadata() -> None:
         "citation_count": 1,
     }
 
-    candidate = search_module._candidate_from_episode_record(
+    candidate = candidate_module._candidate_from_episode_record(
         row,
         signal=RetrievalSignal.EPISODE_FULLTEXT,
         score=1.0,
@@ -2798,7 +2800,7 @@ class TestGraphTraversal:
         )
         superseded_lookup = AsyncMock(return_value=({"edge_retired"}, 1))
         monkeypatch.setattr(
-            search_module,
+            lifecycle_module,
             "_superseded_candidate_uuids",
             superseded_lookup,
         )
@@ -2836,7 +2838,7 @@ class TestGraphTraversal:
         edge_only_retired = make_entity_for_test("edge_only_retired")
         superseded_lookup = AsyncMock(side_effect=RuntimeError("surreal is unhappy"))
         monkeypatch.setattr(
-            search_module,
+            lifecycle_module,
             "_superseded_candidate_uuids",
             superseded_lookup,
         )

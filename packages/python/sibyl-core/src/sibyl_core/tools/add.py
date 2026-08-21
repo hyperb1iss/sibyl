@@ -2,6 +2,7 @@
 
 import inspect
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -332,6 +333,211 @@ def _projection_receipt(
             "entity_ids": [entity_id],
         }
     return receipt
+
+
+@dataclass(frozen=True, slots=True)
+class _SynchronousWrite:
+    entity_manager: Any
+    relationship_manager: Any
+    entity: Entity
+    organization_id: str
+    relationships: list[dict[str, Any]]
+    title: str
+    content: str
+    technologies: Sequence[str]
+    category: str | None
+    generate_embeddings: bool
+    structure: MemoryStructure
+    principal_id: str | None
+    memory_scope: str | None
+    scope_key: str | None
+    project: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _SynchronousPersistenceResult:
+    created_id: str
+    projection_result: Any
+    passage_result: Any
+    rehearsal_receipt: dict[str, Any] | None
+    embedding_backfill: dict[str, Any]
+
+
+async def _discover_auto_relationships(
+    write: _SynchronousWrite,
+    created_id: str,
+) -> list[dict[str, Any]]:
+    try:
+        auto_link_results = await _auto_discover_links(
+            entity_manager=write.entity_manager,
+            title=write.title,
+            content=write.content,
+            technologies=list(write.technologies),
+            category=write.category,
+            exclude_id=created_id,
+            threshold=0.75,
+            limit=5,
+        )
+        relationships = [
+            {
+                "id": f"rel_{created_id}_references_{linked_id}",
+                "source_id": created_id,
+                "target_id": linked_id,
+                "type": RelationshipType.RELATED_TO.value,
+                "metadata": {
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "auto_linked": True,
+                    "similarity_score": score,
+                },
+            }
+            for linked_id, score in auto_link_results
+        ]
+        await _create_relationships_bulk(
+            write.relationship_manager,
+            relationships,
+            "auto_link_partial_failure",
+            generate_embeddings=write.generate_embeddings,
+        )
+        return relationships
+    except Exception as exc:
+        log.warning("auto_link_search_failed", error=str(exc))
+        return []
+
+
+async def _project_synchronous_write(
+    write: _SynchronousWrite,
+    created_id: str,
+) -> tuple[Any, Any]:
+    projection_result = await project_memory_entity(
+        entity_manager=write.entity_manager,
+        relationship_manager=write.relationship_manager,
+        source=write.entity,
+        group_id=write.organization_id,
+        created_source_id=created_id,
+        generate_embeddings=write.generate_embeddings,
+    )
+    if projection_result.errors:
+        log.warning(
+            "add_projection_failed",
+            entity_id=created_id,
+            extracted=projection_result.extracted,
+            projected_entities=projection_result.projected_entities,
+            relationships=projection_result.relationships,
+            projection_state=projection_result.projection_state,
+            errors=projection_result.errors,
+        )
+    elif projection_result.extracted:
+        log.info(
+            "add_projection_complete",
+            entity_id=created_id,
+            extracted=projection_result.extracted,
+            projected_entities=projection_result.projected_entities,
+            relationships=projection_result.relationships,
+            projection_state=projection_result.projection_state,
+            errors=len(projection_result.errors),
+        )
+
+    # Passage edges target the parent, so projection must follow its write.
+    passage_result = await project_entity_passages(
+        entity_manager=write.entity_manager,
+        relationship_manager=write.relationship_manager,
+        source=write.entity,
+        group_id=write.organization_id,
+        created_source_id=created_id,
+        generate_embeddings=write.generate_embeddings,
+    )
+    if passage_result.errors:
+        log.warning(
+            "add_passage_projection_failed",
+            entity_id=created_id,
+            passages=passage_result.passages,
+            relationships=passage_result.relationships,
+            errors=passage_result.errors,
+        )
+    elif passage_result.passages:
+        log.info(
+            "add_passage_projection_complete",
+            entity_id=created_id,
+            passages=passage_result.passages,
+            relationships=passage_result.relationships,
+        )
+    return projection_result, passage_result
+
+
+async def _backfill_synchronous_embeddings(
+    write: _SynchronousWrite,
+    auto_relationships: list[dict[str, Any]],
+    projection_result: Any,
+    passage_result: Any,
+) -> dict[str, Any]:
+    if write.generate_embeddings:
+        return {}
+
+    projection_entities = list(getattr(projection_result, "created_projected_entities", ()))
+    projection_relationships = [
+        relationship.model_dump(mode="json")
+        for relationship in getattr(
+            projection_result,
+            "created_projection_relationships",
+            (),
+        )
+    ]
+    passage_relationships = [
+        relationship.model_dump(mode="json")
+        for relationship in passage_result.created_relationships
+    ]
+    return await _enqueue_embedding_backfill(
+        [write.entity, *projection_entities, *passage_result.created_passages],
+        write.organization_id,
+        write.relationships + auto_relationships + projection_relationships + passage_relationships,
+    )
+
+
+async def _persist_synchronously(
+    write: _SynchronousWrite,
+) -> _SynchronousPersistenceResult:
+    """Persist one add request when the caller must wait for durable storage."""
+    created_id = await _create_entity_record(
+        write.entity_manager,
+        write.entity,
+        generate_embeddings=write.generate_embeddings,
+        organization_id=write.organization_id,
+    )
+    await _create_relationships_bulk(
+        write.relationship_manager,
+        write.relationships,
+        "relationship_creation_partial_failure",
+        generate_embeddings=write.generate_embeddings,
+    )
+    auto_relationships = await _discover_auto_relationships(write, created_id)
+    projection_result, passage_result = await _project_synchronous_write(write, created_id)
+
+    rehearsal_receipt = await _rehearse_write(
+        entity_manager=write.entity_manager,
+        entity=write.entity,
+        created_id=created_id,
+        org_id=write.organization_id,
+        structure=write.structure,
+        passage_ids=[passage.id for passage in passage_result.created_passages],
+        principal_id=write.principal_id,
+        memory_scope=write.memory_scope,
+        scope_key=write.scope_key,
+        project=write.project,
+    )
+    embedding_backfill = await _backfill_synchronous_embeddings(
+        write,
+        auto_relationships,
+        projection_result,
+        passage_result,
+    )
+
+    return _SynchronousPersistenceResult(
+        created_id=created_id,
+        projection_result=projection_result,
+        passage_result=passage_result,
+        rehearsal_receipt=rehearsal_receipt,
+        embedding_backfill=embedding_backfill,
+    )
 
 
 async def add(
@@ -875,128 +1081,27 @@ async def add(
                 allowed_memory_scope_keys=allowed_memory_scope_keys,
             )
         )
+        synchronous_write = _SynchronousWrite(
+            entity_manager=entity_manager,
+            relationship_manager=relationship_manager,
+            entity=entity,
+            organization_id=org_id,
+            relationships=relationships_to_create,
+            title=title,
+            content=content,
+            technologies=technologies or languages or [],
+            category=category,
+            generate_embeddings=generate_embeddings,
+            structure=structure,
+            principal_id=principal_id,
+            memory_scope=memory_scope,
+            scope_key=scope_key,
+            project=project,
+        )
 
         # Sync mode: create entity + relationships immediately via Surreal
         if sync:
-            # Use create_direct() for structured entities and create() for episode-compatible managers.
-            created_id = await _create_entity_record(
-                entity_manager,
-                entity,
-                generate_embeddings=generate_embeddings,
-                organization_id=org_id,
-            )
-
-            await _create_relationships_bulk(
-                relationship_manager,
-                relationships_to_create,
-                "relationship_creation_partial_failure",
-                generate_embeddings=generate_embeddings,
-            )
-
-            # Auto-link to related patterns/rules/templates in sync mode
-            auto_relationships: list[dict[str, Any]] = []
-            try:
-                auto_link_results = await _auto_discover_links(
-                    entity_manager=entity_manager,
-                    title=title,
-                    content=content,
-                    technologies=technologies or languages or [],
-                    category=category,
-                    exclude_id=created_id,
-                    threshold=0.75,
-                    limit=5,
-                )
-                auto_relationships = [
-                    {
-                        "id": f"rel_{created_id}_references_{linked_id}",
-                        "source_id": created_id,
-                        "target_id": linked_id,
-                        "type": RelationshipType.RELATED_TO.value,
-                        "metadata": {
-                            "created_at": datetime.now(UTC).isoformat(),
-                            "auto_linked": True,
-                            "similarity_score": score,
-                        },
-                    }
-                    for linked_id, score in auto_link_results
-                ]
-                await _create_relationships_bulk(
-                    relationship_manager,
-                    auto_relationships,
-                    "auto_link_partial_failure",
-                    generate_embeddings=generate_embeddings,
-                )
-            except Exception as e:
-                log.warning("auto_link_search_failed", error=str(e))
-
-            projection_result = await project_memory_entity(
-                entity_manager=entity_manager,
-                relationship_manager=relationship_manager,
-                source=entity,
-                group_id=org_id,
-                created_source_id=created_id,
-                generate_embeddings=generate_embeddings,
-            )
-            if projection_result.errors:
-                log.warning(
-                    "add_projection_failed",
-                    entity_id=created_id,
-                    extracted=projection_result.extracted,
-                    projected_entities=projection_result.projected_entities,
-                    relationships=projection_result.relationships,
-                    projection_state=projection_result.projection_state,
-                    errors=projection_result.errors,
-                )
-            elif projection_result.extracted:
-                log.info(
-                    "add_projection_complete",
-                    entity_id=created_id,
-                    extracted=projection_result.extracted,
-                    projected_entities=projection_result.projected_entities,
-                    relationships=projection_result.relationships,
-                    projection_state=projection_result.projection_state,
-                    errors=len(projection_result.errors),
-                )
-
-            # Ordered after the parent write on purpose: a PART_OF edge whose
-            # target does not exist yet is silently dropped and never heals.
-            passage_result = await project_entity_passages(
-                entity_manager=entity_manager,
-                relationship_manager=relationship_manager,
-                source=entity,
-                group_id=org_id,
-                created_source_id=created_id,
-                generate_embeddings=generate_embeddings,
-            )
-            if passage_result.errors:
-                log.warning(
-                    "add_passage_projection_failed",
-                    entity_id=created_id,
-                    passages=passage_result.passages,
-                    relationships=passage_result.relationships,
-                    errors=passage_result.errors,
-                )
-            elif passage_result.passages:
-                log.info(
-                    "add_passage_projection_complete",
-                    entity_id=created_id,
-                    passages=passage_result.passages,
-                    relationships=passage_result.relationships,
-                )
-
-            # After the passages exist, so a probe that lands on a span counts.
-            rehearsal_receipt = await _rehearse_write(
-                entity_manager=entity_manager,
-                entity=entity,
-                created_id=created_id,
-                org_id=org_id,
-                structure=structure,
-                passage_ids=[passage.id for passage in passage_result.created_passages],
-                principal_id=principal_id,
-                memory_scope=memory_scope,
-                scope_key=scope_key,
-                project=project,
-            )
+            persisted = await _persist_synchronously(synchronous_write)
 
             message = f"Added: {title}"
             if relationships_to_create:
@@ -1008,12 +1113,12 @@ async def add(
                     "status": "complete",
                     "mode": "sync",
                     "job_ids": [],
-                    "entity_ids": [created_id],
+                    "entity_ids": [persisted.created_id],
                 },
                 "memory_projection": _projection_receipt(
-                    projection_result,
-                    passage_result,
-                    entity_id=created_id,
+                    persisted.projection_result,
+                    persisted.passage_result,
+                    entity_id=persisted.created_id,
                 ),
                 "memory_extraction": {
                     "status": "skipped",
@@ -1021,41 +1126,16 @@ async def add(
                     "reason": "synchronous_write",
                 },
             }
-            if not generate_embeddings:
-                projection_entities = list(
-                    getattr(projection_result, "created_projected_entities", ())
-                )
-                projection_relationships = [
-                    relationship.model_dump(mode="json")
-                    for relationship in getattr(
-                        projection_result,
-                        "created_projection_relationships",
-                        (),
-                    )
-                ]
-                passage_relationships = [
-                    relationship.model_dump(mode="json")
-                    for relationship in passage_result.created_relationships
-                ]
-                background_jobs.update(
-                    await _enqueue_embedding_backfill(
-                        [entity, *projection_entities, *passage_result.created_passages],
-                        org_id,
-                        relationships_to_create
-                        + auto_relationships
-                        + projection_relationships
-                        + passage_relationships,
-                    )
-                )
+            background_jobs.update(persisted.embedding_backfill)
 
             return AddResponse(
                 success=True,
-                id=created_id,
+                id=persisted.created_id,
                 message=message,
                 timestamp=datetime.now(UTC),
                 conflicts=conflicts,
                 background_jobs=background_jobs,
-                probe_rehearsal=rehearsal_receipt,
+                probe_rehearsal=persisted.rehearsal_receipt,
             )
 
         # Async mode (default): queue arq job, return immediately
@@ -1079,69 +1159,7 @@ async def add(
         except Exception as e:
             # If arq queue fails, fall back to sync creation
             log.warning("arq_queue_failed_falling_back_to_sync", error=str(e))
-            # Use create_direct() for structured entities and create() for episode-compatible managers.
-            created_id = await _create_entity_record(
-                entity_manager,
-                entity,
-                generate_embeddings=generate_embeddings,
-                organization_id=org_id,
-            )
-
-            await _create_relationships_bulk(
-                relationship_manager,
-                relationships_to_create,
-                "relationship_creation_partial_failure",
-                generate_embeddings=generate_embeddings,
-            )
-
-            projection_result = await project_memory_entity(
-                entity_manager=entity_manager,
-                relationship_manager=relationship_manager,
-                source=entity,
-                group_id=org_id,
-                created_source_id=created_id,
-                generate_embeddings=generate_embeddings,
-            )
-            if projection_result.errors:
-                log.warning(
-                    "add_projection_failed",
-                    entity_id=created_id,
-                    extracted=projection_result.extracted,
-                    projected_entities=projection_result.projected_entities,
-                    relationships=projection_result.relationships,
-                    projection_state=projection_result.projection_state,
-                    errors=projection_result.errors,
-                )
-            elif projection_result.extracted:
-                log.info(
-                    "add_projection_complete",
-                    entity_id=created_id,
-                    extracted=projection_result.extracted,
-                    projected_entities=projection_result.projected_entities,
-                    relationships=projection_result.relationships,
-                    projection_state=projection_result.projection_state,
-                    errors=len(projection_result.errors),
-                )
-
-            # Same ordering as the sync branch: the parent exists, so the edges
-            # have something to point at. Without this the fallback stored a
-            # memory with no spans beside it, agent-planned or otherwise, and
-            # nothing later would notice.
-            fallback_passages = await project_entity_passages(
-                entity_manager=entity_manager,
-                relationship_manager=relationship_manager,
-                source=entity,
-                group_id=org_id,
-                created_source_id=created_id,
-                generate_embeddings=generate_embeddings,
-            )
-            if fallback_passages.errors:
-                log.warning(
-                    "add_fallback_passage_projection_failed",
-                    entity_id=created_id,
-                    passages=fallback_passages.passages,
-                    errors=fallback_passages.errors,
-                )
+            persisted = await _persist_synchronously(synchronous_write)
 
             fallback_message = f"Added (sync fallback): {title}"
             if conflicts:
@@ -1151,14 +1169,14 @@ async def add(
                     "status": "complete",
                     "mode": "sync_fallback",
                     "job_ids": [],
-                    "entity_ids": [created_id],
+                    "entity_ids": [persisted.created_id],
                     "reason": "queue_unavailable",
                     "error_type": type(e).__name__,
                 },
                 "memory_projection": _projection_receipt(
-                    projection_result,
-                    fallback_passages,
-                    entity_id=created_id,
+                    persisted.projection_result,
+                    persisted.passage_result,
+                    entity_id=persisted.created_id,
                 ),
                 "memory_extraction": {
                     "status": "skipped",
@@ -1166,32 +1184,15 @@ async def add(
                     "reason": "synchronous_fallback",
                 },
             }
-            if not generate_embeddings:
-                projection_entities = list(
-                    getattr(projection_result, "created_projected_entities", ())
-                )
-                projection_relationships = [
-                    relationship.model_dump(mode="json")
-                    for relationship in getattr(
-                        projection_result,
-                        "created_projection_relationships",
-                        (),
-                    )
-                ]
-                background_jobs.update(
-                    await _enqueue_embedding_backfill(
-                        [entity, *projection_entities],
-                        org_id,
-                        relationships_to_create + projection_relationships,
-                    )
-                )
+            background_jobs.update(persisted.embedding_backfill)
             return AddResponse(
                 success=True,
-                id=created_id,
+                id=persisted.created_id,
                 message=fallback_message,
                 timestamp=datetime.now(UTC),
                 conflicts=conflicts,
                 background_jobs=background_jobs,
+                probe_rehearsal=persisted.rehearsal_receipt,
             )
 
         # Return immediately with the entity ID - entity will be created in background

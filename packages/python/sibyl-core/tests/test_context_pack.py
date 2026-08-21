@@ -1031,7 +1031,7 @@ async def test_compile_context_native_ranks_agent_diary_by_relevance(
 ) -> None:
     from datetime import UTC, datetime
 
-    import sibyl_core.retrieval.search as search_module
+    import sibyl_core.retrieval._search_database as database_module
     from sibyl_core.services.surreal_content import RawMemory
 
     class EmptyNativeClient:
@@ -1078,7 +1078,7 @@ async def test_compile_context_native_ranks_agent_diary_by_relevance(
             ]
         return []
 
-    monkeypatch.setattr(search_module, "get_surreal_graph_runtime", fake_native_runtime)
+    monkeypatch.setattr(database_module, "get_surreal_graph_runtime", fake_native_runtime)
 
     pack = await compile_context(
         "What should Nova recall from the diary for delegated handoff?",

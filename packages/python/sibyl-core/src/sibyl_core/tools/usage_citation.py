@@ -10,7 +10,7 @@ from typing import Any
 
 import structlog
 
-from sibyl_core.services.graph import get_surreal_graph_client
+from sibyl_core.services.graph_client import get_surreal_graph_client
 from sibyl_core.services.surreal_content import get_shared_surreal_content_client
 from sibyl_core.services.usage import (
     MemoryUsageEvent,
