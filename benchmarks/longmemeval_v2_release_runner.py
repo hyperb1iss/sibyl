@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -10,6 +9,7 @@ from typing import Any
 from benchmarks import longmemeval_v2_release_evidence as evidence
 from benchmarks import longmemeval_v2_release_io as release_io
 from benchmarks import longmemeval_v2_release_state as state
+from benchmarks.longmemeval_v2_release_command import invoke_command as _invoke_command
 from benchmarks.longmemeval_v2_release_contract import MAX_WORKERS_CAP
 from benchmarks.longmemeval_v2_release_inputs import (
     DOMAINS,
@@ -43,43 +43,6 @@ EXIT_KEYS = frozenset(
 
 def _run_log_path(plan: dict[str, Any], run: dict[str, Any], domain: str, phase: str) -> Path:
     return Path(plan["output_root"]) / "logs" / phase / run["arm_id"] / f"{domain}.jsonl"
-
-
-def _invoke_command(
-    command: list[str],
-    *,
-    log_path: Path,
-    secrets: tuple[str, ...],
-) -> int:
-    state.append_log(
-        log_path,
-        {
-            "event": "start",
-            "recorded_at": state.now(),
-            "command_sha256": rig.canonical_sha256(command),
-        },
-    )
-    process = subprocess.Popen(  # noqa: S603
-        command,
-        cwd=ROOT,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    assert process.stdout is not None
-    for line in process.stdout:
-        state.append_log(
-            log_path,
-            {"event": "output", "text": state.redact(line.rstrip(), secrets=secrets)},
-        )
-    returncode = process.wait()
-    state.append_log(
-        log_path,
-        {"event": "exit", "recorded_at": state.now(), "returncode": returncode},
-    )
-    return returncode
 
 
 def _exit_path(plan: dict[str, Any], run: dict[str, Any], domain: str) -> Path:
@@ -130,7 +93,7 @@ def _run_log_binding(plan: dict[str, Any], run: dict[str, Any], domain: str) -> 
     )
 
 
-def _require_completed_exit(
+def require_completed_exit(
     plan: dict[str, Any],
     run: dict[str, Any],
     domain: str,
@@ -179,7 +142,7 @@ def _existing_domains(
                 continue
             if fresh or not output_dir.is_dir() or not exit_path.is_file() or not run_log.is_file():
                 raise StagePlanError(f"partial domain output requires a fresh root: {key}")
-            completed[key] = _require_completed_exit(plan, run, domain)
+            completed[key] = require_completed_exit(plan, run, domain)
             resumed.append(key)
 
 
@@ -262,7 +225,7 @@ def _require_command_success(returncode: int, *, name: str) -> None:
         raise StagePlanError(f"{name} exited {returncode}")
 
 
-def _require_arm_costs(
+def require_arm_costs(
     plan: dict[str, Any], runs: list[dict[str, Any]], costs: dict[str, float]
 ) -> None:
     for run in runs:
@@ -284,7 +247,7 @@ def _require_worker_count(plan: dict[str, Any], max_workers: int) -> None:
         raise StagePlanError("release runner workers exceed the sealed stage cap")
 
 
-def _require_executed_status(
+def require_executed_status(
     prior_status: dict[str, Any],
     *,
     runs: list[dict[str, Any]],
@@ -319,11 +282,11 @@ def _require_prior_domains(plan: dict[str, Any], costs: dict[str, float]) -> Non
     for run in plan["runs"]:
         for domain in DOMAINS:
             key = f"{run['arm_id']}:{domain}"
-            if key in costs and _require_completed_exit(plan, run, domain) != costs[key]:
+            if key in costs and require_completed_exit(plan, run, domain) != costs[key]:
                 raise StagePlanError("prior completed domain cost changed")
 
 
-def _require_planning_barrier(plan: dict[str, Any], *, secrets: tuple[str, ...]) -> dict[str, Any]:
+def require_planning_barrier(plan: dict[str, Any], *, secrets: tuple[str, ...]) -> dict[str, Any]:
     bindings: dict[str, Any] = {}
     for run in plan["runs"]:
         for domain in DOMAINS:
@@ -361,7 +324,7 @@ def _execute_wave(
     failures: list[dict[str, Any]] = []
     successes: list[tuple[dict[str, Any], str, float, dict[str, Any], str]] = []
     _require_prior_domains(plan, costs)
-    planning = _require_planning_barrier(plan, secrets=secrets)
+    planning = require_planning_barrier(plan, secrets=secrets)
     control = state.stage_control_snapshot(plan)
     with ThreadPoolExecutor(max_workers=min(max_workers, len(pending))) as executor:
         futures = {
@@ -377,7 +340,7 @@ def _execute_wave(
                 successes.append((run, domain, cost, artifacts, started_at))
     state.require_stage_control(plan, control)
     _require_prior_domains(plan, costs)
-    if _require_planning_barrier(plan, secrets=secrets) != planning:
+    if require_planning_barrier(plan, secrets=secrets) != planning:
         raise StagePlanError("paid wave changed sealed planning evidence")
     state.require_claimed_output_tree(plan)
     _require_current_domains(plan, successes)
@@ -464,7 +427,7 @@ def _execute_waves(
             secrets=secrets,
             costs=costs,
         )
-        _require_arm_costs(plan, runs, costs)
+        require_arm_costs(plan, runs, costs)
         if failures:
             return failures
     return []
@@ -515,7 +478,7 @@ def _run_claimed_stage(
     )
     prior_status = state.require_status(plan)
     if prior_status["status"] == "EXECUTED":
-        return _require_executed_status(prior_status, runs=runs, costs=costs)
+        return require_executed_status(prior_status, runs=runs, costs=costs)
     _preflight(plan, runs, secrets=secrets)
     state.write_status(
         plan,

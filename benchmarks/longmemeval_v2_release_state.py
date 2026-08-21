@@ -204,8 +204,31 @@ def require_command_log(
         raise StagePlanError("runner command log is not one canonical file")
     try:
         raw_text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise StagePlanError("runner command log is not valid JSONL") from exc
+    validate_command_log_text(
+        raw_text,
+        command=command,
+        secrets=secrets,
+        expected_returncode=expected_returncode,
+        expected_invocations=expected_invocations,
+    )
+    return bind_artifact(path, name="runner command log")
+
+
+def validate_command_log_text(
+    raw_text: str,
+    *,
+    command: list[str],
+    secrets: tuple[str, ...],
+    expected_returncode: int,
+    expected_invocations: int | None = None,
+) -> None:
+    """Validate exact JSONL bytes read through a separately owned file handle."""
+
+    try:
         rows = [json.loads(line) for line in raw_text.splitlines() if line.strip()]
-    except (OSError, json.JSONDecodeError) as exc:
+    except json.JSONDecodeError as exc:
         raise StagePlanError("runner command log is not valid JSONL") from exc
     if any(secret in raw_text for secret in secrets):
         raise StagePlanError("runner command log contains an unredacted secret")
@@ -234,7 +257,6 @@ def require_command_log(
         raise StagePlanError("runner command log has an incomplete invocation")
     if expected_invocations is not None and invocations != expected_invocations:
         raise StagePlanError("runner command log invocation count is invalid")
-    return bind_artifact(path, name="runner command log")
 
 
 def _require_timestamp(value: object, *, name: str) -> str:

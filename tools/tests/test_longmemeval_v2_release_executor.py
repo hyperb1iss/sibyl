@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from benchmarks import longmemeval_v2_release_command as release_command
 from benchmarks import longmemeval_v2_release_evidence as evidence
+from benchmarks import longmemeval_v2_release_handoff as handoff
 from benchmarks import longmemeval_v2_release_runner as runner
 from benchmarks import longmemeval_v2_release_state as state
 from benchmarks.longmemeval_v2_release_inputs import StagePlanError, bind_artifact
@@ -166,6 +168,25 @@ def test_runner_preflights_every_domain_then_executes_every_wave(
     assert len(paid) == EXPECTED_DOMAIN_EXECUTIONS
     assert sorted(paid) == ["enterprise", "enterprise", "web", "web"]
     assert result["actual_cost_usd"] == EXPECTED_TOTAL_COST_USD
+
+
+def test_executed_stage_handoff_freezes_score_blind_domain_evidence(
+    stage_plan: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[tuple[str, str]] = []
+    monkeypatch.setattr(runner, "_invoke_command", _successful_invoke(events))
+    monkeypatch.setattr(runner.evidence, "require_completed_domain", _successful_completion)
+
+    runner.run_stage_plan(stage_plan)
+    executed = handoff.require_executed_stage(stage_plan)
+
+    assert executed.status_receipt["status"] == "EXECUTED"
+    assert len(executed.domains) == EXPECTED_DOMAIN_EXECUTIONS
+    assert sum(domain.actual_cost_usd for domain in executed.domains) == EXPECTED_TOTAL_COST_USD
+    exit_path = Path(executed.domains[0].exit_artifact["path"])
+    exit_path.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(StagePlanError, match="completed domain exit"):
+        handoff.require_executed_stage(stage_plan)
 
 
 def test_runner_enforces_temporary_worker_cap_and_declared_wave_width(
@@ -493,7 +514,7 @@ def test_command_log_redacts_env_and_inline_secrets(
         def wait() -> int:
             return 0
 
-    monkeypatch.setattr(runner.subprocess, "Popen", lambda *_args, **_kwargs: Process())
+    monkeypatch.setattr(release_command.subprocess, "Popen", lambda *_args, **_kwargs: Process())
     log_path = tmp_path / "runner.jsonl"
 
     assert runner._invoke_command(["fake"], log_path=log_path, secrets=(secret,)) == 0

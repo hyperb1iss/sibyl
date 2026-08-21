@@ -350,6 +350,19 @@ tasks:
       benchmarks/longmemeval_v2_release_contract.py
       benchmarks/longmemeval_v2_release_evidence.py
       benchmarks/longmemeval_v2_release_io.py
+      benchmarks/longmemeval_v2_release_command.py
+      benchmarks/longmemeval_v2_release_fd_exec.py
+      benchmarks/longmemeval_v2_release_handoff.py
+      benchmarks/longmemeval_v2_release_official_package.py
+      benchmarks/longmemeval_v2_release_official_publication.py
+      benchmarks/longmemeval_v2_release_official_receipt.py
+      benchmarks/longmemeval_v2_release_package_archive.py
+      benchmarks/longmemeval_v2_release_package_inventory.py
+      benchmarks/longmemeval_v2_release_package_object.py
+      benchmarks/longmemeval_v2_release_package_policy.py
+      benchmarks/longmemeval_v2_release_package_process.py
+      benchmarks/longmemeval_v2_release_package_root.py
+      benchmarks/longmemeval_v2_release_package_tree.py
       benchmarks/longmemeval_v2_release_inputs.py
       benchmarks/longmemeval_v2_release_memory.py
       benchmarks/longmemeval_v2_release_package_contract.py
@@ -380,6 +393,19 @@ tasks:
       benchmarks/longmemeval_v2_release_contract.py
       benchmarks/longmemeval_v2_release_evidence.py
       benchmarks/longmemeval_v2_release_io.py
+      benchmarks/longmemeval_v2_release_command.py
+      benchmarks/longmemeval_v2_release_fd_exec.py
+      benchmarks/longmemeval_v2_release_handoff.py
+      benchmarks/longmemeval_v2_release_official_package.py
+      benchmarks/longmemeval_v2_release_official_publication.py
+      benchmarks/longmemeval_v2_release_official_receipt.py
+      benchmarks/longmemeval_v2_release_package_archive.py
+      benchmarks/longmemeval_v2_release_package_inventory.py
+      benchmarks/longmemeval_v2_release_package_object.py
+      benchmarks/longmemeval_v2_release_package_policy.py
+      benchmarks/longmemeval_v2_release_package_process.py
+      benchmarks/longmemeval_v2_release_package_root.py
+      benchmarks/longmemeval_v2_release_package_tree.py
       benchmarks/longmemeval_v2_release_inputs.py
       benchmarks/longmemeval_v2_release_memory.py
       benchmarks/longmemeval_v2_release_package_contract.py
@@ -413,6 +439,19 @@ tasks:
       - benchmarks/longmemeval_v2_release_contract.py
       - benchmarks/longmemeval_v2_release_evidence.py
       - benchmarks/longmemeval_v2_release_io.py
+      - benchmarks/longmemeval_v2_release_command.py
+      - benchmarks/longmemeval_v2_release_fd_exec.py
+      - benchmarks/longmemeval_v2_release_handoff.py
+      - benchmarks/longmemeval_v2_release_official_package.py
+      - benchmarks/longmemeval_v2_release_official_publication.py
+      - benchmarks/longmemeval_v2_release_official_receipt.py
+      - benchmarks/longmemeval_v2_release_package_archive.py
+      - benchmarks/longmemeval_v2_release_package_inventory.py
+      - benchmarks/longmemeval_v2_release_package_object.py
+      - benchmarks/longmemeval_v2_release_package_policy.py
+      - benchmarks/longmemeval_v2_release_package_process.py
+      - benchmarks/longmemeval_v2_release_package_root.py
+      - benchmarks/longmemeval_v2_release_package_tree.py
       - benchmarks/longmemeval_v2_release_inputs.py
       - benchmarks/longmemeval_v2_release_memory.py
       - benchmarks/longmemeval_v2_release_package_contract.py
@@ -453,6 +492,19 @@ tasks:
       benchmarks/longmemeval_v2_release_contract.py
       benchmarks/longmemeval_v2_release_evidence.py
       benchmarks/longmemeval_v2_release_io.py
+      benchmarks/longmemeval_v2_release_command.py
+      benchmarks/longmemeval_v2_release_fd_exec.py
+      benchmarks/longmemeval_v2_release_handoff.py
+      benchmarks/longmemeval_v2_release_official_package.py
+      benchmarks/longmemeval_v2_release_official_publication.py
+      benchmarks/longmemeval_v2_release_official_receipt.py
+      benchmarks/longmemeval_v2_release_package_archive.py
+      benchmarks/longmemeval_v2_release_package_inventory.py
+      benchmarks/longmemeval_v2_release_package_object.py
+      benchmarks/longmemeval_v2_release_package_policy.py
+      benchmarks/longmemeval_v2_release_package_process.py
+      benchmarks/longmemeval_v2_release_package_root.py
+      benchmarks/longmemeval_v2_release_package_tree.py
       benchmarks/longmemeval_v2_release_inputs.py
       benchmarks/longmemeval_v2_release_memory.py
       benchmarks/longmemeval_v2_release_package_contract.py
@@ -484,6 +536,19 @@ tasks:
       - benchmarks/longmemeval_v2_release_contract.py
       - benchmarks/longmemeval_v2_release_evidence.py
       - benchmarks/longmemeval_v2_release_io.py
+      - benchmarks/longmemeval_v2_release_command.py
+      - benchmarks/longmemeval_v2_release_fd_exec.py
+      - benchmarks/longmemeval_v2_release_handoff.py
+      - benchmarks/longmemeval_v2_release_official_package.py
+      - benchmarks/longmemeval_v2_release_official_publication.py
+      - benchmarks/longmemeval_v2_release_official_receipt.py
+      - benchmarks/longmemeval_v2_release_package_archive.py
+      - benchmarks/longmemeval_v2_release_package_inventory.py
+      - benchmarks/longmemeval_v2_release_package_object.py
+      - benchmarks/longmemeval_v2_release_package_policy.py
+      - benchmarks/longmemeval_v2_release_package_process.py
+      - benchmarks/longmemeval_v2_release_package_root.py
+      - benchmarks/longmemeval_v2_release_package_tree.py
       - benchmarks/longmemeval_v2_release_inputs.py
       - benchmarks/longmemeval_v2_release_memory.py
       - benchmarks/longmemeval_v2_release_package_contract.py
@@ -523,6 +588,19 @@ tasks:
       benchmarks/longmemeval_v2_release_contract.py
       benchmarks/longmemeval_v2_release_evidence.py
       benchmarks/longmemeval_v2_release_io.py
+      benchmarks/longmemeval_v2_release_command.py
+      benchmarks/longmemeval_v2_release_fd_exec.py
+      benchmarks/longmemeval_v2_release_handoff.py
+      benchmarks/longmemeval_v2_release_official_package.py
+      benchmarks/longmemeval_v2_release_official_publication.py
+      benchmarks/longmemeval_v2_release_official_receipt.py
+      benchmarks/longmemeval_v2_release_package_archive.py
+      benchmarks/longmemeval_v2_release_package_inventory.py
+      benchmarks/longmemeval_v2_release_package_object.py
+      benchmarks/longmemeval_v2_release_package_policy.py
+      benchmarks/longmemeval_v2_release_package_process.py
+      benchmarks/longmemeval_v2_release_package_root.py
+      benchmarks/longmemeval_v2_release_package_tree.py
       benchmarks/longmemeval_v2_release_inputs.py
       benchmarks/longmemeval_v2_release_memory.py
       benchmarks/longmemeval_v2_release_package_contract.py
@@ -557,6 +635,19 @@ tasks:
       - benchmarks/longmemeval_v2_release_contract.py
       - benchmarks/longmemeval_v2_release_evidence.py
       - benchmarks/longmemeval_v2_release_io.py
+      - benchmarks/longmemeval_v2_release_command.py
+      - benchmarks/longmemeval_v2_release_fd_exec.py
+      - benchmarks/longmemeval_v2_release_handoff.py
+      - benchmarks/longmemeval_v2_release_official_package.py
+      - benchmarks/longmemeval_v2_release_official_publication.py
+      - benchmarks/longmemeval_v2_release_official_receipt.py
+      - benchmarks/longmemeval_v2_release_package_archive.py
+      - benchmarks/longmemeval_v2_release_package_inventory.py
+      - benchmarks/longmemeval_v2_release_package_object.py
+      - benchmarks/longmemeval_v2_release_package_policy.py
+      - benchmarks/longmemeval_v2_release_package_process.py
+      - benchmarks/longmemeval_v2_release_package_root.py
+      - benchmarks/longmemeval_v2_release_package_tree.py
       - benchmarks/longmemeval_v2_release_inputs.py
       - benchmarks/longmemeval_v2_release_memory.py
       - benchmarks/longmemeval_v2_release_package_contract.py
@@ -873,6 +964,9 @@ tasks:
       tools/tests/test_longmemeval_v2_release_contract.py
       tools/tests/test_longmemeval_v2_release_memory.py
       tools/tests/test_longmemeval_v2_release_runner.py -v
+      tools/tests/test_longmemeval_v2_release_authority.py -v
+      tools/tests/test_longmemeval_v2_release_package.py -v
+      tools/tests/test_longmemeval_v2_release_package_root.py -v
       tools/tests/test_longmemeval_v2_release_executor.py -v
     inputs:
       - tools/**/*.py
@@ -893,6 +987,19 @@ tasks:
       - benchmarks/longmemeval_v2_release_contract.py
       - benchmarks/longmemeval_v2_release_evidence.py
       - benchmarks/longmemeval_v2_release_io.py
+      - benchmarks/longmemeval_v2_release_command.py
+      - benchmarks/longmemeval_v2_release_fd_exec.py
+      - benchmarks/longmemeval_v2_release_handoff.py
+      - benchmarks/longmemeval_v2_release_official_package.py
+      - benchmarks/longmemeval_v2_release_official_publication.py
+      - benchmarks/longmemeval_v2_release_official_receipt.py
+      - benchmarks/longmemeval_v2_release_package_archive.py
+      - benchmarks/longmemeval_v2_release_package_inventory.py
+      - benchmarks/longmemeval_v2_release_package_object.py
+      - benchmarks/longmemeval_v2_release_package_policy.py
+      - benchmarks/longmemeval_v2_release_package_process.py
+      - benchmarks/longmemeval_v2_release_package_root.py
+      - benchmarks/longmemeval_v2_release_package_tree.py
       - benchmarks/longmemeval_v2_release_inputs.py
       - benchmarks/longmemeval_v2_release_memory.py
       - benchmarks/longmemeval_v2_release_package_contract.py
