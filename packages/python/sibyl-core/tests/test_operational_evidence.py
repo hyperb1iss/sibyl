@@ -304,6 +304,11 @@ def test_source_kind_dedupe_admits_distinct_note_kinds_and_receipts_drops() -> N
     assert receipt["activity_receipt"]["drop_reason_counts"] == {
         "duplicate_operational_source_note_kind": 1
     }
+    assert receipt["activity_receipt"]["note_dedupe"] == {
+        "mode": "source_kind",
+        "duplicate_source_count": 0,
+        "duplicate_source_kind_count": 1,
+    }
 
 
 def test_additive_note_lane_preserves_raw_membership_and_order() -> None:
@@ -311,6 +316,7 @@ def test_additive_note_lane_preserves_raw_membership_and_order() -> None:
         typed_results=_note_pool(4),
         raw_results=[_result(f"raw-{index}") for index in range(5)],
         limit=5,
+        char_budget=100,
         operational_note_lane_mode="additive",
         include_activity_receipt=True,
     )
@@ -332,6 +338,15 @@ def test_additive_note_lane_preserves_raw_membership_and_order() -> None:
         "selected_ids": ["raw-0", "raw-1", "raw-2", "raw-3", "raw-4"],
         "membership_equal": True,
         "order_equal": True,
+    }
+    assert receipt["activity_receipt"]["additive_note_lane"] == {
+        "admitted_note_ids": ["note-0", "note-1", "note-2"]
+    }
+    assert receipt["activity_receipt"]["hard_budget"] == {
+        "mode": "characters",
+        "limit": 100,
+        "selected": 43,
+        "within": True,
     }
 
 

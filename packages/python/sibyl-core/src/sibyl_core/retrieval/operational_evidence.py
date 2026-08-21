@@ -294,6 +294,34 @@ def compose_operational_evidence[ResultT: OperationalEvidenceResult](
                     "candidates": candidate_activity,
                     "admitted_ids": [result.id for result in selected],
                     "drop_reason_counts": dict(sorted(drop_reason_counts.items())),
+                    "note_dedupe": {
+                        "mode": operational_note_dedupe_mode,
+                        "duplicate_source_count": drop_reason_counts[
+                            "duplicate_operational_source"
+                        ],
+                        "duplicate_source_kind_count": drop_reason_counts[
+                            "duplicate_operational_source_note_kind"
+                        ],
+                    },
+                    "additive_note_lane": {
+                        "admitted_note_ids": [
+                            result.id
+                            for result in selected
+                            if is_distilled_operational_note(result)
+                        ]
+                        if operational_note_lane_mode == "additive"
+                        else [],
+                    },
+                    "hard_budget": {
+                        "mode": "items" if char_budget is None else "characters",
+                        "limit": output_limit if char_budget is None else char_budget,
+                        "selected": len(selected) if char_budget is None else selected_chars,
+                        "within": (
+                            len(selected) <= output_limit
+                            if char_budget is None
+                            else selected_chars <= char_budget
+                        ),
+                    },
                     "raw_parity": {
                         "reference_ids": reference_raw_ids,
                         "selected_ids": selected_raw_ids,
