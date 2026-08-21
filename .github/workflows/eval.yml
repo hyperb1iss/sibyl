@@ -598,7 +598,7 @@ jobs:
       - name: Start backend server
         run: |
           cd apps/api
-          uv run --with sentence-transformers==5.6.0 sibyld serve > /tmp/sibyld.log 2>&1 &
+          uv run --with sentence-transformers==6.0.0 sibyld serve > /tmp/sibyld.log 2>&1 &
           echo "Waiting for backend to start..."
           ready=false
           for i in {1..180}; do
@@ -621,7 +621,7 @@ jobs:
       - name: Start background job worker
         run: |
           cd apps/api
-          uv run --with sentence-transformers==5.6.0 sibyld worker > /tmp/sibyl-worker.log 2>&1 &
+          uv run --with sentence-transformers==6.0.0 sibyld worker > /tmp/sibyl-worker.log 2>&1 &
           echo "Background job worker started"
           sleep 2
 

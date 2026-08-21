@@ -1372,7 +1372,7 @@ tasks:
       cache: false
 
   bench-longmemeval-live-local:
-    command: uv run --with sentence-transformers==5.6.0 python benchmarks/longmemeval_live.py
+    command: uv run --with sentence-transformers==6.0.0 python benchmarks/longmemeval_live.py
     options:
       cache: false
 
