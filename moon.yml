@@ -723,6 +723,15 @@ tasks:
     options:
       cache: false
 
+  longmemeval-v2-artifact-bridge:
+    command: uv run python tools/bench/longmemeval_v2_artifact_bridge.py
+    inputs:
+      - tools/bench/longmemeval_v2_artifact_bridge.py
+      - tools/bench/longmemeval_v2_rig.py
+      - pyproject.toml
+    options:
+      cache: false
+
   longmemeval-v2-pack-compare:
     command: uv run python tools/bench/longmemeval_v2_pack_compare.py
     inputs:

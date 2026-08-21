@@ -221,6 +221,11 @@ def test_longmemeval_v2_workflow_packages_receipts_and_diagnostics() -> None:
     assert "build_submission_step_2_build_package.py" in workflow
     assert "--receipt-only" in workflow
     assert "--profile longmemeval-v2" in workflow
+    assert "moon run longmemeval-v2-artifact-bridge" in workflow
+    assert "arm \\" in workflow
+    assert '"$OUTPUT_ROOT/longmemeval_v2_${OFFICIAL_TIER}_receipt.json"' in workflow
+    assert '--output "$OUTPUT_ROOT/arm_run.json"' in workflow
+    assert ".moon/cache/evals/longmemeval-v2-official/arm_run.json" in workflow
     assert "Upload service diagnostics" in workflow
     assert "SIBYL_SURREAL_PATH: rocksdb:///data/sibyl-longmemeval-v2.db" in workflow
     assert "sibyld.log" in workflow

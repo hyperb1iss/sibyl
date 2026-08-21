@@ -1050,6 +1050,12 @@ jobs:
             "$OUTPUT_ROOT/longmemeval_v2_${OFFICIAL_TIER}_receipt.json" \
             --profile longmemeval-v2
 
+          moon run longmemeval-v2-artifact-bridge -- \
+            arm \
+            --official-receipt \
+            "$OUTPUT_ROOT/longmemeval_v2_${OFFICIAL_TIER}_receipt.json" \
+            --output "$OUTPUT_ROOT/arm_run.json"
+
       - name: Upload official combined receipt
         if: inputs.official_validation_slice == 'none'
         uses: actions/upload-artifact@v7
@@ -1057,6 +1063,7 @@ jobs:
           name: longmemeval-v2-combined-${{ inputs.official_tier || 'small' }}-${{ github.sha }}
           path: |
             .moon/cache/evals/longmemeval-v2-official/longmemeval_v2_${{ inputs.official_tier || 'small' }}_receipt.json
+            .moon/cache/evals/longmemeval-v2-official/arm_run.json
             .moon/cache/evals/longmemeval-v2-official/combined_${{ inputs.official_tier || 'small' }}/aggregated_metrics.json
             .moon/cache/evals/longmemeval-v2-official/composition_validation_report.json
             .moon/cache/evals/longmemeval-v2-submissions/sibyl_live_api.tar.gz
