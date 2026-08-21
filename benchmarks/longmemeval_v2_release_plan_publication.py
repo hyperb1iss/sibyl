@@ -79,8 +79,6 @@ def _open_registered(
         try:
             identity = release_io.capture_descriptor_identity(descriptor)
         except BaseException:
-            with suppress(OSError):
-                os.close(descriptor)
             holder.descriptor = None
             raise
         holder.identity = identity

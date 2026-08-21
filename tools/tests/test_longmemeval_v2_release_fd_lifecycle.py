@@ -673,34 +673,52 @@ def test_owned_plan_publication_recovers_post_rename_interrupt(
     plan_publication.write_json_once_owned_path(target, {"status": "sealed"})
 
 
-def test_owned_plan_identity_capture_registers_before_return(
+def test_owned_plan_identity_capture_closes_on_interruption(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     target = tmp_path / "plans" / "stage.json"
-    real_capture = plan_publication.release_io.capture_descriptor_identity
+    real_fstat = release_io.os.fstat
     final_descriptor: int | None = None
 
-    def interrupt_after_capture(
-        descriptor: int,
-        *,
-        holder: plan_safety.OwnedPlanFileHolder | None = None,
-    ) -> release_io.DescriptorIdentity:
-        del holder
+    def interrupt_during_capture(descriptor: int) -> os.stat_result:
         nonlocal final_descriptor
-        real_capture(descriptor)
         final_descriptor = descriptor
         raise KeyboardInterrupt
 
+    monkeypatch.setattr(release_io.os, "fstat", interrupt_during_capture)
+    with pytest.raises(KeyboardInterrupt):
+        plan_publication.write_json_once_owned_path(target, {"status": "sealed"})
+    monkeypatch.setattr(release_io.os, "fstat", real_fstat)
+    assert final_descriptor is not None
+    _assert_closed(final_descriptor)
+    assert not target.exists()
+
+
+def test_owned_plan_identity_capture_does_not_close_a_reused_fd(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "plans" / "stage.json"
+    victim_path = tmp_path / "victim"
+    victim_path.write_text("alive", encoding="utf-8")
+    victim: int | None = None
+
+    def fail_after_helper_cleanup(descriptor: int) -> release_io.DescriptorIdentity:
+        nonlocal victim
+        victim = _reuse_descriptor(descriptor, victim_path)
+        raise KeyboardInterrupt
+
     monkeypatch.setattr(
-        plan_publication.release_io,
+        release_io,
         "capture_descriptor_identity",
-        interrupt_after_capture,
+        fail_after_helper_cleanup,
     )
     with pytest.raises(KeyboardInterrupt):
         plan_publication.write_json_once_owned_path(target, {"status": "sealed"})
-    assert final_descriptor is not None
-    _assert_closed(final_descriptor)
+    assert victim is not None
+    assert os.read(victim, 5) == b"alive"
+    os.close(victim)
     assert not target.exists()
 
 

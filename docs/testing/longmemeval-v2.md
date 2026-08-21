@@ -98,9 +98,9 @@ Choose absolute, canonical paths that do not exist yet for the plan file and pai
 plan file's immediate parent must also be a fresh directory dedicated to that one plan. The
 publisher makes the directory immutable with the plan, so each later stage needs another fresh
 parent. Both paths must live outside and remain disjoint from the Sibyl checkout, official checkout,
-dataset, stage spec, and fixed package inputs. Neither path may traverse a symlink. The plan file and
-paid root must also be disjoint from each other. The planner binds the reviewed system description
-and adapter without override flags.
+dataset, stage spec, and fixed package inputs. Neither path may traverse a symlink. The plan file
+and paid root must also be disjoint from each other. The planner binds the reviewed system
+description and adapter without override flags.
 
 ```bash
 moon run bench-longmemeval-v2-release -- release-plan \
