@@ -118,6 +118,7 @@ _RUNTIME_ROOTS = {
     ".prettierignore",
     ".prettierrc.yaml",
     ".prototools",
+    ".python-version",
     ".gitignore",
     "compose.e2e.yml",
     "docker-compose.prod.yml",
