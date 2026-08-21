@@ -47,9 +47,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .moon/cache
-          key: moon-okf-memory-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
+          key: moon-okf-memory-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            moon-okf-memory-${{ runner.os }}-
+            moon-okf-memory-${{ runner.os }}-${{ hashFiles('.prototools') }}-
 
       - name: Cache uv
         uses: actions/cache@v6

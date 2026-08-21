@@ -71,9 +71,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .moon/cache
-          key: moon-nightly-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
+          key: moon-nightly-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            moon-nightly-${{ runner.os }}-
+            moon-nightly-${{ runner.os }}-${{ hashFiles('.prototools') }}-
 
       - name: Cache uv
         uses: actions/cache@v6
@@ -280,9 +280,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .moon/cache
-          key: moon-live-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
+          key: moon-live-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            moon-live-${{ runner.os }}-
+            moon-live-${{ runner.os }}-${{ hashFiles('.prototools') }}-
 
       - name: Cache uv
         uses: actions/cache@v6
@@ -367,9 +367,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .moon/cache
-          key: moon-restore-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
+          key: moon-restore-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            moon-restore-${{ runner.os }}-
+            moon-restore-${{ runner.os }}-${{ hashFiles('.prototools') }}-
 
       - name: Cache uv
         uses: actions/cache@v6

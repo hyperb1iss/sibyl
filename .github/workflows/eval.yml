@@ -207,9 +207,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .moon/cache
-          key: moon-eval-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
+          key: moon-eval-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            moon-eval-${{ runner.os }}-
+            moon-eval-${{ runner.os }}-${{ hashFiles('.prototools') }}-
 
       - name: Cache uv
         uses: actions/cache@v6
@@ -376,9 +376,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .moon/cache
-          key: moon-longmemeval-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
+          key: moon-longmemeval-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            moon-longmemeval-${{ runner.os }}-
+            moon-longmemeval-${{ runner.os }}-${{ hashFiles('.prototools') }}-
 
       - name: Cache uv
         uses: actions/cache@v6
@@ -565,9 +565,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .moon/cache
-          key: moon-longmemeval-local-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
+          key: moon-longmemeval-local-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            moon-longmemeval-local-${{ runner.os }}-
+            moon-longmemeval-local-${{ runner.os }}-${{ hashFiles('.prototools') }}-
 
       - name: Cache uv
         uses: actions/cache@v6
@@ -748,9 +748,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .moon/cache
-          key: moon-longmemeval-compare-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
+          key: moon-longmemeval-compare-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            moon-longmemeval-compare-${{ runner.os }}-
+            moon-longmemeval-compare-${{ runner.os }}-${{ hashFiles('.prototools') }}-
 
       - name: Cache uv
         uses: actions/cache@v6
@@ -859,9 +859,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .moon/cache
-          key: moon-longmemeval-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock') }}
+          key: moon-longmemeval-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            moon-longmemeval-${{ runner.os }}-
+            moon-longmemeval-${{ runner.os }}-${{ hashFiles('.prototools') }}-
 
       - name: Cache uv
         uses: actions/cache@v6

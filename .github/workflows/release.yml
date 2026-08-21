@@ -107,11 +107,9 @@ jobs:
           path: |
             .moon/cache
             apps/web/.next/cache
-          key:
-            moon-release-${{ runner.os }}-${{ hashFiles('.prototools', 'uv.lock',
-            'apps/web/pnpm-lock.yaml') }}
+          key: moon-release-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock', 'apps/web/pnpm-lock.yaml') }}
           restore-keys: |
-            moon-release-${{ runner.os }}-
+            moon-release-${{ runner.os }}-${{ hashFiles('.prototools') }}-
 
       - name: "◇ Cache pnpm store"
         uses: actions/cache@v6
