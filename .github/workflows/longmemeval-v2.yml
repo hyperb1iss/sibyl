@@ -95,7 +95,7 @@ on:
         description: "Sealed experiment identity, substrate, geometry, and render profile"
         type: string
         default: >-
-          {"experiment_id":"","pass_id":"","pass_seed":0,"arm_role":"machine","substrate":"machine","preregistration_sha256":"","max_spend_usd":8,"retrieval_mode":"accurate","max_context_total_chars":60000,"operational_note_dedupe_mode":"source","operational_note_lane_mode":"reserved","operational_note_distillation_profile":"baseline","render_group_lanes":false,"render_action_spines":false}
+          {"experiment_id":"","experiment_phase":"aa","pass_id":"","pass_seed":0,"arm_role":"machine","substrate":"machine","preregistration_sha256":"","max_spend_usd":8,"retrieval_mode":"accurate","max_context_total_chars":60000,"operational_note_dedupe_mode":"source","operational_note_lane_mode":"reserved","operational_note_distillation_profile":"baseline","render_group_lanes":false,"render_action_spines":false}
       official_tier:
         description: "Official haystack tier"
         type: choice
@@ -399,6 +399,7 @@ jobs:
             ((keys | sort) == ([
               "arm_role",
               "experiment_id",
+              "experiment_phase",
               "max_context_total_chars",
               "max_spend_usd",
               "operational_note_dedupe_mode",
@@ -413,6 +414,7 @@ jobs:
               "substrate"
             ] | sort)) and
             (.experiment_id | type == "string" and length > 0) and
+            (.experiment_phase | IN("aa", "anchor", "race", "render")) and
             (.pass_id | type == "string" and length > 0) and
             (.pass_seed | type == "number" and . >= 0 and floor == .) and
             (.arm_role | IN("machine", "naive", "render_control", "render_treatment")) and
@@ -433,6 +435,7 @@ jobs:
             exit 1
           fi
           EXPERIMENT_ID=$(jq -r '.experiment_id' <<< "$ARM_MANIFEST_JSON")
+          EXPERIMENT_PHASE=$(jq -r '.experiment_phase' <<< "$ARM_MANIFEST_JSON")
           PASS_ID=$(jq -r '.pass_id' <<< "$ARM_MANIFEST_JSON")
           PASS_SEED=$(jq -r '.pass_seed' <<< "$ARM_MANIFEST_JSON")
           ARM_ROLE=$(jq -r '.arm_role' <<< "$ARM_MANIFEST_JSON")
@@ -454,15 +457,17 @@ jobs:
           )
           RENDER_GROUP_LANES=$(jq -r '.render_group_lanes' <<< "$ARM_MANIFEST_JSON")
           RENDER_ACTION_SPINES=$(jq -r '.render_action_spines' <<< "$ARM_MANIFEST_JSON")
-          export EXPERIMENT_ID PASS_ID PREREGISTRATION_SHA256
+          export EXPERIMENT_ID EXPERIMENT_PHASE PASS_ID PREREGISTRATION_SHA256
           for value_name in \
-            EXPERIMENT_ID PASS_ID PASS_SEED ARM_ROLE SUBSTRATE \
+            EXPERIMENT_ID EXPERIMENT_PHASE PASS_ID PASS_SEED ARM_ROLE SUBSTRATE \
             PREREGISTRATION_SHA256 MAX_SPEND_USD RETRIEVAL_MODE \
             MAX_CONTEXT_TOTAL_CHARS NOTE_DEDUPE_MODE NOTE_LANE_MODE \
             NOTE_DISTILLATION_PROFILE RENDER_GROUP_LANES RENDER_ACTION_SPINES; do
             printf '%s=%s\n' "$value_name" "${!value_name}" >> "$GITHUB_ENV"
           done
-          for value_name in EXPERIMENT_ID PASS_ID PASS_SEED ARM_ROLE SUBSTRATE MAX_SPEND_USD; do
+          for value_name in \
+            EXPERIMENT_ID EXPERIMENT_PHASE PASS_ID PASS_SEED ARM_ROLE SUBSTRATE \
+            MAX_SPEND_USD; do
             if [[ -z "${!value_name}" ]]; then
               echo "::error::${value_name} is required for every paid official arm."
               exit 1
@@ -479,6 +484,15 @@ jobs:
           fi
           if [[ ! "$MAX_CONTEXT_TOTAL_CHARS" =~ ^[1-9][0-9]*$ ]]; then
             echo "::error::official_max_context_total_chars must be positive."
+            exit 1
+          fi
+          if [[ "$EXPERIMENT_PHASE" == "race" || "$EXPERIMENT_PHASE" == "render" ]]; then
+            if [[ -z "$PREREGISTRATION_SHA256" ]]; then
+              echo "::error::Race and render phases require a preregistration digest."
+              exit 1
+            fi
+          elif [[ -n "$PREREGISTRATION_SHA256" ]]; then
+            echo "::error::A/A and anchor phases must precede preregistration."
             exit 1
           fi
           if [[ "$ARM_ROLE" == "naive" ]]; then
@@ -719,6 +733,7 @@ jobs:
           args+=(--max-context-chars-per-item "$MAX_CONTEXT_CHARS_PER_ITEM")
           args+=(--max-context-total-chars "$MAX_CONTEXT_TOTAL_CHARS")
           args+=(--experiment-id "$EXPERIMENT_ID")
+          args+=(--experiment-phase "$EXPERIMENT_PHASE")
           args+=(--pass-id "$PASS_ID")
           args+=(--pass-seed "$PASS_SEED")
           args+=(--arm-role "$ARM_ROLE")

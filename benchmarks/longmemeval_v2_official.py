@@ -60,6 +60,7 @@ RECEIPT_SCHEMA_VERSION = "sibyl-longmemeval-v2-official-receipt-v1"
 ACCOUNTING_SCHEMA_VERSION = "sibyl-eval-accounting-v1"
 EXPERIMENT_IDENTITY_SCHEMA_VERSION = "sibyl-longmemeval-v2-experiment-identity-v1"
 EXPERIMENT_ARM_ROLES = frozenset({"machine", "naive", "render_control", "render_treatment"})
+EXPERIMENT_PHASES = frozenset({"aa", "anchor", "race", "render"})
 EXPERIMENT_SUBSTRATES = frozenset({"machine", "naive"})
 MILLION_TOKENS = 1_000_000
 EVAL_PRICE_SNAPSHOT = {
@@ -460,8 +461,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     parser.add_argument("--load-memory-dir", default=None)
     parser.add_argument("--checkpoint-dir", default=None)
     parser.add_argument("--experiment-id", default="")
+    parser.add_argument("--experiment-phase", choices=sorted(EXPERIMENT_PHASES), default="")
     parser.add_argument("--pass-id", default="")
-    parser.add_argument("--pass-seed", default="")
+    parser.add_argument("--pass-seed", type=int, default=None)
     parser.add_argument("--arm-role", choices=sorted(EXPERIMENT_ARM_ROLES), default="")
     parser.add_argument("--substrate", choices=sorted(EXPERIMENT_SUBSTRATES), default="")
     parser.add_argument("--preregistration-sha256", default="")
@@ -678,17 +680,32 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         parser.error("--reuse-existing-project cannot be combined with --checkpoint-dir")
     experiment_fields = {
         "--experiment-id": args.experiment_id,
+        "--experiment-phase": args.experiment_phase,
         "--pass-id": args.pass_id,
         "--pass-seed": args.pass_seed,
         "--arm-role": args.arm_role,
         "--substrate": args.substrate,
     }
     populated_experiment_fields = {
-        flag for flag, value in experiment_fields.items() if isinstance(value, str) and value.strip()
+        flag
+        for flag, value in experiment_fields.items()
+        if value is not None and (not isinstance(value, str) or value.strip())
     }
     if populated_experiment_fields and len(populated_experiment_fields) != len(experiment_fields):
         missing = sorted(set(experiment_fields) - populated_experiment_fields)
         parser.error(f"experiment runs require all identity fields; missing {missing}")
+    if args.pass_seed is not None and args.pass_seed < 0:
+        parser.error("--pass-seed must be non-negative")
+    preregistration = args.preregistration_sha256.strip()
+    if preregistration and (
+        len(preregistration) != 64 or any(char not in "0123456789abcdef" for char in preregistration)
+    ):
+        parser.error("--preregistration-sha256 must be a lowercase SHA-256 digest")
+    if populated_experiment_fields:
+        if args.experiment_phase in {"race", "render"} and not preregistration:
+            parser.error("race and render experiment phases require --preregistration-sha256")
+        if args.experiment_phase in {"aa", "anchor"} and preregistration:
+            parser.error("A/A and anchor experiment phases must precede preregistration")
     if args.max_spend_usd is not None and (
         not math.isfinite(args.max_spend_usd) or args.max_spend_usd <= 0
     ):
@@ -1038,8 +1055,9 @@ def experiment_identity(args: argparse.Namespace) -> dict[str, object]:
     return {
         "experiment_identity_schema_version": EXPERIMENT_IDENTITY_SCHEMA_VERSION,
         "experiment_id": args.experiment_id or None,
+        "experiment_phase": args.experiment_phase or None,
         "pass_id": args.pass_id or None,
-        "pass_seed": args.pass_seed or None,
+        "pass_seed": args.pass_seed,
         "arm_role": args.arm_role or None,
         "substrate": args.substrate or None,
         "preregistration_sha256": args.preregistration_sha256 or None,

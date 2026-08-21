@@ -839,6 +839,8 @@ def test_official_runner_binds_complete_experiment_identity(tmp_path: Path) -> N
             "--plan-only",
             "--experiment-id",
             "eval-1.3",
+            "--experiment-phase",
+            "aa",
             "--pass-id",
             "aa-01",
             "--pass-seed",
@@ -863,8 +865,9 @@ def test_official_runner_binds_complete_experiment_identity(tmp_path: Path) -> N
     assert module.experiment_identity(args) == {
         "experiment_identity_schema_version": "sibyl-longmemeval-v2-experiment-identity-v1",
         "experiment_id": "eval-1.3",
+        "experiment_phase": "aa",
         "pass_id": "aa-01",
-        "pass_seed": "1701",
+        "pass_seed": 1701,
         "arm_role": "machine",
         "substrate": "machine",
         "preregistration_sha256": None,
@@ -897,6 +900,62 @@ def test_official_runner_rejects_partial_experiment_identity(tmp_path: Path) -> 
                 "eval-1.3",
             ]
         )
+
+
+@pytest.mark.parametrize(
+    ("phase", "digest", "message"),
+    [
+        ("race", "", "require --preregistration-sha256"),
+        ("render", "bogus", "lowercase SHA-256"),
+        ("anchor", "a" * 64, "must precede preregistration"),
+    ],
+)
+def test_official_runner_binds_preregistration_to_experiment_phase(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    phase: str,
+    digest: str,
+    message: str,
+) -> None:
+    module = _load_runner_module()
+    argv = [
+        "--data-root",
+        str(tmp_path / "data"),
+        "--domain",
+        "web",
+        "--output-dir",
+        str(tmp_path / "out"),
+        "--plan-only",
+        "--experiment-id",
+        "eval-1.3",
+        "--experiment-phase",
+        phase,
+        "--pass-id",
+        "pass-01",
+        "--pass-seed",
+        "1701",
+        "--arm-role",
+        "machine",
+        "--substrate",
+        "machine",
+        "--github-repository",
+        "hyperb1iss/sibyl",
+        "--github-workflow-ref",
+        "hyperb1iss/sibyl/.github/workflows/longmemeval-v2.yml@refs/heads/main",
+        "--github-workflow-sha",
+        "a" * 40,
+        "--github-run-id",
+        "1234",
+        "--github-run-attempt",
+        "1",
+    ]
+    if digest:
+        argv.extend(["--preregistration-sha256", digest])
+
+    with pytest.raises(SystemExit, match="2"):
+        module.parse_args(argv)
+
+    assert message in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(

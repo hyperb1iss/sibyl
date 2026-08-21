@@ -194,6 +194,7 @@ def test_longmemeval_v2_workflow_seals_paid_arm_manifest() -> None:
     assert "ARM_MANIFEST_JSON: ${{ inputs.official_arm_manifest_json || '' }}" in workflow
     assert "keys | sort) == ([" in workflow
     assert '"experiment_id"' in workflow
+    assert '"experiment_phase"' in workflow
     assert '"pass_id"' in workflow
     assert '"pass_seed"' in workflow
     assert '"arm_role"' in workflow
@@ -204,6 +205,7 @@ def test_longmemeval_v2_workflow_seals_paid_arm_manifest() -> None:
     assert '"operational_note_distillation_profile"' in workflow
     assert "official_arm_manifest_json does not match the sealed schema" in workflow
     assert '--experiment-id "$EXPERIMENT_ID"' in workflow
+    assert '--experiment-phase "$EXPERIMENT_PHASE"' in workflow
     assert '--pass-id "$PASS_ID"' in workflow
     assert '--pass-seed "$PASS_SEED"' in workflow
     assert '--shuffle-questions-seed "$PASS_SEED"' in workflow
