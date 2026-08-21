@@ -741,13 +741,18 @@ def sentence_transformers_available() -> bool:
 
 
 def _sentence_transformer_dimensions(client: Any) -> int | None:
-    get_dimensions = getattr(client, "get_sentence_embedding_dimension", None)
-    if not callable(get_dimensions):
-        return None
-    dimensions = get_dimensions()
-    if isinstance(dimensions, bool) or dimensions is None:
-        return None
-    return int(dimensions)
+    for method_name in (
+        "get_embedding_dimension",
+        "get_sentence_embedding_dimension",
+    ):
+        get_dimensions = getattr(client, method_name, None)
+        if not callable(get_dimensions):
+            continue
+        dimensions = get_dimensions()
+        if isinstance(dimensions, bool) or dimensions is None:
+            continue
+        return int(dimensions)
+    return None
 
 
 def _coerce_embedding_matrix(
