@@ -11,6 +11,9 @@ allowBuilds:
   sharp: false # preserved from prior ignoredBuiltDependencies
   unrs-resolver: false # preserved from prior ignoredBuiltDependencies
 
+# Require packages to age for 24 hours before fresh resolution. Version-specific
+# exceptions below cover this reviewed dependency refresh only.
+minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - '@storybook/addon-a11y@10.5.10'
   - '@storybook/addon-docs@10.5.10'
