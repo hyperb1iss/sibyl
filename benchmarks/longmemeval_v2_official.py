@@ -1677,6 +1677,7 @@ def load_receipt_source_runs(
         aggregated_path = source_dir / "aggregated_metrics.json"
         per_question_path = source_dir / "per_question.jsonl"
         rig_rows_path = source_dir / "rig_rows.jsonl"
+        official_receipt_path = source_dir / "longmemeval_v2_official_receipt.json"
         runtime_dir = source_dir / "runtime_inputs"
         runtime_questions_path = runtime_dir / "questions.json"
         runtime_haystack_path = runtime_dir / "haystack.json"
@@ -1709,6 +1710,7 @@ def load_receipt_source_runs(
                 "aggregated_path": aggregated_path,
                 "per_question_path": per_question_path,
                 "rig_rows_path": rig_rows_path,
+                "official_receipt_path": official_receipt_path,
                 "runtime_questions_path": runtime_questions_path,
                 "runtime_haystack_path": runtime_haystack_path,
                 "memory_config_path": memory_config_path,
@@ -1751,6 +1753,7 @@ def build_source_runs_receipt(
             "aggregated_metrics": artifact_path_record(source_run["aggregated_path"]),
             "per_question": artifact_path_record(source_run["per_question_path"]),
             "rig_rows": artifact_path_record(source_run["rig_rows_path"]),
+            "official_receipt": artifact_path_record(source_run["official_receipt_path"]),
             "runtime_inputs": {
                 "questions": artifact_path_record(source_run["runtime_questions_path"]),
                 "haystack": artifact_path_record(source_run["runtime_haystack_path"]),
@@ -1797,6 +1800,7 @@ def build_source_runs_receipt(
     integrity_complete = all(
         domain in domains
         and domains[domain]["plan"]["exists"]
+        and (args.domain != "combined" or domains[domain]["official_receipt"]["exists"])
         and all(record["exists"] for record in domains[domain]["runtime_inputs"].values())
         and all(
             record["exists"]

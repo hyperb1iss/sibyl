@@ -499,6 +499,9 @@ def test_official_runner_receipt_only_emits_citable_contract(
     assert receipt["source_runs"]["domains"]["web"]["runtime_inputs"]["questions"][
         "sha256"
     ].startswith("sha256:")
+    assert receipt["source_runs"]["domains"]["web"]["official_receipt"]["sha256"].startswith(
+        "sha256:"
+    )
     effective_config = receipt["source_runs"]["domains"]["web"]["effective_memory_config"]
     assert "api_token" not in effective_config["memory_params"]
     assert "email" not in effective_config["memory_params"]
@@ -516,6 +519,40 @@ def test_official_runner_receipt_only_emits_citable_contract(
     assert receipt["accounting"]["cost"]["coverage_complete"] is True
     assert {check["status"] for check in receipt["checks"]} == {"PASS"}
     assert eval_gate.evaluate_report(receipt, profile="longmemeval-v2") == []
+
+
+def test_combined_source_runs_require_each_domain_receipt(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    web_output_dir = tmp_path / "runs" / "web"
+    enterprise_output_dir = tmp_path / "runs" / "enterprise"
+    _write_official_outputs(web_output_dir, domain="web")
+    _write_official_outputs(enterprise_output_dir, domain="enterprise")
+    (web_output_dir / "longmemeval_v2_official_receipt.json").unlink()
+    args = module.parse_args(
+        [
+            "--data-root",
+            str(tmp_path / "data"),
+            "--domain",
+            "combined",
+            "--output-dir",
+            str(tmp_path / "combined"),
+            "--receipt-only",
+            "--web-output-dir",
+            str(web_output_dir),
+            "--enterprise-output-dir",
+            str(enterprise_output_dir),
+        ]
+    )
+
+    source_runs = module.load_receipt_source_runs(
+        args=args,
+        output_dir=tmp_path / "combined",
+    )
+    receipt = module.build_source_runs_receipt(args=args, source_runs=source_runs)
+
+    assert receipt["integrity_complete"] is False
+    assert receipt["domains"]["web"]["official_receipt"]["exists"] is False
+    assert receipt["domains"]["enterprise"]["official_receipt"]["exists"] is True
 
 
 def test_longmemeval_v2_receipt_gate_rejects_missing_lafs(tmp_path: Path) -> None:
@@ -7088,6 +7125,10 @@ def _write_official_outputs(
         plan["provider_usage_run_id"] = usage_run_id
     (output_dir / "longmemeval_v2_official_plan.json").write_text(
         json.dumps(plan),
+        encoding="utf-8",
+    )
+    (output_dir / "longmemeval_v2_official_receipt.json").write_text(
+        json.dumps({"domain": domain, "schema_version": "fixture"}),
         encoding="utf-8",
     )
     (runtime_dir / "questions.json").write_text(
