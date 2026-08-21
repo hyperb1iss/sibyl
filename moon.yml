@@ -552,6 +552,9 @@ tasks:
       - skills/**/*.yml
       - skills/**/*.yaml
       - setup-dev.sh
+      - setup-dev.ps1
+      - .prototools
+      - .python-version
       - tools/**/*.example
       - tools/**/*.md
       - tools/**/*.mdx

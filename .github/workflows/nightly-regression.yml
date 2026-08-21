@@ -55,6 +55,7 @@ jobs:
       - name: Setup moonrepo toolchain
         uses: moonrepo/setup-toolchain@v0.6.4
         with:
+          proto-version: "0.60.2"
           auto-install: true
           auto-setup: true
           cache-version: surreal-ci-v1
@@ -71,9 +72,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .moon/cache
-          key: moon-nightly-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock') }}
+          key: moon-nightly-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            moon-nightly-${{ runner.os }}-${{ hashFiles('.prototools') }}-
+            moon-nightly-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
       - name: Cache uv
         uses: actions/cache@v6
@@ -264,6 +265,7 @@ jobs:
       - name: Setup moonrepo toolchain
         uses: moonrepo/setup-toolchain@v0.6.4
         with:
+          proto-version: "0.60.2"
           auto-install: true
           auto-setup: true
           cache-version: surreal-ci-v1
@@ -280,9 +282,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .moon/cache
-          key: moon-live-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock') }}
+          key: moon-live-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            moon-live-${{ runner.os }}-${{ hashFiles('.prototools') }}-
+            moon-live-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
       - name: Cache uv
         uses: actions/cache@v6
@@ -351,6 +353,7 @@ jobs:
       - name: Setup moonrepo toolchain
         uses: moonrepo/setup-toolchain@v0.6.4
         with:
+          proto-version: "0.60.2"
           auto-install: true
           auto-setup: true
           cache-version: restore-to-scratch-v1
@@ -367,9 +370,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .moon/cache
-          key: moon-restore-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock') }}
+          key: moon-restore-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            moon-restore-${{ runner.os }}-${{ hashFiles('.prototools') }}-
+            moon-restore-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
       - name: Cache uv
         uses: actions/cache@v6

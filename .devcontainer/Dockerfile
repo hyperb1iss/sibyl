@@ -20,6 +20,11 @@ RUN curl -fsSL https://moonrepo.dev/install/proto.sh | bash -s -- 0.60.2 --yes \
     && proto install python 3.13.15 --pin global \
     && proto install node 24.19.0 --pin global \
     && proto install pnpm 11.22.0 --pin global \
+    && printf '%s\n' \
+        'export PROTO_HOME=/opt/proto' \
+        'export PATH="/opt/proto/shims:/opt/proto/bin:$PATH"' \
+        > /etc/profile.d/proto.sh \
+    && chmod 0644 /etc/profile.d/proto.sh \
     && chmod -R a+rx /opt/proto
 
 WORKDIR /workspace/sibyl

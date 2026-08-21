@@ -191,6 +191,7 @@ jobs:
       - name: Setup moonrepo toolchain
         uses: moonrepo/setup-toolchain@v0.6.4
         with:
+          proto-version: "0.60.2"
           auto-install: true
           auto-setup: true
           cache-version: surreal-ci-v1
@@ -207,9 +208,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .moon/cache
-          key: moon-eval-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock') }}
+          key: moon-eval-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            moon-eval-${{ runner.os }}-${{ hashFiles('.prototools') }}-
+            moon-eval-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
       - name: Cache uv
         uses: actions/cache@v6
@@ -368,6 +369,7 @@ jobs:
       - name: Setup moonrepo toolchain
         uses: moonrepo/setup-toolchain@v0.6.4
         with:
+          proto-version: "0.60.2"
           auto-install: true
           auto-setup: true
           cache-version: surreal-ci-v1
@@ -376,9 +378,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .moon/cache
-          key: moon-longmemeval-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock') }}
+          key: moon-longmemeval-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            moon-longmemeval-${{ runner.os }}-${{ hashFiles('.prototools') }}-
+            moon-longmemeval-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
       - name: Cache uv
         uses: actions/cache@v6
@@ -557,6 +559,7 @@ jobs:
       - name: Setup moonrepo toolchain
         uses: moonrepo/setup-toolchain@v0.6.4
         with:
+          proto-version: "0.60.2"
           auto-install: true
           auto-setup: true
           cache-version: surreal-ci-v1
@@ -565,9 +568,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .moon/cache
-          key: moon-longmemeval-local-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock') }}
+          key: moon-longmemeval-local-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            moon-longmemeval-local-${{ runner.os }}-${{ hashFiles('.prototools') }}-
+            moon-longmemeval-local-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
       - name: Cache uv
         uses: actions/cache@v6
@@ -740,6 +743,7 @@ jobs:
       - name: Setup moonrepo toolchain
         uses: moonrepo/setup-toolchain@v0.6.4
         with:
+          proto-version: "0.60.2"
           auto-install: true
           auto-setup: true
           cache-version: surreal-ci-v1
@@ -748,9 +752,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .moon/cache
-          key: moon-longmemeval-compare-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock') }}
+          key: moon-longmemeval-compare-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            moon-longmemeval-compare-${{ runner.os }}-${{ hashFiles('.prototools') }}-
+            moon-longmemeval-compare-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
       - name: Cache uv
         uses: actions/cache@v6
@@ -851,6 +855,7 @@ jobs:
       - name: Setup moonrepo toolchain
         uses: moonrepo/setup-toolchain@v0.6.4
         with:
+          proto-version: "0.60.2"
           auto-install: true
           auto-setup: true
           cache-version: surreal-ci-v1
@@ -859,9 +864,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .moon/cache
-          key: moon-longmemeval-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock') }}
+          key: moon-longmemeval-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            moon-longmemeval-${{ runner.os }}-${{ hashFiles('.prototools') }}-
+            moon-longmemeval-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
       - name: Cache uv
         uses: actions/cache@v6

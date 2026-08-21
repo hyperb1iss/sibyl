@@ -106,6 +106,7 @@ jobs:
       - name: Setup moonrepo toolchain
         uses: moonrepo/setup-toolchain@v0.6.4
         with:
+          proto-version: "0.60.2"
           auto-install: true
           auto-setup: true
           cache-version: surreal-ci-v1
@@ -196,6 +197,7 @@ jobs:
       - name: Setup moonrepo toolchain
         uses: moonrepo/setup-toolchain@v0.6.4
         with:
+          proto-version: "0.60.2"
           auto-install: true
           auto-setup: true
           cache-version: surreal-ci-v1
@@ -229,6 +231,7 @@ jobs:
       - name: Setup moonrepo toolchain
         uses: moonrepo/setup-toolchain@v0.6.4
         with:
+          proto-version: "0.60.2"
           auto-install: true
           auto-setup: true
           cache-version: surreal-ci-v1
@@ -280,6 +283,7 @@ jobs:
       - name: Setup moonrepo toolchain
         uses: moonrepo/setup-toolchain@v0.6.4
         with:
+          proto-version: "0.60.2"
           auto-install: true
           auto-setup: true
           cache-version: surreal-ci-v1
@@ -298,9 +302,9 @@ jobs:
           path: |
             .moon/cache
             apps/web/.next/cache
-          key: moon-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock', 'apps/web/pnpm-lock.yaml') }}
+          key: moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock', 'apps/web/pnpm-lock.yaml') }}
           restore-keys: |
-            moon-${{ runner.os }}-${{ hashFiles('.prototools') }}-
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
       - name: Cache pnpm store
         uses: actions/cache@v6
@@ -383,6 +387,7 @@ jobs:
       - name: Setup moonrepo toolchain
         uses: moonrepo/setup-toolchain@v0.6.4
         with:
+          proto-version: "0.60.2"
           auto-install: true
           auto-setup: true
           cache-version: surreal-ci-v1
@@ -401,9 +406,9 @@ jobs:
           path: |
             .moon/cache
             apps/web/.next/cache
-          key: moon-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock', 'apps/web/pnpm-lock.yaml') }}
+          key: moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock', 'apps/web/pnpm-lock.yaml') }}
           restore-keys: |
-            moon-${{ runner.os }}-${{ hashFiles('.prototools') }}-
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
       - name: Cache pnpm store
         uses: actions/cache@v6
@@ -453,6 +458,7 @@ jobs:
       - name: Setup moonrepo toolchain
         uses: moonrepo/setup-toolchain@v0.6.4
         with:
+          proto-version: "0.60.2"
           auto-install: true
           auto-setup: true
           cache-version: surreal-ci-v1
@@ -471,9 +477,9 @@ jobs:
           path: |
             .moon/cache
             apps/web/.next/cache
-          key: moon-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock', 'apps/web/pnpm-lock.yaml') }}
+          key: moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock', 'apps/web/pnpm-lock.yaml') }}
           restore-keys: |
-            moon-${{ runner.os }}-${{ hashFiles('.prototools') }}-
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
       - name: Cache pnpm store
         uses: actions/cache@v6
@@ -542,6 +548,7 @@ jobs:
       - name: Setup moonrepo toolchain
         uses: moonrepo/setup-toolchain@v0.6.4
         with:
+          proto-version: "0.60.2"
           auto-install: true
           auto-setup: true
           cache-version: surreal-ci-v1
@@ -558,9 +565,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .moon/cache
-          key: moon-live-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock') }}
+          key: moon-live-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            moon-live-${{ runner.os }}-${{ hashFiles('.prototools') }}-
+            moon-live-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
       - name: Cache uv
         uses: actions/cache@v6
@@ -608,6 +615,7 @@ jobs:
       - name: Setup moonrepo toolchain
         uses: moonrepo/setup-toolchain@v0.6.4
         with:
+          proto-version: "0.60.2"
           auto-install: true
           auto-setup: true
           cache-version: surreal-ci-v1
@@ -626,9 +634,9 @@ jobs:
           path: |
             .moon/cache
             apps/web/.next/cache
-          key: moon-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock', 'apps/web/pnpm-lock.yaml') }}
+          key: moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock', 'apps/web/pnpm-lock.yaml') }}
           restore-keys: |
-            moon-${{ runner.os }}-${{ hashFiles('.prototools') }}-
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
       - name: Cache pnpm store
         uses: actions/cache@v6
@@ -742,6 +750,7 @@ jobs:
       - name: Setup moonrepo toolchain
         uses: moonrepo/setup-toolchain@v0.6.4
         with:
+          proto-version: "0.60.2"
           auto-install: true
           auto-setup: true
           cache-version: surreal-ci-v1
@@ -752,9 +761,9 @@ jobs:
           path: |
             .moon/cache
             apps/web/.next/cache
-          key: moon-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock', 'apps/web/pnpm-lock.yaml') }}
+          key: moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock', 'apps/web/pnpm-lock.yaml') }}
           restore-keys: |
-            moon-${{ runner.os }}-${{ hashFiles('.prototools') }}-
+            moon-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
       - name: Cache pnpm store
         uses: actions/cache@v6

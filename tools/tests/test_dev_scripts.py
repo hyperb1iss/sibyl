@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import subprocess
@@ -10,6 +11,122 @@ from shutil import which
 from tools.tests.conftest import REPO_ROOT
 
 EXPECTED_NATIVE_SAMPLE_LINES = 3
+EXPECTED_TOOLCHAIN_VERSIONS = {
+    "proto": "0.60.2",
+    "moon": "2.5.2",
+    "node": "24.19.0",
+    "pnpm": "11.22.0",
+    "python": "3.13.15",
+    "uv": "0.12.5",
+}
+
+
+def _write_stale_toolchain_stubs(proto_home: Path, state_dir: Path) -> None:
+    bin_dir = proto_home / "bin"
+    bin_dir.mkdir(parents=True)
+    state_dir.mkdir()
+    stub = """#!/usr/bin/env bash
+set -euo pipefail
+tool="$(basename "$0")"
+if [[ "$tool" == "proto" && "${1:-}" == "install" ]]; then
+  [[ "${4:-}" == "--pin" && "${5:-}" == "global" ]]
+  printf 'install %s %s --pin global\\n' "$2" "$3" >> "$TOOL_INSTALL_LOG"
+  printf '%s\\n' "$3" > "$TOOL_STATE_DIR/$2"
+  exit 0
+fi
+if [[ "$tool" == "proto" && "${1:-}" == "upgrade" ]]; then
+  printf 'upgrade %s\\n' "$2" >> "$TOOL_INSTALL_LOG"
+  printf '%s\\n' "$2" > "$TOOL_STATE_DIR/proto"
+  exit 0
+fi
+version="$(<"$TOOL_STATE_DIR/$tool")"
+case "$tool" in
+  node) printf 'v%s\\n' "$version" ;;
+  python) printf 'Python %s\\n' "$version" ;;
+  *) printf '%s %s\\n' "$tool" "$version" ;;
+esac
+"""
+    for tool in EXPECTED_TOOLCHAIN_VERSIONS:
+        binary = bin_dir / tool
+        binary.write_text(stub, encoding="utf-8")
+        binary.chmod(0o755)
+        (state_dir / tool).write_text("0.1.0\n", encoding="utf-8")
+
+
+def test_shell_setup_reconciles_hostile_stale_tools_to_exact_repo_pins(
+    tmp_path: Path,
+) -> None:
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    (repo_dir / "setup-dev.sh").write_bytes((REPO_ROOT / "setup-dev.sh").read_bytes())
+    (repo_dir / ".prototools").write_bytes((REPO_ROOT / ".prototools").read_bytes())
+
+    proto_home = tmp_path / "proto-home"
+    state_dir = tmp_path / "state"
+    install_log = tmp_path / "installs.log"
+    _write_stale_toolchain_stubs(proto_home, state_dir)
+
+    bash = which("bash")
+    assert bash is not None
+    script = f"""
+source {shlex.quote(str(repo_dir / "setup-dev.sh"))}
+install_proto
+install_moon
+install_toolchain
+"""
+    result = subprocess.run(  # noqa: S603
+        [bash, "-c", script],
+        cwd=repo_dir,
+        env={
+            **os.environ,
+            "PATH": f"{proto_home / 'bin'}{os.pathsep}{os.environ['PATH']}",
+            "PROTO_HOME": str(proto_home),
+            "TOOL_INSTALL_LOG": str(install_log),
+            "TOOL_STATE_DIR": str(state_dir),
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert {
+        tool: (state_dir / tool).read_text(encoding="utf-8").strip()
+        for tool in EXPECTED_TOOLCHAIN_VERSIONS
+    } == EXPECTED_TOOLCHAIN_VERSIONS
+    assert install_log.read_text(encoding="utf-8").splitlines() == [
+        "upgrade 0.60.2",
+        "install moon 2.5.2 --pin global",
+        "install node 24.19.0 --pin global",
+        "install pnpm 11.22.0 --pin global",
+        "install python 3.13.15 --pin global",
+        "install uv 0.12.5 --pin global",
+    ]
+
+
+def test_powershell_setup_reconciles_every_tool_from_exact_repo_pins() -> None:
+    script = (REPO_ROOT / "setup-dev.ps1").read_text(encoding="utf-8")
+
+    assert "& proto upgrade $expected" in script
+    assert "& $installer $expected" in script
+    assert "& proto install $Tool $Expected --pin global" in script
+    assert "Get-RequiredVersion -Tool 'proto'" in script
+    assert "Get-RequiredVersion -Tool 'moon'" in script
+    assert "$tools = @('node', 'pnpm', 'python', 'uv')" in script
+    assert "Get-RequiredVersion -Tool $tool" in script
+
+
+def test_devcontainer_has_one_exact_node_and_pnpm_owner() -> None:
+    config = json.loads(
+        (REPO_ROOT / ".devcontainer" / "devcontainer.json").read_text(encoding="utf-8")
+    )
+    dockerfile = (REPO_ROOT / ".devcontainer" / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "ghcr.io/devcontainers/features/node:1" not in config["features"]
+    assert 'ENV PATH="/opt/proto/shims:/opt/proto/bin:${PATH}"' in dockerfile
+    assert "> /etc/profile.d/proto.sh" in dockerfile
+    assert "proto install node 24.19.0 --pin global" in dockerfile
+    assert "proto install pnpm 11.22.0 --pin global" in dockerfile
 
 
 def _write_docker_stub(bin_dir: Path) -> None:

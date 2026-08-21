@@ -8,7 +8,9 @@ import yaml
 
 REPO_ROOT = Path(__file__).parents[2]
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
-TOOLCHAIN_DIGEST = "${{ hashFiles('.prototools') }}"
+TOOLCHAIN_DIGESTS = ("${{ hashFiles('.prototools', '.python-version') }}",)
+SETUP_TOOLCHAIN_ACTION = "moonrepo/setup-toolchain@v0.6.4"
+PROTO_VERSION = "0.60.2"
 
 
 def _workflow_paths(workflows_dir: Path) -> list[Path]:
@@ -50,13 +52,42 @@ def test_moon_output_caches_restore_only_matching_toolchains() -> None:
     assert caches, "no moon output caches found"
     for label, cache in caches:
         key = str(cache.get("key", ""))
-        assert TOOLCHAIN_DIGEST in key, f"unsafe cache key in {label}: {key}"
+        for digest in TOOLCHAIN_DIGESTS:
+            assert digest in key, f"unsafe cache key in {label}: {key}"
 
         restore_prefixes = str(cache.get("restore-keys", "")).splitlines()
         for restore_prefix in filter(None, map(str.strip, restore_prefixes)):
-            assert TOOLCHAIN_DIGEST in restore_prefix, (
-                f"unsafe restore prefix in {label}: {restore_prefix}"
-            )
+            for digest in TOOLCHAIN_DIGESTS:
+                assert digest in restore_prefix, (
+                    f"unsafe restore prefix in {label}: {restore_prefix}"
+                )
+
+
+def test_every_moon_setup_uses_the_repo_proto_version() -> None:
+    setup_steps: list[tuple[str, dict[str, Any]]] = []
+    for workflow_path in _workflow_paths(WORKFLOWS_DIR):
+        workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+        jobs = workflow.get("jobs", {})
+        for job_name, job in jobs.items():
+            if not isinstance(job, dict):
+                continue
+            for step_number, step in enumerate(job.get("steps", []), start=1):
+                if not isinstance(step, dict) or step.get("uses") != SETUP_TOOLCHAIN_ACTION:
+                    continue
+                setup_steps.append((f"{workflow_path.name}:{job_name}:step-{step_number}", step))
+
+    assert setup_steps, "no moon setup-toolchain steps found"
+    for label, step in setup_steps:
+        inputs = step.get("with", {})
+        assert inputs.get("proto-version") == PROTO_VERSION, f"unpinned proto version in {label}"
+
+
+def test_every_moon_task_hashes_repo_toolchain_selectors() -> None:
+    config = yaml.safe_load(
+        (REPO_ROOT / ".moon" / "tasks" / "toolchain.yml").read_text(encoding="utf-8")
+    )
+
+    assert set(config["implicitInputs"]) == {"/.prototools", "/.python-version"}
 
 
 def test_moon_output_cache_discovery_is_structural(tmp_path: Path) -> None:

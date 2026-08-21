@@ -9,6 +9,8 @@
 
 #Requires -Version 7.0
 
+param([switch]$SkipMain)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -63,12 +65,66 @@ function Get-VersionString {
     }
 }
 
+function Get-RequiredVersion {
+    param([string]$Tool)
+
+    $toolPattern = [Regex]::Escape($Tool)
+    $pattern = '^\s*{0}\s*=\s*"([^"]+)"' -f $toolPattern
+    foreach ($line in Get-Content (Join-Path $PSScriptRoot '.prototools')) {
+        if ($line -match $pattern) {
+            $version = $Matches[1]
+            if ($version -notmatch '^\d+\.\d+\.\d+$') {
+                Write-Err "Expected an exact $Tool version in .prototools"
+                exit 1
+            }
+            return $version
+        }
+    }
+
+    Write-Err "Missing exact $Tool version in .prototools"
+    exit 1
+}
+
 function Add-PathOnce ([string]$Dir) {
     if (-not $Dir -or -not (Test-Path $Dir)) { return }
     $parts = $env:Path -split [IO.Path]::PathSeparator
     if ($parts -notcontains $Dir) {
         $env:Path = "$Dir$([IO.Path]::PathSeparator)$env:Path"
     }
+}
+
+function Install-ExactTool {
+    param(
+        [string]$Tool,
+        [string]$Expected
+    )
+
+    $current = if (Test-Command $Tool) { Get-VersionString -Tool $Tool } else { '' }
+    if ($current -eq $Expected) {
+        Write-Success "$Tool ${CORAL}v${current}${RESET} already installed"
+        return
+    }
+
+    if ($current) {
+        Write-Info "Upgrading ${CORAL}${Tool}${RESET} from v$current to v$Expected..."
+    } else {
+        Write-Info "Installing ${CORAL}${Tool}${RESET} v$Expected..."
+    }
+
+    & proto install $Tool $Expected --pin global
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "$Tool v$Expected installation failed"
+        exit 1
+    }
+
+    $current = if (Test-Command $Tool) { Get-VersionString -Tool $Tool } else { '' }
+    if ($current -ne $Expected) {
+        $resolved = if ($current) { "v$current" } else { 'missing' }
+        Write-Err "$Tool v$Expected was installed but $resolved resolves on PATH"
+        exit 1
+    }
+
+    Write-Success "$Tool ${CORAL}v${current}${RESET} installed"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -108,28 +164,40 @@ function Install-Proto {
     Add-PathOnce (Join-Path $protoHome 'shims')
     Add-PathOnce (Join-Path $protoHome 'bin')
 
-    if (Test-Command proto) {
-        $version = Get-VersionString -Tool 'proto'
-        Write-Success "proto ${CORAL}v${version}${RESET} already installed"
+    $expected = Get-RequiredVersion -Tool 'proto'
+    $current = if (Test-Command proto) { Get-VersionString -Tool 'proto' } else { '' }
+    if ($current -eq $expected) {
+        Write-Success "proto ${CORAL}v${current}${RESET} already installed"
         return
     }
 
-    Write-Info "Installing proto (toolchain version manager)..."
-
-    # The official one-liner is `irm <url> | iex`, but iex can't accept args
-    # so we download to a temp file and invoke it directly. That lets us pass
-    # flags through to `proto setup` when we need to.
-    $installer = Join-Path ([IO.Path]::GetTempPath()) ("proto-install-$([guid]::NewGuid()).ps1")
-    try {
-        Invoke-WebRequest `
-            -Uri 'https://moonrepo.dev/install/proto.ps1' `
-            -OutFile $installer `
-            -UseBasicParsing `
-            -ErrorAction Stop
-        & $installer
-    }
-    finally {
-        if (Test-Path $installer) { Remove-Item $installer -Force -ErrorAction SilentlyContinue }
+    if ($current) {
+        Write-Info "Upgrading proto from v$current to v$expected..."
+        & proto upgrade $expected
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "proto v$expected upgrade failed"
+            exit 1
+        }
+    } else {
+        Write-Info "Installing proto v$expected (toolchain version manager)..."
+        # The official one-liner is `irm <url> | iex`, but iex can't accept
+        # args. Download the installer so the exact repo version can be passed.
+        $installer = Join-Path ([IO.Path]::GetTempPath()) (
+            "proto-install-$([guid]::NewGuid()).ps1"
+        )
+        try {
+            Invoke-WebRequest `
+                -Uri 'https://moonrepo.dev/install/proto.ps1' `
+                -OutFile $installer `
+                -UseBasicParsing `
+                -ErrorAction Stop
+            & $installer $expected
+        }
+        finally {
+            if (Test-Path $installer) {
+                Remove-Item $installer -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
 
     # Refresh PATH for the bin we just dropped on disk.
@@ -138,7 +206,12 @@ function Install-Proto {
 
     if (-not (Test-Command proto)) {
         Write-Err "proto installation failed"
-        Write-Host "${DIM}Try manually: irm https://moonrepo.dev/install/proto.ps1 | iex${RESET}"
+        exit 1
+    }
+
+    $current = Get-VersionString -Tool 'proto'
+    if ($current -ne $expected) {
+        Write-Err "proto v$expected was installed but v$current resolves on PATH"
         exit 1
     }
 
@@ -152,7 +225,7 @@ function Install-Proto {
         Write-Warn "proto setup reported an issue; PATH may need a new pwsh session to pick up."
     }
 
-    Write-Success "proto installed successfully"
+    Write-Success "proto ${CORAL}v${current}${RESET} installed"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -160,25 +233,7 @@ function Install-Proto {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 function Install-Moon {
-    if (Test-Command moon) {
-        $version = Get-VersionString -Tool 'moon'
-        Write-Success "moon ${CORAL}v${version}${RESET} already installed"
-        return
-    }
-
-    Write-Info "Installing moon (monorepo orchestration)..."
-    # moon is built-in to proto v0.45+, no plugin needed.
-    & proto install moon
-    if ($LASTEXITCODE -ne 0) {
-        Write-Err "moon installation failed"
-        exit 1
-    }
-
-    if (-not (Test-Command moon)) {
-        Write-Err "moon not found on PATH after install"
-        exit 1
-    }
-    Write-Success "moon installed successfully"
+    Install-ExactTool -Tool 'moon' -Expected (Get-RequiredVersion -Tool 'moon')
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -199,37 +254,10 @@ function Install-Toolchain {
 
     Write-Info "Resolving toolchain from ${CORAL}.prototools${RESET}..."
 
-    # Install tools one at a time. `proto use --yes` runs installs in parallel
-    # and can deadlock if any plugin stalls — pnpm waits on node forever when
-    # the node WASM plugin trips on a flaky nodejs.org fetch. Sequential
-    # installs surface failures cleanly and let us short-circuit on tools
-    # that are already present.
+    # Reconcile tools sequentially so pnpm always observes the pinned Node.
     $tools = @('node', 'pnpm', 'python', 'uv')
     foreach ($tool in $tools) {
-        if (Test-Command $tool) {
-            $version = Get-VersionString -Tool $tool
-            Write-Success "${tool} ${CORAL}${version}${RESET}"
-            continue
-        }
-
-        Write-Info "Installing ${CORAL}${tool}${RESET}..."
-        & proto install $tool
-        if ($LASTEXITCODE -ne 0) {
-            Write-Err "${tool} install failed"
-            Write-Host "${DIM}  Retry: ${RESET}proto install $tool"
-            Write-Host "${DIM}  If the node plugin keeps failing, clear the cache:${RESET}"
-            $pluginsDir = Join-Path $protoHome 'plugins'
-            Write-Host "${DIM}    Remove-Item -Recurse -Force '$pluginsDir'; proto install $tool${RESET}"
-            exit 1
-        }
-
-        if (Test-Command $tool) {
-            $version = Get-VersionString -Tool $tool
-            Write-Success "${tool} ${CORAL}${version}${RESET} installed"
-        } else {
-            Write-Err "${tool} not found on PATH after install"
-            exit 1
-        }
+        Install-ExactTool -Tool $tool -Expected (Get-RequiredVersion -Tool $tool)
     }
 }
 
@@ -379,4 +407,6 @@ function Main {
     Show-Summary
 }
 
-Main
+if (-not $SkipMain) {
+    Main
+}
