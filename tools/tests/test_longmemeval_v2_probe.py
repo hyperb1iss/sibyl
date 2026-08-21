@@ -183,6 +183,33 @@ def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
     assert "https://openrouter.ai/api/v1" in workflow
 
 
+def test_longmemeval_v2_workflow_seals_paid_arm_manifest() -> None:
+    workflow = (
+        Path(__file__).parents[2] / ".github" / "workflows" / "longmemeval-v2.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "environment: longmemeval-paid" in workflow
+    assert "official_arm_manifest_json:" in workflow
+    assert "official_experiment_id:" not in workflow
+    assert "ARM_MANIFEST_JSON: ${{ inputs.official_arm_manifest_json || '' }}" in workflow
+    assert "keys | sort) == ([" in workflow
+    assert '"experiment_id"' in workflow
+    assert '"pass_id"' in workflow
+    assert '"pass_seed"' in workflow
+    assert '"arm_role"' in workflow
+    assert '"substrate"' in workflow
+    assert '"preregistration_sha256"' in workflow
+    assert '"max_spend_usd"' in workflow
+    assert '"max_context_total_chars"' in workflow
+    assert '"operational_note_distillation_profile"' in workflow
+    assert "official_arm_manifest_json does not match the sealed schema" in workflow
+    assert '--experiment-id "$EXPERIMENT_ID"' in workflow
+    assert '--pass-id "$PASS_ID"' in workflow
+    assert '--pass-seed "$PASS_SEED"' in workflow
+    assert '--shuffle-questions-seed "$PASS_SEED"' in workflow
+    assert '--max-spend-usd "$MAX_SPEND_USD"' in workflow
+
+
 def test_longmemeval_v2_workflow_packages_receipts_and_diagnostics() -> None:
     workflow = (
         Path(__file__).parents[2] / ".github" / "workflows" / "longmemeval-v2.yml"
@@ -232,12 +259,19 @@ def test_longmemeval_v2_workflow_forwards_frozen_operating_point() -> None:
     assert "official_api_retry_attempts:" in workflow
     assert "official_prompt_build_max_workers:" in workflow
     assert '--max-context-chars-per-item "$MAX_CONTEXT_CHARS_PER_ITEM"' in workflow
+    assert '--max-context-total-chars "$MAX_CONTEXT_TOTAL_CHARS"' in workflow
+    assert '--operational-note-dedupe-mode "$NOTE_DEDUPE_MODE"' in workflow
+    assert '--operational-note-lane-mode "$NOTE_LANE_MODE"' in workflow
+    assert '--operational-note-distillation-profile "$NOTE_DISTILLATION_PROFILE"' in workflow
     assert '--typed-stream-limit "$TYPED_STREAM_LIMIT"' in workflow
     assert '--note-distillation-model "$NOTE_DISTILLATION_MODEL"' in workflow
     assert '--api-retry-attempts "$API_RETRY_ATTEMPTS"' in workflow
     assert '--prompt-build-max-workers "$PROMPT_BUILD_MAX_WORKERS"' in workflow
     assert "args+=(--typed-stream-retrieval)" in workflow
     assert "args+=(--note-distillation)" in workflow
+    assert "args+=(--render-char-total-treatment)" in workflow
+    assert "args+=(--render-group-lanes)" in workflow
+    assert "args+=(--render-action-spines)" in workflow
 
 
 def test_longmemeval_v2_workflow_defaults_to_shared_relevance() -> None:

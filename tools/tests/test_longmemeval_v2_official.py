@@ -1065,6 +1065,70 @@ def test_official_runner_refuses_to_infer_missing_rig_activity(tmp_path: Path) -
         )
 
 
+def test_official_runner_carries_explicit_render_profile_into_memory(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    total_chars = 400_000
+    args = module.parse_args(
+        [
+            "--data-root",
+            str(tmp_path / "data"),
+            "--domain",
+            "web",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--max-context-total-chars",
+            str(total_chars),
+            "--operational-note-dedupe-mode",
+            "source_kind",
+            "--operational-note-lane-mode",
+            "additive",
+            "--operational-note-distillation-profile",
+            "render_v1",
+            "--render-char-total-treatment",
+            "--render-group-lanes",
+            "--render-action-spines",
+        ]
+    )
+
+    params = module.build_memory_config(args)["memory_params"]
+
+    assert params["max_context_total_chars"] == total_chars
+    assert params["operational_note_dedupe_mode"] == "source_kind"
+    assert params["operational_note_lane_mode"] == "additive"
+    assert params["operational_note_distillation_profile"] == "render_v1"
+    assert params["render_char_total_treatment"] is True
+    assert params["render_group_lanes"] is True
+    assert params["render_action_spines"] is True
+
+
+def test_official_runner_omits_baseline_render_profile_from_memory(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    args = module.parse_args(
+        [
+            "--data-root",
+            str(tmp_path / "data"),
+            "--domain",
+            "web",
+            "--output-dir",
+            str(tmp_path / "out"),
+        ]
+    )
+
+    params = module.build_memory_config(args)["memory_params"]
+
+    assert (
+        not {
+            "operational_note_dedupe_mode",
+            "operational_note_lane_mode",
+            "operational_note_distillation_profile",
+            "render_char_total_treatment",
+            "render_group_lanes",
+            "render_action_spines",
+        }
+        & params.keys()
+    )
+
+
 def test_provider_accounting_rejects_empty_usage_log(tmp_path: Path) -> None:
     module = _load_runner_module()
     usage_path = tmp_path / "reader.jsonl"

@@ -86,6 +86,11 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "max_context_items",
         "max_context_chars_per_item",
         "max_context_total_chars",
+        "render_char_total_treatment",
+        "render_group_lanes",
+        "render_action_spines",
+        "operational_note_dedupe_mode",
+        "operational_note_lane_mode",
         "max_chunks_per_trajectory",
         "neighbor_stitch_items",
         "neighbor_stitch_span",
@@ -571,6 +576,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     parser.add_argument("--typed-stream-limit", type=int, default=8)
     parser.add_argument("--note-distillation", action="store_true")
     parser.add_argument("--note-distillation-model", default="gpt-5.4-nano")
+    parser.add_argument(
+        "--operational-note-dedupe-mode",
+        choices=["source", "source_kind"],
+        default="source",
+    )
+    parser.add_argument(
+        "--operational-note-lane-mode",
+        choices=["reserved", "additive"],
+        default="reserved",
+    )
+    parser.add_argument(
+        "--operational-note-distillation-profile",
+        choices=["baseline", "render_v1"],
+        default="baseline",
+    )
+    parser.add_argument("--render-char-total-treatment", action="store_true")
+    parser.add_argument("--render-group-lanes", action="store_true")
+    parser.add_argument("--render-action-spines", action="store_true")
     parser.add_argument("--typed-reservation-items", type=int, default=None)
     parser.add_argument("--knn-type-overfetch", type=int, default=0)
     parser.add_argument(
@@ -745,6 +768,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         parser.error("--state-part-completion-items must be non-negative")
     if args.max_context_total_chars < 1:
         parser.error("--max-context-total-chars must be positive")
+    if args.render_char_total_treatment and args.max_context_total_chars <= 60_000:
+        parser.error("--render-char-total-treatment requires more than 60000 context characters")
     if not 1 <= args.retrieval_max_planned_queries <= MAX_REFINEMENT_QUERIES:
         parser.error(
             f"--retrieval-max-planned-queries must be between 1 and {MAX_REFINEMENT_QUERIES}"
@@ -896,6 +921,20 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
             Path(args.official_repo).expanduser().resolve() if args.official_repo else None
         ),
     }
+    if args.operational_note_dedupe_mode != "source":
+        params["operational_note_dedupe_mode"] = args.operational_note_dedupe_mode
+    if args.operational_note_lane_mode != "reserved":
+        params["operational_note_lane_mode"] = args.operational_note_lane_mode
+    if args.operational_note_distillation_profile != "baseline":
+        params["operational_note_distillation_profile"] = (
+            args.operational_note_distillation_profile
+        )
+    if args.render_char_total_treatment:
+        params["render_char_total_treatment"] = True
+    if args.render_group_lanes:
+        params["render_group_lanes"] = True
+    if args.render_action_spines:
+        params["render_action_spines"] = True
     config = {"memory_type": "sibyl_live_api", "memory_params": params}
     if args.load_memory_dir:
         return build_loaded_memory_config(
@@ -942,6 +981,7 @@ LOADED_MEMORY_NON_MERGED_KEYS = frozenset(
         "bulk_max_content_chars",
         "embedding_backfill_max_pending_jobs",
         "embedding_job_wait_timeout_seconds",
+        "operational_note_distillation_profile",
     }
 )
 
@@ -1307,6 +1347,12 @@ def build_run_plan(
         "typed_stream_limit": args.typed_stream_limit,
         "note_distillation": args.note_distillation,
         "note_distillation_model": args.note_distillation_model,
+        "operational_note_dedupe_mode": args.operational_note_dedupe_mode,
+        "operational_note_lane_mode": args.operational_note_lane_mode,
+        "operational_note_distillation_profile": args.operational_note_distillation_profile,
+        "render_char_total_treatment": args.render_char_total_treatment,
+        "render_group_lanes": args.render_group_lanes,
+        "render_action_spines": args.render_action_spines,
         "typed_reservation_items": args.typed_reservation_items,
         "retrieval_mode": args.retrieval_mode,
         "knn_type_overfetch": args.knn_type_overfetch,
