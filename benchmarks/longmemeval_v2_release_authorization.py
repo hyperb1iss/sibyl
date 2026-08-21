@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from benchmarks.longmemeval_v2_release_inputs import (
     StagePlanError,
-    bind_artifact,
     load_json,
     require_artifact,
     require_exact_keys,
@@ -18,9 +16,9 @@ from benchmarks.longmemeval_v2_release_inputs import (
 )
 from tools.bench import longmemeval_v2_rig as rig
 
-AA_AUTHORIZATION_SCHEMA_VERSION = "sibyl-longmemeval-v2-aa-authorization-v1"
+AA_AUTHORIZATION_SCHEMA_VERSION = "sibyl-longmemeval-v2-aa-authorization-v2"
 PREREGISTRATION_AUTHORIZATION_SCHEMA_VERSION = (
-    "sibyl-longmemeval-v2-preregistration-authorization-v1"
+    "sibyl-longmemeval-v2-preregistration-authorization-v2"
 )
 AA_AUTHORIZATION_KEYS = frozenset(
     {
@@ -46,10 +44,22 @@ PREREGISTRATION_AUTHORIZATION_KEYS = frozenset(
         "aa_receipt_sha256",
         "aa_passes",
         "contracts",
+        "gate",
+        "policy",
         "authorization_sha256",
     }
 )
 PASS_AUTHORIZATION_KEYS = frozenset({"pass_id", "seed", "paired_pass_sha256"})
+BOUND_PASS_AUTHORIZATION_KEYS = PASS_AUTHORIZATION_KEYS | {"paired_pass_artifact"}
+GATE_AUTHORIZATION_KEYS = frozenset({"kind", "source_receipt", "receipt_sha256"})
+RENDER_POLICY_KEYS = frozenset(
+    {
+        "selected_render_substrate",
+        "render_applicable",
+        "included_levers",
+        "replay_survivors",
+    }
+)
 SCORE_BEARING_KEY_FRAGMENTS = (
     "score",
     "accuracy",
@@ -75,23 +85,43 @@ def reject_score_bearing_keys(raw: object, *, name: str) -> None:
             reject_score_bearing_keys(value, name=name)
 
 
-def _pass_projection(raw: object, *, name: str) -> dict[str, Any]:
+def _pass_projection(raw: object, *, name: str, bound: bool = False) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise StagePlanError(f"{name} is missing")
-    require_exact_keys(raw, PASS_AUTHORIZATION_KEYS, name=name)
+    expected_keys = BOUND_PASS_AUTHORIZATION_KEYS if bound else PASS_AUTHORIZATION_KEYS
+    require_exact_keys(raw, expected_keys, name=name)
     pass_id = require_string(raw.get("pass_id"), name=f"{name}.pass_id")
     seed = require_nonnegative_int(raw.get("seed"), name=f"{name}.seed")
     digest = rig._sha256_digest(
         raw.get("paired_pass_sha256"),
         name=f"{name}.paired_pass_sha256",
     )
-    return {"pass_id": pass_id, "seed": seed, "paired_pass_sha256": digest}
+    result: dict[str, Any] = {
+        "pass_id": pass_id,
+        "seed": seed,
+        "paired_pass_sha256": digest,
+    }
+    if bound:
+        result["paired_pass_artifact"] = require_artifact(
+            raw.get("paired_pass_artifact"),
+            name=f"{name}.paired_pass_artifact",
+        )
+    return result
 
 
-def _passes(raw: object, *, name: str, counts: set[int]) -> list[dict[str, Any]]:
+def _passes(
+    raw: object,
+    *,
+    name: str,
+    counts: set[int],
+    bound: bool = False,
+) -> list[dict[str, Any]]:
     if not isinstance(raw, list) or len(raw) not in counts:
         raise StagePlanError(f"{name} has an invalid pass count")
-    passes = [_pass_projection(item, name=f"{name}[{index}]") for index, item in enumerate(raw)]
+    passes = [
+        _pass_projection(item, name=f"{name}[{index}]", bound=bound)
+        for index, item in enumerate(raw)
+    ]
     if len({item["pass_id"] for item in passes}) != len(passes) or len(
         {item["seed"] for item in passes}
     ) != len(passes):
@@ -140,6 +170,7 @@ def require_aa_authorization(raw: object) -> dict[str, Any]:
         raw.get("passes"),
         name="A/A authorization passes",
         counts={rig.INITIAL_AA_PASS_COUNT, rig.EXTENDED_AA_PASS_COUNT},
+        bound=True,
     )
     _authorization_digest(
         raw,
@@ -156,32 +187,7 @@ def require_aa_authorization(raw: object) -> dict[str, Any]:
     }
 
 
-def package_aa_authorization(receipt_path: Path) -> dict[str, Any]:
-    """Project a fully validated prior-stage A/A receipt into scoreless authority."""
-    source = bind_artifact(receipt_path, name="A/A source receipt")
-    receipt = rig.validate_aa_receipt(load_json(Path(source["path"])))
-    payload = {
-        "schema_version": AA_AUTHORIZATION_SCHEMA_VERSION,
-        "kind": "aa",
-        "source_receipt": source,
-        "status": receipt["status"],
-        "aa_receipt_sha256": receipt["aa_receipt_sha256"],
-        "stack": receipt["stack"],
-        "arm_contract": receipt["arm_contract"],
-        "passes": [
-            {
-                "pass_id": item["pass_id"],
-                "seed": item["seed"],
-                "paired_pass_sha256": item["paired_pass_sha256"],
-            }
-            for item in receipt["passes"]
-        ],
-    }
-    payload["authorization_sha256"] = rig.canonical_sha256(payload)
-    return require_aa_authorization(payload)
-
-
-def _contract_keys(kind: str) -> tuple[str, ...]:
+def contract_keys(kind: str) -> tuple[str, ...]:
     if kind == "race":
         return (
             "machine_configuration",
@@ -197,6 +203,57 @@ def _contract_keys(kind: str) -> tuple[str, ...]:
             "treatment_geometry",
         )
     raise StagePlanError("preregistration authorization kind must be race or render")
+
+
+def _require_gate(raw: object, *, kind: str) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise StagePlanError("preregistration gate receipt is missing")
+    require_exact_keys(raw, GATE_AUTHORIZATION_KEYS, name="preregistration gate")
+    expected_kind = "anchor" if kind == "race" else "race"
+    if raw.get("kind") != expected_kind:
+        raise StagePlanError(f"{kind} preregistration has the wrong gate kind")
+    source = require_artifact(raw.get("source_receipt"), name=f"{expected_kind} gate receipt")
+    digest = rig._sha256_digest(
+        raw.get("receipt_sha256"),
+        name=f"{expected_kind} gate receipt digest",
+    )
+    return {"kind": expected_kind, "source_receipt": source, "receipt_sha256": digest}
+
+
+def _require_policy(raw: object, *, kind: str) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise StagePlanError("preregistration policy is missing")
+    if kind == "race":
+        require_exact_keys(raw, frozenset(), name="race preregistration policy")
+        return {}
+    require_exact_keys(raw, RENDER_POLICY_KEYS, name="render preregistration policy")
+    selected = raw.get("selected_render_substrate")
+    if selected not in {"machine", "naive"}:
+        raise StagePlanError("render preregistration selected substrate is invalid")
+    applicable = raw.get("render_applicable")
+    if not isinstance(applicable, bool) or applicable is not (selected == "machine"):
+        raise StagePlanError("render preregistration applicability is inconsistent")
+    levers = raw.get("included_levers")
+    if (
+        not isinstance(levers, list)
+        or not levers
+        or any(not isinstance(item, str) or not item for item in levers)
+        or len(set(levers)) != len(levers)
+    ):
+        raise StagePlanError("render preregistration included levers are invalid")
+    survivors = raw.get("replay_survivors")
+    if (
+        not isinstance(survivors, dict)
+        or set(survivors) != set(levers)
+        or any(survivors.get(item) is not True for item in levers)
+    ):
+        raise StagePlanError("render preregistration replay survivors are invalid")
+    return {
+        "selected_render_substrate": selected,
+        "render_applicable": applicable,
+        "included_levers": list(levers),
+        "replay_survivors": dict(survivors),
+    }
 
 
 def require_preregistration_authorization(raw: object, *, kind: str) -> dict[str, Any]:
@@ -239,7 +296,7 @@ def require_preregistration_authorization(raw: object, *, kind: str) -> dict[str
         counts={rig.INITIAL_AA_PASS_COUNT, rig.EXTENDED_AA_PASS_COUNT},
     )
     contracts = raw.get("contracts")
-    expected_contract_keys = frozenset(_contract_keys(kind))
+    expected_contract_keys = frozenset(contract_keys(kind))
     if not isinstance(contracts, dict):
         raise StagePlanError("preregistration authorization contracts are missing")
     require_exact_keys(
@@ -249,6 +306,8 @@ def require_preregistration_authorization(raw: object, *, kind: str) -> dict[str
     )
     if any(not isinstance(contracts[key], dict) for key in expected_contract_keys):
         raise StagePlanError("preregistration authorization contract is invalid")
+    gate = _require_gate(raw.get("gate"), kind=kind)
+    policy = _require_policy(raw.get("policy"), kind=kind)
     _authorization_digest(
         raw,
         field="authorization_sha256",
@@ -263,41 +322,9 @@ def require_preregistration_authorization(raw: object, *, kind: str) -> dict[str
         "seeds": seeds,
         "aa_passes": aa_passes,
         "contracts": dict(contracts),
+        "gate": gate,
+        "policy": policy,
     }
-
-
-def package_preregistration_authorization(
-    preregistration_path: Path,
-    *,
-    kind: str,
-) -> dict[str, Any]:
-    """Project a fully validated prior-stage preregistration into authority."""
-    source = bind_artifact(preregistration_path, name="source preregistration")
-    preregistration = rig.validate_preregistration(
-        load_json(Path(source["path"])),
-        kind=kind,
-    )
-    aa_receipt = preregistration["aa_receipt"]
-    payload = {
-        "schema_version": PREREGISTRATION_AUTHORIZATION_SCHEMA_VERSION,
-        "kind": kind,
-        "source_preregistration": source,
-        "preregistration_sha256": preregistration["preregistration_sha256"],
-        "stack": preregistration["stack"],
-        "seeds": list(preregistration["seeds"]),
-        "aa_receipt_sha256": preregistration["aa_receipt_sha256"],
-        "aa_passes": [
-            {
-                "pass_id": item["pass_id"],
-                "seed": item["seed"],
-                "paired_pass_sha256": item["paired_pass_sha256"],
-            }
-            for item in aa_receipt["passes"]
-        ],
-        "contracts": {key: preregistration[key] for key in _contract_keys(kind)},
-    }
-    payload["authorization_sha256"] = rig.canonical_sha256(payload)
-    return require_preregistration_authorization(payload, kind=kind)
 
 
 def _planned_arm_contract(arm: dict[str, Any]) -> dict[str, Any]:
@@ -354,6 +381,17 @@ def _require_preregistered_arm_contracts(
             )
         if (_planned_arm_contract(left), _planned_arm_contract(right)) != expected:
             raise StagePlanError(f"planned {spec['stage']} arm contract differs from authorization")
+
+
+def _require_paid_stage_authorization(
+    spec: dict[str, Any],
+    authorization: dict[str, Any],
+) -> None:
+    if spec["stage"] == "render" and (
+        (spec["mode"] == "standard") is not authorization["policy"]["render_applicable"]
+    ):
+        raise StagePlanError("render stage applicability differs from its authorization")
+    _require_preregistered_arm_contracts(spec, authorization)
 
 
 def build_upstream_bindings(
@@ -423,7 +461,7 @@ def build_upstream_bindings(
     else:
         if aa is not None or preregistration is None:
             raise StagePlanError(f"{stage} requires only its preregistration authorization")
-        _require_preregistered_arm_contracts(spec, preregistration)
+        _require_paid_stage_authorization(spec, preregistration)
     return {
         "aa_authorization": aa,
         "preregistration_authorization": preregistration,
@@ -438,16 +476,3 @@ def require_upstream_bindings(
 ) -> None:
     if raw != build_upstream_bindings(spec, expected_stack=expected_stack):
         raise StagePlanError("upstream authorizations changed after stage planning")
-
-
-def write_authorization(path: Path, payload: dict[str, Any]) -> None:
-    """Write a validated authority artifact once, outside paid output roots."""
-    if payload.get("kind") == "aa":
-        require_aa_authorization(payload)
-    else:
-        require_preregistration_authorization(payload, kind=str(payload.get("kind")))
-    target = path.expanduser().resolve()
-    if target.exists():
-        raise StagePlanError("authorization output already exists")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")

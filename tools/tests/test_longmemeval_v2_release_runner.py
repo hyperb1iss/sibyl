@@ -566,12 +566,18 @@ def sealed_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, 
     spec = _aa_spec()
     spec_path = tmp_path / "stage.json"
     spec_path.write_text(json.dumps(spec), encoding="utf-8")
+    system_description = tmp_path / "SYSTEM_DESCRIPTION.md"
+    system_description.write_text("# Sibyl release evaluation\n", encoding="utf-8")
+    adapter = tmp_path / "sibyl_memory.py"
+    adapter.write_text("# sealed adapter\n", encoding="utf-8")
     return {
         "spec": spec,
         "spec_path": spec_path,
         "official_repo": official_repo,
         "data_root": data_root,
         "output_root": tmp_path / "output",
+        "system_description": system_description,
+        "adapter": adapter,
         "source": source,
     }
 
@@ -583,6 +589,8 @@ def _build(inputs: dict[str, Any]) -> dict[str, Any]:
         official_repo=inputs["official_repo"],
         data_root=inputs["data_root"],
         output_root=inputs["output_root"],
+        system_description_path=inputs["system_description"],
+        adapter_path=inputs["adapter"],
         uuid_factory=_canonical_uuid_factory(),
     )
 
@@ -596,7 +604,6 @@ def test_stage_plan_expands_exact_domains_waves_and_local_execution(
     sealed_inputs: dict[str, Any],
 ) -> None:
     stage_plan = _build(sealed_inputs)
-
     assert len(stage_plan["runs"]) == EXPECTED_INITIAL_AA_ARM_COUNT
     assert stage_plan["waves"] == [
         ["aa-1-left"],
@@ -625,6 +632,13 @@ def test_stage_plan_expands_exact_domains_waves_and_local_execution(
                 assert "or.key" not in " ".join(command)
                 assert "OPENROUTER_API_KEY" in command
     assert len(run_ids) == len(stage_plan["runs"])
+    assert stage_plan["package_inputs"] == {
+        "system_description": inputs.bind_artifact(
+            sealed_inputs["system_description"],
+            name="test system description",
+        ),
+        "adapter": inputs.bind_artifact(sealed_inputs["adapter"], name="test adapter"),
+    }
     first_saved_memory = str(
         sealed_inputs["output_root"] / "runs" / "aa-1-left" / "web" / "checkpoint"
     )
@@ -632,6 +646,19 @@ def test_stage_plan_expands_exact_domains_waves_and_local_execution(
     assert right_web["planning_memory_dir"] == first_saved_memory
     assert right_web["execution_memory_dir"] == first_saved_memory
     plan.require_stage_plan(stage_plan, check_checkout=False)
+
+
+@pytest.mark.parametrize("input_name", ["system_description", "adapter"])
+def test_stage_plan_rejects_package_input_drift(
+    sealed_inputs: dict[str, Any],
+    input_name: str,
+) -> None:
+    stage_plan = _build(sealed_inputs)
+    package_input = sealed_inputs[input_name]
+    original = package_input.read_bytes()
+    package_input.write_bytes(b"x" + original[1:])
+    with pytest.raises(contract.StagePlanError, match="digest changed"):
+        plan.require_stage_plan(stage_plan, check_checkout=False)
 
 
 def test_all_plan_only_reservations_accept_future_internal_memory(
@@ -692,16 +719,6 @@ def test_stage_plan_seals_immutable_dataset_and_fixed_domain_caps(
     )
     with pytest.raises(contract.StagePlanError, match="dataset"):
         plan.require_stage_plan(stage_plan, check_checkout=False)
-
-
-def test_release_dataset_payload_hashes_are_exact() -> None:
-    assert inputs.OFFICIAL_DATASET_SHA256 == {
-        "questions": ("sha256:0a3ae5ebea938c24d7800e1e0b0828e08ae1646f939a53853b2b8cdc08e292b7"),
-        "trajectories": ("sha256:363cec9a8e87aa8d9101ce4e600aadbf7031d674056ebe4f969e8424abc5f3c6"),
-        "small_haystack": (
-            "sha256:9b5301defb23a088a5f06e45ff8d5f35e569d78305a66d492046a9fff9b46593"
-        ),
-    }
 
 
 def test_dataset_rejects_root_and_payload_symlink_escape(

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
+from benchmarks import longmemeval_v2_release_io as release_io
 from benchmarks.local_execution_identity import require_local_checkout
 from benchmarks.longmemeval_v2_official_source import (
     OFFICIAL_HARNESS_COMMIT,
@@ -41,6 +41,10 @@ from benchmarks.longmemeval_v2_release_memory import (
     build_memory_bindings,
     require_memory_bindings,
 )
+from benchmarks.longmemeval_v2_release_package_contract import (
+    build_package_inputs,
+    require_package_inputs,
+)
 from tools.bench import longmemeval_v2_rig as rig
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,6 +67,7 @@ PLAN_KEYS = frozenset(
         "stack_identity",
         "memory_bindings",
         "upstream_bindings",
+        "package_inputs",
         "output_root",
         "max_workers_cap",
         "runs",
@@ -428,6 +433,8 @@ def build_stage_plan(
     official_repo: Path,
     data_root: Path,
     output_root: Path,
+    system_description_path: Path,
+    adapter_path: Path,
     uuid_factory: Callable[[], Any] = uuid4,
 ) -> dict[str, Any]:
     """Build an immutable, plan-only-first declaration for exactly one stage."""
@@ -454,6 +461,10 @@ def build_stage_plan(
         runtime=spec["runtime"],
     )
     upstream_bindings = build_upstream_bindings(spec, expected_stack=stack_identity)
+    package_inputs = build_package_inputs(
+        system_description_path=system_description_path,
+        adapter_path=adapter_path,
+    )
     runs, waves = _expand_runs(
         spec=spec,
         source=source,
@@ -475,6 +486,7 @@ def build_stage_plan(
         "stack_identity": stack_identity,
         "memory_bindings": memory_bindings,
         "upstream_bindings": upstream_bindings,
+        "package_inputs": package_inputs,
         "output_root": str(output_root),
         "max_workers_cap": MAX_WORKERS_CAP,
         "runs": runs,
@@ -626,6 +638,7 @@ def _require_stage_plan(
         spec=spec,
         expected_stack=expected_stack,
     )
+    require_package_inputs(raw.get("package_inputs"))
     output_value = require_string(raw.get("output_root"), name="output_root")
     output_root = Path(output_value).resolve()
     if output_value != str(output_root):
@@ -662,10 +675,7 @@ def write_stage_plan(path: Path, payload: dict[str, Any]) -> None:
     output_root = Path(payload["output_root"])
     if target == output_root or output_root in target.parents:
         raise StagePlanError("stage plan must remain outside its fresh output root")
-    if target.exists():
-        raise StagePlanError("stage plan path already exists")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    try:
+        release_io.write_json_once_atomic(target, payload)
+    except FileExistsError as exc:
+        raise StagePlanError("stage plan path already exists") from exc

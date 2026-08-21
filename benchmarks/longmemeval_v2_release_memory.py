@@ -426,6 +426,10 @@ def build_memory_bindings(
     source: dict[str, str],
 ) -> dict[str, Any]:
     roots = spec["memory_roots"]
+    if spec["stage"] == "render" and spec["mode"] == "not_applicable":
+        if roots["baseline"] is not None or roots["render"] is not None:
+            raise StagePlanError("not-applicable render stage cannot bind saved memory")
+        return {"baseline": None, "render": None}
     baseline = _memory_root(
         roots["baseline"],
         name="baseline",

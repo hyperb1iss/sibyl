@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from benchmarks import longmemeval_v2_release_evidence as evidence
+from benchmarks import longmemeval_v2_release_io as release_io
 from benchmarks import longmemeval_v2_release_state as state
 from benchmarks.longmemeval_v2_release_contract import MAX_WORKERS_CAP
 from benchmarks.longmemeval_v2_release_inputs import (
@@ -115,7 +116,7 @@ def _write_exit(
         },
         "exit_sha256",
     )
-    state.write_json_atomic(_exit_path(plan, run, domain), payload)
+    release_io.write_json_atomic(_exit_path(plan, run, domain), payload)
     return payload
 
 

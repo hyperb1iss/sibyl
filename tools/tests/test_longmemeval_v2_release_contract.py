@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 from benchmarks import longmemeval_v2_release_authorization as authorization
+from benchmarks import (
+    longmemeval_v2_release_authorization_package as authorization_package,
+)
 from benchmarks import longmemeval_v2_release_contract as contract
+from benchmarks import longmemeval_v2_release_inputs as inputs
+from benchmarks import longmemeval_v2_release_io as release_io
+from benchmarks import longmemeval_v2_release_memory as release_memory
+from benchmarks import longmemeval_v2_release_plan as release_plan
 from tools.tests.longmemeval_v2_release_support import (
     aa_extension_spec,
     aa_spec,
@@ -167,6 +176,7 @@ def test_stage_spec_rejects_memory_lineage_and_treatment_drift(
     preregistration = {
         "seeds": [1601, 1602, 1603],
         "preregistration_sha256": f"sha256:{'c' * 64}",
+        "policy": {"render_applicable": True},
     }
     monkeypatch.setattr(
         contract,
@@ -201,20 +211,58 @@ def test_aa_authorization_packaging_projects_no_score_fields(
             {**item, "accuracy_delta_pp": 1.0, "left": {}, "right": {}} for item in prior_passes
         ],
     }
+    real_require = authorization.require_aa_authorization
     monkeypatch.setattr(authorization.rig, "validate_aa_receipt", lambda _raw: validated)
+    monkeypatch.setattr(authorization.rig, "validate_stack", lambda raw: raw)
+    paired_pass_paths = []
+    for item in prior_passes:
+        path = tmp_path / f"{item['pass_id']}.json"
+        path.write_text("{}\n", encoding="utf-8")
+        paired_pass_paths.append(path)
+    paired_passes = iter(prior_passes)
+    monkeypatch.setattr(
+        authorization.rig,
+        "validate_pass",
+        lambda _raw: next(paired_passes),
+    )
     monkeypatch.setattr(
         authorization,
         "require_aa_authorization",
         lambda raw: raw,
     )
 
-    projected = authorization.package_aa_authorization(receipt_path)
+    projected = authorization_package.package_aa_authorization(
+        receipt_path,
+        paired_pass_paths=paired_pass_paths,
+    )
 
     assert projected["source_receipt"]["sha256"]
-    assert projected["passes"] == prior_passes
+    assert [
+        {key: item[key] for key in authorization.PASS_AUTHORIZATION_KEYS}
+        for item in projected["passes"]
+    ] == prior_passes
+    assert all(item["paired_pass_artifact"]["sha256"] for item in projected["passes"])
     with pytest.raises(contract.StagePlanError, match="score-bearing"):
         authorization.reject_score_bearing_keys(validated, name="raw A/A receipt")
     authorization.reject_score_bearing_keys(projected, name="A/A authorization")
+    paired_pass_paths[0].write_text("[]\n", encoding="utf-8")
+    with pytest.raises(contract.StagePlanError, match="digest changed"):
+        real_require(projected)
+    paired_pass_paths[0].write_text("{}\n", encoding="utf-8")
+    paired_passes = iter(prior_passes)
+
+    def mutate_after_validation(_raw: object) -> dict[str, str | int]:
+        paired_pass = next(paired_passes)
+        if paired_pass["pass_id"] == prior_passes[0]["pass_id"]:
+            paired_pass_paths[0].write_text("[]\n", encoding="utf-8")
+        return paired_pass
+
+    monkeypatch.setattr(authorization.rig, "validate_pass", mutate_after_validation)
+    with pytest.raises(contract.StagePlanError, match="changed during validation"):
+        authorization_package.package_aa_authorization(
+            receipt_path,
+            paired_pass_paths=paired_pass_paths,
+        )
 
 
 def test_preregistration_authorization_packaging_projects_no_score_fields(
@@ -243,6 +291,7 @@ def test_preregistration_authorization_packaging_projects_no_score_fields(
         "noise_floor_pp": 1.5,
         **contracts,
     }
+    real_require = authorization.require_preregistration_authorization
     monkeypatch.setattr(
         authorization.rig,
         "validate_preregistration",
@@ -253,17 +302,177 @@ def test_preregistration_authorization_packaging_projects_no_score_fields(
         "require_preregistration_authorization",
         lambda raw, *, kind: raw,
     )
+    gate_receipt_path = tmp_path / "anchor-receipt.json"
+    gate_receipt_path.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        authorization_package,
+        "_package_anchor_gate",
+        lambda path, _preregistration: {
+            "kind": "anchor",
+            "source_receipt": authorization_package.bind_artifact(
+                path,
+                name="test anchor",
+            ),
+            "receipt_sha256": f"sha256:{'d' * 64}",
+        },
+    )
 
-    projected = authorization.package_preregistration_authorization(
+    projected = authorization_package.package_preregistration_authorization(
         preregistration_path,
         kind="race",
+        gate_receipt_path=gate_receipt_path,
     )
 
     assert projected["source_preregistration"]["sha256"]
     assert projected["aa_passes"] == prior_passes
+    assert projected["gate"]["kind"] == "anchor"
+    assert projected["policy"] == {}
     with pytest.raises(contract.StagePlanError, match="score-bearing"):
         authorization.reject_score_bearing_keys(validated, name="raw preregistration")
     authorization.reject_score_bearing_keys(projected, name="preregistration authorization")
+    monkeypatch.setattr(authorization.rig, "validate_stack", lambda raw: raw)
+    real_require(projected, kind="race")
+    gate_receipt_path.write_text("[]\n", encoding="utf-8")
+    with pytest.raises(contract.StagePlanError, match="digest changed"):
+        real_require(projected, kind="race")
+
+
+def test_render_authorization_policy_controls_not_applicable_stage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec, _contracts = render_spec()
+    artifact = tmp_path / "render-authorization.json"
+    artifact.write_text("{}\n", encoding="utf-8")
+    spec["upstream"]["preregistration_authorization"] = str(artifact)
+    spec["mode"] = "not_applicable"
+    spec["passes"] = []
+    preregistration = {
+        "preregistration_sha256": f"sha256:{'c' * 64}",
+        "policy": {"render_applicable": False},
+    }
+    monkeypatch.setattr(
+        contract,
+        "require_preregistration_authorization",
+        lambda _raw, *, kind: preregistration,
+    )
+
+    assert contract.require_stage_spec(spec) == spec
+    preregistration["policy"]["render_applicable"] = True
+    with pytest.raises(contract.StagePlanError, match="not-applicable"):
+        contract.require_stage_spec(spec)
+
+
+def test_render_policy_rejects_inconsistent_applicability() -> None:
+    policy = {
+        "selected_render_substrate": "machine",
+        "render_applicable": True,
+        "included_levers": ["render_group_lanes"],
+        "replay_survivors": {"render_group_lanes": True},
+    }
+    assert authorization._require_policy(policy, kind="render") == policy
+    policy["render_applicable"] = False
+    with pytest.raises(contract.StagePlanError, match="applicability"):
+        authorization._require_policy(policy, kind="render")
+
+
+def test_authorization_write_is_atomic_and_one_shot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "authorization.json"
+    paid_output_root = tmp_path / "paid-output"
+    payload = {"kind": "aa", "authorization_sha256": "sealed"}
+    monkeypatch.setattr(authorization, "require_aa_authorization", lambda raw: raw)
+
+    authorization_package.write_authorization(
+        target,
+        payload,
+        paid_output_root=paid_output_root,
+    )
+
+    assert target.read_text(encoding="utf-8").endswith("\n")
+    assert not list(tmp_path.glob("*.tmp"))
+    with pytest.raises(contract.StagePlanError, match="already exists"):
+        authorization_package.write_authorization(
+            target,
+            payload,
+            paid_output_root=paid_output_root,
+        )
+
+
+def test_authorization_write_rejects_paid_output_containment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paid_output_root = tmp_path / "paid-output"
+    target = paid_output_root / "authorization.json"
+    payload = {"kind": "aa", "authorization_sha256": "sealed"}
+    monkeypatch.setattr(authorization, "require_aa_authorization", lambda raw: raw)
+
+    with pytest.raises(contract.StagePlanError, match="outside the paid output root"):
+        authorization_package.write_authorization(
+            target,
+            payload,
+            paid_output_root=paid_output_root,
+        )
+    assert not target.exists()
+
+
+def test_stage_plan_write_is_atomic_and_one_shot_under_concurrency(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "authority" / "stage-plan.json"
+    payload = {"output_root": str(tmp_path / "paid-output")}
+    barrier = Barrier(2)
+    original_link = release_io.os.link
+    monkeypatch.setattr(release_plan, "require_stage_plan", lambda _raw: [])
+
+    def synchronized_link(source: Path, destination: Path) -> None:
+        barrier.wait()
+        original_link(source, destination)
+
+    monkeypatch.setattr(release_io.os, "link", synchronized_link)
+
+    def publish() -> str:
+        try:
+            release_plan.write_stage_plan(target, payload)
+        except contract.StagePlanError:
+            return "rejected"
+        return "published"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = sorted(pool.map(lambda _index: publish(), range(2)))
+
+    assert results == ["published", "rejected"]
+    assert inputs.load_json(target) == payload
+
+
+def test_not_applicable_render_memory_bindings_require_no_roots() -> None:
+    spec = {
+        "stage": "render",
+        "mode": "not_applicable",
+        "memory_roots": {"baseline": None, "render": None},
+    }
+
+    assert release_memory.build_memory_bindings(spec, dataset={}, source={}) == {
+        "baseline": None,
+        "render": None,
+    }
+    spec["memory_roots"]["baseline"] = {"web": "unused", "enterprise": "unused"}
+    with pytest.raises(contract.StagePlanError, match="cannot bind saved memory"):
+        release_memory.build_memory_bindings(spec, dataset={}, source={})
+
+
+def test_release_dataset_payload_hashes_are_exact() -> None:
+    assert inputs.OFFICIAL_DATASET_SHA256 == {
+        "questions": ("sha256:0a3ae5ebea938c24d7800e1e0b0828e08ae1646f939a53853b2b8cdc08e292b7"),
+        "trajectories": ("sha256:363cec9a8e87aa8d9101ce4e600aadbf7031d674056ebe4f969e8424abc5f3c6"),
+        "small_haystack": (
+            "sha256:9b5301defb23a088a5f06e45ff8d5f35e569d78305a66d492046a9fff9b46593"
+        ),
+    }
 
 
 def test_aa_extension_and_anchor_require_exact_authorized_arm_contract(
@@ -331,6 +540,7 @@ def test_paid_stages_require_exact_preregistered_arm_contracts(
     preregistration_authorization = {
         "contracts": contracts,
         "stack": expected_stack,
+        "policy": ({"render_applicable": True} if stage == "render" else {}),
     }
     spec["upstream"]["preregistration_authorization"] = str(artifact)
     monkeypatch.setattr(

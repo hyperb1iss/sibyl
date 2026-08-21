@@ -12,8 +12,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
-from uuid import uuid4
 
+from benchmarks import longmemeval_v2_release_io as release_io
 from benchmarks import longmemeval_v2_release_plan as release_plan
 from benchmarks.longmemeval_v2_release_inputs import (
     StagePlanError,
@@ -120,24 +120,6 @@ def sealed(payload: dict[str, Any], digest_key: str) -> dict[str, Any]:
     result = dict(payload)
     result[digest_key] = rig.canonical_sha256(result)
     return result
-
-
-def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-    try:
-        with temporary.open("x", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-        descriptor = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def append_log(path: Path, payload: dict[str, Any]) -> None:
@@ -286,7 +268,7 @@ def claim_stage(plan: dict[str, Any], *, max_workers: int) -> None:
         },
         "claim_sha256",
     )
-    write_json_atomic(output_root / "runner_claim.json", claim)
+    release_io.write_json_atomic(output_root / "runner_claim.json", claim)
     write_status(plan, status="CLAIMED", max_workers=max_workers)
 
 
@@ -479,7 +461,7 @@ def _status_payload(
 
 def write_status(plan: dict[str, Any], **values: Any) -> dict[str, Any]:
     payload = _status_payload(plan, **values)
-    write_json_atomic(Path(plan["output_root"]) / "runner_status.json", payload)
+    release_io.write_json_atomic(Path(plan["output_root"]) / "runner_status.json", payload)
     return payload
 
 

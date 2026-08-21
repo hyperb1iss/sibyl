@@ -24,8 +24,8 @@ from benchmarks.longmemeval_v2_release_inputs import (
 )
 from tools.bench import longmemeval_v2_rig as rig
 
-STAGE_SPEC_SCHEMA_VERSION = "sibyl-longmemeval-v2-release-stage-spec-v1"
-STAGE_PLAN_SCHEMA_VERSION = "sibyl-longmemeval-v2-release-stage-plan-v1"
+STAGE_SPEC_SCHEMA_VERSION = "sibyl-longmemeval-v2-release-stage-spec-v2"
+STAGE_PLAN_SCHEMA_VERSION = "sibyl-longmemeval-v2-release-stage-plan-v2"
 DEFAULT_MAX_WORKERS = 4
 MAX_WORKERS_CAP = 4
 MAX_CONTEXT_ITEMS = 8
@@ -335,6 +335,7 @@ def _require_fixed_shape(spec: dict[str, Any]) -> None:
         ("anchor", "standard"): (["anchor"], 1),
         ("race", "standard"): (["paired"] * 3 + ["matched"], 2),
         ("render", "standard"): (["paired"] * 3, 2),
+        ("render", "not_applicable"): ([], 0),
     }.get((spec["stage"], spec["mode"]))
     if expected is None:
         raise StagePlanError("stage and mode do not name a supported v1.3 stage")
@@ -387,6 +388,13 @@ def _require_race_shape(spec: dict[str, Any], preregistration: dict[str, Any]) -
 
 def _require_render_shape(spec: dict[str, Any], preregistration: dict[str, Any]) -> None:
     passes = spec["passes"]
+    applicable = preregistration["policy"]["render_applicable"]
+    if spec["mode"] == "not_applicable":
+        if applicable or passes:
+            raise StagePlanError("not-applicable render stage differs from its authorization")
+        return
+    if not applicable:
+        raise StagePlanError("paid render stage is forbidden by its authorization")
     roles = [[arm["manifest"]["arm_role"] for arm in item["arms"]] for item in passes]
     if any(pair != ["render_control", "render_treatment"] for pair in roles):
         raise StagePlanError("render passes must pair control then treatment")
@@ -522,7 +530,10 @@ def require_stage_spec(raw: object) -> dict[str, Any]:
     for field in ("aa_authorization", "preregistration_authorization"):
         if upstream.get(field) is not None and not isinstance(upstream.get(field), str):
             raise StagePlanError(f"upstream.{field} must be an artifact path or null")
-    if not isinstance(raw.get("passes"), list) or not raw["passes"]:
+    passes = raw.get("passes")
+    if not isinstance(passes, list):
+        raise StagePlanError("stage spec passes are missing")
+    if not passes and (stage, raw.get("mode")) != ("render", "not_applicable"):
         raise StagePlanError("stage spec has no passes")
     preregistration, digest = _preregistration_for_spec(raw)
     _require_passes(raw, preregistration_digest=digest)

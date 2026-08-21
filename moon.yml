@@ -346,10 +346,13 @@ tasks:
       uv run ruff check tools benchmarks/provider_usage.py
       benchmarks/local_execution_identity.py benchmarks/longmemeval_v2_official_source.py
       benchmarks/longmemeval_v2_release_authorization.py
+      benchmarks/longmemeval_v2_release_authorization_package.py
       benchmarks/longmemeval_v2_release_contract.py
       benchmarks/longmemeval_v2_release_evidence.py
+      benchmarks/longmemeval_v2_release_io.py
       benchmarks/longmemeval_v2_release_inputs.py
       benchmarks/longmemeval_v2_release_memory.py
+      benchmarks/longmemeval_v2_release_package_contract.py
       benchmarks/longmemeval_v2_release_plan.py
       benchmarks/longmemeval_v2_release_runner.py
       benchmarks/longmemeval_v2_release_state.py
@@ -373,10 +376,13 @@ tasks:
       && uv run ruff format --check tools
       benchmarks/local_execution_identity.py benchmarks/longmemeval_v2_official_source.py
       benchmarks/longmemeval_v2_release_authorization.py
+      benchmarks/longmemeval_v2_release_authorization_package.py
       benchmarks/longmemeval_v2_release_contract.py
       benchmarks/longmemeval_v2_release_evidence.py
+      benchmarks/longmemeval_v2_release_io.py
       benchmarks/longmemeval_v2_release_inputs.py
       benchmarks/longmemeval_v2_release_memory.py
+      benchmarks/longmemeval_v2_release_package_contract.py
       benchmarks/longmemeval_v2_release_plan.py
       benchmarks/longmemeval_v2_release_runner.py
       benchmarks/longmemeval_v2_release_state.py
@@ -403,10 +409,13 @@ tasks:
       - benchmarks/local_execution_identity.py
       - benchmarks/longmemeval_v2_official_source.py
       - benchmarks/longmemeval_v2_release_authorization.py
+      - benchmarks/longmemeval_v2_release_authorization_package.py
       - benchmarks/longmemeval_v2_release_contract.py
       - benchmarks/longmemeval_v2_release_evidence.py
+      - benchmarks/longmemeval_v2_release_io.py
       - benchmarks/longmemeval_v2_release_inputs.py
       - benchmarks/longmemeval_v2_release_memory.py
+      - benchmarks/longmemeval_v2_release_package_contract.py
       - benchmarks/longmemeval_v2_release_plan.py
       - benchmarks/longmemeval_v2_release_runner.py
       - benchmarks/longmemeval_v2_release_state.py
@@ -440,10 +449,13 @@ tasks:
       uv run ruff format tools benchmarks/provider_usage.py
       benchmarks/local_execution_identity.py benchmarks/longmemeval_v2_official_source.py
       benchmarks/longmemeval_v2_release_authorization.py
+      benchmarks/longmemeval_v2_release_authorization_package.py
       benchmarks/longmemeval_v2_release_contract.py
       benchmarks/longmemeval_v2_release_evidence.py
+      benchmarks/longmemeval_v2_release_io.py
       benchmarks/longmemeval_v2_release_inputs.py
       benchmarks/longmemeval_v2_release_memory.py
+      benchmarks/longmemeval_v2_release_package_contract.py
       benchmarks/longmemeval_v2_release_plan.py
       benchmarks/longmemeval_v2_release_runner.py
       benchmarks/longmemeval_v2_release_state.py
@@ -468,10 +480,13 @@ tasks:
       - benchmarks/local_execution_identity.py
       - benchmarks/longmemeval_v2_official_source.py
       - benchmarks/longmemeval_v2_release_authorization.py
+      - benchmarks/longmemeval_v2_release_authorization_package.py
       - benchmarks/longmemeval_v2_release_contract.py
       - benchmarks/longmemeval_v2_release_evidence.py
+      - benchmarks/longmemeval_v2_release_io.py
       - benchmarks/longmemeval_v2_release_inputs.py
       - benchmarks/longmemeval_v2_release_memory.py
+      - benchmarks/longmemeval_v2_release_package_contract.py
       - benchmarks/longmemeval_v2_release_plan.py
       - benchmarks/longmemeval_v2_release_runner.py
       - benchmarks/longmemeval_v2_release_state.py
@@ -504,10 +519,13 @@ tasks:
       uv run ty check tools benchmarks/local_execution_identity.py
       benchmarks/longmemeval_v2_official_source.py
       benchmarks/longmemeval_v2_release_authorization.py
+      benchmarks/longmemeval_v2_release_authorization_package.py
       benchmarks/longmemeval_v2_release_contract.py
       benchmarks/longmemeval_v2_release_evidence.py
+      benchmarks/longmemeval_v2_release_io.py
       benchmarks/longmemeval_v2_release_inputs.py
       benchmarks/longmemeval_v2_release_memory.py
+      benchmarks/longmemeval_v2_release_package_contract.py
       benchmarks/longmemeval_v2_release_plan.py
       benchmarks/longmemeval_v2_release_runner.py
       benchmarks/longmemeval_v2_release_state.py
@@ -535,10 +553,13 @@ tasks:
       - benchmarks/local_execution_identity.py
       - benchmarks/longmemeval_v2_official_source.py
       - benchmarks/longmemeval_v2_release_authorization.py
+      - benchmarks/longmemeval_v2_release_authorization_package.py
       - benchmarks/longmemeval_v2_release_contract.py
       - benchmarks/longmemeval_v2_release_evidence.py
+      - benchmarks/longmemeval_v2_release_io.py
       - benchmarks/longmemeval_v2_release_inputs.py
       - benchmarks/longmemeval_v2_release_memory.py
+      - benchmarks/longmemeval_v2_release_package_contract.py
       - benchmarks/longmemeval_v2_release_plan.py
       - benchmarks/longmemeval_v2_release_runner.py
       - benchmarks/longmemeval_v2_release_state.py
@@ -868,10 +889,13 @@ tasks:
       - benchmarks/longmemeval_v2_official.py
       - benchmarks/longmemeval_v2_official_source.py
       - benchmarks/longmemeval_v2_release_authorization.py
+      - benchmarks/longmemeval_v2_release_authorization_package.py
       - benchmarks/longmemeval_v2_release_contract.py
       - benchmarks/longmemeval_v2_release_evidence.py
+      - benchmarks/longmemeval_v2_release_io.py
       - benchmarks/longmemeval_v2_release_inputs.py
       - benchmarks/longmemeval_v2_release_memory.py
+      - benchmarks/longmemeval_v2_release_package_contract.py
       - benchmarks/longmemeval_v2_release_plan.py
       - benchmarks/longmemeval_v2_release_runner.py
       - benchmarks/longmemeval_v2_release_state.py
