@@ -15,7 +15,176 @@ The adapter writes trajectories through the live Sibyl API and queries `/api/sea
 gold answer from official query context before backend code can read it, and it never sees gold
 trajectory IDs.
 
-## Current Commands
+## v1.3 sealed local release experiment
+
+The v1.3 release experiment runs locally from a clean `main` checkout. The release runner is the
+primary execution path for its paid Small-corpus evidence. The lower-level commands later in this
+page remain useful for development, but their outputs do not replace the sealed v1.3 stage receipts.
+
+Do not generate a paid plan from a feature branch. Merge the runner first, create a clean checkout
+of `main`, fetch the remote, and confirm that local `main` and `origin/main` name the same commit.
+The planner repeats those checks against the live remote and rejects untracked files, dirty
+submodules, moved refs, and detached checkouts.
+
+### Fixed inputs
+
+The release contract accepts one exact input set:
+
+- The official harness checkout is clean at `2cc8c540bdb87fe6761629b585e727e1c4704520`.
+- The Hugging Face dataset revision is `f152293e235517d504809563c833d7190b8c713b`.
+- The complete Small corpus has 451 questions: 240 web and 211 enterprise.
+- The public package description is
+  `benchmarks/longmemeval_v2_release_assets/SYSTEM_DESCRIPTION.md`.
+- The packaged adapter is `benchmarks/longmemeval_v2_memory/sibyl_memory.py`.
+- The reader is `qwen/qwen3.5-9b` through OpenRouter. The judge is `gpt-5.2`.
+- The Sibyl API points at a disposable local stack with a database reserved for this experiment.
+- The package publication path runs on macOS. Its evidence authority uses immutable filesystem flags
+  to protect completed arm and stage packages.
+
+The planner requires these dataset payload hashes:
+
+| Payload                       | SHA-256                                                            |
+| ----------------------------- | ------------------------------------------------------------------ |
+| `questions.jsonl`             | `0a3ae5ebea938c24d7800e1e0b0828e08ae1646f939a53853b2b8cdc08e292b7` |
+| `trajectories.jsonl`          | `363cec9a8e87aa8d9101ce4e600aadbf7031d674056ebe4f969e8424abc5f3c6` |
+| `haystacks/lme_v2_small.json` | `9b5301defb23a088a5f06e45ff8d5f35e569d78305a66d492046a9fff9b46593` |
+
+The stage spec also freezes the local API URL, runtime concurrency, retries, context geometry,
+retrieval mode, seeds, arm configuration, memory lineage, and per-domain cost caps. The planner
+stores paths in the private local plan, but the public execution identity contains only the
+repository, ref, commit, canonical run UUID, and attempt number.
+
+### Credentials and approval
+
+Set both provider variables in the parent shell before the paid command:
+
+```bash
+: "${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY in the parent shell}"
+: "${OPENAI_API_KEY:?set OPENAI_API_KEY in the parent shell}"
+```
+
+Do not pass a token value or a credential-file path as a CLI argument. Plans, public identities,
+receipts, and redacted logs contain environment variable names only. The runner refuses provider
+work unless every domain first produces an exact official plan-only reservation for the full Small
+corpus. The fixed cap is \$3.00 per domain for machine, naive, and render-control arms. The
+render-treatment cap is \$3.60 per domain. Any reservation or actual summed cost above its sealed
+cap stops the stage.
+
+### One stage at a time
+
+Each stage has a separate spec, plan, paid output root, official-arm package root, and final
+receipt. No command creates the next stage.
+
+| Stage         | Fixed work                                                                     | Required authority before the next stage                            |
+| ------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| A/A initial   | Three paired machine-versus-machine passes                                     | A/A authorization with `PASS` or `NEEDS_TWO_MORE`                   |
+| A/A extension | Two additional paired passes, only when the initial receipt requires them      | Final five-pass A/A authorization or a rig-blocked result           |
+| Anchor        | One machine arm over both domains                                              | Post-decontamination anchor plus race preregistration authorization |
+| Race          | Three machine-versus-naive paired passes and one matched-geometry sanity pass  | Race decision plus render preregistration authorization             |
+| Render        | Three control-versus-treatment paired passes, or zero runs when not applicable | Render decision or a canonical `NOT_APPLICABLE` receipt             |
+
+The initial A/A stage always runs all three declared passes. The extension always runs both extra
+passes. Race and render always run every declared pass. Scores never stop a pass wave early.
+
+Create the next spec only after the prior stage package authorizes it. An A/A extension and the
+anchor bind the A/A authorization. The race binds the final A/A authorization and the race
+preregistration authorization issued by the anchor. The render stage binds the render
+preregistration authorization issued by the race. A zero-run render spec is valid only when that
+authorization says the treatment is not applicable.
+
+### Plan a stage
+
+Choose absolute, canonical paths that do not exist yet for the plan file and paid output root. The
+plan file's immediate parent must also be a fresh directory dedicated to that one plan. The
+publisher makes the directory immutable with the plan, so each later stage needs another fresh
+parent. Both paths must live outside and remain disjoint from the Sibyl checkout, official checkout,
+dataset, stage spec, and fixed package inputs. Neither path may traverse a symlink. The plan file and
+paid root must also be disjoint from each other. The planner binds the reviewed system description
+and adapter without override flags.
+
+```bash
+moon run bench-longmemeval-v2-release -- release-plan \
+  --spec /absolute/path/to/aa-initial-spec.json \
+  --official-repo /absolute/path/to/LongMemEval-V2 \
+  --data-root /absolute/path/to/longmemeval-v2-v1-3 \
+  --output-root /absolute/path/to/evidence/aa-initial \
+  --output /absolute/path/to/plans/aa-initial/stage.json
+```
+
+Planning makes no provider call and does not create the paid output root. It seals the source and
+input identities, allocates a distinct canonical execution UUID for each arm, expands both domains,
+and records every plan-only and paid command.
+
+### Run the sealed stage
+
+The local-machine contract permits one through four workers. Four is the preregistered default, not
+a product throughput limit.
+
+```bash
+moon run bench-longmemeval-v2-release -- release-run \
+  --plan /absolute/path/to/plans/aa-initial/stage.json \
+  --max-workers 4
+```
+
+Before any paid wave, the runner executes and validates every sealed plan-only command. A later wave
+that reuses memory also reattests both domain memories before either domain can spend. The runner
+then joins the whole wave, validates the complete claimed root and every official artifact, and
+publishes domain exits atomically. A peer failure prevents later waves from starting.
+
+### Package each official arm
+
+Run the arm command once for every `runs[].arm_id` in the sealed plan. All arms for a stage share
+one fresh canonical package root. The command creates one immutable official authority or validates
+the already published authority on retry. It does not package the stage outcome.
+
+```bash
+moon run bench-longmemeval-v2-release -- release-arm-package \
+  --plan /absolute/path/to/plans/aa-initial/stage.json \
+  --arm-id aa-1-left \
+  --packages-root /absolute/path/to/official-packages/aa-initial
+```
+
+Each arm package runs the official operating-point, submission, combined-metrics, and receipt
+builders under a write-confined staging directory. Its command receipts bind redacted logs, exact
+commands, return codes, outputs, the reviewed public description, and the adapter. Publication is
+atomic and content addressed.
+
+### Package and verify the stage
+
+A/A and render packaging need no preregistration template. Anchor packaging needs the reviewed,
+scoreless race template. Race packaging needs the reviewed, scoreless render template. The package
+owner injects the canonical upstream receipts; a template cannot supply scores, stack identity, or
+producer-owned digests.
+
+```bash
+moon run bench-longmemeval-v2-release -- release-package \
+  --plan /absolute/path/to/plans/aa-initial/stage.json \
+  --packages-root /absolute/path/to/official-packages/aa-initial
+
+moon run bench-longmemeval-v2-release -- release-verify \
+  --plan /absolute/path/to/plans/aa-initial/stage.json
+```
+
+Add `--preregistration-template /absolute/path/to/template.json` only for anchor or race packaging.
+The stage package contains the paired-pass artifacts, score-aware rig outcome, package claim, final
+stage receipt, and a scoreless downstream authorization when the stage issues one. The command
+freezes the completed tree before publishing `PACKAGED`. `release-verify` opens that immutable
+authority, reconstructs the outcome, revalidates the current execution inputs and status, and
+returns the canonical stage receipt.
+
+### Restart and failure rules
+
+Retry only the exact command with the exact plan and roots. A valid completed arm or stage is
+consumed through its canonical validator. A stale command, changed source, moved remote, different
+model or runtime, changed dataset, modified saved memory, incomplete receipt, missing cost, foreign
+file, symlink escape, or partial output is a hard failure. The runner never deletes or silently
+repairs evidence.
+
+A terminal `FAIL` is not resumable. Preserve the failed root, fix the cause, generate a new plan
+with an explicitly fresh output root, and repeat the same stage. Do not advance to another stage
+until `release-verify` succeeds and the receipt authorizes that transition.
+
+## Lower-level commands
 
 Download the text-context dataset slice:
 

@@ -32,11 +32,12 @@ def capture_descriptor_identity(descriptor: int) -> DescriptorIdentity:
         with suppress(OSError):
             os.close(descriptor)
         raise
-    return DescriptorIdentity(
+    identity = DescriptorIdentity(
         device=metadata.st_dev,
         inode=metadata.st_ino,
         file_type=stat.S_IFMT(metadata.st_mode),
     )
+    return identity
 
 
 def close_owned_descriptor(

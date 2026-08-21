@@ -89,6 +89,19 @@ def test_packages_root_is_disjoint_from_every_sealed_input(
         package_root.bind_packages_root(plan, RUNS, packages_root)
 
 
+def test_packages_root_rejects_a_case_alias_under_a_sealed_root(tmp_path: Path) -> None:
+    protected = tmp_path / "Protected"
+    packages = protected / "packages"
+    packages.mkdir(parents=True)
+    alias = protected.with_name("protected") / "packages"
+    if not alias.exists() or not alias.samefile(packages):
+        pytest.skip("requires a case-insensitive filesystem")
+    plan = {"output_root": str(protected)}
+
+    with pytest.raises(StagePlanError, match="overlaps sealed execution inputs"):
+        package_root.bind_packages_root(plan, RUNS, alias)
+
+
 def test_fd_owned_child_writes_file_and_tar_without_lexical_redirection(
     tmp_path: Path,
 ) -> None:

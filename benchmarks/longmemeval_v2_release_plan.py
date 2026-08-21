@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
-from benchmarks import longmemeval_v2_release_io as release_io
+from benchmarks import longmemeval_v2_release_package_policy as package_policy
+from benchmarks import longmemeval_v2_release_plan_publication as plan_publication
 from benchmarks.local_execution_identity import require_local_checkout
 from benchmarks.longmemeval_v2_official_source import (
     OFFICIAL_HARNESS_COMMIT,
@@ -671,11 +672,14 @@ def require_stage_plan(raw: object, *, check_checkout: bool = True) -> list[dict
 def write_stage_plan(path: Path, payload: dict[str, Any]) -> None:
     """Write a validated stage plan without creating its execution root."""
     require_stage_plan(payload)
-    target = path.expanduser().resolve()
-    output_root = Path(payload["output_root"])
-    if target == output_root or output_root in target.parents:
-        raise StagePlanError("stage plan must remain outside its fresh output root")
+    target = package_policy.canonical_path(path, name="stage plan path")
+    if any(
+        package_policy.overlaps(target, sealed) for sealed in package_policy.sealed_paths(payload)
+    ):
+        raise StagePlanError("stage plan path overlaps sealed execution inputs")
     try:
-        release_io.write_json_once_atomic(target, payload)
+        plan_publication.write_json_once_owned_path(target, payload)
     except FileExistsError as exc:
         raise StagePlanError("stage plan path already exists") from exc
+    except OSError as exc:
+        raise StagePlanError("stage plan path changed or is unsafe") from exc

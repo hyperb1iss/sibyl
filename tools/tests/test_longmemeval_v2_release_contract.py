@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from pathlib import Path
 from threading import Barrier
+from typing import Any
 
 import pytest
 from benchmarks import longmemeval_v2_release_authorization as authorization
@@ -23,6 +26,18 @@ from tools.tests.longmemeval_v2_release_support import (
     race_spec,
     render_spec,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_immutable_plan_files(tmp_path: Path) -> Any:
+    yield
+    for current, _directories, files in os.walk(tmp_path, topdown=False):
+        for name in files:
+            with suppress(OSError):
+                os.chflags(Path(current) / name, 0)
+        with suppress(OSError):
+            os.chflags(current, 0)
+            os.chmod(current, 0o700)
 
 
 @pytest.mark.parametrize(

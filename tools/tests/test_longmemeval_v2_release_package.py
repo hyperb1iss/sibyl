@@ -579,7 +579,7 @@ def test_arm_root_creation_rejects_packages_parent_symlink_swap(
 
     monkeypatch.setattr(package_root.os, "open", swap_before_open)
 
-    with pytest.raises(StagePlanError, match="opened safely"):
+    with pytest.raises(StagePlanError, match=r"opened safely|safe existing ancestor"):
         publication.package_official_arm(
             executed,
             arm_id="aa-1-left",
