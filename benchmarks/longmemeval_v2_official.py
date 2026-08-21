@@ -2076,6 +2076,7 @@ def build_receipt_accounting(
     total_tokens = _as_number(tokens.get("total_tokens")) or (prompt_tokens + completion_tokens)
     embedding = _embedding_accounting(source_runs)
     planner = _planner_accounting(source_runs)
+    distillation = _distillation_accounting(source_runs)
     reader = _provider_accounting(
         source_runs,
         role="reader",
@@ -2090,10 +2091,11 @@ def build_receipt_accounting(
     )
     provider_reported_total_usd = sum(
         float(section["provider_reported_cost_usd"])
-        for section in (embedding, planner, reader, judge)
+        for section in (embedding, planner, distillation, reader, judge)
     )
     cost_coverage_complete = all(
-        bool(section["cost_coverage_complete"]) for section in (embedding, planner, reader, judge)
+        bool(section["cost_coverage_complete"])
+        for section in (embedding, planner, distillation, reader, judge)
     )
 
     return {
@@ -2114,6 +2116,7 @@ def build_receipt_accounting(
         },
         "embedding": embedding,
         "planner": planner,
+        "distillation": distillation,
         "reader": reader,
         "judge": judge,
         "cost": {
@@ -2280,6 +2283,82 @@ def _planner_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
         "expected_question_count": expected_rows,
         "recorded_question_count": len(records),
         "cost_basis": "Sibyl structured query planner usage receipt",
+    }
+
+
+def _distillation_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
+    records: list[dict[str, Any]] = []
+    tracking_complete = bool(source_runs)
+    expected_source_runs = 0
+    for source_run in source_runs:
+        if source_run.get("plan", {}).get("note_distillation") is not True:
+            continue
+        expected_source_runs += 1
+        rows = source_run["per_question_rows"]
+        candidates = [
+            usage
+            for row in rows
+            if isinstance(
+                usage := _nested_value(
+                    row,
+                    "memory_post_query_metadata",
+                    "ingest_note_distillation_usage",
+                ),
+                dict,
+            )
+            and usage
+        ]
+        serialized = {json.dumps(candidate, sort_keys=True) for candidate in candidates}
+        if len(candidates) != len(rows) or len(serialized) != 1:
+            tracking_complete = False
+            continue
+        records.append(candidates[0])
+
+    requests = int(sum(_number_from(record, ("requests",)) or 0 for record in records))
+    input_tokens = sum(_number_from(record, ("input_tokens",)) or 0.0 for record in records)
+    output_tokens = sum(_number_from(record, ("output_tokens",)) or 0.0 for record in records)
+    total_tokens = sum(_number_from(record, ("total_tokens",)) or 0.0 for record in records)
+    priced_requests = int(
+        sum(
+            (_number_from(record, ("requests",)) or 0)
+            if record.get("cost_complete") is True
+            and _number_from(record, ("cost_usd",)) is not None
+            else 0
+            for record in records
+        )
+    )
+    provider_reported_cost_usd = sum(
+        _number_from(record, ("cost_usd",)) or 0.0 for record in records
+    )
+    providers = sorted(
+        {
+            provider
+            for record in records
+            if isinstance(provider := record.get("provider"), str) and provider
+        }
+    )
+    models = sorted(
+        {model for record in records if isinstance(model := record.get("model"), str) and model}
+    )
+    tracking_complete = tracking_complete and len(records) == expected_source_runs
+    return {
+        "calls": requests,
+        "requests": requests,
+        "priced_requests": priced_requests,
+        "provider": ",".join(providers) or "not_requested",
+        "model": ",".join(models) or "not_requested",
+        "providers": providers,
+        "models": models,
+        "estimated_input_tokens": input_tokens,
+        "estimated_output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+        "provider_reported_cost_usd": provider_reported_cost_usd,
+        "estimated_cost_usd": provider_reported_cost_usd,
+        "cost_coverage_complete": tracking_complete and priced_requests == requests,
+        "tracking_complete": tracking_complete,
+        "expected_source_run_count": expected_source_runs,
+        "recorded_source_run_count": len(records),
+        "cost_basis": "Sibyl operational note distillation usage receipt",
     }
 
 

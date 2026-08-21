@@ -64,6 +64,10 @@ EXPECTED_SHARED_RELEVANCE_RAW_ITEMS = 5
 EXPECTED_PLANNER_REQUESTS = 2
 EXPECTED_PLANNER_INPUT_TOKENS = 84
 EXPECTED_PLANNER_OUTPUT_TOKENS = 22
+EXPECTED_DISTILLATION_REQUESTS = 3
+EXPECTED_DISTILLATION_INPUT_TOKENS = 300
+EXPECTED_DISTILLATION_OUTPUT_TOKENS = 90
+EXPECTED_DISTILLATION_TOTAL_TOKENS = 390
 EXPECTED_RETRIEVAL_MAX_PLANNED_QUERIES = 3
 EXPECTED_WHITESPACE_EXPOSURE_CHARS = 2
 EXPECTED_SELECTED_WINDOW_COUNT = 2
@@ -512,6 +516,7 @@ def test_official_runner_receipt_only_emits_citable_contract(
     assert receipt["metrics"]["latency_p95_ms"] == EXPECTED_LATENCY_P95_MS
     assert receipt["metrics"]["max_latency_ms"] == EXPECTED_LATENCY_P95_MS
     assert receipt["accounting"]["embedding"]["calls"] == EXPECTED_EMBEDDING_REQUESTS
+    assert receipt["accounting"]["distillation"]["calls"] == 0
     assert receipt["accounting"]["reader"]["requests"] == EXPECTED_READER_REQUESTS
     assert receipt["accounting"]["judge"]["requests"] == EXPECTED_JUDGE_REQUESTS
     assert receipt["accounting"]["cost"]["provider_reported_total_usd"] == pytest.approx(0.1026)
@@ -1392,6 +1397,77 @@ def test_planner_accounting_reports_missing_accurate_query_usage() -> None:
     assert accounting["expected_question_count"] == 1
     assert accounting["recorded_question_count"] == 0
     assert accounting["tracking_complete"] is False
+    assert accounting["cost_coverage_complete"] is False
+
+
+def test_distillation_accounting_counts_each_ingest_once() -> None:
+    module = _load_runner_module()
+    usage = {
+        "provider": "openai",
+        "model": "gpt-5.4-nano",
+        "requests": 3,
+        "input_tokens": 300,
+        "output_tokens": 90,
+        "total_tokens": 390,
+        "cost_usd": 0.0012,
+        "cost_complete": True,
+    }
+    accounting = module._distillation_accounting(
+        [
+            {
+                "plan": {"note_distillation": True},
+                "per_question_rows": [
+                    {"memory_post_query_metadata": {"ingest_note_distillation_usage": usage}},
+                    {"memory_post_query_metadata": {"ingest_note_distillation_usage": usage}},
+                ],
+            }
+        ]
+    )
+
+    assert accounting["requests"] == EXPECTED_DISTILLATION_REQUESTS
+    assert accounting["estimated_input_tokens"] == EXPECTED_DISTILLATION_INPUT_TOKENS
+    assert accounting["estimated_output_tokens"] == EXPECTED_DISTILLATION_OUTPUT_TOKENS
+    assert accounting["total_tokens"] == EXPECTED_DISTILLATION_TOTAL_TOKENS
+    assert accounting["provider_reported_cost_usd"] == pytest.approx(0.0012)
+    assert accounting["recorded_source_run_count"] == 1
+    assert accounting["tracking_complete"] is True
+    assert accounting["cost_coverage_complete"] is True
+
+
+@pytest.mark.parametrize("failure", ["missing", "drift", "unpriced"])
+def test_distillation_accounting_fails_closed_on_incomplete_usage(failure: str) -> None:
+    module = _load_runner_module()
+    first = {
+        "provider": "openai",
+        "model": "gpt-5.4-nano",
+        "requests": 1,
+        "input_tokens": 100,
+        "output_tokens": 30,
+        "total_tokens": 130,
+        "cost_usd": 0.0004,
+        "cost_complete": True,
+    }
+    second = dict(first)
+    if failure == "missing":
+        second = {}
+    elif failure == "drift":
+        second["requests"] = 2
+    else:
+        first["cost_complete"] = False
+        first["cost_usd"] = None
+        second = dict(first)
+    accounting = module._distillation_accounting(
+        [
+            {
+                "plan": {"note_distillation": True},
+                "per_question_rows": [
+                    {"memory_post_query_metadata": {"ingest_note_distillation_usage": first}},
+                    {"memory_post_query_metadata": {"ingest_note_distillation_usage": second}},
+                ],
+            }
+        ]
+    )
+
     assert accounting["cost_coverage_complete"] is False
 
 
