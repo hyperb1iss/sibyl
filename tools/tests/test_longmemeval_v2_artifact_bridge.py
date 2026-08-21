@@ -375,6 +375,7 @@ def _domain_run(
             "memory_type": "sibyl_live_api",
             "memory_params": {
                 "api_url": "http://127.0.0.1:3334/api",
+                "longmemeval_v2_domain": domain,
                 "project_id": f"project-{domain}",
                 "run_id": plan["run_id"],
                 "runner_provenance": plan["runner_provenance"],
@@ -522,6 +523,7 @@ def test_bridge_builds_signed_arm_from_official_artifacts(tmp_path: Path) -> Non
         "enterprise": 2,
         "web": 2,
     }
+    assert "longmemeval_v2_domain" not in arm["configuration"]
 
 
 def test_bridge_builds_signed_arm_from_local_execution(tmp_path: Path) -> None:

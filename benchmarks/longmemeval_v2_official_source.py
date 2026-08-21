@@ -22,8 +22,7 @@ OFFICIAL_HARNESS_PATH = "evaluation/harness.py"
 OFFICIAL_HARNESS_COMMIT = "2cc8c540bdb87fe6761629b585e727e1c4704520"
 OFFICIAL_HARNESS_PREVIOUS_COMMIT = "be15ea6e995462f3391c1a610892df3f67dfa7bd"
 OFFICIAL_HARNESS_DIFF_URL = (
-    f"{OFFICIAL_REPO_URL}/compare/"
-    f"{OFFICIAL_HARNESS_PREVIOUS_COMMIT}...{OFFICIAL_HARNESS_COMMIT}"
+    f"{OFFICIAL_REPO_URL}/compare/{OFFICIAL_HARNESS_PREVIOUS_COMMIT}...{OFFICIAL_HARNESS_COMMIT}"
 )
 
 
@@ -47,7 +46,17 @@ def official_source_record(
 ) -> dict[str, object]:
     """Return the immutable source identity carried by plans and receipts."""
     commit = _git(repo, "rev-parse", "HEAD") if repo is not None else None
-    git_status = _git(repo, "status", "--porcelain") if repo is not None else None
+    git_status = (
+        _git(
+            repo,
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--ignore-submodules=none",
+        )
+        if repo is not None
+        else None
+    )
     harness_exists = bool(repo is not None and (repo / OFFICIAL_HARNESS_PATH).is_file())
     return {
         "url": OFFICIAL_REPO_URL,
@@ -56,11 +65,7 @@ def official_source_record(
         "expected_commit": expected_commit,
         "pin_matches": commit == expected_commit,
         "git_status": (
-            "not_configured"
-            if repo is None
-            else "clean"
-            if git_status == ""
-            else "dirty"
+            "not_configured" if repo is None else "clean" if git_status == "" else "dirty"
         ),
         "harness_path": OFFICIAL_HARNESS_PATH,
         "harness_exists": harness_exists,
@@ -97,7 +102,7 @@ def require_identifier_only_adapter(repo: Path) -> dict[str, object]:
         official_memory = importlib.import_module("memory_modules.memory")
         adapter = importlib.import_module("benchmarks.longmemeval_v2_memory.sibyl_memory")
         if not issubclass(adapter.SibylLiveApiMemory, official_memory.Memory):
-            raise RuntimeError("Sibyl adapter is not bound to the pinned official Memory base")
+            raise TypeError("Sibyl adapter is not bound to the pinned official Memory base")
         signature = inspect.signature(official_memory.Memory.set_query_context)
         parameters = list(signature.parameters.values())
         expected = [

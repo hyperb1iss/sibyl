@@ -24,14 +24,7 @@ from uuid import UUID, uuid4
 
 HTTP_STATUS_OK = 200
 HTTP_STATUS_SERVER_ERROR = 500
-ASCII_DELETE_CODEPOINT = 127
-GIT_REF_FORBIDDEN_ASCII_MAX = 32
-GIT_SHA_LENGTH = 40
-LS_REMOTE_FIELD_COUNT = 2
 MIN_COMBINED_SOURCE_METRICS = 2
-GITHUB_REPOSITORY_PATTERN = re.compile(
-    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9._-]{1,100}"
-)
 POSITIVE_DECIMAL_PATTERN = re.compile(r"[1-9][0-9]*")
 WORKFLOW_FILENAME_PATTERN = re.compile(r"[^/@\x00-\x20\x7f]+\.ya?ml")
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,6 +35,12 @@ if str(CORE_SRC) not in sys.path:
     sys.path.insert(0, str(CORE_SRC))
 
 from benchmarks.git_provenance import git_provenance  # noqa: E402
+from benchmarks.local_execution_identity import (  # noqa: E402
+    GIT_SHA_LENGTH,
+    is_canonical_repository as _is_canonical_repository,
+    is_valid_branch_ref as _is_valid_branch_ref,
+    require_local_checkout,
+)
 from benchmarks.longmemeval_v2_official_source import (  # noqa: E402
     official_source_record,
     require_pinned_source,
@@ -449,64 +448,6 @@ def is_malformed_evaluator_judgement(exc: ValueError) -> bool:
     )
 
 
-def _required_git_output(root: Path, *args: str) -> str:
-    git = shutil.which("git")
-    if git is None:
-        raise ValueError("local experiment identity requires git")
-    try:
-        result = subprocess.run(  # noqa: S603 - resolved git with fixed argument shapes.
-            [git, *args],
-            check=True,
-            capture_output=True,
-            cwd=root,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise ValueError("local experiment identity could not inspect the Sibyl checkout") from exc
-    return result.stdout.strip()
-
-
-def _repository_from_remote(remote: str) -> str:
-    value = remote.strip().removesuffix(".git")
-    if value.startswith("git@github.com:"):
-        value = value.removeprefix("git@github.com:")
-    else:
-        parsed = urlparse(value)
-        if parsed.hostname != "github.com":
-            raise ValueError("local experiment origin must be a GitHub repository")
-        value = parsed.path.lstrip("/")
-    if not _is_canonical_repository(value):
-        raise ValueError("local experiment origin has no canonical owner/repository identity")
-    return value
-
-
-def _is_canonical_repository(repository: str) -> bool:
-    return bool(GITHUB_REPOSITORY_PATTERN.fullmatch(repository))
-
-
-def _is_valid_branch_ref(ref: str) -> bool:
-    prefix = "refs/heads/"
-    if not ref.startswith(prefix) or ref != ref.strip():
-        return False
-    branch = ref.removeprefix(prefix)
-    if not branch or branch.startswith("-") or branch.endswith("."):
-        return False
-    if ".." in branch or "@{" in branch or "\\" in branch:
-        return False
-    if any(
-        ord(character) <= GIT_REF_FORBIDDEN_ASCII_MAX or ord(character) == ASCII_DELETE_CODEPOINT
-        for character in branch
-    ):
-        return False
-    if any(character in "~^:?*[" for character in branch):
-        return False
-    components = branch.split("/")
-    return all(
-        component and not component.startswith(".") and not component.endswith(".lock")
-        for component in components
-    )
-
-
 def _validate_github_run_id(run_id: str) -> None:
     if not POSITIVE_DECIMAL_PATTERN.fullmatch(run_id):
         raise ValueError("GitHub execution run ID must be a canonical positive decimal string")
@@ -643,59 +584,17 @@ def resolve_execution_identity(  # noqa: PLR0912
         raise ValueError("local execution run ID must be a canonical UUID") from exc
     if normalized_run_id != args.local_run_id:
         raise ValueError("local execution run ID must be a canonical UUID")
-    actual_repository = _repository_from_remote(
-        _required_git_output(root, "remote", "get-url", "origin")
-    )
-    actual_ref = _required_git_output(root, "symbolic-ref", "-q", "HEAD")
-    actual_sha = _required_git_output(root, "rev-parse", "HEAD")
-    remote_ref = actual_ref.replace("refs/heads/", "refs/remotes/origin/", 1)
-    try:
-        remote_sha = _required_git_output(root, "rev-parse", "--verify", remote_ref)
-    except ValueError as exc:
-        raise ValueError("local execution ref has no exact origin tracking ref") from exc
-    status = _required_git_output(
-        root,
-        "status",
-        "--porcelain",
-        "--untracked-files=all",
-        "--ignore-submodules=none",
-    )
-    if status:
-        raise ValueError("local experiment runs require a clean Sibyl checkout")
+    checkout = require_local_checkout(root)
+    source = checkout["source_identity"]
+    actual_repository = str(source["repository"])
+    actual_ref = str(source["ref"])
+    actual_sha = str(source["sha"])
     if (args.local_repository, args.local_ref, args.local_sha) != (
         actual_repository,
         actual_ref,
         actual_sha,
     ):
         raise ValueError("local execution repository, ref, or SHA differs from the checkout")
-    if remote_sha != actual_sha:
-        raise ValueError("local execution SHA differs from its origin tracking ref")
-    try:
-        published_ref = _required_git_output(
-            root,
-            "ls-remote",
-            "--exit-code",
-            "--refs",
-            "origin",
-            actual_ref,
-        )
-    except ValueError as exc:
-        raise ValueError("local execution could not verify its exact ref on origin") from exc
-    published_lines = published_ref.splitlines()
-    if len(published_lines) != 1:
-        raise ValueError("local execution origin returned no unique exact ref")
-    fields = published_lines[0].split("\t")
-    if len(fields) != LS_REMOTE_FIELD_COUNT:
-        raise ValueError("local execution origin returned a malformed exact ref")
-    published_sha, published_name = fields
-    if (
-        len(published_sha) != GIT_SHA_LENGTH
-        or any(character not in "0123456789abcdef" for character in published_sha)
-        or published_name != actual_ref
-    ):
-        raise ValueError("local execution origin returned a malformed exact ref")
-    if published_sha != actual_sha:
-        raise ValueError("local execution SHA differs from the exact ref on origin")
     return {
         "schema_version": EXECUTION_IDENTITY_SCHEMA_VERSION,
         "kind": "local",
@@ -1150,6 +1049,7 @@ def materialize_runtime_haystack(
 def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
     params: dict[str, object] = {
         "api_url": args.api_url,
+        "longmemeval_v2_domain": args.domain,
         "project_id": args.project_id,
         "run_id": args.run_id,
         "reuse_existing_project": args.reuse_existing_project,
@@ -1259,6 +1159,7 @@ def install_memory_credentials(args: argparse.Namespace) -> None:
 LOADED_MEMORY_NON_MERGED_KEYS = frozenset(
     {
         "api_url",
+        "longmemeval_v2_domain",
         "project_id",
         "run_id",
         "reuse_existing_project",

@@ -14,6 +14,7 @@ from typing import Any, Protocol, TypedDict, cast
 
 import httpx
 import pytest
+from benchmarks import local_execution_identity as local_identity
 from tools.bench import eval_gate
 
 EXPECTED_REQUIRED_TRAJECTORIES = 2
@@ -196,7 +197,7 @@ def _stub_published_origin_ref(
     ref: str,
     result: str | ValueError,
 ) -> list[tuple[str, ...]]:
-    original = module._required_git_output
+    original = local_identity._required_git_output
     calls: list[tuple[str, ...]] = []
 
     def required_git_output(root: Path, *args: str) -> str:
@@ -207,7 +208,7 @@ def _stub_published_origin_ref(
             return result
         return original(root, *args)
 
-    monkeypatch.setattr(module, "_required_git_output", required_git_output)
+    monkeypatch.setattr(local_identity, "_required_git_output", required_git_output)
     return calls
 
 
@@ -1167,6 +1168,12 @@ def test_official_runner_rejects_fake_local_execution_identity(
         run_id="d6cf4d36-606f-44d6-b386-c723e6b756e8",
     )
     setattr(args, field, value)
+    _stub_published_origin_ref(
+        module,
+        monkeypatch,
+        ref=ref,
+        result=f"{sha}\t{ref}",
+    )
 
     with pytest.raises(ValueError, match=message):
         module.resolve_execution_identity(args, root=checkout)
@@ -1723,6 +1730,7 @@ def test_official_runner_omits_baseline_render_profile_from_memory(tmp_path: Pat
 
     params = module.build_memory_config(args)["memory_params"]
 
+    assert params["longmemeval_v2_domain"] == "web"
     assert (
         not {
             "operational_note_dedupe_mode",
@@ -4019,6 +4027,7 @@ def test_sibyl_memory_chunk_catalog_round_trips(tmp_path: Path) -> None:
     memory._finalize_lock = threading.Lock()
     memory._ingest_finalized = True
     memory.api_url = "http://127.0.0.1:3434/api"
+    memory.longmemeval_v2_domain = "web"
     memory.project_id = "project_saved"
     memory.run_id = "run-saved"
     memory.chunking_mode = "state"
@@ -4037,6 +4046,7 @@ def test_sibyl_memory_chunk_catalog_round_trips(tmp_path: Path) -> None:
 
     restored = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
     module.Memory.__init__(restored, {})
+    restored.longmemeval_v2_domain = "web"
     restored._pending_embedding_job_ids = set()
     restored._pending_projection_job_ids = set()
     restored._ingest_finalized = False
@@ -4044,6 +4054,8 @@ def test_sibyl_memory_chunk_catalog_round_trips(tmp_path: Path) -> None:
 
     assert (tmp_path / module.CHUNK_CATALOG_FILENAME).is_file()
     assert (tmp_path / module.MEMORY_MANIFEST_FILENAME).is_file()
+    manifest = json.loads((tmp_path / module.MEMORY_MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert manifest["longmemeval_v2_domain"] == "web"
     assert restored._chunk_catalog == catalog
     assert restored.created_entities == len(catalog["t1"])
     assert restored.inserted_trajectories == len(catalog)

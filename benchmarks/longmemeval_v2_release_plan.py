@@ -9,10 +9,15 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
-from benchmarks.git_provenance import git_provenance
+from benchmarks.local_execution_identity import require_local_checkout
 from benchmarks.longmemeval_v2_official_source import (
     OFFICIAL_HARNESS_COMMIT,
     require_pinned_source,
+)
+from benchmarks.longmemeval_v2_release_authorization import (
+    build_upstream_bindings,
+    reject_score_bearing_keys,
+    require_upstream_bindings,
 )
 from benchmarks.longmemeval_v2_release_contract import (
     MAX_WORKERS_CAP,
@@ -23,19 +28,18 @@ from benchmarks.longmemeval_v2_release_inputs import (
     DOMAINS,
     StagePlanError,
     bind_artifact,
-    build_memory_bindings,
-    build_upstream_bindings,
-    canonical_sha256,
+    build_expected_stack,
     dataset_record,
-    discover_source_identity,
     load_json,
     require_artifact,
     require_dataset,
     require_exact_keys,
-    require_memory_bindings,
     require_source_identity,
     require_string,
-    require_upstream_bindings,
+)
+from benchmarks.longmemeval_v2_release_memory import (
+    build_memory_bindings,
+    require_memory_bindings,
 )
 from tools.bench import longmemeval_v2_rig as rig
 
@@ -56,6 +60,7 @@ PLAN_KEYS = frozenset(
         "sibyl_provenance",
         "official_source",
         "dataset",
+        "stack_identity",
         "memory_bindings",
         "upstream_bindings",
         "output_root",
@@ -91,6 +96,13 @@ DOMAIN_RUN_KEYS = frozenset(
         "run_command",
     }
 )
+
+
+def _require_checkout() -> dict[str, Any]:
+    try:
+        return require_local_checkout(ROOT)
+    except ValueError as exc:
+        raise StagePlanError(str(exc)) from exc
 
 
 def _execution_for_arm(source: dict[str, str], *, run_id: str) -> dict[str, Any]:
@@ -212,6 +224,7 @@ def _command(
     output_dir: Path,
     memory_dir: Path | None,
     build_memory: bool,
+    future_memory: bool,
     plan_only: bool,
 ) -> list[str]:
     command = _base_command(
@@ -241,7 +254,8 @@ def _command(
     if build_memory:
         command.extend(["--save-memory", "--checkpoint-dir", str(output_dir / "checkpoint")])
     elif memory_dir is not None:
-        command.extend(["--load-memory-dir", str(memory_dir)])
+        memory_flag = "--checkpoint-dir" if plan_only and future_memory else "--load-memory-dir"
+        command.extend([memory_flag, str(memory_dir)])
     else:
         raise StagePlanError("non-builder arm has no memory source")
     if plan_only:
@@ -266,13 +280,13 @@ def _memory_path(
     domain: str,
     bindings: dict[str, Any],
     builders: dict[str, Path],
-) -> Path:
+) -> tuple[Path, bool]:
     external = bindings[memory_source]
     if external is not None:
-        return Path(external[domain]["path"])
+        return Path(external[domain]["path"]), False
     if memory_source not in builders:
         raise StagePlanError(f"memory source {memory_source!r} has no earlier builder")
-    return builders[memory_source] / domain / "checkpoint"
+    return builders[memory_source] / domain / "checkpoint", True
 
 
 def _domain_run(
@@ -296,8 +310,9 @@ def _domain_run(
     execution_output = output_root / "runs" / arm_id / domain
     planning_memory = None
     execution_memory = None
+    future_memory = False
     if not build_memory:
-        saved_memory = _memory_path(
+        saved_memory, future_memory = _memory_path(
             memory_source=memory_name,
             domain=domain,
             bindings=memory_bindings,
@@ -325,12 +340,14 @@ def _domain_run(
             **common,
             output_dir=planning_output,
             memory_dir=planning_memory,
+            future_memory=future_memory,
             plan_only=True,
         ),
         "run_command": _command(
             **common,
             output_dir=execution_output,
             memory_dir=execution_memory,
+            future_memory=False,
             plan_only=False,
         ),
     }
@@ -404,18 +421,6 @@ def _expand_runs(
     return runs, waves
 
 
-def _provenance_for(source: dict[str, str]) -> dict[str, Any]:
-    provenance = git_provenance(ROOT)
-    expected = {
-        "sibyl_commit": source["sha"],
-        "git_dirty": False,
-        "git_status": "clean",
-    }
-    if provenance != expected:
-        raise StagePlanError("Sibyl provenance differs from the clean source identity")
-    return provenance
-
-
 def build_stage_plan(
     *,
     spec: dict[str, Any],
@@ -433,15 +438,22 @@ def build_stage_plan(
     output_root = output_root.expanduser().resolve()
     if output_root.exists():
         raise StagePlanError("stage output root already exists; choose a fresh output root")
-    source = require_source_identity(discover_source_identity(ROOT))
-    provenance = _provenance_for(source)
+    checkout = _require_checkout()
+    source = require_source_identity(checkout["source_identity"])
+    provenance = checkout["provenance"]
     official_repo = official_repo.expanduser().resolve()
     official_source = require_pinned_source(official_repo)
     if official_source["commit"] != OFFICIAL_HARNESS_COMMIT:
         raise StagePlanError("official source differs from the reviewed pin")
     dataset = dataset_record(data_root)
-    memory_bindings = build_memory_bindings(spec)
-    upstream_bindings = build_upstream_bindings(spec)
+    memory_bindings = build_memory_bindings(spec, dataset=dataset, source=source)
+    stack_identity = build_expected_stack(
+        source=source,
+        official_source=official_source,
+        dataset=dataset,
+        runtime=spec["runtime"],
+    )
+    upstream_bindings = build_upstream_bindings(spec, expected_stack=stack_identity)
     runs, waves = _expand_runs(
         spec=spec,
         source=source,
@@ -460,6 +472,7 @@ def build_stage_plan(
         "sibyl_provenance": provenance,
         "official_source": official_source,
         "dataset": dataset,
+        "stack_identity": stack_identity,
         "memory_bindings": memory_bindings,
         "upstream_bindings": upstream_bindings,
         "output_root": str(output_root),
@@ -468,7 +481,7 @@ def build_stage_plan(
         "waves": waves,
         "stage_output": str(output_root / "stage_receipt.json"),
     }
-    payload["stage_plan_sha256"] = canonical_sha256(payload)
+    payload["stage_plan_sha256"] = rig.canonical_sha256(payload)
     require_stage_plan(payload, check_checkout=False)
     return payload
 
@@ -560,6 +573,7 @@ def _require_expansion(
 
 def require_stage_plan(raw: object, *, check_checkout: bool = True) -> list[dict[str, Any]]:
     """Reconstruct and validate every sealed input before execution."""
+    reject_score_bearing_keys(raw, name="stage plan")
     if not isinstance(raw, dict):
         raise StagePlanError("stage plan must be a JSON object")
     require_exact_keys(raw, PLAN_KEYS, name="stage plan")
@@ -567,28 +581,53 @@ def require_stage_plan(raw: object, *, check_checkout: bool = True) -> list[dict
         raise StagePlanError("stage plan schema is invalid")
     _require_created_at(raw.get("created_at"))
     unsigned = {key: value for key, value in raw.items() if key != "stage_plan_sha256"}
-    if raw.get("stage_plan_sha256") != canonical_sha256(unsigned):
+    if raw.get("stage_plan_sha256") != rig.canonical_sha256(unsigned):
         raise StagePlanError("stage plan digest does not bind its content")
     spec = require_stage_spec(raw.get("spec"))
     _require_spec_artifact(raw.get("spec_artifact"), spec=spec)
     source = require_source_identity(raw.get("source_identity"))
-    if check_checkout and discover_source_identity(ROOT) != source:
-        raise StagePlanError("current checkout differs from the sealed source identity")
-    if raw.get("sibyl_provenance") != {
+    expected_provenance = {
         "sibyl_commit": source["sha"],
         "git_dirty": False,
         "git_status": "clean",
-    }:
+    }
+    if check_checkout:
+        checkout = _require_checkout()
+        if checkout != {
+            "source_identity": source,
+            "provenance": expected_provenance,
+        }:
+            raise StagePlanError("current checkout differs from the sealed source identity")
+    if raw.get("sibyl_provenance") != expected_provenance:
         raise StagePlanError("stage plan does not bind clean Sibyl provenance")
     official_source = _require_official_source(raw.get("official_source"))
     dataset = require_dataset(raw.get("dataset"))
-    require_memory_bindings(raw.get("memory_bindings"), spec=spec)
-    memory_bindings = build_memory_bindings(spec)
-    require_upstream_bindings(raw.get("upstream_bindings"), spec=spec)
+    expected_stack = build_expected_stack(
+        source=source,
+        official_source=official_source,
+        dataset=dataset,
+        runtime=spec["runtime"],
+    )
+    if raw.get("stack_identity") != expected_stack:
+        raise StagePlanError("stage stack differs from its sealed source, data, or models")
+    require_memory_bindings(
+        raw.get("memory_bindings"),
+        spec=spec,
+        dataset=dataset,
+        source=source,
+    )
+    memory_bindings = build_memory_bindings(spec, dataset=dataset, source=source)
+    require_upstream_bindings(
+        raw.get("upstream_bindings"),
+        spec=spec,
+        expected_stack=expected_stack,
+    )
     output_value = require_string(raw.get("output_root"), name="output_root")
     output_root = Path(output_value).resolve()
     if output_value != str(output_root):
         raise StagePlanError("stage output root is not canonical")
+    if output_root.exists():
+        raise StagePlanError("stage output root is no longer fresh")
     if raw.get("max_workers_cap") != MAX_WORKERS_CAP:
         raise StagePlanError("stage plan changed the fixed worker cap")
     if raw.get("stage_output") != str(output_root / "stage_receipt.json"):

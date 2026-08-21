@@ -309,6 +309,7 @@ REQUIRED_PASSING_CHECKS = frozenset(
 CONFIG_EXCLUDED_KEYS = frozenset(
     {
         "api_url",
+        "longmemeval_v2_domain",
         "project_id",
         "run_id",
         "runner_provenance",

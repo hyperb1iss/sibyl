@@ -289,6 +289,7 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
 SAVED_MEMORY_IDENTITY_KEYS = frozenset(
     {
         "api_url",
+        "longmemeval_v2_domain",
         "project_id",
         "run_id",
         "content_max_chars",
@@ -3658,6 +3659,16 @@ class SibylLiveApiMemory(Memory):
         official_source = memory_params.get("official_source")
         self.official_source = dict(official_source) if isinstance(official_source, dict) else {}
         self.api_url = _normalize_api_url(_param_str(memory_params, "api_url", DEFAULT_API_URL))
+        self.longmemeval_v2_domain = _param_str(
+            memory_params,
+            "longmemeval_v2_domain",
+            "",
+        )
+        if self.longmemeval_v2_domain and self.longmemeval_v2_domain not in {
+            "web",
+            "enterprise",
+        }:
+            raise ValueError("longmemeval_v2_domain must be web or enterprise")
         self.run_id = _param_str(memory_params, "run_id", f"lme-v2-{uuid4().hex[:12]}")
         self.allow_localhost = _param_bool(memory_params, "allow_localhost", False)
         self.project_id = _param_str(memory_params, "project_id", "")
@@ -5418,6 +5429,7 @@ class SibylLiveApiMemory(Memory):
         manifest = {
             "schema_version": MEMORY_MANIFEST_SCHEMA_VERSION,
             "api_url": getattr(self, "api_url", None),
+            "longmemeval_v2_domain": getattr(self, "longmemeval_v2_domain", None),
             "project_id": getattr(self, "project_id", None),
             "run_id": getattr(self, "run_id", None),
             "chunking_mode": getattr(self, "chunking_mode", DEFAULT_CHUNKING_MODE),
@@ -5490,6 +5502,8 @@ class SibylLiveApiMemory(Memory):
         memory_config_path = input_dir / "memory_config.json"
         if manifest.get("memory_config_sha256") != _sha256_file(memory_config_path):
             raise RuntimeError(f"Saved memory config hash mismatch: {memory_config_path}")
+        if manifest.get("longmemeval_v2_domain") != self.longmemeval_v2_domain:
+            raise RuntimeError(f"Saved memory domain mismatch: {manifest_path}")
         action_spine_path = input_dir / ACTION_SPINE_FILENAME
         expected_action_spine_hash = manifest.get("action_spines_sha256")
         if expected_action_spine_hash is not None:
