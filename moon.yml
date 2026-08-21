@@ -765,6 +765,7 @@ tasks:
       tools/tests/test_longmemeval_v2_causal_ablation.py
       tools/tests/test_longmemeval_v2_pack_compare.py
       tools/tests/test_longmemeval_v2_rig.py
+      tools/tests/test_longmemeval_v2_artifact_bridge.py
       tools/tests/test_longmemeval_v2_validation_slice.py
       tools/tests/test_longmemeval_v2_validation_slice_v2.py -v
     inputs:
