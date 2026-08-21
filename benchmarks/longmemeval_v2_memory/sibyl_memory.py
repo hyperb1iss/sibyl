@@ -534,7 +534,16 @@ def build_operational_experience_payload(
                 "image_refs": [state.screenshot]
                 if include_screenshot_refs and state.screenshot
                 else [],
-                "metadata": {"longmemeval_v2_state_index": state.state_index},
+                "metadata": {
+                    "longmemeval_v2_state_index": state.state_index,
+                    "accessibility_inventory": {
+                        "schema_version": "sibyl-accessibility-inventory-v1",
+                        "source": "longmemeval-v2-official",
+                        "complete": True,
+                        "truncated": False,
+                        "evidence_part_count": len(evidence),
+                    },
+                },
             }
         )
     return {

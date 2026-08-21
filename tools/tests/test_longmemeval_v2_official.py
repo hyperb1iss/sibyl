@@ -5001,6 +5001,13 @@ def test_operational_experience_payload_preserves_oversized_state_evidence() -> 
     observations = experience["observations"]
     parts = observations[0]["evidence"]
     assert len(parts) > 1
+    assert observations[0]["metadata"]["accessibility_inventory"] == {
+        "schema_version": "sibyl-accessibility-inventory-v1",
+        "source": "longmemeval-v2-official",
+        "complete": True,
+        "truncated": False,
+        "evidence_part_count": len(parts),
+    }
     assert all(len(part["content"]) <= OPERATIONAL_EVIDENCE_MAX_CHARS for part in parts)
     assert [part["metadata"]["longmemeval_v2_chunk_index"] for part in parts] == list(
         range(len(parts))
