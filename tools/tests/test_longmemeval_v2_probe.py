@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
 from pathlib import Path
 from types import ModuleType
+
+import pytest
+import yaml
 
 EXPECTED_SELECTED_TRAJECTORIES = 2
 EXPECTED_WORKFLOW_OCCURRENCES = 2
@@ -180,7 +185,86 @@ def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
     assert workflow.index('rm -rf "$domain_output/ingest_checkpoint"') > workflow.index(
         "moon run bench-longmemeval-v2-official-full"
     )
+
+
+def test_longmemeval_v2_workflow_rejects_unsealed_paid_shapes_before_work() -> None:
+    workflow = (
+        Path(__file__).parents[2] / ".github" / "workflows" / "longmemeval-v2.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "official-preflight:" in workflow
+    assert "needs: official-preflight" in workflow
+    assert "Sealed paid arms require the complete Small corpus." in workflow
+    assert "Sealed paid arms require both official Small domains." in workflow
+    assert "Sealed paid arms forbid official_limit." in workflow
+    assert "Sealed paid arms cannot use a validation slice." in workflow
     assert "https://openrouter.ai/api/v1" in workflow
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"OFFICIAL_TIER": "medium"}, "complete Small corpus"),
+        ({"OFFICIAL_DOMAIN": "web"}, "both official Small domains"),
+        ({"OFFICIAL_LIMIT": "1"}, "forbid official_limit"),
+        ({"OFFICIAL_VALIDATION_SLICE": "composition-v1"}, "validation slice"),
+    ],
+)
+def test_paid_preflight_exits_before_invalid_dispatch(
+    override: dict[str, str],
+    message: str,
+) -> None:
+    workflow_path = Path(__file__).parents[2] / ".github" / "workflows" / "longmemeval-v2.yml"
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    script = workflow["jobs"]["official-preflight"]["steps"][0]["run"]
+    env = {
+        **os.environ,
+        "OFFICIAL_DOMAIN": "both",
+        "OFFICIAL_LIMIT": "",
+        "OFFICIAL_TIER": "small",
+        "OFFICIAL_VALIDATION_SLICE": "none",
+        **override,
+    }
+
+    result = subprocess.run(  # noqa: S603
+        ["/bin/bash", "-c", script],
+        check=False,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert message in result.stdout
+
+
+def test_longmemeval_v2_workflow_seals_paid_arm_manifest() -> None:
+    workflow = (
+        Path(__file__).parents[2] / ".github" / "workflows" / "longmemeval-v2.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "environment: longmemeval-paid" in workflow
+    assert "official_arm_manifest_json:" in workflow
+    assert "official_experiment_id:" not in workflow
+    assert "ARM_MANIFEST_JSON: ${{ inputs.official_arm_manifest_json || '' }}" in workflow
+    assert "keys | sort) == ([" in workflow
+    assert '"experiment_id"' in workflow
+    assert '"experiment_phase"' in workflow
+    assert '"pass_id"' in workflow
+    assert '"pass_seed"' in workflow
+    assert '"arm_role"' in workflow
+    assert '"substrate"' in workflow
+    assert '"preregistration_sha256"' in workflow
+    assert '"max_spend_usd"' in workflow
+    assert '"max_context_total_chars"' in workflow
+    assert '"operational_note_distillation_profile"' in workflow
+    assert "official_arm_manifest_json does not match the sealed schema" in workflow
+    assert '--experiment-id "$EXPERIMENT_ID"' in workflow
+    assert '--experiment-phase "$EXPERIMENT_PHASE"' in workflow
+    assert '--pass-id "$PASS_ID"' in workflow
+    assert '--pass-seed "$PASS_SEED"' in workflow
+    assert '--shuffle-questions-seed "$PASS_SEED"' in workflow
+    assert '--max-spend-usd "$MAX_SPEND_USD"' in workflow
 
 
 def test_longmemeval_v2_workflow_packages_receipts_and_diagnostics() -> None:
@@ -192,6 +276,11 @@ def test_longmemeval_v2_workflow_packages_receipts_and_diagnostics() -> None:
     assert "build_submission_step_2_build_package.py" in workflow
     assert "--receipt-only" in workflow
     assert "--profile longmemeval-v2" in workflow
+    assert "moon run longmemeval-v2-artifact-bridge" in workflow
+    assert "arm \\" in workflow
+    assert '"$OUTPUT_ROOT/longmemeval_v2_${OFFICIAL_TIER}_receipt.json"' in workflow
+    assert '--output "$OUTPUT_ROOT/arm_run.json"' in workflow
+    assert ".moon/cache/evals/longmemeval-v2-official/arm_run.json" in workflow
     assert "Upload service diagnostics" in workflow
     assert "SIBYL_SURREAL_PATH: rocksdb:///data/sibyl-longmemeval-v2.db" in workflow
     assert "sibyld.log" in workflow
@@ -232,12 +321,19 @@ def test_longmemeval_v2_workflow_forwards_frozen_operating_point() -> None:
     assert "official_api_retry_attempts:" in workflow
     assert "official_prompt_build_max_workers:" in workflow
     assert '--max-context-chars-per-item "$MAX_CONTEXT_CHARS_PER_ITEM"' in workflow
+    assert '--max-context-total-chars "$MAX_CONTEXT_TOTAL_CHARS"' in workflow
+    assert '--operational-note-dedupe-mode "$NOTE_DEDUPE_MODE"' in workflow
+    assert '--operational-note-lane-mode "$NOTE_LANE_MODE"' in workflow
+    assert '--operational-note-distillation-profile "$NOTE_DISTILLATION_PROFILE"' in workflow
     assert '--typed-stream-limit "$TYPED_STREAM_LIMIT"' in workflow
     assert '--note-distillation-model "$NOTE_DISTILLATION_MODEL"' in workflow
     assert '--api-retry-attempts "$API_RETRY_ATTEMPTS"' in workflow
     assert '--prompt-build-max-workers "$PROMPT_BUILD_MAX_WORKERS"' in workflow
     assert "args+=(--typed-stream-retrieval)" in workflow
     assert "args+=(--note-distillation)" in workflow
+    assert "args+=(--render-char-total-treatment)" in workflow
+    assert "args+=(--render-group-lanes)" in workflow
+    assert "args+=(--render-action-spines)" in workflow
 
 
 def test_longmemeval_v2_workflow_defaults_to_shared_relevance() -> None:

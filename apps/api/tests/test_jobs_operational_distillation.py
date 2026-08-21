@@ -9,7 +9,9 @@ import pytest
 from sibyl.jobs import operational_distillation
 from sibyl_core.ai.llm import ExtractionUsage
 from sibyl_core.ai.operational_distillation import (
+    ACCESSIBILITY_INVENTORY_SCHEMA_VERSION,
     DistilledOperationalNotes,
+    RenderV1DistilledOperationalNotes,
     operational_distilled_note_id,
 )
 from sibyl_core.models.experience import (
@@ -52,6 +54,8 @@ class _Extractor:
                 input_tokens=120,
                 output_tokens=40,
                 total_tokens=160,
+                cost_usd=0.00042,
+                cost_complete=True,
             ),
         )
 
@@ -104,6 +108,28 @@ async def test_distillation_writes_current_notes_and_removes_stale_kind(
     assert result["status"] == "complete"
     assert result["provider"] == "openai"
     assert result["model"] == "gpt-5.4-nano"
+    assert result["requests"] == 1
+    assert result["input_tokens"] == 120
+    assert result["output_tokens"] == 40
+    assert result["total_tokens"] == 160
+    assert result["cost_usd"] == 0.00042
+    assert result["cost_complete"] is True
+    assert result["distillation_receipt"]["usage"] == {
+        "provider": "openai",
+        "model": "gpt-5.4-nano",
+        "requests": 1,
+        "input_tokens": 120,
+        "output_tokens": 40,
+        "total_tokens": 160,
+        "cost_usd": 0.00042,
+        "cost_complete": True,
+    }
+    assert result["distillation_receipt"]["observed_absence"] == {
+        "proposed_count": 0,
+        "admitted_count": 0,
+        "rejected_count": 0,
+        "proposals": [],
+    }
     written = entity_manager.create_direct_bulk.await_args.args[0]
     assert [entity.metadata["note_kind"] for entity in written] == ["workflow", "facts"]
     assert all(entity.metadata["project_id"] == "project-1" for entity in written)
@@ -161,3 +187,115 @@ async def test_distillation_drops_output_when_manifest_changes_during_llm(
     assert result["reason"] == "manifest_stale"
     entity_manager.create_direct_bulk.assert_not_awaited()
     entity_manager.delete.assert_not_awaited()
+
+
+class _RenderExtractor:
+    async def extract_with_usage(self, prompt: str) -> SimpleNamespace:
+        assert "observed_absence" in prompt
+        assert "Complete UI inventory for observation 0" in prompt
+        return SimpleNamespace(
+            output=RenderV1DistilledOperationalNotes(
+                facts=["The incident page has a Status field."],
+                observed_absence=[
+                    {
+                        "observation_ordinal": 0,
+                        "statement": "No Delete incident link was present.",
+                    }
+                ],
+            ),
+            usage=ExtractionUsage(
+                provider="openai",
+                model="gpt-5.4-nano",
+                requests=1,
+                input_tokens=140,
+                output_tokens=50,
+                total_tokens=190,
+                cost_usd=None,
+                cost_complete=False,
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_render_v1_distillation_admits_absence_and_receipts_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    experience = _experience().model_copy(
+        update={
+            "metadata": {"operational_note_distillation_profile": "render_v1"},
+            "observations": (
+                OperationalObservation(
+                    id="state-0",
+                    ordinal=0,
+                    action="inspect incident",
+                    evidence=(
+                        OperationalEvidencePart(
+                            id="tree-0",
+                            content="heading 'Incident INC001'\nlink 'Activity log'",
+                            content_type="text/plain; profile=accessibility-tree",
+                        ),
+                    ),
+                    metadata={
+                        "accessibility_inventory": {
+                            "schema_version": ACCESSIBILITY_INVENTORY_SCHEMA_VERSION,
+                            "source": "test-fixture",
+                            "complete": True,
+                            "truncated": False,
+                            "evidence_part_count": 1,
+                        }
+                    },
+                ),
+            ),
+        }
+    )
+    projection = project_operational_experience(experience)
+    manifest = next(
+        entity
+        for entity in projection.entities
+        if entity.id == projection.manifest.manifest_entity_id
+    )
+    entity_manager = SimpleNamespace(
+        get=AsyncMock(return_value=manifest),
+        create_direct_bulk=AsyncMock(
+            side_effect=lambda entities, **_: [entity.id for entity in entities]
+        ),
+        delete=AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(operational_distillation, "entity_lock", _acquired_lock)
+    monkeypatch.setattr(
+        operational_distillation,
+        "get_surreal_graph_runtime",
+        AsyncMock(return_value=SimpleNamespace(entity_manager=entity_manager)),
+    )
+    monkeypatch.setattr(
+        operational_distillation,
+        "operational_note_distiller",
+        lambda **_: _RenderExtractor(),
+    )
+
+    result = await operational_distillation.distill_operational_experience_notes(
+        {},
+        experience.model_dump(mode="json"),
+        "org-1",
+        content_hash=manifest.metadata["operational_content_hash"],
+        created_by="user-1",
+    )
+
+    written = entity_manager.create_direct_bulk.await_args.args[0]
+    assert [entity.metadata["note_kind"] for entity in written] == [
+        "facts",
+        "observed_absence",
+    ]
+    assert result["distillation_receipt"]["profile"] == "render_v1"
+    assert result["distillation_receipt"]["digest"]["roles"] == [
+        "heading",
+        "gridcell",
+        "columnheader",
+        "StaticText",
+        "link",
+        "option",
+        "listitem",
+    ]
+    assert result["distillation_receipt"]["observed_absence"]["admitted_count"] == 1
+    assert result["distillation_receipt"]["render"]["truncated"] is False
+    assert result["distillation_receipt"]["usage"]["cost_complete"] is False

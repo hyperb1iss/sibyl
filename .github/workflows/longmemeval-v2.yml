@@ -91,6 +91,11 @@ on:
         description: "Run the approval-bound official full harness"
         type: boolean
         default: false
+      official_arm_manifest_json:
+        description: "Sealed experiment identity, substrate, geometry, and render profile"
+        type: string
+        default: >-
+          {"experiment_id":"","experiment_phase":"aa","pass_id":"","pass_seed":0,"arm_role":"machine","substrate":"machine","preregistration_sha256":"","max_spend_usd":8,"retrieval_mode":"accurate","max_context_total_chars":60000,"operational_note_dedupe_mode":"source","operational_note_lane_mode":"reserved","operational_note_distillation_profile":"baseline","render_group_lanes":false,"render_action_spines":false}
       official_tier:
         description: "Official haystack tier"
         type: choice
@@ -154,14 +159,6 @@ on:
         description: "Bundle policy-safe operational source evidence into typed items"
         type: boolean
         default: false
-      official_retrieval_mode:
-        description: "Retrieval pipeline; naive is the 1.3 control arm, frozen screens require fast"
-        type: choice
-        options:
-          - fast
-          - accurate
-          - naive
-        default: accurate
       official_retrieval_max_planned_queries:
         description: "Maximum supplemental evidence queries in accurate mode"
         type: choice
@@ -312,10 +309,42 @@ jobs:
           path: .moon/cache/evals/longmemeval_v2_${{ matrix.tier }}_probe.json
           if-no-files-found: error
 
+  official-preflight:
+    name: Validate sealed paid arm
+    if: github.event_name == 'workflow_dispatch' && inputs.run_official_full
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject incomplete or unpackageable paid runs
+        env:
+          OFFICIAL_DOMAIN: ${{ inputs.official_domain || 'both' }}
+          OFFICIAL_LIMIT: ${{ inputs.official_limit || '' }}
+          OFFICIAL_TIER: ${{ inputs.official_tier || 'small' }}
+          OFFICIAL_VALIDATION_SLICE: ${{ inputs.official_validation_slice || 'none' }}
+        run: |
+          set -euo pipefail
+          if [[ "$OFFICIAL_TIER" != "small" ]]; then
+            echo "::error::Sealed paid arms require the complete Small corpus."
+            exit 1
+          fi
+          if [[ "$OFFICIAL_DOMAIN" != "both" ]]; then
+            echo "::error::Sealed paid arms require both official Small domains."
+            exit 1
+          fi
+          if [[ -n "$OFFICIAL_LIMIT" ]]; then
+            echo "::error::Sealed paid arms forbid official_limit."
+            exit 1
+          fi
+          if [[ "$OFFICIAL_VALIDATION_SLICE" != "none" ]]; then
+            echo "::error::Sealed paid arms cannot use a validation slice."
+            exit 1
+          fi
+
   official-full:
     name: Official ${{ matrix.domain }} ${{ inputs.official_tier || 'small' }}
     if: github.event_name == 'workflow_dispatch' && inputs.run_official_full
+    needs: official-preflight
     runs-on: ubuntu-latest
+    environment: longmemeval-paid
     timeout-minutes: 720
     strategy:
       fail-fast: false
@@ -340,7 +369,7 @@ jobs:
         ${{ startsWith(inputs.official_validation_slice, 'composition-v2') &&
         'bench-longmemeval-v2-validation-slice-v2' ||
         'bench-longmemeval-v2-validation-slice' }}
-      MAX_CONTEXT_TOTAL_CHARS: "60000"
+      ARM_MANIFEST_JSON: ${{ inputs.official_arm_manifest_json || '' }}
       OFFICIAL_DATASET_REVISION: ${{ inputs.official_dataset_revision || '' }}
       OFFICIAL_INCLUDE_SCREENSHOTS: ${{ inputs.official_include_screenshots || false }}
       READER_BASE_URL: ${{ inputs.official_reader_base_url || 'https://openrouter.ai/api/v1' }}
@@ -351,7 +380,6 @@ jobs:
       EVIDENCE_COMPOSITION_MODE:
         ${{ inputs.official_evidence_composition_mode || 'shared_relevance' }}
       SOURCE_EVIDENCE_BUNDLING: ${{ inputs.official_source_evidence_bundling || false }}
-      RETRIEVAL_MODE: ${{ inputs.official_retrieval_mode || 'accurate' }}
       RETRIEVAL_MAX_PLANNED_QUERIES:
         ${{ inputs.official_retrieval_max_planned_queries || '3' }}
       MAX_CONTEXT_CHARS_PER_ITEM:
@@ -397,6 +425,139 @@ jobs:
       - name: Guard paid-run dependencies
         run: |
           set -euo pipefail
+          if ! jq -e '
+            type == "object" and
+            ((keys | sort) == ([
+              "arm_role",
+              "experiment_id",
+              "experiment_phase",
+              "max_context_total_chars",
+              "max_spend_usd",
+              "operational_note_dedupe_mode",
+              "operational_note_distillation_profile",
+              "operational_note_lane_mode",
+              "pass_id",
+              "pass_seed",
+              "preregistration_sha256",
+              "render_action_spines",
+              "render_group_lanes",
+              "retrieval_mode",
+              "substrate"
+            ] | sort)) and
+            (.experiment_id | type == "string" and length > 0) and
+            (.experiment_phase | IN("aa", "anchor", "race", "render")) and
+            (.pass_id | type == "string" and length > 0) and
+            (.pass_seed | type == "number" and . >= 0 and floor == .) and
+            (.arm_role | IN("machine", "naive", "render_control", "render_treatment")) and
+            (.substrate | IN("machine", "naive")) and
+            (.preregistration_sha256 | type == "string") and
+            (.preregistration_sha256 == "" or
+              (.preregistration_sha256 | test("^[0-9a-f]{64}$"))) and
+            (.max_spend_usd | type == "number" and . > 0) and
+            (.retrieval_mode | IN("fast", "accurate", "naive")) and
+            (.max_context_total_chars | type == "number" and . > 0 and floor == .) and
+            (.operational_note_dedupe_mode | IN("source", "source_kind")) and
+            (.operational_note_lane_mode | IN("reserved", "additive")) and
+            (.operational_note_distillation_profile | IN("baseline", "render_v1")) and
+            (.render_group_lanes | type == "boolean") and
+            (.render_action_spines | type == "boolean")
+          ' <<< "$ARM_MANIFEST_JSON" >/dev/null; then
+            echo "::error::official_arm_manifest_json does not match the sealed schema."
+            exit 1
+          fi
+          EXPERIMENT_ID=$(jq -r '.experiment_id' <<< "$ARM_MANIFEST_JSON")
+          EXPERIMENT_PHASE=$(jq -r '.experiment_phase' <<< "$ARM_MANIFEST_JSON")
+          PASS_ID=$(jq -r '.pass_id' <<< "$ARM_MANIFEST_JSON")
+          PASS_SEED=$(jq -r '.pass_seed' <<< "$ARM_MANIFEST_JSON")
+          ARM_ROLE=$(jq -r '.arm_role' <<< "$ARM_MANIFEST_JSON")
+          SUBSTRATE=$(jq -r '.substrate' <<< "$ARM_MANIFEST_JSON")
+          PREREGISTRATION_SHA256=$(jq -r '.preregistration_sha256' <<< "$ARM_MANIFEST_JSON")
+          MAX_SPEND_USD=$(jq -r '.max_spend_usd' <<< "$ARM_MANIFEST_JSON")
+          RETRIEVAL_MODE=$(jq -r '.retrieval_mode' <<< "$ARM_MANIFEST_JSON")
+          MAX_CONTEXT_TOTAL_CHARS=$(
+            jq -r '.max_context_total_chars' <<< "$ARM_MANIFEST_JSON"
+          )
+          NOTE_DEDUPE_MODE=$(
+            jq -r '.operational_note_dedupe_mode' <<< "$ARM_MANIFEST_JSON"
+          )
+          NOTE_LANE_MODE=$(
+            jq -r '.operational_note_lane_mode' <<< "$ARM_MANIFEST_JSON"
+          )
+          NOTE_DISTILLATION_PROFILE=$(
+            jq -r '.operational_note_distillation_profile' <<< "$ARM_MANIFEST_JSON"
+          )
+          RENDER_GROUP_LANES=$(jq -r '.render_group_lanes' <<< "$ARM_MANIFEST_JSON")
+          RENDER_ACTION_SPINES=$(jq -r '.render_action_spines' <<< "$ARM_MANIFEST_JSON")
+          export EXPERIMENT_ID EXPERIMENT_PHASE PASS_ID PREREGISTRATION_SHA256
+          for value_name in \
+            EXPERIMENT_ID EXPERIMENT_PHASE PASS_ID PASS_SEED ARM_ROLE SUBSTRATE \
+            PREREGISTRATION_SHA256 MAX_SPEND_USD RETRIEVAL_MODE \
+            MAX_CONTEXT_TOTAL_CHARS NOTE_DEDUPE_MODE NOTE_LANE_MODE \
+            NOTE_DISTILLATION_PROFILE RENDER_GROUP_LANES RENDER_ACTION_SPINES; do
+            printf '%s=%s\n' "$value_name" "${!value_name}" >> "$GITHUB_ENV"
+          done
+          for value_name in \
+            EXPERIMENT_ID EXPERIMENT_PHASE PASS_ID PASS_SEED ARM_ROLE SUBSTRATE \
+            MAX_SPEND_USD; do
+            if [[ -z "${!value_name}" ]]; then
+              echo "::error::${value_name} is required for every paid official arm."
+              exit 1
+            fi
+          done
+          if [[ ! "$PASS_SEED" =~ ^[0-9]+$ ]]; then
+            echo "::error::official_pass_seed must be a non-negative integer."
+            exit 1
+          fi
+          if [[ ! "$MAX_SPEND_USD" =~ ^[0-9]+([.][0-9]+)?$ ]] ||
+            ! awk -v cap="$MAX_SPEND_USD" 'BEGIN { exit !(cap > 0) }'; then
+            echo "::error::official_max_spend_usd must be finite and positive."
+            exit 1
+          fi
+          if [[ ! "$MAX_CONTEXT_TOTAL_CHARS" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::official_max_context_total_chars must be positive."
+            exit 1
+          fi
+          if [[ "$EXPERIMENT_PHASE" == "race" || "$EXPERIMENT_PHASE" == "render" ]]; then
+            if [[ -z "$PREREGISTRATION_SHA256" ]]; then
+              echo "::error::Race and render phases require a preregistration digest."
+              exit 1
+            fi
+          elif [[ -n "$PREREGISTRATION_SHA256" ]]; then
+            echo "::error::A/A and anchor phases must precede preregistration."
+            exit 1
+          fi
+          if [[ "$ARM_ROLE" == "naive" ]]; then
+            if [[ "$SUBSTRATE" != "naive" || "$RETRIEVAL_MODE" != "naive" ]]; then
+              echo "::error::The naive arm requires the naive substrate and retrieval mode."
+              exit 1
+            fi
+          elif [[ "$SUBSTRATE" != "machine" || "$RETRIEVAL_MODE" == "naive" ]]; then
+            echo "::error::Machine and render arms require the machine substrate."
+            exit 1
+          fi
+          if [[ "$ARM_ROLE" == "render_treatment" ]]; then
+            if [[ "$NOTE_DEDUPE_MODE" != "source_kind" ||
+              "$NOTE_LANE_MODE" != "additive" ||
+              "$NOTE_DISTILLATION_PROFILE" != "render_v1" ||
+              "$NOTE_DISTILLATION" != "true" ||
+              "$TYPED_STREAM_RETRIEVAL" != "true" ||
+              "$RENDER_GROUP_LANES" != "true" ||
+              "$RENDER_ACTION_SPINES" != "true" ]]; then
+              echo "::error::The render treatment requires the complete preregistered bundle."
+              exit 1
+            fi
+            if ! awk -v chars="$MAX_CONTEXT_TOTAL_CHARS" 'BEGIN { exit !(chars > 60000) }'; then
+              echo "::error::The render treatment must raise the 60000-character ceiling."
+              exit 1
+            fi
+          elif [[ "$NOTE_DEDUPE_MODE" != "source" ||
+            "$NOTE_LANE_MODE" != "reserved" ||
+            "$NOTE_DISTILLATION_PROFILE" != "baseline" ||
+            "$RENDER_GROUP_LANES" != "false" ||
+            "$RENDER_ACTION_SPINES" != "false" ]]; then
+            echo "::error::Control arms cannot enable render treatment levers."
+            exit 1
+          fi
           if [[ "$OFFICIAL_VALIDATION_SLICE" != "none" && -n "$OFFICIAL_LIMIT" ]]; then
             echo "::error::official_limit cannot be combined with a frozen validation slice."
             exit 1
@@ -601,6 +762,18 @@ jobs:
           args+=(--retrieval-mode "$RETRIEVAL_MODE")
           args+=(--retrieval-max-planned-queries "$RETRIEVAL_MAX_PLANNED_QUERIES")
           args+=(--max-context-chars-per-item "$MAX_CONTEXT_CHARS_PER_ITEM")
+          args+=(--max-context-total-chars "$MAX_CONTEXT_TOTAL_CHARS")
+          args+=(--experiment-id "$EXPERIMENT_ID")
+          args+=(--experiment-phase "$EXPERIMENT_PHASE")
+          args+=(--pass-id "$PASS_ID")
+          args+=(--pass-seed "$PASS_SEED")
+          args+=(--arm-role "$ARM_ROLE")
+          args+=(--substrate "$SUBSTRATE")
+          args+=(--max-spend-usd "$MAX_SPEND_USD")
+          args+=(--shuffle-questions-seed "$PASS_SEED")
+          args+=(--operational-note-dedupe-mode "$NOTE_DEDUPE_MODE")
+          args+=(--operational-note-lane-mode "$NOTE_LANE_MODE")
+          args+=(--operational-note-distillation-profile "$NOTE_DISTILLATION_PROFILE")
           args+=(--typed-stream-limit "$TYPED_STREAM_LIMIT")
           args+=(--note-distillation-model "$NOTE_DISTILLATION_MODEL")
           args+=(--api-retry-attempts "$API_RETRY_ATTEMPTS")
@@ -611,11 +784,20 @@ jobs:
           if [[ "$NOTE_DISTILLATION" == "true" ]]; then
             args+=(--note-distillation)
           fi
+          if [[ -n "$PREREGISTRATION_SHA256" ]]; then
+            args+=(--preregistration-sha256 "$PREREGISTRATION_SHA256")
+          fi
+          if [[ "$ARM_ROLE" == "render_treatment" ]]; then
+            args+=(--render-char-total-treatment)
+          fi
+          if [[ "$RENDER_GROUP_LANES" == "true" ]]; then
+            args+=(--render-group-lanes)
+          fi
+          if [[ "$RENDER_ACTION_SPINES" == "true" ]]; then
+            args+=(--render-action-spines)
+          fi
           if [[ "$SOURCE_EVIDENCE_BUNDLING" == "true" ]]; then
             args+=(--source-evidence-bundling)
-          fi
-          if [[ "$OFFICIAL_VALIDATION_SLICE" == composition-v2* ]]; then
-            args+=(--max-context-total-chars "$MAX_CONTEXT_TOTAL_CHARS")
           fi
           moon run bench-longmemeval-v2-official-full -- \
             --official-repo "$OFFICIAL_REPO_DIR" \
@@ -899,6 +1081,12 @@ jobs:
             "$OUTPUT_ROOT/longmemeval_v2_${OFFICIAL_TIER}_receipt.json" \
             --profile longmemeval-v2
 
+          moon run longmemeval-v2-artifact-bridge -- \
+            arm \
+            --official-receipt \
+            "$OUTPUT_ROOT/longmemeval_v2_${OFFICIAL_TIER}_receipt.json" \
+            --output "$OUTPUT_ROOT/arm_run.json"
+
       - name: Upload official combined receipt
         if: inputs.official_validation_slice == 'none'
         uses: actions/upload-artifact@v7
@@ -906,6 +1094,7 @@ jobs:
           name: longmemeval-v2-combined-${{ inputs.official_tier || 'small' }}-${{ github.sha }}
           path: |
             .moon/cache/evals/longmemeval-v2-official/longmemeval_v2_${{ inputs.official_tier || 'small' }}_receipt.json
+            .moon/cache/evals/longmemeval-v2-official/arm_run.json
             .moon/cache/evals/longmemeval-v2-official/combined_${{ inputs.official_tier || 'small' }}/aggregated_metrics.json
             .moon/cache/evals/longmemeval-v2-official/composition_validation_report.json
             .moon/cache/evals/longmemeval-v2-submissions/sibyl_live_api.tar.gz

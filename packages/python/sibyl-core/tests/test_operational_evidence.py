@@ -13,10 +13,13 @@ def _result(
     source_id: str | None = None,
     distilled: bool = False,
     content_chars: int | None = None,
+    note_kind: str | None = None,
 ) -> SearchResult:
     metadata = {"operational_source_id": source_id} if source_id else {}
     if distilled:
         metadata["projection_kind"] = "distilled_note"
+    if note_kind:
+        metadata["note_kind"] = note_kind
     return SearchResult(
         id=result_id,
         type=result_type,
@@ -261,3 +264,125 @@ def test_char_budget_must_be_positive() -> None:
             limit=8,
             char_budget=0,
         )
+
+
+def test_source_kind_dedupe_admits_distinct_note_kinds_and_receipts_drops() -> None:
+    typed = [
+        _result(
+            "workflow-a",
+            result_type="note",
+            source_id="capture-a",
+            distilled=True,
+            note_kind="workflow",
+        ),
+        _result(
+            "facts-a",
+            result_type="note",
+            source_id="capture-a",
+            distilled=True,
+            note_kind="facts",
+        ),
+        _result(
+            "workflow-a-duplicate",
+            result_type="note",
+            source_id="capture-a",
+            distilled=True,
+            note_kind="workflow",
+        ),
+    ]
+
+    selected, receipt = compose_operational_evidence(
+        typed_results=typed,
+        raw_results=[_result("raw-a")],
+        limit=3,
+        operational_note_dedupe_mode="source_kind",
+        include_activity_receipt=True,
+    )
+
+    assert [result.id for result in selected] == ["workflow-a", "facts-a", "raw-a"]
+    assert receipt["operational_note_dedupe_mode"] == "source_kind"
+    assert receipt["activity_receipt"]["drop_reason_counts"] == {
+        "duplicate_operational_source_note_kind": 1
+    }
+    assert receipt["activity_receipt"]["note_dedupe"] == {
+        "mode": "source_kind",
+        "duplicate_source_count": 2,
+        "duplicate_source_kind_count": 1,
+    }
+
+
+def test_additive_note_lane_preserves_raw_membership_and_order() -> None:
+    selected, receipt = compose_operational_evidence(
+        typed_results=_note_pool(4),
+        raw_results=[_result(f"raw-{index}") for index in range(5)],
+        limit=5,
+        char_budget=100,
+        operational_note_lane_mode="additive",
+        include_activity_receipt=True,
+    )
+
+    assert [result.id for result in selected] == [
+        "note-0",
+        "note-1",
+        "note-2",
+        "raw-0",
+        "raw-1",
+        "raw-2",
+        "raw-3",
+        "raw-4",
+    ]
+    assert receipt["selected_typed_count"] == 3
+    assert receipt["selected_raw_count"] == 5
+    assert receipt["activity_receipt"]["raw_parity"] == {
+        "reference_ids": ["raw-0", "raw-1", "raw-2", "raw-3", "raw-4"],
+        "selected_ids": ["raw-0", "raw-1", "raw-2", "raw-3", "raw-4"],
+        "membership_equal": True,
+        "order_equal": True,
+    }
+    assert receipt["activity_receipt"]["additive_note_lane"] == {
+        "admitted_note_ids": ["note-0", "note-1", "note-2"]
+    }
+    assert receipt["activity_receipt"]["hard_budget"] == {
+        "mode": "characters",
+        "limit": 100,
+        "selected": 43,
+        "within": True,
+    }
+
+
+def test_additive_note_lane_never_breaks_the_hard_character_budget() -> None:
+    selected, receipt = compose_operational_evidence(
+        typed_results=[
+            _result(
+                f"note-{index}",
+                result_type="note",
+                source_id=f"capture-{index}",
+                distilled=True,
+                content_chars=40,
+            )
+            for index in range(2)
+        ],
+        raw_results=_passage_pool(2, content_chars=100),
+        limit=2,
+        char_budget=250,
+        operational_note_lane_mode="additive",
+        include_activity_receipt=True,
+    )
+
+    assert [result.id for result in selected] == ["note-0", "passage-0", "passage-1"]
+    assert sum(len(result.content) for result in selected) == 240
+    assert receipt["selected_chars"] == 240
+    assert receipt["activity_receipt"]["drop_reason_counts"] == {"hard_char_budget": 1}
+    assert receipt["activity_receipt"]["raw_parity"]["order_equal"] is True
+
+
+def test_default_composition_omits_treatment_receipt_fields() -> None:
+    _selected, receipt = compose_operational_evidence(
+        typed_results=_note_pool(1),
+        raw_results=[_result("raw-a")],
+        limit=2,
+    )
+
+    assert "operational_note_dedupe_mode" not in receipt
+    assert "operational_note_lane_mode" not in receipt
+    assert "activity_receipt" not in receipt

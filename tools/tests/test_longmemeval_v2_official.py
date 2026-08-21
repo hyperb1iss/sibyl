@@ -7,7 +7,6 @@ import shutil
 import subprocess
 import sys
 import threading
-import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -65,6 +64,10 @@ EXPECTED_SHARED_RELEVANCE_RAW_ITEMS = 5
 EXPECTED_PLANNER_REQUESTS = 2
 EXPECTED_PLANNER_INPUT_TOKENS = 84
 EXPECTED_PLANNER_OUTPUT_TOKENS = 22
+EXPECTED_DISTILLATION_REQUESTS = 3
+EXPECTED_DISTILLATION_INPUT_TOKENS = 300
+EXPECTED_DISTILLATION_OUTPUT_TOKENS = 90
+EXPECTED_DISTILLATION_TOTAL_TOKENS = 390
 EXPECTED_RETRIEVAL_MAX_PLANNED_QUERIES = 3
 EXPECTED_WHITESPACE_EXPOSURE_CHARS = 2
 EXPECTED_SELECTED_WINDOW_COUNT = 2
@@ -420,6 +423,9 @@ def _assert_question_id_hash_propagates(
     assert plan["provider_usage_run_id"] != plan["run_id"]
     expected_question_ids_sha256 = module.sha256_question_ids(["q-enterprise"])
     assert plan["selected_question_ids_sha256"] == expected_question_ids_sha256
+    assert plan["official_question_count"] == 1
+    assert plan["official_question_ids_sha256"] == expected_question_ids_sha256
+    assert plan["selection_complete"] is True
     dataset_receipt = module.build_dataset_receipt(
         data_root=data_root,
         domain="enterprise",
@@ -428,6 +434,9 @@ def _assert_question_id_hash_propagates(
         aggregated_metrics={},
     )
     assert dataset_receipt["selected_question_ids_sha256"] == expected_question_ids_sha256
+    assert dataset_receipt["official_question_count"] == 1
+    assert dataset_receipt["official_question_ids_sha256"] == expected_question_ids_sha256
+    assert dataset_receipt["selection_complete"] is True
 
 
 def test_official_runner_receipt_only_emits_citable_contract(
@@ -499,6 +508,9 @@ def test_official_runner_receipt_only_emits_citable_contract(
     assert receipt["source_runs"]["domains"]["web"]["runtime_inputs"]["questions"][
         "sha256"
     ].startswith("sha256:")
+    assert receipt["source_runs"]["domains"]["web"]["official_receipt"]["sha256"].startswith(
+        "sha256:"
+    )
     effective_config = receipt["source_runs"]["domains"]["web"]["effective_memory_config"]
     assert "api_token" not in effective_config["memory_params"]
     assert "email" not in effective_config["memory_params"]
@@ -510,12 +522,47 @@ def test_official_runner_receipt_only_emits_citable_contract(
     assert receipt["metrics"]["latency_p95_ms"] == EXPECTED_LATENCY_P95_MS
     assert receipt["metrics"]["max_latency_ms"] == EXPECTED_LATENCY_P95_MS
     assert receipt["accounting"]["embedding"]["calls"] == EXPECTED_EMBEDDING_REQUESTS
+    assert receipt["accounting"]["distillation"]["calls"] == 0
     assert receipt["accounting"]["reader"]["requests"] == EXPECTED_READER_REQUESTS
     assert receipt["accounting"]["judge"]["requests"] == EXPECTED_JUDGE_REQUESTS
     assert receipt["accounting"]["cost"]["provider_reported_total_usd"] == pytest.approx(0.1026)
     assert receipt["accounting"]["cost"]["coverage_complete"] is True
     assert {check["status"] for check in receipt["checks"]} == {"PASS"}
     assert eval_gate.evaluate_report(receipt, profile="longmemeval-v2") == []
+
+
+def test_combined_source_runs_require_each_domain_receipt(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    web_output_dir = tmp_path / "runs" / "web"
+    enterprise_output_dir = tmp_path / "runs" / "enterprise"
+    _write_official_outputs(web_output_dir, domain="web")
+    _write_official_outputs(enterprise_output_dir, domain="enterprise")
+    (web_output_dir / "longmemeval_v2_official_receipt.json").unlink()
+    args = module.parse_args(
+        [
+            "--data-root",
+            str(tmp_path / "data"),
+            "--domain",
+            "combined",
+            "--output-dir",
+            str(tmp_path / "combined"),
+            "--receipt-only",
+            "--web-output-dir",
+            str(web_output_dir),
+            "--enterprise-output-dir",
+            str(enterprise_output_dir),
+        ]
+    )
+
+    source_runs = module.load_receipt_source_runs(
+        args=args,
+        output_dir=tmp_path / "combined",
+    )
+    receipt = module.build_source_runs_receipt(args=args, source_runs=source_runs)
+
+    assert receipt["integrity_complete"] is False
+    assert receipt["domains"]["web"]["official_receipt"]["exists"] is False
+    assert receipt["domains"]["enterprise"]["official_receipt"]["exists"] is True
 
 
 def test_longmemeval_v2_receipt_gate_rejects_missing_lafs(tmp_path: Path) -> None:
@@ -789,6 +836,457 @@ def test_provider_usage_run_id_is_unique_per_invocation(tmp_path: Path) -> None:
     assert first.provider_usage_run_id != second.provider_usage_run_id
 
 
+def test_official_runner_binds_complete_experiment_identity(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    args = module.parse_args(
+        [
+            "--data-root",
+            str(tmp_path / "data"),
+            "--domain",
+            "web",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--plan-only",
+            "--experiment-id",
+            "eval-1.3",
+            "--experiment-phase",
+            "aa",
+            "--pass-id",
+            "aa-01",
+            "--pass-seed",
+            "1701",
+            "--arm-role",
+            "machine",
+            "--substrate",
+            "machine",
+            "--github-repository",
+            "hyperb1iss/sibyl",
+            "--github-workflow-ref",
+            "hyperb1iss/sibyl/.github/workflows/longmemeval-v2.yml@refs/heads/main",
+            "--github-workflow-sha",
+            "a" * 40,
+            "--github-run-id",
+            "1234",
+            "--github-run-attempt",
+            "2",
+        ]
+    )
+
+    assert module.experiment_identity(args) == {
+        "experiment_identity_schema_version": "sibyl-longmemeval-v2-experiment-identity-v1",
+        "experiment_id": "eval-1.3",
+        "experiment_phase": "aa",
+        "pass_id": "aa-01",
+        "pass_seed": 1701,
+        "arm_role": "machine",
+        "substrate": "machine",
+        "preregistration_sha256": None,
+        "max_spend_usd": None,
+        "github_workflow": {
+            "repository": "hyperb1iss/sibyl",
+            "workflow_ref": (
+                "hyperb1iss/sibyl/.github/workflows/longmemeval-v2.yml@refs/heads/main"
+            ),
+            "workflow_sha": "a" * 40,
+            "run_id": "1234",
+            "run_attempt": 2,
+        },
+    }
+
+
+def test_official_runner_rejects_partial_experiment_identity(tmp_path: Path) -> None:
+    module = _load_runner_module()
+
+    with pytest.raises(SystemExit, match="2"):
+        module.parse_args(
+            [
+                "--data-root",
+                str(tmp_path / "data"),
+                "--domain",
+                "web",
+                "--output-dir",
+                str(tmp_path / "out"),
+                "--experiment-id",
+                "eval-1.3",
+            ]
+        )
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "message"),
+    [
+        (["--limit", "1"], "--limit and --question-ids are forbidden"),
+        (["--question-ids", "q-web"], "--limit and --question-ids are forbidden"),
+        (["--tier", "medium"], "require the complete Small corpus"),
+    ],
+)
+def test_official_runner_rejects_incomplete_paid_experiment_corpus(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    extra_args: list[str],
+    message: str,
+) -> None:
+    module = _load_runner_module()
+    argv = [
+        "--data-root",
+        str(tmp_path / "data"),
+        "--domain",
+        "web",
+        "--output-dir",
+        str(tmp_path / "out"),
+        "--plan-only",
+        "--experiment-id",
+        "eval-1.3",
+        "--experiment-phase",
+        "aa",
+        "--pass-id",
+        "aa-01",
+        "--pass-seed",
+        "1701",
+        "--arm-role",
+        "machine",
+        "--substrate",
+        "machine",
+        "--github-repository",
+        "hyperb1iss/sibyl",
+        "--github-workflow-ref",
+        "hyperb1iss/sibyl/.github/workflows/longmemeval-v2.yml@refs/heads/main",
+        "--github-workflow-sha",
+        "a" * 40,
+        "--github-run-id",
+        "1234",
+        *extra_args,
+    ]
+
+    with pytest.raises(SystemExit, match="2"):
+        module.parse_args(argv)
+
+    assert message in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("phase", "digest", "message"),
+    [
+        ("race", "", "require --preregistration-sha256"),
+        ("render", "bogus", "lowercase SHA-256"),
+        ("anchor", "a" * 64, "must precede preregistration"),
+    ],
+)
+def test_official_runner_binds_preregistration_to_experiment_phase(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    phase: str,
+    digest: str,
+    message: str,
+) -> None:
+    module = _load_runner_module()
+    argv = [
+        "--data-root",
+        str(tmp_path / "data"),
+        "--domain",
+        "web",
+        "--output-dir",
+        str(tmp_path / "out"),
+        "--plan-only",
+        "--experiment-id",
+        "eval-1.3",
+        "--experiment-phase",
+        phase,
+        "--pass-id",
+        "pass-01",
+        "--pass-seed",
+        "1701",
+        "--arm-role",
+        "machine",
+        "--substrate",
+        "machine",
+        "--github-repository",
+        "hyperb1iss/sibyl",
+        "--github-workflow-ref",
+        "hyperb1iss/sibyl/.github/workflows/longmemeval-v2.yml@refs/heads/main",
+        "--github-workflow-sha",
+        "a" * 40,
+        "--github-run-id",
+        "1234",
+        "--github-run-attempt",
+        "1",
+    ]
+    if digest:
+        argv.extend(["--preregistration-sha256", digest])
+
+    with pytest.raises(SystemExit, match="2"):
+        module.parse_args(argv)
+
+    assert message in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("llm_abstention_checker|answerable=false", "llm_abstention_checker"),
+        ("llm_gotchas_checker(strict=true)", "llm_gotchas_checker"),
+        ("norm_phrase_set_match|separators=,;", "norm_phrase_set_match"),
+    ],
+)
+def test_evaluator_function_name_handles_official_parameter_syntax(
+    raw: str,
+    expected: str,
+) -> None:
+    module = _load_runner_module()
+
+    assert module.evaluator_function_name(raw) == expected
+
+
+def test_spend_reservation_counts_reader_judge_and_operations(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    question_count = 4
+    llm_eval_count = 3
+    args = module.parse_args(
+        [
+            "--data-root",
+            str(tmp_path / "data"),
+            "--domain",
+            "web",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--plan-only",
+            "--max-spend-usd",
+            "10",
+            "--retrieval-mode",
+            "accurate",
+            "--retrieval-max-planned-queries",
+            "2",
+            "--note-distillation",
+        ]
+    )
+
+    reservation = module.build_spend_reservation(
+        args=args,
+        question_count=question_count,
+        llm_eval_count=llm_eval_count,
+        required_trajectory_count=5,
+    )
+
+    assert reservation["status"] == "PASS"
+    assert reservation["within_cap"] is True
+    assert reservation["sections"]["reader"]["requests"] == question_count
+    assert reservation["sections"]["judge"]["requests"] == llm_eval_count
+    assert reservation["sections"]["operations"] == {
+        "requests": 13,
+        "planner_requests": 8,
+        "distillation_requests": 5,
+        "input_tokens": 130_000,
+        "output_tokens": 13_312,
+        "estimated_usd": pytest.approx(0.04264),
+    }
+
+
+def test_spend_reservation_and_actual_accounting_fail_closed(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    args = module.parse_args(
+        [
+            "--data-root",
+            str(tmp_path / "data"),
+            "--domain",
+            "web",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--plan-only",
+            "--max-spend-usd",
+            "0.01",
+        ]
+    )
+    blocked = module.build_spend_reservation(
+        args=args,
+        question_count=1,
+        llm_eval_count=1,
+        required_trajectory_count=1,
+    )
+
+    with pytest.raises(RuntimeError, match="exceeds its fixed cap"):
+        module.enforce_spend_reservation({"spend_reservation": blocked})
+    with pytest.raises(RuntimeError, match="accounting is incomplete"):
+        module.enforce_actual_spend_cap(
+            {"accounting": {"cost": {"coverage_complete": False}}},
+            max_spend_usd=1.0,
+        )
+
+
+def test_official_runner_derives_bound_rig_rows(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    data_root = tmp_path / "data"
+    output_dir = tmp_path / "out"
+    _write_dataset(data_root)
+    (data_root / "trajectories.jsonl").write_text(
+        "\n".join(
+            json.dumps(
+                _trajectory(
+                    trajectory_id,
+                    tree=("The priority filter." if trajectory_id == "t1" else "button Other"),
+                )
+            )
+            for trajectory_id in ["t1", "t2", "t3"]
+        ),
+        encoding="utf-8",
+    )
+    runtime_dir = output_dir / "runtime_inputs"
+    runtime_dir.mkdir(parents=True)
+    (runtime_dir / "haystack.json").write_text(
+        json.dumps({"q-enterprise": ["t1", "t2"]}),
+        encoding="utf-8",
+    )
+    (output_dir / "per_question.jsonl").write_text(
+        json.dumps(
+            {
+                "question_id": "q-enterprise",
+                "score_bool": True,
+                "memory_context": [
+                    {
+                        "type": "text",
+                        "value": (
+                            "Retrieved evidence rank 1\nTrajectory: t1\n"
+                            "State 0\nThe priority filter."
+                        ),
+                    }
+                ],
+                "memory_post_query_metadata": {
+                    "context_status": "complete",
+                    "rig_activity": {
+                        "mode": "fast",
+                        "activity_events": 1,
+                        "lever_activity": {},
+                    },
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    path = module.write_rig_rows(
+        data_root=data_root,
+        output_dir=output_dir,
+        domain="enterprise",
+    )
+
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "question_id": "q-enterprise",
+        "status": "valid",
+        "context_status": "complete",
+        "evidence_exposure_eligible": True,
+        "evidence_exposed": True,
+        "activity": {"mode": "fast", "activity_events": 1, "lever_activity": {}},
+    }
+
+
+def test_official_runner_refuses_to_infer_missing_rig_activity(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    data_root = tmp_path / "data"
+    output_dir = tmp_path / "out"
+    _write_dataset(data_root)
+    runtime_dir = output_dir / "runtime_inputs"
+    runtime_dir.mkdir(parents=True)
+    (runtime_dir / "haystack.json").write_text(
+        json.dumps({"q-enterprise": ["t1", "t2"]}),
+        encoding="utf-8",
+    )
+    (output_dir / "per_question.jsonl").write_text(
+        json.dumps(
+            {
+                "question_id": "q-enterprise",
+                "score_bool": True,
+                "memory_context": [],
+                "memory_post_query_metadata": {"context_status": "empty"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="no explicit activity receipt"):
+        module.write_rig_rows(
+            data_root=data_root,
+            output_dir=output_dir,
+            domain="enterprise",
+        )
+    with pytest.raises(RuntimeError, match="exceeds fixed cap"):
+        module.enforce_actual_spend_cap(
+            {
+                "accounting": {
+                    "cost": {
+                        "coverage_complete": True,
+                        "provider_reported_total_usd": 1.01,
+                    }
+                }
+            },
+            max_spend_usd=1.0,
+        )
+
+
+def test_official_runner_carries_explicit_render_profile_into_memory(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    total_chars = 400_000
+    args = module.parse_args(
+        [
+            "--data-root",
+            str(tmp_path / "data"),
+            "--domain",
+            "web",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--max-context-total-chars",
+            str(total_chars),
+            "--operational-note-dedupe-mode",
+            "source_kind",
+            "--operational-note-lane-mode",
+            "additive",
+            "--operational-note-distillation-profile",
+            "render_v1",
+            "--render-char-total-treatment",
+            "--render-group-lanes",
+            "--render-action-spines",
+        ]
+    )
+
+    params = module.build_memory_config(args)["memory_params"]
+
+    assert params["max_context_total_chars"] == total_chars
+    assert params["operational_note_dedupe_mode"] == "source_kind"
+    assert params["operational_note_lane_mode"] == "additive"
+    assert params["operational_note_distillation_profile"] == "render_v1"
+    assert params["render_char_total_treatment"] is True
+    assert params["render_group_lanes"] is True
+    assert params["render_action_spines"] is True
+
+
+def test_official_runner_omits_baseline_render_profile_from_memory(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    args = module.parse_args(
+        [
+            "--data-root",
+            str(tmp_path / "data"),
+            "--domain",
+            "web",
+            "--output-dir",
+            str(tmp_path / "out"),
+        ]
+    )
+
+    params = module.build_memory_config(args)["memory_params"]
+
+    assert (
+        not {
+            "operational_note_dedupe_mode",
+            "operational_note_lane_mode",
+            "operational_note_distillation_profile",
+            "render_char_total_treatment",
+            "render_group_lanes",
+            "render_action_spines",
+        }
+        & params.keys()
+    )
+
+
 def test_provider_accounting_rejects_empty_usage_log(tmp_path: Path) -> None:
     module = _load_runner_module()
     usage_path = tmp_path / "reader.jsonl"
@@ -957,6 +1455,77 @@ def test_planner_accounting_reports_missing_accurate_query_usage() -> None:
     assert accounting["expected_question_count"] == 1
     assert accounting["recorded_question_count"] == 0
     assert accounting["tracking_complete"] is False
+    assert accounting["cost_coverage_complete"] is False
+
+
+def test_distillation_accounting_counts_each_ingest_once() -> None:
+    module = _load_runner_module()
+    usage = {
+        "provider": "openai",
+        "model": "gpt-5.4-nano",
+        "requests": 3,
+        "input_tokens": 300,
+        "output_tokens": 90,
+        "total_tokens": 390,
+        "cost_usd": 0.0012,
+        "cost_complete": True,
+    }
+    accounting = module._distillation_accounting(
+        [
+            {
+                "plan": {"note_distillation": True},
+                "per_question_rows": [
+                    {"memory_post_query_metadata": {"ingest_note_distillation_usage": usage}},
+                    {"memory_post_query_metadata": {"ingest_note_distillation_usage": usage}},
+                ],
+            }
+        ]
+    )
+
+    assert accounting["requests"] == EXPECTED_DISTILLATION_REQUESTS
+    assert accounting["estimated_input_tokens"] == EXPECTED_DISTILLATION_INPUT_TOKENS
+    assert accounting["estimated_output_tokens"] == EXPECTED_DISTILLATION_OUTPUT_TOKENS
+    assert accounting["total_tokens"] == EXPECTED_DISTILLATION_TOTAL_TOKENS
+    assert accounting["provider_reported_cost_usd"] == pytest.approx(0.0012)
+    assert accounting["recorded_source_run_count"] == 1
+    assert accounting["tracking_complete"] is True
+    assert accounting["cost_coverage_complete"] is True
+
+
+@pytest.mark.parametrize("failure", ["missing", "drift", "unpriced"])
+def test_distillation_accounting_fails_closed_on_incomplete_usage(failure: str) -> None:
+    module = _load_runner_module()
+    first = {
+        "provider": "openai",
+        "model": "gpt-5.4-nano",
+        "requests": 1,
+        "input_tokens": 100,
+        "output_tokens": 30,
+        "total_tokens": 130,
+        "cost_usd": 0.0004,
+        "cost_complete": True,
+    }
+    second = dict(first)
+    if failure == "missing":
+        second = {}
+    elif failure == "drift":
+        second["requests"] = 2
+    else:
+        first["cost_complete"] = False
+        first["cost_usd"] = None
+        second = dict(first)
+    accounting = module._distillation_accounting(
+        [
+            {
+                "plan": {"note_distillation": True},
+                "per_question_rows": [
+                    {"memory_post_query_metadata": {"ingest_note_distillation_usage": first}},
+                    {"memory_post_query_metadata": {"ingest_note_distillation_usage": second}},
+                ],
+            }
+        ]
+    )
+
     assert accounting["cost_coverage_complete"] is False
 
 
@@ -3220,246 +3789,6 @@ def test_sibyl_memory_loaded_config_allows_only_runtime_overrides() -> None:
         module.SibylLiveApiMemory.reconcile_loaded_memory_config(saved, requested)
 
 
-def _load_note_distillation_module() -> ModuleType:
-    return _load_module(
-        Path(__file__).parents[2] / "benchmarks" / "longmemeval_v2_memory" / "note_distillation.py",
-        "note_distillation",
-    )
-
-
-def test_parse_distillation_output_strips_fences_and_validates() -> None:
-    module = _load_note_distillation_module()
-    fenced = '```json\n{"workflow": "click New", "facts": [" Label A "], "gotchas": []}\n```'
-
-    notes = module.parse_distillation_output(fenced)
-
-    assert notes["workflow"] == "click New"
-    assert notes["facts"] == ["Label A"]
-    assert notes["gotchas"] == []
-
-    with pytest.raises(ValueError, match="no notes"):
-        module.parse_distillation_output('{"workflow": "", "facts": [], "gotchas": []}')
-
-
-def test_build_trajectory_digest_bounds_length() -> None:
-    module = _load_note_distillation_module()
-    max_chars = 10_000
-    trajectory = {
-        "id": "t1",
-        "goal": "do the thing",
-        "outcome": "success",
-        "states": [
-            {"action": f"click('{index}')", "reasoning": "x" * 400, "uri": "https://e/x"}
-            for index in range(400)
-        ],
-    }
-
-    digest = module.build_trajectory_digest(trajectory, max_chars=max_chars)
-
-    assert len(digest) <= max_chars
-    assert digest.startswith("Goal: do the thing")
-    assert "digest truncated" in digest
-
-
-def test_build_trajectory_digest_includes_salient_page_content() -> None:
-    module = _load_note_distillation_module()
-    axtree = "\n".join(
-        [
-            "RootWebArea 'Forum — Most Commented'",
-            "\t[a1] navigation 'Global skip links'",
-            "\t[a2] link 'Skip to main content'",
-            "\t[a3] heading 'Weekly discussion thread'",
-            "\t[a4] gridcell 'Comments: 347'",
-            "\t[a5] StaticText 'Posted by chronos_admin'",
-            "\t[a6] link 'Open accessibility preferences'",
-        ]
-    )
-    trajectory = {
-        "id": "t7",
-        "goal": "find the most commented post",
-        "outcome": "success",
-        "states": [
-            {
-                "action": "click('a3')",
-                "uri": "https://forum.example/top",
-                "evidence": [
-                    {
-                        "content_type": "text/plain; profile=accessibility-tree",
-                        "content": axtree,
-                    }
-                ],
-            }
-        ],
-    }
-
-    digest = module.build_trajectory_digest(trajectory)
-
-    assert "heading: Weekly discussion thread" in digest
-    assert "gridcell: Comments: 347" in digest
-    assert "Skip to main content" not in digest
-    assert "accessibility preferences" not in digest
-    content_lines = [line for line in digest.splitlines() if line.startswith("  · ")]
-    assert 0 < len(content_lines) <= module.MAX_CONTENT_LINES_PER_STATE
-
-
-def test_build_trajectory_digest_reads_raw_trajectory_shape() -> None:
-    module = _load_note_distillation_module()
-    trajectory = {
-        "id": "t8",
-        "goal": "find the top post",
-        "outcome": "success",
-        "states": [
-            {
-                "action": "click('12')",
-                "thought": "I should open the most commented post",
-                "url": "http://forum.local/top",
-                "accessibility_tree": (
-                    "RootWebArea 'Forum — Top'\n"
-                    "\t[3] heading 'Weekly thread'\n"
-                    "\t[4] gridcell 'Comments: 347'\n"
-                ),
-            }
-        ],
-    }
-
-    digest = module.build_trajectory_digest(trajectory)
-
-    assert "Reasoning: I should open the most commented post" in digest
-    assert "Page: Forum — Top" in digest
-    assert "gridcell: Comments: 347" in digest
-
-
-def test_build_note_entity_payloads_shape() -> None:
-    module = _load_note_distillation_module()
-    payloads = module.build_note_entity_payloads(
-        {"workflow": "step 1", "facts": ["fact"], "gotchas": []},
-        trajectory={"id": "t9", "goal": "g", "outcome": "success"},
-        project_id="project_x",
-        run_id="run_y",
-        model="gpt-5.4-nano",
-    )
-
-    assert [p["metadata"]["note_kind"] for p in payloads] == ["workflow", "facts"]
-    for payload in payloads:
-        assert payload["entity_type"] == "note"
-        metadata = payload["metadata"]
-        assert metadata["longmemeval_v2_trajectory_id"] == "t9"
-        assert metadata["longmemeval_v2_run_id"] == "run_y"
-        assert metadata["projection_kind"] == "distilled_note"
-        assert str(payload["content"]).startswith("Trajectory: t9")
-
-
-def test_note_distillation_insert_does_not_block(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    module = _load_memory_module()
-    monkeypatch.setattr(module.SibylLiveApiMemory, "_authenticate", lambda *args: None)
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-
-    bulk_calls: list[dict[str, object]] = []
-
-    def fake_request(
-        _self: object,
-        method: str,
-        path: str,
-        **kwargs: object,
-    ) -> dict[str, object]:
-        if path == "/health":
-            return {"status": "healthy"}
-        if method == "GET":
-            return {"id": "project_test", "entity_type": "project"}
-        if path == "/entities/bulk":
-            payload = kwargs.get("json")
-            assert isinstance(payload, dict)
-            bulk_calls.append(cast(dict[str, object], payload))
-            return {"created": 2, "background_jobs": {}}
-        return {"created": 0, "background_jobs": {}}
-
-    monkeypatch.setattr(module.SibylLiveApiMemory, "_request_json", fake_request)
-
-    gate = threading.Event()
-
-    def slow_distill(*_args: object, **_kwargs: object) -> dict[str, object]:
-        gate.wait(timeout=10)
-        return {"workflow": "step", "facts": [], "gotchas": []}
-
-    monkeypatch.setattr(module, "distill_trajectory_notes", slow_distill)
-
-    memory = module.SibylLiveApiMemory(
-        {
-            "allow_localhost": True,
-            "project_id": "project_test",
-            "note_distillation": True,
-            "defer_embeddings": False,
-        }
-    )
-    try:
-        memory._submit_note_distillation({"id": "t1", "goal": "g", "outcome": "success"})
-        started = time.monotonic()
-        memory._harvest_note_futures(block=False)
-        elapsed = time.monotonic() - started
-        assert elapsed < 1.0, "non-blocking harvest must not wait on pending futures"
-        assert not bulk_calls, "no notes written while distillation pending"
-
-        gate.set()
-        memory._harvest_note_futures(block=True)
-        assert len(bulk_calls) == 1
-        entities = bulk_calls[0]["entities"]
-        assert isinstance(entities, list)
-        first_entity = entities[0]
-        assert isinstance(first_entity, dict)
-        first_entity_payload = cast(dict[str, object], first_entity)
-        assert first_entity_payload["entity_type"] == "note"
-        assert memory.note_distillation_written == 1
-    finally:
-        if memory._note_executor is not None:
-            memory._note_executor.shutdown(wait=False)
-        memory._client.close()
-
-
-def test_note_distillation_finalize_raises_on_failures(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    module = _load_memory_module()
-    monkeypatch.setattr(module.SibylLiveApiMemory, "_authenticate", lambda *args: None)
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-
-    def fake_request(
-        _self: object,
-        method: str,
-        path: str,
-        **_kwargs: object,
-    ) -> dict[str, object]:
-        if path == "/health":
-            return {"status": "healthy"}
-        if method == "GET":
-            return {"id": "project_test", "entity_type": "project"}
-        return {"created": 0, "background_jobs": {}}
-
-    monkeypatch.setattr(module.SibylLiveApiMemory, "_request_json", fake_request)
-
-    def failing_distill(*_args: object, **_kwargs: object) -> dict[str, object]:
-        raise RuntimeError("model unavailable")
-
-    monkeypatch.setattr(module, "distill_trajectory_notes", failing_distill)
-
-    memory = module.SibylLiveApiMemory(
-        {
-            "allow_localhost": True,
-            "project_id": "project_test",
-            "note_distillation": True,
-        }
-    )
-    try:
-        memory._submit_note_distillation({"id": "t2", "goal": "g", "outcome": "failure"})
-        with pytest.raises(RuntimeError, match="note distillation failed for 1 trajectories"):
-            memory.finalize_ingest()
-    finally:
-        if memory._note_executor is not None:
-            memory._note_executor.shutdown(wait=False)
-        memory._client.close()
-
-
 def test_annotate_inventory_completeness_branches() -> None:
     module = _load_memory_module()
     content = "Goal: something\nObserved UI inventory:\n- link: Home"
@@ -4806,6 +5135,13 @@ def test_operational_experience_payload_preserves_oversized_state_evidence() -> 
     observations = experience["observations"]
     parts = observations[0]["evidence"]
     assert len(parts) > 1
+    assert observations[0]["metadata"]["accessibility_inventory"] == {
+        "schema_version": "sibyl-accessibility-inventory-v1",
+        "source": "longmemeval-v2-official",
+        "complete": True,
+        "truncated": False,
+        "evidence_part_count": len(parts),
+    }
     assert all(len(part["content"]) <= OPERATIONAL_EVIDENCE_MAX_CHARS for part in parts)
     assert [part["metadata"]["longmemeval_v2_chunk_index"] for part in parts] == list(
         range(len(parts))
@@ -6748,6 +7084,10 @@ def _write_official_outputs(
         plan["provider_usage_run_id"] = usage_run_id
     (output_dir / "longmemeval_v2_official_plan.json").write_text(
         json.dumps(plan),
+        encoding="utf-8",
+    )
+    (output_dir / "longmemeval_v2_official_receipt.json").write_text(
+        json.dumps({"domain": domain, "schema_version": "fixture"}),
         encoding="utf-8",
     )
     (runtime_dir / "questions.json").write_text(

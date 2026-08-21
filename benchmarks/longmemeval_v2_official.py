@@ -36,6 +36,12 @@ from benchmarks.longmemeval_v2_official_source import (  # noqa: E402
     official_source_record,
     require_pinned_source,
 )
+from benchmarks.longmemeval_v2_diagnostics import (  # noqa: E402
+    DEFAULT_MAX_RANK,
+    build_question_trace,
+    build_state_text_index,
+    load_jsonl_by_id,
+)
 from benchmarks.provider_usage import (  # noqa: E402
     AsyncUsageTrackingClient,
     ProviderUsageRecorder,
@@ -52,6 +58,20 @@ from sibyl_core.retrieval.refinement import MAX_REFINEMENT_QUERIES  # noqa: E402
 PLAN_SCHEMA_VERSION = "sibyl-longmemeval-v2-official-plan-v1"
 RECEIPT_SCHEMA_VERSION = "sibyl-longmemeval-v2-official-receipt-v1"
 ACCOUNTING_SCHEMA_VERSION = "sibyl-eval-accounting-v1"
+EXPERIMENT_IDENTITY_SCHEMA_VERSION = "sibyl-longmemeval-v2-experiment-identity-v1"
+EXPERIMENT_ARM_ROLES = frozenset({"machine", "naive", "render_control", "render_treatment"})
+EXPERIMENT_PHASES = frozenset({"aa", "anchor", "race", "render"})
+EXPERIMENT_SUBSTRATES = frozenset({"machine", "naive"})
+MILLION_TOKENS = 1_000_000
+EVAL_PRICE_SNAPSHOT = {
+    "reader": {"model": "qwen/qwen3.5-9b", "input_per_million": 0.17, "output_per_million": 0.25},
+    "judge": {"model": "gpt-5.2", "input_per_million": 1.75, "output_per_million": 14.0},
+    "operations": {
+        "model": "gpt-5.4-nano",
+        "input_per_million": 0.20,
+        "output_per_million": 1.25,
+    },
+}
 LOADED_MEMORY_RUNTIME_KEYS = frozenset(
     {
         "api_token",
@@ -67,6 +87,11 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "max_context_items",
         "max_context_chars_per_item",
         "max_context_total_chars",
+        "render_char_total_treatment",
+        "render_group_lanes",
+        "render_action_spines",
+        "operational_note_dedupe_mode",
+        "operational_note_lane_mode",
         "max_chunks_per_trajectory",
         "neighbor_stitch_items",
         "neighbor_stitch_span",
@@ -179,6 +204,8 @@ def main(argv: list[str] | None = None) -> int:
     print(json.dumps(plan, indent=2, sort_keys=True))  # noqa: T201
     if args.plan_only:
         return 0
+    if args.experiment_id:
+        enforce_spend_reservation(plan)
 
     official_repo = resolve_official_repo(args.official_repo)
     require_pinned_source(official_repo)
@@ -209,8 +236,12 @@ def main(argv: list[str] | None = None) -> int:
         official_harness.main()
     finally:
         sys.argv = old_argv
+    if args.experiment_id:
+        write_rig_rows(data_root=data_root, output_dir=output_dir, domain=args.domain)
     receipt = build_receipt_from_artifacts(args=args, data_root=data_root, output_dir=output_dir)
     write_json(resolve_receipt_output(args, output_dir), receipt)
+    if args.experiment_id:
+        enforce_actual_spend_cap(receipt, max_spend_usd=args.max_spend_usd)
     return 0
 
 
@@ -429,6 +460,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     parser.add_argument("--skip-evaluation", action="store_true")
     parser.add_argument("--load-memory-dir", default=None)
     parser.add_argument("--checkpoint-dir", default=None)
+    parser.add_argument("--experiment-id", default="")
+    parser.add_argument("--experiment-phase", choices=sorted(EXPERIMENT_PHASES), default="")
+    parser.add_argument("--pass-id", default="")
+    parser.add_argument("--pass-seed", type=int, default=None)
+    parser.add_argument("--arm-role", choices=sorted(EXPERIMENT_ARM_ROLES), default="")
+    parser.add_argument("--substrate", choices=sorted(EXPERIMENT_SUBSTRATES), default="")
+    parser.add_argument("--preregistration-sha256", default="")
+    parser.add_argument("--max-spend-usd", type=float, default=None)
+    parser.add_argument("--spend-contingency-multiplier", type=float, default=1.25)
+    parser.add_argument("--unmetered-provider-reserve-usd", type=float, default=2.0)
+    parser.add_argument("--reader-output-reserve-tokens", type=int, default=1024)
+    parser.add_argument("--evaluator-input-reserve-tokens", type=int, default=2048)
+    parser.add_argument("--evaluator-output-reserve-tokens", type=int, default=512)
+    parser.add_argument("--operations-input-reserve-tokens", type=int, default=10_000)
+    parser.add_argument("--operations-output-reserve-tokens", type=int, default=1024)
+    parser.add_argument("--github-repository", default=os.getenv("GITHUB_REPOSITORY", ""))
+    parser.add_argument("--github-workflow-ref", default=os.getenv("GITHUB_WORKFLOW_REF", ""))
+    parser.add_argument("--github-workflow-sha", default=os.getenv("GITHUB_SHA", ""))
+    parser.add_argument("--github-run-id", default=os.getenv("GITHUB_RUN_ID", ""))
+    parser.add_argument(
+        "--github-run-attempt",
+        type=int,
+        default=int(os.getenv("GITHUB_RUN_ATTEMPT", "0")),
+    )
 
     parser.add_argument(
         "--api-url", default=os.getenv("SIBYL_API_URL", "http://127.0.0.1:3334/api")
@@ -523,6 +578,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     parser.add_argument("--typed-stream-limit", type=int, default=8)
     parser.add_argument("--note-distillation", action="store_true")
     parser.add_argument("--note-distillation-model", default="gpt-5.4-nano")
+    parser.add_argument(
+        "--operational-note-dedupe-mode",
+        choices=["source", "source_kind"],
+        default="source",
+    )
+    parser.add_argument(
+        "--operational-note-lane-mode",
+        choices=["reserved", "additive"],
+        default="reserved",
+    )
+    parser.add_argument(
+        "--operational-note-distillation-profile",
+        choices=["baseline", "render_v1"],
+        default="baseline",
+    )
+    parser.add_argument("--render-char-total-treatment", action="store_true")
+    parser.add_argument("--render-group-lanes", action="store_true")
+    parser.add_argument("--render-action-spines", action="store_true")
     parser.add_argument("--typed-reservation-items", type=int, default=None)
     parser.add_argument("--knn-type-overfetch", type=int, default=0)
     parser.add_argument(
@@ -605,6 +678,87 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         parser.error("--reuse-existing-project requires --project-id")
     if args.reuse_existing_project and args.checkpoint_dir:
         parser.error("--reuse-existing-project cannot be combined with --checkpoint-dir")
+    experiment_fields = {
+        "--experiment-id": args.experiment_id,
+        "--experiment-phase": args.experiment_phase,
+        "--pass-id": args.pass_id,
+        "--pass-seed": args.pass_seed,
+        "--arm-role": args.arm_role,
+        "--substrate": args.substrate,
+    }
+    populated_experiment_fields = {
+        flag
+        for flag, value in experiment_fields.items()
+        if value is not None and (not isinstance(value, str) or value.strip())
+    }
+    if populated_experiment_fields and len(populated_experiment_fields) != len(experiment_fields):
+        missing = sorted(set(experiment_fields) - populated_experiment_fields)
+        parser.error(f"experiment runs require all identity fields; missing {missing}")
+    if args.pass_seed is not None and args.pass_seed < 0:
+        parser.error("--pass-seed must be non-negative")
+    preregistration = args.preregistration_sha256.strip()
+    if preregistration and (
+        len(preregistration) != 64 or any(char not in "0123456789abcdef" for char in preregistration)
+    ):
+        parser.error("--preregistration-sha256 must be a lowercase SHA-256 digest")
+    if populated_experiment_fields:
+        if args.tier != "small":
+            parser.error("paid experiment runs require the complete Small corpus")
+        if args.limit is not None or args.question_ids:
+            parser.error(
+                "paid experiment runs require every official domain question; "
+                "--limit and --question-ids are forbidden"
+            )
+        if args.experiment_phase in {"race", "render"} and not preregistration:
+            parser.error("race and render experiment phases require --preregistration-sha256")
+        if args.experiment_phase in {"aa", "anchor"} and preregistration:
+            parser.error("A/A and anchor experiment phases must precede preregistration")
+    if args.max_spend_usd is not None and (
+        not math.isfinite(args.max_spend_usd) or args.max_spend_usd <= 0
+    ):
+        parser.error("--max-spend-usd must be finite and positive")
+    if (
+        not math.isfinite(args.spend_contingency_multiplier)
+        or args.spend_contingency_multiplier < 1
+    ):
+        parser.error("--spend-contingency-multiplier must be finite and at least 1")
+    if (
+        not math.isfinite(args.unmetered_provider_reserve_usd)
+        or args.unmetered_provider_reserve_usd < 0
+    ):
+        parser.error("--unmetered-provider-reserve-usd must be finite and non-negative")
+    reserve_token_fields = {
+        "--reader-output-reserve-tokens": args.reader_output_reserve_tokens,
+        "--evaluator-input-reserve-tokens": args.evaluator_input_reserve_tokens,
+        "--evaluator-output-reserve-tokens": args.evaluator_output_reserve_tokens,
+        "--operations-input-reserve-tokens": args.operations_input_reserve_tokens,
+        "--operations-output-reserve-tokens": args.operations_output_reserve_tokens,
+    }
+    invalid_reserve_tokens = sorted(
+        flag for flag, value in reserve_token_fields.items() if value < 1
+    )
+    if invalid_reserve_tokens:
+        parser.error(f"spend reservation token ceilings must be positive: {invalid_reserve_tokens}")
+    if populated_experiment_fields and not (args.plan_only or args.receipt_only):
+        if args.max_spend_usd is None:
+            parser.error("paid experiment runs require --max-spend-usd")
+    if populated_experiment_fields:
+        github_fields = {
+            "--github-repository": args.github_repository,
+            "--github-workflow-ref": args.github_workflow_ref,
+            "--github-workflow-sha": args.github_workflow_sha,
+            "--github-run-id": args.github_run_id,
+        }
+        missing_github = sorted(
+            flag
+            for flag, value in github_fields.items()
+            if not isinstance(value, str) or not value.strip()
+        )
+        if missing_github or args.github_run_attempt < 1:
+            parser.error(
+                "experiment runs require complete GitHub workflow identity; "
+                f"missing {missing_github or ['--github-run-attempt']}"
+            )
     if args.reader_retry_attempts < 1:
         parser.error("--reader-retry-attempts must be positive")
     if args.reader_retry_base_delay_seconds < 0:
@@ -638,6 +792,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         parser.error("--state-part-completion-items must be non-negative")
     if args.max_context_total_chars < 1:
         parser.error("--max-context-total-chars must be positive")
+    if args.render_char_total_treatment and args.max_context_total_chars <= 60_000:
+        parser.error("--render-char-total-treatment requires more than 60000 context characters")
     if not 1 <= args.retrieval_max_planned_queries <= MAX_REFINEMENT_QUERIES:
         parser.error(
             f"--retrieval-max-planned-queries must be between 1 and {MAX_REFINEMENT_QUERIES}"
@@ -789,6 +945,20 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
             Path(args.official_repo).expanduser().resolve() if args.official_repo else None
         ),
     }
+    if args.operational_note_dedupe_mode != "source":
+        params["operational_note_dedupe_mode"] = args.operational_note_dedupe_mode
+    if args.operational_note_lane_mode != "reserved":
+        params["operational_note_lane_mode"] = args.operational_note_lane_mode
+    if args.operational_note_distillation_profile != "baseline":
+        params["operational_note_distillation_profile"] = (
+            args.operational_note_distillation_profile
+        )
+    if args.render_char_total_treatment:
+        params["render_char_total_treatment"] = True
+    if args.render_group_lanes:
+        params["render_group_lanes"] = True
+    if args.render_action_spines:
+        params["render_action_spines"] = True
     config = {"memory_type": "sibyl_live_api", "memory_params": params}
     if args.load_memory_dir:
         return build_loaded_memory_config(
@@ -835,6 +1005,7 @@ LOADED_MEMORY_NON_MERGED_KEYS = frozenset(
         "bulk_max_content_chars",
         "embedding_backfill_max_pending_jobs",
         "embedding_job_wait_timeout_seconds",
+        "operational_note_distillation_profile",
     }
 )
 
@@ -880,6 +1051,238 @@ def haystack_path(data_root: Path, tier: str) -> Path:
     return data_root / f"lme_v2_{tier}.json"
 
 
+def evaluator_function_name(raw: object) -> str:
+    """Return the harness evaluator name without its encoded parameters."""
+
+    value = str(raw).strip()
+    return value.split("|", 1)[0].split("(", 1)[0].strip()
+
+
+def experiment_identity(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "experiment_identity_schema_version": EXPERIMENT_IDENTITY_SCHEMA_VERSION,
+        "experiment_id": args.experiment_id or None,
+        "experiment_phase": args.experiment_phase or None,
+        "pass_id": args.pass_id or None,
+        "pass_seed": args.pass_seed,
+        "arm_role": args.arm_role or None,
+        "substrate": args.substrate or None,
+        "preregistration_sha256": args.preregistration_sha256 or None,
+        "max_spend_usd": args.max_spend_usd,
+        "github_workflow": {
+            "repository": args.github_repository or None,
+            "workflow_ref": args.github_workflow_ref or None,
+            "workflow_sha": args.github_workflow_sha or None,
+            "run_id": args.github_run_id or None,
+            "run_attempt": args.github_run_attempt or None,
+        },
+    }
+
+
+def _token_cost(tokens: int, price_per_million: float) -> float:
+    return tokens * price_per_million / MILLION_TOKENS
+
+
+def build_spend_reservation(
+    *,
+    args: argparse.Namespace,
+    question_count: int,
+    llm_eval_count: int,
+    required_trajectory_count: int,
+) -> dict[str, object]:
+    """Reserve a bounded paid run before the first provider call."""
+
+    reader_input_tokens = question_count * (
+        math.ceil(args.max_context_total_chars / 4) + 2048
+    )
+    reader_output_tokens = question_count * args.reader_output_reserve_tokens
+    judge_input_tokens = llm_eval_count * args.evaluator_input_reserve_tokens
+    judge_output_tokens = llm_eval_count * args.evaluator_output_reserve_tokens
+    planner_request_count = (
+        question_count * args.retrieval_max_planned_queries
+        if args.retrieval_mode == "accurate"
+        else 0
+    )
+    distillation_request_count = required_trajectory_count if args.note_distillation else 0
+    operations_request_count = planner_request_count + distillation_request_count
+    operations_input_tokens = operations_request_count * args.operations_input_reserve_tokens
+    operations_output_tokens = operations_request_count * args.operations_output_reserve_tokens
+
+    sections = {
+        "reader": {
+            "requests": question_count,
+            "input_tokens": reader_input_tokens,
+            "output_tokens": reader_output_tokens,
+            "estimated_usd": _token_cost(
+                reader_input_tokens,
+                float(EVAL_PRICE_SNAPSHOT["reader"]["input_per_million"]),
+            )
+            + _token_cost(
+                reader_output_tokens,
+                float(EVAL_PRICE_SNAPSHOT["reader"]["output_per_million"]),
+            ),
+        },
+        "judge": {
+            "requests": llm_eval_count,
+            "input_tokens": judge_input_tokens,
+            "output_tokens": judge_output_tokens,
+            "estimated_usd": _token_cost(
+                judge_input_tokens,
+                float(EVAL_PRICE_SNAPSHOT["judge"]["input_per_million"]),
+            )
+            + _token_cost(
+                judge_output_tokens,
+                float(EVAL_PRICE_SNAPSHOT["judge"]["output_per_million"]),
+            ),
+        },
+        "operations": {
+            "requests": operations_request_count,
+            "planner_requests": planner_request_count,
+            "distillation_requests": distillation_request_count,
+            "input_tokens": operations_input_tokens,
+            "output_tokens": operations_output_tokens,
+            "estimated_usd": _token_cost(
+                operations_input_tokens,
+                float(EVAL_PRICE_SNAPSHOT["operations"]["input_per_million"]),
+            )
+            + _token_cost(
+                operations_output_tokens,
+                float(EVAL_PRICE_SNAPSHOT["operations"]["output_per_million"]),
+            ),
+        },
+    }
+    metered_estimate = sum(float(section["estimated_usd"]) for section in sections.values())
+    reserved_total = (
+        metered_estimate * args.spend_contingency_multiplier
+        + args.unmetered_provider_reserve_usd
+    )
+    max_spend = args.max_spend_usd
+    return {
+        "schema_version": "sibyl-longmemeval-v2-spend-reservation-v1",
+        "status": (
+            "PASS" if max_spend is None or reserved_total <= max_spend else "BLOCKED"
+        ),
+        "currency": "USD",
+        "price_snapshot": EVAL_PRICE_SNAPSHOT,
+        "price_snapshot_sources": {
+            "reader": "OpenRouter Qwen3.5-9B provider maximum, verified 2026-08-20",
+            "judge": "OpenAI GPT-5.2 standard API price, verified 2026-08-20",
+            "operations": "OpenAI GPT-5.4 nano standard API price, verified 2026-08-20",
+        },
+        "sections": sections,
+        "metered_estimate_usd": metered_estimate,
+        "contingency_multiplier": args.spend_contingency_multiplier,
+        "unmetered_provider_reserve_usd": args.unmetered_provider_reserve_usd,
+        "reserved_total_usd": reserved_total,
+        "max_spend_usd": max_spend,
+        "within_cap": max_spend is None or reserved_total <= max_spend,
+        "enforcement": (
+            "reserve by explicit token estimate before providers; reject incomplete "
+            "or over-cap provider accounting after the run"
+        ),
+    }
+
+
+def enforce_spend_reservation(plan: dict[str, Any]) -> None:
+    reservation = plan.get("spend_reservation")
+    if not isinstance(reservation, dict) or reservation.get("within_cap") is not True:
+        raise RuntimeError("paid experiment spend reservation exceeds its fixed cap")
+
+
+def enforce_actual_spend_cap(
+    receipt: dict[str, Any],
+    *,
+    max_spend_usd: float | None,
+) -> None:
+    accounting = receipt.get("accounting")
+    cost = accounting.get("cost") if isinstance(accounting, dict) else None
+    if not isinstance(cost, dict) or cost.get("coverage_complete") is not True:
+        raise RuntimeError("paid experiment provider accounting is incomplete")
+    actual = cost.get("provider_reported_total_usd")
+    if not isinstance(actual, int | float) or isinstance(actual, bool) or not math.isfinite(actual):
+        raise RuntimeError("paid experiment provider spend is missing")
+    if max_spend_usd is None or actual > max_spend_usd:
+        raise RuntimeError(
+            f"paid experiment spend {actual:.6f} exceeds fixed cap {max_spend_usd!r}"
+        )
+
+
+def write_rig_rows(*, data_root: Path, output_dir: Path, domain: str) -> Path:
+    """Derive score-blind exposure and explicit activity from official bytes."""
+
+    questions = load_jsonl_by_id(data_root / "questions.jsonl")
+    haystack = _load_json_if_exists(output_dir / "runtime_inputs" / "haystack.json")
+    required_trajectory_ids = {
+        str(trajectory_id)
+        for trajectory_ids in haystack.values()
+        if isinstance(trajectory_ids, list)
+        for trajectory_id in trajectory_ids
+    }
+    trajectories = load_jsonl_by_id(
+        data_root / "trajectories.jsonl",
+        required_ids=required_trajectory_ids,
+    )
+    state_text_index = build_state_text_index(trajectories)
+    result_rows = _load_jsonl_if_exists(output_dir / "per_question.jsonl")
+    rig_rows: list[dict[str, object]] = []
+    for index, result in enumerate(result_rows):
+        question_id = str(result.get("question_id") or "").strip()
+        question = questions.get(question_id)
+        trajectory_ids = haystack.get(question_id)
+        if question is None or not isinstance(trajectory_ids, list):
+            raise RuntimeError(f"rig row {index} cannot resolve question {question_id!r}")
+        trace = build_question_trace(
+            domain=domain,
+            result=result,
+            question=question,
+            haystack_ids=[str(item) for item in trajectory_ids],
+            state_text_index=state_text_index,
+            max_rank=DEFAULT_MAX_RANK,
+        )
+        context_status = _nested_value(result, "memory_post_query_metadata", "context_status")
+        activity = _nested_value(result, "memory_post_query_metadata", "rig_activity")
+        if context_status not in {"complete", "empty"}:
+            raise RuntimeError(f"rig row {question_id!r} has invalid context status")
+        if not isinstance(activity, dict):
+            raise RuntimeError(f"rig row {question_id!r} has no explicit activity receipt")
+        activity_events = activity.get("activity_events")
+        if (
+            not isinstance(activity_events, int)
+            or isinstance(activity_events, bool)
+            or activity_events < 1
+        ):
+            raise RuntimeError(f"rig row {question_id!r} has no positive activity events")
+        if not isinstance(activity.get("mode"), str) or not activity["mode"].strip():
+            raise RuntimeError(f"rig row {question_id!r} has no activity mode")
+        if not isinstance(result.get("score_bool"), bool):
+            raise RuntimeError(f"rig row {question_id!r} has no valid official score")
+        exposure_eligible = bool(
+            trace["exact_evidence_eligible"] and trace["exact_evidence_source_complete"]
+        )
+        rig_rows.append(
+            {
+                "question_id": question_id,
+                "status": "valid",
+                "context_status": context_status,
+                "evidence_exposure_eligible": exposure_eligible,
+                "evidence_exposed": (
+                    bool(trace["metrics"]["exact_context_recall_at_k"])
+                    if exposure_eligible
+                    else None
+                ),
+                "activity": activity,
+            }
+        )
+    if not rig_rows:
+        raise RuntimeError("official experiment produced no rig rows")
+    output_path = output_dir / "rig_rows.jsonl"
+    output_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in rig_rows),
+        encoding="utf-8",
+    )
+    return output_path
+
+
 def build_run_plan(
     *,
     args: argparse.Namespace,
@@ -892,18 +1295,29 @@ def build_run_plan(
 ) -> dict[str, Any]:
     all_questions = load_longmemeval_v2_questions(data_root / "questions.jsonl")
     question_by_id = {question.id: question for question in all_questions}
+    official_question_ids = [
+        question.id for question in all_questions if question.domain == args.domain
+    ]
+    selected_question_ids = [str(row["id"]) for row in selected_questions]
     selected_question_models = [question_by_id[str(row["id"])] for row in selected_questions]
     required_trajectories = sorted({tid for ids in selected_haystack.values() for tid in ids})
     llm_eval_count = sum(
         1
         for row in selected_questions
-        if str(row["eval_function"]).split("(", 1)[0]
+        if evaluator_function_name(row["eval_function"])
         in {"llm_abstention_checker", "llm_gotchas_checker"}
+    )
+    spend_reservation = build_spend_reservation(
+        args=args,
+        question_count=len(selected_questions),
+        llm_eval_count=llm_eval_count,
+        required_trajectory_count=len(required_trajectories),
     )
     return {
         "schema_version": PLAN_SCHEMA_VERSION,
         "run_id": args.run_id,
         "provider_usage_run_id": args.provider_usage_run_id,
+        **experiment_identity(args),
         "runner_provenance": git_provenance(ROOT),
         "domain": args.domain,
         "tier": args.tier,
@@ -925,11 +1339,13 @@ def build_run_plan(
         "trajectory_path": str(data_root / "trajectories.jsonl"),
         "trajectory_path_exists": (data_root / "trajectories.jsonl").exists(),
         "question_count": len(selected_questions),
-        "selected_question_ids_sha256": sha256_question_ids(
-            [str(row["id"]) for row in selected_questions]
-        ),
+        "selected_question_ids_sha256": sha256_question_ids(selected_question_ids),
+        "official_question_count": len(official_question_ids),
+        "official_question_ids_sha256": sha256_question_ids(official_question_ids),
+        "selection_complete": selected_question_ids == official_question_ids,
         "required_trajectory_count": len(required_trajectories),
         "llm_eval_count": llm_eval_count,
+        "spend_reservation": spend_reservation,
         "reader_model": args.reader_model,
         "reader_base_url": args.reader_base_url,
         "reader_max_concurrent_requests": args.reader_max_concurrent_requests,
@@ -961,6 +1377,12 @@ def build_run_plan(
         "typed_stream_limit": args.typed_stream_limit,
         "note_distillation": args.note_distillation,
         "note_distillation_model": args.note_distillation_model,
+        "operational_note_dedupe_mode": args.operational_note_dedupe_mode,
+        "operational_note_lane_mode": args.operational_note_lane_mode,
+        "operational_note_distillation_profile": args.operational_note_distillation_profile,
+        "render_char_total_treatment": args.render_char_total_treatment,
+        "render_group_lanes": args.render_group_lanes,
+        "render_action_spines": args.render_action_spines,
         "typed_reservation_items": args.typed_reservation_items,
         "retrieval_mode": args.retrieval_mode,
         "knn_type_overfetch": args.knn_type_overfetch,
@@ -1284,6 +1706,8 @@ def load_receipt_source_runs(
         run_args_path = source_dir / "run_args.json"
         aggregated_path = source_dir / "aggregated_metrics.json"
         per_question_path = source_dir / "per_question.jsonl"
+        rig_rows_path = source_dir / "rig_rows.jsonl"
+        official_receipt_path = source_dir / "longmemeval_v2_official_receipt.json"
         runtime_dir = source_dir / "runtime_inputs"
         runtime_questions_path = runtime_dir / "questions.json"
         runtime_haystack_path = runtime_dir / "haystack.json"
@@ -1315,6 +1739,8 @@ def load_receipt_source_runs(
                 "run_args_path": run_args_path,
                 "aggregated_path": aggregated_path,
                 "per_question_path": per_question_path,
+                "rig_rows_path": rig_rows_path,
+                "official_receipt_path": official_receipt_path,
                 "runtime_questions_path": runtime_questions_path,
                 "runtime_haystack_path": runtime_haystack_path,
                 "memory_config_path": memory_config_path,
@@ -1356,6 +1782,8 @@ def build_source_runs_receipt(
             "run_args": artifact_path_record(source_run["run_args_path"]),
             "aggregated_metrics": artifact_path_record(source_run["aggregated_path"]),
             "per_question": artifact_path_record(source_run["per_question_path"]),
+            "rig_rows": artifact_path_record(source_run["rig_rows_path"]),
+            "official_receipt": artifact_path_record(source_run["official_receipt_path"]),
             "runtime_inputs": {
                 "questions": artifact_path_record(source_run["runtime_questions_path"]),
                 "haystack": artifact_path_record(source_run["runtime_haystack_path"]),
@@ -1402,6 +1830,7 @@ def build_source_runs_receipt(
     integrity_complete = all(
         domain in domains
         and domains[domain]["plan"]["exists"]
+        and (args.domain != "combined" or domains[domain]["official_receipt"]["exists"])
         and all(record["exists"] for record in domains[domain]["runtime_inputs"].values())
         and all(
             record["exists"]
@@ -1659,6 +2088,7 @@ def build_receipt_accounting(
     total_tokens = _as_number(tokens.get("total_tokens")) or (prompt_tokens + completion_tokens)
     embedding = _embedding_accounting(source_runs)
     planner = _planner_accounting(source_runs)
+    distillation = _distillation_accounting(source_runs)
     reader = _provider_accounting(
         source_runs,
         role="reader",
@@ -1673,10 +2103,11 @@ def build_receipt_accounting(
     )
     provider_reported_total_usd = sum(
         float(section["provider_reported_cost_usd"])
-        for section in (embedding, planner, reader, judge)
+        for section in (embedding, planner, distillation, reader, judge)
     )
     cost_coverage_complete = all(
-        bool(section["cost_coverage_complete"]) for section in (embedding, planner, reader, judge)
+        bool(section["cost_coverage_complete"])
+        for section in (embedding, planner, distillation, reader, judge)
     )
 
     return {
@@ -1697,6 +2128,7 @@ def build_receipt_accounting(
         },
         "embedding": embedding,
         "planner": planner,
+        "distillation": distillation,
         "reader": reader,
         "judge": judge,
         "cost": {
@@ -1866,6 +2298,82 @@ def _planner_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _distillation_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
+    records: list[dict[str, Any]] = []
+    tracking_complete = bool(source_runs)
+    expected_source_runs = 0
+    for source_run in source_runs:
+        if source_run.get("plan", {}).get("note_distillation") is not True:
+            continue
+        expected_source_runs += 1
+        rows = source_run["per_question_rows"]
+        candidates = [
+            usage
+            for row in rows
+            if isinstance(
+                usage := _nested_value(
+                    row,
+                    "memory_post_query_metadata",
+                    "ingest_note_distillation_usage",
+                ),
+                dict,
+            )
+            and usage
+        ]
+        serialized = {json.dumps(candidate, sort_keys=True) for candidate in candidates}
+        if len(candidates) != len(rows) or len(serialized) != 1:
+            tracking_complete = False
+            continue
+        records.append(candidates[0])
+
+    requests = int(sum(_number_from(record, ("requests",)) or 0 for record in records))
+    input_tokens = sum(_number_from(record, ("input_tokens",)) or 0.0 for record in records)
+    output_tokens = sum(_number_from(record, ("output_tokens",)) or 0.0 for record in records)
+    total_tokens = sum(_number_from(record, ("total_tokens",)) or 0.0 for record in records)
+    priced_requests = int(
+        sum(
+            (_number_from(record, ("requests",)) or 0)
+            if record.get("cost_complete") is True
+            and _number_from(record, ("cost_usd",)) is not None
+            else 0
+            for record in records
+        )
+    )
+    provider_reported_cost_usd = sum(
+        _number_from(record, ("cost_usd",)) or 0.0 for record in records
+    )
+    providers = sorted(
+        {
+            provider
+            for record in records
+            if isinstance(provider := record.get("provider"), str) and provider
+        }
+    )
+    models = sorted(
+        {model for record in records if isinstance(model := record.get("model"), str) and model}
+    )
+    tracking_complete = tracking_complete and len(records) == expected_source_runs
+    return {
+        "calls": requests,
+        "requests": requests,
+        "priced_requests": priced_requests,
+        "provider": ",".join(providers) or "not_requested",
+        "model": ",".join(models) or "not_requested",
+        "providers": providers,
+        "models": models,
+        "estimated_input_tokens": input_tokens,
+        "estimated_output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+        "provider_reported_cost_usd": provider_reported_cost_usd,
+        "estimated_cost_usd": provider_reported_cost_usd,
+        "cost_coverage_complete": tracking_complete and priced_requests == requests,
+        "tracking_complete": tracking_complete,
+        "expected_source_run_count": expected_source_runs,
+        "recorded_source_run_count": len(records),
+        "cost_basis": "Sibyl operational note distillation usage receipt",
+    }
+
+
 def _summarize_embedding_usage(records: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "requests": int(sum(_number_from(record, ("requests",)) or 0 for record in records)),
@@ -1987,6 +2495,11 @@ def build_dataset_receipt(
         domain=domain,
         tier=tier,
     )
+    official_question_ids = [
+        question.id
+        for question in load_longmemeval_v2_questions(questions_path)
+        if domain in ("combined", question.domain)
+    ]
     recorded_question_count = plan.get("question_count")
     if recorded_question_count is None:
         recorded_question_count = _number_from(
@@ -2003,6 +2516,13 @@ def build_dataset_receipt(
         "haystack_sha256": sha256_file(haystack),
         "question_count": _coerce_integral_number(recorded_question_count),
         "selected_question_ids_sha256": plan.get("selected_question_ids_sha256"),
+        "official_question_count": len(official_question_ids),
+        "official_question_ids_sha256": sha256_question_ids(official_question_ids),
+        "selection_complete": (
+            plan.get("question_count") == len(official_question_ids)
+            and plan.get("selected_question_ids_sha256")
+            == sha256_question_ids(official_question_ids)
+        ),
         "required_trajectory_count": _coerce_integral_number(recorded_required_trajectory_count),
     }
     if dataset_record["question_count"] is None:
@@ -2053,6 +2573,7 @@ def build_artifact_receipt(
         "judge_provider_usage": output_dir / "provider_usage" / "judge.jsonl",
         "aggregated_metrics": aggregated_path,
         "per_question": per_question_path,
+        "rig_rows": output_dir / "rig_rows.jsonl",
         "run_args": run_args_path,
         "metric_overview": metric_overview_path,
         "combined_metrics": combined_metrics_path,
@@ -2078,8 +2599,12 @@ def build_receipt_checks(receipt: dict[str, Any]) -> list[dict[str, Any]]:
             all(
                 _truthy_path(receipt, ("dataset", field))
                 for field in ("questions_sha256", "trajectories_sha256", "haystack_sha256")
+            )
+            and (
+                receipt.get("domain") == "combined"
+                or receipt.get("dataset", {}).get("selection_complete") is True
             ),
-            "questions, trajectories, and tier haystack SHA-256 digests are recorded",
+            "dataset digests are recorded and domain selection is complete",
             ["dataset hashes"],
         ),
         check(

@@ -4,7 +4,7 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -153,13 +153,23 @@ def _reject_machine_knobs_under_the_arm(request: ContextPackRequest) -> None:
         "knn_type_overfetch": request.knn_type_overfetch,
         "evidence.knn_type_overfetch": request.evidence.knn_type_overfetch,
     }
+    composition_fields = {
+        "operational_note_dedupe_mode",
+        "operational_note_lane_mode",
+    }
+    requested.update(
+        {
+            f"evidence.{field}": getattr(request.evidence, field)
+            for field in composition_fields & request.evidence.model_fields_set
+        }
+    )
     offenders = sorted(name for name, value in requested.items() if value)
     if offenders:
         raise HTTPException(
             status_code=400,
             detail=(
                 f"retrieval_mode=naive cannot honour {', '.join(offenders)}: "
-                "the control arm runs no typed overfetch stage"
+                "the control arm runs neither typed evidence composition nor typed overfetch"
             ),
         )
 
@@ -278,6 +288,9 @@ def _compose_context_evidence_response(
     limit: int,
     typed_error: str | None,
     char_budget: int | None = None,
+    operational_note_dedupe_mode: Literal["source", "source_kind"] = "source",
+    operational_note_lane_mode: Literal["reserved", "additive"] = "reserved",
+    include_activity_receipt: bool = False,
 ) -> SearchResponse:
     typed_results = typed_response.results if typed_response is not None else []
     selected, receipt = compose_operational_evidence(
@@ -285,6 +298,9 @@ def _compose_context_evidence_response(
         raw_results=raw_response.results,
         limit=limit,
         char_budget=char_budget,
+        operational_note_dedupe_mode=operational_note_dedupe_mode,
+        operational_note_lane_mode=operational_note_lane_mode,
+        include_activity_receipt=include_activity_receipt,
     )
     receipt.update(
         {
@@ -915,6 +931,15 @@ async def _compile_context_with_evidence(
             limit=request.evidence.limit,
             typed_error=typed_error,
             char_budget=request.evidence.char_budget,
+            operational_note_dedupe_mode=request.evidence.operational_note_dedupe_mode,
+            operational_note_lane_mode=request.evidence.operational_note_lane_mode,
+            include_activity_receipt=bool(
+                {
+                    "operational_note_dedupe_mode",
+                    "operational_note_lane_mode",
+                }
+                & request.evidence.model_fields_set
+            ),
         )
         if request.record_exposure:
             from sibyl_core.tools.usage_exposure import annotate_search_result_exposures

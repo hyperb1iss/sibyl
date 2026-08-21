@@ -15,7 +15,7 @@ import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TypeVar
 from urllib.parse import urlparse
@@ -71,10 +71,29 @@ from longmemeval_v2_memory.agentic_traversal import (  # noqa: E402
     TraversalAction,
     run_agentic_traversal,
 )
-from longmemeval_v2_memory.note_distillation import (  # noqa: E402
-    DEFAULT_NOTE_DISTILLATION_MODEL,
-    build_note_entity_payloads,
-    distill_trajectory_notes,
+from longmemeval_v2_memory.render_bundle import (  # noqa: E402
+    ACTION_SPINE_FILENAME,
+    CHECKPOINT_ACTION_SPINE_FILENAME,
+    CHECKPOINT_DISTILLATION_RECEIPT_FILENAME,
+    DISTILLATION_RECEIPT_FILENAME,
+    LEVER_ADDITIVE_NOTE_LANE,
+    LEVER_ACTION_SPINES,
+    LEVER_CONTEXT_TOTAL_CHARS,
+    LEVER_DIGEST_ROLES_BUDGET,
+    LEVER_ENGLISH_LANE_GROUPING,
+    LEVER_NOTE_KIND_DEDUPE,
+    LEVER_OBSERVED_ABSENCE,
+    append_action_spines,
+    build_action_spine,
+    canonical_sha256,
+    file_sha256,
+    group_results_by_lane,
+    read_action_spines,
+    read_distillation_receipts,
+    screen_context_composition_receipt,
+    screen_distillation_receipts,
+    write_action_spines,
+    write_distillation_receipts,
 )
 
 try:
@@ -119,6 +138,13 @@ DEFAULT_SEARCH_LIMIT = 12
 DEFAULT_CONTEXT_ITEMS = 8
 DEFAULT_CONTEXT_CHARS_PER_ITEM = 18_000
 DEFAULT_CONTEXT_TOTAL_CHARS = 60_000
+DEFAULT_BENCHMARK_AGENT_MODEL = "gpt-5.4-nano"
+DEFAULT_OPERATIONAL_NOTE_DEDUPE_MODE = "source"
+OPERATIONAL_NOTE_DEDUPE_MODES = frozenset({"source", "source_kind"})
+DEFAULT_OPERATIONAL_NOTE_LANE_MODE = "reserved"
+OPERATIONAL_NOTE_LANE_MODES = frozenset({"reserved", "additive"})
+DEFAULT_OPERATIONAL_NOTE_DISTILLATION_PROFILE = "baseline"
+OPERATIONAL_NOTE_DISTILLATION_PROFILES = frozenset({"baseline", "render_v1"})
 QUERY_SLICE_RENDERING_VERSION = "query-aware-source-windows-v5"
 QUERY_SLICE_WINDOW_LINES = 8
 QUERY_SLICE_WINDOW_STRIDE_LINES = 4
@@ -217,6 +243,11 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "max_context_items",
         "max_context_chars_per_item",
         "max_context_total_chars",
+        "render_char_total_treatment",
+        "render_group_lanes",
+        "render_action_spines",
+        "operational_note_dedupe_mode",
+        "operational_note_lane_mode",
         "max_chunks_per_trajectory",
         "neighbor_stitch_items",
         "neighbor_stitch_span",
@@ -264,6 +295,7 @@ SAVED_MEMORY_IDENTITY_KEYS = frozenset(
         "chunking_mode",
         "include_screenshot_refs",
         "defer_embeddings",
+        "operational_note_distillation_profile",
     }
 )
 
@@ -502,7 +534,16 @@ def build_operational_experience_payload(
                 "image_refs": [state.screenshot]
                 if include_screenshot_refs and state.screenshot
                 else [],
-                "metadata": {"longmemeval_v2_state_index": state.state_index},
+                "metadata": {
+                    "longmemeval_v2_state_index": state.state_index,
+                    "accessibility_inventory": {
+                        "schema_version": "sibyl-accessibility-inventory-v1",
+                        "source": "longmemeval-v2-official",
+                        "complete": True,
+                        "truncated": False,
+                        "evidence_part_count": len(evidence),
+                    },
+                },
             }
         )
     return {
@@ -708,6 +749,117 @@ def retrieval_lane_activity(
         "typed_evidence_applicable": retrieval_mode != NAIVE_RETRIEVAL_MODE,
         "typed_search_statuses": sorted(set(typed_statuses)),
         "activity_events": activity_events,
+    }
+
+
+def build_rig_activity(
+    *,
+    lane_activity: dict[str, object],
+    lever_activity: dict[str, object],
+    mode: str,
+) -> dict[str, object]:
+    """Publish explicit arm activity for the artifact bridge on every row."""
+    normalized_levers = {
+        str(lever): count
+        for lever, value in lever_activity.items()
+        if (count := _nonnegative_int(value)) > 0
+    }
+    return {
+        **lane_activity,
+        "mode": mode,
+        "lever_activity": normalized_levers,
+        "activity_events": max(
+            1,
+            _nonnegative_int(lane_activity.get("activity_events"))
+            + sum(normalized_levers.values()),
+        ),
+    }
+
+
+def production_profile_treatment_activity(
+    *,
+    search_metadata: dict[str, object],
+    operational_note_dedupe_mode: str,
+    operational_note_lane_mode: str,
+    distillation_profile: str,
+    distillation_receipts: dict[str, dict[str, object]],
+) -> tuple[dict[str, int], dict[str, object]]:
+    """Validate production-owned render profiles and preserve their raw provenance."""
+    lever_activity: dict[str, int] = {}
+    treatment: dict[str, object] = {}
+    composition_value = search_metadata.get("evidence_composition")
+    composition = composition_value if isinstance(composition_value, dict) else None
+    composition_screens = screen_context_composition_receipt(composition)
+    for lever, enabled in (
+        (LEVER_NOTE_KIND_DEDUPE, operational_note_dedupe_mode == "source_kind"),
+        (LEVER_ADDITIVE_NOTE_LANE, operational_note_lane_mode == "additive"),
+    ):
+        if not enabled:
+            continue
+        screen = composition_screens[lever]
+        if screen.get("status") != "survived" and screen.get("status") != (
+            "blocked_no_treatment_activity"
+        ):
+            raise RuntimeError(
+                f"production render lever {lever} failed closed: {screen.get('status')}"
+            )
+        lever_activity[lever] = _nonnegative_int(screen.get("activity_events"))
+        treatment[lever] = {
+            "source": "evidence.filters.evidence_composition",
+            "screen": screen,
+            "production_receipt": dict(composition or {}),
+        }
+
+    if distillation_profile != DEFAULT_OPERATIONAL_NOTE_DISTILLATION_PROFILE:
+        distillation_screens = screen_distillation_receipts(distillation_receipts)
+        receipt_set_sha256 = canonical_sha256(distillation_receipts)
+        for lever in (LEVER_OBSERVED_ABSENCE, LEVER_DIGEST_ROLES_BUDGET):
+            screen = distillation_screens[lever]
+            if screen.get("status") != "survived" and screen.get("status") != (
+                "blocked_no_treatment_activity"
+            ):
+                raise RuntimeError(
+                    f"production render lever {lever} failed closed: {screen.get('status')}"
+                )
+            treatment[lever] = {
+                "source": DISTILLATION_RECEIPT_FILENAME,
+                "receipt_set_sha256": receipt_set_sha256,
+                "screen": screen,
+            }
+    return lever_activity, treatment
+
+
+def rendered_distillation_treatment_activity(
+    *,
+    evidence_set: list[dict[str, object]],
+    rendered_entity_ids: set[str],
+    distillation_receipts: dict[str, dict[str, object]],
+) -> dict[str, int]:
+    """Count render-profile notes that actually reached the reader."""
+    observed_absence = 0
+    digest_roles_budget = 0
+    for item in evidence_set:
+        entity_id = _stripped_str(item.get("id"))
+        if not entity_id or entity_id not in rendered_entity_ids:
+            continue
+        metadata = _flatten_operational_metadata(item.get("metadata"))
+        if metadata.get("operational_note_distillation_profile") != "render_v1":
+            continue
+        source_id = _stripped_str(metadata.get("operational_source_id"))
+        if source_id not in distillation_receipts:
+            raise RuntimeError(
+                f"rendered operational note has no bound distillation receipt: {entity_id}"
+            )
+        digest_roles_budget += 1
+        if metadata.get("note_kind") == LEVER_OBSERVED_ABSENCE:
+            observed_absence += 1
+    return {
+        lever: count
+        for lever, count in (
+            (LEVER_OBSERVED_ABSENCE, observed_absence),
+            (LEVER_DIGEST_ROLES_BUDGET, digest_roles_budget),
+        )
+        if count > 0
     }
 
 
@@ -1570,6 +1722,49 @@ def render_memory_context(
     }
 
 
+def reader_char_total_activity(
+    *,
+    control_receipt: dict[str, object],
+    treatment_receipt: dict[str, object],
+) -> dict[str, object]:
+    """Count items promoted to whole-state exposure by the larger hard total."""
+
+    def item_states(receipt: dict[str, object]) -> dict[str, dict[str, object]]:
+        items = receipt.get("items")
+        if not isinstance(items, list):
+            return {}
+        return {
+            _stripped_str(item.get("entity_id")): item
+            for item in items
+            if isinstance(item, dict) and _stripped_str(item.get("entity_id"))
+        }
+
+    control = item_states(control_receipt)
+    treatment = item_states(treatment_receipt)
+    promoted = [
+        entity_id
+        for entity_id, treated in treatment.items()
+        if not treated.get("dropped")
+        and not treated.get("truncated")
+        and (
+            entity_id not in control
+            or control[entity_id].get("dropped")
+            or control[entity_id].get("truncated")
+        )
+    ]
+    return {
+        "control_max_total_chars": control_receipt.get("max_total_chars"),
+        "treatment_max_total_chars": treatment_receipt.get("max_total_chars"),
+        "promoted_to_full_count": len(promoted),
+        "promoted_entity_ids": promoted,
+        "added_rendered_chars": max(
+            0,
+            _nonnegative_int(treatment_receipt.get("rendered_context_chars"))
+            - _nonnegative_int(control_receipt.get("rendered_context_chars")),
+        ),
+    }
+
+
 def _allocate_context_chars(capacities: list[int], *, budget: int) -> list[int]:
     allocations = [0] * len(capacities)
     active = list(range(len(capacities)))
@@ -2375,9 +2570,10 @@ def _memory_context_header(rank: int, result: dict[str, object]) -> str:
     trajectory_id = _stripped_str(metadata.get("longmemeval_v2_trajectory_id"))
     chunk_index = metadata.get("longmemeval_v2_chunk_index")
     selection_origin = _stripped_str(result.get("_selection_origin")) or "search"
+    lane_title = _stripped_str(result.get("_render_lane_title"))
     lines = [
         f"Retrieved evidence rank {rank}",
-        f"Retrieval: {selection_origin}",
+        f"Evidence lane: {lane_title}" if lane_title else f"Retrieval: {selection_origin}",
         f"Trajectory: {trajectory_id or 'unknown'}",
         f"Chunk: {chunk_index if isinstance(chunk_index, int) else 'unknown'}",
     ]
@@ -3307,6 +3503,9 @@ _NAIVE_CONFLICTING_BOOL_PARAMS = (
     ("neighbor_support_exempt", DEFAULT_NEIGHBOR_SUPPORT_EXEMPT),
     ("neighbor_trajectory_preserving", DEFAULT_NEIGHBOR_TRAJECTORY_PRESERVING),
     ("source_evidence_bundling", DEFAULT_SOURCE_EVIDENCE_BUNDLING),
+    ("render_char_total_treatment", False),
+    ("render_group_lanes", False),
+    ("render_action_spines", False),
 )
 _NAIVE_CONFLICTING_NUMERIC_PARAMS = (
     ("state_part_completion_items", DEFAULT_STATE_PART_COMPLETION_ITEMS),
@@ -3327,6 +3526,12 @@ _NAIVE_BYPASSED_STAGE_PARAMS = (
     ("context_expansion_max_ratio", DEFAULT_CONTEXT_EXPANSION_MAX_RATIO),
     ("evidence_composition_mode", DEFAULT_EVIDENCE_COMPOSITION_MODE),
     ("typed_reservation_items", None),
+    ("operational_note_dedupe_mode", DEFAULT_OPERATIONAL_NOTE_DEDUPE_MODE),
+    ("operational_note_lane_mode", DEFAULT_OPERATIONAL_NOTE_LANE_MODE),
+    (
+        "operational_note_distillation_profile",
+        DEFAULT_OPERATIONAL_NOTE_DISTILLATION_PROFILE,
+    ),
 )
 
 
@@ -3645,13 +3850,7 @@ class SibylLiveApiMemory(Memory):
         self.note_distillation_model = _param_str(
             memory_params,
             "note_distillation_model",
-            DEFAULT_NOTE_DISTILLATION_MODEL,
-        )
-        self.note_distillation_max_workers = _param_int(
-            memory_params,
-            "note_distillation_max_workers",
-            4,
-            minimum=1,
+            DEFAULT_BENCHMARK_AGENT_MODEL,
         )
         self.agentic_traversal = _param_bool(
             memory_params,
@@ -3669,7 +3868,7 @@ class SibylLiveApiMemory(Memory):
         self.traversal_model = _param_str(
             memory_params,
             "traversal_model",
-            DEFAULT_NOTE_DISTILLATION_MODEL,
+            DEFAULT_BENCHMARK_AGENT_MODEL,
         )
         self.traversal_max_actions = _param_int(
             memory_params,
@@ -3749,6 +3948,50 @@ class SibylLiveApiMemory(Memory):
                 DEFAULT_CONTEXT_TOTAL_CHARS,
             ),
         )
+        self.render_char_total_treatment = _param_bool(
+            memory_params,
+            "render_char_total_treatment",
+            False,
+        )
+        if (
+            self.render_char_total_treatment
+            and self.max_context_total_chars <= DEFAULT_CONTEXT_TOTAL_CHARS
+        ):
+            raise ValueError(
+                "render_char_total_treatment requires max_context_total_chars above "
+                f"the {DEFAULT_CONTEXT_TOTAL_CHARS} character control"
+            )
+        self.render_group_lanes = _param_bool(memory_params, "render_group_lanes", False)
+        self.render_action_spines = _param_bool(memory_params, "render_action_spines", False)
+        self.operational_note_dedupe_mode = _param_str(
+            memory_params,
+            "operational_note_dedupe_mode",
+            DEFAULT_OPERATIONAL_NOTE_DEDUPE_MODE,
+        )
+        if self.operational_note_dedupe_mode not in OPERATIONAL_NOTE_DEDUPE_MODES:
+            raise ValueError(
+                "operational_note_dedupe_mode must be one of "
+                f"{sorted(OPERATIONAL_NOTE_DEDUPE_MODES)}"
+            )
+        self.operational_note_lane_mode = _param_str(
+            memory_params,
+            "operational_note_lane_mode",
+            DEFAULT_OPERATIONAL_NOTE_LANE_MODE,
+        )
+        if self.operational_note_lane_mode not in OPERATIONAL_NOTE_LANE_MODES:
+            raise ValueError(
+                f"operational_note_lane_mode must be one of {sorted(OPERATIONAL_NOTE_LANE_MODES)}"
+            )
+        self.operational_note_distillation_profile = _param_str(
+            memory_params,
+            "operational_note_distillation_profile",
+            DEFAULT_OPERATIONAL_NOTE_DISTILLATION_PROFILE,
+        )
+        if self.operational_note_distillation_profile not in OPERATIONAL_NOTE_DISTILLATION_PROFILES:
+            raise ValueError(
+                "operational_note_distillation_profile must be one of "
+                f"{sorted(OPERATIONAL_NOTE_DISTILLATION_PROFILES)}"
+            )
         raw_char_budget = memory_params.get("evidence_char_budget")
         self.evidence_char_budget = (
             _param_int(memory_params, "evidence_char_budget", 0, minimum=1)
@@ -3845,21 +4088,20 @@ class SibylLiveApiMemory(Memory):
         self._attached_expected_trajectory_ids: set[str] = set()
         self._pending_embedding_job_ids: set[str] = set()
         self._pending_projection_job_ids: set[str] = set()
+        self._pending_note_distillation_job_ids: set[str] = set()
         self._pending_job_entity_ids: dict[str, list[str]] = {}
         self._pending_job_manifest_ids: dict[str, str] = {}
         self.ingest_embedding_usage: dict[str, object] = {}
-        self._note_executor: ThreadPoolExecutor | None = None
-        self._note_futures: list[tuple[str, Future[dict[str, object]], dict[str, object]]] = []
-        self._openai_note_client: object | None = None
         self._openai_traversal_client: object | None = None
-        self.note_distillation_written = 0
-        self.note_distillation_failures: list[tuple[str, str]] = []
+        self.ingest_note_distillation_usage: dict[str, object] = {}
+        self.ingest_note_distillation_receipts: dict[str, dict[str, object]] = {}
         self._finalize_lock = threading.Lock()
         self._ingest_finalized = False
         self._query_local = threading.local()
         self._chunk_catalog: dict[str, dict[int, dict[str, object]]] = {}
         self._chunk_payload_catalog: dict[str, dict[int, dict[str, object]]] = {}
         self._operational_chunk_catalog: dict[str, dict[int, dict[str, object]]] = {}
+        self._action_spines: dict[str, dict[str, object]] = {}
         self._completed_trajectory_ids: set[str] = set()
         self._operational_trajectory_ids: set[str] = set()
         self._client = _new_http_client(
@@ -3890,6 +4132,13 @@ class SibylLiveApiMemory(Memory):
 
     def insert(self, trajectory: dict[str, object]) -> None:
         trajectory_id = _stripped_str(trajectory.get("id"))
+        action_spine = build_action_spine(trajectory)
+        if action_spine is not None:
+            action_spines = getattr(self, "_action_spines", None)
+            if action_spines is None:
+                action_spines = {}
+                self._action_spines = action_spines
+            action_spines[trajectory_id] = action_spine
         if getattr(self, "reuse_existing_project", False):
             if not trajectory_id:
                 raise ValueError("attached existing project requires trajectory ids")
@@ -3958,6 +4207,13 @@ class SibylLiveApiMemory(Memory):
             content_max_chars=self.content_max_chars,
             include_screenshot_refs=self.include_screenshot_refs,
         )
+        distillation_profile = getattr(
+            self,
+            "operational_note_distillation_profile",
+            DEFAULT_OPERATIONAL_NOTE_DISTILLATION_PROFILE,
+        )
+        if distillation_profile != DEFAULT_OPERATIONAL_NOTE_DISTILLATION_PROFILE:
+            experience_payload["distillation_profile"] = distillation_profile
         experience_payload["defer_embeddings"] = self.defer_embeddings
         created = self._request_json(
             "POST",
@@ -3967,11 +4223,9 @@ class SibylLiveApiMemory(Memory):
         self.last_experience_write_receipt = dict(created)
         self.created_entities += _created_count(created)
         self._remember_embedding_backfill_jobs(created)
+        self._remember_note_distillation_jobs(created)
         if len(self._pending_embedding_job_ids) >= self.embedding_backfill_max_pending_jobs:
             self._drain_embedding_backfills()
-        if getattr(self, "note_distillation", False):
-            self._submit_note_distillation(trajectory)
-            self._harvest_note_futures(block=False)
         if trajectory_id:
             completed_trajectory_ids.add(trajectory_id)
             operational_trajectory_ids.add(trajectory_id)
@@ -3982,92 +4236,6 @@ class SibylLiveApiMemory(Memory):
             else:
                 self._append_checkpoint(payloads)
 
-    def _note_client(self) -> object:
-        if self._openai_note_client is None:
-            from openai import OpenAI
-
-            api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("SIBYL_OPENAI_API_KEY", "")
-            if not api_key:
-                raise RuntimeError(
-                    "note distillation requires OPENAI_API_KEY or SIBYL_OPENAI_API_KEY"
-                )
-            self._openai_note_client = OpenAI(api_key=api_key, timeout=120.0, max_retries=2)
-        return self._openai_note_client
-
-    def _submit_note_distillation(self, trajectory: dict[str, object]) -> None:
-        if getattr(self, "reuse_existing_project", False):
-            return
-        if self._note_executor is None:
-            self._note_executor = ThreadPoolExecutor(
-                max_workers=self.note_distillation_max_workers,
-                thread_name_prefix="note-distill",
-            )
-        client = self._note_client()
-        trajectory_id = _stripped_str(trajectory.get("id"))
-        future = self._note_executor.submit(
-            distill_trajectory_notes,
-            client,
-            model=self.note_distillation_model,
-            trajectory=trajectory,
-        )
-        self._note_futures.append((trajectory_id, future, dict(trajectory)))
-
-    def _harvest_note_futures(self, *, block: bool) -> None:
-        """Main-thread only: write payloads for completed distillations."""
-        note_futures = getattr(self, "_note_futures", None)
-        if not note_futures:
-            return
-        remaining: list[tuple[str, Future[dict[str, object]], dict[str, object]]] = []
-        pending_total = len(note_futures)
-        harvested = 0
-        for trajectory_id, future, trajectory in note_futures:
-            if not block and not future.done():
-                remaining.append((trajectory_id, future, trajectory))
-                continue
-            try:
-                notes = future.result()
-            except Exception as exc:
-                self.note_distillation_failures.append((trajectory_id, str(exc)))
-                continue
-            payloads = build_note_entity_payloads(
-                notes,
-                trajectory=trajectory,
-                project_id=self.project_id,
-                run_id=self.run_id,
-                model=self.note_distillation_model,
-            )
-            if payloads:
-                response = self._request_json(
-                    "POST",
-                    "/entities/bulk",
-                    json={"entities": payloads, "defer_embeddings": self.defer_embeddings},
-                )
-                self._remember_embedding_backfill_jobs(response)
-                self.created_entities += _created_count(response)
-                self.note_distillation_written += len(payloads)
-            harvested += 1
-        self._note_futures = remaining
-        if block and harvested:
-            print(  # noqa: T201
-                f"Note distillation: wrote {self.note_distillation_written} notes"
-                f" ({harvested}/{pending_total} pending futures resolved,"
-                f" {len(self.note_distillation_failures)} failures)",
-                file=sys.stderr,
-            )
-
-    def _finalize_note_distillation(self) -> None:
-        self._harvest_note_futures(block=True)
-        note_executor = getattr(self, "_note_executor", None)
-        if note_executor is not None:
-            note_executor.shutdown(wait=False)
-            self._note_executor = None
-        note_failures = getattr(self, "note_distillation_failures", [])
-        if note_failures:
-            failed = sorted({trajectory_id for trajectory_id, _ in note_failures})
-            raise RuntimeError(
-                f"note distillation failed for {len(failed)} trajectories: {failed[:5]}"
-            )
-
     def finalize_ingest(self) -> None:
         with self._finalize_lock:
             if self._ingest_finalized:
@@ -4076,7 +4244,7 @@ class SibylLiveApiMemory(Memory):
                 self.attached_project_receipt = self._verify_attached_project()
                 self._ingest_finalized = True
                 return
-            self._finalize_note_distillation()
+            self._drain_note_distillations()
             self._drain_embedding_backfills()
             self._drain_memory_projections()
             self._ingest_finalized = True
@@ -4595,6 +4763,7 @@ class SibylLiveApiMemory(Memory):
             # Same omit-when-unset rule as the main evidence request.
             stream_evidence["knn_type_overfetch"] = stream_overfetch
             stream_extras["knn_type_overfetch"] = stream_overfetch
+        self._apply_operational_note_profiles(stream_evidence)
         response = self._request_json(
             "POST",
             "/context/pack",
@@ -4635,8 +4804,32 @@ class SibylLiveApiMemory(Memory):
         evidence_request["knn_type_overfetch"] = knn_type_overfetch
         return {"knn_type_overfetch": knn_type_overfetch}
 
+    def _apply_operational_note_profiles(self, evidence_request: dict[str, object]) -> None:
+        dedupe_mode = getattr(
+            self,
+            "operational_note_dedupe_mode",
+            DEFAULT_OPERATIONAL_NOTE_DEDUPE_MODE,
+        )
+        if dedupe_mode != DEFAULT_OPERATIONAL_NOTE_DEDUPE_MODE:
+            evidence_request["operational_note_dedupe_mode"] = dedupe_mode
+        lane_mode = getattr(
+            self,
+            "operational_note_lane_mode",
+            DEFAULT_OPERATIONAL_NOTE_LANE_MODE,
+        )
+        if lane_mode != DEFAULT_OPERATIONAL_NOTE_LANE_MODE:
+            evidence_request["operational_note_lane_mode"] = lane_mode
+
     def query(self, query: str, query_image: str | None = None) -> list[MemoryContextItem]:
-        pending_jobs = len(self._pending_embedding_job_ids) + len(self._pending_projection_job_ids)
+        if getattr(self, "_query_local", None) is None:
+            self._query_local = threading.local()
+        self._query_local.render_lever_activity = {}
+        self._query_local.render_treatment = {}
+        pending_jobs = (
+            len(self._pending_embedding_job_ids)
+            + len(self._pending_projection_job_ids)
+            + len(getattr(self, "_pending_note_distillation_job_ids", set()))
+        )
         if pending_jobs or not self._ingest_finalized:
             msg = f"memory ingestion has {pending_jobs} pending jobs; call finalize_ingest first"
             raise RuntimeError(msg)
@@ -4672,6 +4865,7 @@ class SibylLiveApiMemory(Memory):
             # Omitted rather than sent as null when unset, so a run reproducing
             # the old geometry puts a byte-identical request on the wire.
             evidence_request["char_budget"] = char_budget
+        self._apply_operational_note_profiles(evidence_request)
         pack_request_extras = self._knn_overfetch_extras(evidence_request)
         context_response = self._request_json(
             "POST",
@@ -4720,6 +4914,31 @@ class SibylLiveApiMemory(Memory):
             search_metadata,
             retrieval_mode=getattr(self, "retrieval_mode", DEFAULT_RETRIEVAL_MODE),
         )
+        profile_activity, profile_treatment = production_profile_treatment_activity(
+            search_metadata=search_metadata,
+            operational_note_dedupe_mode=getattr(
+                self,
+                "operational_note_dedupe_mode",
+                DEFAULT_OPERATIONAL_NOTE_DEDUPE_MODE,
+            ),
+            operational_note_lane_mode=getattr(
+                self,
+                "operational_note_lane_mode",
+                DEFAULT_OPERATIONAL_NOTE_LANE_MODE,
+            ),
+            distillation_profile=getattr(
+                self,
+                "operational_note_distillation_profile",
+                DEFAULT_OPERATIONAL_NOTE_DISTILLATION_PROFILE,
+            ),
+            distillation_receipts=getattr(
+                self,
+                "ingest_note_distillation_receipts",
+                {},
+            ),
+        )
+        self._query_local.render_lever_activity = profile_activity
+        self._query_local.render_treatment = profile_treatment
         self._query_local.search_metadata = search_metadata
         self._query_local.lane_activity = lane_activity
         results = _flatten_operational_result_metadata(results)
@@ -4830,6 +5049,28 @@ class SibylLiveApiMemory(Memory):
             ),
             typed_pool=getattr(self, "typed_pool", DEFAULT_TYPED_POOL),
         )
+        render_treatment = dict(getattr(self._query_local, "render_treatment", {}))
+        action_spine_receipt: dict[str, object] | None = None
+        if getattr(self, "render_action_spines", False):
+            evidence_set, action_spine_receipt = append_action_spines(
+                evidence_set,
+                sidecars=getattr(self, "_action_spines", {}),
+            )
+            missing = action_spine_receipt["missing_trajectory_ids"]
+            if missing:
+                raise RuntimeError(
+                    "action-spine treatment is missing ingest sidecars for selected "
+                    f"trajectories: {missing}"
+                )
+            render_treatment[LEVER_ACTION_SPINES] = action_spine_receipt
+        lane_receipt: dict[str, object] | None = None
+        if getattr(self, "render_group_lanes", False):
+            evidence_set, lane_receipt = group_results_by_lane(evidence_set)
+            if not (
+                lane_receipt["membership_preserved"] and lane_receipt["within_lane_order_preserved"]
+            ):
+                raise RuntimeError("plain-English lane grouping changed selected evidence")
+            render_treatment[LEVER_ENGLISH_LANE_GROUPING] = lane_receipt
         rendered_item_ceiling = context_pack_item_ceiling(
             max_items=self.max_context_items,
             char_budget=char_budget,
@@ -4837,6 +5078,11 @@ class SibylLiveApiMemory(Memory):
             overflow_items=(
                 _nonnegative_int(evidence_composition.get("support_overflow_items"))
                 + _nonnegative_int(evidence_composition.get("traversal_admitted_items"))
+                + (
+                    _nonnegative_int(action_spine_receipt.get("appended_spine_count"))
+                    if action_spine_receipt is not None
+                    else 0
+                )
             ),
         )
         assembly_metadata["typed_context_candidate_count"] = len(typed_results)
@@ -4857,6 +5103,61 @@ class SibylLiveApiMemory(Memory):
                 DEFAULT_CONTEXT_TOTAL_CHARS,
             ),
         )
+        if _nonnegative_int(context_budget.get("rendered_context_chars")) > getattr(
+            self,
+            "max_context_total_chars",
+            DEFAULT_CONTEXT_TOTAL_CHARS,
+        ):
+            raise RuntimeError("render treatment exceeded its hard total-character ceiling")
+        render_lever_activity = dict(getattr(self._query_local, "render_lever_activity", {}))
+        if getattr(self, "render_char_total_treatment", False):
+            _control_context, control_budget = render_memory_context(
+                evidence_set,
+                query=query,
+                max_items=rendered_item_ceiling,
+                max_chars_per_item=self.max_context_chars_per_item,
+                max_total_chars=DEFAULT_CONTEXT_TOTAL_CHARS,
+            )
+            char_receipt = reader_char_total_activity(
+                control_receipt=control_budget,
+                treatment_receipt=context_budget,
+            )
+            render_treatment[LEVER_CONTEXT_TOTAL_CHARS] = char_receipt
+            render_lever_activity[LEVER_CONTEXT_TOTAL_CHARS] = _nonnegative_int(
+                char_receipt.get("promoted_to_full_count")
+            )
+        rendered_entity_ids = {
+            _stripped_str(item.get("entity_id"))
+            for item in context_budget.get("items", [])
+            if isinstance(item, dict) and not item.get("dropped")
+        }
+        if (
+            getattr(
+                self,
+                "operational_note_distillation_profile",
+                DEFAULT_OPERATIONAL_NOTE_DISTILLATION_PROFILE,
+            )
+            != DEFAULT_OPERATIONAL_NOTE_DISTILLATION_PROFILE
+        ):
+            render_lever_activity.update(
+                rendered_distillation_treatment_activity(
+                    evidence_set=evidence_set,
+                    rendered_entity_ids=rendered_entity_ids,
+                    distillation_receipts=getattr(
+                        self,
+                        "ingest_note_distillation_receipts",
+                        {},
+                    ),
+                )
+            )
+        if lane_receipt is not None:
+            render_lever_activity[LEVER_ENGLISH_LANE_GROUPING] = len(rendered_entity_ids)
+        if action_spine_receipt is not None:
+            render_lever_activity[LEVER_ACTION_SPINES] = sum(
+                entity_id.startswith("action-spine:") for entity_id in rendered_entity_ids
+            )
+        self._query_local.render_lever_activity = render_lever_activity
+        self._query_local.render_treatment = render_treatment
         assembly_metadata["context_budget"] = context_budget
         self._query_local.retrieval_trace = build_retrieval_trace(
             evidence_set,
@@ -4946,7 +5247,7 @@ class SibylLiveApiMemory(Memory):
     def _traversal_complete(self, system_prompt: str, user_prompt: str) -> str:
         client = self._traversal_llm_client()
         response = client.chat.completions.create(  # type: ignore[attr-defined]
-            model=getattr(self, "traversal_model", DEFAULT_NOTE_DISTILLATION_MODEL),
+            model=getattr(self, "traversal_model", DEFAULT_BENCHMARK_AGENT_MODEL),
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -5059,7 +5360,7 @@ class SibylLiveApiMemory(Memory):
             )
         except Exception as exc:  # noqa: BLE001 - the arm degrades, the run survives
             return [], {"enabled": True, "failed": str(exc)}
-        trace["model"] = getattr(self, "traversal_model", DEFAULT_NOTE_DISTILLATION_MODEL)
+        trace["model"] = getattr(self, "traversal_model", DEFAULT_BENCHMARK_AGENT_MODEL)
         return gathered, trace
 
     def _count_context_result_tokens(
@@ -5101,6 +5402,18 @@ class SibylLiveApiMemory(Memory):
                                 )
                                 + "\n"
                             )
+        action_spine_path = output_dir / ACTION_SPINE_FILENAME
+        write_action_spines(
+            action_spine_path,
+            getattr(self, "_action_spines", {}),
+            compressed=True,
+        )
+        distillation_receipt_path = output_dir / DISTILLATION_RECEIPT_FILENAME
+        write_distillation_receipts(
+            distillation_receipt_path,
+            getattr(self, "ingest_note_distillation_receipts", {}),
+            compressed=True,
+        )
         memory_config_path = output_dir / "memory_config.json"
         manifest = {
             "schema_version": MEMORY_MANIFEST_SCHEMA_VERSION,
@@ -5129,9 +5442,27 @@ class SibylLiveApiMemory(Memory):
             ),
             "pending_embedding_job_ids": sorted(self._pending_embedding_job_ids),
             "pending_projection_job_ids": sorted(self._pending_projection_job_ids),
+            "pending_note_distillation_job_ids": sorted(
+                getattr(self, "_pending_note_distillation_job_ids", set())
+            ),
+            "ingest_note_distillation_usage": dict(
+                getattr(self, "ingest_note_distillation_usage", {})
+            ),
+            "ingest_note_distillation_receipt_count": len(
+                getattr(self, "ingest_note_distillation_receipts", {})
+            ),
+            "ingest_note_distillation_receipt_set_sha256": canonical_sha256(
+                getattr(self, "ingest_note_distillation_receipts", {})
+            ),
             "ingest_finalized": True,
             "memory_config_sha256": _sha256_file(memory_config_path),
             "chunk_catalog_sha256": _sha256_file(catalog_path),
+            "action_spine_count": len(getattr(self, "_action_spines", {})),
+            "action_spines_sha256": file_sha256(action_spine_path),
+            "distillation_receipt_count": len(
+                getattr(self, "ingest_note_distillation_receipts", {})
+            ),
+            "distillation_receipts_sha256": file_sha256(distillation_receipt_path),
         }
         (output_dir / MEMORY_MANIFEST_FILENAME).write_text(
             json_module.dumps(manifest, indent=2, sort_keys=True) + "\n",
@@ -5159,6 +5490,56 @@ class SibylLiveApiMemory(Memory):
         memory_config_path = input_dir / "memory_config.json"
         if manifest.get("memory_config_sha256") != _sha256_file(memory_config_path):
             raise RuntimeError(f"Saved memory config hash mismatch: {memory_config_path}")
+        action_spine_path = input_dir / ACTION_SPINE_FILENAME
+        expected_action_spine_hash = manifest.get("action_spines_sha256")
+        if expected_action_spine_hash is not None:
+            if not action_spine_path.is_file():
+                raise RuntimeError(f"Missing saved action spines: {action_spine_path}")
+            if expected_action_spine_hash != file_sha256(action_spine_path):
+                raise RuntimeError(f"Saved action-spine hash mismatch: {action_spine_path}")
+            self._action_spines = read_action_spines(action_spine_path, compressed=True)
+            if manifest.get("action_spine_count") != len(self._action_spines):
+                raise RuntimeError(f"Saved action-spine count mismatch: {action_spine_path}")
+        else:
+            self._action_spines = {}
+            if getattr(self, "render_action_spines", False):
+                raise RuntimeError(
+                    "action-spine treatment requires a memory artifact built with sidecars"
+                )
+        distillation_receipt_path = input_dir / DISTILLATION_RECEIPT_FILENAME
+        expected_distillation_receipt_hash = manifest.get("distillation_receipts_sha256")
+        if expected_distillation_receipt_hash is not None:
+            if not distillation_receipt_path.is_file():
+                raise RuntimeError(
+                    f"Missing saved distillation receipts: {distillation_receipt_path}"
+                )
+            if expected_distillation_receipt_hash != file_sha256(distillation_receipt_path):
+                raise RuntimeError(
+                    f"Saved distillation-receipt hash mismatch: {distillation_receipt_path}"
+                )
+            self.ingest_note_distillation_receipts = read_distillation_receipts(
+                distillation_receipt_path,
+                compressed=True,
+            )
+            if manifest.get("distillation_receipt_count") != len(
+                self.ingest_note_distillation_receipts
+            ):
+                raise RuntimeError(
+                    f"Saved distillation-receipt count mismatch: {distillation_receipt_path}"
+                )
+        else:
+            self.ingest_note_distillation_receipts = {}
+            if (
+                getattr(
+                    self,
+                    "operational_note_distillation_profile",
+                    DEFAULT_OPERATIONAL_NOTE_DISTILLATION_PROFILE,
+                )
+                != DEFAULT_OPERATIONAL_NOTE_DISTILLATION_PROFILE
+            ):
+                raise RuntimeError(
+                    "render distillation treatment requires saved production receipts"
+                )
         catalog: dict[str, dict[int, dict[str, object]]] = {}
         with gzip.open(catalog_path, "rt", encoding="utf-8") as handle:
             for line in handle:
@@ -5199,8 +5580,14 @@ class SibylLiveApiMemory(Memory):
             if isinstance(manifest.get("ingest_embedding_usage"), dict)
             else {}
         )
+        self.ingest_note_distillation_usage = (
+            dict(manifest["ingest_note_distillation_usage"])
+            if isinstance(manifest.get("ingest_note_distillation_usage"), dict)
+            else {}
+        )
         self._pending_embedding_job_ids.clear()
         self._pending_projection_job_ids.clear()
+        self._pending_note_distillation_job_ids = set()
         self._pending_job_entity_ids = {}
         self._ingest_finalized = True
 
@@ -5258,6 +5645,18 @@ class SibylLiveApiMemory(Memory):
             _write_json_atomic(config_path, self.memory_config)
         if not catalog_path.exists():
             catalog_path.touch()
+        action_spine_path = self.checkpoint_dir / CHECKPOINT_ACTION_SPINE_FILENAME
+        write_action_spines(
+            action_spine_path,
+            getattr(self, "_action_spines", {}),
+            compressed=False,
+        )
+        distillation_receipt_path = self.checkpoint_dir / CHECKPOINT_DISTILLATION_RECEIPT_FILENAME
+        write_distillation_receipts(
+            distillation_receipt_path,
+            getattr(self, "ingest_note_distillation_receipts", {}),
+            compressed=False,
+        )
         manifest = {
             "schema_version": CHECKPOINT_SCHEMA_VERSION,
             "api_url": self.api_url,
@@ -5271,6 +5670,9 @@ class SibylLiveApiMemory(Memory):
             ),
             "pending_embedding_job_ids": sorted(self._pending_embedding_job_ids),
             "pending_projection_job_ids": sorted(self._pending_projection_job_ids),
+            "pending_note_distillation_job_ids": sorted(
+                getattr(self, "_pending_note_distillation_job_ids", set())
+            ),
             "pending_job_entity_ids": {
                 job_id: entity_ids
                 for job_id, entity_ids in sorted(self._pending_job_entity_ids.items())
@@ -5284,9 +5686,18 @@ class SibylLiveApiMemory(Memory):
                 if job_id in self._pending_embedding_job_ids | self._pending_projection_job_ids
             },
             "ingest_embedding_usage": dict(self.ingest_embedding_usage),
+            "ingest_note_distillation_usage": dict(
+                getattr(self, "ingest_note_distillation_usage", {})
+            ),
             "ingest_api_runtime": dict(self.ingest_api_runtime),
             "ingest_finalized": finalized,
             "catalog_size": catalog_path.stat().st_size,
+            "action_spine_count": len(getattr(self, "_action_spines", {})),
+            "action_spines_sha256": file_sha256(action_spine_path),
+            "distillation_receipt_count": len(
+                getattr(self, "ingest_note_distillation_receipts", {})
+            ),
+            "distillation_receipts_sha256": file_sha256(distillation_receipt_path),
             "memory_config_sha256": _sha256_file(config_path),
         }
         _write_json_atomic(
@@ -5323,6 +5734,56 @@ class SibylLiveApiMemory(Memory):
         if isinstance(catalog_size, bool) or not isinstance(catalog_size, int):
             raise RuntimeError(f"Invalid ingest checkpoint catalog size: {manifest_path}")
         catalog_bytes = catalog_path.read_bytes()[:catalog_size]
+        action_spine_path = checkpoint_dir / CHECKPOINT_ACTION_SPINE_FILENAME
+        expected_action_spine_hash = manifest.get("action_spines_sha256")
+        if expected_action_spine_hash is not None:
+            if not action_spine_path.is_file():
+                raise RuntimeError(f"Missing checkpoint action spines: {action_spine_path}")
+            if expected_action_spine_hash != file_sha256(action_spine_path):
+                raise RuntimeError(f"Checkpoint action-spine hash mismatch: {action_spine_path}")
+            self._action_spines = read_action_spines(action_spine_path, compressed=False)
+            if manifest.get("action_spine_count") != len(self._action_spines):
+                raise RuntimeError(f"Checkpoint action-spine count mismatch: {action_spine_path}")
+        else:
+            self._action_spines = {}
+            if getattr(self, "render_action_spines", False):
+                raise RuntimeError(
+                    "action-spine treatment requires a checkpoint built with sidecars"
+                )
+        distillation_receipt_path = checkpoint_dir / CHECKPOINT_DISTILLATION_RECEIPT_FILENAME
+        expected_distillation_receipt_hash = manifest.get("distillation_receipts_sha256")
+        if expected_distillation_receipt_hash is not None:
+            if not distillation_receipt_path.is_file():
+                raise RuntimeError(
+                    f"Missing checkpoint distillation receipts: {distillation_receipt_path}"
+                )
+            if expected_distillation_receipt_hash != file_sha256(distillation_receipt_path):
+                raise RuntimeError(
+                    f"Checkpoint distillation-receipt hash mismatch: {distillation_receipt_path}"
+                )
+            self.ingest_note_distillation_receipts = read_distillation_receipts(
+                distillation_receipt_path,
+                compressed=False,
+            )
+            if manifest.get("distillation_receipt_count") != len(
+                self.ingest_note_distillation_receipts
+            ):
+                raise RuntimeError(
+                    f"Checkpoint distillation-receipt count mismatch: {distillation_receipt_path}"
+                )
+        else:
+            self.ingest_note_distillation_receipts = {}
+            if (
+                getattr(
+                    self,
+                    "operational_note_distillation_profile",
+                    DEFAULT_OPERATIONAL_NOTE_DISTILLATION_PROFILE,
+                )
+                != DEFAULT_OPERATIONAL_NOTE_DISTILLATION_PROFILE
+            ):
+                raise RuntimeError(
+                    "render distillation treatment requires checkpoint production receipts"
+                )
         completed = {
             str(value)
             for value in manifest.get("completed_trajectory_ids", [])
@@ -5367,6 +5828,11 @@ class SibylLiveApiMemory(Memory):
             for value in manifest.get("pending_projection_job_ids", [])
             if isinstance(value, str) and value
         }
+        self._pending_note_distillation_job_ids = {
+            str(value)
+            for value in manifest.get("pending_note_distillation_job_ids", [])
+            if isinstance(value, str) and value
+        }
         pending_job_entity_ids = manifest.get("pending_job_entity_ids")
         self._pending_job_entity_ids = (
             {
@@ -5394,6 +5860,11 @@ class SibylLiveApiMemory(Memory):
             if isinstance(manifest.get("ingest_embedding_usage"), dict)
             else {}
         )
+        self.ingest_note_distillation_usage = (
+            dict(manifest["ingest_note_distillation_usage"])
+            if isinstance(manifest.get("ingest_note_distillation_usage"), dict)
+            else {}
+        )
         self.ingest_api_runtime = (
             dict(manifest["ingest_api_runtime"])
             if isinstance(manifest.get("ingest_api_runtime"), dict)
@@ -5408,6 +5879,13 @@ class SibylLiveApiMemory(Memory):
         query_image: str | None,
         memory_context: list[MemoryContextItem],
     ) -> dict[str, object] | None:
+        lane_activity = dict(getattr(self._query_local, "lane_activity", {}))
+        lever_activity = dict(getattr(self._query_local, "render_lever_activity", {}))
+        rig_activity = build_rig_activity(
+            lane_activity=lane_activity,
+            lever_activity=lever_activity,
+            mode=getattr(self, "retrieval_mode", DEFAULT_RETRIEVAL_MODE),
+        )
         return {
             "memory_type": self.memory_type,
             "api_url": self.api_url,
@@ -5422,7 +5900,19 @@ class SibylLiveApiMemory(Memory):
             "defer_embeddings": self.defer_embeddings,
             "pending_embedding_backfill_jobs": len(self._pending_embedding_job_ids),
             "pending_memory_projection_jobs": len(self._pending_projection_job_ids),
+            "pending_note_distillation_jobs": len(
+                getattr(self, "_pending_note_distillation_job_ids", set())
+            ),
             "ingest_embedding_usage": dict(self.ingest_embedding_usage),
+            "ingest_note_distillation_usage": dict(
+                getattr(self, "ingest_note_distillation_usage", {})
+            ),
+            "ingest_note_distillation_receipt_count": len(
+                getattr(self, "ingest_note_distillation_receipts", {})
+            ),
+            "ingest_note_distillation_receipt_set_sha256": canonical_sha256(
+                getattr(self, "ingest_note_distillation_receipts", {})
+            ),
             "returned_context_items": len(memory_context),
             "search_content_max_chars": self.max_context_chars_per_item,
             "retrieval_mode": getattr(
@@ -5436,7 +5926,9 @@ class SibylLiveApiMemory(Memory):
                 DEFAULT_RETRIEVAL_MAX_PLANNED_QUERIES,
             ),
             "context_status": "complete" if memory_context else "empty",
-            "lane_activity": dict(getattr(self._query_local, "lane_activity", {})),
+            "lane_activity": lane_activity,
+            "rig_activity": rig_activity,
+            "render_treatment": dict(getattr(self._query_local, "render_treatment", {})),
             "stack_identity": {
                 "runner_provenance": dict(getattr(self, "runner_provenance", {})),
                 "api_runtime": dict(getattr(self, "api_runtime", {})),
@@ -5481,6 +5973,27 @@ class SibylLiveApiMemory(Memory):
         self._pending_projection_job_ids.update(job_ids)
         self._remember_job_entity_ids(job_ids, response)
 
+    def _remember_note_distillation_jobs(self, response: dict[str, object]) -> None:
+        if not getattr(self, "note_distillation", False):
+            return
+        background_jobs = response.get("background_jobs")
+        job_info = (
+            background_jobs.get("note_distillation") if isinstance(background_jobs, dict) else None
+        )
+        if isinstance(job_info, dict) and job_info.get("status") == "degraded":
+            error = _stripped_str(job_info.get("error")) or "unknown error"
+            raise RuntimeError(f"production note distillation enqueue degraded: {error}")
+        job_ids = _background_job_ids(response, "note_distillation")
+        if not job_ids and _created_count(response) > 0:
+            raise RuntimeError(
+                "/memory/experience enabled note distillation but returned no job ids"
+            )
+        pending = getattr(self, "_pending_note_distillation_job_ids", None)
+        if pending is None:
+            pending = set()
+            self._pending_note_distillation_job_ids = pending
+        pending.update(job_ids)
+
     def _remember_job_entity_ids(
         self,
         job_ids: list[str],
@@ -5520,6 +6033,17 @@ class SibylLiveApiMemory(Memory):
             progress_label="Memory projections",
         )
 
+    def _drain_note_distillations(self) -> None:
+        pending = getattr(self, "_pending_note_distillation_job_ids", set())
+        self._drain_background_jobs(
+            pending,
+            job_name="production note distillation",
+            job_kind="note_distillation",
+            progress_label="Production note distillations",
+            recover_failures=False,
+            required_result_status="complete",
+        )
+
     def _drain_background_jobs(
         self,
         job_ids: set[str],
@@ -5527,6 +6051,8 @@ class SibylLiveApiMemory(Memory):
         job_name: str,
         job_kind: str,
         progress_label: str,
+        recover_failures: bool = True,
+        required_result_status: str | None = None,
     ) -> None:
         if not job_ids:
             return
@@ -5567,6 +6093,9 @@ class SibylLiveApiMemory(Memory):
                 last_statuses[job_id] = status_value
                 recoverable_failure = status_value == "complete" and bool(status.get("error"))
                 if status_value == "not_found" or recoverable_failure:
+                    if not recover_failures:
+                        detail = status.get("error") if recoverable_failure else status_value
+                        raise RuntimeError(f"{job_name} job {job_id} failed closed: {detail}")
                     if job_id in recovered_job_ids:
                         if recoverable_failure:
                             msg = f"requeued {job_name} job {job_id} failed: {status['error']}"
@@ -5586,6 +6115,15 @@ class SibylLiveApiMemory(Memory):
                 if status_value == "complete":
                     result = status.get("result")
                     if isinstance(result, dict):
+                        result_status = _stripped_str(result.get("status"))
+                        if (
+                            required_result_status is not None
+                            and result_status != required_result_status
+                        ):
+                            raise RuntimeError(
+                                f"{job_name} job {job_id} returned "
+                                f"result status {result_status or 'missing'}"
+                            )
                         result_errors = result.get("errors")
                         projection_state = _stripped_str(result.get("projection_state"))
                         if result_errors or projection_state == "partial":
@@ -5598,6 +6136,31 @@ class SibylLiveApiMemory(Memory):
                             self.ingest_embedding_usage,
                             result.get("embedding_usage"),
                         )
+                        if job_kind == "note_distillation":
+                            _merge_note_distillation_usage(
+                                self.ingest_note_distillation_usage,
+                                result,
+                            )
+                            receipt_store = getattr(
+                                self,
+                                "ingest_note_distillation_receipts",
+                                None,
+                            )
+                            if receipt_store is None:
+                                receipt_store = {}
+                                self.ingest_note_distillation_receipts = receipt_store
+                            _merge_note_distillation_receipt(
+                                receipt_store,
+                                result,
+                                required=(
+                                    getattr(
+                                        self,
+                                        "operational_note_distillation_profile",
+                                        DEFAULT_OPERATIONAL_NOTE_DISTILLATION_PROFILE,
+                                    )
+                                    != DEFAULT_OPERATIONAL_NOTE_DISTILLATION_PROFILE
+                                ),
+                            )
                     pending.remove(job_id)
                     self._pending_job_entity_ids.pop(job_id, None)
                     self._pending_job_manifest_ids.pop(job_id, None)
@@ -5664,6 +6227,7 @@ class SibylLiveApiMemory(Memory):
             raise RuntimeError(msg)
         self._pending_embedding_job_ids.discard(job_id)
         self._pending_projection_job_ids.discard(job_id)
+        getattr(self, "_pending_note_distillation_job_ids", set()).discard(job_id)
         self._pending_job_entity_ids.pop(job_id, None)
         pending_job_manifest_ids.pop(job_id, None)
         self._remember_embedding_backfill_jobs(response)
@@ -6325,6 +6889,63 @@ def _merge_usage_totals(total: dict[str, object], usage: object) -> None:
         current = total.get(field_name, 0)
         current_number = current if isinstance(current, int | float) else 0
         total[field_name] = current_number + value
+
+
+def _merge_note_distillation_usage(
+    total: dict[str, object],
+    result: dict[str, object],
+) -> None:
+    receipt = result.get("distillation_receipt")
+    receipt_usage = receipt.get("usage") if isinstance(receipt, dict) else None
+    usage = receipt_usage if isinstance(receipt_usage, dict) else result
+    for field_name in ("provider", "model"):
+        value = _stripped_str(usage.get(field_name))
+        if value:
+            total[field_name] = value
+    request_count = usage.get("requests", 1)
+    total["requests"] = _nonnegative_int(total.get("requests")) + _nonnegative_int(request_count)
+    for field_name in ("input_tokens", "output_tokens", "total_tokens"):
+        total[field_name] = _nonnegative_int(total.get(field_name)) + _nonnegative_int(
+            usage.get(field_name)
+        )
+    total["duration_ms"] = _nonnegative_int(total.get("duration_ms")) + _nonnegative_int(
+        result.get("duration_ms")
+    )
+    cost = usage.get("cost_usd")
+    cost_is_number = isinstance(cost, int | float) and not isinstance(cost, bool)
+    if cost_is_number:
+        current_cost = total.get("cost_usd", 0.0)
+        current_cost_number = (
+            float(current_cost)
+            if isinstance(current_cost, int | float) and not isinstance(current_cost, bool)
+            else 0.0
+        )
+        total["cost_usd"] = current_cost_number + float(cost)
+    prior_complete = total.get("cost_complete", True) is True
+    total["cost_complete"] = (
+        prior_complete and usage.get("cost_complete") is True and cost_is_number
+    )
+
+
+def _merge_note_distillation_receipt(
+    receipts: dict[str, dict[str, object]],
+    result: dict[str, object],
+    *,
+    required: bool,
+) -> None:
+    receipt = result.get("distillation_receipt")
+    if not isinstance(receipt, dict):
+        if required:
+            raise RuntimeError("render distillation job omitted its production receipt")
+        return
+    source_id = _stripped_str(result.get("source_id"))
+    if not source_id:
+        raise RuntimeError("production distillation receipt omitted its source id")
+    normalized = _string_key_dict(receipt)
+    previous = receipts.get(source_id)
+    if previous is not None and previous != normalized:
+        raise RuntimeError(f"production distillation receipt changed for source {source_id}")
+    receipts[source_id] = normalized
 
 
 def _new_http_client(api_url: str, *, timeout_seconds: float) -> httpx.Client:

@@ -538,6 +538,7 @@ class TestContextPackRoute:
         assert receipt["selected_typed_count"] == 3
         assert receipt["selected_raw_count"] == 5
         assert receipt["typed_search_status"] == "success"
+        assert "activity_receipt" not in receipt
         assert response.evidence.filters["usage_exposure"] == {
             "stamped_count": 8,
             "coverage_complete": True,
@@ -546,6 +547,100 @@ class TestContextPackRoute:
             result.id for result in response.evidence.results
         ]
         assert all(call.args[0].record_exposure is False for call in search.call_args_list)
+
+    @pytest.mark.asyncio
+    async def test_treatment_composition_receipts_source_kind_dedupe_and_raw_parity(
+        self,
+    ) -> None:
+        raw_response = _search_response(
+            "ship faster",
+            *((f"raw-{index}", 1.0 - index / 100) for index in range(5)),
+        )
+        typed_response = SearchResponse(
+            results=[
+                SearchResult(
+                    id=result_id,
+                    type="note",
+                    name=result_id,
+                    content=f"distilled evidence {result_id}",
+                    score=1.0 - index / 100,
+                    metadata={
+                        "projection_kind": "distilled_note",
+                        "operational_source_id": source_id,
+                        "note_kind": note_kind,
+                    },
+                )
+                for index, (result_id, source_id, note_kind) in enumerate(
+                    (
+                        ("workflow-a", "capture-a", "workflow"),
+                        ("facts-a", "capture-a", "facts"),
+                        ("workflow-a-copy", "capture-a", "workflow"),
+                        ("workflow-b", "capture-b", "workflow"),
+                    )
+                )
+            ],
+            total=4,
+            query="ship faster",
+            filters={"typed": True},
+            graph_count=4,
+            limit=5,
+        )
+
+        async def retrieve(
+            search_request: SearchRequest,
+            **_kwargs: object,
+        ) -> SearchResponse:
+            return typed_response if search_request.types == ["note"] else raw_response
+
+        with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value=["proj_1"]),
+            ),
+            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
+            patch("sibyl.api.routes.search.execute_search_request", side_effect=retrieve),
+            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
+        ):
+            response = await context_pack(
+                request=ContextPackRequest(
+                    goal="ship faster",
+                    evidence={
+                        "types": ["session"],
+                        "limit": 5,
+                        "char_budget": 500,
+                        "operational_note_dedupe_mode": "source_kind",
+                        "operational_note_lane_mode": "additive",
+                    },
+                    record_exposure=False,
+                ),
+                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
+                ctx=_ctx(),
+            )
+
+        assert response.evidence is not None
+        assert [result.id for result in response.evidence.results] == [
+            "workflow-a",
+            "facts-a",
+            "workflow-b",
+            "raw-0",
+            "raw-1",
+            "raw-2",
+            "raw-3",
+            "raw-4",
+        ]
+        activity = response.evidence.filters["evidence_composition"]["activity_receipt"]
+        assert activity["note_dedupe"] == {
+            "mode": "source_kind",
+            "duplicate_source_count": 2,
+            "duplicate_source_kind_count": 1,
+        }
+        assert activity["additive_note_lane"]["admitted_note_ids"] == [
+            "workflow-a",
+            "facts-a",
+            "workflow-b",
+        ]
+        assert activity["raw_parity"]["membership_equal"] is True
+        assert activity["raw_parity"]["order_equal"] is True
 
     @pytest.mark.asyncio
     async def test_context_pack_degrades_to_raw_when_distilled_search_fails(self) -> None:
@@ -2415,6 +2510,30 @@ def test_retrieval_mode_schema_documents_the_deprecation() -> None:
 
     description = ContextEvidenceRequest.model_fields["retrieval_mode"].description
     assert "DEPRECATED" in description
+
+
+def test_operational_note_composition_defaults_preserve_the_baseline() -> None:
+    from sibyl.api.schemas.context import ContextEvidenceRequest
+
+    evidence = ContextEvidenceRequest()
+
+    assert evidence.operational_note_dedupe_mode == "source"
+    assert evidence.operational_note_lane_mode == "reserved"
+    assert "operational_note_dedupe_mode" not in evidence.model_fields_set
+    assert "operational_note_lane_mode" not in evidence.model_fields_set
+
+
+def test_explicit_note_composition_requires_the_note_lane() -> None:
+    from sibyl.api.schemas.context import ContextEvidenceRequest
+
+    with pytest.raises(ValueError, match="reserve_distilled_notes=true"):
+        ContextEvidenceRequest(
+            reserve_distilled_notes=False,
+            operational_note_lane_mode="additive",
+        )
+
+    with pytest.raises(ValueError, match="requires char_budget"):
+        ContextEvidenceRequest(operational_note_lane_mode="additive")
 
 
 class TestNaiveRetrievalArm:

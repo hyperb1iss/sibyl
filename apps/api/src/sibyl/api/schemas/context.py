@@ -1,8 +1,8 @@
 """Context pack (structured agent context) request/response models."""
 
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from sibyl_core.models.context import ContextFacet, ContextIntent, ContextLayer
 from sibyl_core.retrieval.refinement import MAX_REFINEMENT_QUERIES
@@ -68,6 +68,18 @@ class ContextEvidenceRequest(BaseModel):
         default=True,
         description="Reserve a typed lane for distilled operational notes",
     )
+    operational_note_dedupe_mode: Literal["source", "source_kind"] = Field(
+        default="source",
+        description=(
+            "Dedupe distilled notes by source for baseline parity or by source and note kind"
+        ),
+    )
+    operational_note_lane_mode: Literal["reserved", "additive"] = Field(
+        default="reserved",
+        description=(
+            "Reserve note capacity inside the raw pack or add notes without changing raw order"
+        ),
+    )
     knn_type_overfetch: int = Field(
         default=0,
         ge=0,
@@ -81,6 +93,20 @@ class ContextEvidenceRequest(BaseModel):
             "0 keeps the classic typed query."
         ),
     )
+
+    @model_validator(mode="after")
+    def require_note_lane_for_explicit_composition(self) -> Self:
+        composition_fields = {
+            "operational_note_dedupe_mode",
+            "operational_note_lane_mode",
+        }
+        if not self.reserve_distilled_notes and self.model_fields_set & composition_fields:
+            raise ValueError(
+                "operational note composition modes require reserve_distilled_notes=true"
+            )
+        if self.operational_note_lane_mode == "additive" and self.char_budget is None:
+            raise ValueError("operational_note_lane_mode=additive requires char_budget")
+        return self
 
 
 class ContextPackRequest(BaseModel):
