@@ -214,7 +214,7 @@ defaults:
 concurrency:
   group:
     ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' &&
-    inputs.run_official_full && 'official-full' || 'standard' }}
+    inputs.run_official_full && github.run_id || 'standard' }}
   cancel-in-progress:
     ${{ github.event_name != 'workflow_dispatch' || !inputs.run_official_full }}
 

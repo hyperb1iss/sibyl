@@ -134,7 +134,8 @@ def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
     assert "inputs.official_domain == 'enterprise'" in workflow
     assert "(inputs.official_domain || 'both') == 'both'" in workflow
     assert "if: github.event_name == 'workflow_dispatch' && inputs.run_official_full" in workflow
-    assert "'official-full' || 'standard'" in workflow
+    assert "inputs.run_official_full && github.run_id || 'standard'" in workflow
+    assert "inputs.run_official_full && 'official-full' || 'standard'" not in workflow
     assert "github.event_name != 'workflow_dispatch' || !inputs.run_official_full" in workflow
     assert "moon run bench-longmemeval-v2-official-full" in workflow
     assert "OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}" in workflow
