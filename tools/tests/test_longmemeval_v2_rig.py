@@ -534,6 +534,28 @@ def test_arm_rejects_resealed_official_corpus_truncation() -> None:
         )
 
 
+@pytest.mark.parametrize("field", ["domain", "question_id"])
+def test_arm_rejects_noncanonical_corpus_identity(field: str) -> None:
+    arm = _seal_arm(
+        _arm("machine", mode="fast", accuracy=0.5),
+        pass_id="noncanonical",  # noqa: S106
+        seed=93,
+        preregistration_sha256="",
+    )
+    arm["rows"][0][field] = f" {arm['rows'][0][field]} "
+    arm["question_order_sha256"] = rig.canonical_sha256(
+        [[row["domain"], row["question_id"]] for row in arm["rows"]]
+    )
+    _reseal_arm(arm)
+
+    with pytest.raises(rig.RigInputError, match=rf"{field} must use its canonical value"):
+        rig.validate_arm(
+            arm,
+            stack_digest=rig.stack_fingerprint(_stack()),
+            side="noncanonical",
+        )
+
+
 def test_arm_provider_usage_fails_closed_on_overspend() -> None:
     paired = _paired_pass(
         "overspend",

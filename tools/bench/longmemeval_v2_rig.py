@@ -648,9 +648,13 @@ def validate_arm(  # noqa: PLR0912, PLR0915
         if row.get("status") != "valid":
             raise RigInputError(f"{name} is failed or incomplete")
         domain = _nonempty_string(row.get("domain"), name=f"{name}.domain")
+        if row.get("domain") != domain:
+            raise RigInputError(f"{name}.domain must use its canonical value")
         if domain not in DOMAINS:
             raise RigInputError(f"{name}.domain is not a Small domain")
         question_id = _nonempty_string(row.get("question_id"), name=f"{name}.question_id")
+        if row.get("question_id") != question_id:
+            raise RigInputError(f"{name}.question_id must use its canonical value")
         identity = (domain, question_id)
         if identity in seen:
             raise RigInputError(f"{side} repeats row {identity}")
