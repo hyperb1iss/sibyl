@@ -11,9 +11,27 @@ allowBuilds:
   sharp: false # preserved from prior ignoredBuiltDependencies
   unrs-resolver: false # preserved from prior ignoredBuiltDependencies
 
+minimumReleaseAgeExclude:
+  - '@storybook/addon-a11y@10.5.10'
+  - '@storybook/addon-docs@10.5.10'
+  - '@storybook/addon-onboarding@10.5.10'
+  - '@storybook/addon-vitest@10.5.10'
+  - '@storybook/builder-vite@10.5.10'
+  - '@storybook/csf-plugin@10.5.10'
+  - '@storybook/nextjs-vite@10.5.10'
+  - '@storybook/react-dom-shim@10.5.10'
+  - '@storybook/react-vite@10.5.10'
+  - '@storybook/react@10.5.10'
+  - '@vitejs/plugin-react@6.1.0'
+  - framer-motion@13.1.1
+  - motion-dom@13.1.1
+  - motion@13.1.1
+  - storybook@10.5.10
+  - vite@8.2.2
+
 overrides:
   postcss: ^8.5.18
-  sharp: 0.35.0
+  sharp: 0.35.3
 
 # Skip minimumReleaseAge re-verification of the committed lockfile. The
 # 24h cooldown still applies during fresh resolution (and lockfile diffs
