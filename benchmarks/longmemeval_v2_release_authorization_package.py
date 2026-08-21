@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -29,10 +30,19 @@ def _validated_artifact(
     return binding, validated
 
 
+def _public_path(path: Path, *, name: str) -> str:
+    canonical = path.expanduser().resolve()
+    if path != canonical:
+        raise StagePlanError(f"{name} public path must be canonical")
+    return str(canonical)
+
+
 def package_aa_authorization(
     receipt_path: Path,
     *,
     paired_pass_paths: list[Path],
+    public_receipt_path: Path | None = None,
+    public_paired_pass_paths: list[Path] | None = None,
 ) -> dict[str, Any]:
     """Project a fully validated prior-stage A/A receipt into authority."""
     source, receipt = _validated_artifact(
@@ -50,6 +60,27 @@ def package_aa_authorization(
         )
         for path in paired_pass_paths
     ]
+    validated = build_aa_authorization(
+        source,
+        receipt,
+        paired_artifacts=paired_artifacts,
+    )
+    return rebase_aa_authorization(
+        validated,
+        public_receipt_path=public_receipt_path,
+        public_paired_pass_paths=public_paired_pass_paths,
+    )
+
+
+def build_aa_authorization(
+    source: dict[str, Any],
+    receipt: dict[str, Any],
+    *,
+    paired_artifacts: list[tuple[dict[str, Any], dict[str, Any]]],
+) -> dict[str, Any]:
+    """Build A/A authority from already fd-bound physical artifacts."""
+
+    receipt = rig.validate_aa_receipt(receipt)
     for summary, (_binding, paired_pass) in zip(
         receipt["passes"],
         paired_artifacts,
@@ -88,28 +119,70 @@ def package_aa_authorization(
     return authorization.require_aa_authorization(payload)
 
 
-def _package_anchor_gate(path: Path, preregistration: dict[str, Any]) -> dict[str, Any]:
-    def validate(raw: object) -> dict[str, Any]:
-        if not isinstance(raw, dict):
-            raise StagePlanError("anchor gate receipt is missing")
-        rig._require_exact_keys(raw, rig.ANCHOR_RECEIPT_KEYS, name="anchor gate receipt")
-        unsigned = {key: value for key, value in raw.items() if key != "anchor_receipt_sha256"}
-        if (
-            raw.get("schema_version") != rig.ANCHOR_SCHEMA_VERSION
-            or raw.get("anchor_receipt_sha256") != rig.canonical_sha256(unsigned)
-            or raw.get("status") != "PASS"
-            or raw.get("anchor_publishable") is not True
-            or raw.get("stack") != preregistration["stack"]
-            or raw.get("aa_receipt_sha256") != preregistration["aa_receipt_sha256"]
-        ):
-            raise StagePlanError("race preregistration anchor gate is invalid")
-        return raw
+def rebase_aa_authorization(
+    validated: dict[str, Any],
+    *,
+    public_receipt_path: Path | None,
+    public_paired_pass_paths: list[Path] | None,
+) -> dict[str, Any]:
+    """Rebase a physically validated A/A projection to future public paths."""
 
+    if public_receipt_path is None and public_paired_pass_paths is None:
+        return validated
+    if public_receipt_path is None or public_paired_pass_paths is None:
+        raise StagePlanError("A/A public authorization paths are incomplete")
+    if len(public_paired_pass_paths) != len(validated["passes"]):
+        raise StagePlanError("A/A public paired-pass path count is invalid")
+    rebased = deepcopy(validated)
+    rebased["source_receipt"]["path"] = _public_path(
+        public_receipt_path,
+        name="A/A source receipt",
+    )
+    for item, public_path in zip(
+        rebased["passes"],
+        public_paired_pass_paths,
+        strict=True,
+    ):
+        item["paired_pass_artifact"]["path"] = _public_path(
+            public_path,
+            name="A/A paired-pass artifact",
+        )
+    rebased["authorization_sha256"] = rig.canonical_sha256(
+        {key: value for key, value in rebased.items() if key != "authorization_sha256"}
+    )
+    return rebased
+
+
+def _package_anchor_gate(
+    path: Path,
+    preregistration: dict[str, Any],
+) -> dict[str, Any]:
     source, receipt = _validated_artifact(
         path,
         name="anchor gate receipt",
-        validator=validate,
+        validator=lambda raw: _validate_anchor_gate(raw, preregistration),
     )
+    return _anchor_gate(source, receipt)
+
+
+def _validate_anchor_gate(raw: object, preregistration: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise StagePlanError("anchor gate receipt is missing")
+    rig._require_exact_keys(raw, rig.ANCHOR_RECEIPT_KEYS, name="anchor gate receipt")
+    unsigned = {key: value for key, value in raw.items() if key != "anchor_receipt_sha256"}
+    if (
+        raw.get("schema_version") != rig.ANCHOR_SCHEMA_VERSION
+        or raw.get("anchor_receipt_sha256") != rig.canonical_sha256(unsigned)
+        or raw.get("status") != "PASS"
+        or raw.get("anchor_publishable") is not True
+        or raw.get("stack") != preregistration["stack"]
+        or raw.get("aa_receipt_sha256") != preregistration["aa_receipt_sha256"]
+    ):
+        raise StagePlanError("race preregistration anchor gate is invalid")
+    return raw
+
+
+def _anchor_gate(source: dict[str, Any], receipt: dict[str, Any]) -> dict[str, Any]:
     return {
         "kind": "anchor",
         "source_receipt": source,
@@ -117,7 +190,10 @@ def _package_anchor_gate(path: Path, preregistration: dict[str, Any]) -> dict[st
     }
 
 
-def _package_race_gate(path: Path, preregistration: dict[str, Any]) -> dict[str, Any]:
+def _package_race_gate(
+    path: Path,
+    preregistration: dict[str, Any],
+) -> dict[str, Any]:
     source, receipt = _validated_artifact(
         path,
         name="race gate receipt",
@@ -128,6 +204,10 @@ def _package_race_gate(path: Path, preregistration: dict[str, Any]) -> dict[str,
         or receipt["stack"] != preregistration["stack"]
     ):
         raise StagePlanError("render preregistration race gate differs from its source")
+    return _race_gate(source, receipt)
+
+
+def _race_gate(source: dict[str, Any], receipt: dict[str, Any]) -> dict[str, Any]:
     return {
         "kind": "race",
         "source_receipt": source,
@@ -153,6 +233,8 @@ def package_preregistration_authorization(
     *,
     kind: str,
     gate_receipt_path: Path,
+    public_preregistration_path: Path | None = None,
+    public_gate_receipt_path: Path | None = None,
 ) -> dict[str, Any]:
     """Project a fully validated prior-stage preregistration into authority."""
     source, preregistration = _validated_artifact(
@@ -160,12 +242,33 @@ def package_preregistration_authorization(
         name="source preregistration",
         validator=lambda raw: rig.validate_preregistration(raw, kind=kind),
     )
-    aa_receipt = preregistration["aa_receipt"]
-    gate = (
-        _package_anchor_gate(gate_receipt_path, preregistration)
-        if kind == "race"
-        else _package_race_gate(gate_receipt_path, preregistration)
+    gate_builder = _package_anchor_gate if kind == "race" else _package_race_gate
+    gate = gate_builder(gate_receipt_path, preregistration)
+    validated = build_preregistration_authorization(
+        source,
+        preregistration,
+        kind=kind,
+        gate=gate,
     )
+    return rebase_preregistration_authorization(
+        validated,
+        kind=kind,
+        public_preregistration_path=public_preregistration_path,
+        public_gate_receipt_path=public_gate_receipt_path,
+    )
+
+
+def build_preregistration_authorization(
+    source: dict[str, Any],
+    preregistration: dict[str, Any],
+    *,
+    kind: str,
+    gate: dict[str, Any],
+) -> dict[str, Any]:
+    """Build preregistration authority from fd-bound physical artifacts."""
+
+    preregistration = rig.validate_preregistration(preregistration, kind=kind)
+    aa_receipt = preregistration["aa_receipt"]
     payload = {
         "schema_version": authorization.PREREGISTRATION_AUTHORIZATION_SCHEMA_VERSION,
         "kind": kind,
@@ -188,6 +291,57 @@ def package_preregistration_authorization(
     }
     payload["authorization_sha256"] = rig.canonical_sha256(payload)
     return authorization.require_preregistration_authorization(payload, kind=kind)
+
+
+def build_preregistration_gate(
+    source: dict[str, Any],
+    receipt: dict[str, Any],
+    preregistration: dict[str, Any],
+    *,
+    kind: str,
+) -> dict[str, Any]:
+    """Build one gate projection from fd-bound receipt bytes."""
+
+    if kind == "race":
+        validated = _validate_anchor_gate(receipt, preregistration)
+        return _anchor_gate(source, validated)
+    if kind != "render":
+        raise StagePlanError("preregistration gate kind is invalid")
+    validated = rig.validate_race_receipt(receipt)
+    if (
+        validated["race_receipt_sha256"] != preregistration["race_receipt_sha256"]
+        or validated["stack"] != preregistration["stack"]
+    ):
+        raise StagePlanError("render preregistration race gate differs from its source")
+    return _race_gate(source, validated)
+
+
+def rebase_preregistration_authorization(
+    validated: dict[str, Any],
+    *,
+    kind: str,
+    public_preregistration_path: Path | None,
+    public_gate_receipt_path: Path | None,
+) -> dict[str, Any]:
+    """Rebase a validated preregistration projection to public paths."""
+
+    if public_preregistration_path is None and public_gate_receipt_path is None:
+        return validated
+    if public_preregistration_path is None or public_gate_receipt_path is None:
+        raise StagePlanError("preregistration public authorization paths are incomplete")
+    rebased = deepcopy(validated)
+    rebased["source_preregistration"]["path"] = _public_path(
+        public_preregistration_path,
+        name="source preregistration",
+    )
+    rebased["gate"]["source_receipt"]["path"] = _public_path(
+        public_gate_receipt_path,
+        name=f"{kind} gate receipt",
+    )
+    rebased["authorization_sha256"] = rig.canonical_sha256(
+        {key: value for key, value in rebased.items() if key != "authorization_sha256"}
+    )
+    return rebased
 
 
 def write_authorization(

@@ -19,12 +19,13 @@ from benchmarks.longmemeval_v2_release_inputs import (
     StagePlanError,
     bind_artifact,
     load_json,
+    require_artifact,
     require_exact_keys,
 )
 from tools.bench import longmemeval_v2_rig as rig
 
 STAGE_CLAIM_SCHEMA_VERSION = "sibyl-longmemeval-v2-release-stage-claim-v1"
-RUNNER_STATUS_SCHEMA_VERSION = "sibyl-longmemeval-v2-release-runner-status-v1"
+RUNNER_STATUS_SCHEMA_VERSION = "sibyl-longmemeval-v2-release-runner-status-v3"
 STAGE_CLAIM_KEYS = frozenset(
     {
         "schema_version",
@@ -45,6 +46,9 @@ STATUS_KEYS = frozenset(
         "resumed_domains",
         "failures",
         "actual_cost_usd",
+        "package_claim",
+        "executed_status_artifact",
+        "stage_receipt",
         "updated_at",
         "status_sha256",
     }
@@ -61,7 +65,11 @@ CLAIMED_ROOT_NAMES = frozenset(
     }
 )
 RESUMABLE_STATUS = frozenset({"CLAIMED", "PREFLIGHT_COMPLETE", "RUNNING", "EXECUTED"})
-RUNNER_STATUS = RESUMABLE_STATUS | {"FAIL"}
+PACKAGE_RESUMABLE_STATUS = frozenset({"EXECUTED", "PACKAGING"})
+RUNNER_STATUS = RESUMABLE_STATUS | {"PACKAGING", "PACKAGED", "FAIL"}
+_PACKAGE_PENDING_PATTERN = re.compile(
+    r"^packages\.pending\.[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
 _SECRET_ENV_NAMES = frozenset(
     {
         "SIBYL_API_TOKEN",
@@ -351,9 +359,25 @@ def require_claimed_output_tree(plan: dict[str, Any]) -> None:
     """Validate the exact claimed-root inventory without checkout side effects."""
 
     output_root = Path(plan["output_root"])
-    unknown = sorted(
-        path.name for path in output_root.iterdir() if path.name not in CLAIMED_ROOT_NAMES
-    )
+    status = read_status_receipt(plan)
+    package_entries = {
+        path.name
+        for path in output_root.iterdir()
+        if path.name in {"packages", "stage_receipt.json"}
+        or _PACKAGE_PENDING_PATTERN.fullmatch(path.name)
+    }
+    if package_entries and status["status"] not in {"PACKAGING", "PACKAGED", "FAIL"}:
+        raise StagePlanError("claimed stage output root contains unknown entries from packaging")
+    pending = {name for name in package_entries if _PACKAGE_PENDING_PATTERN.fullmatch(name)}
+    if len(pending) > 1 or (pending and "packages" in package_entries):
+        raise StagePlanError("claimed stage package publication state is ambiguous")
+    if status["status"] == "PACKAGED" and package_entries != {
+        "packages",
+        "stage_receipt.json",
+    }:
+        raise StagePlanError("packaged stage output inventory is incomplete")
+    allowed = CLAIMED_ROOT_NAMES | package_entries
+    unknown = sorted(path.name for path in output_root.iterdir() if path.name not in allowed)
     if unknown:
         raise StagePlanError(f"claimed stage output root contains unknown entries: {unknown}")
     for path in output_root.rglob("*"):
@@ -464,6 +488,9 @@ def _status_payload(
     resumed: list[str] | None = None,
     failures: list[dict[str, Any]] | None = None,
     cost: float = 0.0,
+    package_claim: dict[str, Any] | None = None,
+    executed_status_artifact: dict[str, Any] | None = None,
+    stage_receipt: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return sealed(
         {
@@ -475,6 +502,9 @@ def _status_payload(
             "resumed_domains": sorted(resumed or []),
             "failures": failures or [],
             "actual_cost_usd": cost,
+            "package_claim": package_claim,
+            "executed_status_artifact": executed_status_artifact,
+            "stage_receipt": stage_receipt,
             "updated_at": now(),
         },
         "status_sha256",
@@ -487,10 +517,11 @@ def write_status(plan: dict[str, Any], **values: Any) -> dict[str, Any]:
     return payload
 
 
-def read_status_receipt(plan: dict[str, Any]) -> dict[str, Any]:
-    """Read any authentic terminal or resumable runner status receipt."""
+def validate_status_receipt(plan: dict[str, Any], raw: object) -> dict[str, Any]:
+    """Validate one runner status object without assuming its live path."""
 
-    raw = load_json(Path(plan["output_root"]) / "runner_status.json")
+    if not isinstance(raw, dict):
+        raise StagePlanError("release runner status is missing")
     require_exact_keys(raw, STATUS_KEYS, name="release runner status")
     unsigned = {key: value for key, value in raw.items() if key != "status_sha256"}
     if raw.get("status_sha256") != rig.canonical_sha256(unsigned):
@@ -499,7 +530,40 @@ def read_status_receipt(plan: dict[str, Any]) -> dict[str, Any]:
         raise StagePlanError("release runner status belongs to another stage plan")
     if raw.get("status") not in RUNNER_STATUS:
         raise StagePlanError("release runner status is unknown")
+    claim = raw.get("package_claim")
+    if raw["status"] in {"PACKAGING", "PACKAGED"}:
+        if not isinstance(claim, dict):
+            raise StagePlanError("package lifecycle status is missing its claim")
+    elif claim is not None:
+        raise StagePlanError("execution status contains a premature package claim")
+    executed_status = raw.get("executed_status_artifact")
+    if raw["status"] in {"PACKAGING", "PACKAGED"}:
+        if (
+            not isinstance(executed_status, dict)
+            or set(executed_status) != {"path", "sha256", "size_bytes"}
+            or not isinstance(executed_status.get("path"), str)
+            or not isinstance(executed_status.get("sha256"), str)
+            or not isinstance(executed_status.get("size_bytes"), int)
+            or executed_status["size_bytes"] <= 0
+        ):
+            raise StagePlanError("package lifecycle status is missing its EXECUTED binding")
+    elif executed_status is not None:
+        raise StagePlanError("execution status contains a premature EXECUTED binding")
+    receipt = raw.get("stage_receipt")
+    if raw["status"] == "PACKAGED":
+        require_artifact(receipt, name="packaged stage receipt")
+    elif receipt is not None:
+        raise StagePlanError("release runner status binds a premature stage receipt")
     return raw
+
+
+def read_status_receipt(plan: dict[str, Any]) -> dict[str, Any]:
+    """Read any authentic terminal or resumable runner status receipt."""
+
+    return validate_status_receipt(
+        plan,
+        load_json(Path(plan["output_root"]) / "runner_status.json"),
+    )
 
 
 def require_status(plan: dict[str, Any]) -> dict[str, Any]:

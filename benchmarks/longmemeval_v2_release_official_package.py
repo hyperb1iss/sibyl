@@ -64,7 +64,7 @@ OPERATING_POINT_FILES = frozenset(
 )
 
 
-def _require_executed_snapshot(executed: ExecutedStage) -> None:
+def _require_stage_evidence(executed: ExecutedStage) -> dict[str, Any]:
     if not isinstance(executed, ExecutedStage):
         raise StagePlanError("official packaging requires an executed-stage handoff")
     if executed.status_receipt.get("status") != "EXECUTED":
@@ -73,10 +73,9 @@ def _require_executed_snapshot(executed: ExecutedStage) -> None:
     if tuple(runs) != executed.runs:
         raise StagePlanError("executed-stage runs changed before packaging")
     require_package_inputs(executed.plan.get("package_inputs"))
-    live_status = state.read_status_receipt(executed.plan)
-    if live_status.get("status") != "EXECUTED" or live_status != executed.status_receipt:
-        raise StagePlanError("executed-stage status changed before packaging")
     for name, binding in executed.control_artifacts:
+        if name == "runner_status":
+            continue
         if require_artifact(binding, name=name) != binding:
             raise StagePlanError("executed-stage control artifact changed")
     for domain in executed.domains:
@@ -87,18 +86,39 @@ def _require_executed_snapshot(executed: ExecutedStage) -> None:
         for name, binding in domain.artifacts:
             if require_artifact(binding, name=f"executed domain {name}") != binding:
                 raise StagePlanError("executed domain artifact changed before packaging")
+    status_binding = dict(executed.control_artifacts).get("runner_status")
+    if not isinstance(status_binding, dict):
+        raise StagePlanError("executed-stage status binding is missing")
+    return status_binding
+
+
+def _require_executed_snapshot(executed: ExecutedStage) -> None:
+    status_binding = _require_stage_evidence(executed)
+    live_status = state.read_status_receipt(executed.plan)
+    if live_status.get("status") != "EXECUTED" or live_status != executed.status_receipt:
+        raise StagePlanError("executed-stage status changed before packaging")
+    if require_artifact(status_binding, name="executed stage status") != status_binding:
+        raise StagePlanError("executed-stage status artifact changed")
     if state.read_status_receipt(executed.plan) != executed.status_receipt:
         raise StagePlanError("executed-stage status changed during packaging validation")
-    status_binding = dict(executed.control_artifacts).get("runner_status")
-    if (
-        status_binding is None
-        or require_artifact(
-            status_binding,
-            name="executed stage status",
-        )
-        != status_binding
-    ):
-        raise StagePlanError("executed-stage status artifact changed")
+
+
+def require_claimed_executed_snapshot(
+    executed: ExecutedStage,
+    packaging_status: dict[str, Any],
+) -> None:
+    """Validate paid evidence against an authentic package-lifecycle status."""
+
+    validated = state.validate_status_receipt(executed.plan, packaging_status)
+    if validated["status"] not in {"PACKAGING", "PACKAGED"}:
+        raise StagePlanError("claimed arm consumption requires package lifecycle status")
+    status_binding = _require_stage_evidence(executed)
+    if validated["executed_status_artifact"] != status_binding:
+        raise StagePlanError("package lifecycle changed the origin EXECUTED binding")
+    if state.read_status_receipt(executed.plan) != validated:
+        raise StagePlanError("package lifecycle status changed before arm consumption")
+    if state.read_status_receipt(executed.plan) != validated:
+        raise StagePlanError("package lifecycle status changed during arm consumption")
 
 
 def _arm_cost(executed: ExecutedStage, run: dict[str, Any]) -> float:

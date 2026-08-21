@@ -209,6 +209,80 @@ def bind_owned_file(directory_fd: int, name: str, *, path: Path) -> dict[str, An
     return bind_owned_content(read_owned_file(directory_fd, name), path=path)
 
 
+def freeze_publication_children(
+    descriptor: int,
+    *,
+    file_mode: int,
+    directory_mode: int,
+) -> None:
+    """Freeze descendants while leaving a retained root renameable."""
+
+    before = os.fstat(descriptor)
+    _freeze_tree_at(descriptor, file_mode=file_mode, directory_mode=directory_mode)
+    os.fchmod(descriptor, directory_mode)
+    after = os.fstat(descriptor)
+    if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+        raise StagePlanError("publication root descriptor identity changed")
+
+
+def _safe_entries(directory_fd: int) -> list[os.DirEntry[str]]:
+    try:
+        return sorted(os.scandir(directory_fd), key=lambda entry: entry.name)
+    except OSError as exc:
+        raise StagePlanError("publication directory is unreadable") from exc
+
+
+def _freeze_tree_at(
+    directory_fd: int,
+    *,
+    file_mode: int,
+    directory_mode: int,
+) -> None:
+    for entry in _safe_entries(directory_fd):
+        if entry.name in {".", ".."} or "/" in entry.name:
+            raise StagePlanError("publication entry name is unsafe")
+        metadata = entry.stat(follow_symlinks=False)
+        if stat.S_ISLNK(metadata.st_mode):
+            raise StagePlanError("publication tree contains a symlink")
+        if stat.S_ISDIR(metadata.st_mode):
+            child_fd = package_root._open_child_directory(directory_fd, entry.name)
+            try:
+                opened = os.fstat(child_fd)
+                if (opened.st_dev, opened.st_ino) != (metadata.st_dev, metadata.st_ino):
+                    raise StagePlanError("publication directory identity changed")
+                _freeze_tree_at(
+                    child_fd,
+                    file_mode=file_mode,
+                    directory_mode=directory_mode,
+                )
+                package_root.freeze_descriptor(
+                    child_fd,
+                    mode=directory_mode,
+                    name="publication directory",
+                )
+            finally:
+                os.close(child_fd)
+        elif stat.S_ISREG(metadata.st_mode):
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            try:
+                child_fd = os.open(entry.name, flags, dir_fd=directory_fd)
+            except OSError as exc:
+                raise StagePlanError("publication file is unsafe") from exc
+            try:
+                opened = os.fstat(child_fd)
+                if (opened.st_dev, opened.st_ino) != (metadata.st_dev, metadata.st_ino):
+                    raise StagePlanError("publication file identity changed")
+                package_root.freeze_descriptor(
+                    child_fd,
+                    mode=file_mode,
+                    name="publication file",
+                )
+            finally:
+                os.close(child_fd)
+        else:
+            raise StagePlanError("publication tree contains a foreign entry")
+
+
 def bind_owned_content(content: bytes, *, path: Path) -> dict[str, Any]:
     """Build one public artifact binding for bytes read through an owned fd."""
 

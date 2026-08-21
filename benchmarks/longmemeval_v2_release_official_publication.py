@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +18,6 @@ from benchmarks import longmemeval_v2_release_package_tree as package_tree
 from benchmarks.longmemeval_v2_release_handoff import ExecutedStage
 from benchmarks.longmemeval_v2_release_inputs import (
     StagePlanError,
-    require_artifact,
     require_exact_keys,
 )
 from tools.bench import longmemeval_v2_rig as rig
@@ -56,16 +57,92 @@ def require_official_arm_package(
         executed.runs,
         packages_root,
     )
-    with package_root.publication_lock(parent_owner):
-        return _require_locked_publication(executed, run, arm_id, parent_owner)
+    with (
+        package_root.publication_lock(parent_owner),
+        _open_locked_publication(
+            executed,
+            run,
+            arm_id,
+            parent_owner,
+            packaging_status=None,
+            expected=None,
+        ) as result,
+    ):
+        return result
 
 
-def _require_locked_publication(
+def require_claimed_official_arm_package(
+    executed: ExecutedStage,
+    *,
+    arm_id: str,
+    packages_root: Path,
+    expected: dict[str, Any],
+    packaging_status: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate a claimed immutable arm during package-lifecycle resume."""
+
+    with open_claimed_official_arm_package(
+        executed,
+        arm_id=arm_id,
+        packages_root=packages_root,
+        expected=expected,
+        packaging_status=packaging_status,
+    ) as result:
+        return result
+
+
+@contextmanager
+def open_claimed_official_arm_package(
+    executed: ExecutedStage,
+    *,
+    arm_id: str,
+    packages_root: Path,
+    expected: dict[str, Any],
+    packaging_status: dict[str, Any],
+) -> Iterator[dict[str, Any]]:
+    """Retain canonical arm authority handles through score-aware semantics."""
+
+    package.require_claimed_executed_snapshot(executed, packaging_status)
+    run = package._find_run(executed, arm_id)
+    parent_owner = package_root.bind_packages_root(
+        executed.plan,
+        executed.runs,
+        packages_root,
+    )
+    with (
+        package_root.publication_lock(parent_owner),
+        _open_locked_publication(
+            executed,
+            run,
+            arm_id,
+            parent_owner,
+            packaging_status=packaging_status,
+            expected=expected,
+        ) as result,
+    ):
+        yield result
+
+
+def _require_external_snapshot(
+    executed: ExecutedStage,
+    packaging_status: dict[str, Any] | None,
+) -> None:
+    if packaging_status is None:
+        package._require_executed_snapshot(executed)
+    else:
+        package.require_claimed_executed_snapshot(executed, packaging_status)
+
+
+@contextmanager
+def _open_locked_publication(
     executed: ExecutedStage,
     run: dict[str, Any],
     arm_id: str,
     parent_owner: package_root.OwnedDirectory,
-) -> dict[str, Any]:
+    *,
+    packaging_status: dict[str, Any] | None,
+    expected: dict[str, Any] | None,
+) -> Iterator[dict[str, Any]]:
     """Consume one authority while sibling metadata cannot be thawed."""
 
     parent_fd = package_root.open_owned_directory(
@@ -96,10 +173,23 @@ def _require_locked_publication(
             )
             if live_raw != raw:
                 raise StagePlanError("official arm publication changed during validation")
-            result = _require_publication_authority(executed, run, raw, content)
+            status_binding = dict(executed.control_artifacts).get("runner_status")
+            if not isinstance(status_binding, dict):
+                raise StagePlanError("published executed status binding is missing")
+            result = _require_publication_authority(
+                executed,
+                run,
+                raw,
+                content,
+                executed_status=status_binding,
+            )
+            if expected is not None and result != expected:
+                raise StagePlanError("official arm publication differs from its package claim")
             package_object.require_arm_authority_unchanged(arm_fd, handle)
-            package._require_executed_snapshot(executed)
-            return result
+            _require_external_snapshot(executed, packaging_status)
+            yield result
+            package_object.require_arm_authority_unchanged(arm_fd, handle)
+            _require_external_snapshot(executed, packaging_status)
         finally:
             if handle is not None:
                 handle.close()
@@ -234,17 +324,16 @@ def _require_publication_authority(
     run: dict[str, Any],
     raw: dict[str, Any],
     content: bytes,
+    *,
+    executed_status: dict[str, Any],
 ) -> dict[str, Any]:
     package_object.require_publication_receipt(raw)
     actual_cost = package._arm_cost(executed, run)
-    status_binding = dict(executed.control_artifacts).get("runner_status")
     if (
         raw.get("stage_plan_sha256") != executed.plan["stage_plan_sha256"]
         or raw.get("arm_id") != run["arm_id"]
         or raw.get("actual_cost_usd") != actual_cost
-        or status_binding is None
-        or raw.get("executed_status") != status_binding
-        or require_artifact(status_binding, name="published executed status") != status_binding
+        or raw.get("executed_status") != executed_status
     ):
         raise StagePlanError("official arm publication lineage is invalid")
     object_binding = raw.get("package_object")

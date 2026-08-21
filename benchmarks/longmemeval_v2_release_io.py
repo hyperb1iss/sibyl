@@ -8,11 +8,73 @@ import stat
 import sys
 from contextlib import suppress
 from ctypes import CDLL, c_char_p, c_int, c_uint, get_errno
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 RENAME_EXCL = 0x00000004
+
+
+@dataclass(frozen=True)
+class DescriptorIdentity:
+    device: int
+    inode: int
+    file_type: int
+
+
+def capture_descriptor_identity(descriptor: int) -> DescriptorIdentity:
+    """Capture one newly opened descriptor or close it on interrupted acquisition."""
+
+    try:
+        metadata = os.fstat(descriptor)
+    except BaseException:
+        with suppress(OSError):
+            os.close(descriptor)
+        raise
+    return DescriptorIdentity(
+        device=metadata.st_dev,
+        inode=metadata.st_ino,
+        file_type=stat.S_IFMT(metadata.st_mode),
+    )
+
+
+def close_owned_descriptor(
+    descriptor: int,
+    identity: DescriptorIdentity,
+) -> BaseException | None:
+    """Close only when a descriptor still names its originally captured inode."""
+
+    try:
+        metadata = os.fstat(descriptor)
+    except BaseException as exc:
+        return exc
+    if (
+        metadata.st_dev != identity.device
+        or metadata.st_ino != identity.inode
+        or stat.S_IFMT(metadata.st_mode) != identity.file_type
+    ):
+        return OSError("descriptor ownership changed before cleanup")
+    try:
+        os.close(descriptor)
+    except BaseException as exc:
+        return exc
+    return None
+
+
+def _close_writer(descriptor: int, identity: DescriptorIdentity) -> None:
+    if error := close_owned_descriptor(descriptor, identity):
+        raise OSError("fd-owned temporary descriptor changed") from error
+
+
+def _write_descriptor(descriptor: int, content: bytes, *, name: str) -> None:
+    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        raise OSError(f"fd-owned {name} temporary is not a regular file")
+    remaining = content
+    while remaining:
+        written = os.write(descriptor, remaining)
+        remaining = remaining[written:]
+    os.fsync(descriptor)
 
 
 def _temporary_path(path: Path) -> Path:
@@ -22,19 +84,42 @@ def _temporary_path(path: Path) -> Path:
 def _write_temporary(path: Path, payload: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = _temporary_path(path)
-    with temporary.open("x", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-        handle.flush()
-        os.fsync(handle.fileno())
-    return temporary
+    descriptor = os.open(
+        temporary,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    try:
+        identity = capture_descriptor_identity(descriptor)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+    try:
+        content = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode()
+        _write_descriptor(descriptor, content, name="path JSON")
+    except BaseException:
+        close_owned_descriptor(descriptor, identity)
+        temporary.unlink(missing_ok=True)
+        raise
+    else:
+        try:
+            _close_writer(descriptor, identity)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
+        return temporary
 
 
 def _fsync_parent(path: Path) -> None:
     descriptor = os.open(path.parent, os.O_RDONLY)
+    identity = capture_descriptor_identity(descriptor)
     try:
         os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+    except BaseException:
+        close_owned_descriptor(descriptor, identity)
+        raise
+    else:
+        _close_writer(descriptor, identity)
 
 
 def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
@@ -73,16 +158,20 @@ def write_json_once_atomic_at(directory_fd: int, name: str, payload: dict[str, A
         dir_fd=directory_fd,
     )
     try:
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            raise OSError("fd-owned JSON temporary is not a regular file")
-        content = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode()
-        while content:
-            written = os.write(descriptor, content)
-            content = content[written:]
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+        identity = capture_descriptor_identity(descriptor)
+    except BaseException:
+        with suppress(FileNotFoundError):
+            os.unlink(temporary, dir_fd=directory_fd)
+        raise
     try:
+        try:
+            content = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode()
+            _write_descriptor(descriptor, content, name="JSON")
+        except BaseException:
+            close_owned_descriptor(descriptor, identity)
+            raise
+        else:
+            _close_writer(descriptor, identity)
         os.link(
             temporary,
             name,
@@ -110,16 +199,19 @@ def write_bytes_once_atomic_at(directory_fd: int, name: str, content: bytes) -> 
         dir_fd=directory_fd,
     )
     try:
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            raise OSError("fd-owned byte temporary is not a regular file")
-        remaining = content
-        while remaining:
-            written = os.write(descriptor, remaining)
-            remaining = remaining[written:]
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+        identity = capture_descriptor_identity(descriptor)
+    except BaseException:
+        with suppress(FileNotFoundError):
+            os.unlink(temporary, dir_fd=directory_fd)
+        raise
     try:
+        try:
+            _write_descriptor(descriptor, content, name="byte")
+        except BaseException:
+            close_owned_descriptor(descriptor, identity)
+            raise
+        else:
+            _close_writer(descriptor, identity)
         os.link(
             temporary,
             name,
