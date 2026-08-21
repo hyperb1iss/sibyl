@@ -59,9 +59,15 @@ from sibyl_core.services.surreal_content import MemoryScope, RawMemory, RawMemor
 class _FakeSentenceTransformer:
     def __init__(self, *, dimensions: int = 3) -> None:
         self.dimensions = dimensions
+        self.dimension_requests: list[str] = []
         self.requests: list[tuple[list[str], dict[str, object]]] = []
 
+    def get_embedding_dimension(self) -> int:
+        self.dimension_requests.append("current")
+        return self.dimensions
+
     def get_sentence_embedding_dimension(self) -> int:
+        self.dimension_requests.append("legacy")
         return self.dimensions
 
     def encode(self, texts: list[str], **kwargs: object) -> list[list[float]]:
@@ -130,6 +136,7 @@ async def test_local_sentence_transformer_provider_embeds_with_metadata() -> Non
     assert provider.metadata.cache_namespace == "graph-local-test"
     assert provider.metadata.tokenizer_estimate_method == "sentence-transformers"
     assert provider.metadata.input_kind_sensitive is False
+    assert client.dimension_requests == ["current"]
     assert embeddings == [[1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]
     assert client.requests == [
         (
@@ -141,6 +148,12 @@ async def test_local_sentence_transformer_provider_embeds_with_metadata() -> Non
             },
         )
     ]
+
+
+def test_local_sentence_transformer_dimensions_support_legacy_clients() -> None:
+    client = SimpleNamespace(get_sentence_embedding_dimension=lambda: 3)
+
+    assert embedding_providers._sentence_transformer_dimensions(client) == 3
 
 
 def test_local_sentence_transformer_provider_rejects_dimension_mismatch() -> None:

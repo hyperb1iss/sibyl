@@ -2,12 +2,12 @@
 # Managed by proto - https://moonrepo.dev/proto
 # moon is built-in to proto v0.45+, no plugin needed
 
-proto = "~0.54"
-moon = "2.2.6"
+proto = "~0.60"
+moon = "2.5.2"
 python = "3.13"
 node = "24"
-pnpm = "11.5.2"
-uv = "0.9"
+pnpm = "11.22.0"
+uv = "0.12"
 
 [settings]
 detect-strategy = "prefer-prototools"

@@ -101,7 +101,7 @@ def test_eval_workflow_has_pr_safe_local_embedding_slice() -> None:
     assert '"tools/tests/test_compare_eval_reports.py"' in workflow
     assert '"tools/tests/test_context_pack_eval_script.py"' in workflow
     assert "bench-longmemeval-live-local:" in moon
-    assert "uv run --with sentence-transformers==5.6.0 python benchmarks/longmemeval_live.py" in (
+    assert "uv run --with sentence-transformers==6.0.0 python benchmarks/longmemeval_live.py" in (
         moon
     )
     assert "LONGMEMEVAL_LOCAL_SMOKE_LIMIT:" in workflow
@@ -112,8 +112,8 @@ def test_eval_workflow_has_pr_safe_local_embedding_slice() -> None:
     assert "SIBYL_OPENAI_API_KEY" not in local_job
     assert "secrets.OPENAI_API_KEY" not in local_job
     assert "for i in {1..180}; do" in local_job
-    assert "uv run --with sentence-transformers==5.6.0 sibyld serve" in local_job
-    assert "uv run --with sentence-transformers==5.6.0 sibyld worker" in local_job
+    assert "uv run --with sentence-transformers==6.0.0 sibyld serve" in local_job
+    assert "uv run --with sentence-transformers==6.0.0 sibyld worker" in local_job
     assert "moon run bench-longmemeval-live-local" in local_job
     assert "--metadata comparison_peer=longmemeval-live-smoke" in local_job
     assert "--metadata embedding_variant=local-all-MiniLM-L6-v2" in local_job
