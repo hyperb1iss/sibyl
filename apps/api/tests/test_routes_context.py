@@ -631,7 +631,7 @@ class TestContextPackRoute:
         activity = response.evidence.filters["evidence_composition"]["activity_receipt"]
         assert activity["note_dedupe"] == {
             "mode": "source_kind",
-            "duplicate_source_count": 0,
+            "duplicate_source_count": 2,
             "duplicate_source_kind_count": 1,
         }
         assert activity["additive_note_lane"]["admitted_note_ids"] == [

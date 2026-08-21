@@ -71,6 +71,9 @@ def compose_operational_evidence[ResultT: OperationalEvidenceResult](
     raw_candidates: list[ResultT] = []
     seen_typed_sources: set[tuple[str, ...]] = set()
     seen_ids: set[str] = set()
+    source_only_seen_sources: set[tuple[str, str]] = set()
+    source_only_seen_ids: set[str] = set()
+    source_only_duplicate_count = 0
     excluded_typed_count = 0
     candidate_activity: list[dict[str, Any]] = []
 
@@ -86,6 +89,15 @@ def compose_operational_evidence[ResultT: OperationalEvidenceResult](
                 reason="not_distilled_operational_note",
             )
             continue
+        source_only_key = (
+            result.type,
+            str(result.metadata.get("operational_source_id") or result.id),
+        )
+        if source_only_key in source_only_seen_sources:
+            source_only_duplicate_count += 1
+        elif result.id not in source_only_seen_ids:
+            source_only_seen_sources.add(source_only_key)
+            source_only_seen_ids.add(result.id)
         source_key_parts = [
             result.type,
             str(result.metadata.get("operational_source_id") or result.id),
@@ -296,9 +308,7 @@ def compose_operational_evidence[ResultT: OperationalEvidenceResult](
                     "drop_reason_counts": dict(sorted(drop_reason_counts.items())),
                     "note_dedupe": {
                         "mode": operational_note_dedupe_mode,
-                        "duplicate_source_count": drop_reason_counts[
-                            "duplicate_operational_source"
-                        ],
+                        "duplicate_source_count": source_only_duplicate_count,
                         "duplicate_source_kind_count": drop_reason_counts[
                             "duplicate_operational_source_note_kind"
                         ],

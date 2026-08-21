@@ -306,7 +306,7 @@ def test_source_kind_dedupe_admits_distinct_note_kinds_and_receipts_drops() -> N
     }
     assert receipt["activity_receipt"]["note_dedupe"] == {
         "mode": "source_kind",
-        "duplicate_source_count": 0,
+        "duplicate_source_count": 2,
         "duplicate_source_kind_count": 1,
     }
 
