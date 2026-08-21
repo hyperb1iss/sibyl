@@ -52,6 +52,9 @@ from sibyl_core.retrieval.refinement import MAX_REFINEMENT_QUERIES  # noqa: E402
 PLAN_SCHEMA_VERSION = "sibyl-longmemeval-v2-official-plan-v1"
 RECEIPT_SCHEMA_VERSION = "sibyl-longmemeval-v2-official-receipt-v1"
 ACCOUNTING_SCHEMA_VERSION = "sibyl-eval-accounting-v1"
+EXPERIMENT_IDENTITY_SCHEMA_VERSION = "sibyl-longmemeval-v2-experiment-identity-v1"
+EXPERIMENT_ARM_ROLES = frozenset({"machine", "naive", "render_control", "render_treatment"})
+EXPERIMENT_SUBSTRATES = frozenset({"machine", "naive"})
 LOADED_MEMORY_RUNTIME_KEYS = frozenset(
     {
         "api_token",
@@ -429,6 +432,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     parser.add_argument("--skip-evaluation", action="store_true")
     parser.add_argument("--load-memory-dir", default=None)
     parser.add_argument("--checkpoint-dir", default=None)
+    parser.add_argument("--experiment-id", default="")
+    parser.add_argument("--pass-id", default="")
+    parser.add_argument("--pass-seed", default="")
+    parser.add_argument("--arm-role", choices=sorted(EXPERIMENT_ARM_ROLES), default="")
+    parser.add_argument("--substrate", choices=sorted(EXPERIMENT_SUBSTRATES), default="")
+    parser.add_argument("--preregistration-sha256", default="")
+    parser.add_argument("--max-spend-usd", type=float, default=None)
+    parser.add_argument("--github-repository", default=os.getenv("GITHUB_REPOSITORY", ""))
+    parser.add_argument("--github-workflow-ref", default=os.getenv("GITHUB_WORKFLOW_REF", ""))
+    parser.add_argument("--github-workflow-sha", default=os.getenv("GITHUB_SHA", ""))
+    parser.add_argument("--github-run-id", default=os.getenv("GITHUB_RUN_ID", ""))
+    parser.add_argument(
+        "--github-run-attempt",
+        type=int,
+        default=int(os.getenv("GITHUB_RUN_ATTEMPT", "0")),
+    )
 
     parser.add_argument(
         "--api-url", default=os.getenv("SIBYL_API_URL", "http://127.0.0.1:3334/api")
@@ -605,6 +624,43 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         parser.error("--reuse-existing-project requires --project-id")
     if args.reuse_existing_project and args.checkpoint_dir:
         parser.error("--reuse-existing-project cannot be combined with --checkpoint-dir")
+    experiment_fields = {
+        "--experiment-id": args.experiment_id,
+        "--pass-id": args.pass_id,
+        "--pass-seed": args.pass_seed,
+        "--arm-role": args.arm_role,
+        "--substrate": args.substrate,
+    }
+    populated_experiment_fields = {
+        flag for flag, value in experiment_fields.items() if isinstance(value, str) and value.strip()
+    }
+    if populated_experiment_fields and len(populated_experiment_fields) != len(experiment_fields):
+        missing = sorted(set(experiment_fields) - populated_experiment_fields)
+        parser.error(f"experiment runs require all identity fields; missing {missing}")
+    if args.max_spend_usd is not None and (
+        not math.isfinite(args.max_spend_usd) or args.max_spend_usd <= 0
+    ):
+        parser.error("--max-spend-usd must be finite and positive")
+    if populated_experiment_fields and not (args.plan_only or args.receipt_only):
+        if args.max_spend_usd is None:
+            parser.error("paid experiment runs require --max-spend-usd")
+    if populated_experiment_fields:
+        github_fields = {
+            "--github-repository": args.github_repository,
+            "--github-workflow-ref": args.github_workflow_ref,
+            "--github-workflow-sha": args.github_workflow_sha,
+            "--github-run-id": args.github_run_id,
+        }
+        missing_github = sorted(
+            flag
+            for flag, value in github_fields.items()
+            if not isinstance(value, str) or not value.strip()
+        )
+        if missing_github or args.github_run_attempt < 1:
+            parser.error(
+                "experiment runs require complete GitHub workflow identity; "
+                f"missing {missing_github or ['--github-run-attempt']}"
+            )
     if args.reader_retry_attempts < 1:
         parser.error("--reader-retry-attempts must be positive")
     if args.reader_retry_base_delay_seconds < 0:
@@ -880,6 +936,33 @@ def haystack_path(data_root: Path, tier: str) -> Path:
     return data_root / f"lme_v2_{tier}.json"
 
 
+def evaluator_function_name(raw: object) -> str:
+    """Return the harness evaluator name without its encoded parameters."""
+
+    value = str(raw).strip()
+    return value.split("|", 1)[0].split("(", 1)[0].strip()
+
+
+def experiment_identity(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "experiment_identity_schema_version": EXPERIMENT_IDENTITY_SCHEMA_VERSION,
+        "experiment_id": args.experiment_id or None,
+        "pass_id": args.pass_id or None,
+        "pass_seed": args.pass_seed or None,
+        "arm_role": args.arm_role or None,
+        "substrate": args.substrate or None,
+        "preregistration_sha256": args.preregistration_sha256 or None,
+        "max_spend_usd": args.max_spend_usd,
+        "github_workflow": {
+            "repository": args.github_repository or None,
+            "workflow_ref": args.github_workflow_ref or None,
+            "workflow_sha": args.github_workflow_sha or None,
+            "run_id": args.github_run_id or None,
+            "run_attempt": args.github_run_attempt or None,
+        },
+    }
+
+
 def build_run_plan(
     *,
     args: argparse.Namespace,
@@ -897,13 +980,14 @@ def build_run_plan(
     llm_eval_count = sum(
         1
         for row in selected_questions
-        if str(row["eval_function"]).split("(", 1)[0]
+        if evaluator_function_name(row["eval_function"])
         in {"llm_abstention_checker", "llm_gotchas_checker"}
     )
     return {
         "schema_version": PLAN_SCHEMA_VERSION,
         "run_id": args.run_id,
         "provider_usage_run_id": args.provider_usage_run_id,
+        **experiment_identity(args),
         "runner_provenance": git_provenance(ROOT),
         "domain": args.domain,
         "tier": args.tier,

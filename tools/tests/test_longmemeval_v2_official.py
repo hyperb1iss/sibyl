@@ -789,6 +789,96 @@ def test_provider_usage_run_id_is_unique_per_invocation(tmp_path: Path) -> None:
     assert first.provider_usage_run_id != second.provider_usage_run_id
 
 
+def test_official_runner_binds_complete_experiment_identity(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    args = module.parse_args(
+        [
+            "--data-root",
+            str(tmp_path / "data"),
+            "--domain",
+            "web",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--plan-only",
+            "--experiment-id",
+            "eval-1.3",
+            "--pass-id",
+            "aa-01",
+            "--pass-seed",
+            "1701",
+            "--arm-role",
+            "machine",
+            "--substrate",
+            "machine",
+            "--github-repository",
+            "hyperb1iss/sibyl",
+            "--github-workflow-ref",
+            "hyperb1iss/sibyl/.github/workflows/longmemeval-v2.yml@refs/heads/main",
+            "--github-workflow-sha",
+            "a" * 40,
+            "--github-run-id",
+            "1234",
+            "--github-run-attempt",
+            "2",
+        ]
+    )
+
+    assert module.experiment_identity(args) == {
+        "experiment_identity_schema_version": "sibyl-longmemeval-v2-experiment-identity-v1",
+        "experiment_id": "eval-1.3",
+        "pass_id": "aa-01",
+        "pass_seed": "1701",
+        "arm_role": "machine",
+        "substrate": "machine",
+        "preregistration_sha256": None,
+        "max_spend_usd": None,
+        "github_workflow": {
+            "repository": "hyperb1iss/sibyl",
+            "workflow_ref": (
+                "hyperb1iss/sibyl/.github/workflows/longmemeval-v2.yml@refs/heads/main"
+            ),
+            "workflow_sha": "a" * 40,
+            "run_id": "1234",
+            "run_attempt": 2,
+        },
+    }
+
+
+def test_official_runner_rejects_partial_experiment_identity(tmp_path: Path) -> None:
+    module = _load_runner_module()
+
+    with pytest.raises(SystemExit, match="2"):
+        module.parse_args(
+            [
+                "--data-root",
+                str(tmp_path / "data"),
+                "--domain",
+                "web",
+                "--output-dir",
+                str(tmp_path / "out"),
+                "--experiment-id",
+                "eval-1.3",
+            ]
+        )
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("llm_abstention_checker|answerable=false", "llm_abstention_checker"),
+        ("llm_gotchas_checker(strict=true)", "llm_gotchas_checker"),
+        ("norm_phrase_set_match|separators=,;", "norm_phrase_set_match"),
+    ],
+)
+def test_evaluator_function_name_handles_official_parameter_syntax(
+    raw: str,
+    expected: str,
+) -> None:
+    module = _load_runner_module()
+
+    assert module.evaluator_function_name(raw) == expected
+
+
 def test_provider_accounting_rejects_empty_usage_log(tmp_path: Path) -> None:
     module = _load_runner_module()
     usage_path = tmp_path / "reader.jsonl"
