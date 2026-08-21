@@ -18,6 +18,21 @@ from tools.bench import longmemeval_v2_artifact_bridge as bridge
 from tools.bench import longmemeval_v2_rig as rig
 
 
+@pytest.fixture(autouse=True)
+def _use_synthetic_official_corpus(monkeypatch: pytest.MonkeyPatch) -> None:
+    question_ids = {domain: [f"{domain}-q{index}" for index in range(2)] for domain in rig.DOMAINS}
+    monkeypatch.setattr(
+        rig,
+        "OFFICIAL_SMALL_QUESTION_COUNTS",
+        {domain: len(ids) for domain, ids in question_ids.items()},
+    )
+    monkeypatch.setattr(
+        rig,
+        "OFFICIAL_SMALL_QUESTION_IDS_SHA256",
+        {domain: rig.canonical_sha256(sorted(ids)) for domain, ids in question_ids.items()},
+    )
+
+
 def _write_json(path: Path, payload: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
@@ -500,6 +515,32 @@ def test_bridge_builds_signed_arm_from_official_artifacts(tmp_path: Path) -> Non
     assert arm["provider_usage"]["max_spend_usd_total"] == len(rig.DOMAINS) * 2.0
     assert len(arm["rows"]) == len(rig.DOMAINS) * 2
     assert set(arm["source_artifacts"]) == rig.DOMAINS
+    assert arm["official_question_count_by_domain"] == {
+        "enterprise": 2,
+        "web": 2,
+    }
+
+
+def test_bridge_arm_rejects_resealed_row_truncation(tmp_path: Path) -> None:
+    combined_path, _combined, _paths = _combined_receipt(tmp_path)
+    arm = bridge.build_arm_run(combined_path)
+    arm["rows"] = [
+        next(row for row in arm["rows"] if row["domain"] == domain)
+        for domain in sorted(rig.DOMAINS)
+    ]
+    arm["question_order_sha256"] = rig.canonical_sha256(
+        [[row["domain"], row["question_id"]] for row in arm["rows"]]
+    )
+    arm["arm_run_sha256"] = rig.canonical_sha256(
+        {key: value for key, value in arm.items() if key != "arm_run_sha256"}
+    )
+
+    with pytest.raises(rig.RigInputError, match="official question count differs"):
+        rig.validate_arm(
+            arm,
+            stack_digest=rig.stack_fingerprint(arm["stack"]),
+            side="truncated",
+        )
 
 
 def test_bridge_rejects_incomplete_official_small_selection(tmp_path: Path) -> None:

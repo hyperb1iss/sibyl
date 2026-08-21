@@ -16,6 +16,26 @@ from benchmarks.longmemeval_v2_official_source import (
 from tools.bench import longmemeval_v2_rig as rig
 
 QUESTION_COUNT_PER_DOMAIN = 10
+PINNED_OFFICIAL_SMALL_QUESTION_COUNTS = dict(rig.OFFICIAL_SMALL_QUESTION_COUNTS)
+PINNED_OFFICIAL_SMALL_QUESTION_IDS_SHA256 = dict(rig.OFFICIAL_SMALL_QUESTION_IDS_SHA256)
+
+
+@pytest.fixture(autouse=True)
+def _use_synthetic_official_corpus(monkeypatch: pytest.MonkeyPatch) -> None:
+    question_ids = {
+        domain: [f"{domain}-{index}" for index in range(QUESTION_COUNT_PER_DOMAIN)]
+        for domain in rig.DOMAINS
+    }
+    monkeypatch.setattr(
+        rig,
+        "OFFICIAL_SMALL_QUESTION_COUNTS",
+        {domain: len(ids) for domain, ids in question_ids.items()},
+    )
+    monkeypatch.setattr(
+        rig,
+        "OFFICIAL_SMALL_QUESTION_IDS_SHA256",
+        {domain: rig.canonical_sha256(sorted(ids)) for domain, ids in question_ids.items()},
+    )
 
 
 def _geometry(*, items: int = 8, total_chars: int = 60_000) -> dict[str, int]:
@@ -155,6 +175,8 @@ def _seal_arm(
             "web": {"per_question": f"sha256:{'3' * 64}"},
             "enterprise": {"per_question": f"sha256:{'4' * 64}"},
         },
+        "official_question_count_by_domain": dict(rig.OFFICIAL_SMALL_QUESTION_COUNTS),
+        "official_question_ids_sha256_by_domain": dict(rig.OFFICIAL_SMALL_QUESTION_IDS_SHA256),
         "question_order_sha256": rig.canonical_sha256(
             [[row["domain"], row["question_id"]] for row in arm["rows"]]
         ),
@@ -238,6 +260,17 @@ def test_aa_receipt_sets_three_point_noise_floor() -> None:
     assert receipt["noise_floor_pp"] == rig.INITIAL_NOISE_FLOOR_PP
     assert receipt["paid_benchmark_allowed"] is True
     assert receipt["score_claim_allowed"] is False
+
+
+def test_rig_pins_the_full_official_small_corpus() -> None:
+    assert PINNED_OFFICIAL_SMALL_QUESTION_COUNTS == {
+        "enterprise": 211,
+        "web": 240,
+    }
+    assert PINNED_OFFICIAL_SMALL_QUESTION_IDS_SHA256 == {
+        "enterprise": "sha256:984368308cc83c63401bf5e3d53d33a635b2768d434215a52cc9d5effee66c19",
+        "web": "sha256:bb4183ef7f554ef278b158b910c6e8c1de6d14572dae8d29789dded57a143eeb",
+    }
 
 
 def test_aa_machine_contract_is_independent_of_display_role() -> None:
@@ -475,6 +508,30 @@ def test_paired_pass_rejects_question_order_and_workflow_drift() -> None:
     _reseal_pass(workflow_drift)
     with pytest.raises(rig.RigInputError, match="workflows differ for workflow_ref"):
         rig.validate_pass(workflow_drift)
+
+
+def test_arm_rejects_resealed_official_corpus_truncation() -> None:
+    arm = _seal_arm(
+        _arm("machine", mode="fast", accuracy=0.5),
+        pass_id="truncated",  # noqa: S106
+        seed=92,
+        preregistration_sha256="",
+    )
+    arm["rows"] = [
+        next(row for row in arm["rows"] if row["domain"] == domain)
+        for domain in sorted(rig.DOMAINS)
+    ]
+    arm["question_order_sha256"] = rig.canonical_sha256(
+        [[row["domain"], row["question_id"]] for row in arm["rows"]]
+    )
+    _reseal_arm(arm)
+
+    with pytest.raises(rig.RigInputError, match="official question count differs"):
+        rig.validate_arm(
+            arm,
+            stack_digest=rig.stack_fingerprint(_stack()),
+            side="truncated",
+        )
 
 
 def test_arm_provider_usage_fails_closed_on_overspend() -> None:

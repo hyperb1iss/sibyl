@@ -528,6 +528,11 @@ def _validate_plan(  # noqa: PLR0912, PLR0915
         or raw.get("selected_question_ids_sha256") != raw.get("official_question_ids_sha256")
     ):
         raise BridgeInputError(f"{domain} plan does not cover the complete Small corpus")
+    if (
+        official_question_count != rig.OFFICIAL_SMALL_QUESTION_COUNTS[domain]
+        or raw.get("official_question_ids_sha256") != rig.OFFICIAL_SMALL_QUESTION_IDS_SHA256[domain]
+    ):
+        raise BridgeInputError(f"{domain} plan does not match the pinned Small corpus")
     _nonnegative_int(raw.get("pass_seed"), name=f"{domain} plan.pass_seed")
     maximum_spend = _finite_number(
         raw.get("max_spend_usd"),
@@ -1162,6 +1167,13 @@ def build_arm_run(combined_receipt_path: Path) -> dict[str, Any]:
         "lever_activity": lever_activity,
         "source_artifacts": {
             domain: domain_runs[domain]["source_artifacts"] for domain in sorted(rig.DOMAINS)
+        },
+        "official_question_count_by_domain": {
+            domain: domain_runs[domain]["official_question_count"] for domain in sorted(rig.DOMAINS)
+        },
+        "official_question_ids_sha256_by_domain": {
+            domain: domain_runs[domain]["official_question_ids_sha256"]
+            for domain in sorted(rig.DOMAINS)
         },
         "question_order_sha256": rig.canonical_sha256(
             [[row["domain"], row["question_id"]] for row in rows]

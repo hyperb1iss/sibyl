@@ -32,6 +32,14 @@ RACE_SCHEMA_VERSION = "sibyl-longmemeval-v2-machine-race-receipt-v2"
 RENDER_SCHEMA_VERSION = "sibyl-longmemeval-v2-render-receipt-v2"
 FAILURE_SCHEMA_VERSION = "sibyl-longmemeval-v2-rig-failure-v1"
 DOMAINS = frozenset({"web", "enterprise"})
+OFFICIAL_SMALL_QUESTION_COUNTS = {
+    "enterprise": 211,
+    "web": 240,
+}
+OFFICIAL_SMALL_QUESTION_IDS_SHA256 = {
+    "enterprise": "sha256:984368308cc83c63401bf5e3d53d33a635b2768d434215a52cc9d5effee66c19",
+    "web": "sha256:bb4183ef7f554ef278b158b910c6e8c1de6d14572dae8d29789dded57a143eeb",
+}
 EXPERIMENT_PHASES = frozenset({"aa", "anchor", "race", "render"})
 INITIAL_NOISE_FLOOR_PP = 3.0
 GIT_SHA_LENGTH = 40
@@ -91,6 +99,8 @@ ARM_RUN_KEYS = frozenset(
         "provider_usage",
         "lever_activity",
         "source_artifacts",
+        "official_question_count_by_domain",
+        "official_question_ids_sha256_by_domain",
         "question_order_sha256",
         "arm_run_sha256",
     }
@@ -602,6 +612,29 @@ def validate_arm(  # noqa: PLR0912, PLR0915
                 digest,
                 name=f"{side}.source_artifacts.{domain}.{artifact_name}",
             )
+    official_question_counts = raw.get("official_question_count_by_domain")
+    if not isinstance(official_question_counts, dict) or set(official_question_counts) != DOMAINS:
+        raise RigInputError(f"{side}.official_question_count_by_domain is not exact")
+    official_question_ids_sha256 = raw.get("official_question_ids_sha256_by_domain")
+    if (
+        not isinstance(official_question_ids_sha256, dict)
+        or set(official_question_ids_sha256) != DOMAINS
+    ):
+        raise RigInputError(f"{side}.official_question_ids_sha256_by_domain is not exact")
+    for domain in sorted(DOMAINS):
+        count = _positive_int(
+            official_question_counts[domain],
+            name=f"{side}.official_question_count_by_domain.{domain}",
+        )
+        digest = _sha256_digest(
+            official_question_ids_sha256[domain],
+            name=f"{side}.official_question_ids_sha256_by_domain.{domain}",
+        )
+        if (
+            count != OFFICIAL_SMALL_QUESTION_COUNTS[domain]
+            or digest != OFFICIAL_SMALL_QUESTION_IDS_SHA256[domain]
+        ):
+            raise RigInputError(f"{side} {domain} corpus identity is not the pinned Small corpus")
     rows = raw.get("rows")
     if not isinstance(rows, list) or not rows:
         raise RigInputError(f"{side}.rows is empty")
@@ -643,6 +676,13 @@ def validate_arm(  # noqa: PLR0912, PLR0915
     if {domain for domain, _question_id in seen} != DOMAINS:
         raise RigInputError(f"{side} rows do not cover both Small domains")
     for domain in DOMAINS:
+        domain_question_ids = sorted(
+            question_id for row_domain, question_id in seen if row_domain == domain
+        )
+        if len(domain_question_ids) != official_question_counts[domain]:
+            raise RigInputError(f"{side} {domain} official question count differs from its rows")
+        if canonical_sha256(domain_question_ids) != official_question_ids_sha256[domain]:
+            raise RigInputError(f"{side} {domain} official question digest differs from its rows")
         if not any(
             row["domain"] == domain and row["evidence_exposure_eligible"] for row in validated_rows
         ):
@@ -669,6 +709,8 @@ def validate_arm(  # noqa: PLR0912, PLR0915
         "geometry": geometry,
         "provider_usage": provider_usage,
         "lever_activity": dict(lever_activity),
+        "official_question_count_by_domain": dict(official_question_counts),
+        "official_question_ids_sha256_by_domain": dict(official_question_ids_sha256),
         "rows": validated_rows,
     }
 
