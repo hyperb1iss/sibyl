@@ -135,7 +135,7 @@ jobs:
       - name: "◇ Setup Python"
         uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: "3.13.15"
 
       - name: "◇ Install uv"
         uses: astral-sh/setup-uv@v10.0.1
@@ -187,7 +187,7 @@ jobs:
       - name: "◇ Setup Python"
         uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: "3.13.15"
 
       - name: "△ Extract and validate version from tag"
         id: version
@@ -293,7 +293,7 @@ jobs:
       - name: "◇ Setup Python"
         uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: "3.13.15"
 
       - name: "△ Extract version from tag"
         id: version

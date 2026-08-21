@@ -50,14 +50,34 @@ function Write-Warn    ([string]$msg) { Write-Host "${ELECTRIC_YELLOW}!${RESET} 
 function Write-Err     ([string]$msg) { [Console]::Error.WriteLine("${ERROR_RED}✗${RESET} $msg") }
 function Write-Header  ([string]$msg) { Write-Host "`n${ELECTRIC_PURPLE}${BOLD}═══ $msg ═══${RESET}`n" }
 
-function Test-Command ([string]$name) {
-    [bool](Get-Command $name -ErrorAction SilentlyContinue)
+function Get-ApplicationCommand ([string]$Name) {
+    $extensions = if ($IsWindows) {
+        @($env:PATHEXT -split ';' | Where-Object { $_ })
+    } else {
+        @('')
+    }
+    foreach ($pathDir in ($env:Path -split [IO.Path]::PathSeparator)) {
+        if (-not $pathDir) { continue }
+        $pathDir = $pathDir.Trim().Trim('"')
+        foreach ($extension in $extensions) {
+            $candidate = Join-Path $pathDir "${Name}${extension}"
+            if (-not (Test-Path $candidate -PathType Leaf)) { continue }
+            $command = Get-Command $candidate -CommandType Application -ErrorAction SilentlyContinue
+            if ($command) { return $command }
+        }
+    }
+}
+
+function Test-Command ([string]$Name) {
+    [bool](Get-ApplicationCommand -Name $Name)
 }
 
 function Get-VersionString {
     param([string]$Tool)
     try {
-        $raw = & $Tool --version 2>$null | Select-Object -First 1
+        $command = Get-ApplicationCommand -Name $Tool
+        if (-not $command) { return 'unknown' }
+        $raw = & $command.Source --version 2>$null | Select-Object -First 1
         if ($raw -match '\d+\.\d+\.\d+') { return $Matches[0] }
         return ($raw ?? 'unknown').Trim()
     } catch {
@@ -85,12 +105,26 @@ function Get-RequiredVersion {
     exit 1
 }
 
-function Add-PathOnce ([string]$Dir) {
-    if (-not $Dir -or -not (Test-Path $Dir)) { return }
-    $parts = $env:Path -split [IO.Path]::PathSeparator
-    if ($parts -notcontains $Dir) {
-        $env:Path = "$Dir$([IO.Path]::PathSeparator)$env:Path"
+function Set-ProtoPath ([string]$ProtoHome) {
+    $prefix = @(
+        (Join-Path $ProtoHome 'shims')
+        (Join-Path $ProtoHome 'bin')
+    )
+    $protoPaths = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase
+    )
+    foreach ($dir in $prefix) {
+        [void]$protoPaths.Add([IO.Path]::TrimEndingDirectorySeparator($dir))
     }
+
+    $remaining = foreach ($part in ($env:Path -split [IO.Path]::PathSeparator)) {
+        if (-not $part) { continue }
+        $normalized = [IO.Path]::TrimEndingDirectorySeparator($part)
+        if (-not $protoPaths.Contains($normalized)) {
+            $part
+        }
+    }
+    $env:Path = (@($prefix) + @($remaining)) -join [IO.Path]::PathSeparator
 }
 
 function Install-ExactTool {
@@ -111,7 +145,12 @@ function Install-ExactTool {
         Write-Info "Installing ${CORAL}${Tool}${RESET} v$Expected..."
     }
 
-    & proto install $Tool $Expected --pin global
+    $proto = Get-ApplicationCommand -Name 'proto'
+    if (-not $proto) {
+        Write-Err "proto is not an executable on PATH"
+        exit 1
+    }
+    & $proto.Source install $Tool $Expected --pin global
     if ($LASTEXITCODE -ne 0) {
         Write-Err "$Tool v$Expected installation failed"
         exit 1
@@ -161,8 +200,7 @@ function Install-Proto {
     # Make sure proto's default install dir is on PATH for this session before
     # the existence check — a previous install may not have updated this shell.
     $protoHome = if ($env:PROTO_HOME) { $env:PROTO_HOME } else { Join-Path $HOME '.proto' }
-    Add-PathOnce (Join-Path $protoHome 'shims')
-    Add-PathOnce (Join-Path $protoHome 'bin')
+    Set-ProtoPath -ProtoHome $protoHome
 
     $expected = Get-RequiredVersion -Tool 'proto'
     $current = if (Test-Command proto) { Get-VersionString -Tool 'proto' } else { '' }
@@ -173,7 +211,8 @@ function Install-Proto {
 
     if ($current) {
         Write-Info "Upgrading proto from v$current to v$expected..."
-        & proto upgrade $expected
+        $proto = Get-ApplicationCommand -Name 'proto'
+        & $proto.Source upgrade $expected
         if ($LASTEXITCODE -ne 0) {
             Write-Err "proto v$expected upgrade failed"
             exit 1
@@ -201,8 +240,7 @@ function Install-Proto {
     }
 
     # Refresh PATH for the bin we just dropped on disk.
-    Add-PathOnce (Join-Path $protoHome 'bin')
-    Add-PathOnce (Join-Path $protoHome 'shims')
+    Set-ProtoPath -ProtoHome $protoHome
 
     if (-not (Test-Command proto)) {
         Write-Err "proto installation failed"
@@ -220,7 +258,8 @@ function Install-Proto {
     # $PROFILE by hand. --yes accepts defaults non-interactively.
     Write-Info "Configuring proto shell integration (proto setup)..."
     try {
-        & proto setup --yes 2>&1 | Out-Host
+        $proto = Get-ApplicationCommand -Name 'proto'
+        & $proto.Source setup --yes 2>&1 | Out-Host
     } catch {
         Write-Warn "proto setup reported an issue; PATH may need a new pwsh session to pick up."
     }
@@ -249,8 +288,7 @@ function Install-Toolchain {
     }
 
     $protoHome = if ($env:PROTO_HOME) { $env:PROTO_HOME } else { Join-Path $HOME '.proto' }
-    Add-PathOnce (Join-Path $protoHome 'shims')
-    Add-PathOnce (Join-Path $protoHome 'bin')
+    Set-ProtoPath -ProtoHome $protoHome
 
     Write-Info "Resolving toolchain from ${CORAL}.prototools${RESET}..."
 

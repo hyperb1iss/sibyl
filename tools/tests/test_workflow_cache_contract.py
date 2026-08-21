@@ -11,6 +11,8 @@ WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 TOOLCHAIN_DIGESTS = ("${{ hashFiles('.prototools', '.python-version') }}",)
 SETUP_TOOLCHAIN_ACTION = "moonrepo/setup-toolchain@v0.6.4"
 PROTO_VERSION = "0.60.2"
+NODE_VERSION = "24.19.0"
+PYTHON_VERSION = "3.13.15"
 
 
 def _workflow_paths(workflows_dir: Path) -> list[Path]:
@@ -88,6 +90,30 @@ def test_every_moon_task_hashes_repo_toolchain_selectors() -> None:
     )
 
     assert set(config["implicitInputs"]) == {"/.prototools", "/.python-version"}
+
+
+def test_direct_workflow_toolchains_use_exact_repo_versions() -> None:
+    docs = yaml.safe_load((WORKFLOWS_DIR / "docs.yml").read_text(encoding="utf-8"))
+    publish = yaml.safe_load((WORKFLOWS_DIR / "publish.yml").read_text(encoding="utf-8"))
+
+    docs_setup = next(
+        step
+        for step in docs["jobs"]["build"]["steps"]
+        if step.get("uses") == "actions/setup-node@v7"
+    )
+    assert docs_setup["with"]["node-version"] == NODE_VERSION
+
+    python_setups = [
+        (job_name, step)
+        for job_name, job in publish["jobs"].items()
+        for step in job.get("steps", [])
+        if step.get("uses") == "actions/setup-python@v7"
+    ]
+    assert python_setups
+    for job_name, python_setup in python_setups:
+        assert python_setup["with"]["python-version"] == PYTHON_VERSION, (
+            f"unpinned direct Python setup in publish:{job_name}"
+        )
 
 
 def test_moon_output_cache_discovery_is_structural(tmp_path: Path) -> None:

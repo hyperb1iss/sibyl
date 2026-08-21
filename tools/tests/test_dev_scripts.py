@@ -11,6 +11,7 @@ from shutil import which
 from tools.tests.conftest import REPO_ROOT
 
 EXPECTED_NATIVE_SAMPLE_LINES = 3
+EXPECTED_POWERSHELL_PROTO_PATH_RESETS = 3
 EXPECTED_TOOLCHAIN_VERSIONS = {
     "proto": "0.60.2",
     "moon": "2.5.2",
@@ -107,13 +108,27 @@ install_toolchain
 def test_powershell_setup_reconciles_every_tool_from_exact_repo_pins() -> None:
     script = (REPO_ROOT / "setup-dev.ps1").read_text(encoding="utf-8")
 
-    assert "& proto upgrade $expected" in script
+    assert "& $proto.Source upgrade $expected" in script
     assert "& $installer $expected" in script
-    assert "& proto install $Tool $Expected --pin global" in script
+    assert "& $proto.Source install $Tool $Expected --pin global" in script
     assert "Get-RequiredVersion -Tool 'proto'" in script
     assert "Get-RequiredVersion -Tool 'moon'" in script
     assert "$tools = @('node', 'pnpm', 'python', 'uv')" in script
     assert "Get-RequiredVersion -Tool $tool" in script
+
+
+def test_powershell_setup_uses_proto_path_and_executable_authority() -> None:
+    script = (REPO_ROOT / "setup-dev.ps1").read_text(encoding="utf-8")
+
+    assert '$candidate = Join-Path $pathDir "${Name}${extension}"' in script
+    assert "Get-Command $candidate -CommandType Application" in script
+    assert "$raw = & $command.Source --version" in script
+    assert "[StringComparer]::OrdinalIgnoreCase" in script
+    assert "if (-not $protoPaths.Contains($normalized))" in script
+    assert "$env:Path = (@($prefix) + @($remaining))" in script
+    assert (
+        script.count("Set-ProtoPath -ProtoHome $protoHome") == EXPECTED_POWERSHELL_PROTO_PATH_RESETS
+    )
 
 
 def test_devcontainer_has_one_exact_node_and_pnpm_owner() -> None:
