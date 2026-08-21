@@ -9,6 +9,7 @@ import pytest
 from sibyl.jobs import operational_distillation
 from sibyl_core.ai.llm import ExtractionUsage
 from sibyl_core.ai.operational_distillation import (
+    ACCESSIBILITY_INVENTORY_SCHEMA_VERSION,
     DistilledOperationalNotes,
     RenderV1DistilledOperationalNotes,
     operational_distilled_note_id,
@@ -234,6 +235,15 @@ async def test_render_v1_distillation_admits_absence_and_receipts_profile(
                             content_type="text/plain; profile=accessibility-tree",
                         ),
                     ),
+                    metadata={
+                        "accessibility_inventory": {
+                            "schema_version": ACCESSIBILITY_INVENTORY_SCHEMA_VERSION,
+                            "source": "test-fixture",
+                            "complete": True,
+                            "truncated": False,
+                            "evidence_part_count": 1,
+                        }
+                    },
                 ),
             ),
         }

@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from sibyl_core.ai.llm import LLMSurface
 from sibyl_core.ai.operational_distillation import (
+    ACCESSIBILITY_INVENTORY_SCHEMA_VERSION,
     MAX_OPERATIONAL_NOTE_CHARS,
     OPERATIONAL_NOTE_CATEGORY,
     RENDER_V1_CONTENT_ROLES,
@@ -29,6 +30,18 @@ from sibyl_core.models.experience import (
     OperationalExperience,
     OperationalObservation,
 )
+
+
+def _inventory_metadata(*, part_count: int = 1) -> dict[str, object]:
+    return {
+        "accessibility_inventory": {
+            "schema_version": ACCESSIBILITY_INVENTORY_SCHEMA_VERSION,
+            "source": "test-fixture",
+            "complete": True,
+            "truncated": False,
+            "evidence_part_count": part_count,
+        }
+    }
 
 
 def _experience() -> OperationalExperience:
@@ -59,6 +72,7 @@ def _experience() -> OperationalExperience:
                 metadata={
                     "thought": "The request is still open",
                     "url": "https://example.test/changes/CR123",
+                    **_inventory_metadata(),
                 },
             ),
             OperationalObservation(
@@ -78,6 +92,7 @@ def _experience() -> OperationalExperience:
                         content_type="text/plain; profile=accessibility-tree",
                     ),
                 ),
+                metadata=_inventory_metadata(),
             ),
         ),
     )
@@ -176,7 +191,7 @@ def test_render_v1_digest_receipts_cover_roles_lines_chars_and_truncation() -> N
         profile="render_v1",
     )
 
-    assert "Complete UI inventory for observation 0" in digest
+    assert "Partial UI inventory for observation 0" in digest
     assert receipt["profile"] == "render_v1"
     assert tuple(receipt["roles"]) == RENDER_V1_CONTENT_ROLES
     assert receipt["candidate_line_count"] == 3
@@ -191,16 +206,20 @@ def test_render_v1_digest_receipts_cover_roles_lines_chars_and_truncation() -> N
     }
     assert receipt["within_digest_char_budget"] is True
     assert receipt["within_line_budget"] is True
-    assert receipt["truncated"] is False
+    assert receipt["truncated"] is True
     assert receipt["inventories"][0] == {
         "observation_ordinal": 0,
         "accessibility_tree_count": 1,
         "candidate_line_count": 2,
         "admitted_line_count": 2,
         "candidate_role_counts": {"heading": 1, "gridcell": 1},
-        "complete": True,
-        "truncated": False,
-        "rejection_reasons": [],
+        "complete": False,
+        "truncated": True,
+        "rejection_reasons": ["role_filter"],
+        "source_named_node_count": 5,
+        "excluded_role_count": 3,
+        "excluded_name_count": 0,
+        "excluded_noise_count": 0,
     }
 
 
@@ -220,6 +239,7 @@ def test_render_v1_absence_admits_only_exact_complete_nontruncated_inventory() -
                         content_type="text/plain; profile=accessibility-tree",
                     ),
                 ),
+                metadata=_inventory_metadata(),
             ),
             OperationalObservation(
                 id="partial",
@@ -231,6 +251,7 @@ def test_render_v1_absence_admits_only_exact_complete_nontruncated_inventory() -
                         content_type="text/plain; profile=accessibility-tree",
                     ),
                 ),
+                metadata=_inventory_metadata(),
             ),
         ),
     )
@@ -276,6 +297,80 @@ def test_render_v1_absence_admits_only_exact_complete_nontruncated_inventory() -
         False,
         False,
     ]
+
+
+@pytest.mark.parametrize(
+    ("observation_metadata", "evidence_metadata", "tree", "expected_reason"),
+    (
+        ({}, {}, "heading 'Settings'", "source_inventory_receipt_missing"),
+        (
+            _inventory_metadata() | {"ui_inventory_truncated": True},
+            {},
+            "heading 'Settings'",
+            "source_inventory_truncated",
+        ),
+        (
+            _inventory_metadata(),
+            {"ui_inventory_truncated": True},
+            "heading 'Settings'",
+            "source_inventory_truncated",
+        ),
+        (
+            _inventory_metadata(),
+            {},
+            "heading 'Settings'\nrowheader 'Delete account'",
+            "role_filter",
+        ),
+    ),
+)
+def test_render_v1_absence_rejects_untrusted_or_filtered_inventory(
+    observation_metadata: dict[str, object],
+    evidence_metadata: dict[str, object],
+    tree: str,
+    expected_reason: str,
+) -> None:
+    experience = OperationalExperience(
+        source_id="capture-hostile-absence",
+        goal="Inspect controls",
+        observations=(
+            OperationalObservation(
+                id="hostile",
+                ordinal=0,
+                evidence=(
+                    OperationalEvidencePart(
+                        id="hostile-tree",
+                        content=tree,
+                        content_type="text/plain; profile=accessibility-tree",
+                        metadata=evidence_metadata,
+                    ),
+                ),
+                metadata=observation_metadata,
+            ),
+        ),
+    )
+    notes = RenderV1DistilledOperationalNotes(
+        facts=["Settings were inspected."],
+        observed_absence=[
+            ObservedOperationalAbsence(
+                observation_ordinal=0,
+                statement="No Delete account control was present.",
+            )
+        ],
+    )
+    _digest, digest_receipt = build_operational_experience_digest_with_receipt(
+        experience,
+        profile="render_v1",
+    )
+
+    admitted, receipt = admit_observed_operational_absence(
+        notes,
+        digest_receipt=digest_receipt,
+        profile="render_v1",
+    )
+
+    assert admitted == []
+    assert receipt["admitted_count"] == 0
+    assert receipt["proposals"][0]["reason"] == expected_reason
 
 
 def test_render_v1_projects_only_admitted_absence_with_render_receipts() -> None:

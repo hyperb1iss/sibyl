@@ -17,6 +17,7 @@ from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.models.experience import OperationalExperience, OperationalObservation
 
 OPERATIONAL_NOTE_DISTILLATION_SCHEMA_VERSION = "sibyl-operational-note-distillation-v1"
+ACCESSIBILITY_INVENTORY_SCHEMA_VERSION = "sibyl-accessibility-inventory-v1"
 OPERATIONAL_NOTE_CATEGORY = "operational_distillation"
 MAX_OPERATIONAL_DIGEST_CHARS = 40_000
 MAX_OPERATIONAL_NOTE_CHARS = 1_600
@@ -30,6 +31,7 @@ MAX_OBSERVED_ABSENCE_ITEMS = 5
 OperationalNoteDistillationProfile = Literal["baseline", "render_v1"]
 
 _CONTENT_NODE_RE = re.compile(r"(?:\[\w+\]\s+)?([A-Za-z]+)\s+'([^']{4,200})'")
+_INVENTORY_NODE_RE = re.compile(r"(?:\[\w+\]\s+)?([A-Za-z]+)\s+'([^'\n]*)'")
 _BASELINE_CONTENT_ROLES = {
     "heading": 3,
     "cell": 2,
@@ -565,14 +567,31 @@ def _salient_content_lines_with_receipt(
 ) -> tuple[list[str], dict[str, Any]]:
     scored: list[tuple[int, str, str, bool]] = []
     tree_count = 0
+    source_named_node_count = 0
+    excluded_role_count = 0
+    excluded_name_count = 0
+    excluded_noise_count = 0
     for tree in _observation_accessibility_trees(observation):
         tree_count += 1
-        for match in _CONTENT_NODE_RE.finditer(tree):
+        node_pattern = _INVENTORY_NODE_RE if profile.name == "render_v1" else _CONTENT_NODE_RE
+        for match in node_pattern.finditer(tree):
             role, name = match.group(1), _clean(match.group(2))
+            if profile.name == "render_v1":
+                if not name:
+                    continue
+                source_named_node_count += 1
             weight = profile.content_roles.get(role)
-            if weight is None or len(name) < MIN_CONTENT_NAME_CHARS:
+            if weight is None:
+                excluded_role_count += 1
                 continue
-            if not re.search(r"[A-Za-z0-9]{2}", name) or _CONTENT_NOISE_RE.search(name):
+            if len(name) < MIN_CONTENT_NAME_CHARS:
+                excluded_name_count += 1
+                continue
+            if not re.search(r"[A-Za-z0-9]{2}", name):
+                excluded_name_count += 1
+                continue
+            if _CONTENT_NOISE_RE.search(name):
+                excluded_noise_count += 1
                 continue
             key = f"{role}:{name}".casefold()
             if key in seen:
@@ -588,6 +607,14 @@ def _salient_content_lines_with_receipt(
     candidate_count = len(scored)
     admitted_count = len(admitted)
     rejection_reasons: list[str] = []
+    if profile.name == "render_v1":
+        rejection_reasons.extend(_source_inventory_rejection_reasons(observation, tree_count))
+        if excluded_role_count:
+            rejection_reasons.append("role_filter")
+        if excluded_name_count:
+            rejection_reasons.append("name_filter")
+        if excluded_noise_count:
+            rejection_reasons.append("noise_filter")
     if candidate_count > profile.max_lines_per_observation:
         rejection_reasons.append("observation_line_budget")
     if candidate_count > admitted_count and budget < profile.max_lines_per_observation:
@@ -595,7 +622,7 @@ def _salient_content_lines_with_receipt(
     if any(clipped for _score, _role, _line, clipped in admitted):
         rejection_reasons.append("line_char_budget")
     truncated = bool(rejection_reasons)
-    return [line for _score, _role, line, _clipped in admitted], {
+    receipt = {
         "observation_ordinal": observation.ordinal,
         "accessibility_tree_count": tree_count,
         "candidate_line_count": candidate_count,
@@ -607,6 +634,45 @@ def _salient_content_lines_with_receipt(
         "truncated": truncated,
         "rejection_reasons": rejection_reasons,
     }
+    if profile.name == "render_v1":
+        receipt.update(
+            {
+                "source_named_node_count": source_named_node_count,
+                "excluded_role_count": excluded_role_count,
+                "excluded_name_count": excluded_name_count,
+                "excluded_noise_count": excluded_noise_count,
+            }
+        )
+    return [line for _score, _role, line, _clipped in admitted], receipt
+
+
+def _source_inventory_rejection_reasons(
+    observation: OperationalObservation,
+    accessibility_tree_count: int,
+) -> list[str]:
+    receipt = observation.metadata.get("accessibility_inventory")
+    if not isinstance(receipt, dict):
+        return ["source_inventory_receipt_missing"]
+    reasons: list[str] = []
+    if receipt.get("schema_version") != ACCESSIBILITY_INVENTORY_SCHEMA_VERSION:
+        reasons.append("source_inventory_schema_mismatch")
+    if not isinstance(receipt.get("source"), str) or not receipt["source"].strip():
+        reasons.append("source_inventory_source_missing")
+    known_truncated = bool(observation.metadata.get("ui_inventory_truncated")) or any(
+        bool(evidence.metadata.get("ui_inventory_truncated")) for evidence in observation.evidence
+    )
+    if receipt.get("truncated") is not False or known_truncated:
+        reasons.append("source_inventory_truncated")
+    if receipt.get("complete") is not True:
+        reasons.append("source_inventory_incomplete")
+    expected_parts = receipt.get("evidence_part_count")
+    if (
+        not isinstance(expected_parts, int)
+        or isinstance(expected_parts, bool)
+        or expected_parts != accessibility_tree_count
+    ):
+        reasons.append("source_inventory_part_count_mismatch")
+    return reasons
 
 
 def _distillation_profile(
