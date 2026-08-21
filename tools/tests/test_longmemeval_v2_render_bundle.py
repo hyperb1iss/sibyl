@@ -159,7 +159,7 @@ def test_plain_english_lane_header_is_treatment_only() -> None:
 
 
 def test_reader_char_total_activity_counts_only_new_whole_items() -> None:
-    control = {
+    control: dict[str, object] = {
         "max_total_chars": 60_000,
         "rendered_context_chars": 60_000,
         "items": [
@@ -167,7 +167,7 @@ def test_reader_char_total_activity_counts_only_new_whole_items() -> None:
             {"entity_id": "b", "dropped": False, "truncated": False},
         ],
     }
-    treatment = {
+    treatment: dict[str, object] = {
         "max_total_chars": 400_000,
         "rendered_context_chars": 75_000,
         "items": [
@@ -211,7 +211,9 @@ def test_rig_activity_is_explicit_for_control_and_aggregates_treatment() -> None
     }
 
 
-def test_adapter_renders_bundle_and_emits_explicit_per_lever_activity() -> None:  # noqa: PLR0915
+def test_adapter_renders_bundle_and_emits_explicit_per_lever_activity(  # noqa: PLR0915
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     requests: list[dict[str, object]] = []
     result = {
         "id": "session-1",
@@ -268,10 +270,12 @@ def test_adapter_renders_bundle_and_emits_explicit_per_lever_activity() -> None:
         _method: str,
         path: str,
         *,
-        json: dict[str, object],
-        **_kwargs: object,
+        json: dict[str, object] | None = None,
+        params: dict[str, object] | None = None,
     ) -> dict[str, object]:
         assert path == "/context/pack"
+        assert json is not None
+        assert params is None
         requests.append(json)
         return {
             "sections": [],
@@ -281,7 +285,7 @@ def test_adapter_renders_bundle_and_emits_explicit_per_lever_activity() -> None:
             },
         }
 
-    memory._request_json = request_json
+    monkeypatch.setattr(memory, "_request_json", request_json)
 
     context = memory.query("Which control opens the panel?")
     metadata = memory.post_query_hook(
@@ -298,7 +302,10 @@ def test_adapter_renders_bundle_and_emits_explicit_per_lever_activity() -> None:
     assert "Evidence lane: Retrieved source evidence" in str(context[0]["value"])
     assert "Evidence lane: Action spines" in str(context[1]["value"])
     assert metadata is not None
-    lever_activity = metadata["rig_activity"]["lever_activity"]
+    rig_activity = metadata["rig_activity"]
+    assert isinstance(rig_activity, dict)
+    lever_activity = rig_activity["lever_activity"]
+    assert isinstance(lever_activity, dict)
     assert set(lever_activity) == {
         "reader_char_total",
         "note_kind_dedupe",
@@ -309,7 +316,9 @@ def test_adapter_renders_bundle_and_emits_explicit_per_lever_activity() -> None:
     assert all(value > 0 for value in lever_activity.values())
 
 
-def test_adapter_delegates_note_distillation_to_production_job() -> None:
+def test_adapter_delegates_note_distillation_to_production_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     memory = object.__new__(sibyl_memory.SibylLiveApiMemory)
     memory.note_distillation = True
     memory._pending_note_distillation_job_ids = set()
@@ -337,9 +346,11 @@ def test_adapter_delegates_note_distillation_to_production_job() -> None:
         _method: str,
         path: str,
         *,
-        json: dict[str, object],
+        json: dict[str, object] | None = None,
+        params: dict[str, object] | None = None,
     ) -> dict[str, object]:
         assert path == "/jobs/status"
+        assert params is None
         assert json == {"job_ids": ["note-job-1"]}
         return {
             "jobs": {
@@ -359,7 +370,7 @@ def test_adapter_delegates_note_distillation_to_production_job() -> None:
             }
         }
 
-    memory._request_json = request_json
+    monkeypatch.setattr(memory, "_request_json", request_json)
     memory._drain_note_distillations()
 
     assert memory._pending_note_distillation_job_ids == set()
