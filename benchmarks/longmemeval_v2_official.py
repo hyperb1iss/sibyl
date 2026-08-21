@@ -55,6 +55,16 @@ ACCOUNTING_SCHEMA_VERSION = "sibyl-eval-accounting-v1"
 EXPERIMENT_IDENTITY_SCHEMA_VERSION = "sibyl-longmemeval-v2-experiment-identity-v1"
 EXPERIMENT_ARM_ROLES = frozenset({"machine", "naive", "render_control", "render_treatment"})
 EXPERIMENT_SUBSTRATES = frozenset({"machine", "naive"})
+MILLION_TOKENS = 1_000_000
+EVAL_PRICE_SNAPSHOT = {
+    "reader": {"model": "qwen/qwen3.5-9b", "input_per_million": 0.17, "output_per_million": 0.25},
+    "judge": {"model": "gpt-5.2", "input_per_million": 1.75, "output_per_million": 14.0},
+    "operations": {
+        "model": "gpt-5.4-nano",
+        "input_per_million": 0.20,
+        "output_per_million": 1.25,
+    },
+}
 LOADED_MEMORY_RUNTIME_KEYS = frozenset(
     {
         "api_token",
@@ -182,6 +192,8 @@ def main(argv: list[str] | None = None) -> int:
     print(json.dumps(plan, indent=2, sort_keys=True))  # noqa: T201
     if args.plan_only:
         return 0
+    if args.experiment_id:
+        enforce_spend_reservation(plan)
 
     official_repo = resolve_official_repo(args.official_repo)
     require_pinned_source(official_repo)
@@ -214,6 +226,8 @@ def main(argv: list[str] | None = None) -> int:
         sys.argv = old_argv
     receipt = build_receipt_from_artifacts(args=args, data_root=data_root, output_dir=output_dir)
     write_json(resolve_receipt_output(args, output_dir), receipt)
+    if args.experiment_id:
+        enforce_actual_spend_cap(receipt, max_spend_usd=args.max_spend_usd)
     return 0
 
 
@@ -439,6 +453,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     parser.add_argument("--substrate", choices=sorted(EXPERIMENT_SUBSTRATES), default="")
     parser.add_argument("--preregistration-sha256", default="")
     parser.add_argument("--max-spend-usd", type=float, default=None)
+    parser.add_argument("--spend-contingency-multiplier", type=float, default=1.25)
+    parser.add_argument("--unmetered-provider-reserve-usd", type=float, default=2.0)
+    parser.add_argument("--reader-output-reserve-tokens", type=int, default=1024)
+    parser.add_argument("--evaluator-input-reserve-tokens", type=int, default=2048)
+    parser.add_argument("--evaluator-output-reserve-tokens", type=int, default=512)
+    parser.add_argument("--operations-input-reserve-tokens", type=int, default=10_000)
+    parser.add_argument("--operations-output-reserve-tokens", type=int, default=1024)
     parser.add_argument("--github-repository", default=os.getenv("GITHUB_REPOSITORY", ""))
     parser.add_argument("--github-workflow-ref", default=os.getenv("GITHUB_WORKFLOW_REF", ""))
     parser.add_argument("--github-workflow-sha", default=os.getenv("GITHUB_SHA", ""))
@@ -641,6 +662,28 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         not math.isfinite(args.max_spend_usd) or args.max_spend_usd <= 0
     ):
         parser.error("--max-spend-usd must be finite and positive")
+    if (
+        not math.isfinite(args.spend_contingency_multiplier)
+        or args.spend_contingency_multiplier < 1
+    ):
+        parser.error("--spend-contingency-multiplier must be finite and at least 1")
+    if (
+        not math.isfinite(args.unmetered_provider_reserve_usd)
+        or args.unmetered_provider_reserve_usd < 0
+    ):
+        parser.error("--unmetered-provider-reserve-usd must be finite and non-negative")
+    reserve_token_fields = {
+        "--reader-output-reserve-tokens": args.reader_output_reserve_tokens,
+        "--evaluator-input-reserve-tokens": args.evaluator_input_reserve_tokens,
+        "--evaluator-output-reserve-tokens": args.evaluator_output_reserve_tokens,
+        "--operations-input-reserve-tokens": args.operations_input_reserve_tokens,
+        "--operations-output-reserve-tokens": args.operations_output_reserve_tokens,
+    }
+    invalid_reserve_tokens = sorted(
+        flag for flag, value in reserve_token_fields.items() if value < 1
+    )
+    if invalid_reserve_tokens:
+        parser.error(f"spend reservation token ceilings must be positive: {invalid_reserve_tokens}")
     if populated_experiment_fields and not (args.plan_only or args.receipt_only):
         if args.max_spend_usd is None:
             parser.error("paid experiment runs require --max-spend-usd")
@@ -963,6 +1006,134 @@ def experiment_identity(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _token_cost(tokens: int, price_per_million: float) -> float:
+    return tokens * price_per_million / MILLION_TOKENS
+
+
+def build_spend_reservation(
+    *,
+    args: argparse.Namespace,
+    question_count: int,
+    llm_eval_count: int,
+    required_trajectory_count: int,
+) -> dict[str, object]:
+    """Reserve a bounded paid run before the first provider call."""
+
+    reader_input_tokens = question_count * (
+        math.ceil(args.max_context_total_chars / 4) + 2048
+    )
+    reader_output_tokens = question_count * args.reader_output_reserve_tokens
+    judge_input_tokens = llm_eval_count * args.evaluator_input_reserve_tokens
+    judge_output_tokens = llm_eval_count * args.evaluator_output_reserve_tokens
+    planner_request_count = (
+        question_count * args.retrieval_max_planned_queries
+        if args.retrieval_mode == "accurate"
+        else 0
+    )
+    distillation_request_count = required_trajectory_count if args.note_distillation else 0
+    operations_request_count = planner_request_count + distillation_request_count
+    operations_input_tokens = operations_request_count * args.operations_input_reserve_tokens
+    operations_output_tokens = operations_request_count * args.operations_output_reserve_tokens
+
+    sections = {
+        "reader": {
+            "requests": question_count,
+            "input_tokens": reader_input_tokens,
+            "output_tokens": reader_output_tokens,
+            "estimated_usd": _token_cost(
+                reader_input_tokens,
+                float(EVAL_PRICE_SNAPSHOT["reader"]["input_per_million"]),
+            )
+            + _token_cost(
+                reader_output_tokens,
+                float(EVAL_PRICE_SNAPSHOT["reader"]["output_per_million"]),
+            ),
+        },
+        "judge": {
+            "requests": llm_eval_count,
+            "input_tokens": judge_input_tokens,
+            "output_tokens": judge_output_tokens,
+            "estimated_usd": _token_cost(
+                judge_input_tokens,
+                float(EVAL_PRICE_SNAPSHOT["judge"]["input_per_million"]),
+            )
+            + _token_cost(
+                judge_output_tokens,
+                float(EVAL_PRICE_SNAPSHOT["judge"]["output_per_million"]),
+            ),
+        },
+        "operations": {
+            "requests": operations_request_count,
+            "planner_requests": planner_request_count,
+            "distillation_requests": distillation_request_count,
+            "input_tokens": operations_input_tokens,
+            "output_tokens": operations_output_tokens,
+            "estimated_usd": _token_cost(
+                operations_input_tokens,
+                float(EVAL_PRICE_SNAPSHOT["operations"]["input_per_million"]),
+            )
+            + _token_cost(
+                operations_output_tokens,
+                float(EVAL_PRICE_SNAPSHOT["operations"]["output_per_million"]),
+            ),
+        },
+    }
+    metered_estimate = sum(float(section["estimated_usd"]) for section in sections.values())
+    reserved_total = (
+        metered_estimate * args.spend_contingency_multiplier
+        + args.unmetered_provider_reserve_usd
+    )
+    max_spend = args.max_spend_usd
+    return {
+        "schema_version": "sibyl-longmemeval-v2-spend-reservation-v1",
+        "status": (
+            "PASS" if max_spend is None or reserved_total <= max_spend else "BLOCKED"
+        ),
+        "currency": "USD",
+        "price_snapshot": EVAL_PRICE_SNAPSHOT,
+        "price_snapshot_sources": {
+            "reader": "OpenRouter Qwen3.5-9B provider maximum, verified 2026-08-20",
+            "judge": "OpenAI GPT-5.2 standard API price, verified 2026-08-20",
+            "operations": "OpenAI GPT-5.4 nano standard API price, verified 2026-08-20",
+        },
+        "sections": sections,
+        "metered_estimate_usd": metered_estimate,
+        "contingency_multiplier": args.spend_contingency_multiplier,
+        "unmetered_provider_reserve_usd": args.unmetered_provider_reserve_usd,
+        "reserved_total_usd": reserved_total,
+        "max_spend_usd": max_spend,
+        "within_cap": max_spend is None or reserved_total <= max_spend,
+        "enforcement": (
+            "reserve by explicit token estimate before providers; reject incomplete "
+            "or over-cap provider accounting after the run"
+        ),
+    }
+
+
+def enforce_spend_reservation(plan: dict[str, Any]) -> None:
+    reservation = plan.get("spend_reservation")
+    if not isinstance(reservation, dict) or reservation.get("within_cap") is not True:
+        raise RuntimeError("paid experiment spend reservation exceeds its fixed cap")
+
+
+def enforce_actual_spend_cap(
+    receipt: dict[str, Any],
+    *,
+    max_spend_usd: float | None,
+) -> None:
+    accounting = receipt.get("accounting")
+    cost = accounting.get("cost") if isinstance(accounting, dict) else None
+    if not isinstance(cost, dict) or cost.get("coverage_complete") is not True:
+        raise RuntimeError("paid experiment provider accounting is incomplete")
+    actual = cost.get("provider_reported_total_usd")
+    if not isinstance(actual, int | float) or isinstance(actual, bool) or not math.isfinite(actual):
+        raise RuntimeError("paid experiment provider spend is missing")
+    if max_spend_usd is None or actual > max_spend_usd:
+        raise RuntimeError(
+            f"paid experiment spend {actual:.6f} exceeds fixed cap {max_spend_usd!r}"
+        )
+
+
 def build_run_plan(
     *,
     args: argparse.Namespace,
@@ -982,6 +1153,12 @@ def build_run_plan(
         for row in selected_questions
         if evaluator_function_name(row["eval_function"])
         in {"llm_abstention_checker", "llm_gotchas_checker"}
+    )
+    spend_reservation = build_spend_reservation(
+        args=args,
+        question_count=len(selected_questions),
+        llm_eval_count=llm_eval_count,
+        required_trajectory_count=len(required_trajectories),
     )
     return {
         "schema_version": PLAN_SCHEMA_VERSION,
@@ -1014,6 +1191,7 @@ def build_run_plan(
         ),
         "required_trajectory_count": len(required_trajectories),
         "llm_eval_count": llm_eval_count,
+        "spend_reservation": spend_reservation,
         "reader_model": args.reader_model,
         "reader_base_url": args.reader_base_url,
         "reader_max_concurrent_requests": args.reader_max_concurrent_requests,

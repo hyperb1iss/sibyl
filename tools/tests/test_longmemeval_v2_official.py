@@ -879,6 +879,93 @@ def test_evaluator_function_name_handles_official_parameter_syntax(
     assert module.evaluator_function_name(raw) == expected
 
 
+def test_spend_reservation_counts_reader_judge_and_operations(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    question_count = 4
+    llm_eval_count = 3
+    args = module.parse_args(
+        [
+            "--data-root",
+            str(tmp_path / "data"),
+            "--domain",
+            "web",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--plan-only",
+            "--max-spend-usd",
+            "10",
+            "--retrieval-mode",
+            "accurate",
+            "--retrieval-max-planned-queries",
+            "2",
+            "--note-distillation",
+        ]
+    )
+
+    reservation = module.build_spend_reservation(
+        args=args,
+        question_count=question_count,
+        llm_eval_count=llm_eval_count,
+        required_trajectory_count=5,
+    )
+
+    assert reservation["status"] == "PASS"
+    assert reservation["within_cap"] is True
+    assert reservation["sections"]["reader"]["requests"] == question_count
+    assert reservation["sections"]["judge"]["requests"] == llm_eval_count
+    assert reservation["sections"]["operations"] == {
+        "requests": 13,
+        "planner_requests": 8,
+        "distillation_requests": 5,
+        "input_tokens": 130_000,
+        "output_tokens": 13_312,
+        "estimated_usd": pytest.approx(0.04264),
+    }
+
+
+def test_spend_reservation_and_actual_accounting_fail_closed(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    args = module.parse_args(
+        [
+            "--data-root",
+            str(tmp_path / "data"),
+            "--domain",
+            "web",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--plan-only",
+            "--max-spend-usd",
+            "0.01",
+        ]
+    )
+    blocked = module.build_spend_reservation(
+        args=args,
+        question_count=1,
+        llm_eval_count=1,
+        required_trajectory_count=1,
+    )
+
+    with pytest.raises(RuntimeError, match="exceeds its fixed cap"):
+        module.enforce_spend_reservation({"spend_reservation": blocked})
+    with pytest.raises(RuntimeError, match="accounting is incomplete"):
+        module.enforce_actual_spend_cap(
+            {"accounting": {"cost": {"coverage_complete": False}}},
+            max_spend_usd=1.0,
+        )
+    with pytest.raises(RuntimeError, match="exceeds fixed cap"):
+        module.enforce_actual_spend_cap(
+            {
+                "accounting": {
+                    "cost": {
+                        "coverage_complete": True,
+                        "provider_reported_total_usd": 1.01,
+                    }
+                }
+            },
+            max_spend_usd=1.0,
+        )
+
+
 def test_provider_accounting_rejects_empty_usage_log(tmp_path: Path) -> None:
     module = _load_runner_module()
     usage_path = tmp_path / "reader.jsonl"
