@@ -19,11 +19,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 HTTP_STATUS_OK = 200
 HTTP_STATUS_SERVER_ERROR = 500
+GIT_SHA_LENGTH = 40
 MIN_COMBINED_SOURCE_METRICS = 2
+REPOSITORY_SEGMENT_COUNT = 2
 ROOT = Path(__file__).resolve().parents[1]
 CORE_SRC = ROOT / "packages" / "python" / "sibyl-core" / "src"
 if str(ROOT) not in sys.path:
@@ -55,10 +57,11 @@ from sibyl_core.evals.longmemeval_v2 import (  # noqa: E402
 )
 from sibyl_core.retrieval.refinement import MAX_REFINEMENT_QUERIES  # noqa: E402
 
-PLAN_SCHEMA_VERSION = "sibyl-longmemeval-v2-official-plan-v1"
+PLAN_SCHEMA_VERSION = "sibyl-longmemeval-v2-official-plan-v2"
 RECEIPT_SCHEMA_VERSION = "sibyl-longmemeval-v2-official-receipt-v1"
 ACCOUNTING_SCHEMA_VERSION = "sibyl-eval-accounting-v1"
-EXPERIMENT_IDENTITY_SCHEMA_VERSION = "sibyl-longmemeval-v2-experiment-identity-v1"
+EXPERIMENT_IDENTITY_SCHEMA_VERSION = "sibyl-longmemeval-v2-experiment-identity-v2"
+EXECUTION_IDENTITY_SCHEMA_VERSION = "sibyl-longmemeval-v2-execution-identity-v1"
 EXPERIMENT_ARM_ROLES = frozenset({"machine", "naive", "render_control", "render_treatment"})
 EXPERIMENT_PHASES = frozenset({"aa", "anchor", "race", "render"})
 EXPERIMENT_SUBSTRATES = frozenset({"machine", "naive"})
@@ -438,7 +441,188 @@ def is_malformed_evaluator_judgement(exc: ValueError) -> bool:
     )
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PLR0915
+def _required_git_output(root: Path, *args: str) -> str:
+    git = shutil.which("git")
+    if git is None:
+        raise ValueError("local experiment identity requires git")
+    try:
+        result = subprocess.run(  # noqa: S603 - resolved git with fixed argument shapes.
+            [git, *args],
+            check=True,
+            capture_output=True,
+            cwd=root,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ValueError("local experiment identity could not inspect the Sibyl checkout") from exc
+    return result.stdout.strip()
+
+
+def _repository_from_remote(remote: str) -> str:
+    value = remote.strip().removesuffix(".git")
+    if value.startswith("git@github.com:"):
+        value = value.removeprefix("git@github.com:")
+    else:
+        parsed = urlparse(value)
+        if parsed.hostname != "github.com":
+            raise ValueError("local experiment origin must be a GitHub repository")
+        value = parsed.path.lstrip("/")
+    if len(value.split("/")) != REPOSITORY_SEGMENT_COUNT or any(
+        not part for part in value.split("/")
+    ):
+        raise ValueError("local experiment origin has no canonical owner/repository identity")
+    return value
+
+
+def _validate_execution_common(
+    *,
+    repository: str,
+    ref: str,
+    sha: str,
+    run_id: str,
+    run_attempt: int,
+) -> None:
+    if repository != repository.strip() or len(repository.split("/")) != REPOSITORY_SEGMENT_COUNT:
+        raise ValueError("execution repository must be a canonical owner/repository slug")
+    if not ref.startswith("refs/heads/") or ref != ref.strip():
+        raise ValueError("execution ref must be a full refs/heads/* ref")
+    if len(sha) != GIT_SHA_LENGTH or any(character not in "0123456789abcdef" for character in sha):
+        raise ValueError("execution SHA must be a full lowercase Git SHA")
+    if not run_id or run_id != run_id.strip():
+        raise ValueError("execution run ID must be a non-empty canonical value")
+    if isinstance(run_attempt, bool) or run_attempt < 1:
+        raise ValueError("execution run attempt must be a positive integer")
+
+
+def resolve_execution_identity(  # noqa: PLR0912
+    args: argparse.Namespace,
+    *,
+    root: Path,
+) -> dict[str, object]:
+    """Return an exact public execution identity for a paid experiment."""
+
+    if os.getenv("GITHUB_ACTIONS") == "true":
+        if args.execution_kind not in {"", "github"}:
+            raise ValueError("GitHub Actions experiment runs require GitHub execution identity")
+        local_fields = {
+            "--local-repository": args.local_repository,
+            "--local-ref": args.local_ref,
+            "--local-sha": args.local_sha,
+            "--local-run-id": args.local_run_id,
+            "--local-run-attempt": args.local_run_attempt,
+        }
+        if any(value for value in local_fields.values()):
+            raise ValueError("GitHub execution identity cannot include local execution fields")
+        github_environment = {
+            "repository": os.getenv("GITHUB_REPOSITORY", ""),
+            "ref": os.getenv("GITHUB_REF", ""),
+            "sha": os.getenv("GITHUB_SHA", ""),
+            "run_id": os.getenv("GITHUB_RUN_ID", ""),
+            "workflow_ref": os.getenv("GITHUB_WORKFLOW_REF", ""),
+        }
+        github_arguments = {
+            "repository": args.github_repository,
+            "ref": args.github_ref,
+            "sha": args.github_workflow_sha,
+            "run_id": args.github_run_id,
+            "workflow_ref": args.github_workflow_ref,
+        }
+        missing = sorted(key for key, value in github_environment.items() if not value)
+        if missing or int(os.getenv("GITHUB_RUN_ATTEMPT", "0")) < 1:
+            raise ValueError(f"GitHub execution environment is incomplete: {missing}")
+        if github_arguments != github_environment or args.github_run_attempt != int(
+            os.environ["GITHUB_RUN_ATTEMPT"]
+        ):
+            raise ValueError("GitHub execution arguments differ from the Actions environment")
+        _validate_execution_common(
+            repository=github_environment["repository"],
+            ref=github_environment["ref"],
+            sha=github_environment["sha"],
+            run_id=github_environment["run_id"],
+            run_attempt=args.github_run_attempt,
+        )
+        workflow_ref = github_environment["workflow_ref"]
+        if not workflow_ref.startswith(
+            f"{github_environment['repository']}/.github/workflows/"
+        ) or not workflow_ref.endswith(f"@{github_environment['ref']}"):
+            raise ValueError("GitHub workflow ref does not bind the repository ref")
+        return {
+            "schema_version": EXECUTION_IDENTITY_SCHEMA_VERSION,
+            "kind": "github",
+            **github_environment,
+            "run_attempt": args.github_run_attempt,
+        }
+
+    if args.execution_kind != "local":
+        raise ValueError("local experiment runs require --execution-kind local")
+    if any(
+        (
+            args.github_repository,
+            args.github_ref,
+            args.github_workflow_ref,
+            args.github_workflow_sha,
+            args.github_run_id,
+            args.github_run_attempt,
+        )
+    ):
+        raise ValueError("local execution identity cannot include GitHub execution fields")
+    local_fields = {
+        "--local-repository": args.local_repository,
+        "--local-ref": args.local_ref,
+        "--local-sha": args.local_sha,
+        "--local-run-id": args.local_run_id,
+    }
+    missing = sorted(flag for flag, value in local_fields.items() if not value)
+    if missing or args.local_run_attempt < 1:
+        raise ValueError(
+            f"local execution identity is incomplete: {missing or ['--local-run-attempt']}"
+        )
+    _validate_execution_common(
+        repository=args.local_repository,
+        ref=args.local_ref,
+        sha=args.local_sha,
+        run_id=args.local_run_id,
+        run_attempt=args.local_run_attempt,
+    )
+    try:
+        normalized_run_id = str(UUID(args.local_run_id))
+    except ValueError as exc:
+        raise ValueError("local execution run ID must be a canonical UUID") from exc
+    if normalized_run_id != args.local_run_id:
+        raise ValueError("local execution run ID must be a canonical UUID")
+    actual_repository = _repository_from_remote(
+        _required_git_output(root, "remote", "get-url", "origin")
+    )
+    actual_ref = _required_git_output(root, "symbolic-ref", "-q", "HEAD")
+    actual_sha = _required_git_output(root, "rev-parse", "HEAD")
+    remote_ref = actual_ref.replace("refs/heads/", "refs/remotes/origin/", 1)
+    try:
+        remote_sha = _required_git_output(root, "rev-parse", "--verify", remote_ref)
+    except ValueError as exc:
+        raise ValueError("local execution ref has no exact origin tracking ref") from exc
+    status = _required_git_output(root, "status", "--porcelain")
+    if status:
+        raise ValueError("local experiment runs require a clean Sibyl checkout")
+    if (args.local_repository, args.local_ref, args.local_sha) != (
+        actual_repository,
+        actual_ref,
+        actual_sha,
+    ):
+        raise ValueError("local execution repository, ref, or SHA differs from the checkout")
+    if remote_sha != actual_sha:
+        raise ValueError("local execution SHA differs from its origin tracking ref")
+    return {
+        "schema_version": EXECUTION_IDENTITY_SCHEMA_VERSION,
+        "kind": "local",
+        "repository": actual_repository,
+        "ref": actual_ref,
+        "sha": actual_sha,
+        "run_id": args.local_run_id,
+        "run_attempt": args.local_run_attempt,
+    }
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PLR0912, PLR0915
     parser = argparse.ArgumentParser(description="Run LongMemEval-V2 with Sibyl memory.")
     parser.add_argument("--official-repo", default=os.getenv("LME_V2_OFFICIAL_REPO"))
     parser.add_argument("--data-root", required=True)
@@ -476,6 +660,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     parser.add_argument("--operations-input-reserve-tokens", type=int, default=10_000)
     parser.add_argument("--operations-output-reserve-tokens", type=int, default=1024)
     parser.add_argument("--github-repository", default=os.getenv("GITHUB_REPOSITORY", ""))
+    parser.add_argument("--github-ref", default=os.getenv("GITHUB_REF", ""))
     parser.add_argument("--github-workflow-ref", default=os.getenv("GITHUB_WORKFLOW_REF", ""))
     parser.add_argument("--github-workflow-sha", default=os.getenv("GITHUB_SHA", ""))
     parser.add_argument("--github-run-id", default=os.getenv("GITHUB_RUN_ID", ""))
@@ -484,6 +669,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         type=int,
         default=int(os.getenv("GITHUB_RUN_ATTEMPT", "0")),
     )
+    parser.add_argument("--execution-kind", choices=["github", "local"], default="")
+    parser.add_argument("--local-repository", default="")
+    parser.add_argument("--local-ref", default="")
+    parser.add_argument("--local-sha", default="")
+    parser.add_argument("--local-run-id", default="")
+    parser.add_argument("--local-run-attempt", type=int, default=0)
 
     parser.add_argument(
         "--api-url", default=os.getenv("SIBYL_API_URL", "http://127.0.0.1:3334/api")
@@ -742,23 +933,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     if populated_experiment_fields and not (args.plan_only or args.receipt_only):
         if args.max_spend_usd is None:
             parser.error("paid experiment runs require --max-spend-usd")
+    args.execution = None
     if populated_experiment_fields:
-        github_fields = {
-            "--github-repository": args.github_repository,
-            "--github-workflow-ref": args.github_workflow_ref,
-            "--github-workflow-sha": args.github_workflow_sha,
-            "--github-run-id": args.github_run_id,
-        }
-        missing_github = sorted(
-            flag
-            for flag, value in github_fields.items()
-            if not isinstance(value, str) or not value.strip()
-        )
-        if missing_github or args.github_run_attempt < 1:
-            parser.error(
-                "experiment runs require complete GitHub workflow identity; "
-                f"missing {missing_github or ['--github-run-attempt']}"
-            )
+        try:
+            args.execution = resolve_execution_identity(args, root=ROOT)
+        except ValueError as exc:
+            parser.error(str(exc))
     if args.reader_retry_attempts < 1:
         parser.error("--reader-retry-attempts must be positive")
     if args.reader_retry_base_delay_seconds < 0:
@@ -1069,13 +1249,7 @@ def experiment_identity(args: argparse.Namespace) -> dict[str, object]:
         "substrate": args.substrate or None,
         "preregistration_sha256": args.preregistration_sha256 or None,
         "max_spend_usd": args.max_spend_usd,
-        "github_workflow": {
-            "repository": args.github_repository or None,
-            "workflow_ref": args.github_workflow_ref or None,
-            "workflow_sha": args.github_workflow_sha or None,
-            "run_id": args.github_run_id or None,
-            "run_attempt": args.github_run_attempt or None,
-        },
+        "execution": args.execution,
     }
 
 

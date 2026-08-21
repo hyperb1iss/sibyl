@@ -10,6 +10,7 @@ import math
 import sys
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -23,8 +24,9 @@ from benchmarks.longmemeval_v2_official_source import (  # noqa: E402
     OFFICIAL_REPO_URL,
 )
 
-ARM_RUN_SCHEMA_VERSION = "sibyl-longmemeval-v2-arm-run-v1"
-RUN_PAIR_SCHEMA_VERSION = "sibyl-longmemeval-v2-paired-pass-v2"
+ARM_RUN_SCHEMA_VERSION = "sibyl-longmemeval-v2-arm-run-v2"
+RUN_PAIR_SCHEMA_VERSION = "sibyl-longmemeval-v2-paired-pass-v3"
+EXECUTION_IDENTITY_SCHEMA_VERSION = "sibyl-longmemeval-v2-execution-identity-v1"
 PREREGISTRATION_SCHEMA_VERSION = "sibyl-longmemeval-v2-preregistration-v2"
 AA_SCHEMA_VERSION = "sibyl-longmemeval-v2-aa-receipt-v2"
 ANCHOR_SCHEMA_VERSION = "sibyl-longmemeval-v2-anchor-receipt-v2"
@@ -43,6 +45,7 @@ OFFICIAL_SMALL_QUESTION_IDS_SHA256 = {
 EXPERIMENT_PHASES = frozenset({"aa", "anchor", "race", "render"})
 INITIAL_NOISE_FLOOR_PP = 3.0
 GIT_SHA_LENGTH = 40
+REPOSITORY_SEGMENT_COUNT = 2
 INITIAL_AA_PASS_COUNT = 3
 EXTENDED_AA_PASS_COUNT = 5
 PAIRED_PASS_COUNT = 3
@@ -91,7 +94,7 @@ ARM_RUN_KEYS = frozenset(
         "name",
         "substrate",
         "preregistration_sha256",
-        "workflow",
+        "execution",
         "stack",
         "configuration",
         "geometry",
@@ -133,7 +136,11 @@ ARM_ROW_KEYS = frozenset(
         "activity",
     }
 )
-WORKFLOW_KEYS = frozenset({"repository", "workflow_ref", "workflow_sha", "run_id", "run_attempt"})
+EXECUTION_COMMON_KEYS = frozenset(
+    {"schema_version", "kind", "repository", "ref", "sha", "run_id", "run_attempt"}
+)
+GITHUB_EXECUTION_KEYS = frozenset(EXECUTION_COMMON_KEYS | {"workflow_ref"})
+LOCAL_EXECUTION_KEYS = EXECUTION_COMMON_KEYS
 PROVIDER_USAGE_KEYS = frozenset(
     {
         "complete",
@@ -434,20 +441,53 @@ def _validate_geometry(raw: object, *, name: str) -> dict[str, int]:
     return {key: _positive_int(raw.get(key), name=f"{name}.{key}") for key in sorted(GEOMETRY_KEYS)}
 
 
-def _validate_workflow(raw: object, *, name: str) -> dict[str, Any]:
+def validate_execution_identity(raw: object, *, name: str) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise RigInputError(f"{name} is missing")
-    _require_exact_keys(raw, WORKFLOW_KEYS, name=name)
-    workflow = dict(raw)
-    for key in ("repository", "workflow_ref", "run_id"):
-        _nonempty_string(workflow.get(key), name=f"{name}.{key}")
-    workflow_sha = _nonempty_string(workflow.get("workflow_sha"), name=f"{name}.workflow_sha")
-    if len(workflow_sha) != GIT_SHA_LENGTH or any(
-        character not in "0123456789abcdef" for character in workflow_sha
+    kind = _nonempty_string(raw.get("kind"), name=f"{name}.kind")
+    if kind not in {"github", "local"}:
+        raise RigInputError(f"{name}.kind is invalid")
+    _require_exact_keys(
+        raw,
+        GITHUB_EXECUTION_KEYS if kind == "github" else LOCAL_EXECUTION_KEYS,
+        name=name,
+    )
+    if raw.get("schema_version") != EXECUTION_IDENTITY_SCHEMA_VERSION:
+        raise RigInputError(f"{name}.schema_version is invalid")
+    execution = dict(raw)
+    repository = _nonempty_string(execution.get("repository"), name=f"{name}.repository")
+    if (
+        repository != execution["repository"]
+        or len(repository.split("/")) != REPOSITORY_SEGMENT_COUNT
     ):
-        raise RigInputError(f"{name}.workflow_sha must be a full lowercase Git SHA")
-    _positive_int(workflow.get("run_attempt"), name=f"{name}.run_attempt")
-    return workflow
+        raise RigInputError(f"{name}.repository must be a canonical owner/repository slug")
+    ref = _nonempty_string(execution.get("ref"), name=f"{name}.ref")
+    if ref != execution["ref"] or not ref.startswith("refs/heads/"):
+        raise RigInputError(f"{name}.ref must be a full refs/heads/* ref")
+    sha = _nonempty_string(execution.get("sha"), name=f"{name}.sha")
+    if len(sha) != GIT_SHA_LENGTH or any(character not in "0123456789abcdef" for character in sha):
+        raise RigInputError(f"{name}.sha must be a full lowercase Git SHA")
+    run_id = _nonempty_string(execution.get("run_id"), name=f"{name}.run_id")
+    if run_id != execution["run_id"]:
+        raise RigInputError(f"{name}.run_id must use its canonical value")
+    if kind == "local":
+        try:
+            normalized_run_id = str(UUID(run_id))
+        except ValueError as exc:
+            raise RigInputError(f"{name}.run_id must be a canonical UUID") from exc
+        if normalized_run_id != run_id:
+            raise RigInputError(f"{name}.run_id must be a canonical UUID")
+    else:
+        workflow_ref = _nonempty_string(
+            execution.get("workflow_ref"),
+            name=f"{name}.workflow_ref",
+        )
+        if not workflow_ref.startswith(
+            f"{repository}/.github/workflows/"
+        ) or not workflow_ref.endswith(f"@{ref}"):
+            raise RigInputError(f"{name}.workflow_ref does not bind its repository ref")
+    _positive_int(execution.get("run_attempt"), name=f"{name}.run_attempt")
+    return execution
 
 
 def _validate_provider_usage(raw: object, *, name: str) -> dict[str, Any]:
@@ -573,7 +613,7 @@ def validate_arm(  # noqa: PLR0912, PLR0915
             raw.get("preregistration_sha256"),
             name=f"{side}.preregistration_sha256",
         )
-    workflow = _validate_workflow(raw.get("workflow"), name=f"{side}.workflow")
+    execution = validate_execution_identity(raw.get("execution"), name=f"{side}.execution")
     configuration = raw.get("configuration")
     if not isinstance(configuration, dict) or not configuration:
         raise RigInputError(f"{side}.configuration is missing")
@@ -584,8 +624,8 @@ def validate_arm(  # noqa: PLR0912, PLR0915
     if substrate == "machine" and mode == "naive":
         raise RigInputError(f"{side} machine substrate uses naive retrieval")
     arm_stack = validate_stack(raw.get("stack"))
-    if workflow["workflow_sha"] != arm_stack["sibyl_commit"]:
-        raise RigInputError(f"{side} workflow SHA does not match the arm stack")
+    if execution["sha"] != arm_stack["sibyl_commit"]:
+        raise RigInputError(f"{side} execution SHA does not match the arm stack")
     if stack_fingerprint(arm_stack) != stack_digest:
         raise RigInputError(f"{side} arm stack differs from the paired pass")
     provider_usage = _validate_provider_usage(raw.get("provider_usage"), name=side)
@@ -708,7 +748,7 @@ def validate_arm(  # noqa: PLR0912, PLR0915
         "name": arm_name,
         "substrate": substrate,
         "preregistration_sha256": preregistration_sha256,
-        "workflow": workflow,
+        "execution": execution,
         "configuration": dict(configuration),
         "geometry": geometry,
         "provider_usage": provider_usage,
@@ -763,11 +803,15 @@ def validate_pass(raw: object) -> dict[str, Any]:  # noqa: PLR0912
             raise RigInputError(f"{side} arm seed differs from the paired pass")
         if arm["preregistration_sha256"] != preregistration_sha256:
             raise RigInputError(f"{side} arm preregistration differs from the paired pass")
-    for field in ("repository", "workflow_ref", "workflow_sha"):
-        if left["workflow"][field] != right["workflow"][field]:
-            raise RigInputError(f"paired arm workflows differ for {field}")
-    if left["workflow"]["run_id"] == right["workflow"]["run_id"]:
-        raise RigInputError("paired arms reused one workflow run ID")
+    for field in ("kind", "repository", "ref", "sha"):
+        if left["execution"][field] != right["execution"][field]:
+            raise RigInputError(f"paired arm executions differ for {field}")
+    if left["execution"]["kind"] == "github" and (
+        left["execution"]["workflow_ref"] != right["execution"]["workflow_ref"]
+    ):
+        raise RigInputError("paired arm executions differ for workflow_ref")
+    if left["execution"]["run_id"] == right["execution"]["run_id"]:
+        raise RigInputError("paired arms reused one execution run ID")
     left_ids = [(row["domain"], row["question_id"]) for row in left["rows"]]
     right_ids = [(row["domain"], row["question_id"]) for row in right["rows"]]
     if left_ids != right_ids:
