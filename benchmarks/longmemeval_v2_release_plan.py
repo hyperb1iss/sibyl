@@ -571,8 +571,12 @@ def _require_expansion(
     return expected_runs
 
 
-def require_stage_plan(raw: object, *, check_checkout: bool = True) -> list[dict[str, Any]]:
-    """Reconstruct and validate every sealed input before execution."""
+def _require_stage_plan(
+    raw: object,
+    *,
+    check_checkout: bool,
+    claimed_root: bool,
+) -> list[dict[str, Any]]:
     reject_score_bearing_keys(raw, name="stage plan")
     if not isinstance(raw, dict):
         raise StagePlanError("stage plan must be a JSON object")
@@ -626,7 +630,9 @@ def require_stage_plan(raw: object, *, check_checkout: bool = True) -> list[dict
     output_root = Path(output_value).resolve()
     if output_value != str(output_root):
         raise StagePlanError("stage output root is not canonical")
-    if output_root.exists():
+    if claimed_root and (not output_root.is_dir() or output_root.is_symlink()):
+        raise StagePlanError("claimed stage output root is missing or non-canonical")
+    if not claimed_root and output_root.exists():
         raise StagePlanError("stage output root is no longer fresh")
     if raw.get("max_workers_cap") != MAX_WORKERS_CAP:
         raise StagePlanError("stage plan changed the fixed worker cap")
@@ -641,6 +647,12 @@ def require_stage_plan(raw: object, *, check_checkout: bool = True) -> list[dict
         memory_bindings=memory_bindings,
         output_root=output_root,
     )
+
+
+def require_stage_plan(raw: object, *, check_checkout: bool = True) -> list[dict[str, Any]]:
+    """Reconstruct and validate every sealed input before claiming its fresh root."""
+
+    return _require_stage_plan(raw, check_checkout=check_checkout, claimed_root=False)
 
 
 def write_stage_plan(path: Path, payload: dict[str, Any]) -> None:
