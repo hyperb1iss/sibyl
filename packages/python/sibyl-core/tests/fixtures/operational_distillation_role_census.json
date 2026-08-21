@@ -1,0 +1,49 @@
+{
+  "schema_version": "sibyl-operational-distillation-role-census-v1",
+  "source": {
+    "dataset": "xiaowu0162/longmemeval-v2",
+    "file": "trajectories.jsonl",
+    "revision": "f152293e235517d504809563c833d7190b8c713b",
+    "linked_etag": "363cec9a8e87aa8d9101ce4e600aadbf7031d674056ebe4f969e8424abc5f3c6"
+  },
+  "corpus": {
+    "first_trajectory_id": "00332982",
+    "last_trajectory_id": "ffcfdab5",
+    "trajectory_count": 1870,
+    "state_count": 48609,
+    "accessibility_tree_count": 48609
+  },
+  "matcher": "(?:\\[\\w+\\]\\s+)?([A-Za-z]+)\\s+'([^']{4,200})'",
+  "baseline_role_counts": {
+    "heading": 166749,
+    "cell": 0,
+    "gridcell": 3427249,
+    "columnheader": 238785,
+    "rowheader": 4748,
+    "StaticText": 4627661,
+    "link": 1450759,
+    "option": 1096274,
+    "listitem": 45021,
+    "article": 84
+  },
+  "selection": {
+    "minimum_share": 0.001,
+    "selected_roles": [
+      "heading",
+      "gridcell",
+      "columnheader",
+      "StaticText",
+      "link",
+      "option",
+      "listitem"
+    ],
+    "selected_match_count": 11052498,
+    "total_match_count": 11057330,
+    "coverage": 0.999563,
+    "excluded_roles": {
+      "cell": "no matches",
+      "rowheader": "0.000429 of profile matches",
+      "article": "0.000008 of profile matches"
+    }
+  }
+}

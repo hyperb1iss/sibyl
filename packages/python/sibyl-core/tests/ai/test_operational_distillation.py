@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -7,9 +10,16 @@ from sibyl_core.ai.llm import LLMSurface
 from sibyl_core.ai.operational_distillation import (
     MAX_OPERATIONAL_NOTE_CHARS,
     OPERATIONAL_NOTE_CATEGORY,
+    RENDER_V1_CONTENT_ROLES,
     DistilledOperationalNotes,
+    ObservedOperationalAbsence,
+    RenderV1DistilledOperationalNotes,
+    admit_observed_operational_absence,
     build_operational_experience_digest,
+    build_operational_experience_digest_with_receipt,
+    build_operational_note_distillation_prompt,
     build_operational_note_entities,
+    build_operational_note_entities_with_receipt,
     operational_distilled_note_id,
     operational_note_distiller,
 )
@@ -40,6 +50,7 @@ def _experience() -> OperationalExperience:
                             "RootWebArea 'Change requests'\n"
                             "heading 'Change request CR123'\n"
                             "cell 'Status Open'\n"
+                            "gridcell 'Status Open'\n"
                             "navigation 'Primary'"
                         ),
                         content_type="text/plain; profile=accessibility-tree",
@@ -59,7 +70,11 @@ def _experience() -> OperationalExperience:
                 evidence=(
                     OperationalEvidencePart(
                         id="tree-1",
-                        content="RootWebArea 'Change requests'\ncell 'Status Closed'",
+                        content=(
+                            "RootWebArea 'Change requests'\n"
+                            "cell 'Status Closed'\n"
+                            "gridcell 'Status Closed'"
+                        ),
                         content_type="text/plain; profile=accessibility-tree",
                     ),
                 ),
@@ -123,3 +138,194 @@ def test_note_distiller_uses_configured_memory_surface() -> None:
 
     assert extractor.surface is LLMSurface.MEMORY
     assert extractor.max_tokens == 512
+    assert extractor.output_type is DistilledOperationalNotes
+    assert set(DistilledOperationalNotes.model_json_schema()["properties"]) == {
+        "workflow",
+        "facts",
+        "gotchas",
+    }
+    assert operational_note_distiller(profile="render_v1").output_type is (
+        RenderV1DistilledOperationalNotes
+    )
+
+
+def test_render_v1_roles_are_selected_from_the_checked_in_full_corpus_census() -> None:
+    census_path = (
+        Path(__file__).parents[1] / "fixtures" / "operational_distillation_role_census.json"
+    )
+    census = json.loads(census_path.read_text())
+    counts = census["baseline_role_counts"]
+    total = sum(counts.values())
+    threshold = census["selection"]["minimum_share"]
+    selected = tuple(role for role in counts if counts[role] / total >= threshold)
+
+    assert census["corpus"] == {
+        "first_trajectory_id": "00332982",
+        "last_trajectory_id": "ffcfdab5",
+        "trajectory_count": 1870,
+        "state_count": 48609,
+        "accessibility_tree_count": 48609,
+    }
+    assert selected == RENDER_V1_CONTENT_ROLES
+    assert census["selection"]["coverage"] == pytest.approx(0.999563, abs=0.000001)
+
+
+def test_render_v1_digest_receipts_cover_roles_lines_chars_and_truncation() -> None:
+    digest, receipt = build_operational_experience_digest_with_receipt(
+        _experience(),
+        profile="render_v1",
+    )
+
+    assert "Complete UI inventory for observation 0" in digest
+    assert receipt["profile"] == "render_v1"
+    assert tuple(receipt["roles"]) == RENDER_V1_CONTENT_ROLES
+    assert receipt["candidate_line_count"] == 3
+    assert receipt["admitted_line_count"] == 3
+    assert receipt["content_chars"] > 0
+    assert receipt["digest_chars"] == len(digest)
+    assert receipt["configured_budget"] == {
+        "digest_chars": 40_000,
+        "lines_per_observation": 8,
+        "lines_total": 160,
+        "line_chars": 140,
+    }
+    assert receipt["within_digest_char_budget"] is True
+    assert receipt["within_line_budget"] is True
+    assert receipt["truncated"] is False
+    assert receipt["inventories"][0] == {
+        "observation_ordinal": 0,
+        "accessibility_tree_count": 1,
+        "candidate_line_count": 2,
+        "admitted_line_count": 2,
+        "candidate_role_counts": {"heading": 1, "gridcell": 1},
+        "complete": True,
+        "truncated": False,
+        "rejection_reasons": [],
+    }
+
+
+def test_render_v1_absence_admits_only_exact_complete_nontruncated_inventory() -> None:
+    crowded_lines = "\n".join(f"StaticText 'item {index}'" for index in range(9))
+    experience = OperationalExperience(
+        source_id="capture-absence",
+        goal="Inspect controls",
+        observations=(
+            OperationalObservation(
+                id="complete",
+                ordinal=2,
+                evidence=(
+                    OperationalEvidencePart(
+                        id="complete-tree",
+                        content="heading 'Settings'\nlink 'Advanced settings'",
+                        content_type="text/plain; profile=accessibility-tree",
+                    ),
+                ),
+            ),
+            OperationalObservation(
+                id="partial",
+                ordinal=7,
+                evidence=(
+                    OperationalEvidencePart(
+                        id="partial-tree",
+                        content=crowded_lines,
+                        content_type="text/plain; profile=accessibility-tree",
+                    ),
+                ),
+            ),
+        ),
+    )
+    notes = RenderV1DistilledOperationalNotes(
+        facts=["Settings were inspected."],
+        observed_absence=[
+            ObservedOperationalAbsence(
+                observation_ordinal=2,
+                statement="No Delete account link was present.",
+            ),
+            ObservedOperationalAbsence(
+                observation_ordinal=7,
+                statement="No tenth item was present.",
+            ),
+            ObservedOperationalAbsence(
+                observation_ordinal=99,
+                statement="No Save button was present.",
+            ),
+        ],
+    )
+    _digest, digest_receipt = build_operational_experience_digest_with_receipt(
+        experience,
+        profile="render_v1",
+    )
+
+    admitted, receipt = admit_observed_operational_absence(
+        notes,
+        digest_receipt=digest_receipt,
+        profile="render_v1",
+    )
+
+    assert [item.observation_ordinal for item in admitted] == [2]
+    assert receipt["proposed_count"] == 3
+    assert receipt["admitted_count"] == 1
+    assert receipt["rejected_count"] == 2
+    assert [item["reason"] for item in receipt["proposals"]] == [
+        "complete_inventory",
+        "observation_line_budget",
+        "observation_not_found",
+    ]
+    assert [item["inventory_complete"] for item in receipt["proposals"]] == [
+        True,
+        False,
+        False,
+    ]
+
+
+def test_render_v1_projects_only_admitted_absence_with_render_receipts() -> None:
+    notes = RenderV1DistilledOperationalNotes(
+        facts=["The Status field accepts Closed."],
+        observed_absence=[
+            ObservedOperationalAbsence(
+                observation_ordinal=0,
+                statement="No Delete button was present.",
+            )
+        ],
+    )
+
+    entities, receipt = build_operational_note_entities_with_receipt(
+        notes,
+        experience=_experience(),
+        organization_id="org-1",
+        created_by="user-1",
+        content_hash="content-hash",
+        profile="render_v1",
+        admitted_observed_absence=notes.observed_absence,
+    )
+
+    assert [entity.metadata["note_kind"] for entity in entities] == [
+        "facts",
+        "observed_absence",
+    ]
+    assert entities[1].metadata["operational_note_distillation_profile"] == "render_v1"
+    assert "Observation 0: No Delete button was present." in entities[1].content
+    assert receipt["note_count"] == 2
+    assert receipt["lines"] > 0
+    assert receipt["chars"] == sum(len(entity.content) for entity in entities)
+    assert receipt["truncated"] is False
+    assert receipt["max_note_chars"] == MAX_OPERATIONAL_NOTE_CHARS
+    assert receipt["within_note_char_budget"] is True
+
+
+def test_baseline_prompt_and_digest_omit_treatment_surface() -> None:
+    digest = build_operational_experience_digest(_experience())
+    prompt = build_operational_note_distillation_prompt(digest)
+
+    assert "Complete UI inventory" not in digest
+    assert "observed_absence" not in prompt
+    assert (
+        "operational_note_distillation_profile"
+        not in build_operational_note_entities(
+            DistilledOperationalNotes(facts=["fact"]),
+            experience=_experience(),
+            organization_id="org-1",
+            created_by="user-1",
+            content_hash="content-hash",
+        )[0].metadata
+    )
