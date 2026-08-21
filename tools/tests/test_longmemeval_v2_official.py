@@ -952,6 +952,105 @@ def test_spend_reservation_and_actual_accounting_fail_closed(tmp_path: Path) -> 
             {"accounting": {"cost": {"coverage_complete": False}}},
             max_spend_usd=1.0,
         )
+
+
+def test_official_runner_derives_bound_rig_rows(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    data_root = tmp_path / "data"
+    output_dir = tmp_path / "out"
+    _write_dataset(data_root)
+    (data_root / "trajectories.jsonl").write_text(
+        "\n".join(
+            json.dumps(
+                _trajectory(
+                    trajectory_id,
+                    tree=("The priority filter." if trajectory_id == "t1" else "button Other"),
+                )
+            )
+            for trajectory_id in ["t1", "t2", "t3"]
+        ),
+        encoding="utf-8",
+    )
+    runtime_dir = output_dir / "runtime_inputs"
+    runtime_dir.mkdir(parents=True)
+    (runtime_dir / "haystack.json").write_text(
+        json.dumps({"q-enterprise": ["t1", "t2"]}),
+        encoding="utf-8",
+    )
+    (output_dir / "per_question.jsonl").write_text(
+        json.dumps(
+            {
+                "question_id": "q-enterprise",
+                "score_bool": True,
+                "memory_context": [
+                    {
+                        "type": "text",
+                        "value": (
+                            "Retrieved evidence rank 1\nTrajectory: t1\n"
+                            "State 0\nThe priority filter."
+                        ),
+                    }
+                ],
+                "memory_post_query_metadata": {
+                    "context_status": "complete",
+                    "rig_activity": {
+                        "mode": "fast",
+                        "activity_events": 1,
+                        "lever_activity": {},
+                    },
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    path = module.write_rig_rows(
+        data_root=data_root,
+        output_dir=output_dir,
+        domain="enterprise",
+    )
+
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "question_id": "q-enterprise",
+        "status": "valid",
+        "context_status": "complete",
+        "evidence_exposure_eligible": True,
+        "evidence_exposed": True,
+        "activity": {"mode": "fast", "activity_events": 1, "lever_activity": {}},
+    }
+
+
+def test_official_runner_refuses_to_infer_missing_rig_activity(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    data_root = tmp_path / "data"
+    output_dir = tmp_path / "out"
+    _write_dataset(data_root)
+    runtime_dir = output_dir / "runtime_inputs"
+    runtime_dir.mkdir(parents=True)
+    (runtime_dir / "haystack.json").write_text(
+        json.dumps({"q-enterprise": ["t1", "t2"]}),
+        encoding="utf-8",
+    )
+    (output_dir / "per_question.jsonl").write_text(
+        json.dumps(
+            {
+                "question_id": "q-enterprise",
+                "score_bool": True,
+                "memory_context": [],
+                "memory_post_query_metadata": {"context_status": "empty"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="no explicit activity receipt"):
+        module.write_rig_rows(
+            data_root=data_root,
+            output_dir=output_dir,
+            domain="enterprise",
+        )
     with pytest.raises(RuntimeError, match="exceeds fixed cap"):
         module.enforce_actual_spend_cap(
             {

@@ -36,6 +36,12 @@ from benchmarks.longmemeval_v2_official_source import (  # noqa: E402
     official_source_record,
     require_pinned_source,
 )
+from benchmarks.longmemeval_v2_diagnostics import (  # noqa: E402
+    DEFAULT_MAX_RANK,
+    build_question_trace,
+    build_state_text_index,
+    load_jsonl_by_id,
+)
 from benchmarks.provider_usage import (  # noqa: E402
     AsyncUsageTrackingClient,
     ProviderUsageRecorder,
@@ -224,6 +230,8 @@ def main(argv: list[str] | None = None) -> int:
         official_harness.main()
     finally:
         sys.argv = old_argv
+    if args.experiment_id:
+        write_rig_rows(data_root=data_root, output_dir=output_dir, domain=args.domain)
     receipt = build_receipt_from_artifacts(args=args, data_root=data_root, output_dir=output_dir)
     write_json(resolve_receipt_output(args, output_dir), receipt)
     if args.experiment_id:
@@ -1134,6 +1142,82 @@ def enforce_actual_spend_cap(
         )
 
 
+def write_rig_rows(*, data_root: Path, output_dir: Path, domain: str) -> Path:
+    """Derive score-blind exposure and explicit activity from official bytes."""
+
+    questions = load_jsonl_by_id(data_root / "questions.jsonl")
+    haystack = _load_json_if_exists(output_dir / "runtime_inputs" / "haystack.json")
+    required_trajectory_ids = {
+        str(trajectory_id)
+        for trajectory_ids in haystack.values()
+        if isinstance(trajectory_ids, list)
+        for trajectory_id in trajectory_ids
+    }
+    trajectories = load_jsonl_by_id(
+        data_root / "trajectories.jsonl",
+        required_ids=required_trajectory_ids,
+    )
+    state_text_index = build_state_text_index(trajectories)
+    result_rows = _load_jsonl_if_exists(output_dir / "per_question.jsonl")
+    rig_rows: list[dict[str, object]] = []
+    for index, result in enumerate(result_rows):
+        question_id = str(result.get("question_id") or "").strip()
+        question = questions.get(question_id)
+        trajectory_ids = haystack.get(question_id)
+        if question is None or not isinstance(trajectory_ids, list):
+            raise RuntimeError(f"rig row {index} cannot resolve question {question_id!r}")
+        trace = build_question_trace(
+            domain=domain,
+            result=result,
+            question=question,
+            haystack_ids=[str(item) for item in trajectory_ids],
+            state_text_index=state_text_index,
+            max_rank=DEFAULT_MAX_RANK,
+        )
+        context_status = _nested_value(result, "memory_post_query_metadata", "context_status")
+        activity = _nested_value(result, "memory_post_query_metadata", "rig_activity")
+        if context_status not in {"complete", "empty"}:
+            raise RuntimeError(f"rig row {question_id!r} has invalid context status")
+        if not isinstance(activity, dict):
+            raise RuntimeError(f"rig row {question_id!r} has no explicit activity receipt")
+        activity_events = activity.get("activity_events")
+        if (
+            not isinstance(activity_events, int)
+            or isinstance(activity_events, bool)
+            or activity_events < 1
+        ):
+            raise RuntimeError(f"rig row {question_id!r} has no positive activity events")
+        if not isinstance(activity.get("mode"), str) or not activity["mode"].strip():
+            raise RuntimeError(f"rig row {question_id!r} has no activity mode")
+        if not isinstance(result.get("score_bool"), bool):
+            raise RuntimeError(f"rig row {question_id!r} has no valid official score")
+        exposure_eligible = bool(
+            trace["exact_evidence_eligible"] and trace["exact_evidence_source_complete"]
+        )
+        rig_rows.append(
+            {
+                "question_id": question_id,
+                "status": "valid",
+                "context_status": context_status,
+                "evidence_exposure_eligible": exposure_eligible,
+                "evidence_exposed": (
+                    bool(trace["metrics"]["exact_context_recall_at_k"])
+                    if exposure_eligible
+                    else None
+                ),
+                "activity": activity,
+            }
+        )
+    if not rig_rows:
+        raise RuntimeError("official experiment produced no rig rows")
+    output_path = output_dir / "rig_rows.jsonl"
+    output_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in rig_rows),
+        encoding="utf-8",
+    )
+    return output_path
+
+
 def build_run_plan(
     *,
     args: argparse.Namespace,
@@ -1546,6 +1630,7 @@ def load_receipt_source_runs(
         run_args_path = source_dir / "run_args.json"
         aggregated_path = source_dir / "aggregated_metrics.json"
         per_question_path = source_dir / "per_question.jsonl"
+        rig_rows_path = source_dir / "rig_rows.jsonl"
         runtime_dir = source_dir / "runtime_inputs"
         runtime_questions_path = runtime_dir / "questions.json"
         runtime_haystack_path = runtime_dir / "haystack.json"
@@ -1577,6 +1662,7 @@ def load_receipt_source_runs(
                 "run_args_path": run_args_path,
                 "aggregated_path": aggregated_path,
                 "per_question_path": per_question_path,
+                "rig_rows_path": rig_rows_path,
                 "runtime_questions_path": runtime_questions_path,
                 "runtime_haystack_path": runtime_haystack_path,
                 "memory_config_path": memory_config_path,
@@ -1618,6 +1704,7 @@ def build_source_runs_receipt(
             "run_args": artifact_path_record(source_run["run_args_path"]),
             "aggregated_metrics": artifact_path_record(source_run["aggregated_path"]),
             "per_question": artifact_path_record(source_run["per_question_path"]),
+            "rig_rows": artifact_path_record(source_run["rig_rows_path"]),
             "runtime_inputs": {
                 "questions": artifact_path_record(source_run["runtime_questions_path"]),
                 "haystack": artifact_path_record(source_run["runtime_haystack_path"]),
@@ -2315,6 +2402,7 @@ def build_artifact_receipt(
         "judge_provider_usage": output_dir / "provider_usage" / "judge.jsonl",
         "aggregated_metrics": aggregated_path,
         "per_question": per_question_path,
+        "rig_rows": output_dir / "rig_rows.jsonl",
         "run_args": run_args_path,
         "metric_overview": metric_overview_path,
         "combined_metrics": combined_metrics_path,
