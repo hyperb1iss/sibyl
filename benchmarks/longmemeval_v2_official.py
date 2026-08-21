@@ -45,6 +45,10 @@ from benchmarks.longmemeval_v2_official_source import (  # noqa: E402
     official_source_record,
     require_pinned_source,
 )
+from benchmarks.longmemeval_v2_memory.sibyl_memory import (  # noqa: E402
+    MEMORY_MANIFEST_SCHEMA_VERSION,
+    SibylLiveApiMemory,
+)
 from benchmarks.longmemeval_v2_diagnostics import (  # noqa: E402
     DEFAULT_MAX_RANK,
     build_question_trace,
@@ -213,6 +217,12 @@ def main(argv: list[str] | None = None) -> int:
     write_json(output_dir / "longmemeval_v2_official_plan.json", plan)
     print(json.dumps(plan, indent=2, sort_keys=True))  # noqa: T201
     if args.plan_only:
+        attest_loaded_memory_project(
+            args=args,
+            data_root=data_root,
+            selected_haystack=selected_haystack,
+            memory_config=memory_config,
+        )
         return 0
     if args.experiment_id:
         enforce_spend_reservation(plan)
@@ -1138,6 +1148,80 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
                 requested_config=config,
             )
     return config
+
+
+def _loaded_memory_attestation_dir(args: argparse.Namespace) -> Path | None:
+    if args.load_memory_dir:
+        return Path(args.load_memory_dir).expanduser().resolve()
+    if not args.checkpoint_dir:
+        return None
+    checkpoint = Path(args.checkpoint_dir).expanduser().resolve()
+    if not (checkpoint / "memory_config.json").is_file():
+        return None
+    manifest_path = checkpoint / "memory_manifest.json"
+    if not manifest_path.is_file():
+        raise RuntimeError(f"Loaded checkpoint has no completed memory manifest: {checkpoint}")
+    return checkpoint
+
+
+def attest_loaded_memory_project(
+    *,
+    args: argparse.Namespace,
+    data_root: Path,
+    selected_haystack: dict[str, list[str]],
+    memory_config: dict[str, object],
+) -> dict[str, object] | None:
+    """Read-audit a completed saved project during plan-only execution."""
+
+    memory_dir = _loaded_memory_attestation_dir(args)
+    if memory_dir is None:
+        return None
+    manifest_path = memory_dir / "memory_manifest.json"
+    manifest = _load_json_if_exists(manifest_path)
+    params = memory_config.get("memory_params")
+    if not isinstance(params, dict):
+        raise RuntimeError("Loaded memory config has no memory_params")
+    project_id = params.get("project_id")
+    run_id = params.get("run_id")
+    if (
+        manifest.get("schema_version") != MEMORY_MANIFEST_SCHEMA_VERSION
+        or manifest.get("ingest_finalized") is not True
+        or manifest.get("longmemeval_v2_domain") != args.domain
+        or manifest.get("project_id") != project_id
+        or manifest.get("run_id") != run_id
+        or params.get("longmemeval_v2_domain") != args.domain
+        or not isinstance(project_id, str)
+        or not project_id
+        or not isinstance(run_id, str)
+        or not run_id
+    ):
+        raise RuntimeError("Loaded memory manifest identity is incomplete or inconsistent")
+    expected_ids = {
+        str(trajectory_id)
+        for trajectory_ids in selected_haystack.values()
+        for trajectory_id in trajectory_ids
+    }
+    if not expected_ids:
+        raise RuntimeError("Loaded memory attestation has no required trajectories")
+    trajectories_by_id = load_jsonl_by_id(
+        data_root / "trajectories.jsonl",
+        required_ids=expected_ids,
+    )
+    if set(trajectories_by_id) != expected_ids:
+        raise RuntimeError("Loaded memory attestation cannot resolve every trajectory")
+    receipt = SibylLiveApiMemory.attest_existing(
+        params,
+        expected_trajectory_ids=expected_ids,
+        trajectories=[trajectories_by_id[item] for item in sorted(expected_ids)],
+    )
+    if (
+        receipt.get("project_id") != project_id
+        or receipt.get("run_id") != run_id
+        or receipt.get("longmemeval_v2_domain") != args.domain
+        or receipt.get("content_audit", {}).get("status") != "verified"
+    ):
+        raise RuntimeError("Loaded memory remote attestation is incomplete or inconsistent")
+    return receipt
 
 
 def install_memory_credentials(args: argparse.Namespace) -> None:

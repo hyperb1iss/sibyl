@@ -230,6 +230,7 @@ RETRYABLE_HTTP_STATUS_CODES = frozenset({408, 409, 425, 429})
 SAVED_MEMORY_SECRET_KEYS = frozenset(
     {"api_token", "api_credentials_path", "refresh_token", "email", "password"}
 )
+READ_ONLY_ATTESTATION_PARAM = "read_only_attestation"
 LOADED_MEMORY_RUNTIME_KEYS = frozenset(
     {
         *SAVED_MEMORY_SECRET_KEYS,
@@ -3578,6 +3579,28 @@ class SibylLiveApiMemory(Memory):
         return memory
 
     @classmethod
+    def attest_existing(
+        cls,
+        memory_params: dict[str, object],
+        *,
+        expected_trajectory_ids: Iterable[str],
+        trajectories: Iterable[dict[str, object]],
+    ) -> dict[str, object]:
+        """Verify a saved remote project without permitting benchmark writes."""
+
+        effective_params = dict(memory_params)
+        effective_params[READ_ONLY_ATTESTATION_PARAM] = True
+        memory = cls.attach_existing(
+            effective_params,
+            expected_trajectory_ids=expected_trajectory_ids,
+            trajectories=trajectories,
+        )
+        try:
+            return dict(memory.attached_project_receipt)
+        finally:
+            memory._client.close()
+
+    @classmethod
     def prepare_existing(
         cls,
         memory_params: dict[str, object],
@@ -3605,7 +3628,7 @@ class SibylLiveApiMemory(Memory):
         memory_params = {
             key: value
             for key, value in self.memory_params.items()
-            if key not in SAVED_MEMORY_SECRET_KEYS | {"checkpoint_dir"}
+            if key not in SAVED_MEMORY_SECRET_KEYS | {"checkpoint_dir", READ_ONLY_ATTESTATION_PARAM}
         }
         memory_params.update(
             {
@@ -4143,6 +4166,10 @@ class SibylLiveApiMemory(Memory):
 
     def insert(self, trajectory: dict[str, object]) -> None:
         trajectory_id = _stripped_str(trajectory.get("id"))
+        trajectory_domain = _stripped_str(trajectory.get("domain"))
+        domain = getattr(self, "longmemeval_v2_domain", "")
+        if domain and trajectory_domain != domain:
+            raise ValueError("trajectory domain differs from the configured LongMemEval-V2 domain")
         action_spine = build_action_spine(trajectory)
         if action_spine is not None:
             action_spines = getattr(self, "_action_spines", None)
@@ -4488,6 +4515,7 @@ class SibylLiveApiMemory(Memory):
             )
         observed: set[str] = set()
         run_ids: set[str] = set()
+        domains: set[str] = set()
         observed_chunk_counts: Counter[tuple[str, int]] = Counter()
         entity_count = 0
         expected_entity_count = 0
@@ -4517,8 +4545,13 @@ class SibylLiveApiMemory(Memory):
                 run_id = _stripped_str(metadata.get("longmemeval_v2_run_id"))
                 if not trajectory_id or not run_id:
                     raise RuntimeError("attached project contains unbound session entities")
+                domain = _stripped_str(metadata.get("longmemeval_v2_domain"))
+                if self.longmemeval_v2_domain and domain != self.longmemeval_v2_domain:
+                    raise RuntimeError("attached project contains a foreign domain session")
                 observed.add(trajectory_id)
                 run_ids.add(run_id)
+                if domain:
+                    domains.add(domain)
                 entity_count += 1
                 if trajectory_id in expected:
                     expected_entity_count += 1
@@ -4615,6 +4648,7 @@ class SibylLiveApiMemory(Memory):
         receipt = {
             "project_id": self.project_id,
             "run_id": self.run_id,
+            "longmemeval_v2_domain": self.longmemeval_v2_domain,
             "session_entity_count": entity_count,
             "expected_session_entity_count": expected_entity_count,
             "expected_trajectory_count": len(expected),
@@ -4635,6 +4669,7 @@ class SibylLiveApiMemory(Memory):
             "expected": expected,
             "observed": observed,
             "run_ids": run_ids,
+            "domains": domains,
             "missing_chunk_keys": missing_chunk_keys,
             "unexpected_chunk_keys": unexpected_chunk_keys,
             "duplicate_chunk_keys": duplicate_chunk_keys,
@@ -4710,6 +4745,8 @@ class SibylLiveApiMemory(Memory):
                 f"attached project run identity mismatch: expected {self.run_id!r}, "
                 f"found {sorted(run_ids)}"
             )
+        if self.longmemeval_v2_domain and set(inventory["domains"]) != {self.longmemeval_v2_domain}:
+            raise RuntimeError("attached project domain identity mismatch")
 
     def _complete_attached_project_receipt(
         self,
@@ -6284,6 +6321,10 @@ class SibylLiveApiMemory(Memory):
             self._cli_auth = cli_auth
             self._client.headers.update({"Authorization": f"Bearer {cli_token}"})
             return
+        if _param_bool(memory_params, READ_ONLY_ATTESTATION_PARAM, False):
+            raise RuntimeError(
+                "read-only saved-memory attestation requires existing token credentials"
+            )
         email = _param_str(memory_params, "email", "") or os.environ.get("LME_SIBYL_EMAIL", "")
         password = _param_str(memory_params, "password", "") or os.environ.get(
             "LME_SIBYL_PASSWORD",
@@ -6350,6 +6391,13 @@ class SibylLiveApiMemory(Memory):
 
     def _create_project(self) -> str:
         sequence = next(_INSTANCE_COUNTER)
+        domain = getattr(self, "longmemeval_v2_domain", "")
+        metadata = {
+            "longmemeval_v2_run_id": self.run_id,
+            "capture_surface": "longmemeval-v2-official",
+        }
+        if domain:
+            metadata["longmemeval_v2_domain"] = domain
         response = self._request_json(
             "POST",
             "/entities",
@@ -6361,10 +6409,7 @@ class SibylLiveApiMemory(Memory):
                 "entity_type": "project",
                 "skip_conflicts": True,
                 "defer_embeddings": self.defer_embeddings,
-                "metadata": {
-                    "longmemeval_v2_run_id": self.run_id,
-                    "capture_surface": "longmemeval-v2-official",
-                },
+                "metadata": metadata,
             },
         )
         project_id = _stripped_str(response.get("id"))
@@ -6391,6 +6436,13 @@ class SibylLiveApiMemory(Memory):
         if response.get("id") != self.project_id or response.get("entity_type") != "project":
             msg = f"Saved Sibyl project identity mismatch for {self.project_id!r}"
             raise RuntimeError(msg)
+        if self.longmemeval_v2_domain:
+            metadata = _flatten_operational_metadata(response.get("metadata"))
+            if (
+                metadata.get("longmemeval_v2_run_id") != self.run_id
+                or metadata.get("longmemeval_v2_domain") != self.longmemeval_v2_domain
+            ):
+                raise RuntimeError(f"Saved Sibyl project metadata mismatch for {self.project_id!r}")
 
     def _request_json(
         self,

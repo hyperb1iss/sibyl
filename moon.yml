@@ -827,6 +827,7 @@ tasks:
       tools/tests/test_longmemeval_v2_artifact_bridge.py
       tools/tests/test_longmemeval_v2_validation_slice.py
       tools/tests/test_longmemeval_v2_validation_slice_v2.py
+      tools/tests/test_longmemeval_v2_release_attestation.py
       tools/tests/test_longmemeval_v2_release_contract.py
       tools/tests/test_longmemeval_v2_release_memory.py
       tools/tests/test_longmemeval_v2_release_runner.py -v
