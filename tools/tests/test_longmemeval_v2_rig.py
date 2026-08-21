@@ -131,6 +131,10 @@ def _seed_for(pass_id: str) -> int:
     return int(rig.canonical_sha256(pass_id)[7:15], 16)
 
 
+def _github_run_id(pass_id: str, arm_name: str) -> str:
+    return str(int(rig.canonical_sha256([pass_id, arm_name])[7:23], 16) + 1)
+
+
 def _seal_arm(
     arm: dict[str, Any],
     *,
@@ -155,7 +159,7 @@ def _seal_arm(
             "ref": "refs/heads/main",
             "workflow_ref": "hyperb1iss/sibyl/.github/workflows/longmemeval-v2.yml@refs/heads/main",
             "sha": "a" * 40,
-            "run_id": f"run-{pass_id}-{arm['name']}",
+            "run_id": _github_run_id(pass_id, arm["name"]),
             "run_attempt": 1,
         },
         "stack": _stack(),
@@ -219,8 +223,8 @@ def _paired_pass(
         preregistration_sha256=resolved_preregistration,
         experiment_phase=experiment_phase,
     )
-    sealed_left["execution"]["run_id"] = f"run-{pass_id}-left"
-    sealed_right["execution"]["run_id"] = f"run-{pass_id}-right"
+    sealed_left["execution"]["run_id"] = _github_run_id(pass_id, "left")
+    sealed_right["execution"]["run_id"] = _github_run_id(pass_id, "right")
     _reseal_arm(sealed_left)
     _reseal_arm(sealed_right)
     payload = {
@@ -534,6 +538,53 @@ def test_execution_identity_rejects_fake_local_and_unknown_fields() -> None:
     fake = {**execution, "run_id": "reused-local-name"}
     with pytest.raises(rig.RigInputError, match="canonical UUID"):
         rig.validate_execution_identity(fake, name="local")
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        (
+            "repository",
+            "git@github.com:hyperb1iss/sibyl",
+            "canonical owner/repository slug",
+        ),
+        ("ref", "refs/heads/", "valid full refs/heads"),
+        ("ref", "refs/heads/bad..branch", "valid full refs/heads"),
+        ("run_id", "run-1234", "canonical positive decimal"),
+        ("run_id", "01234", "canonical positive decimal"),
+        (
+            "workflow_ref",
+            "hyperb1iss/sibyl/.github/workflows/@refs/heads/main",
+            "canonical YAML",
+        ),
+        (
+            "workflow_ref",
+            "hyperb1iss/sibyl/.github/workflows/eval.json@refs/heads/main",
+            "canonical YAML",
+        ),
+        (
+            "workflow_ref",
+            "hyperb1iss/sibyl/.github/workflows/nested/eval.yml@refs/heads/main",
+            "canonical YAML",
+        ),
+    ],
+)
+def test_fully_resealed_pass_rejects_noncanonical_github_execution(
+    field: str,
+    value: str,
+    message: str,
+) -> None:
+    paired = _paired_pass(
+        "hostile-execution",
+        left=_arm("left", mode="fast", accuracy=0.5),
+        right=_arm("right", mode="fast", accuracy=0.5),
+    )
+    paired["arms"]["left"]["execution"][field] = value
+    _reseal_arm(paired["arms"]["left"])
+    _reseal_pass(paired)
+
+    with pytest.raises(rig.RigInputError, match=message):
+        rig.validate_pass(paired)
 
 
 def test_paired_pass_rejects_reused_run_id_and_cross_kind_drift() -> None:

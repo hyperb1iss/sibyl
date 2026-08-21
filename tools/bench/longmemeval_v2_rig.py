@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -44,8 +45,14 @@ OFFICIAL_SMALL_QUESTION_IDS_SHA256 = {
 }
 EXPERIMENT_PHASES = frozenset({"aa", "anchor", "race", "render"})
 INITIAL_NOISE_FLOOR_PP = 3.0
+ASCII_DELETE_CODEPOINT = 127
+GIT_REF_FORBIDDEN_ASCII_MAX = 32
 GIT_SHA_LENGTH = 40
-REPOSITORY_SEGMENT_COUNT = 2
+GITHUB_REPOSITORY_PATTERN = re.compile(
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9._-]{1,100}"
+)
+POSITIVE_DECIMAL_PATTERN = re.compile(r"[1-9][0-9]*")
+WORKFLOW_FILENAME_PATTERN = re.compile(r"[^/@\x00-\x20\x7f]+\.ya?ml")
 INITIAL_AA_PASS_COUNT = 3
 EXTENDED_AA_PASS_COUNT = 5
 PAIRED_PASS_COUNT = 3
@@ -441,6 +448,47 @@ def _validate_geometry(raw: object, *, name: str) -> dict[str, int]:
     return {key: _positive_int(raw.get(key), name=f"{name}.{key}") for key in sorted(GEOMETRY_KEYS)}
 
 
+def _is_valid_branch_ref(ref: str) -> bool:
+    prefix = "refs/heads/"
+    if not ref.startswith(prefix) or ref != ref.strip():
+        return False
+    branch = ref.removeprefix(prefix)
+    if not branch or branch.startswith("-") or branch.endswith("."):
+        return False
+    if ".." in branch or "@{" in branch or "\\" in branch:
+        return False
+    if any(
+        ord(character) <= GIT_REF_FORBIDDEN_ASCII_MAX or ord(character) == ASCII_DELETE_CODEPOINT
+        for character in branch
+    ):
+        return False
+    if any(character in "~^:?*[" for character in branch):
+        return False
+    components = branch.split("/")
+    return all(
+        component and not component.startswith(".") and not component.endswith(".lock")
+        for component in components
+    )
+
+
+def _validate_workflow_ref(
+    *,
+    repository: str,
+    ref: str,
+    workflow_ref: str,
+    name: str,
+) -> None:
+    prefix = f"{repository}/.github/workflows/"
+    suffix = f"@{ref}"
+    if not workflow_ref.startswith(prefix) or not workflow_ref.endswith(suffix):
+        raise RigInputError(f"{name} is not canonical for its repository and ref")
+    filename = workflow_ref[len(prefix) : -len(suffix)]
+    if not WORKFLOW_FILENAME_PATTERN.fullmatch(filename):
+        raise RigInputError(f"{name} must name one canonical YAML workflow file")
+    if workflow_ref != f"{prefix}{filename}{suffix}":
+        raise RigInputError(f"{name} is not canonical for its repository and ref")
+
+
 def validate_execution_identity(raw: object, *, name: str) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise RigInputError(f"{name} is missing")
@@ -456,14 +504,11 @@ def validate_execution_identity(raw: object, *, name: str) -> dict[str, Any]:
         raise RigInputError(f"{name}.schema_version is invalid")
     execution = dict(raw)
     repository = _nonempty_string(execution.get("repository"), name=f"{name}.repository")
-    if (
-        repository != execution["repository"]
-        or len(repository.split("/")) != REPOSITORY_SEGMENT_COUNT
-    ):
+    if not GITHUB_REPOSITORY_PATTERN.fullmatch(repository):
         raise RigInputError(f"{name}.repository must be a canonical owner/repository slug")
     ref = _nonempty_string(execution.get("ref"), name=f"{name}.ref")
-    if ref != execution["ref"] or not ref.startswith("refs/heads/"):
-        raise RigInputError(f"{name}.ref must be a full refs/heads/* ref")
+    if not _is_valid_branch_ref(ref):
+        raise RigInputError(f"{name}.ref must be a valid full refs/heads/* branch ref")
     sha = _nonempty_string(execution.get("sha"), name=f"{name}.sha")
     if len(sha) != GIT_SHA_LENGTH or any(character not in "0123456789abcdef" for character in sha):
         raise RigInputError(f"{name}.sha must be a full lowercase Git SHA")
@@ -478,14 +523,18 @@ def validate_execution_identity(raw: object, *, name: str) -> dict[str, Any]:
         if normalized_run_id != run_id:
             raise RigInputError(f"{name}.run_id must be a canonical UUID")
     else:
+        if not POSITIVE_DECIMAL_PATTERN.fullmatch(run_id):
+            raise RigInputError(f"{name}.run_id must be a canonical positive decimal string")
         workflow_ref = _nonempty_string(
             execution.get("workflow_ref"),
             name=f"{name}.workflow_ref",
         )
-        if not workflow_ref.startswith(
-            f"{repository}/.github/workflows/"
-        ) or not workflow_ref.endswith(f"@{ref}"):
-            raise RigInputError(f"{name}.workflow_ref does not bind its repository ref")
+        _validate_workflow_ref(
+            repository=repository,
+            ref=ref,
+            workflow_ref=workflow_ref,
+            name=f"{name}.workflow_ref",
+        )
     _positive_int(execution.get("run_attempt"), name=f"{name}.run_attempt")
     return execution
 

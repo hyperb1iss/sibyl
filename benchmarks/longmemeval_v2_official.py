@@ -10,6 +10,7 @@ import importlib.util
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -23,9 +24,16 @@ from uuid import UUID, uuid4
 
 HTTP_STATUS_OK = 200
 HTTP_STATUS_SERVER_ERROR = 500
+ASCII_DELETE_CODEPOINT = 127
+GIT_REF_FORBIDDEN_ASCII_MAX = 32
 GIT_SHA_LENGTH = 40
+LS_REMOTE_FIELD_COUNT = 2
 MIN_COMBINED_SOURCE_METRICS = 2
-REPOSITORY_SEGMENT_COUNT = 2
+GITHUB_REPOSITORY_PATTERN = re.compile(
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9._-]{1,100}"
+)
+POSITIVE_DECIMAL_PATTERN = re.compile(r"[1-9][0-9]*")
+WORKFLOW_FILENAME_PATTERN = re.compile(r"[^/@\x00-\x20\x7f]+\.ya?ml")
 ROOT = Path(__file__).resolve().parents[1]
 CORE_SRC = ROOT / "packages" / "python" / "sibyl-core" / "src"
 if str(ROOT) not in sys.path:
@@ -467,11 +475,53 @@ def _repository_from_remote(remote: str) -> str:
         if parsed.hostname != "github.com":
             raise ValueError("local experiment origin must be a GitHub repository")
         value = parsed.path.lstrip("/")
-    if len(value.split("/")) != REPOSITORY_SEGMENT_COUNT or any(
-        not part for part in value.split("/")
-    ):
+    if not _is_canonical_repository(value):
         raise ValueError("local experiment origin has no canonical owner/repository identity")
     return value
+
+
+def _is_canonical_repository(repository: str) -> bool:
+    return bool(GITHUB_REPOSITORY_PATTERN.fullmatch(repository))
+
+
+def _is_valid_branch_ref(ref: str) -> bool:
+    prefix = "refs/heads/"
+    if not ref.startswith(prefix) or ref != ref.strip():
+        return False
+    branch = ref.removeprefix(prefix)
+    if not branch or branch.startswith("-") or branch.endswith("."):
+        return False
+    if ".." in branch or "@{" in branch or "\\" in branch:
+        return False
+    if any(
+        ord(character) <= GIT_REF_FORBIDDEN_ASCII_MAX or ord(character) == ASCII_DELETE_CODEPOINT
+        for character in branch
+    ):
+        return False
+    if any(character in "~^:?*[" for character in branch):
+        return False
+    components = branch.split("/")
+    return all(
+        component and not component.startswith(".") and not component.endswith(".lock")
+        for component in components
+    )
+
+
+def _validate_github_run_id(run_id: str) -> None:
+    if not POSITIVE_DECIMAL_PATTERN.fullmatch(run_id):
+        raise ValueError("GitHub execution run ID must be a canonical positive decimal string")
+
+
+def _validate_workflow_ref(*, repository: str, ref: str, workflow_ref: str) -> None:
+    prefix = f"{repository}/.github/workflows/"
+    suffix = f"@{ref}"
+    if not workflow_ref.startswith(prefix) or not workflow_ref.endswith(suffix):
+        raise ValueError("GitHub workflow ref is not canonical for its repository and ref")
+    filename = workflow_ref[len(prefix) : -len(suffix)]
+    if not WORKFLOW_FILENAME_PATTERN.fullmatch(filename):
+        raise ValueError("GitHub workflow ref must name one canonical YAML workflow file")
+    if workflow_ref != f"{prefix}{filename}{suffix}":
+        raise ValueError("GitHub workflow ref is not canonical for its repository and ref")
 
 
 def _validate_execution_common(
@@ -482,15 +532,15 @@ def _validate_execution_common(
     run_id: str,
     run_attempt: int,
 ) -> None:
-    if repository != repository.strip() or len(repository.split("/")) != REPOSITORY_SEGMENT_COUNT:
+    if not _is_canonical_repository(repository):
         raise ValueError("execution repository must be a canonical owner/repository slug")
-    if not ref.startswith("refs/heads/") or ref != ref.strip():
-        raise ValueError("execution ref must be a full refs/heads/* ref")
+    if not _is_valid_branch_ref(ref):
+        raise ValueError("execution ref must be a valid full refs/heads/* branch ref")
     if len(sha) != GIT_SHA_LENGTH or any(character not in "0123456789abcdef" for character in sha):
         raise ValueError("execution SHA must be a full lowercase Git SHA")
     if not run_id or run_id != run_id.strip():
         raise ValueError("execution run ID must be a non-empty canonical value")
-    if isinstance(run_attempt, bool) or run_attempt < 1:
+    if isinstance(run_attempt, bool) or not isinstance(run_attempt, int) or run_attempt < 1:
         raise ValueError("execution run attempt must be a positive integer")
 
 
@@ -527,11 +577,12 @@ def resolve_execution_identity(  # noqa: PLR0912
             "run_id": args.github_run_id,
             "workflow_ref": args.github_workflow_ref,
         }
+        github_run_attempt = os.getenv("GITHUB_RUN_ATTEMPT", "")
         missing = sorted(key for key, value in github_environment.items() if not value)
-        if missing or int(os.getenv("GITHUB_RUN_ATTEMPT", "0")) < 1:
+        if missing or not POSITIVE_DECIMAL_PATTERN.fullmatch(github_run_attempt):
             raise ValueError(f"GitHub execution environment is incomplete: {missing}")
         if github_arguments != github_environment or args.github_run_attempt != int(
-            os.environ["GITHUB_RUN_ATTEMPT"]
+            github_run_attempt
         ):
             raise ValueError("GitHub execution arguments differ from the Actions environment")
         _validate_execution_common(
@@ -541,11 +592,13 @@ def resolve_execution_identity(  # noqa: PLR0912
             run_id=github_environment["run_id"],
             run_attempt=args.github_run_attempt,
         )
+        _validate_github_run_id(github_environment["run_id"])
         workflow_ref = github_environment["workflow_ref"]
-        if not workflow_ref.startswith(
-            f"{github_environment['repository']}/.github/workflows/"
-        ) or not workflow_ref.endswith(f"@{github_environment['ref']}"):
-            raise ValueError("GitHub workflow ref does not bind the repository ref")
+        _validate_workflow_ref(
+            repository=github_environment["repository"],
+            ref=github_environment["ref"],
+            workflow_ref=workflow_ref,
+        )
         return {
             "schema_version": EXECUTION_IDENTITY_SCHEMA_VERSION,
             "kind": "github",
@@ -600,7 +653,13 @@ def resolve_execution_identity(  # noqa: PLR0912
         remote_sha = _required_git_output(root, "rev-parse", "--verify", remote_ref)
     except ValueError as exc:
         raise ValueError("local execution ref has no exact origin tracking ref") from exc
-    status = _required_git_output(root, "status", "--porcelain")
+    status = _required_git_output(
+        root,
+        "status",
+        "--porcelain",
+        "--untracked-files=all",
+        "--ignore-submodules=none",
+    )
     if status:
         raise ValueError("local experiment runs require a clean Sibyl checkout")
     if (args.local_repository, args.local_ref, args.local_sha) != (
@@ -611,6 +670,32 @@ def resolve_execution_identity(  # noqa: PLR0912
         raise ValueError("local execution repository, ref, or SHA differs from the checkout")
     if remote_sha != actual_sha:
         raise ValueError("local execution SHA differs from its origin tracking ref")
+    try:
+        published_ref = _required_git_output(
+            root,
+            "ls-remote",
+            "--exit-code",
+            "--refs",
+            "origin",
+            actual_ref,
+        )
+    except ValueError as exc:
+        raise ValueError("local execution could not verify its exact ref on origin") from exc
+    published_lines = published_ref.splitlines()
+    if len(published_lines) != 1:
+        raise ValueError("local execution origin returned no unique exact ref")
+    fields = published_lines[0].split("\t")
+    if len(fields) != LS_REMOTE_FIELD_COUNT:
+        raise ValueError("local execution origin returned a malformed exact ref")
+    published_sha, published_name = fields
+    if (
+        len(published_sha) != GIT_SHA_LENGTH
+        or any(character not in "0123456789abcdef" for character in published_sha)
+        or published_name != actual_ref
+    ):
+        raise ValueError("local execution origin returned a malformed exact ref")
+    if published_sha != actual_sha:
+        raise ValueError("local execution SHA differs from the exact ref on origin")
     return {
         "schema_version": EXECUTION_IDENTITY_SCHEMA_VERSION,
         "kind": "local",

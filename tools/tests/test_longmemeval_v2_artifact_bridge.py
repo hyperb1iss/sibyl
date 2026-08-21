@@ -453,7 +453,7 @@ def _combined_receipt(
     root: Path,
     *,
     role: str = "display_control",
-    workflow_run_id: str = "workflow-control",
+    workflow_run_id: str = "1001",
     phase: str = "aa",
     mode: str = "fast",
 ) -> tuple[Path, dict[str, Any], dict[str, dict[str, Path]]]:
@@ -628,12 +628,12 @@ def test_bridge_builds_paired_pass_from_distinct_workflow_runs(tmp_path: Path) -
     left_path, _left_combined, _left_paths = _combined_receipt(
         tmp_path / "left",
         role="display_control",
-        workflow_run_id="workflow-left",
+        workflow_run_id="1001",
     )
     right_path, _right_combined, _right_paths = _combined_receipt(
         tmp_path / "right",
         role="display_treatment",
-        workflow_run_id="workflow-right",
+        workflow_run_id="1002",
     )
 
     paired = bridge.build_paired_pass(
@@ -642,8 +642,8 @@ def test_bridge_builds_paired_pass_from_distinct_workflow_runs(tmp_path: Path) -
     )
 
     assert paired["experiment_phase"] == "aa"
-    assert paired["arms"]["left"]["execution"]["run_id"] == "workflow-left"
-    assert paired["arms"]["right"]["execution"]["run_id"] == "workflow-right"
+    assert paired["arms"]["left"]["execution"]["run_id"] == "1001"
+    assert paired["arms"]["right"]["execution"]["run_id"] == "1002"
     assert rig.validate_pass(paired) == paired
 
 
@@ -813,12 +813,12 @@ def test_pair_bridge_rejects_recomputed_arm_seed_drift(tmp_path: Path) -> None:
     left_path, _left_combined, _left_paths = _combined_receipt(
         tmp_path / "left",
         role="display_control",
-        workflow_run_id="workflow-left",
+        workflow_run_id="1001",
     )
     right_path, _right_combined, _right_paths = _combined_receipt(
         tmp_path / "right",
         role="display_treatment",
-        workflow_run_id="workflow-right",
+        workflow_run_id="1002",
     )
     left = bridge.build_arm_run(left_path)
     right = deepcopy(bridge.build_arm_run(right_path))
