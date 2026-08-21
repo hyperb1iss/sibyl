@@ -702,6 +702,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     ):
         parser.error("--preregistration-sha256 must be a lowercase SHA-256 digest")
     if populated_experiment_fields:
+        if args.tier != "small":
+            parser.error("paid experiment runs require the complete Small corpus")
+        if args.limit is not None or args.question_ids:
+            parser.error(
+                "paid experiment runs require every official domain question; "
+                "--limit and --question-ids are forbidden"
+            )
         if args.experiment_phase in {"race", "render"} and not preregistration:
             parser.error("race and render experiment phases require --preregistration-sha256")
         if args.experiment_phase in {"aa", "anchor"} and preregistration:
@@ -1288,6 +1295,10 @@ def build_run_plan(
 ) -> dict[str, Any]:
     all_questions = load_longmemeval_v2_questions(data_root / "questions.jsonl")
     question_by_id = {question.id: question for question in all_questions}
+    official_question_ids = [
+        question.id for question in all_questions if question.domain == args.domain
+    ]
+    selected_question_ids = [str(row["id"]) for row in selected_questions]
     selected_question_models = [question_by_id[str(row["id"])] for row in selected_questions]
     required_trajectories = sorted({tid for ids in selected_haystack.values() for tid in ids})
     llm_eval_count = sum(
@@ -1328,9 +1339,10 @@ def build_run_plan(
         "trajectory_path": str(data_root / "trajectories.jsonl"),
         "trajectory_path_exists": (data_root / "trajectories.jsonl").exists(),
         "question_count": len(selected_questions),
-        "selected_question_ids_sha256": sha256_question_ids(
-            [str(row["id"]) for row in selected_questions]
-        ),
+        "selected_question_ids_sha256": sha256_question_ids(selected_question_ids),
+        "official_question_count": len(official_question_ids),
+        "official_question_ids_sha256": sha256_question_ids(official_question_ids),
+        "selection_complete": selected_question_ids == official_question_ids,
         "required_trajectory_count": len(required_trajectories),
         "llm_eval_count": llm_eval_count,
         "spend_reservation": spend_reservation,
@@ -2483,6 +2495,11 @@ def build_dataset_receipt(
         domain=domain,
         tier=tier,
     )
+    official_question_ids = [
+        question.id
+        for question in load_longmemeval_v2_questions(questions_path)
+        if domain in ("combined", question.domain)
+    ]
     recorded_question_count = plan.get("question_count")
     if recorded_question_count is None:
         recorded_question_count = _number_from(
@@ -2499,6 +2516,13 @@ def build_dataset_receipt(
         "haystack_sha256": sha256_file(haystack),
         "question_count": _coerce_integral_number(recorded_question_count),
         "selected_question_ids_sha256": plan.get("selected_question_ids_sha256"),
+        "official_question_count": len(official_question_ids),
+        "official_question_ids_sha256": sha256_question_ids(official_question_ids),
+        "selection_complete": (
+            plan.get("question_count") == len(official_question_ids)
+            and plan.get("selected_question_ids_sha256")
+            == sha256_question_ids(official_question_ids)
+        ),
         "required_trajectory_count": _coerce_integral_number(recorded_required_trajectory_count),
     }
     if dataset_record["question_count"] is None:
@@ -2575,8 +2599,12 @@ def build_receipt_checks(receipt: dict[str, Any]) -> list[dict[str, Any]]:
             all(
                 _truthy_path(receipt, ("dataset", field))
                 for field in ("questions_sha256", "trajectories_sha256", "haystack_sha256")
+            )
+            and (
+                receipt.get("domain") == "combined"
+                or receipt.get("dataset", {}).get("selection_complete") is True
             ),
-            "questions, trajectories, and tier haystack SHA-256 digests are recorded",
+            "dataset digests are recorded and domain selection is complete",
             ["dataset hashes"],
         ),
         check(

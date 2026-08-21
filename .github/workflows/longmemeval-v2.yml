@@ -309,9 +309,40 @@ jobs:
           path: .moon/cache/evals/longmemeval_v2_${{ matrix.tier }}_probe.json
           if-no-files-found: error
 
+  official-preflight:
+    name: Validate sealed paid arm
+    if: github.event_name == 'workflow_dispatch' && inputs.run_official_full
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject incomplete or unpackageable paid runs
+        env:
+          OFFICIAL_DOMAIN: ${{ inputs.official_domain || 'both' }}
+          OFFICIAL_LIMIT: ${{ inputs.official_limit || '' }}
+          OFFICIAL_TIER: ${{ inputs.official_tier || 'small' }}
+          OFFICIAL_VALIDATION_SLICE: ${{ inputs.official_validation_slice || 'none' }}
+        run: |
+          set -euo pipefail
+          if [[ "$OFFICIAL_TIER" != "small" ]]; then
+            echo "::error::Sealed paid arms require the complete Small corpus."
+            exit 1
+          fi
+          if [[ "$OFFICIAL_DOMAIN" != "both" ]]; then
+            echo "::error::Sealed paid arms require both official Small domains."
+            exit 1
+          fi
+          if [[ -n "$OFFICIAL_LIMIT" ]]; then
+            echo "::error::Sealed paid arms forbid official_limit."
+            exit 1
+          fi
+          if [[ "$OFFICIAL_VALIDATION_SLICE" != "none" ]]; then
+            echo "::error::Sealed paid arms cannot use a validation slice."
+            exit 1
+          fi
+
   official-full:
     name: Official ${{ matrix.domain }} ${{ inputs.official_tier || 'small' }}
     if: github.event_name == 'workflow_dispatch' && inputs.run_official_full
+    needs: official-preflight
     runs-on: ubuntu-latest
     environment: longmemeval-paid
     timeout-minutes: 720

@@ -482,6 +482,12 @@ def _validate_activity(raw: object, *, mode: str, name: str) -> dict[str, Any]:
         "planner_query_count",
     ):
         _nonnegative_int(raw.get(field), name=f"{name}.{field}")
+    for attempts_field, successes_field in (
+        ("naive_vector_attempts", "naive_vector_successes"),
+        ("hybrid_vector_attempts", "hybrid_vector_successes"),
+    ):
+        if raw[successes_field] > raw[attempts_field]:
+            raise RigInputError(f"{name}.{successes_field} exceeds {attempts_field}")
     statuses = raw.get("typed_search_statuses")
     if not isinstance(statuses, list) or any(
         not isinstance(status, str) or not status for status in statuses
@@ -508,6 +514,15 @@ def _validate_activity(raw: object, *, mode: str, name: str) -> dict[str, Any]:
         for lever, count in lever_activity.items()
     ):
         raise RigInputError(f"{name}.lever_activity is invalid")
+    expected_activity_events = (
+        raw["context_pack_requests"]
+        + raw["naive_vector_attempts"]
+        + raw["hybrid_vector_attempts"]
+        + raw["planner_query_count"]
+        + sum(lever_activity.values())
+    )
+    if raw["activity_events"] != expected_activity_events:
+        raise RigInputError(f"{name}.activity_events does not match its explicit counters")
     return dict(raw)
 
 

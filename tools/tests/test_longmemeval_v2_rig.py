@@ -69,7 +69,7 @@ def _arm(
     for domain in sorted(rig.DOMAINS):
         for index in range(QUESTION_COUNT_PER_DOMAIN):
             activity = {
-                "activity_events": 1,
+                "activity_events": 2,
                 "retrieval_mode": mode,
                 "mode": mode,
                 "context_pack_requests": 1,
@@ -376,6 +376,28 @@ def test_failed_rows_and_inactive_arms_fail_closed() -> None:
     )
     with pytest.raises(rig.RigInputError, match="hybrid_vector_attempts"):
         rig.validate_pass(inactive)
+
+
+def test_impossible_activity_counters_fail_closed() -> None:
+    excess_success = _arm("machine", mode="fast", accuracy=0.5)
+    excess_success["rows"][0]["activity"]["hybrid_vector_successes"] = 2
+    success_pass = _paired_pass(
+        "excess-success",
+        left=excess_success,
+        right=_arm("machine", mode="fast", accuracy=0.5),
+    )
+    with pytest.raises(rig.RigInputError, match="successes exceeds"):
+        rig.validate_pass(success_pass)
+
+    false_total = _arm("machine", mode="fast", accuracy=0.5)
+    false_total["rows"][0]["activity"]["activity_events"] = 999
+    total_pass = _paired_pass(
+        "false-total",
+        left=false_total,
+        right=_arm("machine", mode="fast", accuracy=0.5),
+    )
+    with pytest.raises(rig.RigInputError, match="does not match its explicit counters"):
+        rig.validate_pass(total_pass)
 
 
 def test_evidence_exposure_uses_only_eligible_rows() -> None:
@@ -823,6 +845,7 @@ def test_render_bundle_ships_only_when_every_gate_passes() -> None:
             "plain_english_lanes": 4,
             "action_spine": 2,
         }
+        treatment["rows"][0]["activity"]["activity_events"] += 6
         control = _arm(
             "render_control",
             mode="fast",

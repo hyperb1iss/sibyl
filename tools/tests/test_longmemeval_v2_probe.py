@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
 from pathlib import Path
 from types import ModuleType
+
+import pytest
+import yaml
 
 EXPECTED_SELECTED_TRAJECTORIES = 2
 EXPECTED_WORKFLOW_OCCURRENCES = 2
@@ -180,7 +185,57 @@ def test_longmemeval_v2_workflow_gates_official_full_run() -> None:
     assert workflow.index('rm -rf "$domain_output/ingest_checkpoint"') > workflow.index(
         "moon run bench-longmemeval-v2-official-full"
     )
+
+
+def test_longmemeval_v2_workflow_rejects_unsealed_paid_shapes_before_work() -> None:
+    workflow = (
+        Path(__file__).parents[2] / ".github" / "workflows" / "longmemeval-v2.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "official-preflight:" in workflow
+    assert "needs: official-preflight" in workflow
+    assert "Sealed paid arms require the complete Small corpus." in workflow
+    assert "Sealed paid arms require both official Small domains." in workflow
+    assert "Sealed paid arms forbid official_limit." in workflow
+    assert "Sealed paid arms cannot use a validation slice." in workflow
     assert "https://openrouter.ai/api/v1" in workflow
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"OFFICIAL_TIER": "medium"}, "complete Small corpus"),
+        ({"OFFICIAL_DOMAIN": "web"}, "both official Small domains"),
+        ({"OFFICIAL_LIMIT": "1"}, "forbid official_limit"),
+        ({"OFFICIAL_VALIDATION_SLICE": "composition-v1"}, "validation slice"),
+    ],
+)
+def test_paid_preflight_exits_before_invalid_dispatch(
+    override: dict[str, str],
+    message: str,
+) -> None:
+    workflow_path = Path(__file__).parents[2] / ".github" / "workflows" / "longmemeval-v2.yml"
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    script = workflow["jobs"]["official-preflight"]["steps"][0]["run"]
+    env = {
+        **os.environ,
+        "OFFICIAL_DOMAIN": "both",
+        "OFFICIAL_LIMIT": "",
+        "OFFICIAL_TIER": "small",
+        "OFFICIAL_VALIDATION_SLICE": "none",
+        **override,
+    }
+
+    result = subprocess.run(  # noqa: S603
+        ["/bin/bash", "-c", script],
+        check=False,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert message in result.stdout
 
 
 def test_longmemeval_v2_workflow_seals_paid_arm_manifest() -> None:

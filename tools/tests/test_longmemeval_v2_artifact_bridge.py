@@ -86,6 +86,9 @@ def _receipt(
                 "haystack_sha256": f"sha256:{'3' * 64}",
                 "question_count": plan["question_count"],
                 "selected_question_ids_sha256": plan["selected_question_ids_sha256"],
+                "official_question_count": plan["official_question_count"],
+                "official_question_ids_sha256": plan["official_question_ids_sha256"],
+                "selection_complete": plan["selection_complete"],
                 "required_trajectory_count": plan["required_trajectory_count"],
             },
             "source_runs": {},
@@ -227,6 +230,7 @@ def _plan(
 
 def _activity(*, mode: str, levers: dict[str, int] | None = None) -> dict[str, Any]:
     naive = mode == "naive"
+    lever_activity = levers or {}
     return {
         "retrieval_mode": mode,
         "context_pack_requests": 1,
@@ -237,9 +241,9 @@ def _activity(*, mode: str, levers: dict[str, int] | None = None) -> dict[str, A
         "planner_query_count": 0,
         "typed_evidence_applicable": not naive,
         "typed_search_statuses": [] if naive else ["complete"],
-        "activity_events": 1,
+        "activity_events": 2 + sum(lever_activity.values()),
         "mode": mode,
-        "lever_activity": levers or {},
+        "lever_activity": lever_activity,
     }
 
 
@@ -279,6 +283,9 @@ def _domain_run(
     ]
     question_ids = [row["id"] for row in runtime_questions]
     plan["selected_question_ids_sha256"] = bridge._question_ids_sha256(question_ids)
+    plan["official_question_count"] = len(question_ids)
+    plan["official_question_ids_sha256"] = plan["selected_question_ids_sha256"]
+    plan["selection_complete"] = True
     shuffled = list(question_ids)
     random.Random(plan["pass_seed"]).shuffle(shuffled)  # noqa: S311
     per_question: list[dict[str, Any]] = []
@@ -495,6 +502,23 @@ def test_bridge_builds_signed_arm_from_official_artifacts(tmp_path: Path) -> Non
     assert set(arm["source_artifacts"]) == rig.DOMAINS
 
 
+def test_bridge_rejects_incomplete_official_small_selection(tmp_path: Path) -> None:
+    combined_path, combined, paths = _combined_receipt(tmp_path)
+    plan = json.loads(paths["web"]["plan"].read_text(encoding="utf-8"))
+    plan["selection_complete"] = False
+    _write_json(paths["web"]["plan"], plan)
+    _refresh_artifact(
+        combined_path,
+        combined,
+        domain="web",
+        artifact="plan",
+        path=paths["web"]["plan"],
+    )
+
+    with pytest.raises(bridge.BridgeInputError, match="complete Small corpus"):
+        bridge.build_arm_run(combined_path)
+
+
 def test_bridge_builds_paired_pass_from_distinct_workflow_runs(tmp_path: Path) -> None:
     left_path, _left_combined, _left_paths = _combined_receipt(
         tmp_path / "left",
@@ -667,6 +691,7 @@ def test_bridge_rejects_unknown_plan_fields_and_control_lever_activity(
     combined_path, combined, paths = _combined_receipt(tmp_path / "lever")
     rig_rows = bridge._load_jsonl(paths["web"]["rig_rows"])
     rig_rows[0]["activity"]["lever_activity"] = {"unapproved": 1}
+    rig_rows[0]["activity"]["activity_events"] += 1
     _write_jsonl(paths["web"]["rig_rows"], rig_rows)
     _refresh_artifact(
         combined_path,

@@ -423,6 +423,9 @@ def _assert_question_id_hash_propagates(
     assert plan["provider_usage_run_id"] != plan["run_id"]
     expected_question_ids_sha256 = module.sha256_question_ids(["q-enterprise"])
     assert plan["selected_question_ids_sha256"] == expected_question_ids_sha256
+    assert plan["official_question_count"] == 1
+    assert plan["official_question_ids_sha256"] == expected_question_ids_sha256
+    assert plan["selection_complete"] is True
     dataset_receipt = module.build_dataset_receipt(
         data_root=data_root,
         domain="enterprise",
@@ -431,6 +434,9 @@ def _assert_question_id_hash_propagates(
         aggregated_metrics={},
     )
     assert dataset_receipt["selected_question_ids_sha256"] == expected_question_ids_sha256
+    assert dataset_receipt["official_question_count"] == 1
+    assert dataset_receipt["official_question_ids_sha256"] == expected_question_ids_sha256
+    assert dataset_receipt["selection_complete"] is True
 
 
 def test_official_runner_receipt_only_emits_citable_contract(
@@ -904,6 +910,58 @@ def test_official_runner_rejects_partial_experiment_identity(tmp_path: Path) -> 
                 "eval-1.3",
             ]
         )
+
+
+@pytest.mark.parametrize(
+    ("extra_args", "message"),
+    [
+        (["--limit", "1"], "--limit and --question-ids are forbidden"),
+        (["--question-ids", "q-web"], "--limit and --question-ids are forbidden"),
+        (["--tier", "medium"], "require the complete Small corpus"),
+    ],
+)
+def test_official_runner_rejects_incomplete_paid_experiment_corpus(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    extra_args: list[str],
+    message: str,
+) -> None:
+    module = _load_runner_module()
+    argv = [
+        "--data-root",
+        str(tmp_path / "data"),
+        "--domain",
+        "web",
+        "--output-dir",
+        str(tmp_path / "out"),
+        "--plan-only",
+        "--experiment-id",
+        "eval-1.3",
+        "--experiment-phase",
+        "aa",
+        "--pass-id",
+        "aa-01",
+        "--pass-seed",
+        "1701",
+        "--arm-role",
+        "machine",
+        "--substrate",
+        "machine",
+        "--github-repository",
+        "hyperb1iss/sibyl",
+        "--github-workflow-ref",
+        "hyperb1iss/sibyl/.github/workflows/longmemeval-v2.yml@refs/heads/main",
+        "--github-workflow-sha",
+        "a" * 40,
+        "--github-run-id",
+        "1234",
+        *extra_args,
+    ]
+
+    with pytest.raises(SystemExit, match="2"):
+        module.parse_args(argv)
+
+    assert message in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(

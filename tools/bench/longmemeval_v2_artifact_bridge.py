@@ -60,6 +60,9 @@ OFFICIAL_PLAN_KEYS = frozenset(
         "trajectory_path_exists",
         "question_count",
         "selected_question_ids_sha256",
+        "official_question_count",
+        "official_question_ids_sha256",
+        "selection_complete",
         "required_trajectory_count",
         "llm_eval_count",
         "spend_reservation",
@@ -202,6 +205,9 @@ OFFICIAL_DATASET_KEYS = frozenset(
         "haystack_sha256",
         "question_count",
         "selected_question_ids_sha256",
+        "official_question_count",
+        "official_question_ids_sha256",
+        "selection_complete",
         "required_trajectory_count",
     }
 )
@@ -511,7 +517,17 @@ def _validate_plan(  # noqa: PLR0912, PLR0915
         or raw.get("trajectory_path_exists") is not True
     ):
         raise BridgeInputError(f"{domain} plan is not a completed scored run")
-    _positive_int(raw.get("question_count"), name=f"{domain} plan.question_count")
+    question_count = _positive_int(raw.get("question_count"), name=f"{domain} plan.question_count")
+    official_question_count = _positive_int(
+        raw.get("official_question_count"),
+        name=f"{domain} plan.official_question_count",
+    )
+    if (
+        raw.get("selection_complete") is not True
+        or question_count != official_question_count
+        or raw.get("selected_question_ids_sha256") != raw.get("official_question_ids_sha256")
+    ):
+        raise BridgeInputError(f"{domain} plan does not cover the complete Small corpus")
     _nonnegative_int(raw.get("pass_seed"), name=f"{domain} plan.pass_seed")
     maximum_spend = _finite_number(
         raw.get("max_spend_usd"),
@@ -733,6 +749,9 @@ def _validate_dataset_and_models(
         or Path(str(dataset.get("data_root"))).resolve() != Path(str(plan["data_root"])).resolve()
         or dataset.get("question_count") != plan["question_count"]
         or dataset.get("selected_question_ids_sha256") != plan["selected_question_ids_sha256"]
+        or dataset.get("official_question_count") != plan["official_question_count"]
+        or dataset.get("official_question_ids_sha256") != plan["official_question_ids_sha256"]
+        or dataset.get("selection_complete") is not True
         or dataset.get("required_trajectory_count") != plan["required_trajectory_count"]
     ):
         raise BridgeInputError(f"{domain} dataset identity differs from its plan")
