@@ -139,11 +139,16 @@ class EntityManager(_EntityWorkItemManager):
             generate_embeddings=True,
             embedding_batch_size=embedding_batch_size,
         )
-        written_ids = await _update_entity_embeddings_if_current(
-            self._client,
-            prepared,
-            group_id=self._group_id,
-        )
+        written_ids: set[str] = set()
+        batch_size = max(int(embedding_batch_size), 1)
+        for index in range(0, len(prepared), batch_size):
+            written_ids.update(
+                await _update_entity_embeddings_if_current(
+                    self._client,
+                    prepared[index : index + batch_size],
+                    group_id=self._group_id,
+                )
+            )
         ready_ids.update(written_ids)
         return [entity.id for entity in current_entities if entity.id in ready_ids]
 
