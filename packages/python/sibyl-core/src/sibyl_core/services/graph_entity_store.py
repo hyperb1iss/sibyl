@@ -435,51 +435,64 @@ def _parsed_metadata_snapshot(raw: object) -> dict[str, object] | None:
     return None
 
 
-async def _update_entity_embedding_if_current(
+_ENTITY_EMBEDDING_BACKFILL_QUERY = """
+UPDATE (
+    SELECT VALUE id
+    FROM entity
+    WHERE group_id = $group_id AND uuid IN $uuids
+) SET
+    name_embedding = $rows_by_uuid[uuid].name_embedding,
+    attributes.embedding_metadata = $rows_by_uuid[uuid].embedding_metadata,
+    attributes.updated_at = $rows_by_uuid[uuid].updated_at,
+    updated_at = $rows_by_uuid[uuid].updated_at,
+    revision = (revision ?? 0) + 1
+WHERE group_id = $group_id
+  AND entity_type = $rows_by_uuid[uuid].entity_type
+  AND name = $rows_by_uuid[uuid].name
+  AND description = $rows_by_uuid[uuid].description
+  AND content = $rows_by_uuid[uuid].content
+  AND (attributes.summary ?? '') = $rows_by_uuid[uuid].summary
+RETURN AFTER;
+"""
+
+
+async def _update_entity_embeddings_if_current(
     client: SurrealGraphClient,
-    entity: Entity,
+    entities: Sequence[Entity],
     *,
     group_id: str,
-) -> bool:
-    if not entity.embedding:
-        return False
+) -> set[str]:
+    rows = [
+        {
+            "uuid": entity.id,
+            "entity_type": entity.entity_type.value,
+            "name": entity.name,
+            "description": entity.description or "",
+            "content": entity.content or "",
+            "summary": str(entity.metadata.get("summary") or ""),
+            "name_embedding": entity.embedding,
+            "embedding_metadata": entity.metadata.get("embedding_metadata"),
+            "updated_at": datetime.now(UTC),
+        }
+        for entity in entities
+        if entity.embedding
+    ]
+    if not rows:
+        return set()
+    rows_by_uuid = {str(row["uuid"]): row for row in rows}
     rows = normalize_records(
         await client.execute_query(
-            # Addressed through a subquery because the UPDATE planner (unlike
-            # SELECT's) abandons idx_entity_uuid once the if-current guards are
-            # stacked on and iterates the whole table: 2.8s/statement at 43K
-            # rows vs 20ms addressed, and the backfill runs eight of these
-            # concurrently. The guards still evaluate atomically inside the
-            # UPDATE, so if-current semantics are unchanged.
-            """
-            UPDATE (SELECT VALUE id FROM entity WHERE group_id = $group_id AND uuid = $uuid LIMIT 1) SET
-                name_embedding = $name_embedding,
-                attributes.embedding_metadata = $embedding_metadata,
-                attributes.updated_at = $updated_at,
-                updated_at = $updated_at,
-                revision = (revision ?? 0) + 1
-            WHERE group_id = $group_id
-              AND uuid = $uuid
-              AND entity_type = $entity_type
-              AND name = $name
-              AND description = $description
-              AND content = $content
-              AND (attributes.summary ?? '') = $summary
-            RETURN AFTER;
-            """,
+            # Each row is still addressed through idx_entity_uuid and fenced
+            # atomically against its current text. Sending the batch as one
+            # query keeps HNSW writes on one database request instead of
+            # flooding every pool socket with an independent indexed UPDATE.
+            _ENTITY_EMBEDDING_BACKFILL_QUERY,
             group_id=group_id,
-            uuid=entity.id,
-            entity_type=entity.entity_type.value,
-            name=entity.name,
-            description=entity.description or "",
-            content=entity.content or "",
-            summary=str(entity.metadata.get("summary") or ""),
-            name_embedding=entity.embedding,
-            embedding_metadata=entity.metadata.get("embedding_metadata"),
-            updated_at=datetime.now(UTC),
+            uuids=list(rows_by_uuid),
+            rows_by_uuid=rows_by_uuid,
         )
     )
-    return any(str(row.get("uuid") or "") == entity.id for row in rows)
+    return {str(row["uuid"]) for row in rows if str(row.get("uuid") or "")}
 
 
 def _persisted_entity_embedding_text(entity: Entity) -> str:

@@ -25,7 +25,7 @@ from sibyl_core.services.graph_entity_store import (
     _persisted_entity_embedding_text,
     _replace_entities_bulk,
     _replace_entity,
-    _update_entity_embedding_if_current,
+    _update_entity_embeddings_if_current,
 )
 from sibyl_core.services.graph_entity_work_items import _EntityWorkItemManager
 from sibyl_core.services.graph_records import _entity_from_row, entity_from_surreal_row
@@ -139,19 +139,12 @@ class EntityManager(_EntityWorkItemManager):
             generate_embeddings=True,
             embedding_batch_size=embedding_batch_size,
         )
-        written = await asyncio.gather(
-            *(
-                _update_entity_embedding_if_current(
-                    self._client,
-                    entity,
-                    group_id=self._group_id,
-                )
-                for entity in prepared
-            )
+        written_ids = await _update_entity_embeddings_if_current(
+            self._client,
+            prepared,
+            group_id=self._group_id,
         )
-        ready_ids.update(
-            entity.id for entity, persisted in zip(prepared, written, strict=True) if persisted
-        )
+        ready_ids.update(written_ids)
         return [entity.id for entity in current_entities if entity.id in ready_ids]
 
     async def create(self, entity: Entity) -> str:
