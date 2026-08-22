@@ -113,6 +113,8 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "api_retry_attempts",
         "api_retry_base_delay_seconds",
         "api_retry_max_delay_seconds",
+        "required_embedding_provider",
+        "required_embedding_model",
         "search_limit",
         "max_context_items",
         "max_context_chars_per_item",
@@ -869,6 +871,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     parser.add_argument("--bulk-max-entities", type=int, default=32)
     parser.add_argument("--bulk-max-content-chars", type=int, default=512_000)
     parser.add_argument("--embedding-backfill-max-pending-jobs", type=int, default=8)
+    parser.add_argument("--require-embedding-provider", default="")
+    parser.add_argument("--require-embedding-model", default="")
 
     parser.add_argument("--reader-model", default=os.getenv("READER_MODEL", "Qwen/Qwen3.5-9B"))
     parser.add_argument(
@@ -909,6 +913,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         parser.error("--reuse-existing-project requires --project-id")
     if args.reuse_existing_project and args.checkpoint_dir:
         parser.error("--reuse-existing-project cannot be combined with --checkpoint-dir")
+    if bool(args.require_embedding_provider.strip()) != bool(args.require_embedding_model.strip()):
+        parser.error(
+            "--require-embedding-provider and --require-embedding-model must be set together"
+        )
     experiment_fields = {
         "--experiment-id": args.experiment_id,
         "--experiment-phase": args.experiment_phase,
@@ -1161,6 +1169,8 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
         "bulk_max_entities": args.bulk_max_entities,
         "bulk_max_content_chars": args.bulk_max_content_chars,
         "embedding_backfill_max_pending_jobs": args.embedding_backfill_max_pending_jobs,
+        "required_embedding_provider": args.require_embedding_provider,
+        "required_embedding_model": args.require_embedding_model,
         "runner_provenance": git_provenance(ROOT),
         "official_source": official_source_record(
             Path(args.official_repo).expanduser().resolve() if args.official_repo else None
@@ -2452,23 +2462,27 @@ def _embedding_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
     tracking_complete = bool(source_runs)
     for source_run in source_runs:
         rows = source_run["per_question_rows"]
-        ingest_candidates = [
-            usage
-            for row in rows
-            if isinstance(
-                usage := _nested_value(
-                    row,
-                    "memory_post_query_metadata",
-                    "ingest_embedding_usage",
-                ),
-                dict,
-            )
-            and usage
-        ]
-        if ingest_candidates:
-            ingest_records.append(ingest_candidates[0])
-        elif not source_run.get("plan", {}).get("load_memory_dir"):
+        if not rows:
             tracking_complete = False
+        if not source_run.get("plan", {}).get("load_memory_dir"):
+            ingest_candidates = [
+                usage
+                for row in rows
+                if isinstance(
+                    usage := _nested_value(
+                        row,
+                        "memory_post_query_metadata",
+                        "ingest_embedding_usage",
+                    ),
+                    dict,
+                )
+                and usage
+            ]
+            serialized = {json.dumps(candidate, sort_keys=True) for candidate in ingest_candidates}
+            if len(ingest_candidates) == len(rows) and len(serialized) == 1:
+                ingest_records.append(ingest_candidates[0])
+            else:
+                tracking_complete = False
         for row in rows:
             usage = _nested_value(
                 row,
@@ -2482,6 +2496,8 @@ def _embedding_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
                 tracking_complete = False
     ingest = _summarize_embedding_usage(ingest_records)
     query = _summarize_embedding_usage(query_records)
+    usage_complete = bool(ingest["valid"] and query["valid"])
+    tracking_complete = tracking_complete and usage_complete
     requests = int(ingest["requests"] + query["requests"])
     priced_requests = int(ingest["cost_reported_requests"] + query["cost_reported_requests"])
     provider_reported_cost_usd = float(
@@ -2496,6 +2512,7 @@ def _embedding_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
         provider_reported_cost_usd=provider_reported_cost_usd,
         providers=providers,
         models=models,
+        usage_complete=usage_complete,
     )
     return {
         "calls": requests,
@@ -2529,15 +2546,32 @@ def _embedding_cost_settlement(
     provider_reported_cost_usd: float,
     providers: list[str],
     models: list[str],
+    usage_complete: bool = True,
 ) -> dict[str, Any]:
     if provider_reported_cost_usd < 0.0:
+        return {
+            "official_pricing_cost_usd": 0.0,
+            "settled_cost_usd": 0.0,
+            "coverage_complete": False,
+            "cost_sources": [],
+            "official_price_snapshot": None,
+            "cost_basis": "invalid negative embedding provider accounting",
+        }
+    if (
+        not usage_complete
+        or requests < 0
+        or priced_requests < 0
+        or priced_requests > requests
+        or input_tokens < 0.0
+        or not input_tokens.is_integer()
+    ):
         return {
             "official_pricing_cost_usd": 0.0,
             "settled_cost_usd": provider_reported_cost_usd,
             "coverage_complete": False,
             "cost_sources": [],
             "official_price_snapshot": None,
-            "cost_basis": "invalid negative embedding provider accounting",
+            "cost_basis": "invalid embedding usage counters",
         }
     if providers and set(providers) <= {"disabled", "local"}:
         return {
@@ -2629,20 +2663,19 @@ def _planner_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
             else:
                 tracking_complete = False
 
-    requests = int(sum(_number_from(record, ("requests",)) or 0 for record in records))
-    input_tokens = sum(_number_from(record, ("input_tokens",)) or 0.0 for record in records)
-    output_tokens = sum(_number_from(record, ("output_tokens",)) or 0.0 for record in records)
-    priced_requests = int(
-        sum(
-            (_number_from(record, ("requests",)) or 0)
-            if record.get("cost_complete") is True
-            and _number_from(record, ("cost_usd",)) is not None
-            else 0
-            for record in records
-        )
+    records_valid = all(_structured_provider_usage_valid(record) for record in records)
+    requests = sum(_non_negative_int(record.get("requests")) or 0 for record in records)
+    input_tokens = sum(_non_negative_int(record.get("input_tokens")) or 0 for record in records)
+    output_tokens = sum(_non_negative_int(record.get("output_tokens")) or 0 for record in records)
+    priced_requests = sum(
+        (_non_negative_int(record.get("requests")) or 0)
+        if record.get("cost_complete") is True
+        and _non_negative_number(record.get("cost_usd")) is not None
+        else 0
+        for record in records
     )
     provider_reported_cost_usd = sum(
-        _number_from(record, ("cost_usd",)) or 0.0 for record in records
+        _non_negative_number(record.get("cost_usd")) or 0.0 for record in records
     )
     providers = sorted(
         {
@@ -2667,7 +2700,9 @@ def _planner_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
         "estimated_output_tokens": output_tokens,
         "provider_reported_cost_usd": provider_reported_cost_usd,
         "estimated_cost_usd": provider_reported_cost_usd,
-        "cost_coverage_complete": coverage_complete and priced_requests == requests,
+        "cost_coverage_complete": (
+            coverage_complete and records_valid and priced_requests == requests
+        ),
         "tracking_complete": coverage_complete,
         "expected_question_count": expected_rows,
         "recorded_question_count": len(records),
@@ -2703,21 +2738,20 @@ def _distillation_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any
             continue
         records.append(candidates[0])
 
-    requests = int(sum(_number_from(record, ("requests",)) or 0 for record in records))
-    input_tokens = sum(_number_from(record, ("input_tokens",)) or 0.0 for record in records)
-    output_tokens = sum(_number_from(record, ("output_tokens",)) or 0.0 for record in records)
-    total_tokens = sum(_number_from(record, ("total_tokens",)) or 0.0 for record in records)
-    priced_requests = int(
-        sum(
-            (_number_from(record, ("requests",)) or 0)
-            if record.get("cost_complete") is True
-            and _number_from(record, ("cost_usd",)) is not None
-            else 0
-            for record in records
-        )
+    records_valid = all(_structured_provider_usage_valid(record) for record in records)
+    requests = sum(_non_negative_int(record.get("requests")) or 0 for record in records)
+    input_tokens = sum(_non_negative_int(record.get("input_tokens")) or 0 for record in records)
+    output_tokens = sum(_non_negative_int(record.get("output_tokens")) or 0 for record in records)
+    total_tokens = sum(_non_negative_int(record.get("total_tokens")) or 0 for record in records)
+    priced_requests = sum(
+        (_non_negative_int(record.get("requests")) or 0)
+        if record.get("cost_complete") is True
+        and _non_negative_number(record.get("cost_usd")) is not None
+        else 0
+        for record in records
     )
     provider_reported_cost_usd = sum(
-        _number_from(record, ("cost_usd",)) or 0.0 for record in records
+        _non_negative_number(record.get("cost_usd")) or 0.0 for record in records
     )
     providers = sorted(
         {
@@ -2743,7 +2777,9 @@ def _distillation_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any
         "total_tokens": total_tokens,
         "provider_reported_cost_usd": provider_reported_cost_usd,
         "estimated_cost_usd": provider_reported_cost_usd,
-        "cost_coverage_complete": tracking_complete and priced_requests == requests,
+        "cost_coverage_complete": (
+            tracking_complete and records_valid and priced_requests == requests
+        ),
         "tracking_complete": tracking_complete,
         "expected_source_run_count": expected_source_runs,
         "recorded_source_run_count": len(records),
@@ -2753,17 +2789,19 @@ def _distillation_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any
 
 def _summarize_embedding_usage(records: list[dict[str, Any]]) -> dict[str, Any]:
     return {
-        "requests": int(sum(_number_from(record, ("requests",)) or 0 for record in records)),
-        "inputs": int(sum(_number_from(record, ("inputs",)) or 0 for record in records)),
+        "requests": sum(_non_negative_int(record.get("requests")) or 0 for record in records),
+        "inputs": sum(_non_negative_int(record.get("inputs")) or 0 for record in records),
         "input_tokens": sum(
-            _number_from(record, ("prompt_tokens",), ("total_tokens",)) or 0.0 for record in records
+            _non_negative_int(record.get("prompt_tokens")) or 0 for record in records
         ),
-        "cost_reported_requests": int(
-            sum(_number_from(record, ("cost_reported_requests",)) or 0 for record in records)
+        "cost_reported_requests": sum(
+            _non_negative_int(record.get("cost_reported_requests")) or 0
+            for record in records
         ),
         "provider_reported_cost_usd": sum(
-            _number_from(record, ("cost_usd",)) or 0.0 for record in records
+            _non_negative_number(record.get("cost_usd")) or 0.0 for record in records
         ),
+        "valid": all(_embedding_usage_record_valid(record) for record in records),
         "providers": sorted(
             {
                 provider
@@ -2906,6 +2944,57 @@ def _non_negative_int(value: Any) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         return None
     return value
+
+
+def _non_negative_number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) and number >= 0.0 else None
+
+
+def _structured_provider_usage_valid(record: dict[str, Any]) -> bool:
+    requests = _non_negative_int(record.get("requests"))
+    input_tokens = _non_negative_int(record.get("input_tokens"))
+    output_tokens = _non_negative_int(record.get("output_tokens"))
+    total_tokens = _non_negative_int(record.get("total_tokens"))
+    cost = _non_negative_number(record.get("cost_usd"))
+    return (
+        isinstance(record.get("provider"), str)
+        and bool(str(record["provider"]).strip())
+        and isinstance(record.get("model"), str)
+        and bool(str(record["model"]).strip())
+        and requests is not None
+        and input_tokens is not None
+        and output_tokens is not None
+        and total_tokens == input_tokens + output_tokens
+        and record.get("cost_complete") is True
+        and cost is not None
+        and (requests > 0 or cost == 0.0)
+    )
+
+
+def _embedding_usage_record_valid(record: dict[str, Any]) -> bool:
+    requests = _non_negative_int(record.get("requests"))
+    inputs = _non_negative_int(record.get("inputs"))
+    prompt_tokens = _non_negative_int(record.get("prompt_tokens"))
+    total_tokens = _non_negative_int(record.get("total_tokens"))
+    priced_requests = _non_negative_int(record.get("cost_reported_requests"))
+    cost = _non_negative_number(record.get("cost_usd"))
+    return (
+        isinstance(record.get("provider"), str)
+        and bool(str(record["provider"]).strip())
+        and isinstance(record.get("model"), str)
+        and bool(str(record["model"]).strip())
+        and requests is not None
+        and inputs is not None
+        and prompt_tokens is not None
+        and total_tokens == prompt_tokens
+        and priced_requests is not None
+        and priced_requests <= requests
+        and cost is not None
+        and (priced_requests > 0 or cost == 0.0)
+    )
 
 
 def accounting_metric_aliases(accounting: dict[str, Any]) -> dict[str, float]:

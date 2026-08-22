@@ -241,6 +241,8 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "api_retry_attempts",
         "api_retry_base_delay_seconds",
         "api_retry_max_delay_seconds",
+        "required_embedding_provider",
+        "required_embedding_model",
         "search_limit",
         "max_context_items",
         "max_context_chars_per_item",
@@ -3559,6 +3561,41 @@ def _naive_arm_conflicts(memory_params: dict[str, object]) -> list[str]:
     return sorted(conflicts)
 
 
+def require_embedding_usage_profile(
+    usage: dict[str, object],
+    *,
+    provider: str,
+    model: str,
+    surface: str,
+) -> None:
+    if not provider and not model:
+        return
+    if not provider or not model:
+        raise ValueError("required embedding provider and model must be configured together")
+    actual_provider = _stripped_str(usage.get("provider"))
+    actual_model = _stripped_str(usage.get("model"))
+    if actual_provider != provider or actual_model != model:
+        raise RuntimeError(
+            f"{surface} embedding profile mismatch: "
+            f"expected {provider}/{model}, received "
+            f"{actual_provider or 'missing'}/{actual_model or 'missing'}"
+        )
+
+
+def require_embedding_profile(
+    search_metadata: dict[str, object],
+    *,
+    provider: str,
+    model: str,
+) -> None:
+    require_embedding_usage_profile(
+        _string_key_dict(search_metadata.get("embedding_usage")),
+        provider=provider,
+        model=model,
+        surface="serving API",
+    )
+
+
 @register_memory
 class SibylLiveApiMemory(Memory):
     memory_type = "sibyl_live_api"
@@ -3691,6 +3728,18 @@ class SibylLiveApiMemory(Memory):
         official_source = memory_params.get("official_source")
         self.official_source = dict(official_source) if isinstance(official_source, dict) else {}
         self.api_url = _normalize_api_url(_param_str(memory_params, "api_url", DEFAULT_API_URL))
+        self.required_embedding_provider = _param_str(
+            memory_params,
+            "required_embedding_provider",
+            "",
+        )
+        self.required_embedding_model = _param_str(
+            memory_params,
+            "required_embedding_model",
+            "",
+        )
+        if bool(self.required_embedding_provider) != bool(self.required_embedding_model):
+            raise ValueError("required embedding provider and model must be configured together")
         self.longmemeval_v2_domain = _param_str(
             memory_params,
             "longmemeval_v2_domain",
@@ -4901,6 +4950,12 @@ class SibylLiveApiMemory(Memory):
         if pending_jobs or not self._ingest_finalized:
             msg = f"memory ingestion has {pending_jobs} pending jobs; call finalize_ingest first"
             raise RuntimeError(msg)
+        require_embedding_usage_profile(
+            _string_key_dict(getattr(self, "ingest_embedding_usage", {})),
+            provider=getattr(self, "required_embedding_provider", ""),
+            model=getattr(self, "required_embedding_model", ""),
+            surface="ingest worker",
+        )
         stream_future = None
         stream_executor: ThreadPoolExecutor | None = None
         if getattr(self, "typed_stream_retrieval", DEFAULT_TYPED_STREAM_RETRIEVAL):
@@ -4962,6 +5017,11 @@ class SibylLiveApiMemory(Memory):
             ),
         )
         results, search_metadata = _required_context_evidence(context_response)
+        require_embedding_profile(
+            search_metadata,
+            provider=getattr(self, "required_embedding_provider", ""),
+            model=getattr(self, "required_embedding_model", ""),
+        )
         if stream_future is not None and stream_executor is not None:
             try:
                 stream_results, stream_metadata = stream_future.result()

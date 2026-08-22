@@ -225,6 +225,11 @@ def test_stage_plan_expands_exact_domains_waves_and_local_execution(
                 assert command[command.index("--local-ref") + 1] == "refs/heads/main"
                 assert "or.key" not in " ".join(command)
                 assert "OPENROUTER_API_KEY" in command
+                assert command[command.index("--require-embedding-provider") + 1] == "local"
+                assert (
+                    command[command.index("--require-embedding-model") + 1]
+                    == "sentence-transformers/all-MiniLM-L6-v2"
+                )
     assert len(run_ids) == len(stage_plan["runs"])
     assert stage_plan["package_inputs"] == {
         "system_description": inputs.bind_artifact(

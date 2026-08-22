@@ -69,6 +69,8 @@ EXPECTED_DISTILLATION_REQUESTS = 3
 EXPECTED_DISTILLATION_INPUT_TOKENS = 300
 EXPECTED_DISTILLATION_OUTPUT_TOKENS = 90
 EXPECTED_DISTILLATION_TOTAL_TOKENS = 390
+EXPECTED_LOADED_QUERY_TOKENS = 10
+EXPECTED_MISMATCHED_INGEST_QUERY_TOKENS = 2
 EXPECTED_RETRIEVAL_MAX_PLANNED_QUERIES = 3
 EXPECTED_WHITESPACE_EXPOSURE_CHARS = 2
 EXPECTED_SELECTED_WINDOW_COUNT = 2
@@ -1975,13 +1977,23 @@ def test_actual_spend_cap_uses_settled_total() -> None:
 
 def test_embedding_accounting_accepts_loaded_local_memory() -> None:
     module = _load_runner_module()
+    historical_ingest_usage = {
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+        "requests": 1,
+        "inputs": 1,
+        "prompt_tokens": 1000,
+        "total_tokens": 1000,
+        "cost_reported_requests": 0,
+        "cost_usd": 0.0,
+    }
     local_usage = {
         "provider": "local",
         "model": "sentence-transformers/all-MiniLM-L6-v2",
-        "requests": 0,
-        "inputs": 0,
-        "prompt_tokens": 0,
-        "total_tokens": 0,
+        "requests": 1,
+        "inputs": 1,
+        "prompt_tokens": 10,
+        "total_tokens": 10,
         "cost_reported_requests": 0,
         "cost_usd": 0.0,
     }
@@ -1992,7 +2004,7 @@ def test_embedding_accounting_accepts_loaded_local_memory() -> None:
                 "per_question_rows": [
                     {
                         "memory_post_query_metadata": {
-                            "ingest_embedding_usage": local_usage,
+                            "ingest_embedding_usage": historical_ingest_usage,
                             "search_metadata": {"embedding_usage": local_usage},
                         }
                     }
@@ -2002,10 +2014,100 @@ def test_embedding_accounting_accepts_loaded_local_memory() -> None:
     )
 
     assert accounting["providers"] == ["local"]
+    assert accounting["requests"] == 1
+    assert accounting["estimated_input_tokens"] == EXPECTED_LOADED_QUERY_TOKENS
     assert accounting["settled_cost_usd"] == 0.0
     assert accounting["cost_sources"] == ["local_runtime_zero_cost"]
     assert accounting["tracking_complete"] is True
     assert accounting["cost_coverage_complete"] is True
+
+
+def test_embedding_accounting_requires_one_consistent_build_ingest_receipt() -> None:
+    module = _load_runner_module()
+    first = {
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+        "requests": 1,
+        "inputs": 1,
+        "prompt_tokens": 1,
+        "total_tokens": 1,
+        "cost_reported_requests": 0,
+        "cost_usd": 0.0,
+    }
+    second = {**first, "prompt_tokens": 1_000_000, "total_tokens": 1_000_000}
+    query = {**first, "prompt_tokens": 1, "total_tokens": 1}
+    accounting = module._embedding_accounting(
+        [
+            {
+                "plan": {"load_memory_dir": None},
+                "per_question_rows": [
+                    {
+                        "memory_post_query_metadata": {
+                            "ingest_embedding_usage": first,
+                            "search_metadata": {"embedding_usage": query},
+                        }
+                    },
+                    {
+                        "memory_post_query_metadata": {
+                            "ingest_embedding_usage": second,
+                            "search_metadata": {"embedding_usage": query},
+                        }
+                    },
+                ],
+            }
+        ]
+    )
+
+    assert accounting["tracking_complete"] is False
+    assert accounting["cost_coverage_complete"] is False
+    assert accounting["estimated_input_tokens"] == EXPECTED_MISMATCHED_INGEST_QUERY_TOKENS
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"requests": 0.5},
+        {"cost_reported_requests": 0.5},
+        {"prompt_tokens": -1, "total_tokens": -1},
+        {"total_tokens": 999},
+        {"cost_usd": -0.01},
+    ],
+)
+def test_embedding_accounting_rejects_malformed_usage_counters(
+    override: dict[str, float | int],
+) -> None:
+    module = _load_runner_module()
+    usage = {
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+        "requests": 1,
+        "inputs": 1,
+        "prompt_tokens": 1000,
+        "total_tokens": 1000,
+        "cost_reported_requests": 0,
+        "cost_usd": 0.0,
+        **override,
+    }
+    accounting = module._embedding_accounting(
+        [
+            {
+                "plan": {"load_memory_dir": None},
+                "per_question_rows": [
+                    {
+                        "memory_post_query_metadata": {
+                            "ingest_embedding_usage": usage,
+                            "search_metadata": {"embedding_usage": usage},
+                        }
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert accounting["tracking_complete"] is False
+    assert accounting["cost_coverage_complete"] is False
+    assert accounting["official_pricing_cost_usd"] == 0.0
+    assert accounting["settled_cost_usd"] >= 0.0
 
 
 def test_embedding_accounting_prices_unreported_openai_usage() -> None:
@@ -2136,6 +2238,70 @@ def test_planner_accounting_requires_complete_accurate_query_usage() -> None:
     assert accounting["cost_coverage_complete"] is True
 
 
+def test_planner_accounting_rejects_negative_provider_cost() -> None:
+    module = _load_runner_module()
+    usage = {
+        "provider": "openai",
+        "model": "gpt-5.4-nano",
+        "requests": 1,
+        "input_tokens": 40,
+        "output_tokens": 10,
+        "total_tokens": 50,
+        "cost_usd": -1.0,
+        "cost_complete": True,
+    }
+    accounting = module._planner_accounting(
+        [
+            {
+                "memory_config": {"memory_params": {"retrieval_mode": "accurate"}},
+                "per_question_rows": [
+                    {
+                        "memory_post_query_metadata": {
+                            "retrieval_mode": "accurate",
+                            "search_metadata": {
+                                "planner_status": "success",
+                                "planner_usage": usage,
+                            },
+                        }
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert accounting["provider_reported_cost_usd"] == 0.0
+    assert accounting["tracking_complete"] is True
+    assert accounting["cost_coverage_complete"] is False
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"requests": 0.5},
+        {"input_tokens": -1},
+        {"total_tokens": 49},
+        {"cost_usd": -1.0},
+    ],
+)
+def test_structured_provider_usage_rejects_malformed_values(
+    override: dict[str, float | int],
+) -> None:
+    module = _load_runner_module()
+    usage = {
+        "provider": "openai",
+        "model": "gpt-5.4-nano",
+        "requests": 1,
+        "input_tokens": 40,
+        "output_tokens": 10,
+        "total_tokens": 50,
+        "cost_usd": 0.001,
+        "cost_complete": True,
+        **override,
+    }
+
+    assert module._structured_provider_usage_valid(usage) is False
+
+
 def test_planner_accounting_accepts_zero_cost_deterministic_refinement() -> None:
     module = _load_runner_module()
     source_run = {
@@ -2258,6 +2424,34 @@ def test_distillation_accounting_counts_each_ingest_once() -> None:
     assert accounting["recorded_source_run_count"] == 1
     assert accounting["tracking_complete"] is True
     assert accounting["cost_coverage_complete"] is True
+
+
+def test_distillation_accounting_rejects_negative_provider_cost() -> None:
+    module = _load_runner_module()
+    usage = {
+        "provider": "openai",
+        "model": "gpt-5.4-nano",
+        "requests": 1,
+        "input_tokens": 100,
+        "output_tokens": 30,
+        "total_tokens": 130,
+        "cost_usd": -1.0,
+        "cost_complete": True,
+    }
+    accounting = module._distillation_accounting(
+        [
+            {
+                "plan": {"note_distillation": True},
+                "per_question_rows": [
+                    {"memory_post_query_metadata": {"ingest_note_distillation_usage": usage}}
+                ],
+            }
+        ]
+    )
+
+    assert accounting["provider_reported_cost_usd"] == 0.0
+    assert accounting["tracking_complete"] is True
+    assert accounting["cost_coverage_complete"] is False
 
 
 @pytest.mark.parametrize("failure", ["missing", "drift", "unpriced"])
@@ -4539,6 +4733,8 @@ def test_sibyl_memory_loaded_config_allows_only_runtime_overrides() -> None:
             "context_expansion_max_ratio": EXPECTED_CONTEXT_EXPANSION_MAX_RATIO,
             "retrieval_mode": "accurate",
             "retrieval_max_planned_queries": 3,
+            "required_embedding_provider": "local",
+            "required_embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
         },
     }
 
@@ -4555,10 +4751,43 @@ def test_sibyl_memory_loaded_config_allows_only_runtime_overrides() -> None:
     assert params["context_expansion_max_ratio"] == EXPECTED_CONTEXT_EXPANSION_MAX_RATIO
     assert params["retrieval_mode"] == "accurate"
     assert params["retrieval_max_planned_queries"] == EXPECTED_RETRIEVAL_MAX_PLANNED_QUERIES
+    assert params["required_embedding_provider"] == "local"
+    assert params["required_embedding_model"] == "sentence-transformers/all-MiniLM-L6-v2"
 
     requested["memory_params"]["content_max_chars"] = 8_000
     with pytest.raises(RuntimeError, match="content_max_chars"):
         module.SibylLiveApiMemory.reconcile_loaded_memory_config(saved, requested)
+
+
+def test_sibyl_memory_requires_the_sealed_embedding_profile() -> None:
+    module = _load_memory_module()
+    expected_model = "sentence-transformers/all-MiniLM-L6-v2"
+
+    module.require_embedding_profile(
+        {"embedding_usage": {"provider": "local", "model": expected_model}},
+        provider="local",
+        model=expected_model,
+    )
+
+    with pytest.raises(RuntimeError, match="embedding profile mismatch"):
+        module.require_embedding_profile(
+            {
+                "embedding_usage": {
+                    "provider": "openai",
+                    "model": "text-embedding-3-small",
+                }
+            },
+            provider="local",
+            model=expected_model,
+        )
+
+    with pytest.raises(RuntimeError, match="ingest worker embedding profile mismatch"):
+        module.require_embedding_usage_profile(
+            {},
+            provider="local",
+            model=expected_model,
+            surface="ingest worker",
+        )
 
 
 def test_annotate_inventory_completeness_branches() -> None:

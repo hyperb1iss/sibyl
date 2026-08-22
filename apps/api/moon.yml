@@ -291,6 +291,10 @@ tasks:
 
   serve-local-embeddings:
     command: uv run --with sentence-transformers==6.0.0 sibyld serve
+    env:
+      SIBYL_GRAPH_EMBEDDING_PROVIDER: local
+      SIBYL_GRAPH_EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
+      SIBYL_GRAPH_EMBEDDING_DIMENSIONS: "384"
     preset: server
     options:
       persistent: true
@@ -298,6 +302,16 @@ tasks:
   # Worker
   worker:
     command: uv run sibyld worker
+    preset: server
+    options:
+      persistent: true
+
+  worker-local-embeddings:
+    command: uv run --with sentence-transformers==6.0.0 sibyld worker
+    env:
+      SIBYL_GRAPH_EMBEDDING_PROVIDER: local
+      SIBYL_GRAPH_EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
+      SIBYL_GRAPH_EMBEDDING_DIMENSIONS: "384"
     preset: server
     options:
       persistent: true
