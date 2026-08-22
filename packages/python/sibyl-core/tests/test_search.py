@@ -120,6 +120,38 @@ async def test_openai_embedding_provider_records_response_usage() -> None:
 
 
 @pytest.mark.asyncio
+async def test_openai_embedding_usage_restores_provenance_into_empty_capture() -> None:
+    class Embeddings:
+        async def create(self, **kwargs: object) -> SimpleNamespace:
+            inputs = kwargs["input"]
+            assert isinstance(inputs, list)
+            return SimpleNamespace(
+                data=[SimpleNamespace(embedding=[0.1, 0.2]) for _ in inputs],
+                usage=SimpleNamespace(prompt_tokens=7, total_tokens=7),
+            )
+
+    metadata = EmbeddingMetadata(
+        provider="openai",
+        model="text-embedding-3-small",
+        dimensions=2,
+        cache_namespace="usage-test",
+        tokenizer_estimate_method="test",
+    )
+    provider = OpenAIEmbeddingProvider(
+        metadata=metadata,
+        client=SimpleNamespace(embeddings=Embeddings()),
+    )
+
+    with capture_embedding_usage(None) as captured:
+        await provider.embed_texts(["alpha", "beta"])
+
+    assert captured["provider"] == "openai"
+    assert captured["model"] == "text-embedding-3-small"
+    assert captured["requests"] == 1
+    assert captured["prompt_tokens"] == 7
+
+
+@pytest.mark.asyncio
 async def test_local_sentence_transformer_provider_embeds_with_metadata() -> None:
     client = _FakeSentenceTransformer(dimensions=3)
     provider = create_embedding_provider(

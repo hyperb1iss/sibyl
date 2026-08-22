@@ -204,6 +204,8 @@ class OpenAIEmbeddingProvider:
         if collector is not None:
             _record_usage_totals(
                 collector,
+                provider=self.metadata.provider,
+                model=self.metadata.model,
                 input_count=input_count,
                 prompt_tokens=int(prompt_tokens),
                 total_tokens=int(total_tokens),
@@ -541,11 +543,15 @@ def _numeric_usage_value(value: object) -> float:
 def _record_usage_totals(
     usage: dict[str, str | int | float],
     *,
+    provider: str,
+    model: str,
     input_count: int,
     prompt_tokens: int,
     total_tokens: int,
     cost: float | None,
 ) -> None:
+    usage["provider"] = provider
+    usage["model"] = model
     usage["requests"] = int(usage.get("requests", 0)) + 1
     usage["inputs"] = int(usage.get("inputs", 0)) + input_count
     usage["prompt_tokens"] = int(usage.get("prompt_tokens", 0)) + prompt_tokens

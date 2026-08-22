@@ -79,8 +79,23 @@ EXPERIMENT_PHASES = frozenset({"aa", "anchor", "race", "render"})
 EXPERIMENT_SUBSTRATES = frozenset({"machine", "naive"})
 MILLION_TOKENS = 1_000_000
 EVAL_PRICE_SNAPSHOT = {
+    "embedding": {
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+        "input_per_million": 0.02,
+        "source": "https://developers.openai.com/api/docs/models/text-embedding-3-small",
+        "verified_at": "2026-08-22",
+    },
     "reader": {"model": "qwen/qwen3.5-9b", "input_per_million": 0.17, "output_per_million": 0.25},
-    "judge": {"model": "gpt-5.2", "input_per_million": 1.75, "output_per_million": 14.0},
+    "judge": {
+        "model": "gpt-5.2",
+        "provider_model": "gpt-5.2-2025-12-11",
+        "input_per_million": 1.75,
+        "cached_input_per_million": 0.175,
+        "output_per_million": 14.0,
+        "source": "https://developers.openai.com/api/docs/models/gpt-5.2",
+        "verified_at": "2026-08-22",
+    },
     "operations": {
         "model": "gpt-5.4-nano",
         "input_per_million": 0.20,
@@ -1440,6 +1455,7 @@ def build_spend_reservation(
         "currency": "USD",
         "price_snapshot": EVAL_PRICE_SNAPSHOT,
         "price_snapshot_sources": {
+            "embedding": "OpenAI text-embedding-3-small standard API price, verified 2026-08-22",
             "reader": "OpenRouter Qwen3.5-9B provider maximum, verified 2026-08-20",
             "judge": "OpenAI GPT-5.2 standard API price, verified 2026-08-20",
             "operations": "OpenAI GPT-5.4 nano standard API price, verified 2026-08-20",
@@ -1473,7 +1489,7 @@ def enforce_actual_spend_cap(
     cost = accounting.get("cost") if isinstance(accounting, dict) else None
     if not isinstance(cost, dict) or cost.get("coverage_complete") is not True:
         raise RuntimeError("paid experiment provider accounting is incomplete")
-    actual = cost.get("provider_reported_total_usd")
+    actual = cost.get("settled_total_usd", cost.get("provider_reported_total_usd"))
     if not isinstance(actual, int | float) or isinstance(actual, bool) or not math.isfinite(actual):
         raise RuntimeError("paid experiment provider spend is missing")
     if max_spend_usd is None or actual > max_spend_usd:
@@ -2380,6 +2396,14 @@ def build_receipt_accounting(
         float(section["provider_reported_cost_usd"])
         for section in (embedding, planner, distillation, reader, judge)
     )
+    official_pricing_total_usd = sum(
+        float(section.get("official_pricing_cost_usd", 0.0))
+        for section in (embedding, reader, judge)
+    )
+    settled_total_usd = sum(
+        float(section.get("settled_cost_usd", section["provider_reported_cost_usd"]))
+        for section in (embedding, planner, distillation, reader, judge)
+    )
     cost_coverage_complete = all(
         bool(section["cost_coverage_complete"])
         for section in (embedding, planner, distillation, reader, judge)
@@ -2407,14 +2431,16 @@ def build_receipt_accounting(
         "reader": reader,
         "judge": judge,
         "cost": {
-            "estimated_total_usd": provider_reported_total_usd,
+            "estimated_total_usd": settled_total_usd,
             "provider_reported_total_usd": provider_reported_total_usd,
+            "official_pricing_total_usd": official_pricing_total_usd,
+            "settled_total_usd": settled_total_usd,
             "currency": "USD",
             "coverage_complete": cost_coverage_complete,
             "is_lower_bound": not cost_coverage_complete,
             "enforcement": (
-                "provider-reported cost only; unpriced requests remain explicit and are not "
-                "silently estimated"
+                "provider-reported cost when present; otherwise exact-token settlement against "
+                "a pinned official model price snapshot; all other unpriced requests fail closed"
             ),
         },
     }
@@ -2441,7 +2467,7 @@ def _embedding_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
         ]
         if ingest_candidates:
             ingest_records.append(ingest_candidates[0])
-        else:
+        elif not source_run.get("plan", {}).get("load_memory_dir"):
             tracking_complete = False
         for row in rows:
             usage = _nested_value(
@@ -2463,6 +2489,14 @@ def _embedding_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
     )
     providers = sorted(set(ingest["providers"]) | set(query["providers"]))
     models = sorted(set(ingest["models"]) | set(query["models"]))
+    settlement = _embedding_cost_settlement(
+        requests=requests,
+        priced_requests=priced_requests,
+        input_tokens=float(ingest["input_tokens"] + query["input_tokens"]),
+        provider_reported_cost_usd=provider_reported_cost_usd,
+        providers=providers,
+        models=models,
+    )
     return {
         "calls": requests,
         "requests": requests,
@@ -2474,12 +2508,79 @@ def _embedding_accounting(source_runs: list[dict[str, Any]]) -> dict[str, Any]:
         "estimated_input_tokens": float(ingest["input_tokens"] + query["input_tokens"]),
         "estimated_output_tokens": 0.0,
         "provider_reported_cost_usd": provider_reported_cost_usd,
-        "estimated_cost_usd": provider_reported_cost_usd,
-        "cost_coverage_complete": tracking_complete and priced_requests == requests,
+        "official_pricing_cost_usd": settlement["official_pricing_cost_usd"],
+        "settled_cost_usd": settlement["settled_cost_usd"],
+        "estimated_cost_usd": settlement["settled_cost_usd"],
+        "cost_coverage_complete": tracking_complete and settlement["coverage_complete"],
         "tracking_complete": tracking_complete,
         "ingest": ingest,
         "query": query,
-        "cost_basis": "Sibyl embedding provider response usage",
+        "cost_sources": settlement["cost_sources"],
+        "official_price_snapshot": settlement["official_price_snapshot"],
+        "cost_basis": settlement["cost_basis"],
+    }
+
+
+def _embedding_cost_settlement(
+    *,
+    requests: int,
+    priced_requests: int,
+    input_tokens: float,
+    provider_reported_cost_usd: float,
+    providers: list[str],
+    models: list[str],
+) -> dict[str, Any]:
+    if provider_reported_cost_usd < 0.0:
+        return {
+            "official_pricing_cost_usd": 0.0,
+            "settled_cost_usd": provider_reported_cost_usd,
+            "coverage_complete": False,
+            "cost_sources": [],
+            "official_price_snapshot": None,
+            "cost_basis": "invalid negative embedding provider accounting",
+        }
+    if providers and set(providers) <= {"disabled", "local"}:
+        return {
+            "official_pricing_cost_usd": 0.0,
+            "settled_cost_usd": 0.0,
+            "coverage_complete": provider_reported_cost_usd == 0.0,
+            "cost_sources": ["local_runtime_zero_cost"],
+            "official_price_snapshot": None,
+            "cost_basis": "local embedding runtime with no external provider spend",
+        }
+    if priced_requests == requests:
+        return {
+            "official_pricing_cost_usd": 0.0,
+            "settled_cost_usd": provider_reported_cost_usd,
+            "coverage_complete": True,
+            "cost_sources": ["provider_response_usage"],
+            "official_price_snapshot": None,
+            "cost_basis": "Sibyl embedding provider response usage",
+        }
+
+    price = EVAL_PRICE_SNAPSHOT["embedding"]
+    if (
+        providers == [price["provider"]]
+        and models == [price["model"]]
+        and priced_requests == 0
+        and input_tokens.is_integer()
+    ):
+        official_cost = _token_cost(int(input_tokens), float(price["input_per_million"]))
+        return {
+            "official_pricing_cost_usd": official_cost,
+            "settled_cost_usd": official_cost,
+            "coverage_complete": True,
+            "cost_sources": ["openai_official_model_pricing"],
+            "official_price_snapshot": price,
+            "cost_basis": "exact-token settlement against pinned official embedding pricing",
+        }
+    return {
+        "official_pricing_cost_usd": 0.0,
+        "settled_cost_usd": provider_reported_cost_usd,
+        "coverage_complete": False,
+        "cost_sources": [],
+        "official_price_snapshot": None,
+        "cost_basis": "incomplete embedding provider accounting",
     }
 
 
@@ -2697,12 +2798,25 @@ def _provider_accounting(
     output_tokens = sum(
         _number_from(event, ("usage", "completion_tokens")) or 0.0 for event in events
     )
-    costs = [
-        cost for event in events if (cost := _number_from(event, ("usage", "cost_usd"))) is not None
+    settlements = [
+        settlement
+        for event in events
+        if (settlement := _provider_event_cost(event, role=role)) is not None
     ]
     request_count = len(events)
-    priced_requests = len(costs)
-    provider_reported_cost_usd = sum(costs)
+    priced_requests = len(settlements)
+    provider_reported_cost_usd = sum(
+        settlement["cost_usd"]
+        for settlement in settlements
+        if settlement["source"] == "provider_response_usage"
+    )
+    official_pricing_cost_usd = sum(
+        settlement["cost_usd"]
+        for settlement in settlements
+        if settlement["source"] == "openai_official_model_pricing"
+    )
+    settled_cost_usd = provider_reported_cost_usd + official_pricing_cost_usd
+    cost_sources = sorted({settlement["source"] for settlement in settlements})
     return {
         "requests": request_count,
         "priced_requests": priced_requests,
@@ -2723,11 +2837,72 @@ def _provider_accounting(
         "estimated_input_tokens": input_tokens if events else fallback_input_tokens,
         "estimated_output_tokens": output_tokens if events else fallback_output_tokens,
         "provider_reported_cost_usd": provider_reported_cost_usd,
-        "estimated_cost_usd": provider_reported_cost_usd,
+        "official_pricing_cost_usd": official_pricing_cost_usd,
+        "settled_cost_usd": settled_cost_usd,
+        "estimated_cost_usd": settled_cost_usd,
         "cost_coverage_complete": tracking_complete and priced_requests == request_count,
         "tracking_complete": tracking_complete,
-        "cost_basis": "provider response usage sidecar",
+        "cost_sources": cost_sources,
+        "official_price_snapshot": (
+            EVAL_PRICE_SNAPSHOT["judge"]
+            if "openai_official_model_pricing" in cost_sources
+            else None
+        ),
+        "cost_basis": (
+            "provider response usage sidecar and pinned official model pricing"
+            if "openai_official_model_pricing" in cost_sources
+            else "provider response usage sidecar"
+        ),
     }
+
+
+def _provider_event_cost(event: dict[str, Any], *, role: str) -> dict[str, Any] | None:
+    provider_cost = _number_from(event, ("usage", "cost_usd"))
+    if provider_cost is not None and provider_cost >= 0.0:
+        return {"cost_usd": provider_cost, "source": "provider_response_usage"}
+    if role != "judge":
+        return None
+
+    price = EVAL_PRICE_SNAPSHOT["judge"]
+    if (
+        event.get("requested_model") != price["model"]
+        or event.get("provider_model") != price["provider_model"]
+    ):
+        return None
+    usage = event.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    prompt_tokens = _non_negative_int(usage.get("prompt_tokens"))
+    completion_tokens = _non_negative_int(usage.get("completion_tokens"))
+    total_tokens = _non_negative_int(usage.get("total_tokens"))
+    prompt_details = usage.get("prompt_tokens_details")
+    cached_tokens = (
+        _non_negative_int(prompt_details.get("cached_tokens"))
+        if isinstance(prompt_details, dict)
+        else None
+    )
+    if (
+        prompt_tokens is None
+        or completion_tokens is None
+        or total_tokens != prompt_tokens + completion_tokens
+        or cached_tokens is None
+        or cached_tokens > prompt_tokens
+    ):
+        return None
+
+    uncached_tokens = prompt_tokens - cached_tokens
+    cost_usd = (
+        _token_cost(uncached_tokens, float(price["input_per_million"]))
+        + _token_cost(cached_tokens, float(price["cached_input_per_million"]))
+        + _token_cost(completion_tokens, float(price["output_per_million"]))
+    )
+    return {"cost_usd": cost_usd, "source": "openai_official_model_pricing"}
+
+
+def _non_negative_int(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
 
 
 def accounting_metric_aliases(accounting: dict[str, Any]) -> dict[str, float]:

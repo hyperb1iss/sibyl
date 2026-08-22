@@ -289,6 +289,12 @@ tasks:
     options:
       persistent: true
 
+  serve-local-embeddings:
+    command: uv run --with sentence-transformers==6.0.0 sibyld serve
+    preset: server
+    options:
+      persistent: true
+
   # Worker
   worker:
     command: uv run sibyld worker
