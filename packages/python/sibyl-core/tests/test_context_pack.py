@@ -507,6 +507,7 @@ async def test_compile_context_can_keep_native_and_degraded_retrieval_graph_only
 
     assert len(native_calls) == 1
     assert fallback_calls[0]["include_documents"] is False
+    assert fallback_calls[0]["include_raw_memory"] is False
 
 
 @pytest.mark.asyncio

@@ -1272,6 +1272,7 @@ async def _compile_fallback_sections(
         "include_content": True,
         "content_max_chars": FALLBACK_SEARCH_CONTENT_MAX_CHARS,
         "include_documents": include_documents,
+        "include_raw_memory": include_documents,
         "include_graph": True,
         "organization_id": organization_id,
     }
