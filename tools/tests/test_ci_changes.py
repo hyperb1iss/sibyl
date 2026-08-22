@@ -51,6 +51,16 @@ def test_documentation_only_change_keeps_runtime_jobs_off() -> None:
     assert outputs["run_helm"] == "false"
 
 
+@pytest.mark.parametrize("path", [".prototools", ".python-version"])
+def test_toolchain_change_runs_runtime_jobs(path: str) -> None:
+    outputs = classify_changed_paths((path,)).outputs()
+
+    assert outputs["run_static"] == "true"
+    assert outputs["run_build"] == "true"
+    assert outputs["run_tests"] == "true"
+    assert outputs["run_e2e"] == "true"
+
+
 def test_classifier_fails_closed_with_the_unmatched_path() -> None:
     path = "new-release-surface.toml"
 

@@ -9,6 +9,8 @@
 
 #Requires -Version 7.0
 
+param([switch]$SkipMain)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -31,6 +33,10 @@ $ITALIC          = "$ESC[3m"
 $BOLD            = "$ESC[1m"
 $RESET           = "$ESC[0m"
 
+$PROTO_INSTALLER_VERSION = '0.60.2'
+$PROTO_INSTALLER_SHA256 = '91de41e2ba3ac62d26d9c6197001e44acedf451a6281908696b9ed2c76b9bcc8'
+$PROTO_INSTALLER_URL = "https://github.com/moonrepo/proto/releases/download/v${PROTO_INSTALLER_VERSION}/proto_cli-installer.ps1"
+
 # Banner gradient (electric purple → neon cyan)
 $GRAD_1 = "$ESC[38;2;225;53;255m"
 $GRAD_2 = "$ESC[38;2;201;88;247m"
@@ -48,14 +54,36 @@ function Write-Warn    ([string]$msg) { Write-Host "${ELECTRIC_YELLOW}!${RESET} 
 function Write-Err     ([string]$msg) { [Console]::Error.WriteLine("${ERROR_RED}✗${RESET} $msg") }
 function Write-Header  ([string]$msg) { Write-Host "`n${ELECTRIC_PURPLE}${BOLD}═══ $msg ═══${RESET}`n" }
 
-function Test-Command ([string]$name) {
-    [bool](Get-Command $name -ErrorAction SilentlyContinue)
+function Get-ApplicationCommand ([string]$Name) {
+    $extensions = if ($IsWindows) {
+        @($env:PATHEXT -split ';' | Where-Object { $_ })
+    } else {
+        @('')
+    }
+    foreach ($pathDir in ($env:Path -split [IO.Path]::PathSeparator)) {
+        if (-not $pathDir) { continue }
+        $pathDir = $pathDir.Trim().Trim('"')
+        foreach ($extension in $extensions) {
+            $candidate = Join-Path $pathDir "${Name}${extension}"
+            if (-not (Test-Path $candidate -PathType Leaf)) { continue }
+            $command = Get-Command $candidate -CommandType Application -ErrorAction SilentlyContinue
+            if ($command) { return $command }
+        }
+    }
+}
+
+function Test-Command ([string]$Name) {
+    [bool](Get-ApplicationCommand -Name $Name)
 }
 
 function Get-VersionString {
     param([string]$Tool)
     try {
-        $raw = & $Tool --version 2>$null | Select-Object -First 1
+        $command = Get-ApplicationCommand -Name $Tool
+        if (-not $command) { return 'unknown' }
+        $output = @(& $command.Source --version 2>$null)
+        if ($LASTEXITCODE -ne 0) { return 'unknown' }
+        $raw = $output | Select-Object -First 1
         if ($raw -match '\d+\.\d+\.\d+') { return $Matches[0] }
         return ($raw ?? 'unknown').Trim()
     } catch {
@@ -63,12 +91,85 @@ function Get-VersionString {
     }
 }
 
-function Add-PathOnce ([string]$Dir) {
-    if (-not $Dir -or -not (Test-Path $Dir)) { return }
-    $parts = $env:Path -split [IO.Path]::PathSeparator
-    if ($parts -notcontains $Dir) {
-        $env:Path = "$Dir$([IO.Path]::PathSeparator)$env:Path"
+function Get-RequiredVersion {
+    param([string]$Tool)
+
+    $toolPattern = [Regex]::Escape($Tool)
+    $pattern = '^\s*{0}\s*=\s*"([^"]+)"' -f $toolPattern
+    foreach ($line in Get-Content (Join-Path $PSScriptRoot '.prototools')) {
+        if ($line -match $pattern) {
+            $version = $Matches[1]
+            if ($version -notmatch '^\d+\.\d+\.\d+$') {
+                Write-Err "Expected an exact $Tool version in .prototools"
+                exit 1
+            }
+            return $version
+        }
     }
+
+    Write-Err "Missing exact $Tool version in .prototools"
+    exit 1
+}
+
+function Set-ProtoPath ([string]$ProtoHome) {
+    $prefix = @(
+        (Join-Path $ProtoHome 'shims')
+        (Join-Path $ProtoHome 'bin')
+    )
+    $protoPaths = [Collections.Generic.HashSet[string]]::new(
+        [StringComparer]::OrdinalIgnoreCase
+    )
+    foreach ($dir in $prefix) {
+        [void]$protoPaths.Add([IO.Path]::TrimEndingDirectorySeparator($dir))
+    }
+
+    $remaining = foreach ($part in ($env:Path -split [IO.Path]::PathSeparator)) {
+        if (-not $part) { continue }
+        $normalized = [IO.Path]::TrimEndingDirectorySeparator($part)
+        if (-not $protoPaths.Contains($normalized)) {
+            $part
+        }
+    }
+    $env:Path = (@($prefix) + @($remaining)) -join [IO.Path]::PathSeparator
+}
+
+function Install-ExactTool {
+    param(
+        [string]$Tool,
+        [string]$Expected
+    )
+
+    $current = if (Test-Command $Tool) { Get-VersionString -Tool $Tool } else { '' }
+    if ($current -eq $Expected) {
+        Write-Success "$Tool ${CORAL}v${current}${RESET} already installed"
+        return
+    }
+
+    if ($current) {
+        Write-Info "Upgrading ${CORAL}${Tool}${RESET} from v$current to v$Expected..."
+    } else {
+        Write-Info "Installing ${CORAL}${Tool}${RESET} v$Expected..."
+    }
+
+    $proto = Get-ApplicationCommand -Name 'proto'
+    if (-not $proto) {
+        Write-Err "proto is not an executable on PATH"
+        exit 1
+    }
+    & $proto.Source install $Tool $Expected --pin global
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "$Tool v$Expected installation failed"
+        exit 1
+    }
+
+    $current = if (Test-Command $Tool) { Get-VersionString -Tool $Tool } else { '' }
+    if ($current -ne $Expected) {
+        $resolved = if ($current) { "v$current" } else { 'missing' }
+        Write-Err "$Tool v$Expected was installed but $resolved resolves on PATH"
+        exit 1
+    }
+
+    Write-Success "$Tool ${CORAL}v${current}${RESET} installed"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -105,40 +206,66 @@ function Install-Proto {
     # Make sure proto's default install dir is on PATH for this session before
     # the existence check — a previous install may not have updated this shell.
     $protoHome = if ($env:PROTO_HOME) { $env:PROTO_HOME } else { Join-Path $HOME '.proto' }
-    Add-PathOnce (Join-Path $protoHome 'shims')
-    Add-PathOnce (Join-Path $protoHome 'bin')
+    Set-ProtoPath -ProtoHome $protoHome
 
-    if (Test-Command proto) {
-        $version = Get-VersionString -Tool 'proto'
-        Write-Success "proto ${CORAL}v${version}${RESET} already installed"
+    $expected = Get-RequiredVersion -Tool 'proto'
+    $current = if (Test-Command proto) { Get-VersionString -Tool 'proto' } else { '' }
+    if ($current -eq $expected) {
+        Write-Success "proto ${CORAL}v${current}${RESET} already installed"
         return
     }
 
-    Write-Info "Installing proto (toolchain version manager)..."
-
-    # The official one-liner is `irm <url> | iex`, but iex can't accept args
-    # so we download to a temp file and invoke it directly. That lets us pass
-    # flags through to `proto setup` when we need to.
-    $installer = Join-Path ([IO.Path]::GetTempPath()) ("proto-install-$([guid]::NewGuid()).ps1")
-    try {
-        Invoke-WebRequest `
-            -Uri 'https://moonrepo.dev/install/proto.ps1' `
-            -OutFile $installer `
-            -UseBasicParsing `
-            -ErrorAction Stop
-        & $installer
-    }
-    finally {
-        if (Test-Path $installer) { Remove-Item $installer -Force -ErrorAction SilentlyContinue }
+    if ($current) {
+        Write-Info "Upgrading proto from v$current to v$expected..."
+        $proto = Get-ApplicationCommand -Name 'proto'
+        & $proto.Source upgrade $expected
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "proto v$expected upgrade failed"
+            exit 1
+        }
+    } else {
+        Write-Info "Installing proto v$expected (toolchain version manager)..."
+        if ($expected -ne $PROTO_INSTALLER_VERSION) {
+            Write-Err "No verified proto installer is pinned for v$expected"
+            exit 1
+        }
+        $installer = Join-Path ([IO.Path]::GetTempPath()) (
+            "proto-install-$([guid]::NewGuid()).ps1"
+        )
+        try {
+            Invoke-WebRequest `
+                -Uri $PROTO_INSTALLER_URL `
+                -OutFile $installer `
+                -UseBasicParsing `
+                -ErrorAction Stop
+            $actualSha256 = (Get-FileHash -Path $installer -Algorithm SHA256).Hash
+            if (-not [String]::Equals(
+                $actualSha256,
+                $PROTO_INSTALLER_SHA256,
+                [StringComparison]::OrdinalIgnoreCase
+            )) {
+                throw 'proto installer checksum mismatch'
+            }
+            & $installer
+        }
+        finally {
+            if (Test-Path $installer) {
+                Remove-Item $installer -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
 
     # Refresh PATH for the bin we just dropped on disk.
-    Add-PathOnce (Join-Path $protoHome 'bin')
-    Add-PathOnce (Join-Path $protoHome 'shims')
+    Set-ProtoPath -ProtoHome $protoHome
 
     if (-not (Test-Command proto)) {
         Write-Err "proto installation failed"
-        Write-Host "${DIM}Try manually: irm https://moonrepo.dev/install/proto.ps1 | iex${RESET}"
+        exit 1
+    }
+
+    $current = Get-VersionString -Tool 'proto'
+    if ($current -ne $expected) {
+        Write-Err "proto v$expected was installed but v$current resolves on PATH"
         exit 1
     }
 
@@ -147,12 +274,13 @@ function Install-Proto {
     # $PROFILE by hand. --yes accepts defaults non-interactively.
     Write-Info "Configuring proto shell integration (proto setup)..."
     try {
-        & proto setup --yes 2>&1 | Out-Host
+        $proto = Get-ApplicationCommand -Name 'proto'
+        & $proto.Source setup --yes 2>&1 | Out-Host
     } catch {
         Write-Warn "proto setup reported an issue; PATH may need a new pwsh session to pick up."
     }
 
-    Write-Success "proto installed successfully"
+    Write-Success "proto ${CORAL}v${current}${RESET} installed"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -160,25 +288,7 @@ function Install-Proto {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 function Install-Moon {
-    if (Test-Command moon) {
-        $version = Get-VersionString -Tool 'moon'
-        Write-Success "moon ${CORAL}v${version}${RESET} already installed"
-        return
-    }
-
-    Write-Info "Installing moon (monorepo orchestration)..."
-    # moon is built-in to proto v0.45+, no plugin needed.
-    & proto install moon
-    if ($LASTEXITCODE -ne 0) {
-        Write-Err "moon installation failed"
-        exit 1
-    }
-
-    if (-not (Test-Command moon)) {
-        Write-Err "moon not found on PATH after install"
-        exit 1
-    }
-    Write-Success "moon installed successfully"
+    Install-ExactTool -Tool 'moon' -Expected (Get-RequiredVersion -Tool 'moon')
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -194,42 +304,14 @@ function Install-Toolchain {
     }
 
     $protoHome = if ($env:PROTO_HOME) { $env:PROTO_HOME } else { Join-Path $HOME '.proto' }
-    Add-PathOnce (Join-Path $protoHome 'shims')
-    Add-PathOnce (Join-Path $protoHome 'bin')
+    Set-ProtoPath -ProtoHome $protoHome
 
     Write-Info "Resolving toolchain from ${CORAL}.prototools${RESET}..."
 
-    # Install tools one at a time. `proto use --yes` runs installs in parallel
-    # and can deadlock if any plugin stalls — pnpm waits on node forever when
-    # the node WASM plugin trips on a flaky nodejs.org fetch. Sequential
-    # installs surface failures cleanly and let us short-circuit on tools
-    # that are already present.
+    # Reconcile tools sequentially so pnpm always observes the pinned Node.
     $tools = @('node', 'pnpm', 'python', 'uv')
     foreach ($tool in $tools) {
-        if (Test-Command $tool) {
-            $version = Get-VersionString -Tool $tool
-            Write-Success "${tool} ${CORAL}${version}${RESET}"
-            continue
-        }
-
-        Write-Info "Installing ${CORAL}${tool}${RESET}..."
-        & proto install $tool
-        if ($LASTEXITCODE -ne 0) {
-            Write-Err "${tool} install failed"
-            Write-Host "${DIM}  Retry: ${RESET}proto install $tool"
-            Write-Host "${DIM}  If the node plugin keeps failing, clear the cache:${RESET}"
-            $pluginsDir = Join-Path $protoHome 'plugins'
-            Write-Host "${DIM}    Remove-Item -Recurse -Force '$pluginsDir'; proto install $tool${RESET}"
-            exit 1
-        }
-
-        if (Test-Command $tool) {
-            $version = Get-VersionString -Tool $tool
-            Write-Success "${tool} ${CORAL}${version}${RESET} installed"
-        } else {
-            Write-Err "${tool} not found on PATH after install"
-            exit 1
-        }
+        Install-ExactTool -Tool $tool -Expected (Get-RequiredVersion -Tool $tool)
     }
 }
 
@@ -379,4 +461,6 @@ function Main {
     Show-Summary
 }
 
-Main
+if (-not $SkipMain) {
+    Main
+}

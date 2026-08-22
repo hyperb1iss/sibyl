@@ -241,8 +241,9 @@ jobs:
           sudo apt-get install -y libxml2-dev libxslt-dev
 
       - name: Setup moonrepo toolchain
-        uses: moonrepo/setup-toolchain@v0.6
+        uses: moonrepo/setup-toolchain@v0.6.4
         with:
+          proto-version: "0.60.2"
           auto-install: true
           auto-setup: true
           cache-version: longmemeval-v2-v1
@@ -251,9 +252,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .moon/cache
-          key: moon-longmemeval-v2-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock') }}
+          key: moon-longmemeval-v2-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            moon-longmemeval-v2-${{ runner.os }}-${{ hashFiles('.prototools') }}-
+            moon-longmemeval-v2-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
       - name: Cache uv
         uses: actions/cache@v6
@@ -645,8 +646,9 @@ jobs:
           sudo apt-get install -y libxml2-dev libxslt-dev
 
       - name: Setup moonrepo toolchain
-        uses: moonrepo/setup-toolchain@v0.6
+        uses: moonrepo/setup-toolchain@v0.6.4
         with:
+          proto-version: "0.60.2"
           auto-install: true
           auto-setup: true
           cache-version: longmemeval-v2-official-v1
@@ -655,9 +657,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .moon/cache
-          key: moon-longmemeval-v2-official-${{ runner.os }}-${{ hashFiles('.prototools') }}-${{ hashFiles('uv.lock') }}
+          key: moon-longmemeval-v2-official-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            moon-longmemeval-v2-official-${{ runner.os }}-${{ hashFiles('.prototools') }}-
+            moon-longmemeval-v2-official-${{ runner.os }}-${{ hashFiles('.prototools', '.python-version') }}-
 
       - name: Cache uv
         uses: actions/cache@v6
@@ -961,8 +963,9 @@ jobs:
           persist-credentials: false
 
       - name: Setup moonrepo toolchain
-        uses: moonrepo/setup-toolchain@v0.6
+        uses: moonrepo/setup-toolchain@v0.6.4
         with:
+          proto-version: "0.60.2"
           auto-install: true
           auto-setup: true
           cache-version: longmemeval-v2-official-v1

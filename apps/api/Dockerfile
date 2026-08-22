@@ -4,10 +4,10 @@
 # ============================================================================
 
 # Stage 1: Builder
-FROM python:3.13-slim-bookworm AS builder
+FROM python:3.13.15-slim-bookworm AS builder
 
 # Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.5 /uv /uvx /bin/
 
 WORKDIR /app
 
@@ -27,7 +27,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 
 # Stage 2: Runtime
-FROM python:3.13-slim-bookworm AS runtime
+FROM python:3.13.15-slim-bookworm AS runtime
 
 # Build provenance. Without these the running server cannot name itself:
 # _read_version() falls back to "0.0.0" and get_runtime_provenance()

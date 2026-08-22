@@ -4,6 +4,13 @@
 
 set -euo pipefail
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly REPO_ROOT
+
+readonly PROTO_INSTALLER_VERSION="0.60.2"
+readonly PROTO_INSTALLER_SHA256="eda7887a3192337b87f62c08328781f08f39f55796efd885ec3472976b4e9adf"
+readonly PROTO_INSTALLER_URL="https://github.com/moonrepo/proto/releases/download/v${PROTO_INSTALLER_VERSION}/proto_cli-installer.sh"
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SilkCircuit Neon Palette
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -38,6 +45,77 @@ header() { echo -e "\n${ELECTRIC_PURPLE}${BOLD}═══ $1 ═══${RESET}\n"
 
 command_exists() { command -v "$1" &>/dev/null; }
 
+calculate_sha256() {
+    local path="$1"
+
+    if command_exists sha256sum; then
+        sha256sum "$path" | awk '{print $1}'
+    elif command_exists shasum; then
+        shasum -a 256 "$path" | awk '{print $1}'
+    else
+        error "SHA-256 verification requires sha256sum or shasum"
+        return 1
+    fi
+}
+
+required_version() {
+    local tool="$1"
+    local version
+
+    version=$(sed -nE \
+        "s/^[[:space:]]*${tool}[[:space:]]*=[[:space:]]*\"([^\"]+)\".*/\\1/p" \
+        "$REPO_ROOT/.prototools" | head -1)
+    if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        error "Missing exact ${tool} version in .prototools"
+        return 1
+    fi
+
+    printf '%s\n' "$version"
+}
+
+installed_version() {
+    local tool="$1"
+    local output
+
+    if ! command_exists "$tool"; then
+        return 0
+    fi
+
+    output=$("$tool" --version 2>/dev/null) || return $?
+    printf '%s\n' "$output" \
+        | head -1 \
+        | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' \
+        || true
+}
+
+install_exact_tool() {
+    local tool="$1"
+    local expected="$2"
+    local current
+
+    current=$(installed_version "$tool") || current=""
+    if [[ "$current" == "$expected" ]]; then
+        success "${tool} ${CORAL}v${current}${RESET} already installed"
+        return 0
+    fi
+
+    if [[ -n "$current" ]]; then
+        info "Upgrading ${CORAL}${tool}${RESET} from v${current} to v${expected}..."
+    else
+        info "Installing ${CORAL}${tool}${RESET} v${expected}..."
+    fi
+
+    proto install "$tool" "$expected" --pin global
+    hash -r
+    current=$(installed_version "$tool") || current=""
+    if [[ "$current" != "$expected" ]]; then
+        error "${tool} v${expected} was installed but v${current:-missing} resolves on PATH"
+        exit 1
+    fi
+
+    success "${tool} ${CORAL}v${current}${RESET} installed"
+}
+
 check_os() {
     case "$(uname -s)" in
         Darwin) OS="macos" ;;
@@ -66,27 +144,52 @@ print_banner() {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 install_proto() {
-    if command_exists proto; then
-        local version
-        version=$(proto --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
-        success "proto ${CORAL}v${version}${RESET} already installed"
+    local expected
+    local current
+    expected=$(required_version proto) || return 1
+
+    export PROTO_HOME="${PROTO_HOME:-$HOME/.proto}"
+    export PATH="$PROTO_HOME/bin:$PROTO_HOME/shims:$PATH"
+    current=$(installed_version proto) || current=""
+    if [[ "$current" == "$expected" ]]; then
+        success "proto ${CORAL}v${current}${RESET} already installed"
         return 0
     fi
 
-    info "Installing proto (toolchain version manager)..."
-    curl -fsSL https://moonrepo.dev/install/proto.sh | bash -s -- --yes
-
-    # Source proto into current shell
-    export PROTO_HOME="${PROTO_HOME:-$HOME/.proto}"
-    export PATH="$PROTO_HOME/bin:$PATH"
-
-    if command_exists proto; then
-        success "proto installed successfully"
+    if [[ -n "$current" ]]; then
+        info "Upgrading proto from v${current} to v${expected}..."
+        proto upgrade "$expected"
     else
-        error "proto installation failed"
-        echo -e "${DIM}Try manually: curl -fsSL https://moonrepo.dev/install/proto.sh | bash${RESET}"
+        info "Installing proto v${expected} (toolchain version manager)..."
+        if [[ "$expected" != "$PROTO_INSTALLER_VERSION" ]]; then
+            error "No verified proto installer is pinned for v${expected}"
+            return 1
+        fi
+        if ! (
+            installer=$(mktemp "${TMPDIR:-/tmp}/sibyl-proto-installer.XXXXXX") || exit 1
+            trap 'rm -f "$installer"' EXIT
+            curl -fsSL "$PROTO_INSTALLER_URL" -o "$installer" || exit 1
+            actual_sha256=$(calculate_sha256 "$installer") || exit 1
+            if [[ "$actual_sha256" != "$PROTO_INSTALLER_SHA256" ]]; then
+                error "proto installer checksum mismatch"
+                exit 1
+            fi
+            bash "$installer"
+        ); then
+            error "Verified proto v${expected} installation failed"
+            return 1
+        fi
+    fi
+
+    hash -r
+    current=$(installed_version proto) || current=""
+
+    if [[ "$current" != "$expected" ]]; then
+        error "proto v${expected} was installed but v${current:-missing} resolves on PATH"
         exit 1
     fi
+
+    success "proto ${CORAL}v${current}${RESET} installed"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -94,23 +197,9 @@ install_proto() {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 install_moon() {
-    if command_exists moon; then
-        local version
-        version=$(moon --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
-        success "moon ${CORAL}v${version}${RESET} already installed"
-        return 0
-    fi
-
-    info "Installing moon (monorepo orchestration)..."
-    # Moon is built-in to proto v0.45+, no plugin needed
-    proto install moon
-
-    if command_exists moon; then
-        success "moon installed successfully"
-    else
-        error "moon installation failed"
-        exit 1
-    fi
+    local expected
+    expected=$(required_version moon) || return 1
+    install_exact_tool moon "$expected"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -120,7 +209,7 @@ install_moon() {
 install_toolchain() {
     header "Toolchain"
 
-    if [[ ! -f .prototools ]]; then
+    if [[ ! -f "$REPO_ROOT/.prototools" ]]; then
         error ".prototools not found - are you in the sibyl directory?"
         exit 1
     fi
@@ -131,37 +220,12 @@ install_toolchain() {
 
     info "Resolving toolchain from ${CORAL}.prototools${RESET}..."
 
-    # Install tools one at a time. `proto use --yes` runs installs in parallel
-    # and deadlocks if any plugin stalls — pnpm waits on node forever when the
-    # node WASM plugin trips on a flaky nodejs.org fetch, even when node is
-    # already on disk. Sequential installs surface failures cleanly and let us
-    # short-circuit on tools that are already present.
+    # Reconcile tools sequentially so pnpm always observes the pinned Node.
     local tools=("node" "pnpm" "python" "uv")
+    local expected
     for tool in "${tools[@]}"; do
-        if command_exists "$tool"; then
-            local version
-            version=$("$tool" --version 2>/dev/null | head -1)
-            success "${tool} ${CORAL}${version}${RESET}"
-            continue
-        fi
-
-        info "Installing ${CORAL}${tool}${RESET}..."
-        if ! timeout 180 proto install "$tool"; then
-            error "${tool} install failed or timed out after 180s"
-            echo -e "${DIM}  Retry: ${RESET}proto install ${tool}"
-            echo -e "${DIM}  If the node plugin keeps failing, clear the cache:${RESET}"
-            echo -e "${DIM}    rm -rf ~/.proto/plugins && proto install ${tool}${RESET}"
-            exit 1
-        fi
-
-        if command_exists "$tool"; then
-            local version
-            version=$("$tool" --version 2>/dev/null | head -1)
-            success "${tool} ${CORAL}${version}${RESET} installed"
-        else
-            error "${tool} not found on PATH after install"
-            exit 1
-        fi
+        expected=$(required_version "$tool") || return 1
+        install_exact_tool "$tool" "$expected"
     done
 }
 
@@ -279,7 +343,7 @@ main() {
     check_os
 
     # Change to script directory
-    cd "$(dirname "$0")"
+    cd "$REPO_ROOT"
 
     header "Environment: ${OS}"
 
@@ -294,4 +358,6 @@ main() {
     print_summary
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
