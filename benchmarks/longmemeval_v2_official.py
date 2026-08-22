@@ -269,15 +269,25 @@ def install_official_memory_adapter(official_repo: Path) -> type[Any]:
     """Bind the Sibyl adapter to the pinned harness memory registry."""
 
     official_path = str(official_repo)
-    if official_path not in sys.path:
-        sys.path.insert(0, official_path)
+    while official_path in sys.path:
+        sys.path.remove(official_path)
+    sys.path.insert(0, official_path)
+    for module_name in tuple(sys.modules):
+        if module_name == "memory_modules" or module_name.startswith("memory_modules."):
+            del sys.modules[module_name]
+    importlib.invalidate_caches()
+    memory_module = importlib.import_module("memory_modules.memory")
+    registry_file = getattr(memory_module, "__file__", None)
+    if not isinstance(registry_file, str) or not Path(registry_file).resolve().is_relative_to(
+        official_repo.resolve()
+    ):
+        raise RuntimeError("Official memory registry did not load from the pinned checkout")
     adapter_name = "benchmarks.longmemeval_v2_memory.sibyl_memory"
     adapter_module = sys.modules.get(adapter_name)
     if adapter_module is None:
         adapter_module = importlib.import_module(adapter_name)
     else:
         adapter_module = importlib.reload(adapter_module)
-    memory_module = importlib.import_module("memory_modules.memory")
     memory_cls = getattr(adapter_module, "SibylLiveApiMemory", None)
     memory_types = getattr(memory_module, "MEMORY_TYPES", {})
     if memory_cls is None or memory_types.get("sibyl_live_api") is not memory_cls:

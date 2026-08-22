@@ -467,12 +467,18 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(  # noqa: PLR09
 def test_official_runner_rebinds_adapter_to_official_registry(
     tmp_path: Path,
 ) -> None:
+    fallback_repo = tmp_path / "fallback"
     official_repo = tmp_path / "official"
-    memory_package = official_repo / "memory_modules"
-    memory_package.mkdir(parents=True)
-    (memory_package / "__init__.py").write_text("", encoding="utf-8")
-    (memory_package / "memory.py").write_text(
-        """MEMORY_TYPES = {}
+    for registry_root, origin in (
+        (fallback_repo, "fallback"),
+        (official_repo, "official"),
+    ):
+        memory_package = registry_root / "memory_modules"
+        memory_package.mkdir(parents=True)
+        (memory_package / "__init__.py").write_text("", encoding="utf-8")
+        (memory_package / "memory.py").write_text(
+            f'''ORIGIN = "{origin}"
+MEMORY_TYPES = {{}}
 
 
 class Memory:
@@ -488,28 +494,34 @@ MemoryContextItem = dict[str, str]
 def register_memory(memory_cls):
     MEMORY_TYPES[memory_cls.memory_type] = memory_cls
     return memory_cls
-""",
-        encoding="utf-8",
-    )
+''',
+            encoding="utf-8",
+        )
     project_root = Path(__file__).parents[2]
     probe = """
 import sys
 from pathlib import Path
 
+sys.path.insert(0, sys.argv[2])
 import benchmarks.longmemeval_v2_official as runner
 from benchmarks.longmemeval_v2_memory import sibyl_memory as fallback_adapter
+from memory_modules import memory as fallback_registry
 
-assert fallback_adapter._register_memory.__module__ == fallback_adapter.__name__
+assert fallback_registry.ORIGIN == "fallback"
+assert fallback_registry.MEMORY_TYPES["sibyl_live_api"] is fallback_adapter.SibylLiveApiMemory
 installed = runner.install_official_memory_adapter(Path(sys.argv[1]))
-from memory_modules.memory import MEMORY_TYPES
+from memory_modules import memory as official_registry
 
-assert MEMORY_TYPES["sibyl_live_api"] is installed
+assert sys.path[0] == sys.argv[1]
+assert official_registry.ORIGIN == "official"
+assert official_registry is not fallback_registry
+assert official_registry.MEMORY_TYPES["sibyl_live_api"] is installed
 assert runner.SibylLiveApiMemory is installed
 print("real_registry_rebind=PASS")
 """
 
     result = subprocess.run(  # noqa: S603 - current interpreter with test-owned input.
-        [sys.executable, "-c", probe, str(official_repo)],
+        [sys.executable, "-c", probe, str(official_repo), str(fallback_repo)],
         cwd=project_root,
         check=False,
         capture_output=True,
