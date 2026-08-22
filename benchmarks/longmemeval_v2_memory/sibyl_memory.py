@@ -5578,11 +5578,7 @@ class SibylLiveApiMemory(Memory):
                 "inserted_trajectories",
                 len(self._chunk_catalog),
             ),
-            "created_entities": getattr(
-                self,
-                "created_entities",
-                sum(len(chunks) for chunks in self._chunk_catalog.values()),
-            ),
+            "created_entities": sum(len(chunks) for chunks in self._chunk_catalog.values()),
             "ingest_api_runtime": dict(getattr(self, "ingest_api_runtime", {})),
             "ingest_embedding_usage": dict(getattr(self, "ingest_embedding_usage", {})),
             "completed_trajectory_ids": sorted(

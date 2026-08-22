@@ -4655,6 +4655,7 @@ def test_sibyl_memory_refines_split_state_without_spending_context_slot() -> Non
 
 def test_sibyl_memory_chunk_catalog_round_trips(tmp_path: Path) -> None:
     module = _load_memory_module()
+    operational_created_entities = 17
     catalog = {
         "t1": {
             0: _search_result("t1", chunk_index=0, state_index=0, score=0.0),
@@ -4679,6 +4680,7 @@ def test_sibyl_memory_chunk_catalog_round_trips(tmp_path: Path) -> None:
         "requests": EXPECTED_SAVED_USAGE_REQUESTS,
         "provider_reported_cost_usd": EXPECTED_SAVED_USAGE_COST_USD,
     }
+    memory.created_entities = operational_created_entities
     (tmp_path / "memory_config.json").write_text(
         json.dumps(memory.memory_config),
         encoding="utf-8",
@@ -4698,6 +4700,8 @@ def test_sibyl_memory_chunk_catalog_round_trips(tmp_path: Path) -> None:
     assert (tmp_path / module.MEMORY_MANIFEST_FILENAME).is_file()
     manifest = json.loads((tmp_path / module.MEMORY_MANIFEST_FILENAME).read_text(encoding="utf-8"))
     assert manifest["longmemeval_v2_domain"] == "web"
+    assert manifest["created_entities"] == len(catalog["t1"])
+    assert memory.created_entities == operational_created_entities
     assert restored._chunk_catalog == catalog
     assert restored.created_entities == len(catalog["t1"])
     assert restored.inserted_trajectories == len(catalog)
