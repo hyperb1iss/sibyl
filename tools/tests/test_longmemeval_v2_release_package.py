@@ -106,7 +106,7 @@ def executed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ExecutedStage:
             domain: {"output_dir": str(paid_root / "runs" / "aa-1-left" / domain)}
             for domain in ("web", "enterprise")
         },
-        "spend_reservation": {"max_spend_usd_total": 6.0},
+        "spend_reservation": {"max_spend_usd_total": 8.5},
     }
     for domain in ("web", "enterprise"):
         _artifact(Path(run["domains"][domain]["output_dir"]) / "aggregated_metrics.json")

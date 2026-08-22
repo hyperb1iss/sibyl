@@ -9,6 +9,7 @@ from threading import Barrier
 from typing import Any
 
 import pytest
+from benchmarks import longmemeval_v2_official as official
 from benchmarks import longmemeval_v2_release_authorization as authorization
 from benchmarks import (
     longmemeval_v2_release_authorization_package as authorization_package,
@@ -27,6 +28,8 @@ from tools.tests.longmemeval_v2_release_support import (
     race_spec,
     render_spec,
 )
+
+MAX_CAP_HEADROOM_USD = 0.15
 
 
 @pytest.fixture(autouse=True)
@@ -106,6 +109,45 @@ def test_stage_spec_rejects_role_cap_retrieval_and_geometry_drift() -> None:
         arm["manifest"]["geometry"]["max_context_items"] = 7
     with pytest.raises(contract.StagePlanError, match="geometry"):
         contract.require_stage_spec(geometry_drift)
+
+
+def test_release_caps_cover_pinned_full_corpus_reservations(tmp_path: Path) -> None:
+    domain_counts = {
+        "web": (240, 86),
+        "enterprise": (211, 70),
+    }
+    for role, cap in contract.RELEASE_ROLE_CAPS_USD.items():
+        treatment = role == "render_treatment"
+        reservations = []
+        for domain, (question_count, llm_eval_count) in domain_counts.items():
+            argv = [
+                "--data-root",
+                str(tmp_path / "data"),
+                "--domain",
+                domain,
+                "--output-dir",
+                str(tmp_path / role / domain),
+                "--plan-only",
+                "--max-spend-usd",
+                str(cap),
+                "--max-context-total-chars",
+                "72000" if treatment else "60000",
+            ]
+            if treatment:
+                argv.append("--note-distillation")
+            args = official.parse_args(argv)
+            reservation = official.build_spend_reservation(
+                args=args,
+                question_count=question_count,
+                llm_eval_count=llm_eval_count,
+                required_trajectory_count=100,
+            )
+            reserved_total = reservation["reserved_total_usd"]
+            assert isinstance(reserved_total, (int, float))
+            reservations.append(float(reserved_total))
+            assert reservation["status"] == "PASS"
+
+        assert 0 <= cap - max(reservations) < MAX_CAP_HEADROOM_USD
 
 
 @pytest.mark.parametrize(

@@ -318,8 +318,8 @@ def test_stage_plan_seals_immutable_dataset_and_fixed_domain_caps(
     for run in stage_plan["runs"]:
         assert run["spend_reservation"] == {
             "currency": "USD",
-            "max_spend_usd_per_domain": 3.0,
-            "max_spend_usd_total": 6.0,
+            "max_spend_usd_per_domain": 4.25,
+            "max_spend_usd_total": 8.5,
             "enforcement": "official plan-only reservation before provider calls",
         }
 

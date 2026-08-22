@@ -61,8 +61,8 @@ def _run(root: Path, arm_id: str, index: int) -> dict[str, Any]:
         "domains": {domain: _domain_run(root, arm_id, domain) for domain in ("web", "enterprise")},
         "spend_reservation": {
             "currency": "USD",
-            "max_spend_usd_per_domain": 3.0,
-            "max_spend_usd_total": 6.0,
+            "max_spend_usd_per_domain": 4.25,
+            "max_spend_usd_total": 8.5,
             "enforcement": "official plan-only reservation before provider calls",
         },
     }
@@ -572,7 +572,7 @@ def test_runner_rejects_actual_cost_over_sealed_arm_reservation(
     monkeypatch.setattr(
         runner.evidence,
         "require_completed_domain",
-        lambda *_args: (3.1, {}),
+        lambda *_args: (4.3, {}),
     )
 
     with pytest.raises(StagePlanError, match="total reservation"):
