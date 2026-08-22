@@ -50,10 +50,10 @@ RELEASE_RUNTIME_PINS = {
     "prompt_build_max_workers": 1,
 }
 RELEASE_ROLE_CAPS_USD = {
-    "machine": 3.0,
-    "naive": 3.0,
-    "render_control": 3.0,
-    "render_treatment": 3.6,
+    "machine": 4.25,
+    "naive": 4.25,
+    "render_control": 4.25,
+    "render_treatment": 4.75,
 }
 SPEC_KEYS = frozenset(
     {

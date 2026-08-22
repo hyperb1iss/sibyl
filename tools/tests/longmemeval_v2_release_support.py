@@ -57,7 +57,7 @@ def manifest(
         "arm_role": role,
         "substrate": "naive" if naive else "machine",
         "preregistration_sha256": preregistration,
-        "max_spend_usd": 3.6 if treatment else 3.0,
+        "max_spend_usd": 4.75 if treatment else 4.25,
         "retrieval_mode": retrieval_mode,
         "max_context_total_chars": total_chars,
         "operational_note_dedupe_mode": dedupe_mode,

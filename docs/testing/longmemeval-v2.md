@@ -66,8 +66,8 @@ Set both provider variables in the parent shell before the paid command:
 Do not pass a token value or a credential-file path as a CLI argument. Plans, public identities,
 receipts, and redacted logs contain environment variable names only. The runner refuses provider
 work unless every domain first produces an exact official plan-only reservation for the full Small
-corpus. The fixed cap is \$3.00 per domain for machine, naive, and render-control arms. The
-render-treatment cap is \$3.60 per domain. Any reservation or actual summed cost above its sealed
+corpus. The fixed cap is \$4.25 per domain for machine, naive, and render-control arms. The
+render-treatment cap is \$4.75 per domain. Any reservation or actual summed cost above its sealed
 cap stops the stage.
 
 ### One stage at a time
