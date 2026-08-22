@@ -651,6 +651,28 @@ def test_claimed_tree_rejects_nested_foreign_and_symlinked_domain_artifacts(
         state.require_claimed_stage_plan(stage_plan)
 
 
+def test_claimed_tree_accepts_only_declared_saved_memory_artifacts(
+    stage_plan: dict[str, Any],
+) -> None:
+    state.claim_stage(stage_plan, max_workers=4)
+    memory_state = Path(stage_plan["runs"][0]["domains"]["web"]["output_dir"]) / "memory_state"
+    memory_state.mkdir(parents=True)
+    for name in (
+        "action_spines.jsonl.gz",
+        "chunk_catalog.jsonl.gz",
+        "distillation_receipts.jsonl.gz",
+        "memory_config.json",
+        "memory_manifest.json",
+    ):
+        (memory_state / name).write_bytes(b"official adapter artifact\n")
+
+    state.require_claimed_stage_plan(stage_plan)
+
+    (memory_state / "foreign.bin").write_bytes(b"hostile")
+    with pytest.raises(StagePlanError, match="unknown entries"):
+        state.require_claimed_stage_plan(stage_plan)
+
+
 def test_completion_evidence_rejects_foreign_files_created_by_paid_command(
     stage_plan: dict[str, Any],
 ) -> None:

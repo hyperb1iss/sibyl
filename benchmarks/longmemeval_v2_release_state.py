@@ -113,6 +113,15 @@ _CHECKPOINT_FILES = frozenset(
         "memory_manifest.json",
     }
 )
+_MEMORY_STATE_FILES = frozenset(
+    {
+        "action_spines.jsonl.gz",
+        "chunk_catalog.jsonl.gz",
+        "distillation_receipts.jsonl.gz",
+        "memory_config.json",
+        "memory_manifest.json",
+    }
+)
 _LOG_EVENT_KEYS = {
     "start": frozenset({"event", "recorded_at", "command_sha256"}),
     "output": frozenset({"event", "text"}),
@@ -400,7 +409,7 @@ def _require_domain_tree(parent: Path, *, planning: bool, build_memory: bool) ->
     files = _PLANNING_FILES if planning else _DOMAIN_FILES
     directories = {"provider_usage", "runtime_inputs"}
     if build_memory and not planning:
-        directories.add("checkpoint")
+        directories.update({"checkpoint", "memory_state"})
     _require_subset(parent, set(files) | directories, name="domain output")
     _require_subset(parent / "runtime_inputs", set(_RUNTIME_FILES), name="runtime inputs")
     _require_subset(
@@ -410,6 +419,11 @@ def _require_domain_tree(parent: Path, *, planning: bool, build_memory: bool) ->
     )
     if build_memory and not planning:
         _require_subset(parent / "checkpoint", set(_CHECKPOINT_FILES), name="memory checkpoint")
+        _require_subset(
+            parent / "memory_state",
+            set(_MEMORY_STATE_FILES),
+            name="saved memory state",
+        )
 
 
 def require_domain_output_tree(
