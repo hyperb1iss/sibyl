@@ -1255,6 +1255,7 @@ async def _compile_fallback_sections(
     principal_id: str | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
     audit: bool = False,
+    include_documents: bool = True,
 ) -> list[ContextSection]:
     # The degraded path answers to the same reader as the native one. Dropping
     # the principal here only failed closed for private rows by accident, and
@@ -1270,7 +1271,7 @@ async def _compile_fallback_sections(
         "limit": limit,
         "include_content": True,
         "content_max_chars": FALLBACK_SEARCH_CONTENT_MAX_CHARS,
-        "include_documents": True,
+        "include_documents": include_documents,
         "include_graph": True,
         "organization_id": organization_id,
     }
@@ -1631,6 +1632,7 @@ async def compile_context(
     record_exposure: bool = True,
     knn_type_overfetch: int = 0,
     naive_retrieval: bool = False,
+    include_documents: bool = True,
 ) -> ContextPack:
     """Build a small, structured context pack for an agent goal.
 
@@ -1748,6 +1750,7 @@ async def compile_context(
                     principal_id=principal_id,
                     allowed_memory_scope_keys=allowed_memory_scope_keys,
                     audit=audit,
+                    include_documents=include_documents,
                 )
             ),
             limit,

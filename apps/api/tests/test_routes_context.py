@@ -364,6 +364,7 @@ class TestContextPackRoute:
         assert compile_context.await_args.kwargs["include_related"] is True
         assert compile_context.await_args.kwargs["related_limit"] == 3
         assert compile_context.await_args.kwargs["record_exposure"] is True
+        assert compile_context.await_args.kwargs["include_documents"] is True
 
     @pytest.mark.asyncio
     async def test_context_pack_can_disable_exposure_recording(self) -> None:
@@ -713,7 +714,8 @@ class TestContextPackRoute:
             )
         )
 
-        async def compile_pack(**_kwargs: object) -> ContextPack:
+        async def compile_pack(**kwargs: object) -> ContextPack:
+            assert kwargs["include_documents"] is False
             await provider.embed_texts(["ship faster"], input_kind="query")
             return _pack()
 
