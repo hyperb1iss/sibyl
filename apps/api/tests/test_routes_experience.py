@@ -172,6 +172,47 @@ async def test_capture_persists_authorized_experience_and_queues_embeddings(
 
 
 @pytest.mark.asyncio
+async def test_capture_can_disable_provider_backed_note_distillation(
+    queue_note_distillation: AsyncMock,
+) -> None:
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    ctx = SimpleNamespace(user_id="user-1")
+    request = _request().model_copy(update={"note_distillation": False})
+    projection = project_operational_experience(request.experience)
+    write_result = SimpleNamespace(
+        projection=projection,
+        written_entity_ids=projection.manifest.entity_ids,
+        written_relationship_ids=projection.manifest.relationship_ids,
+        deleted_entity_ids=(),
+        deleted_relationship_ids=(),
+        embedding_backfill_required=False,
+    )
+
+    with (
+        patch(
+            "sibyl.api.routes.experience.verify_entity_project_access",
+            AsyncMock(),
+        ),
+        patch(
+            "sibyl.api.routes.experience.get_experience_graph_runtime",
+            AsyncMock(return_value=_runtime()),
+        ),
+        patch(
+            "sibyl.api.routes.experience.persist_operational_experience",
+            AsyncMock(return_value=write_result),
+        ),
+    ):
+        response = await capture_operational_experience(
+            payload=request,
+            org=org,
+            ctx=ctx,
+        )
+
+    queue_note_distillation.assert_not_awaited()
+    assert "note_distillation" not in response.background_jobs
+
+
+@pytest.mark.asyncio
 async def test_capture_can_embed_synchronously_without_background_job() -> None:
     org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
     ctx = SimpleNamespace(user_id="user-1")

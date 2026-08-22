@@ -1002,6 +1002,7 @@ async def context_pack(
                 allowed_memory_scope_keys=set(ctx.api_key_memory_scope_keys)
                 if ctx.api_key_memory_scope_keys is not None
                 else None,
+                include_documents=request.evidence is None,
             )
 
         evidence_response = None

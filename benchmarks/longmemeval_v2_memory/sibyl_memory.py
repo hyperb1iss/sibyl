@@ -4328,8 +4328,15 @@ class SibylLiveApiMemory(Memory):
             "operational_note_distillation_profile",
             DEFAULT_OPERATIONAL_NOTE_DISTILLATION_PROFILE,
         )
+        experience_payload["note_distillation"] = getattr(self, "note_distillation", False)
         if distillation_profile != DEFAULT_OPERATIONAL_NOTE_DISTILLATION_PROFILE:
-            experience_payload["distillation_profile"] = distillation_profile
+            experience = experience_payload.get("experience")
+            if not isinstance(experience, dict):
+                raise RuntimeError("operational experience payload is malformed")
+            metadata = experience.get("metadata")
+            if not isinstance(metadata, dict):
+                raise RuntimeError("operational experience metadata is malformed")
+            metadata["operational_note_distillation_profile"] = distillation_profile
         experience_payload["defer_embeddings"] = self.defer_embeddings
         created = self._request_json(
             "POST",

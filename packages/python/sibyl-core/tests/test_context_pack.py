@@ -477,6 +477,31 @@ async def test_compile_context_falls_back_when_batched_native_search_fails(
 
 
 @pytest.mark.asyncio
+async def test_compile_context_can_keep_degraded_retrieval_graph_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    async def fake_native_context_search(**_kwargs: Any) -> SearchResponse:
+        raise RuntimeError("native search unavailable")
+
+    async def fallback_search(**kwargs: Any) -> SearchResponse:
+        calls.append(kwargs)
+        return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
+
+    monkeypatch.setattr(context_module, "context_search", fake_native_context_search)
+
+    await compile_context(
+        "sealed local retrieval",
+        organization_id="org-123",
+        search_fn=fallback_search,
+        include_documents=False,
+    )
+
+    assert calls[0]["include_documents"] is False
+
+
+@pytest.mark.asyncio
 async def test_fallback_sections_disable_default_search_exposure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
