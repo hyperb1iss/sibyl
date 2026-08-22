@@ -652,7 +652,7 @@ def _validate_runtime(
         or runtime.get("git_dirty") is not False
         or runtime.get("git_status") != "clean"
     ):
-        raise BridgeInputError(f"{name} API runtime does not match the clean workflow SHA")
+        raise BridgeInputError(f"{name} API runtime does not match the clean execution SHA")
 
 
 def _configuration_and_geometry(

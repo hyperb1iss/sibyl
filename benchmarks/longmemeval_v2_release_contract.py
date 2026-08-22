@@ -319,6 +319,8 @@ def _require_manifest(
 def _preregistration_for_spec(spec: dict[str, Any]) -> tuple[dict[str, Any], str]:
     raw_path = spec["upstream"]["preregistration_authorization"]
     if raw_path is None:
+        if spec["stage"] in {"race", "render"}:
+            raise StagePlanError("race and render stages require preregistration authorization")
         return {}, ""
     path = Path(require_string(raw_path, name="upstream.preregistration_authorization")).resolve()
     preregistration = require_preregistration_authorization(

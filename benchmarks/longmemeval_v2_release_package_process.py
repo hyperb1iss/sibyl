@@ -289,6 +289,7 @@ def execute_step(
         package_root.require_lease(lease)
     outputs: dict[str, Any] = {}
     error: str | None = None
+    log: dict[str, Any] = {}
     try:
         validate_inputs()
         log = state.require_command_log(
@@ -308,31 +309,32 @@ def execute_step(
         require_inventory(root, expected)
     except Exception as exc:
         error = state.redact(exc, secrets=secrets)
-        if lease is None:
-            log = state.require_command_log(
-                log_path(root, step),
-                command=command,
-                secrets=secrets,
-                expected_returncode=returncode,
-                expected_invocations=1,
-            )
-        else:
-            log_content = package_tree.read_owned_file(lease.logs_fd, f"{step}.jsonl")
-            try:
+        try:
+            if lease is None:
+                log = state.require_command_log(
+                    log_path(root, step),
+                    command=command,
+                    secrets=secrets,
+                    expected_returncode=returncode,
+                    expected_invocations=1,
+                )
+            else:
+                log_content = package_tree.read_owned_file(lease.logs_fd, f"{step}.jsonl")
                 log_text = log_content.decode("utf-8")
-            except UnicodeDecodeError as decode_error:
-                raise StagePlanError("package command log is not UTF-8") from decode_error
-            state.validate_command_log_text(
-                log_text,
-                command=command,
-                secrets=secrets,
-                expected_returncode=returncode,
-                expected_invocations=1,
-            )
-            log = package_tree.bind_owned_content(
-                log_content,
-                path=log_path(root, step),
-            )
+                state.validate_command_log_text(
+                    log_text,
+                    command=command,
+                    secrets=secrets,
+                    expected_returncode=returncode,
+                    expected_invocations=1,
+                )
+                log = package_tree.bind_owned_content(
+                    log_content,
+                    path=log_path(root, step),
+                )
+        except Exception as log_error:
+            recovered = state.redact(log_error, secrets=secrets)
+            error = f"{error}; command log recovery failed: {recovered}"
     payload = _command_receipt(
         step=step,
         command=command,

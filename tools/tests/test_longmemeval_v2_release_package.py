@@ -25,6 +25,7 @@ from benchmarks.longmemeval_v2_release_inputs import StagePlanError, bind_artifa
 from tools.bench import longmemeval_v2_rig as rig
 
 COMMAND_COUNT = 4
+SECOND_VALIDATION = 2
 
 requires_darwin_file_flags = pytest.mark.skipif(
     sys.platform != "darwin",
@@ -1021,3 +1022,37 @@ def test_package_spawn_failure_writes_redacted_return_code_receipt(
     assert receipt["status"] == "FAIL"
     assert receipt["returncode"] == -1
     assert secret not in (root / "logs/spawn.jsonl").read_text(encoding="utf-8")
+
+
+def test_package_failure_receipt_preserves_primary_and_log_recovery_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "package"
+    root.mkdir()
+    validations = 0
+
+    def validate_inputs() -> None:
+        nonlocal validations
+        validations += 1
+        if validations == SECOND_VALIDATION:
+            raise StagePlanError("primary validation failed")
+
+    monkeypatch.setattr(process, "_invoke_command", lambda *_args, **_kwargs: 0)
+
+    with pytest.raises(StagePlanError, match="command log recovery failed"):
+        process.execute_step(
+            root=root,
+            step="broken-log",
+            command=["fake"],
+            collect=lambda: {},
+            receipts={},
+            secrets=(),
+            validate_inputs=validate_inputs,
+        )
+
+    receipt = load_json(process.command_receipt_path(root, "broken-log"))
+    assert receipt["status"] == "FAIL"
+    assert receipt["log"] == {}
+    assert "primary validation failed" in receipt["error"]
+    assert "command log recovery failed" in receipt["error"]

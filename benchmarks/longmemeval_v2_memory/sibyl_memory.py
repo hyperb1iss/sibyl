@@ -16,6 +16,7 @@ import time
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from pathlib import Path
 from typing import TypeVar
 from urllib.parse import urlparse
@@ -3575,7 +3576,11 @@ class SibylLiveApiMemory(Memory):
             expected_trajectory_ids=expected_trajectory_ids,
             trajectories=trajectories,
         )
-        memory.finalize_ingest()
+        try:
+            memory.finalize_ingest()
+        except BaseException:
+            memory._close_client()
+            raise
         return memory
 
     @classmethod
@@ -3598,7 +3603,7 @@ class SibylLiveApiMemory(Memory):
         try:
             return dict(memory.attached_project_receipt)
         finally:
-            memory._client.close()
+            memory._close_client()
 
     @classmethod
     def prepare_existing(
@@ -3614,13 +3619,17 @@ class SibylLiveApiMemory(Memory):
         effective_params = dict(memory_params)
         effective_params["reuse_existing_project"] = True
         memory = cls(effective_params)
-        memory._attached_expected_trajectory_ids.update(
-            str(trajectory_id).strip()
-            for trajectory_id in expected_trajectory_ids
-            if str(trajectory_id).strip()
-        )
-        for trajectory in trajectories:
-            memory.insert(trajectory)
+        try:
+            memory._attached_expected_trajectory_ids.update(
+                str(trajectory_id).strip()
+                for trajectory_id in expected_trajectory_ids
+                if str(trajectory_id).strip()
+            )
+            for trajectory in trajectories:
+                memory.insert(trajectory)
+        except BaseException:
+            memory._close_client()
+            raise
         return memory
 
     @property
@@ -4147,19 +4156,30 @@ class SibylLiveApiMemory(Memory):
         self._refresh_token = ""
         self._api_credentials_path: Path | None = None
         self._cli_auth: dict[str, str] = {}
-        self._authenticate(memory_params)
-        self.api_runtime = self._request_json("GET", "/health")
-        self.ingest_api_runtime = dict(self.api_runtime)
-        if not self.project_id:
-            self.project_id = self._create_project()
-        else:
-            self._verify_project_visibility()
-        self.memory_params["project_id"] = self.project_id
-        if (
-            self.checkpoint_dir is not None
-            and (self.checkpoint_dir / CHECKPOINT_MANIFEST_FILENAME).is_file()
-        ):
-            self._load_checkpoint(self.checkpoint_dir)
+        try:
+            self._authenticate(memory_params)
+            self.api_runtime = self._request_json("GET", "/health")
+            self.ingest_api_runtime = dict(self.api_runtime)
+            if not self.project_id:
+                self.project_id = self._create_project()
+            else:
+                self._verify_project_visibility()
+            self.memory_params["project_id"] = self.project_id
+            if (
+                self.checkpoint_dir is not None
+                and (self.checkpoint_dir / CHECKPOINT_MANIFEST_FILENAME).is_file()
+            ):
+                self._load_checkpoint(self.checkpoint_dir)
+        except BaseException:
+            self._close_client()
+            raise
+
+    def _close_client(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        with suppress(Exception):
+            self._client.close()
 
     def set_query_context(self, *, query_invocation_id: str) -> None:
         super().set_query_context(query_invocation_id=query_invocation_id)

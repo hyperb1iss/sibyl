@@ -4972,6 +4972,84 @@ def test_sibyl_memory_attach_existing_requires_project_id() -> None:
         )
 
 
+def test_sibyl_memory_constructor_closes_client_when_authentication_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_memory_module()
+
+    class Client:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    client = Client()
+    monkeypatch.setattr(module, "_new_http_client", lambda *_args, **_kwargs: client)
+    monkeypatch.setattr(
+        module.SibylLiveApiMemory,
+        "_authenticate",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("auth failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="auth failed"):
+        module.SibylLiveApiMemory({"allow_localhost": True})
+    assert client.closed is True
+
+
+@pytest.mark.parametrize("failure_point", ["insert", "finalize"])
+def test_sibyl_memory_existing_attachment_closes_client_on_failure(
+    failure_point: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_memory_module()
+
+    class Client:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    client = Client()
+    monkeypatch.setattr(module, "_new_http_client", lambda *_args, **_kwargs: client)
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_authenticate", lambda *_args: None)
+
+    def request(
+        _self: object,
+        _method: str,
+        path: str,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        if path == "/health":
+            return {"status": "healthy"}
+        return {"id": "project_test", "entity_type": "project"}
+
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_request_json", request)
+    if failure_point == "insert":
+        monkeypatch.setattr(
+            module.SibylLiveApiMemory,
+            "insert",
+            lambda *_args: (_ for _ in ()).throw(RuntimeError("insert failed")),
+        )
+        invoke = module.SibylLiveApiMemory.prepare_existing
+        trajectories = [{"id": "trajectory_test"}]
+    else:
+        monkeypatch.setattr(
+            module.SibylLiveApiMemory,
+            "finalize_ingest",
+            lambda *_args: (_ for _ in ()).throw(RuntimeError("finalize failed")),
+        )
+        invoke = module.SibylLiveApiMemory.attach_existing
+        trajectories = []
+
+    with pytest.raises(RuntimeError, match=f"{failure_point} failed"):
+        invoke(
+            {"allow_localhost": True, "project_id": "project_test"},
+            expected_trajectory_ids={"trajectory_test"},
+            trajectories=trajectories,
+        )
+    assert client.closed is True
+
+
 def test_official_runner_rejects_reuse_with_checkpoint_dir(tmp_path: Path) -> None:
     module = _load_runner_module()
 

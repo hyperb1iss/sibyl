@@ -1016,3 +1016,20 @@ def test_stage_planner_rejects_changed_live_origin(
 
     with pytest.raises(contract.StagePlanError, match=message):
         _build(sealed_inputs)
+
+
+def test_local_execution_git_inspection_has_a_finite_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def timeout(*_args: object, **kwargs: Any) -> None:
+        captured.update(kwargs)
+        raise subprocess.TimeoutExpired(cmd="git", timeout=kwargs["timeout"])
+
+    monkeypatch.setattr(local_identity.subprocess, "run", timeout)
+
+    with pytest.raises(ValueError, match="could not inspect"):
+        local_identity._required_git_output(tmp_path, "status")
+    assert captured["timeout"] == local_identity.GIT_INSPECTION_TIMEOUT_SECONDS

@@ -294,7 +294,33 @@ def test_dependent_wave_attestations_form_a_barrier_before_paid_workers(
     assert status["actual_cost_usd"] == 1.0
 
 
-def test_bridge_integrity_failure_preserves_last_trusted_paid_ledger(
+def test_post_wave_barrier_failure_preserves_current_paid_receipts_for_resume(
+    stage_plan: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple[str, str]] = []
+    monkeypatch.setattr(runner, "_invoke_command", _successful_invoke(events))
+    monkeypatch.setattr(runner.evidence, "require_completed_domain", _successful_completion)
+    real_require_stage_control = runner.state.require_stage_control
+    monkeypatch.setattr(
+        runner.state,
+        "require_stage_control",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(StagePlanError("barrier failed")),
+    )
+
+    with pytest.raises(StagePlanError, match="barrier failed"):
+        runner.run_stage_plan(stage_plan)
+
+    status = state.read_status_receipt(stage_plan)
+    assert status["completed_domains"] == ["arm-a:enterprise", "arm-a:web"]
+    assert status["actual_cost_usd"] == 1.0
+    monkeypatch.setattr(runner.state, "require_stage_control", real_require_stage_control)
+
+    assert runner.run_stage_plan(stage_plan)["status"] == "EXECUTED"
+    assert len([event for event in events if event[0] == "paid"]) == EXPECTED_DOMAIN_EXECUTIONS
+
+
+def test_bridge_integrity_failure_preserves_all_paid_receipts_in_failure_ledger(
     stage_plan: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     events: list[tuple[str, str]] = []
@@ -325,12 +351,17 @@ def test_bridge_integrity_failure_preserves_last_trusted_paid_ledger(
 
     status = state.read_status_receipt(stage_plan)
     assert status["status"] == "FAIL"
-    assert status["completed_domains"] == ["arm-a:enterprise", "arm-a:web"]
-    assert status["actual_cost_usd"] == 1.0
+    assert status["completed_domains"] == [
+        "arm-a:enterprise",
+        "arm-a:web",
+        "arm-b:enterprise",
+        "arm-b:web",
+    ]
+    assert status["actual_cost_usd"] == EXPECTED_TOTAL_COST_USD
     assert "bridge artifact drifted" in status["failures"][0]["error"]
 
 
-def test_oserror_during_integrity_check_preserves_last_trusted_paid_ledger(
+def test_oserror_during_integrity_check_preserves_all_paid_receipts_in_failure_ledger(
     stage_plan: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     events: list[tuple[str, str]] = []
@@ -358,11 +389,16 @@ def test_oserror_during_integrity_check_preserves_last_trusted_paid_ledger(
 
     status = state.read_status_receipt(stage_plan)
     assert status["status"] == "FAIL"
-    assert status["completed_domains"] == ["arm-a:enterprise", "arm-a:web"]
-    assert status["actual_cost_usd"] == 1.0
+    assert status["completed_domains"] == [
+        "arm-a:enterprise",
+        "arm-a:web",
+        "arm-b:enterprise",
+        "arm-b:web",
+    ]
+    assert status["actual_cost_usd"] == EXPECTED_TOTAL_COST_USD
 
 
-def test_malformed_prior_exit_writes_fail_with_last_trusted_paid_ledger(
+def test_malformed_prior_exit_preserves_all_paid_receipts_in_failure_ledger(
     stage_plan: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     events: list[tuple[str, str]] = []
@@ -383,8 +419,13 @@ def test_malformed_prior_exit_writes_fail_with_last_trusted_paid_ledger(
 
     status = state.read_status_receipt(stage_plan)
     assert status["status"] == "FAIL"
-    assert status["completed_domains"] == ["arm-a:enterprise", "arm-a:web"]
-    assert status["actual_cost_usd"] == 1.0
+    assert status["completed_domains"] == [
+        "arm-a:enterprise",
+        "arm-a:web",
+        "arm-b:enterprise",
+        "arm-b:web",
+    ]
+    assert status["actual_cost_usd"] == EXPECTED_TOTAL_COST_USD
 
 
 def test_zero_exit_without_official_receipt_fails_closed(
@@ -402,6 +443,21 @@ def test_zero_exit_without_official_receipt_fails_closed(
     assert exit_receipt["returncode"] == 0
     assert exit_receipt["status"] == "FAIL"
     assert "missing" in exit_receipt["error"]
+
+
+def test_failed_domain_receipt_cannot_resume_or_repeat_provider_work(
+    stage_plan: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[tuple[str, str]] = []
+    monkeypatch.setattr(runner, "_invoke_command", _successful_invoke(events))
+
+    assert runner.run_stage_plan(stage_plan)["status"] == "FAIL"
+    paid_count = len([event for event in events if event[0] == "paid"])
+
+    with pytest.raises(StagePlanError, match="differs from its sealed run"):
+        runner.run_stage_plan(stage_plan)
+
+    assert len([event for event in events if event[0] == "paid"]) == paid_count
 
 
 def test_partial_domain_output_requires_a_fresh_root(
@@ -596,7 +652,8 @@ def test_wave_rejects_foreign_root_output_before_complete(
     with pytest.raises(StagePlanError, match="unknown entries"):
         runner.run_stage_plan(stage_plan)
 
-    assert not list((Path(stage_plan["output_root"]) / "exits").rglob("*.json"))
+    exits = list((Path(stage_plan["output_root"]) / "exits").rglob("*.json"))
+    assert len(exits) == EXPECTED_WAVE_DOMAINS
 
 
 def test_wave_root_audit_waits_for_concurrent_temporary_files(
@@ -687,7 +744,8 @@ def test_wave_rejects_planning_artifact_mutation_after_preflight(
     with pytest.raises(StagePlanError, match="changed sealed planning evidence"):
         runner.run_stage_plan(stage_plan)
 
-    assert not list((Path(stage_plan["output_root"]) / "exits").rglob("*.json"))
+    exits = list((Path(stage_plan["output_root"]) / "exits").rglob("*.json"))
+    assert len(exits) == EXPECTED_WAVE_DOMAINS
 
 
 def test_planning_selection_requires_exact_sealed_small_corpus() -> None:
@@ -737,7 +795,8 @@ def test_wave_rejects_runner_control_overwrite_before_complete(
     with pytest.raises(StagePlanError):
         runner.run_stage_plan(stage_plan)
 
-    assert not list((Path(stage_plan["output_root"]) / "exits").rglob("*.json"))
+    exits = list((Path(stage_plan["output_root"]) / "exits").rglob("*.json"))
+    assert len(exits) == EXPECTED_WAVE_DOMAINS
 
 
 def test_later_wave_rejects_prior_exit_overwrite(
@@ -759,7 +818,7 @@ def test_later_wave_rejects_prior_exit_overwrite(
     with pytest.raises(StagePlanError, match="completed domain exit"):
         runner.run_stage_plan(stage_plan)
 
-    assert not (Path(stage_plan["output_root"]) / "exits" / "arm-b" / "web.json").exists()
+    assert (Path(stage_plan["output_root"]) / "exits" / "arm-b" / "web.json").is_file()
 
 
 def test_later_wave_rejects_resealed_prior_artifact_drift(

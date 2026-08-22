@@ -165,6 +165,17 @@ def test_race_matched_control_rejects_aa_seed_reuse(
         contract.require_stage_spec(spec)
 
 
+@pytest.mark.parametrize("factory", [race_spec, render_spec])
+def test_paid_followup_stage_requires_preregistration_authority(
+    factory: Any,
+) -> None:
+    spec, _contracts = factory()
+    spec["upstream"]["preregistration_authorization"] = None
+
+    with pytest.raises(contract.StagePlanError, match="require preregistration"):
+        contract.require_stage_spec(spec)
+
+
 def test_stage_spec_rejects_memory_lineage_and_treatment_drift(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -13,6 +13,7 @@ ASCII_DELETE_CODEPOINT = 127
 GIT_REF_FORBIDDEN_ASCII_MAX = 32
 GIT_SHA_LENGTH = 40
 LS_REMOTE_FIELD_COUNT = 2
+GIT_INSPECTION_TIMEOUT_SECONDS = 30
 GITHUB_REPOSITORY_PATTERN = re.compile(
     r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9._-]{1,100}"
 )
@@ -29,8 +30,9 @@ def _required_git_output(root: Path, *args: str) -> str:
             capture_output=True,
             cwd=root,
             text=True,
+            timeout=GIT_INSPECTION_TIMEOUT_SECONDS,
         )
-    except (OSError, subprocess.CalledProcessError) as exc:
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise ValueError("local experiment identity could not inspect the Sibyl checkout") from exc
     return result.stdout.strip()
 

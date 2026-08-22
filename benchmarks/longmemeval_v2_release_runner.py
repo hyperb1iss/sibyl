@@ -303,14 +303,31 @@ def require_planning_barrier(plan: dict[str, Any], *, secrets: tuple[str, ...]) 
     return bindings
 
 
-def _require_current_domains(
+def _persist_current_domains(
     plan: dict[str, Any],
     successes: list[tuple[dict[str, Any], str, float, dict[str, Any], str]],
+    *,
+    costs: dict[str, float],
+    secrets: tuple[str, ...],
 ) -> None:
     for run, domain, cost, artifacts, _started_at in successes:
         current_cost, current_artifacts = evidence.require_completed_domain(plan, run, domain)
         if current_cost != cost or current_artifacts != artifacts:
             raise StagePlanError("current wave evidence changed before completion")
+    for run, domain, cost, artifacts, started_at in successes:
+        artifacts["runner_log"] = _run_log_binding(plan, run, domain)
+        _write_exit(
+            plan,
+            run,
+            domain,
+            started_at=started_at,
+            returncode=0,
+            cost=cost,
+            artifacts=artifacts,
+            error=None,
+            secrets=secrets,
+        )
+        costs[f"{run['arm_id']}:{domain}"] = cost
 
 
 def _execute_wave(
@@ -338,27 +355,12 @@ def _execute_wave(
                 failures.append(failure)
             elif cost is not None and artifacts is not None:
                 successes.append((run, domain, cost, artifacts, started_at))
+    _persist_current_domains(plan, successes, costs=costs, secrets=secrets)
     state.require_stage_control(plan, control)
     _require_prior_domains(plan, costs)
     if require_planning_barrier(plan, secrets=secrets) != planning:
         raise StagePlanError("paid wave changed sealed planning evidence")
     state.require_claimed_output_tree(plan)
-    _require_current_domains(plan, successes)
-    for run, domain, _cost, artifacts, _started_at in successes:
-        artifacts["runner_log"] = _run_log_binding(plan, run, domain)
-    for run, domain, cost, artifacts, started_at in successes:
-        _write_exit(
-            plan,
-            run,
-            domain,
-            started_at=started_at,
-            returncode=0,
-            cost=cost,
-            artifacts=artifacts,
-            error=None,
-            secrets=secrets,
-        )
-        costs[f"{run['arm_id']}:{domain}"] = cost
     return failures
 
 
@@ -476,10 +478,14 @@ def _run_claimed_stage(
         completed=costs,
         resumed=resumed,
     )
+    require_arm_costs(plan, runs, costs)
     prior_status = state.require_status(plan)
     if prior_status["status"] == "EXECUTED":
         return require_executed_status(prior_status, runs=runs, costs=costs)
     _preflight(plan, runs, secrets=secrets)
+    _require_prior_domains(plan, costs)
+    require_planning_barrier(plan, secrets=secrets)
+    state.require_claimed_output_tree(plan)
     state.write_status(
         plan,
         status="PREFLIGHT_COMPLETE",
