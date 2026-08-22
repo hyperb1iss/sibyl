@@ -7,6 +7,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly REPO_ROOT
 
+readonly PROTO_INSTALLER_VERSION="0.60.2"
+readonly PROTO_INSTALLER_SHA256="eda7887a3192337b87f62c08328781f08f39f55796efd885ec3472976b4e9adf"
+readonly PROTO_INSTALLER_URL="https://github.com/moonrepo/proto/releases/download/v${PROTO_INSTALLER_VERSION}/proto_cli-installer.sh"
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SilkCircuit Neon Palette
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -41,6 +45,19 @@ header() { echo -e "\n${ELECTRIC_PURPLE}${BOLD}═══ $1 ═══${RESET}\n"
 
 command_exists() { command -v "$1" &>/dev/null; }
 
+calculate_sha256() {
+    local path="$1"
+
+    if command_exists sha256sum; then
+        sha256sum "$path" | awk '{print $1}'
+    elif command_exists shasum; then
+        shasum -a 256 "$path" | awk '{print $1}'
+    else
+        error "SHA-256 verification requires sha256sum or shasum"
+        return 1
+    fi
+}
+
 required_version() {
     local tool="$1"
     local version
@@ -50,7 +67,7 @@ required_version() {
         "$REPO_ROOT/.prototools" | head -1)
     if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         error "Missing exact ${tool} version in .prototools"
-        exit 1
+        return 1
     fi
 
     printf '%s\n' "$version"
@@ -58,12 +75,14 @@ required_version() {
 
 installed_version() {
     local tool="$1"
+    local output
 
     if ! command_exists "$tool"; then
         return 0
     fi
 
-    "$tool" --version 2>/dev/null \
+    output=$("$tool" --version 2>/dev/null) || return $?
+    printf '%s\n' "$output" \
         | head -1 \
         | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' \
         || true
@@ -74,7 +93,7 @@ install_exact_tool() {
     local expected="$2"
     local current
 
-    current=$(installed_version "$tool")
+    current=$(installed_version "$tool") || current=""
     if [[ "$current" == "$expected" ]]; then
         success "${tool} ${CORAL}v${current}${RESET} already installed"
         return 0
@@ -88,7 +107,7 @@ install_exact_tool() {
 
     proto install "$tool" "$expected" --pin global
     hash -r
-    current=$(installed_version "$tool")
+    current=$(installed_version "$tool") || current=""
     if [[ "$current" != "$expected" ]]; then
         error "${tool} v${expected} was installed but v${current:-missing} resolves on PATH"
         exit 1
@@ -127,11 +146,11 @@ print_banner() {
 install_proto() {
     local expected
     local current
-    expected=$(required_version proto)
+    expected=$(required_version proto) || return 1
 
     export PROTO_HOME="${PROTO_HOME:-$HOME/.proto}"
     export PATH="$PROTO_HOME/bin:$PROTO_HOME/shims:$PATH"
-    current=$(installed_version proto)
+    current=$(installed_version proto) || current=""
     if [[ "$current" == "$expected" ]]; then
         success "proto ${CORAL}v${current}${RESET} already installed"
         return 0
@@ -142,12 +161,28 @@ install_proto() {
         proto upgrade "$expected"
     else
         info "Installing proto v${expected} (toolchain version manager)..."
-        curl -fsSL https://moonrepo.dev/install/proto.sh \
-            | bash -s -- "$expected" --yes
+        if [[ "$expected" != "$PROTO_INSTALLER_VERSION" ]]; then
+            error "No verified proto installer is pinned for v${expected}"
+            return 1
+        fi
+        if ! (
+            installer=$(mktemp "${TMPDIR:-/tmp}/sibyl-proto-installer.XXXXXX") || exit 1
+            trap 'rm -f "$installer"' EXIT
+            curl -fsSL "$PROTO_INSTALLER_URL" -o "$installer" || exit 1
+            actual_sha256=$(calculate_sha256 "$installer") || exit 1
+            if [[ "$actual_sha256" != "$PROTO_INSTALLER_SHA256" ]]; then
+                error "proto installer checksum mismatch"
+                exit 1
+            fi
+            bash "$installer"
+        ); then
+            error "Verified proto v${expected} installation failed"
+            return 1
+        fi
     fi
 
     hash -r
-    current=$(installed_version proto)
+    current=$(installed_version proto) || current=""
 
     if [[ "$current" != "$expected" ]]; then
         error "proto v${expected} was installed but v${current:-missing} resolves on PATH"
@@ -162,7 +197,9 @@ install_proto() {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 install_moon() {
-    install_exact_tool moon "$(required_version moon)"
+    local expected
+    expected=$(required_version moon) || return 1
+    install_exact_tool moon "$expected"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -185,8 +222,10 @@ install_toolchain() {
 
     # Reconcile tools sequentially so pnpm always observes the pinned Node.
     local tools=("node" "pnpm" "python" "uv")
+    local expected
     for tool in "${tools[@]}"; do
-        install_exact_tool "$tool" "$(required_version "$tool")"
+        expected=$(required_version "$tool") || return 1
+        install_exact_tool "$tool" "$expected"
     done
 }
 

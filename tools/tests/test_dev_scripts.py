@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import subprocess
 import time
 from pathlib import Path
 from shutil import which
 
+import pytest
 from tools.tests.conftest import REPO_ROOT
 
 EXPECTED_NATIVE_SAMPLE_LINES = 3
-EXPECTED_POWERSHELL_PROTO_PATH_RESETS = 3
 EXPECTED_TOOLCHAIN_VERSIONS = {
     "proto": "0.60.2",
     "moon": "2.5.2",
@@ -19,6 +20,10 @@ EXPECTED_TOOLCHAIN_VERSIONS = {
     "pnpm": "11.22.0",
     "python": "3.13.15",
     "uv": "0.12.5",
+}
+PROTO_INSTALLER_SHA256 = {
+    "powershell": "91de41e2ba3ac62d26d9c6197001e44acedf451a6281908696b9ed2c76b9bcc8",
+    "shell": "eda7887a3192337b87f62c08328781f08f39f55796efd885ec3472976b4e9adf",
 }
 
 
@@ -54,6 +59,7 @@ esac
         (state_dir / tool).write_text("0.1.0\n", encoding="utf-8")
 
 
+@pytest.mark.skipif(which("bash") is None, reason="bash is required for setup-dev.sh")
 def test_shell_setup_reconciles_hostile_stale_tools_to_exact_repo_pins(
     tmp_path: Path,
 ) -> None:
@@ -105,30 +111,311 @@ install_toolchain
     ]
 
 
-def test_powershell_setup_reconciles_every_tool_from_exact_repo_pins() -> None:
-    script = (REPO_ROOT / "setup-dev.ps1").read_text(encoding="utf-8")
-
-    assert "& $proto.Source upgrade $expected" in script
-    assert "& $installer $expected" in script
-    assert "& $proto.Source install $Tool $Expected --pin global" in script
-    assert "Get-RequiredVersion -Tool 'proto'" in script
-    assert "Get-RequiredVersion -Tool 'moon'" in script
-    assert "$tools = @('node', 'pnpm', 'python', 'uv')" in script
-    assert "Get-RequiredVersion -Tool $tool" in script
-
-
-def test_powershell_setup_uses_proto_path_and_executable_authority() -> None:
-    script = (REPO_ROOT / "setup-dev.ps1").read_text(encoding="utf-8")
-
-    assert '$candidate = Join-Path $pathDir "${Name}${extension}"' in script
-    assert "Get-Command $candidate -CommandType Application" in script
-    assert "$raw = & $command.Source --version" in script
-    assert "[StringComparer]::OrdinalIgnoreCase" in script
-    assert "if (-not $protoPaths.Contains($normalized))" in script
-    assert "$env:Path = (@($prefix) + @($remaining))" in script
-    assert (
-        script.count("Set-ProtoPath -ProtoHome $protoHome") == EXPECTED_POWERSHELL_PROTO_PATH_RESETS
+@pytest.mark.skipif(which("bash") is None, reason="bash is required for setup-dev.sh")
+def test_shell_setup_reinstalls_tool_when_version_command_fails(tmp_path: Path) -> None:
+    state = tmp_path / "installed"
+    install_log = tmp_path / "installs.log"
+    bash = which("bash")
+    assert bash is not None
+    script = f"""
+source {shlex.quote(str(REPO_ROOT / "setup-dev.sh"))}
+badtool() {{
+  printf 'badtool 2.5.2\\n'
+  [[ -f {shlex.quote(str(state))} ]]
+}}
+proto() {{
+  printf '%s\\n' "$*" > {shlex.quote(str(install_log))}
+  touch {shlex.quote(str(state))}
+}}
+install_exact_tool badtool 2.5.2
+"""
+    result = subprocess.run(  # noqa: S603
+        [bash, "-c", script],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
     )
+
+    assert result.returncode == 0, result.stderr
+    assert install_log.read_text(encoding="utf-8").strip() == ("install badtool 2.5.2 --pin global")
+
+
+@pytest.mark.skipif(which("bash") is None, reason="bash is required for setup-dev.sh")
+@pytest.mark.parametrize(
+    ("tool", "function_name"),
+    [("proto", "install_proto"), ("moon", "install_moon"), ("uv", "install_toolchain")],
+)
+def test_shell_setup_rejects_malformed_pin_before_install(
+    tmp_path: Path,
+    tool: str,
+    function_name: str,
+) -> None:
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    (repo_dir / "setup-dev.sh").write_bytes((REPO_ROOT / "setup-dev.sh").read_bytes())
+    prototools = (REPO_ROOT / ".prototools").read_text(encoding="utf-8")
+    prototools = prototools.replace(
+        f'{tool} = "{EXPECTED_TOOLCHAIN_VERSIONS[tool]}"',
+        f'{tool} = "latest"',
+    )
+    (repo_dir / ".prototools").write_text(prototools, encoding="utf-8")
+
+    proto_home = tmp_path / "proto-home"
+    state_dir = tmp_path / "state"
+    install_log = tmp_path / "installs.log"
+    _write_stale_toolchain_stubs(proto_home, state_dir)
+    for name, version in EXPECTED_TOOLCHAIN_VERSIONS.items():
+        (state_dir / name).write_text(f"{version}\n", encoding="utf-8")
+
+    bash = which("bash")
+    assert bash is not None
+    result = subprocess.run(  # noqa: S603
+        [
+            bash,
+            "-c",
+            f"source {shlex.quote(str(repo_dir / 'setup-dev.sh'))}; {function_name}",
+        ],
+        cwd=repo_dir,
+        env={
+            **os.environ,
+            "PATH": f"{proto_home / 'bin'}{os.pathsep}{os.environ['PATH']}",
+            "PROTO_HOME": str(proto_home),
+            "TOOL_INSTALL_LOG": str(install_log),
+            "TOOL_STATE_DIR": str(state_dir),
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert f"Missing exact {tool} version" in result.stderr
+    assert not install_log.exists()
+
+
+@pytest.mark.skipif(
+    which("bash") is None or not (which("sha256sum") or which("shasum")),
+    reason="bash and a SHA-256 tool are required for setup-dev.sh",
+)
+def test_shell_proto_bootstrap_rejects_tampered_installer_and_cleans_up(
+    tmp_path: Path,
+) -> None:
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    (repo_dir / "setup-dev.sh").write_bytes((REPO_ROOT / "setup-dev.sh").read_bytes())
+    (repo_dir / ".prototools").write_bytes((REPO_ROOT / ".prototools").read_bytes())
+
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    fake_curl = fake_bin / "curl"
+    fake_curl.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+output=''
+while (($#)); do
+  if [[ "$1" == "-o" ]]; then
+    output="$2"
+    shift 2
+  else
+    shift
+  fi
+done
+printf '#!/usr/bin/env bash\\ntouch "$MALICIOUS_MARKER"\\n' > "$output"
+""",
+        encoding="utf-8",
+    )
+    fake_curl.chmod(0o755)
+
+    proto_home = tmp_path / "proto-home"
+    temp_dir = tmp_path / "temp"
+    temp_dir.mkdir()
+    marker = tmp_path / "executed"
+    bash = which("bash")
+    assert bash is not None
+    result = subprocess.run(  # noqa: S603
+        [bash, "-c", f"source {shlex.quote(str(repo_dir / 'setup-dev.sh'))}; install_proto"],
+        cwd=repo_dir,
+        env={
+            **os.environ,
+            "MALICIOUS_MARKER": str(marker),
+            "PATH": f"{fake_bin}{os.pathsep}{os.defpath}",
+            "PROTO_HOME": str(proto_home),
+            "TMPDIR": str(temp_dir),
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "proto installer checksum mismatch" in result.stderr
+    assert not marker.exists()
+    assert list(temp_dir.iterdir()) == []
+
+
+def _write_powershell_toolchain_stubs(proto_home: Path, state_dir: Path) -> None:
+    bin_dir = proto_home / "bin"
+    shims_dir = proto_home / "shims"
+    bin_dir.mkdir(parents=True)
+    shims_dir.mkdir()
+    state_dir.mkdir()
+
+    if os.name == "nt":
+        stub = """@echo off
+set tool=%~n0
+if "%tool%"=="proto" if "%1"=="install" (
+  echo install %2 %3 --pin global>>"%TOOL_INSTALL_LOG%"
+  echo %3>"%TOOL_STATE_DIR%\\%2"
+  if exist "%TOOL_STATE_DIR%\\%2.fail" del "%TOOL_STATE_DIR%\\%2.fail"
+  exit /b 0
+)
+set /p version=<"%TOOL_STATE_DIR%\\%tool%"
+if "%tool%"=="node" (echo v%version%) else if "%tool%"=="python" (echo Python %version%) else (echo %tool% %version%)
+if exist "%TOOL_STATE_DIR%\\%tool%.fail" exit /b 42
+"""
+        suffix = ".cmd"
+    else:
+        stub = """#!/usr/bin/env bash
+set -euo pipefail
+tool="$(basename "$0")"
+if [[ "$tool" == "proto" && "${1:-}" == "install" ]]; then
+  printf 'install %s %s --pin global\\n' "$2" "$3" >> "$TOOL_INSTALL_LOG"
+  printf '%s\\n' "$3" > "$TOOL_STATE_DIR/$2"
+  rm -f "$TOOL_STATE_DIR/$2.fail"
+  exit 0
+fi
+version="$(<"$TOOL_STATE_DIR/$tool")"
+case "$tool" in
+  node) printf 'v%s\\n' "$version" ;;
+  python) printf 'Python %s\\n' "$version" ;;
+  *) printf '%s %s\\n' "$tool" "$version" ;;
+esac
+if [[ -f "$TOOL_STATE_DIR/$tool.fail" ]]; then
+  exit 42
+fi
+"""
+        suffix = ""
+
+    proto = bin_dir / f"proto{suffix}"
+    proto.write_text(stub, encoding="utf-8")
+    proto.chmod(0o755)
+    (state_dir / "proto").write_text("0.60.2\n", encoding="utf-8")
+    for tool in ("moon", "node", "pnpm", "python", "uv"):
+        binary = shims_dir / f"{tool}{suffix}"
+        binary.write_text(stub, encoding="utf-8")
+        binary.chmod(0o755)
+        (state_dir / tool).write_text("0.1.0\n", encoding="utf-8")
+    (state_dir / "node").write_text(
+        f"{EXPECTED_TOOLCHAIN_VERSIONS['node']}\n",
+        encoding="utf-8",
+    )
+    (state_dir / "node.fail").touch()
+
+
+@pytest.mark.skipif(which("pwsh") is None, reason="pwsh is required for setup-dev.ps1")
+def test_powershell_setup_reconciles_exact_tools_and_executable_sources(
+    tmp_path: Path,
+) -> None:
+    proto_home = tmp_path / "proto-home"
+    state_dir = tmp_path / "state"
+    install_log = tmp_path / "installs.log"
+    _write_powershell_toolchain_stubs(proto_home, state_dir)
+
+    pwsh = which("pwsh")
+    assert pwsh is not None
+    harness = tmp_path / "powershell-toolchain-contract.ps1"
+    harness.write_text(
+        """
+param($SetupScript, $ProtoHome, $InstallLog, $StateDir)
+. $SetupScript -SkipMain
+$env:PROTO_HOME = $ProtoHome
+$env:TOOL_INSTALL_LOG = $InstallLog
+$env:TOOL_STATE_DIR = $StateDir
+$separator = [IO.Path]::PathSeparator
+$env:Path = @(
+    (Join-Path $ProtoHome 'bin'),
+    (Join-Path $ProtoHome 'shims'),
+    (Join-Path $ProtoHome 'bin'),
+    $env:Path
+) -join $separator
+function global:node { 'v99.99.99' }
+Install-Moon
+Install-Toolchain
+$nodeCommand = Get-ApplicationCommand -Name 'node'
+Write-Output "NODE_SOURCE=$($nodeCommand.Source)"
+Write-Output "FINAL_PATH=$env:Path"
+""".lstrip(),
+        encoding="utf-8",
+    )
+    result = subprocess.run(  # noqa: S603
+        [
+            pwsh,
+            "-NoProfile",
+            "-NonInteractive",
+            "-File",
+            str(harness),
+            "-SetupScript",
+            str(REPO_ROOT / "setup-dev.ps1"),
+            "-ProtoHome",
+            str(proto_home),
+            "-InstallLog",
+            str(install_log),
+            "-StateDir",
+            str(state_dir),
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert {
+        tool: (state_dir / tool).read_text(encoding="utf-8").strip()
+        for tool in EXPECTED_TOOLCHAIN_VERSIONS
+    } == EXPECTED_TOOLCHAIN_VERSIONS
+    assert install_log.read_text(encoding="utf-8").splitlines() == [
+        "install moon 2.5.2 --pin global",
+        "install node 24.19.0 --pin global",
+        "install pnpm 11.22.0 --pin global",
+        "install python 3.13.15 --pin global",
+        "install uv 0.12.5 --pin global",
+    ]
+
+    source_line = next(line for line in result.stdout.splitlines() if "NODE_SOURCE=" in line)
+    path_line = next(line for line in result.stdout.splitlines() if "FINAL_PATH=" in line)
+    node_source = Path(source_line.split("=", 1)[1])
+    path_parts = path_line.split("=", 1)[1].split(os.pathsep)
+    assert node_source.parent.resolve() == (proto_home / "shims").resolve()
+    assert [Path(part).resolve() for part in path_parts[:2]] == [
+        (proto_home / "shims").resolve(),
+        (proto_home / "bin").resolve(),
+    ]
+    assert sum(Path(part).resolve() == (proto_home / "shims").resolve() for part in path_parts) == 1
+    assert sum(Path(part).resolve() == (proto_home / "bin").resolve() for part in path_parts) == 1
+
+
+def test_proto_bootstrap_uses_verified_pinned_release_installers() -> None:
+    shell = (REPO_ROOT / "setup-dev.sh").read_text(encoding="utf-8")
+    powershell = (REPO_ROOT / "setup-dev.ps1").read_text(encoding="utf-8")
+    expected_version = EXPECTED_TOOLCHAIN_VERSIONS["proto"]
+
+    shell_version = re.search(r'PROTO_INSTALLER_VERSION="([^"]+)"', shell)
+    powershell_version = re.search(r"PROTO_INSTALLER_VERSION = '([^']+)'", powershell)
+    assert shell_version
+    assert powershell_version
+    assert shell_version.group(1) == expected_version
+    assert powershell_version.group(1) == expected_version
+
+    assert PROTO_INSTALLER_SHA256["shell"] in shell
+    assert PROTO_INSTALLER_SHA256["powershell"] in powershell
+    assert "releases/download/v${PROTO_INSTALLER_VERSION}/proto_cli-installer.sh" in shell
+    assert "releases/download/v${PROTO_INSTALLER_VERSION}/proto_cli-installer.ps1" in powershell
+    assert '"$expected" != "$PROTO_INSTALLER_VERSION"' in shell
+    assert "$expected -ne $PROTO_INSTALLER_VERSION" in powershell
+    assert "moonrepo.dev/install" not in shell
+    assert "moonrepo.dev/install" not in powershell
 
 
 def test_devcontainer_has_one_exact_node_and_pnpm_owner() -> None:
@@ -137,7 +424,9 @@ def test_devcontainer_has_one_exact_node_and_pnpm_owner() -> None:
     )
     dockerfile = (REPO_ROOT / ".devcontainer" / "Dockerfile").read_text(encoding="utf-8")
 
-    assert "ghcr.io/devcontainers/features/node:1" not in config["features"]
+    features = config.get("features", {})
+    assert isinstance(features, dict)
+    assert not any(key.startswith("ghcr.io/devcontainers/features/node") for key in features)
     assert 'ENV PATH="/opt/proto/shims:/opt/proto/bin:${PATH}"' in dockerfile
     assert "> /etc/profile.d/proto.sh" in dockerfile
     assert "proto install node 24.19.0 --pin global" in dockerfile

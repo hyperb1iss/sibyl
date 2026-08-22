@@ -33,6 +33,10 @@ $ITALIC          = "$ESC[3m"
 $BOLD            = "$ESC[1m"
 $RESET           = "$ESC[0m"
 
+$PROTO_INSTALLER_VERSION = '0.60.2'
+$PROTO_INSTALLER_SHA256 = '91de41e2ba3ac62d26d9c6197001e44acedf451a6281908696b9ed2c76b9bcc8'
+$PROTO_INSTALLER_URL = "https://github.com/moonrepo/proto/releases/download/v${PROTO_INSTALLER_VERSION}/proto_cli-installer.ps1"
+
 # Banner gradient (electric purple → neon cyan)
 $GRAD_1 = "$ESC[38;2;225;53;255m"
 $GRAD_2 = "$ESC[38;2;201;88;247m"
@@ -77,7 +81,9 @@ function Get-VersionString {
     try {
         $command = Get-ApplicationCommand -Name $Tool
         if (-not $command) { return 'unknown' }
-        $raw = & $command.Source --version 2>$null | Select-Object -First 1
+        $output = @(& $command.Source --version 2>$null)
+        if ($LASTEXITCODE -ne 0) { return 'unknown' }
+        $raw = $output | Select-Object -First 1
         if ($raw -match '\d+\.\d+\.\d+') { return $Matches[0] }
         return ($raw ?? 'unknown').Trim()
     } catch {
@@ -219,18 +225,28 @@ function Install-Proto {
         }
     } else {
         Write-Info "Installing proto v$expected (toolchain version manager)..."
-        # The official one-liner is `irm <url> | iex`, but iex can't accept
-        # args. Download the installer so the exact repo version can be passed.
+        if ($expected -ne $PROTO_INSTALLER_VERSION) {
+            Write-Err "No verified proto installer is pinned for v$expected"
+            exit 1
+        }
         $installer = Join-Path ([IO.Path]::GetTempPath()) (
             "proto-install-$([guid]::NewGuid()).ps1"
         )
         try {
             Invoke-WebRequest `
-                -Uri 'https://moonrepo.dev/install/proto.ps1' `
+                -Uri $PROTO_INSTALLER_URL `
                 -OutFile $installer `
                 -UseBasicParsing `
                 -ErrorAction Stop
-            & $installer $expected
+            $actualSha256 = (Get-FileHash -Path $installer -Algorithm SHA256).Hash
+            if (-not [String]::Equals(
+                $actualSha256,
+                $PROTO_INSTALLER_SHA256,
+                [StringComparison]::OrdinalIgnoreCase
+            )) {
+                throw 'proto installer checksum mismatch'
+            }
+            & $installer
         }
         finally {
             if (Test-Path $installer) {
