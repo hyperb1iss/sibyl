@@ -1608,6 +1608,84 @@ class _SurrealErrorEnvelopeClient:
         return [{"status": "ERR", "result": "fulltext index unavailable", "time": "1ms"}]
 
 
+class _NodeFulltextClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        rows_by_field = {
+            "name": [
+                self._row("shared", score=0.8, day=1),
+                self._row("name-only", score=0.9, day=2),
+            ],
+            "summary": [self._row("summary-only", score=0.9, day=3)],
+            "description": [],
+            "content": [
+                self._row("shared", score=0.95, day=1),
+                self._row("content-only", score=0.85, day=4),
+            ],
+        }
+        field = next(
+            field for field in source_module.NODE_FULLTEXT_FIELDS if f"{field} @0@" in query
+        )
+        return rows_by_field[field]
+
+    @staticmethod
+    def _row(uuid: str, *, score: float, day: int) -> dict[str, object]:
+        return {
+            "uuid": uuid,
+            "name": uuid,
+            "entity_type": "note",
+            "content": uuid,
+            "group_id": "org-123",
+            "project_id": "project_123",
+            "attributes": {},
+            "created_at": datetime(2026, 8, day, tzinfo=UTC),
+            "score": score,
+        }
+
+
+@pytest.mark.asyncio
+async def test_node_fulltext_queries_each_index_and_merges_global_top_k() -> None:
+    client = _NodeFulltextClient()
+    plan = build_context_retrieval_plan(
+        query="surreal replay verification",
+        organization_id="org-123",
+        facets=[ContextFacet.RECENT_MEMORY],
+        facet_types={ContextFacet.RECENT_MEMORY: ["note"]},
+        principal_id="user-123",
+        project="project_123",
+        accessible_projects={"project_123"},
+    )
+
+    candidates = await source_module._node_fulltext_candidates(
+        client=client,
+        plan=plan,
+        search_filter=search_module.SearchFilter(
+            node_types=("note",),
+            project_ids=("project_123",),
+        ),
+        limit=3,
+    )
+
+    assert [(candidate.id, candidate.score) for candidate in candidates] == [
+        ("shared", 0.95),
+        ("summary-only", 0.9),
+        ("name-only", 0.9),
+    ]
+    assert len(client.calls) == len(source_module.NODE_FULLTEXT_FIELDS)
+    for field in source_module.NODE_FULLTEXT_FIELDS:
+        [(query, params)] = [call for call in client.calls if f"{field} @0@" in call[0]]
+        assert all(
+            other == field or f"{other} @" not in query
+            for other in source_module.NODE_FULLTEXT_FIELDS
+        )
+        assert params["limit"] == 3
+        assert params["node_types"] == ["note"]
+        assert params["project_ids"] == ["project_123"]
+
+
 @pytest.mark.asyncio
 async def test_surreal_rrf_backend_uses_database_fusion_scores() -> None:
     plan = build_context_retrieval_plan(
