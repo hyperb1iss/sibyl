@@ -27,7 +27,7 @@ def _git_output(*args: str) -> str | None:
         )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return None
-    return result.stdout.strip() or None
+    return result.stdout.strip()
 
 
 def _optional_bool(value: str | None) -> bool | None:
