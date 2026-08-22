@@ -155,35 +155,36 @@ async def capture_operational_experience(
                         error_code=error_code,
                         error=str(exc),
                     )
-            distillation_job_id: str | None = None
-            try:
-                from sibyl.jobs.queue import enqueue_operational_note_distillation
+            if payload.note_distillation:
+                distillation_job_id: str | None = None
+                try:
+                    from sibyl.jobs.queue import enqueue_operational_note_distillation
 
-                distillation_job_id = await enqueue_operational_note_distillation(
-                    experience.model_dump(mode="json"),
-                    group_id,
-                    content_hash=result.projection.manifest.content_hash,
-                    created_by=ctx.user_id,
-                    max_tokens=settings.operational_note_distillation_max_tokens,
-                )
-                background_jobs["note_distillation"] = {
-                    "status": "queued",
-                    "job_ids": [distillation_job_id],
-                    "queued_sources": 1,
-                }
-            except Exception as exc:
-                background_jobs["note_distillation"] = {
-                    "status": "degraded",
-                    "job_ids": [distillation_job_id] if distillation_job_id else [],
-                    "queued_sources": 0,
-                    "error": "enqueue_failed",
-                }
-                log.warning(
-                    "operational_note_distillation_enqueue_failed",
-                    source_id=experience.source_id,
-                    error_code="enqueue_failed",
-                    error=str(exc),
-                )
+                    distillation_job_id = await enqueue_operational_note_distillation(
+                        experience.model_dump(mode="json"),
+                        group_id,
+                        content_hash=result.projection.manifest.content_hash,
+                        created_by=ctx.user_id,
+                        max_tokens=settings.operational_note_distillation_max_tokens,
+                    )
+                    background_jobs["note_distillation"] = {
+                        "status": "queued",
+                        "job_ids": [distillation_job_id],
+                        "queued_sources": 1,
+                    }
+                except Exception as exc:
+                    background_jobs["note_distillation"] = {
+                        "status": "degraded",
+                        "job_ids": [distillation_job_id] if distillation_job_id else [],
+                        "queued_sources": 0,
+                        "error": "enqueue_failed",
+                    }
+                    log.warning(
+                        "operational_note_distillation_enqueue_failed",
+                        source_id=experience.source_id,
+                        error_code="enqueue_failed",
+                        error=str(exc),
+                    )
     except LockAcquisitionError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

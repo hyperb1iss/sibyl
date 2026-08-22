@@ -15,6 +15,10 @@ class OperationalExperienceCaptureRequest(BaseModel):
         default=True,
         description="Persist lexical records first and queue embedding backfill",
     )
+    note_distillation: bool = Field(
+        default=True,
+        description="Queue provider-backed operational note distillation",
+    )
 
 
 class OperationalExperienceCaptureResponse(BaseModel):

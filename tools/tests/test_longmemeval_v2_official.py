@@ -7371,6 +7371,7 @@ def test_sibyl_memory_insert_tracks_deferred_background_jobs() -> None:
     assert isinstance(request_json, dict)
     assert calls[0]["path"] == "/memory/experience"
     assert request_json["defer_embeddings"] is True
+    assert request_json["note_distillation"] is False
     experience = cast(dict[str, object], request_json["experience"])
     assert experience["source_id"] == "longmemeval-v2:run_lme:t1"
     observations = cast(list[dict[str, object]], experience["observations"])
@@ -7386,6 +7387,56 @@ def test_sibyl_memory_insert_tracks_deferred_background_jobs() -> None:
     assert memory._pending_job_manifest_ids == {
         "embed-lme-v2-1": "artifact-lme-v2-1",
     }
+
+
+def test_sibyl_memory_requests_and_profiles_operational_note_distillation() -> None:
+    module = _load_memory_module()
+    memory = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
+    module.Memory.__init__(memory, {})
+    requests: list[dict[str, object]] = []
+
+    def fake_request(
+        _method: str,
+        _path: str,
+        *,
+        json: dict[str, object] | None = None,
+        params: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        del params
+        requests.append(json or {})
+        return {
+            "written_entities": 1,
+            "background_jobs": {
+                "note_distillation": {
+                    "status": "queued",
+                    "job_ids": ["distill-lme-v2-1"],
+                },
+            },
+        }
+
+    memory.project_id = "project_lme"
+    memory.run_id = "run_lme"
+    memory.content_max_chars = TEST_CONTENT_MAX_CHARS
+    memory.embedding_backfill_max_pending_jobs = 8
+    memory.include_screenshot_refs = False
+    memory.defer_embeddings = False
+    memory.note_distillation = True
+    memory.operational_note_distillation_profile = "render_v1"
+    memory.created_entities = 0
+    memory.inserted_trajectories = 0
+    memory._pending_embedding_job_ids = set()
+    memory._pending_projection_job_ids = set()
+    memory._pending_note_distillation_job_ids = set()
+    memory._request_json = fake_request
+
+    memory.insert(_trajectory("t1"))
+
+    payload = requests[0]
+    assert payload["note_distillation"] is True
+    experience = cast(dict[str, object], payload["experience"])
+    metadata = cast(dict[str, object], experience["metadata"])
+    assert metadata["operational_note_distillation_profile"] == "render_v1"
+    assert memory._pending_note_distillation_job_ids == {"distill-lme-v2-1"}
 
 
 def test_sibyl_memory_retries_write_after_pre_checkpoint_crash(tmp_path: Path) -> None:
