@@ -58,11 +58,11 @@ def _package(
 
 
 def _cycle_file(path: Path, content: bytes) -> None:
-    os.chflags(path, 0)
+    package_root.set_path_flags(path, 0)
     path.chmod(0o600)
     path.write_bytes(content)
     path.chmod(package_object.OBJECT_FILE_MODE)
-    os.chflags(path, package_root.IMMUTABLE_FLAG)
+    package_root.set_path_flags(path, package_root.IMMUTABLE_FLAG)
 
 
 def test_darwin_immutable_parent_and_arms_deny_foreign_writes(
@@ -77,13 +77,13 @@ def test_darwin_immutable_parent_and_arms_deny_foreign_writes(
     object_path = Path(result["package_object"]["path"])
 
     assert stat.S_IMODE(packages_root.stat().st_mode) == FROZEN_DIRECTORY_MODE
-    assert packages_root.stat().st_flags & package_root.IMMUTABLE_FLAG
+    assert package_root.file_flags(packages_root.stat()) & package_root.IMMUTABLE_FLAG
     arms_root = packages_root / "arms"
     assert stat.S_IMODE(arms_root.stat().st_mode) == FROZEN_DIRECTORY_MODE
-    assert arms_root.stat().st_flags & package_root.IMMUTABLE_FLAG
+    assert package_root.file_flags(arms_root.stat()) & package_root.IMMUTABLE_FLAG
     assert stat.S_IMODE(authority_root.stat().st_mode) == FROZEN_DIRECTORY_MODE
-    assert authority_root.stat().st_flags & package_root.IMMUTABLE_FLAG
-    assert object_path.stat().st_flags & package_root.IMMUTABLE_FLAG
+    assert package_root.file_flags(authority_root.stat()) & package_root.IMMUTABLE_FLAG
+    assert package_root.file_flags(object_path.stat()) & package_root.IMMUTABLE_FLAG
     with pytest.raises(PermissionError):
         (packages_root / "foreign").mkdir()
     with pytest.raises(PermissionError):
@@ -195,7 +195,7 @@ def test_publication_refreezes_arms_after_post_thaw_interrupt(
         _package(executed, packages_root, monkeypatch)
     arms_metadata = (packages_root / "arms").stat()
     assert stat.S_IMODE(arms_metadata.st_mode) == FROZEN_DIRECTORY_MODE
-    assert arms_metadata.st_flags & package_root.IMMUTABLE_FLAG
+    assert package_root.file_flags(arms_metadata) & package_root.IMMUTABLE_FLAG
 
 
 def test_publication_refreezes_arms_after_partial_thaw_interrupt(
@@ -221,7 +221,7 @@ def test_publication_refreezes_arms_after_partial_thaw_interrupt(
     arms_metadata = (packages_root / "arms").stat()
     assert interrupted is True
     assert stat.S_IMODE(arms_metadata.st_mode) == FROZEN_DIRECTORY_MODE
-    assert arms_metadata.st_flags & package_root.IMMUTABLE_FLAG
+    assert package_root.file_flags(arms_metadata) & package_root.IMMUTABLE_FLAG
 
 
 @pytest.mark.parametrize("target", ["authority", "object"])

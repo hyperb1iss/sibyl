@@ -16,6 +16,7 @@ from benchmarks import longmemeval_v2_release_contract as contract
 from benchmarks import longmemeval_v2_release_inputs as inputs
 from benchmarks import longmemeval_v2_release_io as release_io
 from benchmarks import longmemeval_v2_release_memory as release_memory
+from benchmarks import longmemeval_v2_release_package_root as package_root
 from benchmarks import longmemeval_v2_release_plan as release_plan
 from tools.tests.longmemeval_v2_release_support import (
     aa_extension_spec,
@@ -34,9 +35,9 @@ def _clear_immutable_plan_files(tmp_path: Path) -> Any:
     for current, _directories, files in os.walk(tmp_path, topdown=False):
         for name in files:
             with suppress(OSError):
-                os.chflags(Path(current) / name, 0)
+                package_root.set_path_flags(Path(current) / name, 0)
         with suppress(OSError):
-            os.chflags(current, 0)
+            package_root.set_path_flags(current, 0)
             os.chmod(current, 0o700)
 
 

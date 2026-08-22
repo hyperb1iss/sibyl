@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 from benchmarks import longmemeval_v2_release_io as release_io
+from benchmarks import longmemeval_v2_release_package_root as package_root
 from benchmarks import longmemeval_v2_release_plan_publication as plan_publication
 from benchmarks import longmemeval_v2_release_plan_safety as plan_safety
 from benchmarks import longmemeval_v2_release_stage_io as stage_io
@@ -29,9 +30,9 @@ def _clear_immutable_plan_files(tmp_path: Path) -> Any:
     for current, _directories, files in os.walk(tmp_path, topdown=False):
         for name in files:
             with suppress(OSError):
-                os.chflags(Path(current) / name, 0)
+                package_root.set_path_flags(Path(current) / name, 0)
         with suppress(OSError):
-            os.chflags(current, 0)
+            package_root.set_path_flags(current, 0)
             os.chmod(current, 0o700)
 
 
@@ -618,7 +619,7 @@ def test_owned_plan_publication_has_one_real_darwin_winner(
     assert results.count("rejected") == PLAN_WRITER_COUNT - 1
     metadata = target.stat()
     assert stat.S_IMODE(metadata.st_mode) == plan_publication.PLAN_FILE_MODE
-    assert metadata.st_flags == plan_publication.PLAN_FILE_FLAGS
+    assert package_root.file_flags(metadata) == plan_publication.PLAN_FILE_FLAGS
     assert not list(target.parent.glob(".stage.json.*.tmp"))
 
 
@@ -646,7 +647,7 @@ def test_owned_plan_publication_recovers_a_post_freeze_interrupt(
     assert not list(target.parent.glob(".stage.json.*.tmp"))
     monkeypatch.setattr(plan_publication.os, "fsync", real_fsync)
     plan_publication.write_json_once_owned_path(target, {"status": "sealed"})
-    assert target.stat().st_flags == plan_publication.PLAN_FILE_FLAGS
+    assert package_root.file_flags(target.stat()) == plan_publication.PLAN_FILE_FLAGS
 
 
 def test_owned_plan_publication_recovers_post_rename_interrupt(

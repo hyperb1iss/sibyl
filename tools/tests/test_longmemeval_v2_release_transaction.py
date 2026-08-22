@@ -13,6 +13,7 @@ from benchmarks import longmemeval_v2_release_io as release_io
 from benchmarks import longmemeval_v2_release_outcomes as outcomes
 from benchmarks import longmemeval_v2_release_package as package
 from benchmarks import longmemeval_v2_release_package_claim as package_claim
+from benchmarks import longmemeval_v2_release_package_root as package_root
 from benchmarks import longmemeval_v2_release_stage_io as stage_io
 from benchmarks import longmemeval_v2_release_stage_receipt as stage_receipt
 from benchmarks import longmemeval_v2_release_stage_transaction as stage_transaction
@@ -30,13 +31,13 @@ def _clear_immutable_outputs(tmp_path: Path) -> Any:
     for current, _directories, files in os.walk(tmp_path):
         root = Path(current)
         with suppress(OSError):
-            os.chflags(root, 0)
+            package_root.set_path_flags(root, 0)
         with suppress(OSError):
             root.chmod(0o700)
         for name in files:
             path = root / name
             with suppress(OSError):
-                os.chflags(path, 0)
+                package_root.set_path_flags(path, 0)
             with suppress(OSError):
                 path.chmod(0o600)
 
@@ -602,7 +603,7 @@ def test_frozen_stage_authority_retains_files_through_final_validation(
 
     target = output_root / relative
     with stage_io.open_frozen_stage_authority(output_root) as authority:
-        os.chflags(target, 0)
+        package_root.set_path_flags(target, 0)
         target.chmod(MUTABLE_FILE_MODE)
         with pytest.raises(StagePlanError, match=r"changed|immutable|mode"):
             authority.require_unchanged()

@@ -12,6 +12,7 @@ from benchmarks import longmemeval_v2_release_official_package as package
 from benchmarks import longmemeval_v2_release_official_receipt as official_receipt
 from benchmarks import longmemeval_v2_release_package_archive as package_archive
 from benchmarks import longmemeval_v2_release_package_object as package_object
+from benchmarks import longmemeval_v2_release_package_root as package_root
 from benchmarks import longmemeval_v2_release_state as state
 from benchmarks.longmemeval_v2_release_handoff import ExecutedDomain, ExecutedStage
 from benchmarks.longmemeval_v2_release_inputs import bind_artifact, load_json
@@ -24,13 +25,13 @@ def thaw_tree(root: Path) -> None:
     for current, _directories, files in os.walk(root):
         current_path = Path(current)
         with suppress(OSError):
-            os.chflags(current_path, 0)
+            package_root.set_path_flags(current_path, 0)
         with suppress(OSError):
             current_path.chmod(0o700)
         for name in files:
             path = current_path / name
             with suppress(OSError):
-                os.chflags(path, 0)
+                package_root.set_path_flags(path, 0)
             with suppress(OSError):
                 path.chmod(0o600)
 

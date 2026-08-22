@@ -17,6 +17,7 @@ from typing import Any, cast
 from uuid import uuid4
 
 from benchmarks import longmemeval_v2_release_io as release_io
+from benchmarks import longmemeval_v2_release_package_root as package_root
 from benchmarks import longmemeval_v2_release_plan_safety as plan_safety
 
 PLAN_FILE_MODE = 0o400
@@ -349,7 +350,7 @@ def _open_owned_plan_file(
         mode=stat.S_IMODE(metadata.st_mode),
         size=metadata.st_size,
         ctime_ns=metadata.st_ctime_ns,
-        flags=metadata.st_flags,
+        flags=package_root.file_flags(metadata),
         sha256=hashlib.sha256(content).hexdigest(),
     )
     _require_owned_plan_file(holder.authority, directory_fd, name, expected=expected)
@@ -376,7 +377,7 @@ def _require_owned_plan_file(
         or stat.S_IMODE(metadata.st_mode) != authority.mode
         or metadata.st_size != authority.size
         or metadata.st_ctime_ns != authority.ctime_ns
-        or metadata.st_flags != authority.flags
+        or package_root.file_flags(metadata) != authority.flags
         or hashlib.sha256(content).hexdigest() != authority.sha256
         or content != expected
     ):

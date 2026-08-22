@@ -40,7 +40,7 @@ def snapshot_descriptor(descriptor: int) -> DescriptorSnapshot:
         ctime_ns=metadata.st_ctime_ns,
         mtime_ns=metadata.st_mtime_ns,
         size=metadata.st_size,
-        flags=metadata.st_flags,
+        flags=package_root.file_flags(metadata),
     )
 
 

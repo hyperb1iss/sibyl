@@ -271,7 +271,7 @@ def _authority_snapshot(descriptor: int) -> AuthoritySnapshot:
         ctime_ns=metadata.st_ctime_ns,
         mtime_ns=metadata.st_mtime_ns,
         size=metadata.st_size,
-        flags=metadata.st_flags,
+        flags=package_root.file_flags(metadata),
     )
 
 
@@ -290,7 +290,7 @@ def _file_snapshot(descriptor: int, *, mode: int, name: str) -> FileSnapshot:
         ctime_ns=metadata.st_ctime_ns,
         mtime_ns=metadata.st_mtime_ns,
         size=metadata.st_size,
-        flags=metadata.st_flags,
+        flags=package_root.file_flags(metadata),
     )
 
 

@@ -158,7 +158,7 @@ def _read_frozen_object(path: Path, binding: dict[str, Any]) -> bytes:
     if (
         not stat.S_ISREG(before.st_mode)
         or stat.S_IMODE(before.st_mode) != package_object.OBJECT_FILE_MODE
-        or not (before.st_flags & package_root.IMMUTABLE_FLAG)
+        or not (package_root.file_flags(before) & package_root.IMMUTABLE_FLAG)
     ):
         raise StagePlanError("official arm object is not immutable")
     content = path.read_bytes()

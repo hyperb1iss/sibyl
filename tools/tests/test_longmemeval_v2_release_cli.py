@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 from benchmarks import longmemeval_v2_ablations as ablations
 from benchmarks import longmemeval_v2_release_cli as cli
+from benchmarks import longmemeval_v2_release_package_root as package_root
 from benchmarks.longmemeval_v2_release_inputs import StagePlanError
 
 
@@ -19,9 +20,9 @@ def _clear_immutable_plan_files(tmp_path: Path) -> Any:
     for current, _directories, files in os.walk(tmp_path, topdown=False):
         for name in files:
             with suppress(OSError):
-                os.chflags(Path(current) / name, 0)
+                package_root.set_path_flags(Path(current) / name, 0)
         with suppress(OSError):
-            os.chflags(current, 0)
+            package_root.set_path_flags(current, 0)
             os.chmod(current, 0o700)
 
 

@@ -30,13 +30,13 @@ def _thaw_tree(root: Path) -> None:
     for current, _directories, files in os.walk(root):
         current_path = Path(current)
         with suppress(OSError):
-            os.chflags(current_path, 0)
+            package_root.set_path_flags(current_path, 0)
         with suppress(OSError):
             current_path.chmod(0o700)
         for name in files:
             path = current_path / name
             with suppress(OSError):
-                os.chflags(path, 0)
+                package_root.set_path_flags(path, 0)
             with suppress(OSError):
                 path.chmod(0o600)
 
@@ -379,7 +379,7 @@ def test_completed_package_rejects_bound_output_mutation(
     )
     receipt = load_json(package_object.publication_path(root.parent, "aa-1-left"))
     object_path = Path(receipt["package_object"]["path"])
-    os.chflags(object_path, 0)
+    package_root.set_path_flags(object_path, 0)
     object_path.chmod(0o600)
     object_path.write_bytes(b"tampered\n")
 
@@ -406,7 +406,7 @@ def test_completed_package_rejects_mutable_object_mode(
         packages_root=packages_root,
     )
     object_path = Path(result["package_object"]["path"])
-    os.chflags(object_path, 0)
+    package_root.set_path_flags(object_path, 0)
     object_path.chmod(0o600)
 
     with pytest.raises(StagePlanError, match="immutable state changed"):
@@ -480,7 +480,7 @@ def test_completed_package_rejects_publication_receipt_mutation(
     )
 
     receipt = package_object.publication_path(root.parent, "aa-1-left")
-    os.chflags(receipt, 0)
+    package_root.set_path_flags(receipt, 0)
     receipt.chmod(0o600)
     receipt.write_text("{}\n", encoding="utf-8")
     with pytest.raises(StagePlanError):

@@ -144,7 +144,7 @@ def test_fd_owned_child_writes_file_and_tar_without_lexical_redirection(
         assert (lease.arm.path / "proof.tar.gz").stat().st_size > 0
 
         displaced = tmp_path / "displaced"
-        os.chflags(packages_root, 0)
+        package_root.set_path_flags(packages_root, 0)
         packages_root.chmod(0o700)
         packages_root.rename(displaced)
         packages_root.mkdir()

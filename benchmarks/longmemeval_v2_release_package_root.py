@@ -146,18 +146,29 @@ def _require_descriptor_identity(descriptor: int, owner: OwnedDirectory, *, name
         raise StagePlanError(f"{name} changed before descriptor ownership")
 
 
-def _file_flags(metadata: os.stat_result) -> int:
+def file_flags(metadata: os.stat_result) -> int:
+    """Read Darwin file flags without binding type checks to the host stubs."""
+
     flags = getattr(metadata, "st_flags", None)
     if not isinstance(flags, int):
         raise StagePlanError("immutable official publication requires Darwin file flags")
     return flags
 
 
+def set_path_flags(path: os.PathLike[str] | str, flags: int) -> None:
+    """Set Darwin file flags without binding type checks to the host stubs."""
+
+    setter = getattr(os, "chflags", None)
+    if not callable(setter):
+        raise OSError("immutable official publication requires Darwin chflags")
+    setter(path, flags)
+
+
 def freeze_descriptor(descriptor: int, *, mode: int, name: str) -> os.stat_result:
     """Set and verify one descriptor's exact mode and immutable flag."""
 
     before = os.fstat(descriptor)
-    if _file_flags(before) & IMMUTABLE_FLAG:
+    if file_flags(before) & IMMUTABLE_FLAG:
         if stat.S_IMODE(before.st_mode) != mode:
             raise StagePlanError(f"{name} immutable mode is invalid")
         return before
@@ -168,7 +179,7 @@ def freeze_descriptor(descriptor: int, *, mode: int, name: str) -> os.stat_resul
     except OSError as exc:
         raise StagePlanError(f"{name} could not be frozen") from exc
     after = os.fstat(descriptor)
-    if stat.S_IMODE(after.st_mode) != mode or not (_file_flags(after) & IMMUTABLE_FLAG):
+    if stat.S_IMODE(after.st_mode) != mode or not (file_flags(after) & IMMUTABLE_FLAG):
         raise StagePlanError(f"{name} did not become immutable")
     return after
 
@@ -177,7 +188,7 @@ def require_frozen_descriptor(descriptor: int, *, mode: int, name: str) -> os.st
     """Require one open descriptor to retain its frozen publication state."""
 
     metadata = os.fstat(descriptor)
-    if stat.S_IMODE(metadata.st_mode) != mode or not (_file_flags(metadata) & IMMUTABLE_FLAG):
+    if stat.S_IMODE(metadata.st_mode) != mode or not (file_flags(metadata) & IMMUTABLE_FLAG):
         raise StagePlanError(f"{name} immutable state changed")
     return metadata
 
@@ -199,7 +210,7 @@ def thaw_descriptor(
     except OSError as exc:
         raise StagePlanError(f"{name} could not be thawed for publication") from exc
     metadata = os.fstat(descriptor)
-    if stat.S_IMODE(metadata.st_mode) != writable_mode or _file_flags(metadata):
+    if stat.S_IMODE(metadata.st_mode) != writable_mode or file_flags(metadata):
         raise StagePlanError(f"{name} did not become writable for publication")
 
 
