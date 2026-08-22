@@ -665,6 +665,7 @@ def test_all_plan_only_reservations_accept_future_internal_memory(
     sealed_inputs: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     stage_plan = _build(sealed_inputs)
     monkeypatch.setattr(
         official,

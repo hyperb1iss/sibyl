@@ -38,8 +38,8 @@ The release contract accepts one exact input set:
 - The packaged adapter is `benchmarks/longmemeval_v2_memory/sibyl_memory.py`.
 - The reader is `qwen/qwen3.5-9b` through OpenRouter. The judge is `gpt-5.2`.
 - The Sibyl API points at a disposable local stack with a database reserved for this experiment.
-- The package publication path runs on macOS. Its evidence authority uses immutable filesystem flags
-  to protect completed arm and stage packages.
+- The package publication path runs on macOS 26 or newer. Its evidence authority uses immutable
+  filesystem flags to protect completed arm and stage packages.
 
 The planner requires these dataset payload hashes:
 
