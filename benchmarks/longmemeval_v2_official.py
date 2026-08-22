@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import importlib
 import importlib.util
 import json
 import math
@@ -229,8 +230,7 @@ def main(argv: list[str] | None = None) -> int:
 
     official_repo = resolve_official_repo(args.official_repo)
     require_pinned_source(official_repo)
-    sys.path.insert(0, str(official_repo))
-    import benchmarks.longmemeval_v2_memory.sibyl_memory  # noqa: F401, PLC0415
+    install_official_memory_adapter(official_repo)
     import evaluation.harness as official_harness  # noqa: PLC0415
     import evaluation.qa_eval_metrics as official_metrics  # noqa: PLC0415
 
@@ -263,6 +263,27 @@ def main(argv: list[str] | None = None) -> int:
     if args.experiment_id:
         enforce_actual_spend_cap(receipt, max_spend_usd=args.max_spend_usd)
     return 0
+
+
+def install_official_memory_adapter(official_repo: Path) -> type[Any]:
+    """Bind the Sibyl adapter to the pinned harness memory registry."""
+
+    official_path = str(official_repo)
+    if official_path not in sys.path:
+        sys.path.insert(0, official_path)
+    adapter_name = "benchmarks.longmemeval_v2_memory.sibyl_memory"
+    adapter_module = sys.modules.get(adapter_name)
+    if adapter_module is None:
+        adapter_module = importlib.import_module(adapter_name)
+    else:
+        adapter_module = importlib.reload(adapter_module)
+    memory_module = importlib.import_module("memory_modules.memory")
+    memory_cls = getattr(adapter_module, "SibylLiveApiMemory", None)
+    memory_types = getattr(memory_module, "MEMORY_TYPES", {})
+    if memory_cls is None or memory_types.get("sibyl_live_api") is not memory_cls:
+        raise RuntimeError("Sibyl memory adapter did not register with the official harness")
+    globals()["SibylLiveApiMemory"] = memory_cls
+    return memory_cls
 
 
 def _redacted_command_args(command_args: Sequence[str]) -> list[str]:

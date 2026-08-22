@@ -464,6 +464,37 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(  # noqa: PLR09
     _assert_question_id_hash_propagates(module, data_root=data_root, plan=plan)
 
 
+def test_official_runner_rebinds_adapter_to_official_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_runner_module()
+    adapter_name = "benchmarks.longmemeval_v2_memory.sibyl_memory"
+    original_adapter = sys.modules[adapter_name]
+    official_memory = type("OfficialSibylMemory", (), {})
+    reloaded_adapter = SimpleNamespace(SibylLiveApiMemory=official_memory)
+    memory_package = ModuleType("memory_modules")
+    memory_module = ModuleType("memory_modules.memory")
+    cast("Any", memory_module).MEMORY_TYPES = {"sibyl_live_api": official_memory}
+    monkeypatch.setitem(sys.modules, "memory_modules", memory_package)
+    monkeypatch.setitem(sys.modules, "memory_modules.memory", memory_module)
+    path_visible_during_reload = False
+
+    def reload_adapter(adapter: ModuleType) -> SimpleNamespace:
+        nonlocal path_visible_during_reload
+        path_visible_during_reload = str(tmp_path) in sys.path
+        assert adapter is original_adapter
+        return reloaded_adapter
+
+    monkeypatch.setattr(module.importlib, "reload", reload_adapter)
+
+    installed = module.install_official_memory_adapter(tmp_path)
+
+    assert path_visible_during_reload is True
+    assert installed is official_memory
+    assert module.SibylLiveApiMemory is official_memory
+
+
 def test_official_runner_refuses_existing_provider_usage_before_work(tmp_path: Path) -> None:
     module = _load_runner_module()
     output_dir = tmp_path / "output"
