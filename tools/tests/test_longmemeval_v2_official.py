@@ -466,33 +466,58 @@ def test_official_runner_plan_materializes_honest_runtime_inputs(  # noqa: PLR09
 
 def test_official_runner_rebinds_adapter_to_official_registry(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    module = _load_runner_module()
-    adapter_name = "benchmarks.longmemeval_v2_memory.sibyl_memory"
-    original_adapter = sys.modules[adapter_name]
-    official_memory = type("OfficialSibylMemory", (), {})
-    reloaded_adapter = SimpleNamespace(SibylLiveApiMemory=official_memory)
-    memory_package = ModuleType("memory_modules")
-    memory_module = ModuleType("memory_modules.memory")
-    cast("Any", memory_module).MEMORY_TYPES = {"sibyl_live_api": official_memory}
-    monkeypatch.setitem(sys.modules, "memory_modules", memory_package)
-    monkeypatch.setitem(sys.modules, "memory_modules.memory", memory_module)
-    path_visible_during_reload = False
+    official_repo = tmp_path / "official"
+    memory_package = official_repo / "memory_modules"
+    memory_package.mkdir(parents=True)
+    (memory_package / "__init__.py").write_text("", encoding="utf-8")
+    (memory_package / "memory.py").write_text(
+        """MEMORY_TYPES = {}
 
-    def reload_adapter(adapter: ModuleType) -> SimpleNamespace:
-        nonlocal path_visible_during_reload
-        path_visible_during_reload = str(tmp_path) in sys.path
-        assert adapter is original_adapter
-        return reloaded_adapter
 
-    monkeypatch.setattr(module.importlib, "reload", reload_adapter)
+class Memory:
+    memory_type = ""
 
-    installed = module.install_official_memory_adapter(tmp_path)
+    def __init__(self, memory_params):
+        self.memory_params = memory_params
 
-    assert path_visible_during_reload is True
-    assert installed is official_memory
-    assert module.SibylLiveApiMemory is official_memory
+
+MemoryContextItem = dict[str, str]
+
+
+def register_memory(memory_cls):
+    MEMORY_TYPES[memory_cls.memory_type] = memory_cls
+    return memory_cls
+""",
+        encoding="utf-8",
+    )
+    project_root = Path(__file__).parents[2]
+    probe = """
+import sys
+from pathlib import Path
+
+import benchmarks.longmemeval_v2_official as runner
+from benchmarks.longmemeval_v2_memory import sibyl_memory as fallback_adapter
+
+assert fallback_adapter._register_memory.__module__ == fallback_adapter.__name__
+installed = runner.install_official_memory_adapter(Path(sys.argv[1]))
+from memory_modules.memory import MEMORY_TYPES
+
+assert MEMORY_TYPES["sibyl_live_api"] is installed
+assert runner.SibylLiveApiMemory is installed
+print("real_registry_rebind=PASS")
+"""
+
+    result = subprocess.run(  # noqa: S603 - current interpreter with test-owned input.
+        [sys.executable, "-c", probe, str(official_repo)],
+        cwd=project_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "real_registry_rebind=PASS"
 
 
 def test_official_runner_refuses_existing_provider_usage_before_work(tmp_path: Path) -> None:
