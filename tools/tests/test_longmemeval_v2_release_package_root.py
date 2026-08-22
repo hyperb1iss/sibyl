@@ -18,6 +18,11 @@ RUNS = ({"arm_id": ARM_ID},)
 OWNED_DESCRIPTOR_COUNT = 2
 LEASE_DESCRIPTOR_COUNT = 7
 
+pytestmark = pytest.mark.skipif(
+    sys.platform != "darwin",
+    reason="requires Darwin immutable file flags",
+)
+
 
 def _plan(tmp_path: Path) -> dict[str, Any]:
     roots = {

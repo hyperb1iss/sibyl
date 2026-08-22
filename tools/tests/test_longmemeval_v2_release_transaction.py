@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import sys
 from contextlib import nullcontext, suppress
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,11 @@ from benchmarks.longmemeval_v2_release_inputs import StagePlanError, bind_artifa
 
 EXECUTED_COST_USD = 0.5
 MUTABLE_FILE_MODE = 0o600
+
+pytestmark = pytest.mark.skipif(
+    sys.platform != "darwin",
+    reason="requires Darwin immutable file flags",
+)
 
 
 @pytest.fixture(autouse=True)

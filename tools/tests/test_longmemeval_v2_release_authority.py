@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import replace
@@ -23,6 +24,11 @@ from tools.tests.longmemeval_v2_release_package_support import (
     stub_score_aware_boundary,
     successful_invoke,
     thaw_tree,
+)
+
+pytestmark = pytest.mark.skipif(
+    sys.platform != "darwin",
+    reason="requires Darwin immutable file flags",
 )
 
 FROZEN_DIRECTORY_MODE = 0o500

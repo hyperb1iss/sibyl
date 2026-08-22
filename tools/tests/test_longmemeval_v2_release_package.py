@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import sys
 from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
@@ -24,6 +25,11 @@ from benchmarks.longmemeval_v2_release_inputs import StagePlanError, bind_artifa
 from tools.bench import longmemeval_v2_rig as rig
 
 COMMAND_COUNT = 4
+
+pytestmark = pytest.mark.skipif(
+    sys.platform != "darwin",
+    reason="requires Darwin immutable file flags",
+)
 
 
 def _thaw_tree(root: Path) -> None:

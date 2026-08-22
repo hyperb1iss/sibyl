@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import signal
 import stat
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from pathlib import Path
@@ -22,6 +23,11 @@ OUTPUT_FSTAT_INTERRUPT_CALL = 2
 POST_WRITE_VALIDATION_CALL = 2
 FINAL_PATH_VALIDATION_CALL = 3
 PLAN_WRITER_COUNT = 8
+
+pytestmark = pytest.mark.skipif(
+    sys.platform != "darwin",
+    reason="requires Darwin immutable file flags",
+)
 
 
 @pytest.fixture(autouse=True)

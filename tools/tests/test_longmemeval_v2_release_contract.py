@@ -445,9 +445,9 @@ def test_stage_plan_write_is_atomic_and_one_shot_under_concurrency(
     original_link = release_io.os.link
     monkeypatch.setattr(release_plan, "require_stage_plan", lambda _raw: [])
 
-    def synchronized_link(source: Path, destination: Path) -> None:
+    def synchronized_link(source: Path, destination: Path, **kwargs: Any) -> None:
         barrier.wait()
-        original_link(source, destination)
+        original_link(source, destination, **kwargs)
 
     monkeypatch.setattr(release_io.os, "link", synchronized_link)
 
