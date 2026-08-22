@@ -54,7 +54,7 @@ def require_release_host_binding(raw: object) -> dict[str, Any]:
 
 
 def _existing_directory(path: Path) -> Path:
-    ancestor = path.parent
+    ancestor = path
     while not ancestor.exists():
         if ancestor.parent == ancestor:
             raise StagePlanError("release output has no existing filesystem ancestor")
@@ -128,9 +128,12 @@ def probe_release_host(path: Path) -> dict[str, Any]:
         raise StagePlanError(f"release publication requires macOS {MINIMUM_MACOS_MAJOR} or newer")
 
     destination = canonical_path(path, name="release output root")
-    ancestor = _existing_directory(destination)
+    destination_ancestor = _existing_directory(destination)
+    probe_ancestor = _existing_directory(destination.parent)
+    if destination_ancestor.stat().st_dev != probe_ancestor.stat().st_dev:
+        raise StagePlanError("release destination filesystem differs from its writable parent")
     try:
-        probe_root = Path(tempfile.mkdtemp(prefix=".sibyl-release-host-", dir=ancestor))
+        probe_root = Path(tempfile.mkdtemp(prefix=".sibyl-release-host-", dir=probe_ancestor))
     except OSError as exc:
         raise StagePlanError("release host capability probe could not be created") from exc
     probe_device = _probe_immutable_descendant_rename(probe_root)

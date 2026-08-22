@@ -31,7 +31,7 @@ def _release_cli_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setattr(
         cli.release_plan,
         "require_current_release_host",
-        lambda _plan: dict(SUPPORTED_RELEASE_HOST),
+        lambda _plan, **_kwargs: dict(SUPPORTED_RELEASE_HOST),
     )
     yield
     for current, _directories, files in os.walk(tmp_path, topdown=False):
@@ -278,7 +278,7 @@ def test_release_run_rejects_an_unsupported_host_before_provider_work(
     monkeypatch.setattr(
         cli.release_plan,
         "require_current_release_host",
-        lambda _plan: (_ for _ in ()).throw(StagePlanError("unsupported release host")),
+        lambda _plan, **_kwargs: (_ for _ in ()).throw(StagePlanError("unsupported release host")),
     )
     monkeypatch.setattr(
         cli.release_runner,
@@ -287,6 +287,41 @@ def test_release_run_rejects_an_unsupported_host_before_provider_work(
     )
 
     with pytest.raises(StagePlanError, match="unsupported release host"):
+        cli.run_release_cli_command(args)
+
+
+@pytest.mark.parametrize("command", ["release-arm-package", "release-package"])
+def test_release_packaging_rejects_an_unbound_packages_filesystem(
+    command: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    values: dict[str, Any] = {
+        "packages_root": str(tmp_path / "packages"),
+        "preregistration_template": None,
+    }
+    if command == "release-arm-package":
+        values["arm_id"] = "aa-1-left"
+    args = _command_args(tmp_path, command, **values)
+
+    def require_host(_plan: object, **kwargs: Any) -> dict[str, Any]:
+        if kwargs.get("publication_root") is not None:
+            raise StagePlanError("packages filesystem differs from sealed host")
+        return dict(SUPPORTED_RELEASE_HOST)
+
+    monkeypatch.setattr(cli.release_plan, "require_current_release_host", require_host)
+    monkeypatch.setattr(
+        cli,
+        "require_executed_stage",
+        lambda *_args, **_kwargs: pytest.fail("unbound packages root reached packaging"),
+    )
+    monkeypatch.setattr(
+        cli.release_package,
+        "package_stage",
+        lambda *_args, **_kwargs: pytest.fail("unbound packages root reached packaging"),
+    )
+
+    with pytest.raises(StagePlanError, match="packages filesystem differs"):
         cli.run_release_cli_command(args)
 
 

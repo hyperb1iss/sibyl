@@ -673,7 +673,11 @@ def require_stage_plan(raw: object, *, check_checkout: bool = True) -> list[dict
     return _require_stage_plan(raw, check_checkout=check_checkout, claimed_root=False)
 
 
-def require_current_release_host(raw: object) -> dict[str, Any]:
+def require_current_release_host(
+    raw: object,
+    *,
+    publication_root: Path | None = None,
+) -> dict[str, Any]:
     """Re-probe the plan's sealed output filesystem before provider work."""
 
     if not isinstance(raw, dict):
@@ -682,7 +686,10 @@ def require_current_release_host(raw: object) -> dict[str, Any]:
     output_root = Path(output_value).resolve()
     if output_value != str(output_root):
         raise StagePlanError("stage output root is not canonical")
-    return package_policy.require_current_release_host(output_root, raw.get("release_host"))
+    binding = package_policy.require_current_release_host(output_root, raw.get("release_host"))
+    if publication_root is not None:
+        package_policy.require_current_release_host(publication_root, binding)
+    return binding
 
 
 def write_stage_plan(path: Path, payload: dict[str, Any]) -> None:

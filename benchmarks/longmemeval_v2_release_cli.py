@@ -64,9 +64,13 @@ def _object(path: Path, *, name: str) -> dict[str, Any]:
     return raw
 
 
-def _supported_plan(path: Path) -> dict[str, Any]:
+def _supported_plan(
+    path: Path,
+    *,
+    publication_root: Path | None = None,
+) -> dict[str, Any]:
     plan = _object(path, name="release stage plan")
-    release_plan.require_current_release_host(plan)
+    release_plan.require_current_release_host(plan, publication_root=publication_root)
     return plan
 
 
@@ -154,10 +158,12 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _package_arm(args: argparse.Namespace) -> dict[str, Any]:
-    executed = require_executed_stage(_supported_plan(_path(args.plan)))
+    packages_root = _canonical_destination(args.packages_root, name="official packages root")
+    executed = require_executed_stage(
+        _supported_plan(_path(args.plan), publication_root=packages_root)
+    )
     if args.arm_id not in {run["arm_id"] for run in executed.runs}:
         raise StagePlanError("official arm ID is not present in the sealed stage")
-    packages_root = _path(args.packages_root)
     authority_path = package_object.publication_path(packages_root, args.arm_id)
     package_arm = (
         official_publication.require_official_arm_package
@@ -171,12 +177,13 @@ def _package_arm(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _package(args: argparse.Namespace) -> dict[str, Any]:
+    packages_root = _canonical_destination(args.packages_root, name="official packages root")
     template = (
         _path(args.preregistration_template) if args.preregistration_template is not None else None
     )
     return release_package.package_stage(
-        _supported_plan(_path(args.plan)),
-        official_packages_root=_path(args.packages_root),
+        _supported_plan(_path(args.plan), publication_root=packages_root),
+        official_packages_root=packages_root,
         preregistration_template=template,
     )
 

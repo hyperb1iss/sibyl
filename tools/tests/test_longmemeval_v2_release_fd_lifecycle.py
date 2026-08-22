@@ -42,6 +42,20 @@ def _clear_immutable_plan_files(tmp_path: Path) -> Any:
             os.chmod(current, 0o700)
 
 
+def test_owned_plan_publication_rejects_non_darwin_before_writing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(plan_publication.sys, "platform", "linux")
+
+    with pytest.raises(OSError, match="requires macOS"):
+        plan_publication._write_json_once_rename_atomic_at(
+            -1,
+            "plan.json",
+            {},
+            authority_holder=plan_safety.OwnedPlanFileHolder(),
+        )
+
+
 def _assert_closed(descriptor: int) -> None:
     with pytest.raises(OSError, match="Bad file descriptor"):
         os.fstat(descriptor)

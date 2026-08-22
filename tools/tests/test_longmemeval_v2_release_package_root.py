@@ -4,6 +4,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -94,6 +95,25 @@ def test_release_host_probe_binds_the_exact_destination_filesystem(tmp_path: Pat
     }
     assert package_policy.require_current_release_host(output_root, binding) == binding
     assert list(tmp_path.iterdir()) == []
+
+
+@requires_darwin_file_flags
+def test_release_host_probe_rejects_a_mounted_destination_device(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_root = tmp_path / "mounted-release"
+    output_root.mkdir()
+    directories = iter(
+        (
+            SimpleNamespace(stat=lambda: SimpleNamespace(st_dev=2)),
+            SimpleNamespace(stat=lambda: SimpleNamespace(st_dev=1)),
+        )
+    )
+    monkeypatch.setattr(package_policy, "_existing_directory", lambda _path: next(directories))
+
+    with pytest.raises(StagePlanError, match="differs from its writable parent"):
+        package_policy.probe_release_host(output_root)
 
 
 @pytest.mark.parametrize(

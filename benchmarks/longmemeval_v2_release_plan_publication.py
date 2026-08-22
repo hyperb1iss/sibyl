@@ -248,6 +248,8 @@ def _write_json_once_rename_atomic_at(
 ) -> bytes:
     if Path(name).name != name:
         raise ValueError("fd-owned JSON publication requires one safe relative name")
+    if sys.platform != "darwin":
+        raise OSError("owned release plan publication requires macOS")
     temporary = f".{name}.{uuid4().hex}.tmp"
     writer = plan_safety.OwnedPlanFileHolder()
     content = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode()
@@ -264,17 +266,7 @@ def _write_json_once_rename_atomic_at(
             message="plan temporary acquisition lost its descriptor",
         )
         _write_descriptor(writer_descriptor, content)
-        if sys.platform == "darwin":
-            release_io.rename_once_atomic_at(directory_fd, temporary, directory_fd, name)
-        else:
-            os.link(
-                temporary,
-                name,
-                src_dir_fd=directory_fd,
-                dst_dir_fd=directory_fd,
-                follow_symlinks=False,
-            )
-            os.unlink(temporary, dir_fd=directory_fd)
+        release_io.rename_once_atomic_at(directory_fd, temporary, directory_fd, name)
         os.fsync(directory_fd)
         _open_owned_plan_file(
             directory_fd,
