@@ -122,6 +122,21 @@ def test_ci_runs_release_and_helm_contract_jobs() -> None:
     assert "profile: production-redis" in workflow
 
 
+def test_ci_runs_darwin_authority_on_the_supported_host() -> None:
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    job = workflow["jobs"]["darwin-eval-authority"]
+
+    assert job["runs-on"] == "macos-26"
+    assert any(step.get("run") == "moon run bench-gate-test --force" for step in job["steps"])
+    cache_inputs = [
+        step.get("with", {}) for step in job["steps"] if "actions/cache@" in step.get("uses", "")
+    ]
+    assert cache_inputs
+    for inputs in cache_inputs:
+        assert "macos-26-${{ runner.arch }}" in inputs["key"]
+        assert "macos-26-${{ runner.arch }}" in inputs["restore-keys"]
+
+
 @pytest.mark.parametrize("project_file", PYTHON_MOON_PROJECTS)
 def test_parallel_pytest_tasks_load_temp_root_isolation(project_file: str) -> None:
     project = yaml.safe_load((REPO_ROOT / project_file).read_text(encoding="utf-8"))

@@ -131,6 +131,10 @@ def _seed_for(pass_id: str) -> int:
     return int(rig.canonical_sha256(pass_id)[7:15], 16)
 
 
+def _github_run_id(pass_id: str, arm_name: str) -> str:
+    return str(int(rig.canonical_sha256([pass_id, arm_name])[7:23], 16) + 1)
+
+
 def _seal_arm(
     arm: dict[str, Any],
     *,
@@ -148,11 +152,14 @@ def _seal_arm(
         "name": arm["name"],
         "substrate": arm["substrate"],
         "preregistration_sha256": preregistration_sha256,
-        "workflow": {
+        "execution": {
+            "schema_version": rig.EXECUTION_IDENTITY_SCHEMA_VERSION,
+            "kind": "github",
             "repository": "hyperb1iss/sibyl",
+            "ref": "refs/heads/main",
             "workflow_ref": "hyperb1iss/sibyl/.github/workflows/longmemeval-v2.yml@refs/heads/main",
-            "workflow_sha": "a" * 40,
-            "run_id": f"run-{pass_id}-{arm['name']}",
+            "sha": "a" * 40,
+            "run_id": _github_run_id(pass_id, arm["name"]),
             "run_attempt": 1,
         },
         "stack": _stack(),
@@ -216,8 +223,8 @@ def _paired_pass(
         preregistration_sha256=resolved_preregistration,
         experiment_phase=experiment_phase,
     )
-    sealed_left["workflow"]["run_id"] = f"run-{pass_id}-left"
-    sealed_right["workflow"]["run_id"] = f"run-{pass_id}-right"
+    sealed_left["execution"]["run_id"] = _github_run_id(pass_id, "left")
+    sealed_right["execution"]["run_id"] = _github_run_id(pass_id, "right")
     _reseal_arm(sealed_left)
     _reseal_arm(sealed_right)
     payload = {
@@ -481,7 +488,7 @@ def test_arm_requires_exposure_eligible_rows_in_each_domain() -> None:
         )
 
 
-def test_paired_pass_rejects_question_order_and_workflow_drift() -> None:
+def test_paired_pass_rejects_question_order_and_execution_drift() -> None:
     paired = _paired_pass(
         "order",
         left=_arm("left", mode="fast", accuracy=0.5),
@@ -498,16 +505,139 @@ def test_paired_pass_rejects_question_order_and_workflow_drift() -> None:
     with pytest.raises(rig.RigInputError, match="same question order"):
         rig.validate_pass(paired)
 
-    workflow_drift = _paired_pass(
-        "workflow",
+    execution_drift = _paired_pass(
+        "execution",
         left=_arm("left", mode="fast", accuracy=0.5),
         right=_arm("right", mode="fast", accuracy=0.5),
     )
-    workflow_drift["arms"]["right"]["workflow"]["workflow_ref"] = "other-workflow"
-    _reseal_arm(workflow_drift["arms"]["right"])
-    _reseal_pass(workflow_drift)
-    with pytest.raises(rig.RigInputError, match="workflows differ for workflow_ref"):
-        rig.validate_pass(workflow_drift)
+    execution_drift["arms"]["right"]["execution"]["workflow_ref"] = (
+        "hyperb1iss/sibyl/.github/workflows/other.yml@refs/heads/main"
+    )
+    _reseal_arm(execution_drift["arms"]["right"])
+    _reseal_pass(execution_drift)
+    with pytest.raises(rig.RigInputError, match="executions differ for workflow_ref"):
+        rig.validate_pass(execution_drift)
+
+
+def test_execution_identity_rejects_fake_local_and_unknown_fields() -> None:
+    execution = {
+        "schema_version": rig.EXECUTION_IDENTITY_SCHEMA_VERSION,
+        "kind": "local",
+        "repository": "hyperb1iss/sibyl",
+        "ref": "refs/heads/main",
+        "sha": "a" * 40,
+        "run_id": "d6cf4d36-606f-44d6-b386-c723e6b756e8",
+        "run_attempt": 1,
+    }
+    assert rig.validate_execution_identity(execution, name="local") == execution
+
+    unknown = {**execution, "hostname": "private.example.test"}
+    with pytest.raises(rig.RigInputError, match=r"unknown=\['hostname'\]"):
+        rig.validate_execution_identity(unknown, name="local")
+
+    fake = {**execution, "run_id": "reused-local-name"}
+    with pytest.raises(rig.RigInputError, match="canonical UUID"):
+        rig.validate_execution_identity(fake, name="local")
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        (
+            "repository",
+            "git@github.com:hyperb1iss/sibyl",
+            "canonical owner/repository slug",
+        ),
+        ("ref", "refs/heads/", "valid full refs/heads"),
+        ("ref", "refs/heads/bad..branch", "valid full refs/heads"),
+        ("run_id", "run-1234", "canonical positive decimal"),
+        ("run_id", "01234", "canonical positive decimal"),
+        (
+            "workflow_ref",
+            "hyperb1iss/sibyl/.github/workflows/@refs/heads/main",
+            "canonical YAML",
+        ),
+        (
+            "workflow_ref",
+            "hyperb1iss/sibyl/.github/workflows/eval.json@refs/heads/main",
+            "canonical YAML",
+        ),
+        (
+            "workflow_ref",
+            "hyperb1iss/sibyl/.github/workflows/nested/eval.yml@refs/heads/main",
+            "canonical YAML",
+        ),
+    ],
+)
+def test_fully_resealed_pass_rejects_noncanonical_github_execution(
+    field: str,
+    value: str,
+    message: str,
+) -> None:
+    paired = _paired_pass(
+        "hostile-execution",
+        left=_arm("left", mode="fast", accuracy=0.5),
+        right=_arm("right", mode="fast", accuracy=0.5),
+    )
+    paired["arms"]["left"]["execution"][field] = value
+    _reseal_arm(paired["arms"]["left"])
+    _reseal_pass(paired)
+
+    with pytest.raises(rig.RigInputError, match=message):
+        rig.validate_pass(paired)
+
+
+def test_paired_pass_rejects_reused_run_id_and_cross_kind_drift() -> None:
+    reused = _paired_pass(
+        "reused-run",
+        left=_arm("left", mode="fast", accuracy=0.5),
+        right=_arm("right", mode="fast", accuracy=0.5),
+    )
+    reused["arms"]["right"]["execution"]["run_id"] = reused["arms"]["left"]["execution"]["run_id"]
+    _reseal_arm(reused["arms"]["right"])
+    _reseal_pass(reused)
+    with pytest.raises(rig.RigInputError, match="reused one execution run ID"):
+        rig.validate_pass(reused)
+
+    cross_kind = _paired_pass(
+        "cross-kind",
+        left=_arm("left", mode="fast", accuracy=0.5),
+        right=_arm("right", mode="fast", accuracy=0.5),
+    )
+    right_execution = cross_kind["arms"]["right"]["execution"]
+    right_execution.pop("workflow_ref")
+    right_execution["kind"] = "local"
+    right_execution["run_id"] = "d6cf4d36-606f-44d6-b386-c723e6b756e8"
+    _reseal_arm(cross_kind["arms"]["right"])
+    _reseal_pass(cross_kind)
+    with pytest.raises(rig.RigInputError, match="executions differ for kind"):
+        rig.validate_pass(cross_kind)
+
+
+def test_local_arm_rejects_execution_sha_mismatch() -> None:
+    arm = _seal_arm(
+        _arm("machine", mode="fast", accuracy=0.5),
+        pass_id="local-sha",  # noqa: S106
+        seed=93,
+        preregistration_sha256="",
+    )
+    execution = arm["execution"]
+    execution.pop("workflow_ref")
+    execution.update(
+        {
+            "kind": "local",
+            "sha": "b" * 40,
+            "run_id": "d6cf4d36-606f-44d6-b386-c723e6b756e8",
+        }
+    )
+    _reseal_arm(arm)
+
+    with pytest.raises(rig.RigInputError, match="execution SHA does not match"):
+        rig.validate_arm(
+            arm,
+            stack_digest=rig.stack_fingerprint(_stack()),
+            side="local-sha",
+        )
 
 
 def test_arm_rejects_resealed_official_corpus_truncation() -> None:

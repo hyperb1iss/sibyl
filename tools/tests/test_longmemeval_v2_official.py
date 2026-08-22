@@ -14,6 +14,7 @@ from typing import Any, Protocol, TypedDict, cast
 
 import httpx
 import pytest
+from benchmarks import local_execution_identity as local_identity
 from tools.bench import eval_gate
 
 EXPECTED_REQUIRED_TRAJECTORIES = 2
@@ -119,6 +120,96 @@ def _load_runner_module() -> ModuleType:
         Path(__file__).parents[2] / "benchmarks" / "longmemeval_v2_official.py",
         "longmemeval_v2_official",
     )
+
+
+def _set_github_execution_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    values = {
+        "GITHUB_ACTIONS": "true",
+        "GITHUB_REPOSITORY": "hyperb1iss/sibyl",
+        "GITHUB_REF": "refs/heads/main",
+        "GITHUB_SHA": "a" * 40,
+        "GITHUB_RUN_ID": "1234",
+        "GITHUB_RUN_ATTEMPT": "2",
+        "GITHUB_WORKFLOW_REF": (
+            "hyperb1iss/sibyl/.github/workflows/longmemeval-v2.yml@refs/heads/main"
+        ),
+    }
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
+
+
+def _local_git_checkout(tmp_path: Path) -> tuple[Path, str, str]:
+    checkout = tmp_path / "sibyl"
+    checkout.mkdir()
+    git = shutil.which("git")
+    assert git is not None
+    commands = [
+        [git, "init", "-b", "main"],
+        [git, "config", "user.email", "eval@example.test"],
+        [git, "config", "user.name", "Eval Test"],
+        [git, "remote", "add", "origin", "git@github.com:hyperb1iss/sibyl.git"],
+    ]
+    for command in commands:
+        subprocess.run(  # noqa: S603 - resolved git with test-owned arguments.
+            command,
+            cwd=checkout,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    marker = checkout / "README.md"
+    marker.write_text("sealed\n", encoding="utf-8")
+    subprocess.run(  # noqa: S603 - resolved git with test-owned arguments.
+        [git, "add", "README.md"],
+        cwd=checkout,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(  # noqa: S603 - resolved git with test-owned arguments.
+        [git, "commit", "-m", "test: seal checkout"],
+        cwd=checkout,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    sha = subprocess.run(  # noqa: S603 - resolved git with test-owned arguments.
+        [git, "rev-parse", "HEAD"],
+        cwd=checkout,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(  # noqa: S603 - resolved git with test-owned arguments.
+        [git, "update-ref", "refs/remotes/origin/main", sha],
+        cwd=checkout,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return checkout, "refs/heads/main", sha
+
+
+def _stub_published_origin_ref(
+    module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    ref: str,
+    result: str | ValueError,
+) -> list[tuple[str, ...]]:
+    original = local_identity._required_git_output
+    calls: list[tuple[str, ...]] = []
+
+    def required_git_output(root: Path, *args: str) -> str:
+        calls.append(args)
+        if args == ("ls-remote", "--exit-code", "--refs", "origin", ref):
+            if isinstance(result, ValueError):
+                raise result
+            return result
+        return original(root, *args)
+
+    monkeypatch.setattr(local_identity, "_required_git_output", required_git_output)
+    return calls
 
 
 def _finalize_request_handler(
@@ -836,8 +927,12 @@ def test_provider_usage_run_id_is_unique_per_invocation(tmp_path: Path) -> None:
     assert first.provider_usage_run_id != second.provider_usage_run_id
 
 
-def test_official_runner_binds_complete_experiment_identity(tmp_path: Path) -> None:
+def test_official_runner_binds_complete_experiment_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module = _load_runner_module()
+    _set_github_execution_environment(monkeypatch)
     args = module.parse_args(
         [
             "--data-root",
@@ -859,21 +954,11 @@ def test_official_runner_binds_complete_experiment_identity(tmp_path: Path) -> N
             "machine",
             "--substrate",
             "machine",
-            "--github-repository",
-            "hyperb1iss/sibyl",
-            "--github-workflow-ref",
-            "hyperb1iss/sibyl/.github/workflows/longmemeval-v2.yml@refs/heads/main",
-            "--github-workflow-sha",
-            "a" * 40,
-            "--github-run-id",
-            "1234",
-            "--github-run-attempt",
-            "2",
         ]
     )
 
     assert module.experiment_identity(args) == {
-        "experiment_identity_schema_version": "sibyl-longmemeval-v2-experiment-identity-v1",
+        "experiment_identity_schema_version": "sibyl-longmemeval-v2-experiment-identity-v2",
         "experiment_id": "eval-1.3",
         "experiment_phase": "aa",
         "pass_id": "aa-01",
@@ -882,16 +967,387 @@ def test_official_runner_binds_complete_experiment_identity(tmp_path: Path) -> N
         "substrate": "machine",
         "preregistration_sha256": None,
         "max_spend_usd": None,
-        "github_workflow": {
+        "execution": {
+            "schema_version": "sibyl-longmemeval-v2-execution-identity-v1",
+            "kind": "github",
             "repository": "hyperb1iss/sibyl",
+            "ref": "refs/heads/main",
+            "sha": "a" * 40,
+            "run_id": "1234",
             "workflow_ref": (
                 "hyperb1iss/sibyl/.github/workflows/longmemeval-v2.yml@refs/heads/main"
             ),
-            "workflow_sha": "a" * 40,
-            "run_id": "1234",
             "run_attempt": 2,
         },
     }
+
+
+def test_official_runner_rejects_spoofed_github_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_runner_module()
+    _set_github_execution_environment(monkeypatch)
+    args = SimpleNamespace(
+        execution_kind="github",
+        local_repository="",
+        local_ref="",
+        local_sha="",
+        local_run_id="",
+        local_run_attempt=0,
+        github_repository="attacker/fork",
+        github_ref="refs/heads/main",
+        github_workflow_ref=os.environ["GITHUB_WORKFLOW_REF"],
+        github_workflow_sha=os.environ["GITHUB_SHA"],
+        github_run_id=os.environ["GITHUB_RUN_ID"],
+        github_run_attempt=2,
+    )
+
+    with pytest.raises(ValueError, match="differ from the Actions environment"):
+        module.resolve_execution_identity(args, root=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("repository", "ref", "run_id", "workflow_filename", "message"),
+    [
+        (
+            "git@github.com:hyperb1iss/sibyl",
+            "refs/heads/main",
+            "1234",
+            "longmemeval-v2.yml",
+            "canonical owner/repository slug",
+        ),
+        ("hyperb1iss/sibyl", "refs/heads/", "1234", "eval.yml", "valid full refs/heads"),
+        (
+            "hyperb1iss/sibyl",
+            "refs/heads/bad..branch",
+            "1234",
+            "eval.yml",
+            "valid full refs/heads",
+        ),
+        (
+            "hyperb1iss/sibyl",
+            "refs/heads/main",
+            "run-1234",
+            "eval.yml",
+            "canonical positive decimal",
+        ),
+        (
+            "hyperb1iss/sibyl",
+            "refs/heads/main",
+            "01234",
+            "eval.yml",
+            "canonical positive decimal",
+        ),
+        ("hyperb1iss/sibyl", "refs/heads/main", "1234", "", "canonical YAML"),
+        ("hyperb1iss/sibyl", "refs/heads/main", "1234", "eval.json", "canonical YAML"),
+        (
+            "hyperb1iss/sibyl",
+            "refs/heads/main",
+            "1234",
+            "nested/eval.yml",
+            "canonical YAML",
+        ),
+    ],
+)
+def test_official_runner_rejects_noncanonical_github_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    repository: str,
+    ref: str,
+    run_id: str,
+    workflow_filename: str,
+    message: str,
+) -> None:
+    module = _load_runner_module()
+    workflow_ref = f"{repository}/.github/workflows/{workflow_filename}@{ref}"
+    environment = {
+        "GITHUB_ACTIONS": "true",
+        "GITHUB_REPOSITORY": repository,
+        "GITHUB_REF": ref,
+        "GITHUB_SHA": "a" * 40,
+        "GITHUB_RUN_ID": run_id,
+        "GITHUB_RUN_ATTEMPT": "1",
+        "GITHUB_WORKFLOW_REF": workflow_ref,
+    }
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
+    args = SimpleNamespace(
+        execution_kind="github",
+        local_repository="",
+        local_ref="",
+        local_sha="",
+        local_run_id="",
+        local_run_attempt=0,
+        github_repository=repository,
+        github_ref=ref,
+        github_workflow_ref=workflow_ref,
+        github_workflow_sha="a" * 40,
+        github_run_id=run_id,
+        github_run_attempt=1,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        module.resolve_execution_identity(args, root=tmp_path)
+
+
+def _local_execution_args(*, ref: str, sha: str, run_id: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        execution_kind="local",
+        local_repository="hyperb1iss/sibyl",
+        local_ref=ref,
+        local_sha=sha,
+        local_run_id=run_id,
+        local_run_attempt=1,
+        github_repository="",
+        github_ref="",
+        github_workflow_ref="",
+        github_workflow_sha="",
+        github_run_id="",
+        github_run_attempt=0,
+    )
+
+
+def test_official_runner_seals_exact_clean_local_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_runner_module()
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    checkout, ref, sha = _local_git_checkout(tmp_path)
+    run_id = "d6cf4d36-606f-44d6-b386-c723e6b756e8"
+    git_calls = _stub_published_origin_ref(
+        module,
+        monkeypatch,
+        ref=ref,
+        result=f"{sha}\t{ref}",
+    )
+
+    execution = module.resolve_execution_identity(
+        _local_execution_args(ref=ref, sha=sha, run_id=run_id),
+        root=checkout,
+    )
+
+    assert execution == {
+        "schema_version": "sibyl-longmemeval-v2-execution-identity-v1",
+        "kind": "local",
+        "repository": "hyperb1iss/sibyl",
+        "ref": "refs/heads/main",
+        "sha": sha,
+        "run_id": run_id,
+        "run_attempt": 1,
+    }
+    assert not ({"hostname", "path", "workflow_ref"} & execution.keys())
+    assert ("status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none") in (
+        git_calls
+    )
+    assert ("ls-remote", "--exit-code", "--refs", "origin", ref) in git_calls
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("local_sha", "b" * 40, "differs from the checkout"),
+        ("local_ref", "main", "full refs/heads"),
+        ("local_run_id", "not-unique", "canonical UUID"),
+    ],
+)
+def test_official_runner_rejects_fake_local_execution_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: str,
+    message: str,
+) -> None:
+    module = _load_runner_module()
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    checkout, ref, sha = _local_git_checkout(tmp_path)
+    args = _local_execution_args(
+        ref=ref,
+        sha=sha,
+        run_id="d6cf4d36-606f-44d6-b386-c723e6b756e8",
+    )
+    setattr(args, field, value)
+    _stub_published_origin_ref(
+        module,
+        monkeypatch,
+        ref=ref,
+        result=f"{sha}\t{ref}",
+    )
+
+    with pytest.raises(ValueError, match=message):
+        module.resolve_execution_identity(args, root=checkout)
+
+
+def test_official_runner_rejects_dirty_local_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_runner_module()
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    checkout, ref, sha = _local_git_checkout(tmp_path)
+    (checkout / "README.md").write_text("dirty\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="clean Sibyl checkout"):
+        module.resolve_execution_identity(
+            _local_execution_args(
+                ref=ref,
+                sha=sha,
+                run_id="d6cf4d36-606f-44d6-b386-c723e6b756e8",
+            ),
+            root=checkout,
+        )
+
+
+def test_official_runner_rejects_unpushed_local_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_runner_module()
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    checkout, ref, _sha = _local_git_checkout(tmp_path)
+    git = shutil.which("git")
+    assert git is not None
+    marker = checkout / "README.md"
+    marker.write_text("new commit\n", encoding="utf-8")
+    subprocess.run(  # noqa: S603 - resolved git with test-owned arguments.
+        [git, "commit", "-am", "test: unpushed commit"],
+        cwd=checkout,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    head = subprocess.run(  # noqa: S603 - resolved git with test-owned arguments.
+        [git, "rev-parse", "HEAD"],
+        cwd=checkout,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    with pytest.raises(ValueError, match="differs from its origin tracking ref"):
+        module.resolve_execution_identity(
+            _local_execution_args(
+                ref=ref,
+                sha=head,
+                run_id="d6cf4d36-606f-44d6-b386-c723e6b756e8",
+            ),
+            root=checkout,
+        )
+
+
+def test_official_runner_rejects_hidden_untracked_local_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_runner_module()
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    checkout, ref, sha = _local_git_checkout(tmp_path)
+    git = shutil.which("git")
+    assert git is not None
+    subprocess.run(  # noqa: S603 - resolved git with test-owned arguments.
+        [git, "config", "status.showUntrackedFiles", "no"],
+        cwd=checkout,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    (checkout / "hidden-by-config.txt").write_text("untracked\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="clean Sibyl checkout"):
+        module.resolve_execution_identity(
+            _local_execution_args(
+                ref=ref,
+                sha=sha,
+                run_id="d6cf4d36-606f-44d6-b386-c723e6b756e8",
+            ),
+            root=checkout,
+        )
+
+
+def test_official_runner_rejects_deleted_origin_ref(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_runner_module()
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    checkout, ref, sha = _local_git_checkout(tmp_path)
+    _stub_published_origin_ref(
+        module,
+        monkeypatch,
+        ref=ref,
+        result=ValueError("ls-remote found no exact ref"),
+    )
+
+    with pytest.raises(ValueError, match="could not verify its exact ref on origin"):
+        module.resolve_execution_identity(
+            _local_execution_args(
+                ref=ref,
+                sha=sha,
+                run_id="d6cf4d36-606f-44d6-b386-c723e6b756e8",
+            ),
+            root=checkout,
+        )
+
+
+def test_official_runner_rejects_force_moved_origin_ref(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_runner_module()
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    checkout, ref, sha = _local_git_checkout(tmp_path)
+    _stub_published_origin_ref(
+        module,
+        monkeypatch,
+        ref=ref,
+        result=f"{'b' * 40}\t{ref}",
+    )
+
+    with pytest.raises(ValueError, match="differs from the exact ref on origin"):
+        module.resolve_execution_identity(
+            _local_execution_args(
+                ref=ref,
+                sha=sha,
+                run_id="d6cf4d36-606f-44d6-b386-c723e6b756e8",
+            ),
+            root=checkout,
+        )
+
+
+@pytest.mark.parametrize(
+    "published_ref",
+    [
+        "",
+        f"{'a' * 40}\trefs/heads/main\n{'a' * 40}\trefs/heads/main",
+        f"{'a' * 40} refs/heads/main",
+        f"{'a' * 40}\trefs/heads/other",
+    ],
+)
+def test_official_runner_rejects_nonunique_or_malformed_origin_ref(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    published_ref: str,
+) -> None:
+    module = _load_runner_module()
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    checkout, ref, sha = _local_git_checkout(tmp_path)
+    _stub_published_origin_ref(
+        module,
+        monkeypatch,
+        ref=ref,
+        result=published_ref,
+    )
+
+    with pytest.raises(ValueError, match="origin returned"):
+        module.resolve_execution_identity(
+            _local_execution_args(
+                ref=ref,
+                sha=sha,
+                run_id="d6cf4d36-606f-44d6-b386-c723e6b756e8",
+            ),
+            root=checkout,
+        )
 
 
 def test_official_runner_rejects_partial_experiment_identity(tmp_path: Path) -> None:
@@ -1274,6 +1730,7 @@ def test_official_runner_omits_baseline_render_profile_from_memory(tmp_path: Pat
 
     params = module.build_memory_config(args)["memory_params"]
 
+    assert params["longmemeval_v2_domain"] == "web"
     assert (
         not {
             "operational_note_dedupe_mode",
@@ -3570,6 +4027,7 @@ def test_sibyl_memory_chunk_catalog_round_trips(tmp_path: Path) -> None:
     memory._finalize_lock = threading.Lock()
     memory._ingest_finalized = True
     memory.api_url = "http://127.0.0.1:3434/api"
+    memory.longmemeval_v2_domain = "web"
     memory.project_id = "project_saved"
     memory.run_id = "run-saved"
     memory.chunking_mode = "state"
@@ -3588,6 +4046,7 @@ def test_sibyl_memory_chunk_catalog_round_trips(tmp_path: Path) -> None:
 
     restored = module.SibylLiveApiMemory.__new__(module.SibylLiveApiMemory)
     module.Memory.__init__(restored, {})
+    restored.longmemeval_v2_domain = "web"
     restored._pending_embedding_job_ids = set()
     restored._pending_projection_job_ids = set()
     restored._ingest_finalized = False
@@ -3595,6 +4054,8 @@ def test_sibyl_memory_chunk_catalog_round_trips(tmp_path: Path) -> None:
 
     assert (tmp_path / module.CHUNK_CATALOG_FILENAME).is_file()
     assert (tmp_path / module.MEMORY_MANIFEST_FILENAME).is_file()
+    manifest = json.loads((tmp_path / module.MEMORY_MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert manifest["longmemeval_v2_domain"] == "web"
     assert restored._chunk_catalog == catalog
     assert restored.created_entities == len(catalog["t1"])
     assert restored.inserted_trajectories == len(catalog)
@@ -4509,6 +4970,84 @@ def test_sibyl_memory_attach_existing_requires_project_id() -> None:
             expected_trajectory_ids={"trajectory_test"},
             trajectories=[],
         )
+
+
+def test_sibyl_memory_constructor_closes_client_when_authentication_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_memory_module()
+
+    class Client:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    client = Client()
+    monkeypatch.setattr(module, "_new_http_client", lambda *_args, **_kwargs: client)
+    monkeypatch.setattr(
+        module.SibylLiveApiMemory,
+        "_authenticate",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("auth failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="auth failed"):
+        module.SibylLiveApiMemory({"allow_localhost": True})
+    assert client.closed is True
+
+
+@pytest.mark.parametrize("failure_point", ["insert", "finalize"])
+def test_sibyl_memory_existing_attachment_closes_client_on_failure(
+    failure_point: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_memory_module()
+
+    class Client:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    client = Client()
+    monkeypatch.setattr(module, "_new_http_client", lambda *_args, **_kwargs: client)
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_authenticate", lambda *_args: None)
+
+    def request(
+        _self: object,
+        _method: str,
+        path: str,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        if path == "/health":
+            return {"status": "healthy"}
+        return {"id": "project_test", "entity_type": "project"}
+
+    monkeypatch.setattr(module.SibylLiveApiMemory, "_request_json", request)
+    if failure_point == "insert":
+        monkeypatch.setattr(
+            module.SibylLiveApiMemory,
+            "insert",
+            lambda *_args: (_ for _ in ()).throw(RuntimeError("insert failed")),
+        )
+        invoke = module.SibylLiveApiMemory.prepare_existing
+        trajectories = [{"id": "trajectory_test"}]
+    else:
+        monkeypatch.setattr(
+            module.SibylLiveApiMemory,
+            "finalize_ingest",
+            lambda *_args: (_ for _ in ()).throw(RuntimeError("finalize failed")),
+        )
+        invoke = module.SibylLiveApiMemory.attach_existing
+        trajectories = []
+
+    with pytest.raises(RuntimeError, match=f"{failure_point} failed"):
+        invoke(
+            {"allow_localhost": True, "project_id": "project_test"},
+            expected_trajectory_ids={"trajectory_test"},
+            trajectories=trajectories,
+        )
+    assert client.closed is True
 
 
 def test_official_runner_rejects_reuse_with_checkpoint_dir(tmp_path: Path) -> None:

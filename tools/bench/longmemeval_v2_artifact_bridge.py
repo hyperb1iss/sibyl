@@ -18,10 +18,10 @@ if str(ROOT) not in sys.path:
 
 from tools.bench import longmemeval_v2_rig as rig  # noqa: E402
 
-OFFICIAL_PLAN_SCHEMA_VERSION = "sibyl-longmemeval-v2-official-plan-v1"
+OFFICIAL_PLAN_SCHEMA_VERSION = "sibyl-longmemeval-v2-official-plan-v2"
 OFFICIAL_RECEIPT_SCHEMA_VERSION = "sibyl-longmemeval-v2-official-receipt-v1"
 PROVIDER_USAGE_SCHEMA_VERSION = "sibyl-provider-usage-event-v1"
-EXPERIMENT_IDENTITY_SCHEMA_VERSION = "sibyl-longmemeval-v2-experiment-identity-v1"
+EXPERIMENT_IDENTITY_SCHEMA_VERSION = "sibyl-longmemeval-v2-experiment-identity-v2"
 SPEND_RESERVATION_SCHEMA_VERSION = "sibyl-longmemeval-v2-spend-reservation-v1"
 SHA256_HEX_LENGTH = 64
 
@@ -32,7 +32,7 @@ OFFICIAL_PLAN_KEYS = frozenset(
         "provider_usage_run_id",
         "experiment_identity_schema_version",
         "runner_provenance",
-        "github_workflow",
+        "execution",
         "experiment_id",
         "experiment_phase",
         "pass_id",
@@ -309,6 +309,7 @@ REQUIRED_PASSING_CHECKS = frozenset(
 CONFIG_EXCLUDED_KEYS = frozenset(
     {
         "api_url",
+        "longmemeval_v2_domain",
         "project_id",
         "run_id",
         "runner_provenance",
@@ -605,17 +606,20 @@ def _validate_plan(  # noqa: PLR0912, PLR0915
         or any(value is not True for value in requirements.values())
     ):
         raise BridgeInputError(f"{domain} plan requirements are not all satisfied")
-    workflow = rig._validate_workflow(raw.get("github_workflow"), name=f"{domain} workflow")
+    execution = rig.validate_execution_identity(
+        raw.get("execution"),
+        name=f"{domain} execution",
+    )
     provenance = raw.get("runner_provenance")
     if not isinstance(provenance, dict):
         raise BridgeInputError(f"{domain} runner provenance is missing")
     _require_exact_keys(provenance, PROVENANCE_KEYS, name=f"{domain} runner provenance")
     if (
-        provenance.get("sibyl_commit") != workflow["workflow_sha"]
+        provenance.get("sibyl_commit") != execution["sha"]
         or provenance.get("git_dirty") is not False
         or provenance.get("git_status") != "clean"
     ):
-        raise BridgeInputError(f"{domain} runner provenance is not the clean workflow SHA")
+        raise BridgeInputError(f"{domain} runner provenance is not the clean execution SHA")
     official_source = raw.get("official_source")
     if not isinstance(official_source, dict):
         raise BridgeInputError(f"{domain} official source is missing")
@@ -626,7 +630,7 @@ def _validate_plan(  # noqa: PLR0912, PLR0915
         raise BridgeInputError(f"{domain} official source path differs from its plan")
     return {
         **raw,
-        "github_workflow": workflow,
+        "execution": execution,
         "preregistration_sha256": normalized_preregistration,
     }
 
@@ -634,7 +638,7 @@ def _validate_plan(  # noqa: PLR0912, PLR0915
 def _validate_runtime(
     raw: object,
     *,
-    workflow_sha: str,
+    execution_sha: str,
     name: str,
 ) -> None:
     if not isinstance(raw, dict) or set(raw) != {"status", "version", "runtime"}:
@@ -644,11 +648,11 @@ def _validate_runtime(
         raise BridgeInputError(f"{name} API runtime identity is missing")
     if (
         raw.get("status") != "healthy"
-        or runtime.get("commit") != workflow_sha
+        or runtime.get("commit") != execution_sha
         or runtime.get("git_dirty") is not False
         or runtime.get("git_status") != "clean"
     ):
-        raise BridgeInputError(f"{name} API runtime does not match the clean workflow SHA")
+        raise BridgeInputError(f"{name} API runtime does not match the clean execution SHA")
 
 
 def _configuration_and_geometry(
@@ -903,7 +907,7 @@ def _validate_cross_domain_identity(domain_runs: dict[str, dict[str, Any]]) -> N
         "substrate",
         "preregistration_sha256",
         "max_spend_usd",
-        "github_workflow",
+        "execution",
         "configuration",
         "geometry",
         "reader",
@@ -1008,7 +1012,7 @@ def _domain_artifacts(  # noqa: PLR0912, PLR0915
         domain=domain,
     )
     if (
-        official_receipt.get("sibyl_commit") != plan["github_workflow"]["workflow_sha"]
+        official_receipt.get("sibyl_commit") != plan["execution"]["sha"]
         or official_receipt.get("official_repo") != plan["official_source"]
         or official_receipt.get("runner_provenance") != plan["runner_provenance"]
         or official_receipt.get("method") != plan["method"]
@@ -1021,7 +1025,7 @@ def _domain_artifacts(  # noqa: PLR0912, PLR0915
         raise BridgeInputError(f"{domain} API runtime is inconsistent")
     _validate_runtime(
         source.get("api_runtime"),
-        workflow_sha=str(plan["github_workflow"]["workflow_sha"]),
+        execution_sha=str(plan["execution"]["sha"]),
         name=domain,
     )
     configuration, geometry = _configuration_and_geometry(
@@ -1051,7 +1055,7 @@ def _domain_artifacts(  # noqa: PLR0912, PLR0915
         }
     )
     stack = {
-        "sibyl_commit": plan["github_workflow"]["workflow_sha"],
+        "sibyl_commit": plan["execution"]["sha"],
         "sibyl_git_status": "clean",
         "official_source": plan["official_source"],
         "dataset_sha256_by_domain": {domain: dataset_digest},
@@ -1144,7 +1148,7 @@ def build_arm_run(combined_receipt_path: Path) -> dict[str, Any]:
         "name": role,
         "substrate": first["substrate"],
         "preregistration_sha256": first["preregistration_sha256"],
-        "workflow": first["github_workflow"],
+        "execution": first["execution"],
         "stack": validated_stack,
         "configuration": first["configuration"],
         "geometry": first["geometry"],

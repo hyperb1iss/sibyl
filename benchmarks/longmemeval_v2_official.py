@@ -10,6 +10,7 @@ import importlib.util
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -19,11 +20,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 HTTP_STATUS_OK = 200
 HTTP_STATUS_SERVER_ERROR = 500
 MIN_COMBINED_SOURCE_METRICS = 2
+POSITIVE_DECIMAL_PATTERN = re.compile(r"[1-9][0-9]*")
+WORKFLOW_FILENAME_PATTERN = re.compile(r"[^/@\x00-\x20\x7f]+\.ya?ml")
 ROOT = Path(__file__).resolve().parents[1]
 CORE_SRC = ROOT / "packages" / "python" / "sibyl-core" / "src"
 if str(ROOT) not in sys.path:
@@ -32,9 +35,19 @@ if str(CORE_SRC) not in sys.path:
     sys.path.insert(0, str(CORE_SRC))
 
 from benchmarks.git_provenance import git_provenance  # noqa: E402
+from benchmarks.local_execution_identity import (  # noqa: E402
+    GIT_SHA_LENGTH,
+    is_canonical_repository as _is_canonical_repository,
+    is_valid_branch_ref as _is_valid_branch_ref,
+    require_local_checkout,
+)
 from benchmarks.longmemeval_v2_official_source import (  # noqa: E402
     official_source_record,
     require_pinned_source,
+)
+from benchmarks.longmemeval_v2_memory.sibyl_memory import (  # noqa: E402
+    MEMORY_MANIFEST_SCHEMA_VERSION,
+    SibylLiveApiMemory,
 )
 from benchmarks.longmemeval_v2_diagnostics import (  # noqa: E402
     DEFAULT_MAX_RANK,
@@ -55,10 +68,11 @@ from sibyl_core.evals.longmemeval_v2 import (  # noqa: E402
 )
 from sibyl_core.retrieval.refinement import MAX_REFINEMENT_QUERIES  # noqa: E402
 
-PLAN_SCHEMA_VERSION = "sibyl-longmemeval-v2-official-plan-v1"
+PLAN_SCHEMA_VERSION = "sibyl-longmemeval-v2-official-plan-v2"
 RECEIPT_SCHEMA_VERSION = "sibyl-longmemeval-v2-official-receipt-v1"
 ACCOUNTING_SCHEMA_VERSION = "sibyl-eval-accounting-v1"
-EXPERIMENT_IDENTITY_SCHEMA_VERSION = "sibyl-longmemeval-v2-experiment-identity-v1"
+EXPERIMENT_IDENTITY_SCHEMA_VERSION = "sibyl-longmemeval-v2-experiment-identity-v2"
+EXECUTION_IDENTITY_SCHEMA_VERSION = "sibyl-longmemeval-v2-execution-identity-v1"
 EXPERIMENT_ARM_ROLES = frozenset({"machine", "naive", "render_control", "render_treatment"})
 EXPERIMENT_PHASES = frozenset({"aa", "anchor", "race", "render"})
 EXPERIMENT_SUBSTRATES = frozenset({"machine", "naive"})
@@ -203,6 +217,12 @@ def main(argv: list[str] | None = None) -> int:
     write_json(output_dir / "longmemeval_v2_official_plan.json", plan)
     print(json.dumps(plan, indent=2, sort_keys=True))  # noqa: T201
     if args.plan_only:
+        attest_loaded_memory_project(
+            args=args,
+            data_root=data_root,
+            selected_haystack=selected_haystack,
+            memory_config=memory_config,
+        )
         return 0
     if args.experiment_id:
         enforce_spend_reservation(plan)
@@ -438,7 +458,165 @@ def is_malformed_evaluator_judgement(exc: ValueError) -> bool:
     )
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PLR0915
+def _validate_github_run_id(run_id: str) -> None:
+    if not POSITIVE_DECIMAL_PATTERN.fullmatch(run_id):
+        raise ValueError("GitHub execution run ID must be a canonical positive decimal string")
+
+
+def _validate_workflow_ref(*, repository: str, ref: str, workflow_ref: str) -> None:
+    prefix = f"{repository}/.github/workflows/"
+    suffix = f"@{ref}"
+    if not workflow_ref.startswith(prefix) or not workflow_ref.endswith(suffix):
+        raise ValueError("GitHub workflow ref is not canonical for its repository and ref")
+    filename = workflow_ref[len(prefix) : -len(suffix)]
+    if not WORKFLOW_FILENAME_PATTERN.fullmatch(filename):
+        raise ValueError("GitHub workflow ref must name one canonical YAML workflow file")
+    if workflow_ref != f"{prefix}{filename}{suffix}":
+        raise ValueError("GitHub workflow ref is not canonical for its repository and ref")
+
+
+def _validate_execution_common(
+    *,
+    repository: str,
+    ref: str,
+    sha: str,
+    run_id: str,
+    run_attempt: int,
+) -> None:
+    if not _is_canonical_repository(repository):
+        raise ValueError("execution repository must be a canonical owner/repository slug")
+    if not _is_valid_branch_ref(ref):
+        raise ValueError("execution ref must be a valid full refs/heads/* branch ref")
+    if len(sha) != GIT_SHA_LENGTH or any(character not in "0123456789abcdef" for character in sha):
+        raise ValueError("execution SHA must be a full lowercase Git SHA")
+    if not run_id or run_id != run_id.strip():
+        raise ValueError("execution run ID must be a non-empty canonical value")
+    if isinstance(run_attempt, bool) or not isinstance(run_attempt, int) or run_attempt < 1:
+        raise ValueError("execution run attempt must be a positive integer")
+
+
+def resolve_execution_identity(  # noqa: PLR0912
+    args: argparse.Namespace,
+    *,
+    root: Path,
+) -> dict[str, object]:
+    """Return an exact public execution identity for a paid experiment."""
+
+    if os.getenv("GITHUB_ACTIONS") == "true":
+        if args.execution_kind not in {"", "github"}:
+            raise ValueError("GitHub Actions experiment runs require GitHub execution identity")
+        local_fields = {
+            "--local-repository": args.local_repository,
+            "--local-ref": args.local_ref,
+            "--local-sha": args.local_sha,
+            "--local-run-id": args.local_run_id,
+            "--local-run-attempt": args.local_run_attempt,
+        }
+        if any(value for value in local_fields.values()):
+            raise ValueError("GitHub execution identity cannot include local execution fields")
+        github_environment = {
+            "repository": os.getenv("GITHUB_REPOSITORY", ""),
+            "ref": os.getenv("GITHUB_REF", ""),
+            "sha": os.getenv("GITHUB_SHA", ""),
+            "run_id": os.getenv("GITHUB_RUN_ID", ""),
+            "workflow_ref": os.getenv("GITHUB_WORKFLOW_REF", ""),
+        }
+        github_arguments = {
+            "repository": args.github_repository,
+            "ref": args.github_ref,
+            "sha": args.github_workflow_sha,
+            "run_id": args.github_run_id,
+            "workflow_ref": args.github_workflow_ref,
+        }
+        github_run_attempt = os.getenv("GITHUB_RUN_ATTEMPT", "")
+        missing = sorted(key for key, value in github_environment.items() if not value)
+        if missing or not POSITIVE_DECIMAL_PATTERN.fullmatch(github_run_attempt):
+            raise ValueError(f"GitHub execution environment is incomplete: {missing}")
+        if github_arguments != github_environment or args.github_run_attempt != int(
+            github_run_attempt
+        ):
+            raise ValueError("GitHub execution arguments differ from the Actions environment")
+        _validate_execution_common(
+            repository=github_environment["repository"],
+            ref=github_environment["ref"],
+            sha=github_environment["sha"],
+            run_id=github_environment["run_id"],
+            run_attempt=args.github_run_attempt,
+        )
+        _validate_github_run_id(github_environment["run_id"])
+        workflow_ref = github_environment["workflow_ref"]
+        _validate_workflow_ref(
+            repository=github_environment["repository"],
+            ref=github_environment["ref"],
+            workflow_ref=workflow_ref,
+        )
+        return {
+            "schema_version": EXECUTION_IDENTITY_SCHEMA_VERSION,
+            "kind": "github",
+            **github_environment,
+            "run_attempt": args.github_run_attempt,
+        }
+
+    if args.execution_kind != "local":
+        raise ValueError("local experiment runs require --execution-kind local")
+    if any(
+        (
+            args.github_repository,
+            args.github_ref,
+            args.github_workflow_ref,
+            args.github_workflow_sha,
+            args.github_run_id,
+            args.github_run_attempt,
+        )
+    ):
+        raise ValueError("local execution identity cannot include GitHub execution fields")
+    local_fields = {
+        "--local-repository": args.local_repository,
+        "--local-ref": args.local_ref,
+        "--local-sha": args.local_sha,
+        "--local-run-id": args.local_run_id,
+    }
+    missing = sorted(flag for flag, value in local_fields.items() if not value)
+    if missing or args.local_run_attempt < 1:
+        raise ValueError(
+            f"local execution identity is incomplete: {missing or ['--local-run-attempt']}"
+        )
+    _validate_execution_common(
+        repository=args.local_repository,
+        ref=args.local_ref,
+        sha=args.local_sha,
+        run_id=args.local_run_id,
+        run_attempt=args.local_run_attempt,
+    )
+    try:
+        normalized_run_id = str(UUID(args.local_run_id))
+    except ValueError as exc:
+        raise ValueError("local execution run ID must be a canonical UUID") from exc
+    if normalized_run_id != args.local_run_id:
+        raise ValueError("local execution run ID must be a canonical UUID")
+    checkout = require_local_checkout(root)
+    source = checkout["source_identity"]
+    actual_repository = str(source["repository"])
+    actual_ref = str(source["ref"])
+    actual_sha = str(source["sha"])
+    if (args.local_repository, args.local_ref, args.local_sha) != (
+        actual_repository,
+        actual_ref,
+        actual_sha,
+    ):
+        raise ValueError("local execution repository, ref, or SHA differs from the checkout")
+    return {
+        "schema_version": EXECUTION_IDENTITY_SCHEMA_VERSION,
+        "kind": "local",
+        "repository": actual_repository,
+        "ref": actual_ref,
+        "sha": actual_sha,
+        "run_id": args.local_run_id,
+        "run_attempt": args.local_run_attempt,
+    }
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PLR0912, PLR0915
     parser = argparse.ArgumentParser(description="Run LongMemEval-V2 with Sibyl memory.")
     parser.add_argument("--official-repo", default=os.getenv("LME_V2_OFFICIAL_REPO"))
     parser.add_argument("--data-root", required=True)
@@ -476,6 +654,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     parser.add_argument("--operations-input-reserve-tokens", type=int, default=10_000)
     parser.add_argument("--operations-output-reserve-tokens", type=int, default=1024)
     parser.add_argument("--github-repository", default=os.getenv("GITHUB_REPOSITORY", ""))
+    parser.add_argument("--github-ref", default=os.getenv("GITHUB_REF", ""))
     parser.add_argument("--github-workflow-ref", default=os.getenv("GITHUB_WORKFLOW_REF", ""))
     parser.add_argument("--github-workflow-sha", default=os.getenv("GITHUB_SHA", ""))
     parser.add_argument("--github-run-id", default=os.getenv("GITHUB_RUN_ID", ""))
@@ -484,6 +663,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         type=int,
         default=int(os.getenv("GITHUB_RUN_ATTEMPT", "0")),
     )
+    parser.add_argument("--execution-kind", choices=["github", "local"], default="")
+    parser.add_argument("--local-repository", default="")
+    parser.add_argument("--local-ref", default="")
+    parser.add_argument("--local-sha", default="")
+    parser.add_argument("--local-run-id", default="")
+    parser.add_argument("--local-run-attempt", type=int, default=0)
 
     parser.add_argument(
         "--api-url", default=os.getenv("SIBYL_API_URL", "http://127.0.0.1:3334/api")
@@ -742,23 +927,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
     if populated_experiment_fields and not (args.plan_only or args.receipt_only):
         if args.max_spend_usd is None:
             parser.error("paid experiment runs require --max-spend-usd")
+    args.execution = None
     if populated_experiment_fields:
-        github_fields = {
-            "--github-repository": args.github_repository,
-            "--github-workflow-ref": args.github_workflow_ref,
-            "--github-workflow-sha": args.github_workflow_sha,
-            "--github-run-id": args.github_run_id,
-        }
-        missing_github = sorted(
-            flag
-            for flag, value in github_fields.items()
-            if not isinstance(value, str) or not value.strip()
-        )
-        if missing_github or args.github_run_attempt < 1:
-            parser.error(
-                "experiment runs require complete GitHub workflow identity; "
-                f"missing {missing_github or ['--github-run-attempt']}"
-            )
+        try:
+            args.execution = resolve_execution_identity(args, root=ROOT)
+        except ValueError as exc:
+            parser.error(str(exc))
     if args.reader_retry_attempts < 1:
         parser.error("--reader-retry-attempts must be positive")
     if args.reader_retry_base_delay_seconds < 0:
@@ -885,6 +1059,7 @@ def materialize_runtime_haystack(
 def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
     params: dict[str, object] = {
         "api_url": args.api_url,
+        "longmemeval_v2_domain": args.domain,
         "project_id": args.project_id,
         "run_id": args.run_id,
         "reuse_existing_project": args.reuse_existing_project,
@@ -975,6 +1150,80 @@ def build_memory_config(args: argparse.Namespace) -> dict[str, object]:
     return config
 
 
+def _loaded_memory_attestation_dir(args: argparse.Namespace) -> Path | None:
+    if args.load_memory_dir:
+        return Path(args.load_memory_dir).expanduser().resolve()
+    if not args.checkpoint_dir:
+        return None
+    checkpoint = Path(args.checkpoint_dir).expanduser().resolve()
+    if not (checkpoint / "memory_config.json").is_file():
+        return None
+    manifest_path = checkpoint / "memory_manifest.json"
+    if not manifest_path.is_file():
+        raise RuntimeError(f"Loaded checkpoint has no completed memory manifest: {checkpoint}")
+    return checkpoint
+
+
+def attest_loaded_memory_project(
+    *,
+    args: argparse.Namespace,
+    data_root: Path,
+    selected_haystack: dict[str, list[str]],
+    memory_config: dict[str, object],
+) -> dict[str, object] | None:
+    """Read-audit a completed saved project during plan-only execution."""
+
+    memory_dir = _loaded_memory_attestation_dir(args)
+    if memory_dir is None:
+        return None
+    manifest_path = memory_dir / "memory_manifest.json"
+    manifest = _load_json_if_exists(manifest_path)
+    params = memory_config.get("memory_params")
+    if not isinstance(params, dict):
+        raise RuntimeError("Loaded memory config has no memory_params")
+    project_id = params.get("project_id")
+    run_id = params.get("run_id")
+    if (
+        manifest.get("schema_version") != MEMORY_MANIFEST_SCHEMA_VERSION
+        or manifest.get("ingest_finalized") is not True
+        or manifest.get("longmemeval_v2_domain") != args.domain
+        or manifest.get("project_id") != project_id
+        or manifest.get("run_id") != run_id
+        or params.get("longmemeval_v2_domain") != args.domain
+        or not isinstance(project_id, str)
+        or not project_id
+        or not isinstance(run_id, str)
+        or not run_id
+    ):
+        raise RuntimeError("Loaded memory manifest identity is incomplete or inconsistent")
+    expected_ids = {
+        str(trajectory_id)
+        for trajectory_ids in selected_haystack.values()
+        for trajectory_id in trajectory_ids
+    }
+    if not expected_ids:
+        raise RuntimeError("Loaded memory attestation has no required trajectories")
+    trajectories_by_id = load_jsonl_by_id(
+        data_root / "trajectories.jsonl",
+        required_ids=expected_ids,
+    )
+    if set(trajectories_by_id) != expected_ids:
+        raise RuntimeError("Loaded memory attestation cannot resolve every trajectory")
+    receipt = SibylLiveApiMemory.attest_existing(
+        params,
+        expected_trajectory_ids=expected_ids,
+        trajectories=[trajectories_by_id[item] for item in sorted(expected_ids)],
+    )
+    if (
+        receipt.get("project_id") != project_id
+        or receipt.get("run_id") != run_id
+        or receipt.get("longmemeval_v2_domain") != args.domain
+        or receipt.get("content_audit", {}).get("status") != "verified"
+    ):
+        raise RuntimeError("Loaded memory remote attestation is incomplete or inconsistent")
+    return receipt
+
+
 def install_memory_credentials(args: argparse.Namespace) -> None:
     for environment_key, value in (
         ("SIBYL_API_TOKEN", args.api_token),
@@ -994,6 +1243,7 @@ def install_memory_credentials(args: argparse.Namespace) -> None:
 LOADED_MEMORY_NON_MERGED_KEYS = frozenset(
     {
         "api_url",
+        "longmemeval_v2_domain",
         "project_id",
         "run_id",
         "reuse_existing_project",
@@ -1069,13 +1319,7 @@ def experiment_identity(args: argparse.Namespace) -> dict[str, object]:
         "substrate": args.substrate or None,
         "preregistration_sha256": args.preregistration_sha256 or None,
         "max_spend_usd": args.max_spend_usd,
-        "github_workflow": {
-            "repository": args.github_repository or None,
-            "workflow_ref": args.github_workflow_ref or None,
-            "workflow_sha": args.github_workflow_sha or None,
-            "run_id": args.github_run_id or None,
-            "run_attempt": args.github_run_attempt or None,
-        },
+        "execution": args.execution,
     }
 
 

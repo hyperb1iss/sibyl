@@ -51,6 +51,10 @@ from benchmarks.longmemeval_v2_reader_replication_report import (  # noqa: E402
     build_reader_replication_report,
 )
 from benchmarks.longmemeval_v2_reader_report import build_reader_report  # noqa: E402
+from benchmarks.longmemeval_v2_release_cli import (  # noqa: E402
+    add_release_arguments,
+    run_release_cli_command,
+)
 
 SCHEMA_VERSION = "sibyl-longmemeval-v2-ablations-v1"
 GATE_SCHEMA_VERSION = "sibyl-longmemeval-v2-ablation-gate-v1"
@@ -187,6 +191,8 @@ def main(argv: list[str] | None = None) -> int:
         write_json(Path(args.output).expanduser().resolve(), gate)
         print(json.dumps(gate, indent=2, sort_keys=True))  # noqa: T201
         return 0
+    if args.command.startswith("release-"):
+        return run_release_cli_command(args)
     if args.command.startswith("reader-"):
         return run_reader_cli_command(args)
     if args.command == "doctor":
@@ -433,6 +439,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     add_reader_replication_arguments(subparsers)
     add_reader_holdout_arguments(subparsers)
     add_reader_causal_arguments(subparsers)
+    add_release_arguments(subparsers)
 
     doctor = subparsers.add_parser("doctor")
     doctor.add_argument("--official-repo", required=True)

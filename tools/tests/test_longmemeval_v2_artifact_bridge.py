@@ -163,10 +163,13 @@ def _plan(
                 "git_dirty": False,
                 "git_status": "clean",
             },
-            "github_workflow": {
+            "execution": {
+                "schema_version": rig.EXECUTION_IDENTITY_SCHEMA_VERSION,
+                "kind": "github",
                 "repository": "hyperb1iss/sibyl",
+                "ref": "refs/heads/main",
                 "workflow_ref": "hyperb1iss/sibyl/.github/workflows/eval.yml@refs/heads/main",
-                "workflow_sha": "a" * 40,
+                "sha": "a" * 40,
                 "run_id": workflow_run_id,
                 "run_attempt": 1,
             },
@@ -372,6 +375,7 @@ def _domain_run(
             "memory_type": "sibyl_live_api",
             "memory_params": {
                 "api_url": "http://127.0.0.1:3334/api",
+                "longmemeval_v2_domain": domain,
                 "project_id": f"project-{domain}",
                 "run_id": plan["run_id"],
                 "runner_provenance": plan["runner_provenance"],
@@ -450,7 +454,7 @@ def _combined_receipt(
     root: Path,
     *,
     role: str = "display_control",
-    workflow_run_id: str = "workflow-control",
+    workflow_run_id: str = "1001",
     phase: str = "aa",
     mode: str = "fast",
 ) -> tuple[Path, dict[str, Any], dict[str, dict[str, Path]]]:
@@ -519,6 +523,68 @@ def test_bridge_builds_signed_arm_from_official_artifacts(tmp_path: Path) -> Non
         "enterprise": 2,
         "web": 2,
     }
+    assert "longmemeval_v2_domain" not in arm["configuration"]
+
+
+def test_bridge_builds_signed_arm_from_local_execution(tmp_path: Path) -> None:
+    combined_path, combined, paths = _combined_receipt(tmp_path)
+    local_execution = {
+        "schema_version": rig.EXECUTION_IDENTITY_SCHEMA_VERSION,
+        "kind": "local",
+        "repository": "hyperb1iss/sibyl",
+        "ref": "refs/heads/main",
+        "sha": "a" * 40,
+        "run_id": "d6cf4d36-606f-44d6-b386-c723e6b756e8",
+        "run_attempt": 1,
+    }
+    for domain in sorted(rig.DOMAINS):
+        plan = json.loads(paths[domain]["plan"].read_text(encoding="utf-8"))
+        plan["execution"] = local_execution
+        _write_json(paths[domain]["plan"], plan)
+        _refresh_artifact(
+            combined_path,
+            combined,
+            domain=domain,
+            artifact="plan",
+            path=paths[domain]["plan"],
+        )
+
+    arm = bridge.build_arm_run(combined_path)
+
+    assert arm["execution"] == local_execution
+    assert (
+        rig.validate_arm(
+            arm,
+            stack_digest=rig.stack_fingerprint(arm["stack"]),
+            side="local",
+        )
+        == arm
+    )
+
+
+def test_bridge_rejects_local_execution_sha_mismatch(tmp_path: Path) -> None:
+    combined_path, combined, paths = _combined_receipt(tmp_path)
+    plan = json.loads(paths["web"]["plan"].read_text(encoding="utf-8"))
+    plan["execution"] = {
+        "schema_version": rig.EXECUTION_IDENTITY_SCHEMA_VERSION,
+        "kind": "local",
+        "repository": "hyperb1iss/sibyl",
+        "ref": "refs/heads/main",
+        "sha": "b" * 40,
+        "run_id": "d6cf4d36-606f-44d6-b386-c723e6b756e8",
+        "run_attempt": 1,
+    }
+    _write_json(paths["web"]["plan"], plan)
+    _refresh_artifact(
+        combined_path,
+        combined,
+        domain="web",
+        artifact="plan",
+        path=paths["web"]["plan"],
+    )
+
+    with pytest.raises(bridge.BridgeInputError, match="clean execution SHA"):
+        bridge.build_arm_run(combined_path)
 
 
 def test_bridge_arm_rejects_resealed_row_truncation(tmp_path: Path) -> None:
@@ -564,12 +630,12 @@ def test_bridge_builds_paired_pass_from_distinct_workflow_runs(tmp_path: Path) -
     left_path, _left_combined, _left_paths = _combined_receipt(
         tmp_path / "left",
         role="display_control",
-        workflow_run_id="workflow-left",
+        workflow_run_id="1001",
     )
     right_path, _right_combined, _right_paths = _combined_receipt(
         tmp_path / "right",
         role="display_treatment",
-        workflow_run_id="workflow-right",
+        workflow_run_id="1002",
     )
 
     paired = bridge.build_paired_pass(
@@ -578,8 +644,8 @@ def test_bridge_builds_paired_pass_from_distinct_workflow_runs(tmp_path: Path) -
     )
 
     assert paired["experiment_phase"] == "aa"
-    assert paired["arms"]["left"]["workflow"]["run_id"] == "workflow-left"
-    assert paired["arms"]["right"]["workflow"]["run_id"] == "workflow-right"
+    assert paired["arms"]["left"]["execution"]["run_id"] == "1001"
+    assert paired["arms"]["right"]["execution"]["run_id"] == "1002"
     assert rig.validate_pass(paired) == paired
 
 
@@ -749,12 +815,12 @@ def test_pair_bridge_rejects_recomputed_arm_seed_drift(tmp_path: Path) -> None:
     left_path, _left_combined, _left_paths = _combined_receipt(
         tmp_path / "left",
         role="display_control",
-        workflow_run_id="workflow-left",
+        workflow_run_id="1001",
     )
     right_path, _right_combined, _right_paths = _combined_receipt(
         tmp_path / "right",
         role="display_treatment",
-        workflow_run_id="workflow-right",
+        workflow_run_id="1002",
     )
     left = bridge.build_arm_run(left_path)
     right = deepcopy(bridge.build_arm_run(right_path))

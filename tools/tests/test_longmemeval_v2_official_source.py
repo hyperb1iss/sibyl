@@ -103,6 +103,26 @@ def test_pinned_source_rejects_commit_drift_and_dirty_checkout(tmp_path: Path) -
         source.require_pinned_source(repo, expected_commit=commit)
 
 
+def test_pinned_source_rejects_hidden_untracked_shadow_module(tmp_path: Path) -> None:
+    repo, commit = _write_official_checkout(tmp_path / "official")
+    git = shutil.which("git")
+    assert git is not None
+    subprocess.run(  # noqa: S603
+        [git, "config", "status.showUntrackedFiles", "no"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    (repo / "memory_modules" / "sitecustomize.py").write_text(
+        "raise RuntimeError('shadowed')\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="official checkout is dirty"):
+        source.require_pinned_source(repo, expected_commit=commit)
+
+
 def test_adapter_contract_runs_against_clean_official_base(tmp_path: Path) -> None:
     repo, commit = _write_official_checkout(tmp_path / "official")
     code = """

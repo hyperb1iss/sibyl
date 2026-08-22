@@ -514,6 +514,52 @@ jobs:
           files: apps/api/coverage.xml,apps/cli/coverage.xml,packages/python/sibyl-core/coverage.xml,apps/web/coverage.xml
           fail_ci_if_error: false
 
+  darwin-eval-authority:
+    name: Darwin Eval Authority
+    needs: changes
+    if: needs.changes.outputs.runtime_changed == 'true'
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup moonrepo toolchain
+        uses: moonrepo/setup-toolchain@v0.6.4
+        with:
+          proto-version: "0.60.2"
+          auto-install: true
+          auto-setup: true
+          cache-version: surreal-ci-v1
+
+      - name: Verify toolchain
+        run: |
+          chmod +x "$HOME/.proto/shims"/* 2>/dev/null || true
+          chmod +x "$HOME/.proto/bin"/* 2>/dev/null || true
+          moon --version
+          proto --version
+          uv --version
+
+      - name: Cache moon outputs
+        uses: actions/cache@v6
+        with:
+          path: .moon/cache
+          key: moon-macos-26-${{ runner.arch }}-${{ hashFiles('.prototools', '.python-version') }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            moon-macos-26-${{ runner.arch }}-${{ hashFiles('.prototools', '.python-version') }}-
+
+      - name: Cache uv
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/uv
+          key: uv-macos-26-${{ runner.arch }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            uv-macos-26-${{ runner.arch }}-
+
+      - name: Run Darwin eval authority gate
+        run: moon run bench-gate-test --force
+
   live-ingestion:
     name: Live SurrealDB 3.x Ingestion
     needs: changes
