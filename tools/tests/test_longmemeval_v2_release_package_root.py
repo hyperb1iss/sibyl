@@ -23,6 +23,13 @@ requires_darwin_file_flags = pytest.mark.skipif(
     reason="requires Darwin immutable file flags",
 )
 
+SUPPORTED_RELEASE_HOST = {
+    "platform": "darwin",
+    "macos_major": package_policy.MINIMUM_MACOS_MAJOR,
+    "filesystem_device": 1,
+    "immutable_descendant_rename": True,
+}
+
 
 def _plan(tmp_path: Path) -> dict[str, Any]:
     roots = {
@@ -52,6 +59,41 @@ def _plan(tmp_path: Path) -> dict[str, Any]:
             }
         },
     }
+
+
+@pytest.mark.parametrize(
+    ("binding", "message"),
+    [
+        ({**SUPPORTED_RELEASE_HOST, "platform": "linux"}, "platform must be Darwin"),
+        ({**SUPPORTED_RELEASE_HOST, "macos_major": 25}, "requires macOS 26"),
+        (
+            {**SUPPORTED_RELEASE_HOST, "immutable_descendant_rename": False},
+            "lacks immutable descendant rename support",
+        ),
+    ],
+)
+def test_release_host_binding_rejects_unsupported_authority(
+    binding: dict[str, Any],
+    message: str,
+) -> None:
+    with pytest.raises(StagePlanError, match=message):
+        package_policy.require_release_host_binding(binding)
+
+
+@requires_darwin_file_flags
+def test_release_host_probe_binds_the_exact_destination_filesystem(tmp_path: Path) -> None:
+    output_root = tmp_path / "future" / "release"
+
+    binding = package_policy.probe_release_host(output_root)
+
+    assert binding == {
+        "platform": "darwin",
+        "macos_major": int(package_policy.platform.mac_ver()[0].split(".", 1)[0]),
+        "filesystem_device": tmp_path.stat().st_dev,
+        "immutable_descendant_rename": True,
+    }
+    assert package_policy.require_current_release_host(output_root, binding) == binding
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.parametrize(

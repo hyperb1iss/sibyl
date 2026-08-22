@@ -4,16 +4,155 @@ from __future__ import annotations
 
 import fcntl
 import os
+import platform
+import shutil
 import stat
 import sys
+import tempfile
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from benchmarks.longmemeval_v2_release_inputs import StagePlanError
+from benchmarks import longmemeval_v2_release_io as release_io
+from benchmarks.longmemeval_v2_release_inputs import (
+    StagePlanError,
+    require_exact_keys,
+    require_positive_int,
+    require_string,
+)
 
 SIBYL_ROOT = Path(__file__).resolve().parents[1]
 DARWIN_F_GETPATH = 50
 DARWIN_PATH_BUFFER_SIZE = 1024
+DARWIN_IMMUTABLE_FLAG = getattr(stat, "UF_IMMUTABLE", 0x00000002)
+MINIMUM_MACOS_MAJOR = 26
+RELEASE_HOST_KEYS = frozenset(
+    {
+        "platform",
+        "macos_major",
+        "filesystem_device",
+        "immutable_descendant_rename",
+    }
+)
+
+
+def require_release_host_binding(raw: object) -> dict[str, Any]:
+    """Validate the sealed host capability required by package publication."""
+
+    if not isinstance(raw, dict):
+        raise StagePlanError("release host binding is missing")
+    require_exact_keys(raw, RELEASE_HOST_KEYS, name="release host")
+    if require_string(raw.get("platform"), name="release host platform") != "darwin":
+        raise StagePlanError("release host platform must be Darwin")
+    major = require_positive_int(raw.get("macos_major"), name="release host macOS major")
+    if major < MINIMUM_MACOS_MAJOR:
+        raise StagePlanError(f"release host requires macOS {MINIMUM_MACOS_MAJOR} or newer")
+    require_positive_int(raw.get("filesystem_device"), name="release host filesystem device")
+    if raw.get("immutable_descendant_rename") is not True:
+        raise StagePlanError("release host lacks immutable descendant rename support")
+    return dict(raw)
+
+
+def _existing_directory(path: Path) -> Path:
+    ancestor = path.parent
+    while not ancestor.exists():
+        if ancestor.parent == ancestor:
+            raise StagePlanError("release output has no existing filesystem ancestor")
+        ancestor = ancestor.parent
+    if not ancestor.is_dir() or ancestor.is_symlink():
+        raise StagePlanError("release output filesystem ancestor is unsafe")
+    return ancestor
+
+
+def _remove_release_host_probe(probe_root: Path) -> None:
+    setter = getattr(os, "chflags", None)
+    if callable(setter):
+        for candidate in (
+            probe_root / "pending/sealed/artifact.json",
+            probe_root / "pending/sealed",
+            probe_root / "published/sealed/artifact.json",
+            probe_root / "published/sealed",
+        ):
+            with suppress(OSError):
+                setter(candidate, 0)
+    try:
+        shutil.rmtree(probe_root)
+    except OSError as exc:
+        raise StagePlanError("release host capability probe cleanup failed") from exc
+
+
+def _probe_immutable_descendant_rename(probe_root: Path) -> int:
+    source = probe_root / "pending"
+    descendant = source / "sealed"
+    artifact = descendant / "artifact.json"
+    published = probe_root / "published"
+    try:
+        probe_device = probe_root.stat().st_dev
+        descendant.mkdir(parents=True)
+        artifact.write_text("{}\n", encoding="utf-8")
+        artifact_fd = os.open(artifact, os.O_RDONLY)
+        try:
+            descendant_fd = os.open(descendant, os.O_RDONLY)
+            try:
+                release_io.set_fd_flags(artifact_fd, DARWIN_IMMUTABLE_FLAG)
+                release_io.set_fd_flags(descendant_fd, DARWIN_IMMUTABLE_FLAG)
+            finally:
+                os.close(descendant_fd)
+        finally:
+            os.close(artifact_fd)
+        root_fd = os.open(probe_root, os.O_RDONLY)
+        try:
+            release_io.rename_once_atomic_at(root_fd, source.name, root_fd, published.name)
+        finally:
+            os.close(root_fd)
+    except OSError as exc:
+        raise StagePlanError(
+            "release host cannot publish immutable descendants atomically"
+        ) from exc
+    finally:
+        _remove_release_host_probe(probe_root)
+    return probe_device
+
+
+def probe_release_host(path: Path) -> dict[str, Any]:
+    """Prove the destination can atomically rename immutable descendants."""
+
+    if sys.platform != "darwin":
+        raise StagePlanError(f"release publication requires macOS {MINIMUM_MACOS_MAJOR} or newer")
+    version = platform.mac_ver()[0]
+    try:
+        major = int(version.split(".", 1)[0])
+    except (ValueError, IndexError) as exc:
+        raise StagePlanError("release host macOS version is unavailable") from exc
+    if major < MINIMUM_MACOS_MAJOR:
+        raise StagePlanError(f"release publication requires macOS {MINIMUM_MACOS_MAJOR} or newer")
+
+    destination = canonical_path(path, name="release output root")
+    ancestor = _existing_directory(destination)
+    try:
+        probe_root = Path(tempfile.mkdtemp(prefix=".sibyl-release-host-", dir=ancestor))
+    except OSError as exc:
+        raise StagePlanError("release host capability probe could not be created") from exc
+    probe_device = _probe_immutable_descendant_rename(probe_root)
+
+    return require_release_host_binding(
+        {
+            "platform": "darwin",
+            "macos_major": major,
+            "filesystem_device": probe_device,
+            "immutable_descendant_rename": True,
+        }
+    )
+
+
+def require_current_release_host(path: Path, expected: object) -> dict[str, Any]:
+    """Re-probe the sealed output filesystem before any provider work."""
+
+    binding = require_release_host_binding(expected)
+    current = probe_release_host(path)
+    if current != binding:
+        raise StagePlanError("current release host differs from the sealed host capability")
+    return current
 
 
 def _filesystem_path(path: Path, *, name: str) -> Path:

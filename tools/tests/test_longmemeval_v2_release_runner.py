@@ -591,6 +591,12 @@ def _build(inputs: dict[str, Any]) -> dict[str, Any]:
         output_root=inputs["output_root"],
         system_description_path=inputs["system_description"],
         adapter_path=inputs["adapter"],
+        release_host={
+            "platform": "darwin",
+            "macos_major": 26,
+            "filesystem_device": 1,
+            "immutable_descendant_rename": True,
+        },
         uuid_factory=_canonical_uuid_factory(),
     )
 
@@ -638,6 +644,12 @@ def test_stage_plan_expands_exact_domains_waves_and_local_execution(
             name="test system description",
         ),
         "adapter": inputs.bind_artifact(sealed_inputs["adapter"], name="test adapter"),
+    }
+    assert stage_plan["release_host"] == {
+        "platform": "darwin",
+        "macos_major": 26,
+        "filesystem_device": 1,
+        "immutable_descendant_rename": True,
     }
     first_saved_memory = str(
         sealed_inputs["output_root"] / "runs" / "aa-1-left" / "web" / "checkpoint"
@@ -927,6 +939,12 @@ def test_stage_plan_rejects_resealed_command_and_execution_tampering(
     _reseal(tampered_execution)
     with pytest.raises(contract.StagePlanError, match="distinct"):
         plan.require_stage_plan(tampered_execution, check_checkout=False)
+
+    tampered_host = deepcopy(stage_plan)
+    tampered_host["release_host"]["macos_major"] = 25
+    _reseal(tampered_host)
+    with pytest.raises(contract.StagePlanError, match="requires macOS 26"):
+        plan.require_stage_plan(tampered_host, check_checkout=False)
 
 
 def test_stage_plan_rejects_existing_output_root(sealed_inputs: dict[str, Any]) -> None:

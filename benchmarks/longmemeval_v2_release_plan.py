@@ -69,6 +69,7 @@ PLAN_KEYS = frozenset(
         "memory_bindings",
         "upstream_bindings",
         "package_inputs",
+        "release_host",
         "output_root",
         "max_workers_cap",
         "runs",
@@ -436,6 +437,7 @@ def build_stage_plan(
     output_root: Path,
     system_description_path: Path,
     adapter_path: Path,
+    release_host: dict[str, Any],
     uuid_factory: Callable[[], Any] = uuid4,
 ) -> dict[str, Any]:
     """Build an immutable, plan-only-first declaration for exactly one stage."""
@@ -488,6 +490,7 @@ def build_stage_plan(
         "memory_bindings": memory_bindings,
         "upstream_bindings": upstream_bindings,
         "package_inputs": package_inputs,
+        "release_host": package_policy.require_release_host_binding(release_host),
         "output_root": str(output_root),
         "max_workers_cap": MAX_WORKERS_CAP,
         "runs": runs,
@@ -640,6 +643,7 @@ def _require_stage_plan(
         expected_stack=expected_stack,
     )
     require_package_inputs(raw.get("package_inputs"))
+    package_policy.require_release_host_binding(raw.get("release_host"))
     output_value = require_string(raw.get("output_root"), name="output_root")
     output_root = Path(output_value).resolve()
     if output_value != str(output_root):
@@ -667,6 +671,18 @@ def require_stage_plan(raw: object, *, check_checkout: bool = True) -> list[dict
     """Reconstruct and validate every sealed input before claiming its fresh root."""
 
     return _require_stage_plan(raw, check_checkout=check_checkout, claimed_root=False)
+
+
+def require_current_release_host(raw: object) -> dict[str, Any]:
+    """Re-probe the plan's sealed output filesystem before provider work."""
+
+    if not isinstance(raw, dict):
+        raise StagePlanError("stage plan must be a JSON object")
+    output_value = require_string(raw.get("output_root"), name="output_root")
+    output_root = Path(output_value).resolve()
+    if output_value != str(output_root):
+        raise StagePlanError("stage output root is not canonical")
+    return package_policy.require_current_release_host(output_root, raw.get("release_host"))
 
 
 def write_stage_plan(path: Path, payload: dict[str, Any]) -> None:

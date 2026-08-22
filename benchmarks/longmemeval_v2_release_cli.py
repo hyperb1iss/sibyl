@@ -64,6 +64,12 @@ def _object(path: Path, *, name: str) -> dict[str, Any]:
     return raw
 
 
+def _supported_plan(path: Path) -> dict[str, Any]:
+    plan = _object(path, name="release stage plan")
+    release_plan.require_current_release_host(plan)
+    return plan
+
+
 def _emit(payload: dict[str, Any]) -> None:
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
@@ -131,6 +137,7 @@ def _plan(args: argparse.Namespace) -> dict[str, Any]:
         output_root=output_root,
         system_description_path=SYSTEM_DESCRIPTION,
         adapter_path=ADAPTER,
+        release_host=package_policy.probe_release_host(output_root),
     )
     release_plan.write_stage_plan(plan_output, payload)
     return payload
@@ -138,7 +145,7 @@ def _plan(args: argparse.Namespace) -> dict[str, Any]:
 
 def _run(args: argparse.Namespace) -> dict[str, Any]:
     payload = release_runner.run_stage_plan(
-        _object(_path(args.plan), name="release stage plan"),
+        _supported_plan(_path(args.plan)),
         max_workers=args.max_workers,
     )
     if payload.get("status") != "EXECUTED":
@@ -147,7 +154,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _package_arm(args: argparse.Namespace) -> dict[str, Any]:
-    executed = require_executed_stage(_object(_path(args.plan), name="release stage plan"))
+    executed = require_executed_stage(_supported_plan(_path(args.plan)))
     if args.arm_id not in {run["arm_id"] for run in executed.runs}:
         raise StagePlanError("official arm ID is not present in the sealed stage")
     packages_root = _path(args.packages_root)
@@ -168,16 +175,14 @@ def _package(args: argparse.Namespace) -> dict[str, Any]:
         _path(args.preregistration_template) if args.preregistration_template is not None else None
     )
     return release_package.package_stage(
-        _object(_path(args.plan), name="release stage plan"),
+        _supported_plan(_path(args.plan)),
         official_packages_root=_path(args.packages_root),
         preregistration_template=template,
     )
 
 
 def _verify(args: argparse.Namespace) -> dict[str, Any]:
-    return release_package.require_packaged_stage(
-        _object(_path(args.plan), name="release stage plan")
-    )
+    return release_package.require_packaged_stage(_supported_plan(_path(args.plan)))
 
 
 def run_release_cli_command(args: argparse.Namespace) -> int:

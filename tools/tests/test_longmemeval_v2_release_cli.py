@@ -13,9 +13,26 @@ from benchmarks import longmemeval_v2_release_cli as cli
 from benchmarks import longmemeval_v2_release_package_root as package_root
 from benchmarks.longmemeval_v2_release_inputs import StagePlanError
 
+SUPPORTED_RELEASE_HOST = {
+    "platform": "darwin",
+    "macos_major": 26,
+    "filesystem_device": 1,
+    "immutable_descendant_rename": True,
+}
+
 
 @pytest.fixture(autouse=True)
-def _clear_immutable_plan_files(tmp_path: Path) -> Any:
+def _release_cli_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+    monkeypatch.setattr(
+        cli.package_policy,
+        "probe_release_host",
+        lambda _path: dict(SUPPORTED_RELEASE_HOST),
+    )
+    monkeypatch.setattr(
+        cli.release_plan,
+        "require_current_release_host",
+        lambda _plan: dict(SUPPORTED_RELEASE_HOST),
+    )
     yield
     for current, _directories, files in os.walk(tmp_path, topdown=False):
         for name in files:
@@ -102,6 +119,7 @@ def test_release_plan_binds_only_the_reviewed_package_inputs(
     assert cli.run_release_cli_command(_plan_args(tmp_path)) == 0
     assert captured["system_description_path"] == cli.SYSTEM_DESCRIPTION
     assert captured["adapter_path"] == cli.ADAPTER
+    assert captured["release_host"] == SUPPORTED_RELEASE_HOST
     assert captured["payload"] == payload
     assert captured["plan_path"] == (tmp_path / "plan.json").resolve()
     assert json.loads(capsys.readouterr().out) == payload
@@ -249,6 +267,26 @@ def test_release_run_rejects_a_nonexecuted_owner_result(
     )
 
     with pytest.raises(StagePlanError, match="EXECUTED"):
+        cli.run_release_cli_command(args)
+
+
+def test_release_run_rejects_an_unsupported_host_before_provider_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    args = _command_args(tmp_path, "release-run", max_workers=4)
+    monkeypatch.setattr(
+        cli.release_plan,
+        "require_current_release_host",
+        lambda _plan: (_ for _ in ()).throw(StagePlanError("unsupported release host")),
+    )
+    monkeypatch.setattr(
+        cli.release_runner,
+        "run_stage_plan",
+        lambda *_args, **_kwargs: pytest.fail("unsupported host reached provider work"),
+    )
+
+    with pytest.raises(StagePlanError, match="unsupported release host"):
         cli.run_release_cli_command(args)
 
 

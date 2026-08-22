@@ -127,7 +127,14 @@ def test_ci_runs_darwin_authority_on_the_supported_host() -> None:
     job = workflow["jobs"]["darwin-eval-authority"]
 
     assert job["runs-on"] == "macos-26"
-    assert any(step.get("run") == "moon run bench-gate-test" for step in job["steps"])
+    assert any(step.get("run") == "moon run bench-gate-test --force" for step in job["steps"])
+    cache_inputs = [
+        step.get("with", {}) for step in job["steps"] if "actions/cache@" in step.get("uses", "")
+    ]
+    assert cache_inputs
+    for inputs in cache_inputs:
+        assert "macos-26-${{ runner.arch }}" in inputs["key"]
+        assert "macos-26-${{ runner.arch }}" in inputs["restore-keys"]
 
 
 @pytest.mark.parametrize("project_file", PYTHON_MOON_PROJECTS)
