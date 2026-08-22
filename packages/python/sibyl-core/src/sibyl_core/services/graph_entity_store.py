@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sibyl_core.backends.surreal.connection import _is_transient_connection_error
+from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
 from sibyl_core.embeddings.providers import entity_embedding_text
 from sibyl_core.memory_pipeline.retrieval_keys import coerce_retrieval_keys
 from sibyl_core.models.entities import Entity, EntityType
@@ -435,13 +436,13 @@ def _parsed_metadata_snapshot(raw: object) -> dict[str, object] | None:
     return None
 
 
-_ENTITY_EMBEDDING_BACKFILL_QUERY = """
+_ENTITY_EMBEDDING_BACKFILL_QUERY = f"""
 UPDATE (
     SELECT VALUE id
     FROM entity
     WHERE group_id = $group_id AND uuid IN $uuids
 ) SET
-    name_embedding = <array<float, 1024>>$rows_by_uuid[uuid].name_embedding,
+    name_embedding = <array<float, {EMBEDDING_DIM}>>$rows_by_uuid[uuid].name_embedding,
     attributes.embedding_metadata = $rows_by_uuid[uuid].embedding_metadata,
     attributes.updated_at = $rows_by_uuid[uuid].updated_at,
     updated_at = $rows_by_uuid[uuid].updated_at,

@@ -2048,6 +2048,7 @@ async def test_native_embedding_backfill_batches_indexed_updates() -> None:
     assert len(client.calls) == 1
     query, params = client.calls[0]
     assert "WHERE group_id = $group_id AND uuid IN $uuids" in query
+    assert f"<array<float, {EMBEDDING_DIM}>>" in query
     assert cast("list[str]", params["uuids"]) == [entity.id for entity in entities]
     assert len(cast("dict[str, object]", params["rows_by_uuid"])) == len(entities)
 
