@@ -345,6 +345,7 @@ def test_owned_plan_publication_cleanup_preserves_a_reused_foreign_fd(
     os.close(victim)
 
 
+@requires_darwin_file_flags
 def test_owned_plan_publication_interrupt_removes_the_temporary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -578,7 +579,15 @@ def test_owned_plan_publication_rejects_relocation_after_final_validation(
     assert not (displaced / "stage.json").exists()
 
 
-@pytest.mark.parametrize("acquisition", ["root", "child", "temporary", "final"])
+@pytest.mark.parametrize(
+    "acquisition",
+    [
+        "root",
+        "child",
+        pytest.param("temporary", marks=requires_darwin_file_flags),
+        pytest.param("final", marks=requires_darwin_file_flags),
+    ],
+)
 def test_owned_plan_publication_defers_real_sigint_until_fd_registration(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

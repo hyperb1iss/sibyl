@@ -180,9 +180,12 @@ model or runtime, changed dataset, modified saved memory, incomplete receipt, mi
 file, symlink escape, or partial output is a hard failure. The runner never deletes or silently
 repairs evidence.
 
-A terminal `FAIL` is not resumable. Preserve the failed root, fix the cause, generate a new plan
-with an explicitly fresh output root, and repeat the same stage. Do not advance to another stage
-until `release-verify` succeeds and the receipt authorizes that transition.
+A terminal `FAIL` is resumable only when every existing paid domain has a complete receipt whose
+cost, artifacts, command log, and sealed execution identity still validate. The retry repeats all
+live planning and stage barriers before it reuses those domains, so a post-wave barrier failure does
+not repay valid provider work. A failed domain receipt, partial output, or drifted artifact still
+requires a new plan with an explicitly fresh output root. Preserve the failed root for audit, and do
+not advance until `release-verify` succeeds and its receipt authorizes the transition.
 
 ## Lower-level commands
 

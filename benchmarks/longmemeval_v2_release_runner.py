@@ -303,31 +303,60 @@ def require_planning_barrier(plan: dict[str, Any], *, secrets: tuple[str, ...]) 
     return bindings
 
 
+def _require_unchanged_current_domain(
+    plan: dict[str, Any],
+    run: dict[str, Any],
+    domain: str,
+    *,
+    cost: float,
+    artifacts: dict[str, Any],
+) -> None:
+    current_cost, current_artifacts = evidence.require_completed_domain(plan, run, domain)
+    if current_cost != cost or current_artifacts != artifacts:
+        raise StagePlanError("current wave evidence changed before completion")
+
+
 def _persist_current_domains(
     plan: dict[str, Any],
     successes: list[tuple[dict[str, Any], str, float, dict[str, Any], str]],
     *,
     costs: dict[str, float],
     secrets: tuple[str, ...],
-) -> None:
-    for run, domain, cost, artifacts, _started_at in successes:
-        current_cost, current_artifacts = evidence.require_completed_domain(plan, run, domain)
-        if current_cost != cost or current_artifacts != artifacts:
-            raise StagePlanError("current wave evidence changed before completion")
+) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
     for run, domain, cost, artifacts, started_at in successes:
-        artifacts["runner_log"] = _run_log_binding(plan, run, domain)
-        _write_exit(
-            plan,
-            run,
-            domain,
-            started_at=started_at,
-            returncode=0,
-            cost=cost,
-            artifacts=artifacts,
-            error=None,
-            secrets=secrets,
-        )
-        costs[f"{run['arm_id']}:{domain}"] = cost
+        key = f"{run['arm_id']}:{domain}"
+        try:
+            _require_unchanged_current_domain(
+                plan,
+                run,
+                domain,
+                cost=cost,
+                artifacts=artifacts,
+            )
+            artifacts["runner_log"] = _run_log_binding(plan, run, domain)
+            _write_exit(
+                plan,
+                run,
+                domain,
+                started_at=started_at,
+                returncode=0,
+                cost=cost,
+                artifacts=artifacts,
+                error=None,
+                secrets=secrets,
+            )
+        except Exception as exc:
+            failures.append(
+                {
+                    "run": key,
+                    "error": state.redact(exc, secrets=secrets),
+                    "returncode": 0,
+                }
+            )
+            continue
+        costs[key] = cost
+    return failures
 
 
 def _execute_wave(
@@ -350,12 +379,22 @@ def _execute_wave(
         }
         for future in as_completed(futures):
             run, domain = futures[future]
-            cost, artifacts, started_at, failure = future.result()
+            try:
+                cost, artifacts, started_at, failure = future.result()
+            except Exception as exc:
+                failures.append(
+                    {
+                        "run": f"{run['arm_id']}:{domain}",
+                        "error": state.redact(exc, secrets=secrets),
+                        "returncode": -1,
+                    }
+                )
+                continue
             if failure is not None:
                 failures.append(failure)
             elif cost is not None and artifacts is not None:
                 successes.append((run, domain, cost, artifacts, started_at))
-    _persist_current_domains(plan, successes, costs=costs, secrets=secrets)
+    failures.extend(_persist_current_domains(plan, successes, costs=costs, secrets=secrets))
     state.require_stage_control(plan, control)
     _require_prior_domains(plan, costs)
     if require_planning_barrier(plan, secrets=secrets) != planning:

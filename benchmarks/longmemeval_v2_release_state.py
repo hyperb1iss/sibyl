@@ -569,5 +569,5 @@ def read_status_receipt(plan: dict[str, Any]) -> dict[str, Any]:
 def require_status(plan: dict[str, Any]) -> dict[str, Any]:
     raw = read_status_receipt(plan)
     if raw.get("status") not in RESUMABLE_STATUS:
-        raise StagePlanError("failed or unknown release runner state requires a fresh output root")
+        raise StagePlanError("non-execution runner state requires a fresh output root")
     return raw

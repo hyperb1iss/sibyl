@@ -460,6 +460,38 @@ def test_failed_domain_receipt_cannot_resume_or_repeat_provider_work(
     assert len([event for event in events if event[0] == "paid"]) == paid_count
 
 
+def test_worker_receipt_failure_preserves_successful_peer_receipt(
+    stage_plan: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[tuple[str, str]] = []
+    real_write_exit = runner._write_exit
+    monkeypatch.setattr(runner, "_invoke_command", _successful_invoke(events))
+
+    def completion(
+        _plan: dict[str, Any], _run: dict[str, Any], domain: str
+    ) -> tuple[float, dict[str, Any]]:
+        if domain == "web":
+            raise StagePlanError("web evidence failed")
+        return 0.5, {}
+
+    def write_exit(
+        plan: dict[str, Any], run: dict[str, Any], domain: str, **kwargs: Any
+    ) -> dict[str, Any]:
+        if domain == "web":
+            raise OSError("web failure receipt unavailable")
+        return real_write_exit(plan, run, domain, **kwargs)
+
+    monkeypatch.setattr(runner.evidence, "require_completed_domain", completion)
+    monkeypatch.setattr(runner, "_write_exit", write_exit)
+
+    result = runner.run_stage_plan(stage_plan)
+
+    assert result["status"] == "FAIL"
+    assert result["completed_domains"] == ["arm-a:enterprise"]
+    assert (Path(stage_plan["output_root"]) / "exits" / "arm-a" / "enterprise.json").is_file()
+    assert not (Path(stage_plan["output_root"]) / "exits" / "arm-a" / "web.json").exists()
+
+
 def test_partial_domain_output_requires_a_fresh_root(
     stage_plan: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -717,10 +749,13 @@ def test_wave_revalidates_current_evidence_after_every_peer_quiesces(
 
     monkeypatch.setattr(runner.evidence, "require_completed_domain", completion)
 
-    with pytest.raises(StagePlanError, match="current wave evidence changed"):
-        runner.run_stage_plan(stage_plan)
+    result = runner.run_stage_plan(stage_plan)
 
-    assert not list((Path(stage_plan["output_root"]) / "exits").rglob("*.json"))
+    assert result["status"] == "FAIL"
+    assert "current wave evidence changed" in result["failures"][0]["error"]
+    exits = list((Path(stage_plan["output_root"]) / "exits").rglob("*.json"))
+    assert len(exits) == 1
+    assert exits[0].name == "enterprise.json"
 
 
 def test_wave_rejects_planning_artifact_mutation_after_preflight(
@@ -883,8 +918,13 @@ def test_wave_rejects_current_and_prior_run_log_overwrite(
     monkeypatch.setattr(runner, "_invoke_command", corrupt_log)
     monkeypatch.setattr(runner.evidence, "require_completed_domain", _successful_completion)
 
-    with pytest.raises(StagePlanError, match="runner command log"):
-        runner.run_stage_plan(stage_plan)
+    if target == "current":
+        result = runner.run_stage_plan(stage_plan)
+        assert result["status"] == "FAIL"
+        assert "runner command log" in result["failures"][0]["error"]
+    else:
+        with pytest.raises(StagePlanError, match="runner command log"):
+            runner.run_stage_plan(stage_plan)
 
 
 @pytest.mark.parametrize("foreign_name", ["packages", "stage_receipt.json"])
