@@ -17,7 +17,10 @@ from sibyl_core.backends.surreal.content_schema import (
     EMBEDDING_DIM,
 )
 from sibyl_core.backends.surreal.dedicated_client import DedicatedSurrealClient
-from sibyl_core.backends.surreal.schema import bootstrap_schema
+from sibyl_core.backends.surreal.schema import (
+    EMBEDDING_DIM as GRAPH_EMBEDDING_DIM,
+    bootstrap_schema,
+)
 from sibyl_core.backends.surreal.schema_version import (
     GRAPH_SCHEMA_NAME,
     get_schema_version,
@@ -534,6 +537,38 @@ async def test_live_surreal_server_round_trips_native_entity() -> None:
                 await _drop_surreal_namespace(client.namespace)
         else:
             await _drop_surreal_namespace(client.namespace)
+
+
+@pytest.mark.asyncio
+async def test_live_surreal_server_batches_fenced_entity_embedding_backfill() -> None:
+    async with _live_graph_manager() as (client, _manager):
+        manager = EntityManager(
+            client,
+            group_id=client.group_id,
+            embedding_provider=_StaticEmbeddingProvider([0.25] * GRAPH_EMBEDDING_DIM),
+        )
+        entities = tuple(
+            Entity(
+                id=f"live-batched-{index}-{uuid4().hex}",
+                entity_type=EntityType.SESSION,
+                name=f"Live batched entity {index}",
+                content=f"Live content {index}",
+                organization_id=client.group_id,
+            )
+            for index in range(2)
+        )
+        await manager.create_direct_bulk(entities)
+
+        ready_ids = await manager.backfill_embeddings_if_current(entities)
+        stored = [await manager.get(entity.id) for entity in entities]
+
+        changed = entities[1].model_copy(update={"content": "Changed live content"})
+        await manager.create_direct_bulk((changed,))
+        stale_ids = await manager.backfill_embeddings_if_current((entities[1],))
+
+        assert ready_ids == [entity.id for entity in entities]
+        assert all(entity.embedding for entity in stored)
+        assert stale_ids == []
 
 
 @pytest.mark.asyncio

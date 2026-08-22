@@ -11,6 +11,7 @@ import pytest
 
 import sibyl_core.services.graph as graph_module
 import sibyl_core.services.graph_client as graph_client_module
+import sibyl_core.services.graph_entities as graph_entities_module
 import sibyl_core.services.graph_entity_search as graph_entity_search_module
 import sibyl_core.services.graph_entity_store as graph_entity_store_module
 import sibyl_core.services.graph_runtime as graph_runtime_module
@@ -76,6 +77,9 @@ class _EmbeddingWriteClient:
         if "INSERT INTO entity $rows ON DUPLICATE KEY UPDATE" in query:
             rows = cast("list[dict[str, object]]", params["rows"])
             return [{"uuid": row["uuid"], "name_embedding": row["name_embedding"]} for row in rows]
+        if "WHERE group_id = $group_id AND uuid IN $uuids" in query:
+            rows = cast("dict[str, dict[str, object]]", params["rows_by_uuid"]).values()
+            return [{"uuid": row["uuid"]} for row in rows]
         if "RELATE $src->$rel->$tgt" in query:
             return [{"uuid": params["uuid"], "fact_embedding": params["fact_embedding"]}]
         return []
@@ -2017,6 +2021,89 @@ async def test_native_embedding_backfill_cannot_overwrite_or_resurrect_stale_ent
     assert stored.content == "  version two\n"
     assert stored.embedding
     assert deleted_ids == []
+
+
+@pytest.mark.asyncio
+async def test_native_embedding_backfill_batches_indexed_updates() -> None:
+    client = _EmbeddingWriteClient()
+    entities = [
+        Entity(
+            id=f"session_batched_{index}",
+            entity_type=EntityType.SESSION,
+            name=f"Batched session {index}",
+            content=f"Evidence {index}",
+            embedding=[float(index)] * 1024,
+            organization_id=client.group_id,
+        )
+        for index in range(2)
+    ]
+
+    updated_ids = await graph_entity_store_module._update_entity_embeddings_if_current(
+        cast("Any", client),
+        entities,
+        group_id=client.group_id,
+    )
+
+    assert updated_ids == {entity.id for entity in entities}
+    assert len(client.calls) == 1
+    query, params = client.calls[0]
+    assert "WHERE group_id = $group_id AND uuid IN $uuids" in query
+    assert f"<array<float, {EMBEDDING_DIM}>>" in query
+    assert cast("list[str]", params["uuids"]) == [entity.id for entity in entities]
+    assert len(cast("dict[str, object]", params["rows_by_uuid"])) == len(entities)
+
+
+@pytest.mark.asyncio
+async def test_native_embedding_backfill_bounds_each_write_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = SurrealGraphClient(group_id="org-native-bounded-embedding", url="memory://")
+    provider = DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
+            provider="deterministic",
+            model="unit-test",
+            dimensions=1024,
+            cache_namespace="native-bounded-embedding-test",
+            tokenizer_estimate_method="utf8-byte-length",
+        )
+    )
+    entities = tuple(
+        Entity(
+            id=f"session_bounded_{index}",
+            entity_type=EntityType.SESSION,
+            name=f"Bounded session {index}",
+            content=f"Evidence {index}",
+            organization_id=client.group_id,
+        )
+        for index in range(3)
+    )
+    update_batch = AsyncMock(
+        side_effect=lambda _client, batch, **_kwargs: {entity.id for entity in batch}
+    )
+    monkeypatch.setattr(
+        graph_entities_module,
+        "_update_entity_embeddings_if_current",
+        update_batch,
+    )
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(
+            client,
+            group_id=client.group_id,
+            embedding_provider=provider,
+        )
+        await manager.create_direct_bulk(entities)
+
+        ready_ids = await manager.backfill_embeddings_if_current(
+            entities,
+            embedding_batch_size=2,
+        )
+    finally:
+        await client.close()
+
+    assert ready_ids == [entity.id for entity in entities]
+    assert update_batch.await_count == 2
+    assert [len(call.args[1]) for call in update_batch.await_args_list] == [2, 1]
 
 
 @pytest.mark.asyncio

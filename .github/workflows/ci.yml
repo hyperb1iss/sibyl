@@ -626,6 +626,13 @@ jobs:
       - name: Run live ingestion primitives
         run: moon run api:test-live
 
+      - name: Run local embedding dimension backfill
+        env:
+          PYTEST_ADDOPTS: >-
+            -k live_surreal_server_batches_fenced_entity_embedding_backfill -x
+          SIBYL_GRAPH_EMBEDDING_DIMENSIONS: "384"
+        run: moon run api:test-live --force
+
   e2e:
     name: E2E
     needs: changes
