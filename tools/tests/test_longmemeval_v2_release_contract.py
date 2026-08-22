@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from pathlib import Path
@@ -14,7 +15,6 @@ from benchmarks import (
 )
 from benchmarks import longmemeval_v2_release_contract as contract
 from benchmarks import longmemeval_v2_release_inputs as inputs
-from benchmarks import longmemeval_v2_release_io as release_io
 from benchmarks import longmemeval_v2_release_memory as release_memory
 from benchmarks import longmemeval_v2_release_package_root as package_root
 from benchmarks import longmemeval_v2_release_plan as release_plan
@@ -435,6 +435,10 @@ def test_authorization_write_rejects_paid_output_containment(
     assert not target.exists()
 
 
+@pytest.mark.skipif(
+    sys.platform != "darwin",
+    reason="requires Darwin immutable file flags",
+)
 def test_stage_plan_write_is_atomic_and_one_shot_under_concurrency(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -442,16 +446,10 @@ def test_stage_plan_write_is_atomic_and_one_shot_under_concurrency(
     target = tmp_path / "authority" / "stage-plan.json"
     payload = {"output_root": str(tmp_path / "paid-output")}
     barrier = Barrier(2)
-    original_link = release_io.os.link
     monkeypatch.setattr(release_plan, "require_stage_plan", lambda _raw: [])
 
-    def synchronized_link(source: Path, destination: Path, **kwargs: Any) -> None:
-        barrier.wait()
-        original_link(source, destination, **kwargs)
-
-    monkeypatch.setattr(release_io.os, "link", synchronized_link)
-
     def publish() -> str:
+        barrier.wait()
         try:
             release_plan.write_stage_plan(target, payload)
         except contract.StagePlanError:

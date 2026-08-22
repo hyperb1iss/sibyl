@@ -24,7 +24,7 @@ POST_WRITE_VALIDATION_CALL = 2
 FINAL_PATH_VALIDATION_CALL = 3
 PLAN_WRITER_COUNT = 8
 
-pytestmark = pytest.mark.skipif(
+requires_darwin_file_flags = pytest.mark.skipif(
     sys.platform != "darwin",
     reason="requires Darwin immutable file flags",
 )
@@ -57,6 +57,7 @@ def _reuse_descriptor(descriptor: int, victim_path: Path) -> int:
     return descriptor
 
 
+@requires_darwin_file_flags
 def test_ensure_directory_interrupt_closes_partially_owned_child(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -92,6 +93,7 @@ def test_ensure_directory_interrupt_closes_partially_owned_child(
     _assert_closed(opened[-1])
 
 
+@requires_darwin_file_flags
 def test_open_root_interrupt_closes_partially_owned_descriptor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -227,6 +229,7 @@ def test_frozen_file_interrupt_never_closes_reused_foreign_fd(
     os.close(victim)
 
 
+@requires_darwin_file_flags
 def test_frozen_tree_cleanup_never_closes_reused_directory_fd(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -254,6 +257,7 @@ def test_frozen_tree_cleanup_never_closes_reused_directory_fd(
     os.close(victim)
 
 
+@requires_darwin_file_flags
 def test_owned_plan_publication_never_redirects_after_parent_swap(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -346,6 +350,7 @@ def test_owned_plan_publication_interrupt_removes_the_temporary(
     assert not list(target.parent.glob(".stage.json.*.tmp"))
 
 
+@requires_darwin_file_flags
 def test_owned_plan_publication_rejects_final_target_replacement(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -373,6 +378,7 @@ def test_owned_plan_publication_rejects_final_target_replacement(
     assert not target.exists()
 
 
+@requires_darwin_file_flags
 def test_owned_plan_publication_rejects_final_target_chmod(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -397,6 +403,7 @@ def test_owned_plan_publication_rejects_final_target_chmod(
         plan_publication.write_json_once_owned_path(target, {"status": "sealed"})
 
 
+@requires_darwin_file_flags
 def test_owned_plan_publication_rejects_in_place_mutation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -423,6 +430,7 @@ def test_owned_plan_publication_rejects_in_place_mutation(
         plan_publication.write_json_once_owned_path(target, {"status": "sealed"})
 
 
+@requires_darwin_file_flags
 def test_owned_plan_publication_preserves_reused_plan_file_fd(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -466,6 +474,7 @@ def test_owned_plan_publication_preserves_reused_plan_file_fd(
     os.close(victim)
 
 
+@requires_darwin_file_flags
 def test_owned_plan_publication_rejects_late_parent_relocation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -510,6 +519,7 @@ def test_owned_plan_publication_rejects_late_parent_relocation(
     assert not (displaced / "stage.json").exists()
 
 
+@requires_darwin_file_flags
 def test_owned_plan_publication_rejects_relocation_after_final_validation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -607,6 +617,7 @@ def test_owned_plan_publication_defers_real_sigint_until_fd_registration(
     assert not target.parent.exists()
 
 
+@requires_darwin_file_flags
 def test_owned_plan_publication_has_one_real_darwin_winner(
     tmp_path: Path,
 ) -> None:
@@ -629,6 +640,7 @@ def test_owned_plan_publication_has_one_real_darwin_winner(
     assert not list(target.parent.glob(".stage.json.*.tmp"))
 
 
+@requires_darwin_file_flags
 def test_owned_plan_publication_recovers_a_post_freeze_interrupt(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -656,6 +668,7 @@ def test_owned_plan_publication_recovers_a_post_freeze_interrupt(
     assert package_root.file_flags(target.stat()) == plan_publication.PLAN_FILE_FLAGS
 
 
+@requires_darwin_file_flags
 def test_owned_plan_publication_recovers_post_rename_interrupt(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -729,6 +742,7 @@ def test_owned_plan_identity_capture_does_not_close_a_reused_fd(
     assert not target.exists()
 
 
+@requires_darwin_file_flags
 def test_owned_plan_helper_registers_authority_before_return(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

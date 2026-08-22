@@ -26,7 +26,7 @@ from tools.bench import longmemeval_v2_rig as rig
 
 COMMAND_COUNT = 4
 
-pytestmark = pytest.mark.skipif(
+requires_darwin_file_flags = pytest.mark.skipif(
     sys.platform != "darwin",
     reason="requires Darwin immutable file flags",
 )
@@ -269,6 +269,7 @@ def _published_members(root: Path) -> tuple[dict[str, Any], dict[str, bytes]]:
     return publication, members
 
 
+@requires_darwin_file_flags
 def test_official_arm_package_records_every_command_and_exact_output(
     executed: ExecutedStage,
     tmp_path: Path,
@@ -301,6 +302,7 @@ def test_official_arm_package_records_every_command_and_exact_output(
     )
 
 
+@requires_darwin_file_flags
 def test_zero_exit_without_outputs_writes_fail_receipt(
     executed: ExecutedStage,
     tmp_path: Path,
@@ -369,6 +371,7 @@ def test_packaging_rejects_stale_root_without_deleting_it(
     assert marker.read_text(encoding="utf-8") == "mine\n"
 
 
+@requires_darwin_file_flags
 def test_completed_package_rejects_bound_output_mutation(
     executed: ExecutedStage,
     tmp_path: Path,
@@ -397,6 +400,7 @@ def test_completed_package_rejects_bound_output_mutation(
         )
 
 
+@requires_darwin_file_flags
 def test_completed_package_rejects_mutable_object_mode(
     executed: ExecutedStage,
     tmp_path: Path,
@@ -423,7 +427,13 @@ def test_completed_package_rejects_mutable_object_mode(
         )
 
 
-@pytest.mark.parametrize("mutation", ["status", "object"])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        pytest.param("status", marks=requires_darwin_file_flags),
+        "object",
+    ],
+)
 def test_publication_returns_only_after_canonical_consumer_validation(
     mutation: str,
     executed: ExecutedStage,
@@ -470,6 +480,7 @@ def test_publication_returns_only_after_canonical_consumer_validation(
     assert published is (mutation == "status")
 
 
+@requires_darwin_file_flags
 def test_completed_package_rejects_publication_receipt_mutation(
     executed: ExecutedStage,
     tmp_path: Path,
@@ -497,6 +508,7 @@ def test_completed_package_rejects_publication_receipt_mutation(
         )
 
 
+@requires_darwin_file_flags
 def test_completed_package_object_rebuild_is_deterministic(
     executed: ExecutedStage,
     tmp_path: Path,
@@ -594,6 +606,7 @@ def test_arm_root_creation_rejects_packages_parent_symlink_swap(
     assert not (escape / "aa-1-left").exists()
 
 
+@requires_darwin_file_flags
 def test_arm_packages_are_canonical_non_nested_siblings(
     executed: ExecutedStage,
     tmp_path: Path,
@@ -617,6 +630,7 @@ def test_arm_packages_are_canonical_non_nested_siblings(
         )
 
 
+@requires_darwin_file_flags
 def test_completed_publication_rejects_live_status_mutation(
     executed: ExecutedStage,
     tmp_path: Path,
@@ -641,6 +655,7 @@ def test_completed_publication_rejects_live_status_mutation(
         )
 
 
+@requires_darwin_file_flags
 def test_completed_publication_revalidates_paid_artifacts(
     executed: ExecutedStage,
     tmp_path: Path,
@@ -665,6 +680,7 @@ def test_completed_publication_revalidates_paid_artifacts(
         )
 
 
+@requires_darwin_file_flags
 def test_publication_interruption_leaves_no_authority_and_blocks_reuse(
     executed: ExecutedStage,
     tmp_path: Path,
@@ -701,6 +717,7 @@ def test_publication_interruption_leaves_no_authority_and_blocks_reuse(
         )
 
 
+@requires_darwin_file_flags
 @pytest.mark.parametrize(
     "target_step",
     ["operating-point", "submission", "combined-metrics", "official-receipt"],
@@ -771,6 +788,7 @@ def test_package_steps_reject_foreign_files_in_official_subtrees(
         )
 
 
+@requires_darwin_file_flags
 def test_packaging_rejects_combined_receipt_mutation_during_bridge(
     executed: ExecutedStage,
     tmp_path: Path,

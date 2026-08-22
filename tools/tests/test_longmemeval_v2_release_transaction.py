@@ -25,7 +25,7 @@ from benchmarks.longmemeval_v2_release_inputs import StagePlanError, bind_artifa
 EXECUTED_COST_USD = 0.5
 MUTABLE_FILE_MODE = 0o600
 
-pytestmark = pytest.mark.skipif(
+requires_darwin_file_flags = pytest.mark.skipif(
     sys.platform != "darwin",
     reason="requires Darwin immutable file flags",
 )
@@ -79,6 +79,7 @@ def _live_status(status: str = "EXECUTED") -> dict[str, Any]:
     }
 
 
+@requires_darwin_file_flags
 def test_pending_transaction_root_is_exactly_one_canonical_uuid(tmp_path: Path) -> None:
     root = tmp_path.resolve()
     with stage_transaction.open_pending_transaction(
@@ -98,6 +99,7 @@ def test_pending_transaction_root_is_exactly_one_canonical_uuid(tmp_path: Path) 
         stage_transaction.open_pending_transaction(root, prefix="packages.pending.")
 
 
+@requires_darwin_file_flags
 def test_json_binding_uses_future_public_path_without_leaking_staging(
     tmp_path: Path,
 ) -> None:
@@ -231,6 +233,7 @@ def test_preregistration_authorization_rebases_only_after_pending_validation(
     assert len(validations) == 1
 
 
+@requires_darwin_file_flags
 def test_outcome_transaction_binds_only_final_public_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -289,6 +292,7 @@ def test_outcome_transaction_binds_only_final_public_paths(
     assert all("packages.pending" not in binding["path"] for binding in bindings.values())
 
 
+@requires_darwin_file_flags
 @pytest.mark.parametrize("stage", ["anchor", "render"])
 def test_zero_pass_outcome_never_creates_an_empty_passes_directory(
     tmp_path: Path,
@@ -341,6 +345,7 @@ def test_zero_pass_outcome_never_creates_an_empty_passes_directory(
     assert not (pending / "passes").exists()
 
 
+@requires_darwin_file_flags
 def test_pending_transaction_never_writes_through_descendant_symlink(
     tmp_path: Path,
 ) -> None:
@@ -360,6 +365,7 @@ def test_pending_transaction_never_writes_through_descendant_symlink(
     assert not (escaped / "aa-1.json").exists()
 
 
+@requires_darwin_file_flags
 def test_pending_write_interrupt_removes_owned_temporary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -423,6 +429,7 @@ def test_status_write_interrupt_preserves_status_without_temporary(
     assert not any(entry.name.endswith(".tmp") for entry in output_root.iterdir())
 
 
+@requires_darwin_file_flags
 def test_public_package_root_freeze_interrupt_is_resumable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -469,6 +476,7 @@ def test_public_package_root_freeze_interrupt_is_resumable(
         authority.require_unchanged()
 
 
+@requires_darwin_file_flags
 def test_stage_receipt_freeze_interrupt_reuses_exact_publication(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -592,6 +600,7 @@ def test_stage_child_open_interrupt_closes_partial_descriptor(
         os.fstat(opened[-1])
 
 
+@requires_darwin_file_flags
 @pytest.mark.parametrize("relative", ["packages/outcome.json", "stage_receipt.json"])
 def test_frozen_stage_authority_retains_files_through_final_validation(
     tmp_path: Path,
@@ -655,6 +664,7 @@ def test_packaging_handoff_revalidates_preregistration_template_last(
         package_claim.require_packaging_handoff({}, claim, live)
 
 
+@requires_darwin_file_flags
 def test_frozen_publication_rejects_foreign_and_mutable_entries(tmp_path: Path) -> None:
     output_root = tmp_path / "paid"
     output_root.mkdir()

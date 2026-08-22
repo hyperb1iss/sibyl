@@ -18,7 +18,7 @@ RUNS = ({"arm_id": ARM_ID},)
 OWNED_DESCRIPTOR_COUNT = 2
 LEASE_DESCRIPTOR_COUNT = 7
 
-pytestmark = pytest.mark.skipif(
+requires_darwin_file_flags = pytest.mark.skipif(
     sys.platform != "darwin",
     reason="requires Darwin immutable file flags",
 )
@@ -107,6 +107,7 @@ def test_packages_root_rejects_a_case_alias_under_a_sealed_root(tmp_path: Path) 
         package_root.bind_packages_root(plan, RUNS, alias)
 
 
+@requires_darwin_file_flags
 def test_fd_owned_child_writes_file_and_tar_without_lexical_redirection(
     tmp_path: Path,
 ) -> None:
@@ -182,6 +183,7 @@ def test_fd_owned_child_writes_file_and_tar_without_lexical_redirection(
         lease.close()
 
 
+@requires_darwin_file_flags
 def test_sandbox_denies_descendant_symlink_escape(tmp_path: Path) -> None:
     plan = _plan(tmp_path)
     packages = tmp_path / "packages"
@@ -218,6 +220,7 @@ def test_sandbox_denies_descendant_symlink_escape(tmp_path: Path) -> None:
         lease.close()
 
 
+@requires_darwin_file_flags
 def test_reused_package_descriptor_is_rejected_before_use(tmp_path: Path) -> None:
     plan = _plan(tmp_path)
     packages = tmp_path / "packages"
@@ -239,6 +242,7 @@ def test_reused_package_descriptor_is_rejected_before_use(tmp_path: Path) -> Non
     os.close(lease.arm_fd)
 
 
+@requires_darwin_file_flags
 def test_package_lease_construction_closes_partial_descriptors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -272,6 +276,7 @@ def test_package_lease_construction_closes_partial_descriptors(
             os.fstat(descriptor)
 
 
+@requires_darwin_file_flags
 def test_command_interrupt_closes_owned_descriptors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -320,6 +325,7 @@ def test_command_interrupt_closes_owned_descriptors(
         lease.close()
 
 
+@requires_darwin_file_flags
 @pytest.mark.parametrize("failure", [StagePlanError("owner race"), KeyboardInterrupt()])
 def test_arm_lease_final_owner_failure_closes_every_descriptor(
     failure: BaseException,
@@ -362,6 +368,7 @@ def test_arm_lease_final_owner_failure_closes_every_descriptor(
             os.fstat(descriptor)
 
 
+@requires_darwin_file_flags
 def test_second_descriptor_duplication_interrupt_closes_first_duplicate(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -409,6 +416,7 @@ def test_second_descriptor_duplication_interrupt_closes_first_duplicate(
         lease.close()
 
 
+@requires_darwin_file_flags
 def test_owned_tree_rejects_foreign_empty_directory(tmp_path: Path) -> None:
     plan = _plan(tmp_path)
     packages = tmp_path / "packages"
@@ -424,6 +432,7 @@ def test_owned_tree_rejects_foreign_empty_directory(tmp_path: Path) -> None:
         lease.close()
 
 
+@requires_darwin_file_flags
 def test_receipt_owner_failure_closes_unassigned_descriptor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
