@@ -1875,6 +1875,41 @@ def test_provider_accounting_prices_pinned_openai_judge_usage(tmp_path: Path) ->
     assert accounting["cost_coverage_complete"] is True
 
 
+def test_provider_accounting_rejects_negative_judge_cost(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    usage_path = tmp_path / "judge.jsonl"
+    usage_path.touch()
+    accounting = module._provider_accounting(
+        [
+            {
+                "judge_usage_path": usage_path,
+                "judge_usage_invalid_lines": 0,
+                "judge_usage_foreign_event_count": 0,
+                "judge_usage_events": [
+                    {
+                        "requested_model": "gpt-5.2",
+                        "provider_model": "gpt-5.2-2025-12-11",
+                        "usage": {
+                            "cost_usd": -0.01,
+                            "prompt_tokens": 1000,
+                            "completion_tokens": 200,
+                            "total_tokens": 1200,
+                            "prompt_tokens_details": {"cached_tokens": 400},
+                        },
+                    }
+                ],
+                "expected_usage_run_id": "usage-current",
+            }
+        ],
+        role="judge",
+        fallback_input_tokens=0.0,
+        fallback_output_tokens=0.0,
+    )
+
+    assert accounting["settled_cost_usd"] == 0.0
+    assert accounting["cost_coverage_complete"] is False
+
+
 @pytest.mark.parametrize(
     ("provider_model", "prompt_details"),
     [
@@ -2008,6 +2043,40 @@ def test_embedding_accounting_prices_unreported_openai_usage() -> None:
     assert accounting["settled_cost_usd"] == pytest.approx(0.00004)
     assert accounting["official_price_snapshot"] == module.EVAL_PRICE_SNAPSHOT["embedding"]
     assert accounting["cost_coverage_complete"] is True
+
+
+def test_embedding_accounting_rejects_untracked_reported_cost() -> None:
+    module = _load_runner_module()
+    usage = {
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+        "requests": 1,
+        "inputs": 1,
+        "prompt_tokens": 1000,
+        "total_tokens": 1000,
+        "cost_reported_requests": 0,
+        "cost_usd": 0.25,
+    }
+    accounting = module._embedding_accounting(
+        [
+            {
+                "plan": {"load_memory_dir": None},
+                "per_question_rows": [
+                    {
+                        "memory_post_query_metadata": {
+                            "ingest_embedding_usage": usage,
+                            "search_metadata": {"embedding_usage": usage},
+                        }
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert accounting["provider_reported_cost_usd"] == pytest.approx(0.5)
+    assert accounting["settled_cost_usd"] == pytest.approx(0.5)
+    assert accounting["official_pricing_cost_usd"] == 0.0
+    assert accounting["cost_coverage_complete"] is False
 
 
 def test_planner_accounting_requires_complete_accurate_query_usage() -> None:

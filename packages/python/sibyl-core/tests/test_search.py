@@ -151,6 +151,34 @@ async def test_openai_embedding_usage_restores_provenance_into_empty_capture() -
     assert captured["prompt_tokens"] == 7
 
 
+def test_embedding_usage_marks_mixed_provenance() -> None:
+    usage: dict[str, str | int | float] = {}
+    common = {
+        "input_count": 1,
+        "prompt_tokens": 7,
+        "total_tokens": 7,
+        "cost": None,
+    }
+
+    embedding_providers._record_usage_totals(
+        usage,
+        provider="openai",
+        model="text-embedding-3-small",
+        **common,
+    )
+    embedding_providers._record_usage_totals(
+        usage,
+        provider="local",
+        model="sentence-transformers/all-MiniLM-L6-v2",
+        **common,
+    )
+
+    assert usage["provider"] == "mixed"
+    assert usage["model"] == "mixed"
+    assert usage["requests"] == 2
+    assert usage["prompt_tokens"] == 14
+
+
 @pytest.mark.asyncio
 async def test_local_sentence_transformer_provider_embeds_with_metadata() -> None:
     client = _FakeSentenceTransformer(dimensions=3)

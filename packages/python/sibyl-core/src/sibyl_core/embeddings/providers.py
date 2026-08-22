@@ -550,8 +550,10 @@ def _record_usage_totals(
     total_tokens: int,
     cost: float | None,
 ) -> None:
-    usage["provider"] = provider
-    usage["model"] = model
+    previous_provider = usage.get("provider")
+    previous_model = usage.get("model")
+    usage["provider"] = provider if previous_provider in (None, provider) else "mixed"
+    usage["model"] = model if previous_model in (None, model) else "mixed"
     usage["requests"] = int(usage.get("requests", 0)) + 1
     usage["inputs"] = int(usage.get("inputs", 0)) + input_count
     usage["prompt_tokens"] = int(usage.get("prompt_tokens", 0)) + prompt_tokens

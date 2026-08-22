@@ -2563,6 +2563,7 @@ def _embedding_cost_settlement(
         providers == [price["provider"]]
         and models == [price["model"]]
         and priced_requests == 0
+        and provider_reported_cost_usd == 0.0
         and input_tokens.is_integer()
     ):
         official_cost = _token_cost(int(input_tokens), float(price["input_per_million"]))
@@ -2858,7 +2859,9 @@ def _provider_accounting(
 
 def _provider_event_cost(event: dict[str, Any], *, role: str) -> dict[str, Any] | None:
     provider_cost = _number_from(event, ("usage", "cost_usd"))
-    if provider_cost is not None and provider_cost >= 0.0:
+    if provider_cost is not None:
+        if provider_cost < 0.0:
+            return None
         return {"cost_usd": provider_cost, "source": "provider_response_usage"}
     if role != "judge":
         return None
