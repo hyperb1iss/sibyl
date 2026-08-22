@@ -668,6 +668,16 @@ def test_claimed_tree_accepts_only_declared_saved_memory_artifacts(
 
     state.require_claimed_stage_plan(stage_plan)
 
+    baseline_memory_state = (
+        Path(stage_plan["runs"][1]["domains"]["web"]["output_dir"]) / "memory_state"
+    )
+    baseline_memory_state.mkdir(parents=True)
+    (baseline_memory_state / "memory_manifest.json").write_text("{}\n", encoding="utf-8")
+    with pytest.raises(StagePlanError, match="unknown entries"):
+        state.require_claimed_stage_plan(stage_plan)
+    (baseline_memory_state / "memory_manifest.json").unlink()
+    baseline_memory_state.rmdir()
+
     (memory_state / "foreign.bin").write_bytes(b"hostile")
     with pytest.raises(StagePlanError, match="unknown entries"):
         state.require_claimed_stage_plan(stage_plan)
