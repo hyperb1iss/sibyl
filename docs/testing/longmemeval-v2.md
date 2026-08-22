@@ -94,6 +94,36 @@ authorization says the treatment is not applicable.
 
 ### Plan a stage
 
+Prepare an isolated database directory, then start the pinned SurrealDB 3.2.3 eval service and
+Valkey:
+
+```bash
+export SIBYL_RELEASE_ROOT=/absolute/path/to/fresh-v1.3-eval-root
+mkdir -p "$SIBYL_RELEASE_ROOT/surreal"
+
+COMPOSE_PROJECT_NAME=sibyl-v13-eval SIBYL_REDIS_PORT=6393 \
+  docker compose --env-file /dev/null --profile eval --profile redis \
+  up -d surrealdb-eval redis
+```
+
+The eval service binds SurrealDB to port 8018. Its 8 GiB block cache, 128 MiB write buffer, and four
+write buffers prevent the full small-corpus ingest from claiming the machine's entire memory limit.
+Root credentials stay in the container environment rather than its command arguments.
+
+Launch the release API and worker in two more terminals:
+
+```bash
+moon run api:serve-local-embeddings
+moon run api:worker-local-embeddings
+```
+
+The sealed release path requires both tasks. Each task connects to SurrealDB on port 8018 and Valkey
+on port 6393, installs `sentence-transformers==6.0.0`, and pins the `local` provider with
+`sentence-transformers/all-MiniLM-L6-v2`. Do not substitute the generic API or worker task. Keep
+both processes running through release execution. The adapter rejects a worker that did not report
+observed MiniLM ingestion and requires observed MiniLM query usage from the API before accepting
+cache-only query receipts.
+
 Choose absolute, canonical paths that do not exist yet for the plan file and paid output root. The
 plan file's immediate parent must also be a fresh directory dedicated to that one plan. The
 publisher makes the directory immutable with the plan, so each later stage needs another fresh
@@ -428,7 +458,9 @@ moon run bench-gate -- \
 - Official LongMemEval-V2 checkout available through `--official-repo`.
 - Full dataset prepared with `questions.jsonl`, `haystacks/lme_v2_<tier>.json`,
   `trajectories.jsonl`, and screenshots if image evidence is enabled.
-- Live disposable Sibyl API stack. The adapter mutates the target through `/entities` and `/search`.
+- Live disposable SurrealDB 3.2.3 and Valkey services, plus the Sibyl API and worker started with
+  `api:serve-local-embeddings` and `api:worker-local-embeddings`. The adapter mutates the target
+  through `/entities` and `/search`.
 - Reader model endpoint, normally OpenRouter `qwen/qwen3.5-9b` with `OPENROUTER_API_KEY`.
 - Evaluator key/model for LLM-graded categories, normally `gpt-5.2`.
 - Same method and tier for `web` and `enterprise` before combining metrics.

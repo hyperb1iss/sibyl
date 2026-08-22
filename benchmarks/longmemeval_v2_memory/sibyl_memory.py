@@ -241,6 +241,8 @@ LOADED_MEMORY_RUNTIME_KEYS = frozenset(
         "api_retry_attempts",
         "api_retry_base_delay_seconds",
         "api_retry_max_delay_seconds",
+        "required_embedding_provider",
+        "required_embedding_model",
         "search_limit",
         "max_context_items",
         "max_context_chars_per_item",
@@ -3559,6 +3561,50 @@ def _naive_arm_conflicts(memory_params: dict[str, object]) -> list[str]:
     return sorted(conflicts)
 
 
+def require_embedding_usage_profile(
+    usage: dict[str, object],
+    *,
+    provider: str,
+    model: str,
+    surface: str,
+    require_observed_usage: bool = True,
+) -> None:
+    if not provider and not model:
+        return
+    if not provider or not model:
+        raise ValueError("required embedding provider and model must be configured together")
+    actual_provider = _stripped_str(usage.get("provider"))
+    actual_model = _stripped_str(usage.get("model"))
+    if actual_provider != provider or actual_model != model:
+        raise RuntimeError(
+            f"{surface} embedding profile mismatch: "
+            f"expected {provider}/{model}, received "
+            f"{actual_provider or 'missing'}/{actual_model or 'missing'}"
+        )
+    requests = _strict_nonnegative_int(usage.get("requests"))
+    inputs = _strict_nonnegative_int(usage.get("inputs"))
+    if require_observed_usage and (
+        requests is None or inputs is None or requests == 0 or inputs == 0
+    ):
+        raise RuntimeError(f"{surface} embedding profile has no observed usage")
+
+
+def require_embedding_profile(
+    search_metadata: dict[str, object],
+    *,
+    provider: str,
+    model: str,
+    require_observed_usage: bool = True,
+) -> None:
+    require_embedding_usage_profile(
+        _string_key_dict(search_metadata.get("embedding_usage")),
+        provider=provider,
+        model=model,
+        surface="serving API",
+        require_observed_usage=require_observed_usage,
+    )
+
+
 @register_memory
 class SibylLiveApiMemory(Memory):
     memory_type = "sibyl_live_api"
@@ -3691,6 +3737,18 @@ class SibylLiveApiMemory(Memory):
         official_source = memory_params.get("official_source")
         self.official_source = dict(official_source) if isinstance(official_source, dict) else {}
         self.api_url = _normalize_api_url(_param_str(memory_params, "api_url", DEFAULT_API_URL))
+        self.required_embedding_provider = _param_str(
+            memory_params,
+            "required_embedding_provider",
+            "",
+        )
+        self.required_embedding_model = _param_str(
+            memory_params,
+            "required_embedding_model",
+            "",
+        )
+        if bool(self.required_embedding_provider) != bool(self.required_embedding_model):
+            raise ValueError("required embedding provider and model must be configured together")
         self.longmemeval_v2_domain = _param_str(
             memory_params,
             "longmemeval_v2_domain",
@@ -4901,6 +4959,12 @@ class SibylLiveApiMemory(Memory):
         if pending_jobs or not self._ingest_finalized:
             msg = f"memory ingestion has {pending_jobs} pending jobs; call finalize_ingest first"
             raise RuntimeError(msg)
+        require_embedding_usage_profile(
+            _string_key_dict(getattr(self, "ingest_embedding_usage", {})),
+            provider=getattr(self, "required_embedding_provider", ""),
+            model=getattr(self, "required_embedding_model", ""),
+            surface="ingest worker",
+        )
         stream_future = None
         stream_executor: ThreadPoolExecutor | None = None
         if getattr(self, "typed_stream_retrieval", DEFAULT_TYPED_STREAM_RETRIEVAL):
@@ -4962,6 +5026,17 @@ class SibylLiveApiMemory(Memory):
             ),
         )
         results, search_metadata = _required_context_evidence(context_response)
+        require_embedding_profile(
+            search_metadata,
+            provider=getattr(self, "required_embedding_provider", ""),
+            model=getattr(self, "required_embedding_model", ""),
+            require_observed_usage=not getattr(self, "_serving_embedding_observed", False),
+        )
+        embedding_usage = _string_key_dict(search_metadata.get("embedding_usage"))
+        if (_strict_nonnegative_int(embedding_usage.get("requests")) or 0) > 0 and (
+            _strict_nonnegative_int(embedding_usage.get("inputs")) or 0
+        ) > 0:
+            self._serving_embedding_observed = True
         if stream_future is not None and stream_executor is not None:
             try:
                 stream_results, stream_metadata = stream_future.result()
@@ -6131,6 +6206,8 @@ class SibylLiveApiMemory(Memory):
             self._pending_job_entity_ids = {}
         if getattr(self, "_pending_job_manifest_ids", None) is None:
             self._pending_job_manifest_ids = {}
+        if getattr(self, "ingest_embedding_usage", None) is None:
+            self.ingest_embedding_usage = {}
 
         pending = set(job_ids)
         total = len(pending)
@@ -6185,6 +6262,8 @@ class SibylLiveApiMemory(Memory):
                     continue
                 if status_value == "complete":
                     result = status.get("result")
+                    if job_kind != "note_distillation" and not isinstance(result, dict):
+                        raise RuntimeError(f"{job_name} job {job_id} omitted its result")
                     if isinstance(result, dict):
                         result_status = _stripped_str(result.get("status"))
                         if (
@@ -6203,9 +6282,16 @@ class SibylLiveApiMemory(Memory):
                                 f"{result_errors or projection_state}"
                             )
                             raise RuntimeError(msg)
+                        embedding_usage = result.get("embedding_usage")
+                        if job_kind != "note_distillation" and (
+                            not isinstance(embedding_usage, dict) or not embedding_usage
+                        ):
+                            raise RuntimeError(
+                                f"{job_name} job {job_id} omitted embedding usage accounting"
+                            )
                         _merge_usage_totals(
                             self.ingest_embedding_usage,
-                            result.get("embedding_usage"),
+                            embedding_usage,
                         )
                         if job_kind == "note_distillation":
                             _merge_note_distillation_usage(
@@ -6955,12 +7041,13 @@ def _retry_delay_seconds(
 
 
 def _merge_usage_totals(total: dict[str, object], usage: object) -> None:
-    if not isinstance(usage, dict):
+    if not isinstance(usage, dict) or not usage:
         return
-    for field_name in ("provider", "model"):
-        value = _stripped_str(usage.get(field_name))
-        if value:
-            total[field_name] = value
+    if total and not _embedding_usage_valid(total):
+        raise RuntimeError("existing embedding usage aggregate is invalid")
+    if not _embedding_usage_valid(usage):
+        raise RuntimeError("embedding job returned invalid usage accounting")
+    _merge_usage_provenance(total, usage)
     for field_name in (
         "requests",
         "inputs",
@@ -6969,9 +7056,7 @@ def _merge_usage_totals(total: dict[str, object], usage: object) -> None:
         "cost_reported_requests",
         "cost_usd",
     ):
-        value = usage.get(field_name)
-        if isinstance(value, bool) or not isinstance(value, int | float):
-            continue
+        value = usage[field_name]
         current = total.get(field_name, 0)
         current_number = current if isinstance(current, int | float) else 0
         total[field_name] = current_number + value
@@ -6984,15 +7069,15 @@ def _merge_note_distillation_usage(
     receipt = result.get("distillation_receipt")
     receipt_usage = receipt.get("usage") if isinstance(receipt, dict) else None
     usage = receipt_usage if isinstance(receipt_usage, dict) else result
-    for field_name in ("provider", "model"):
-        value = _stripped_str(usage.get(field_name))
-        if value:
-            total[field_name] = value
-    request_count = usage.get("requests", 1)
-    total["requests"] = _nonnegative_int(total.get("requests")) + _nonnegative_int(request_count)
+    if total and not _structured_usage_valid(total):
+        raise RuntimeError("existing distillation usage aggregate is invalid")
+    if not _structured_usage_valid(usage):
+        raise RuntimeError("distillation job returned invalid usage accounting")
+    _merge_usage_provenance(total, usage)
+    total["requests"] = _nonnegative_int(total.get("requests")) + int(usage["requests"])
     for field_name in ("input_tokens", "output_tokens", "total_tokens"):
         total[field_name] = _nonnegative_int(total.get(field_name)) + _nonnegative_int(
-            usage.get(field_name)
+            usage[field_name]
         )
     total["duration_ms"] = _nonnegative_int(total.get("duration_ms")) + _nonnegative_int(
         result.get("duration_ms")
@@ -7010,6 +7095,97 @@ def _merge_note_distillation_usage(
     prior_complete = total.get("cost_complete", True) is True
     total["cost_complete"] = (
         prior_complete and usage.get("cost_complete") is True and cost_is_number
+    )
+
+
+def _merge_usage_provenance(total: dict[str, object], usage: dict[str, object]) -> None:
+    for field_name in ("provider", "model"):
+        value = _stripped_str(usage.get(field_name))
+        previous = _stripped_str(total.get(field_name))
+        total[field_name] = value if not previous or previous == value else "mixed"
+
+
+def _strict_nonnegative_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _strict_nonnegative_number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) and number >= 0.0 else None
+
+
+def _embedding_usage_valid(usage: dict[str, object]) -> bool:
+    provider = _stripped_str(usage.get("provider"))
+    model = _stripped_str(usage.get("model"))
+    requests = _strict_nonnegative_int(usage.get("requests"))
+    inputs = _strict_nonnegative_int(usage.get("inputs"))
+    prompt_tokens = _strict_nonnegative_int(usage.get("prompt_tokens"))
+    total_tokens = _strict_nonnegative_int(usage.get("total_tokens"))
+    priced_requests = _strict_nonnegative_int(usage.get("cost_reported_requests"))
+    cost = _strict_nonnegative_number(usage.get("cost_usd"))
+    return bool(
+        provider
+        and provider != "mixed"
+        and model
+        and model != "mixed"
+        and requests is not None
+        and inputs is not None
+        and prompt_tokens is not None
+        and total_tokens == prompt_tokens
+        and priced_requests is not None
+        and priced_requests <= requests
+        and cost is not None
+        and (priced_requests > 0 or cost == 0.0)
+        and (
+            (requests == 0 and inputs == 0 and prompt_tokens == 0 and priced_requests == 0)
+            or (requests > 0 and inputs >= requests)
+        )
+        and (provider in {"disabled", "local"} or requests == 0 or prompt_tokens > 0)
+    )
+
+
+def _structured_usage_valid(usage: dict[str, object]) -> bool:
+    provider = _stripped_str(usage.get("provider"))
+    model = _stripped_str(usage.get("model"))
+    requests = _strict_nonnegative_int(usage.get("requests"))
+    input_tokens = _strict_nonnegative_int(usage.get("input_tokens"))
+    output_tokens = _strict_nonnegative_int(usage.get("output_tokens"))
+    total_tokens = _strict_nonnegative_int(usage.get("total_tokens"))
+    cost = (
+        None if usage.get("cost_usd") is None else _strict_nonnegative_number(usage.get("cost_usd"))
+    )
+    cost_complete = usage.get("cost_complete")
+    cost_shape_valid = (
+        cost is not None
+        if cost_complete is True
+        else (usage.get("cost_usd") is None or cost is not None)
+    )
+    return bool(
+        provider
+        and provider != "mixed"
+        and model
+        and model != "mixed"
+        and requests is not None
+        and input_tokens is not None
+        and output_tokens is not None
+        and total_tokens == input_tokens + output_tokens
+        and isinstance(cost_complete, bool)
+        and cost_shape_valid
+        and (
+            (requests or 0) > 0
+            and (total_tokens or 0) > 0
+            or (
+                requests == 0
+                and input_tokens == 0
+                and output_tokens == 0
+                and total_tokens == 0
+                and (cost is None or cost == 0.0)
+            )
+        )
     )
 
 

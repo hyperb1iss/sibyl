@@ -189,14 +189,18 @@ class OpenAIEmbeddingProvider:
 
     def _record_usage(self, response: Any, *, input_count: int) -> None:
         usage = getattr(response, "usage", None)
-        prompt_tokens = _usage_number(usage, "prompt_tokens") or 0.0
-        total_tokens = _usage_number(usage, "total_tokens") or prompt_tokens
-        cost = _usage_number(usage, "cost")
+        prompt_tokens = _required_usage_counter(usage, "prompt_tokens")
+        total_tokens = _required_usage_counter(usage, "total_tokens")
+        if prompt_tokens == 0 or total_tokens != prompt_tokens:
+            raise RuntimeError(
+                "embedding provider returned inconsistent prompt and total token usage"
+            )
+        cost = _optional_usage_cost(usage, "cost")
         with self._usage_lock:
             self._usage["requests"] += 1
             self._usage["inputs"] += input_count
-            self._usage["prompt_tokens"] += int(prompt_tokens)
-            self._usage["total_tokens"] += int(total_tokens)
+            self._usage["prompt_tokens"] += prompt_tokens
+            self._usage["total_tokens"] += total_tokens
             if cost is not None:
                 self._usage["cost_reported_requests"] += 1
                 self._usage["cost_usd"] += cost
@@ -204,9 +208,11 @@ class OpenAIEmbeddingProvider:
         if collector is not None:
             _record_usage_totals(
                 collector,
+                provider=self.metadata.provider,
+                model=self.metadata.model,
                 input_count=input_count,
-                prompt_tokens=int(prompt_tokens),
-                total_tokens=int(total_tokens),
+                prompt_tokens=prompt_tokens,
+                total_tokens=total_tokens,
                 cost=cost,
             )
 
@@ -302,7 +308,19 @@ class LocalSentenceTransformerEmbeddingProvider:
         if not texts:
             return []
         prepared = [text.strip() or _LOCAL_EMBEDDING_EMPTY_TEXT for text in texts]
-        return await asyncio.to_thread(self._embed_texts_sync, prepared)
+        embeddings = await asyncio.to_thread(self._embed_texts_sync, prepared)
+        collector = _embedding_usage_collector.get()
+        if collector is not None:
+            _record_usage_totals(
+                collector,
+                provider=self.metadata.provider,
+                model=self.metadata.model,
+                input_count=len(prepared),
+                prompt_tokens=0,
+                total_tokens=0,
+                cost=None,
+            )
+        return embeddings
 
     def _embed_texts_sync(self, texts: Sequence[str]) -> list[list[float]]:
         client = self._get_client_sync()
@@ -517,7 +535,7 @@ def _empty_embedding_usage(metadata: EmbeddingMetadata) -> dict[str, str | int |
     }
 
 
-def _usage_number(usage: Any, field_name: str) -> float | None:
+def _usage_value(usage: Any, field_name: str) -> Any:
     if usage is None:
         return None
     value = usage.get(field_name) if isinstance(usage, dict) else getattr(usage, field_name, None)
@@ -525,10 +543,26 @@ def _usage_number(usage: Any, field_name: str) -> float | None:
         model_extra = getattr(usage, "model_extra", None)
         if isinstance(model_extra, dict):
             value = model_extra.get(field_name)
-    if isinstance(value, bool) or not isinstance(value, int | float):
+    return value
+
+
+def _required_usage_counter(usage: Any, field_name: str) -> int:
+    value = _usage_value(usage, field_name)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise RuntimeError(f"embedding provider returned invalid {field_name} usage counter")
+    return value
+
+
+def _optional_usage_cost(usage: Any, field_name: str) -> float | None:
+    value = _usage_value(usage, field_name)
+    if value is None:
         return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise RuntimeError("embedding provider returned invalid cost usage")
     number = float(value)
-    return number if math.isfinite(number) else None
+    if not math.isfinite(number) or number < 0.0:
+        raise RuntimeError("embedding provider returned invalid cost usage")
+    return number
 
 
 def _numeric_usage_value(value: object) -> float:
@@ -541,11 +575,17 @@ def _numeric_usage_value(value: object) -> float:
 def _record_usage_totals(
     usage: dict[str, str | int | float],
     *,
+    provider: str,
+    model: str,
     input_count: int,
     prompt_tokens: int,
     total_tokens: int,
     cost: float | None,
 ) -> None:
+    previous_provider = usage.get("provider")
+    previous_model = usage.get("model")
+    usage["provider"] = provider if previous_provider in (None, provider) else "mixed"
+    usage["model"] = model if previous_model in (None, model) else "mixed"
     usage["requests"] = int(usage.get("requests", 0)) + 1
     usage["inputs"] = int(usage.get("inputs", 0)) + input_count
     usage["prompt_tokens"] = int(usage.get("prompt_tokens", 0)) + prompt_tokens

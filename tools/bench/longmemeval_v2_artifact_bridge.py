@@ -726,8 +726,8 @@ def _domain_cost_and_tokens(receipt: dict[str, Any], *, domain: str) -> tuple[fl
     if not isinstance(cost, dict) or cost.get("coverage_complete") is not True:
         raise BridgeInputError(f"{domain} provider cost coverage is incomplete")
     actual_cost = _finite_number(
-        cost.get("provider_reported_total_usd"),
-        name=f"{domain} provider cost",
+        cost.get("settled_total_usd", cost.get("provider_reported_total_usd")),
+        name=f"{domain} settled provider cost",
     )
     total_tokens = 0
     for role in PROVIDER_ROLE_KEYS:

@@ -22,6 +22,8 @@ from benchmarks.longmemeval_v2_release_authorization import (
 )
 from benchmarks.longmemeval_v2_release_contract import (
     MAX_WORKERS_CAP,
+    RELEASE_EMBEDDING_MODEL,
+    RELEASE_EMBEDDING_PROVIDER,
     STAGE_PLAN_SCHEMA_VERSION,
     require_stage_spec,
 )
@@ -148,6 +150,10 @@ def _base_command(
         str(output_dir),
         "--api-url",
         runtime["api_url"],
+        "--require-embedding-provider",
+        RELEASE_EMBEDDING_PROVIDER,
+        "--require-embedding-model",
+        RELEASE_EMBEDDING_MODEL,
         "--reader-base-url",
         runtime["reader_base_url"],
         "--reader-model",

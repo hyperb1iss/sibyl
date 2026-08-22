@@ -370,6 +370,47 @@ def test_longmemeval_v2_full_moon_task_installs_official_harness_deps() -> None:
     assert "--with torchvision" in task
 
 
+def test_longmemeval_v2_release_runbook_names_both_embedding_processes() -> None:
+    runbook = (Path(__file__).parents[2] / "docs" / "testing" / "longmemeval-v2.md").read_text(
+        encoding="utf-8"
+    )
+
+    normalized = " ".join(runbook.split())
+    assert "moon run api:serve-local-embeddings" in runbook
+    assert "moon run api:worker-local-embeddings" in runbook
+    assert "Do not substitute the generic API or worker task" in normalized
+    assert "up -d surrealdb-eval redis" in normalized
+    assert "SIBYL_REDIS_PORT=6393" in runbook
+
+
+def test_local_embedding_tasks_share_the_release_runtime() -> None:
+    moon = (Path(__file__).parents[2] / "apps" / "api" / "moon.yml").read_text(encoding="utf-8")
+    serve = moon.split("  serve-local-embeddings:", 1)[1].split("  # Worker", 1)[0]
+    worker = moon.split("  worker-local-embeddings:", 1)[1].split("  # Dependencies", 1)[0]
+
+    for task in (serve, worker):
+        assert "SIBYL_COORDINATION_BACKEND: redis" in task
+        assert "SIBYL_SURREAL_URL: ws://127.0.0.1:8018/rpc" in task
+        assert "SIBYL_SURREAL_USERNAME: root" in task
+        assert "SIBYL_SURREAL_PASSWORD: root" in task
+        assert "SIBYL_REDIS_HOST: 127.0.0.1" in task
+        assert 'SIBYL_REDIS_PORT: "6393"' in task
+
+
+def test_release_compose_service_pins_the_bounded_surreal_runtime() -> None:
+    compose = (Path(__file__).parents[2] / "docker-compose.yml").read_text(encoding="utf-8")
+    eval_service = compose.split("  surrealdb-eval:", 1)[1].split("  redis:", 1)[0]
+
+    assert "surrealdb/surrealdb:v3.2.3" in eval_service
+    assert '["start", "--log", "info", "rocksdb:///data/sibyl.db"]' in eval_service
+    assert "SURREAL_BIND: 0.0.0.0:8000" in eval_service
+    assert 'SURREAL_ROCKSDB_BLOCK_CACHE_SIZE: "8589934592"' in eval_service
+    assert 'SURREAL_ROCKSDB_WRITE_BUFFER_SIZE: "134217728"' in eval_service
+    assert 'SURREAL_ROCKSDB_MAX_WRITE_BUFFER_NUMBER: "4"' in eval_service
+    assert '"127.0.0.1:8018:8000"' in eval_service
+    assert "${SIBYL_RELEASE_ROOT:-./.moon/cache/surreal-eval}/surreal" in eval_service
+
+
 def _write_dataset(
     root: Path,
     *,
