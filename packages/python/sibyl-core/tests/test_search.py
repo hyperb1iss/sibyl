@@ -1658,14 +1658,26 @@ async def test_node_fulltext_queries_each_index_and_merges_global_top_k() -> Non
         project="project_123",
         accessible_projects={"project_123"},
     )
+    search_filter = search_module.SearchFilter(
+        node_types=("note",),
+        project_ids=("project_123",),
+    )
+
+    assert (
+        await source_module._node_fulltext_candidates(
+            client=client,
+            plan=plan,
+            search_filter=search_filter,
+            limit=0,
+        )
+        == []
+    )
+    assert client.calls == []
 
     candidates = await source_module._node_fulltext_candidates(
         client=client,
         plan=plan,
-        search_filter=search_module.SearchFilter(
-            node_types=("note",),
-            project_ids=("project_123",),
-        ),
+        search_filter=search_filter,
         limit=3,
     )
 

@@ -184,7 +184,9 @@ async def _node_fulltext_candidates(
     terms = build_fulltext_terms(plan.query)
     if not terms:
         return []
-    result_limit = max(int(limit), 1)
+    result_limit = int(limit)
+    if result_limit <= 0:
+        return []
     filter_clauses, filter_params = _node_filter_clause(search_filter)
     field_rows = await asyncio.gather(
         *(
