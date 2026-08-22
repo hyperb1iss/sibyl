@@ -441,7 +441,7 @@ UPDATE (
     FROM entity
     WHERE group_id = $group_id AND uuid IN $uuids
 ) SET
-    name_embedding = $rows_by_uuid[uuid].name_embedding,
+    name_embedding = <array<float, 1024>>$rows_by_uuid[uuid].name_embedding,
     attributes.embedding_metadata = $rows_by_uuid[uuid].embedding_metadata,
     attributes.updated_at = $rows_by_uuid[uuid].updated_at,
     updated_at = $rows_by_uuid[uuid].updated_at,
