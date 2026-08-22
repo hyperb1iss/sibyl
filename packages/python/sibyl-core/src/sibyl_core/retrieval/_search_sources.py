@@ -43,6 +43,7 @@ type RawMemoryRecallFn = Callable[..., Awaitable[list[RawMemory] | RawMemoryReca
 
 EDGE_FULLTEXT_MATCH_HEADROOM = 8
 EDGE_FULLTEXT_MIN_MATCH_LIMIT = 32
+NODE_FULLTEXT_FIELDS = ("name", "summary", "description", "content")
 _RAW_MEMORY_CONTEXT_TYPES = {"raw_memory", "session", "episode", "note"}
 log = structlog.get_logger()
 
@@ -180,14 +181,58 @@ async def _node_fulltext_candidates(
     search_filter: SearchFilter,
     limit: int,
 ) -> list[RetrievalCandidate]:
-    match = build_match_disjunction(
-        ["name", "summary", "description", "content"],
-        build_fulltext_terms(plan.query),
-    )
-    if match is None:
+    terms = build_fulltext_terms(plan.query)
+    if not terms:
+        return []
+    result_limit = int(limit)
+    if result_limit <= 0:
         return []
     filter_clauses, filter_params = _node_filter_clause(search_filter)
-    rows = await _execute_query_records(
+    field_rows = await asyncio.gather(
+        *(
+            _node_fulltext_field_rows(
+                client=client,
+                field=field,
+                terms=terms,
+                organization_id=plan.organization_id,
+                filter_clauses=filter_clauses,
+                filter_params=filter_params,
+                limit=result_limit,
+            )
+            for field in NODE_FULLTEXT_FIELDS
+        )
+    )
+    best_by_uuid: dict[str, RetrievalCandidate] = {}
+    for rows in field_rows:
+        for row in rows:
+            candidate = _candidate_from_node_record(
+                row,
+                signal=RetrievalSignal.NODE_FULLTEXT,
+                score=_record_score(row),
+            )
+            current = best_by_uuid.get(candidate.id)
+            if current is None or candidate.score > current.score:
+                best_by_uuid[candidate.id] = candidate
+    return sorted(
+        best_by_uuid.values(),
+        key=_node_fulltext_candidate_sort_key,
+        reverse=True,
+    )[:result_limit]
+
+
+async def _node_fulltext_field_rows(
+    *,
+    client: Any,
+    field: str,
+    terms: list[str],
+    organization_id: str,
+    filter_clauses: list[str],
+    filter_params: Mapping[str, Any],
+    limit: int,
+) -> list[dict[str, Any]]:
+    match = build_match_disjunction([field], terms)
+    assert match is not None
+    return await _execute_query_records(
         client,
         f"""
         SELECT *,
@@ -200,19 +245,20 @@ async def _node_fulltext_candidates(
         ORDER BY score DESC, created_at DESC, uuid DESC
         LIMIT $limit;
         """,
-        group_id=plan.organization_id,
-        limit=max(int(limit), 1),
+        group_id=organization_id,
+        limit=limit,
         **match.params,
         **filter_params,
     )
-    return [
-        _candidate_from_node_record(
-            row,
-            signal=RetrievalSignal.NODE_FULLTEXT,
-            score=_record_score(row),
-        )
-        for row in rows
-    ]
+
+
+def _node_fulltext_candidate_sort_key(
+    candidate: RetrievalCandidate,
+) -> tuple[float, float, str]:
+    created_at = (
+        candidate.created_at.timestamp() if candidate.created_at is not None else float("-inf")
+    )
+    return candidate.score, created_at, candidate.id
 
 
 async def _exact_key_candidates(
