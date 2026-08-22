@@ -292,6 +292,13 @@ tasks:
   serve-local-embeddings:
     command: uv run --with sentence-transformers==6.0.0 sibyld serve
     env:
+      SIBYL_STORE: surreal
+      SIBYL_COORDINATION_BACKEND: redis
+      SIBYL_SURREAL_URL: ws://127.0.0.1:8018/rpc
+      SIBYL_SURREAL_USERNAME: root
+      SIBYL_SURREAL_PASSWORD: root
+      SIBYL_REDIS_HOST: 127.0.0.1
+      SIBYL_REDIS_PORT: "6393"
       SIBYL_GRAPH_EMBEDDING_PROVIDER: local
       SIBYL_GRAPH_EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
       SIBYL_GRAPH_EMBEDDING_DIMENSIONS: "384"
@@ -309,6 +316,13 @@ tasks:
   worker-local-embeddings:
     command: uv run --with sentence-transformers==6.0.0 sibyld worker
     env:
+      SIBYL_STORE: surreal
+      SIBYL_COORDINATION_BACKEND: redis
+      SIBYL_SURREAL_URL: ws://127.0.0.1:8018/rpc
+      SIBYL_SURREAL_USERNAME: root
+      SIBYL_SURREAL_PASSWORD: root
+      SIBYL_REDIS_HOST: 127.0.0.1
+      SIBYL_REDIS_PORT: "6393"
       SIBYL_GRAPH_EMBEDDING_PROVIDER: local
       SIBYL_GRAPH_EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
       SIBYL_GRAPH_EMBEDDING_DIMENSIONS: "384"

@@ -1500,7 +1500,12 @@ def enforce_actual_spend_cap(
     if not isinstance(cost, dict) or cost.get("coverage_complete") is not True:
         raise RuntimeError("paid experiment provider accounting is incomplete")
     actual = cost.get("settled_total_usd", cost.get("provider_reported_total_usd"))
-    if not isinstance(actual, int | float) or isinstance(actual, bool) or not math.isfinite(actual):
+    if (
+        not isinstance(actual, int | float)
+        or isinstance(actual, bool)
+        or not math.isfinite(actual)
+        or actual < 0.0
+    ):
         raise RuntimeError("paid experiment provider spend is missing")
     if max_spend_usd is None or actual > max_spend_usd:
         raise RuntimeError(
@@ -2896,9 +2901,10 @@ def _provider_accounting(
 
 
 def _provider_event_cost(event: dict[str, Any], *, role: str) -> dict[str, Any] | None:
-    provider_cost = _number_from(event, ("usage", "cost_usd"))
-    if provider_cost is not None:
-        if provider_cost < 0.0:
+    usage = event.get("usage")
+    if isinstance(usage, dict) and usage.get("cost_usd") is not None:
+        provider_cost = _non_negative_number(usage.get("cost_usd"))
+        if provider_cost is None:
             return None
         return {"cost_usd": provider_cost, "source": "provider_response_usage"}
     if role != "judge":
@@ -2910,7 +2916,6 @@ def _provider_event_cost(event: dict[str, Any], *, role: str) -> dict[str, Any] 
         or event.get("provider_model") != price["provider_model"]
     ):
         return None
-    usage = event.get("usage")
     if not isinstance(usage, dict):
         return None
     prompt_tokens = _non_negative_int(usage.get("prompt_tokens"))
@@ -2926,6 +2931,7 @@ def _provider_event_cost(event: dict[str, Any], *, role: str) -> dict[str, Any] 
         prompt_tokens is None
         or completion_tokens is None
         or total_tokens != prompt_tokens + completion_tokens
+        or total_tokens == 0
         or cached_tokens is None
         or cached_tokens > prompt_tokens
     ):
@@ -2961,20 +2967,31 @@ def _structured_provider_usage_valid(record: dict[str, Any]) -> bool:
     cost = _non_negative_number(record.get("cost_usd"))
     return (
         isinstance(record.get("provider"), str)
-        and bool(str(record["provider"]).strip())
+        and str(record["provider"]).strip() not in {"", "mixed"}
         and isinstance(record.get("model"), str)
-        and bool(str(record["model"]).strip())
+        and str(record["model"]).strip() not in {"", "mixed"}
         and requests is not None
         and input_tokens is not None
         and output_tokens is not None
         and total_tokens == input_tokens + output_tokens
         and record.get("cost_complete") is True
         and cost is not None
-        and (requests > 0 or cost == 0.0)
+        and (
+            requests > 0
+            and total_tokens > 0
+            or (
+                requests == 0
+                and input_tokens == 0
+                and output_tokens == 0
+                and total_tokens == 0
+                and cost == 0.0
+            )
+        )
     )
 
 
 def _embedding_usage_record_valid(record: dict[str, Any]) -> bool:
+    provider = str(record.get("provider", "")).strip()
     requests = _non_negative_int(record.get("requests"))
     inputs = _non_negative_int(record.get("inputs"))
     prompt_tokens = _non_negative_int(record.get("prompt_tokens"))
@@ -2983,9 +3000,9 @@ def _embedding_usage_record_valid(record: dict[str, Any]) -> bool:
     cost = _non_negative_number(record.get("cost_usd"))
     return (
         isinstance(record.get("provider"), str)
-        and bool(str(record["provider"]).strip())
+        and str(record["provider"]).strip() not in {"", "mixed"}
         and isinstance(record.get("model"), str)
-        and bool(str(record["model"]).strip())
+        and str(record["model"]).strip() not in {"", "mixed"}
         and requests is not None
         and inputs is not None
         and prompt_tokens is not None
@@ -2994,6 +3011,11 @@ def _embedding_usage_record_valid(record: dict[str, Any]) -> bool:
         and priced_requests <= requests
         and cost is not None
         and (priced_requests > 0 or cost == 0.0)
+        and (
+            (requests == 0 and inputs == 0 and prompt_tokens == 0 and priced_requests == 0)
+            or (requests > 0 and inputs >= requests)
+        )
+        and (provider in {"disabled", "local"} or requests == 0 or prompt_tokens > 0)
     )
 
 

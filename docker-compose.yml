@@ -30,6 +30,24 @@ services:
       - "${SURREAL_DATA_DIR:-./.moon/cache/surreal-dev}:/data:U"
     restart: unless-stopped
 
+  surrealdb-eval:
+    image: surrealdb/surrealdb:v3.2.3
+    container_name: ${COMPOSE_PROJECT_NAME:-sibyl}-surrealdb-eval
+    profiles: ["eval"]
+    command: ["start", "--log", "info", "rocksdb:///data/sibyl.db"]
+    environment:
+      SURREAL_BIND: 0.0.0.0:8000
+      SURREAL_USER: root
+      SURREAL_PASS: root
+      SURREAL_ROCKSDB_BLOCK_CACHE_SIZE: "8589934592"
+      SURREAL_ROCKSDB_WRITE_BUFFER_SIZE: "134217728"
+      SURREAL_ROCKSDB_MAX_WRITE_BUFFER_NUMBER: "4"
+    ports:
+      - "127.0.0.1:8018:8000"
+    volumes:
+      - "${SIBYL_RELEASE_ROOT:-./.moon/cache/surreal-eval}/surreal:/data:U"
+    restart: unless-stopped
+
   redis:
     image: valkey/valkey:8-alpine
     container_name: ${COMPOSE_PROJECT_NAME:-sibyl}-redis

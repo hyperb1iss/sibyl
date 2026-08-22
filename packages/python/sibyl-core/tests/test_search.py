@@ -151,6 +151,49 @@ async def test_openai_embedding_usage_restores_provenance_into_empty_capture() -
     assert captured["prompt_tokens"] == 7
 
 
+@pytest.mark.parametrize(
+    ("usage_override", "message"),
+    [
+        ({"prompt_tokens": 7.5}, "prompt_tokens"),
+        ({"prompt_tokens": -1}, "prompt_tokens"),
+        ({"total_tokens": 8}, "inconsistent"),
+        ({"prompt_tokens": 0, "total_tokens": 0}, "inconsistent"),
+        ({"cost": True}, "cost"),
+        ({"cost": "invalid"}, "cost"),
+        ({"cost": float("nan")}, "cost"),
+        ({"cost": -0.001}, "cost"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_openai_embedding_provider_rejects_malformed_usage(
+    usage_override: dict[str, object],
+    message: str,
+) -> None:
+    class Embeddings:
+        async def create(self, **kwargs: object) -> SimpleNamespace:
+            inputs = kwargs["input"]
+            assert isinstance(inputs, list)
+            usage = {"prompt_tokens": 7, "total_tokens": 7, **usage_override}
+            return SimpleNamespace(
+                data=[SimpleNamespace(embedding=[0.1, 0.2]) for _ in inputs],
+                usage=SimpleNamespace(**usage),
+            )
+
+    provider = OpenAIEmbeddingProvider(
+        metadata=EmbeddingMetadata(
+            provider="openai",
+            model="text-embedding-test",
+            dimensions=2,
+            cache_namespace="invalid-usage-test",
+            tokenizer_estimate_method="test",
+        ),
+        client=SimpleNamespace(embeddings=Embeddings()),
+    )
+
+    with pytest.raises(RuntimeError, match=message):
+        await provider.embed_texts(["alpha"])
+
+
 def test_embedding_usage_marks_mixed_provenance() -> None:
     usage: dict[str, str | int | float] = {}
     common = {
@@ -190,7 +233,8 @@ async def test_local_sentence_transformer_provider_embeds_with_metadata() -> Non
         client=client,
     )
 
-    embeddings = await provider.embed_texts(["  alpha  ", ""], input_kind="query")
+    with capture_embedding_usage(provider) as usage:
+        embeddings = await provider.embed_texts(["  alpha  ", ""], input_kind="query")
 
     assert provider.metadata.provider == "local"
     assert provider.metadata.cache_namespace == "graph-local-test"
@@ -208,6 +252,16 @@ async def test_local_sentence_transformer_provider_embeds_with_metadata() -> Non
             },
         )
     ]
+    assert usage == {
+        "provider": "local",
+        "model": "sentence-transformers/all-MiniLM-L6-v2",
+        "requests": 1,
+        "inputs": 2,
+        "prompt_tokens": 0,
+        "total_tokens": 0,
+        "cost_reported_requests": 0,
+        "cost_usd": 0.0,
+    }
 
 
 def test_local_sentence_transformer_dimensions_support_legacy_clients() -> None:
