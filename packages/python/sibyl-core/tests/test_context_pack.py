@@ -477,16 +477,22 @@ async def test_compile_context_falls_back_when_batched_native_search_fails(
 
 
 @pytest.mark.asyncio
-async def test_compile_context_can_keep_degraded_retrieval_graph_only(
+async def test_compile_context_can_keep_native_and_degraded_retrieval_graph_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[dict[str, Any]] = []
+    native_calls: list[dict[str, Any]] = []
+    fallback_calls: list[dict[str, Any]] = []
 
-    async def fake_native_context_search(**_kwargs: Any) -> SearchResponse:
+    async def forbidden_raw_recall(**_kwargs: Any) -> list[Any]:
+        raise AssertionError("raw memory recall should stay disabled")
+
+    async def fake_native_context_search(**kwargs: Any) -> SearchResponse:
+        native_calls.append(kwargs)
+        assert await kwargs["raw_memory_recall_fn"]() == []
         raise RuntimeError("native search unavailable")
 
     async def fallback_search(**kwargs: Any) -> SearchResponse:
-        calls.append(kwargs)
+        fallback_calls.append(kwargs)
         return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
 
     monkeypatch.setattr(context_module, "context_search", fake_native_context_search)
@@ -495,10 +501,13 @@ async def test_compile_context_can_keep_degraded_retrieval_graph_only(
         "sealed local retrieval",
         organization_id="org-123",
         search_fn=fallback_search,
+        raw_memory_recall_fn=forbidden_raw_recall,
         include_documents=False,
     )
 
-    assert calls[0]["include_documents"] is False
+    assert len(native_calls) == 1
+    assert fallback_calls[0]["include_documents"] is False
+    assert fallback_calls[0]["include_raw_memory"] is False
 
 
 @pytest.mark.asyncio

@@ -1272,6 +1272,7 @@ async def _compile_fallback_sections(
         "include_content": True,
         "content_max_chars": FALLBACK_SEARCH_CONTENT_MAX_CHARS,
         "include_documents": include_documents,
+        "include_raw_memory": include_documents,
         "include_graph": True,
         "organization_id": organization_id,
     }
@@ -1581,6 +1582,7 @@ async def _compile_native_sections(
     raw_memory_recall_fn: RawMemoryRecallFn,
     audit: bool = False,
     naive_retrieval: bool = False,
+    include_raw_memory: bool = True,
 ) -> list[ContextSection]:
     search_limit = min(50, max(limit, per_facet_limit * len(facets)))
     facet = ContextFacet.RECENT_MEMORY if ContextFacet.RECENT_MEMORY in facets else None
@@ -1603,9 +1605,15 @@ async def _compile_native_sections(
             limit=search_limit,
             include_content=True,
             embedding_provider=configured_embedding_provider(),
-            raw_memory_recall_fn=raw_memory_recall_fn,
+            raw_memory_recall_fn=(
+                raw_memory_recall_fn if include_raw_memory else _empty_raw_memory_recall
+            ),
         )
     return _sections_from_response(response, facets=facets, audit=audit)
+
+
+async def _empty_raw_memory_recall(**_kwargs: Any) -> list[Any]:
+    return []
 
 
 async def compile_context(
@@ -1639,6 +1647,9 @@ async def compile_context(
     `naive_retrieval` swaps the 8-lane retrieval for the naive-strong control
     arm and drops the one-hop related-item walk, so a pack compiled under the
     arm carries no graph traversal at all. It is off unless a caller selects it.
+
+    `include_documents=False` keeps both native and fallback retrieval on the
+    graph, excluding raw content memory as well as imported documents.
     """
 
     goal = goal.strip()
@@ -1680,6 +1691,7 @@ async def compile_context(
             raw_memory_recall_fn=raw_memory_recall_fn,
             audit=audit,
             naive_retrieval=naive_retrieval,
+            include_raw_memory=include_documents,
         )
     except Exception as exc:
         if naive_retrieval:
