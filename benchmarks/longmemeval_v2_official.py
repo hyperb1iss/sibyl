@@ -2086,6 +2086,7 @@ def build_source_runs_receipt(
     domains: dict[str, dict[str, Any]] = {}
     for source_run in source_runs:
         domain = str(source_run["domain"])
+        plan = source_run["plan"]
         run_args = source_run["run_args"]
         output_dir = source_run["output_dir"]
         api_runtime, api_runtime_consistent = _source_api_runtime(source_run["per_question_rows"])
@@ -2132,8 +2133,16 @@ def build_source_runs_receipt(
             "reader_model": run_args.get("model"),
             "reader_base_url": run_args.get("base_url"),
             "evaluator_model": run_args.get("evaluator_model"),
-            "method": run_args.get("method"),
-            "tier": run_args.get("tier"),
+            "method": _first_string(
+                plan.get("method"),
+                run_args.get("method"),
+                DEFAULT_METHOD,
+            ),
+            "tier": _first_string(
+                plan.get("tier"),
+                run_args.get("tier"),
+                getattr(args, "tier", ""),
+            ),
         }
 
     expected_domains = ("web", "enterprise") if args.domain == "combined" else (args.domain,)
@@ -2174,7 +2183,8 @@ def build_source_runs_receipt(
         ),
         "model_consistent": _source_run_values_consistent(source_runs, "model")
         and _source_run_values_consistent(source_runs, "evaluator_model"),
-        "method_consistent": _source_run_values_consistent(source_runs, "method"),
+        "method_consistent": all(domain in domains for domain in expected_domains)
+        and len({domains[domain]["method"] for domain in expected_domains}) == 1,
     }
 
 

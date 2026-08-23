@@ -711,6 +711,10 @@ def test_official_runner_receipt_only_emits_citable_contract(
     assert receipt["source_runs"]["integrity_complete"] is True
     assert receipt["source_runs"]["api_runtime_consistent"] is True
     assert set(receipt["source_runs"]["domains"]) == {"web", "enterprise"}
+    assert all(
+        source["method"] == "sibyl_live_api" and source["tier"] == "small"
+        for source in receipt["source_runs"]["domains"].values()
+    )
     assert receipt["source_runs"]["domains"]["web"]["runtime_inputs"]["questions"][
         "sha256"
     ].startswith("sha256:")
@@ -8533,7 +8537,12 @@ def _write_official_outputs(
     usage_run_id = run_id if legacy_usage_identity else f"usage-{domain}"
     runtime_dir = output_dir / "runtime_inputs"
     runtime_dir.mkdir()
-    plan = {"run_id": run_id, "domain": domain}
+    plan = {
+        "run_id": run_id,
+        "domain": domain,
+        "tier": "small",
+        "method": "sibyl_live_api",
+    }
     if not legacy_usage_identity:
         plan["provider_usage_run_id"] = usage_run_id
     (output_dir / "longmemeval_v2_official_plan.json").write_text(
@@ -8581,12 +8590,10 @@ def _write_official_outputs(
         json.dumps(
             {
                 "domain": domain,
-                "tier": "small",
                 "model": "Qwen/Qwen3.5-9B",
                 "base_url": "http://localhost:8023/v1",
                 "evaluator_model": "gpt-5.2",
                 "evaluator_reasoning_effort": "medium",
-                "method": "sibyl_live_api",
             }
         ),
         encoding="utf-8",
