@@ -645,9 +645,16 @@ def _assert_source_prompt_artifacts(
         )
 
 
+@pytest.mark.parametrize(
+    ("run_arg_method", "run_arg_tier"),
+    [(None, None), ("unsealed_method", "medium")],
+    ids=["fallbacks-absent", "fallbacks-conflict"],
+)
 def test_official_runner_receipt_only_emits_citable_contract(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    run_arg_method: str | None,
+    run_arg_tier: str | None,
 ) -> None:
     module = _load_runner_module()
     data_root = tmp_path / "data"
@@ -664,8 +671,19 @@ def test_official_runner_receipt_only_emits_citable_contract(
         lambda repo: source_record(repo, expected_commit=fixture_commit),
     )
     _write_dataset(data_root)
-    _write_official_outputs(web_output_dir, domain="web", legacy_usage_identity=True)
-    _write_official_outputs(enterprise_output_dir, domain="enterprise")
+    _write_official_outputs(
+        web_output_dir,
+        domain="web",
+        legacy_usage_identity=True,
+        run_arg_method=run_arg_method,
+        run_arg_tier=run_arg_tier,
+    )
+    _write_official_outputs(
+        enterprise_output_dir,
+        domain="enterprise",
+        run_arg_method=run_arg_method,
+        run_arg_tier=run_arg_tier,
+    )
     _write_combined_outputs(combined_dir)
 
     assert (
@@ -8531,6 +8549,8 @@ def _write_official_outputs(
     *,
     domain: str = "enterprise",
     legacy_usage_identity: bool = False,
+    run_arg_method: str | None = None,
+    run_arg_tier: str | None = None,
 ) -> None:
     output_dir.mkdir(parents=True)
     run_id = f"run-{domain}"
@@ -8586,16 +8606,19 @@ def _write_official_outputs(
         ),
         encoding="utf-8",
     )
+    run_args = {
+        "domain": domain,
+        "model": "Qwen/Qwen3.5-9B",
+        "base_url": "http://localhost:8023/v1",
+        "evaluator_model": "gpt-5.2",
+        "evaluator_reasoning_effort": "medium",
+    }
+    if run_arg_method is not None:
+        run_args["method"] = run_arg_method
+    if run_arg_tier is not None:
+        run_args["tier"] = run_arg_tier
     (output_dir / "run_args.json").write_text(
-        json.dumps(
-            {
-                "domain": domain,
-                "model": "Qwen/Qwen3.5-9B",
-                "base_url": "http://localhost:8023/v1",
-                "evaluator_model": "gpt-5.2",
-                "evaluator_reasoning_effort": "medium",
-            }
-        ),
+        json.dumps(run_args),
         encoding="utf-8",
     )
     (output_dir / "metric_overview.json").write_text(
