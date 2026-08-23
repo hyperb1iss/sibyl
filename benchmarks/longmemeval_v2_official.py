@@ -1907,6 +1907,9 @@ def build_receipt_from_artifacts(
     )
     artifacts = build_artifact_receipt(
         output_dir=output_dir,
+        prompt_artifact_dir=(
+            None if args.domain == "combined" and args.receipt_only else output_dir
+        ),
         plan_path=plan_path,
         aggregated_path=aggregated_path,
         per_question_path=per_question_path,
@@ -2012,6 +2015,8 @@ def load_receipt_source_runs(
         run_args_path = source_dir / "run_args.json"
         aggregated_path = source_dir / "aggregated_metrics.json"
         per_question_path = source_dir / "per_question.jsonl"
+        prompt_build_summary_path = source_dir / "prompt_build_summary.json"
+        prompt_rows_path = source_dir / "prompt_rows.jsonl"
         rig_rows_path = source_dir / "rig_rows.jsonl"
         official_receipt_path = source_dir / "longmemeval_v2_official_receipt.json"
         runtime_dir = source_dir / "runtime_inputs"
@@ -2045,6 +2050,8 @@ def load_receipt_source_runs(
                 "run_args_path": run_args_path,
                 "aggregated_path": aggregated_path,
                 "per_question_path": per_question_path,
+                "prompt_build_summary_path": prompt_build_summary_path,
+                "prompt_rows_path": prompt_rows_path,
                 "rig_rows_path": rig_rows_path,
                 "official_receipt_path": official_receipt_path,
                 "runtime_questions_path": runtime_questions_path,
@@ -2088,6 +2095,10 @@ def build_source_runs_receipt(
             "run_args": artifact_path_record(source_run["run_args_path"]),
             "aggregated_metrics": artifact_path_record(source_run["aggregated_path"]),
             "per_question": artifact_path_record(source_run["per_question_path"]),
+            "prompt_build_summary": artifact_path_record(
+                source_run["prompt_build_summary_path"]
+            ),
+            "prompt_rows": artifact_path_record(source_run["prompt_rows_path"]),
             "rig_rows": artifact_path_record(source_run["rig_rows_path"]),
             "official_receipt": artifact_path_record(source_run["official_receipt_path"]),
             "runtime_inputs": {
@@ -2131,6 +2142,8 @@ def build_source_runs_receipt(
         and domains[domain]["run_args"]["exists"]
         and domains[domain]["aggregated_metrics"]["exists"]
         and domains[domain]["per_question"]["exists"]
+        and domains[domain]["prompt_build_summary"]["exists"]
+        and domains[domain]["prompt_rows"]["exists"]
         for domain in expected_domains
     )
     integrity_complete = all(
@@ -3118,6 +3131,7 @@ def summarize_dataset_counts(
 def build_artifact_receipt(
     *,
     output_dir: Path,
+    prompt_artifact_dir: Path | None,
     plan_path: Path,
     aggregated_path: Path,
     per_question_path: Path,
@@ -3137,8 +3151,16 @@ def build_artifact_receipt(
         "judge_provider_usage": output_dir / "provider_usage" / "judge.jsonl",
         "aggregated_metrics": aggregated_path,
         "per_question": per_question_path,
-        "prompt_build_summary": output_dir / "prompt_build_summary.json",
-        "prompt_rows": output_dir / "prompt_rows.jsonl",
+        "prompt_build_summary": (
+            prompt_artifact_dir / "prompt_build_summary.json"
+            if prompt_artifact_dir is not None
+            else None
+        ),
+        "prompt_rows": (
+            prompt_artifact_dir / "prompt_rows.jsonl"
+            if prompt_artifact_dir is not None
+            else None
+        ),
         "rig_rows": output_dir / "rig_rows.jsonl",
         "run_args": run_args_path,
         "metric_overview": metric_overview_path,

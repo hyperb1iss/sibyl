@@ -54,6 +54,8 @@ _SOURCE_ARTIFACT_NAMES = {
     "run_args": "run_args",
     "aggregated_metrics": "aggregated_metrics",
     "per_question": "per_question",
+    "prompt_build_summary": "prompt_build_summary",
+    "prompt_rows": "prompt_rows",
     "rig_rows": "rig_rows",
 }
 _RUNTIME_SOURCE_NAMES = {

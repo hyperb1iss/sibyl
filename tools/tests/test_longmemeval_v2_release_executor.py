@@ -708,6 +708,46 @@ def test_claimed_tree_accepts_receipt_bound_prompt_artifacts(
     state.require_claimed_stage_plan(stage_plan)
 
 
+def test_receipt_prompt_bindings_reject_missing_changed_and_foreign_files(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "output"
+    artifacts: dict[str, Any] = {}
+    for name, relative in evidence.COMPLETION_ARTIFACTS.items():
+        path = output_dir / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{name}\n", encoding="utf-8")
+        artifacts[name] = bind_artifact(path, name=f"test {name}")
+    receipt = {
+        "artifacts": {
+            receipt_name: evidence.official.artifact_path_record(
+                Path(artifacts[local_name]["path"])
+            )
+            for local_name, receipt_name in evidence._RECEIPT_ARTIFACT_NAMES.items()
+        }
+    }
+
+    evidence._require_receipt_artifacts(receipt, artifacts)
+
+    summary_path = Path(artifacts["prompt_build_summary"]["path"])
+    summary_path.unlink()
+    with pytest.raises(BridgeInputError, match="prompt_build_summary artifact is missing"):
+        evidence._require_receipt_artifacts(receipt, artifacts)
+    summary_path.write_text("prompt_build_summary\n", encoding="utf-8")
+
+    rows_path = Path(artifacts["prompt_rows"]["path"])
+    rows_path.write_text("changed\n", encoding="utf-8")
+    with pytest.raises(BridgeInputError, match="prompt_rows artifact size does not match"):
+        evidence._require_receipt_artifacts(receipt, artifacts)
+    rows_path.write_text("prompt_rows\n", encoding="utf-8")
+
+    foreign_path = tmp_path / "foreign-prompt-rows.jsonl"
+    foreign_path.write_text("prompt_rows\n", encoding="utf-8")
+    receipt["artifacts"]["prompt_rows"] = evidence.official.artifact_path_record(foreign_path)
+    with pytest.raises(BridgeInputError, match="path does not match"):
+        evidence._require_receipt_artifacts(receipt, artifacts)
+
+
 def test_wave_rejects_foreign_root_output_before_complete(
     stage_plan: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:

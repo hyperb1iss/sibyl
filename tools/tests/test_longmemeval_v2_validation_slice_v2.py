@@ -569,6 +569,17 @@ def _write_candidate_runs(
             encoding="utf-8",
         )
         (run_dir / "aggregated_metrics.json").write_text("{}", encoding="utf-8")
+        (run_dir / "prompt_build_summary.json").write_text(
+            json.dumps({"prompt_row_count": len(selected)}),
+            encoding="utf-8",
+        )
+        (run_dir / "prompt_rows.jsonl").write_text(
+            "".join(
+                json.dumps({"question_id": question_id, "messages": []}) + "\n"
+                for question_id in selected
+            ),
+            encoding="utf-8",
+        )
         (runtime_dir / "questions.json").write_text(
             json.dumps([{"id": question_id} for question_id in selected]),
             encoding="utf-8",
