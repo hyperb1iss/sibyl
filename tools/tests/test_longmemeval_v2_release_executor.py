@@ -696,6 +696,18 @@ def test_completion_evidence_rejects_foreign_files_created_by_paid_command(
         evidence.require_completed_domain(stage_plan, run, "web")
 
 
+def test_claimed_tree_accepts_receipt_bound_prompt_artifacts(
+    stage_plan: dict[str, Any],
+) -> None:
+    state.claim_stage(stage_plan, max_workers=4)
+    output_dir = Path(stage_plan["runs"][0]["domains"]["web"]["output_dir"])
+    output_dir.mkdir(parents=True)
+    (output_dir / "prompt_build_summary.json").write_text("{}\n", encoding="utf-8")
+    (output_dir / "prompt_rows.jsonl").write_text("{}\n", encoding="utf-8")
+
+    state.require_claimed_stage_plan(stage_plan)
+
+
 def test_wave_rejects_foreign_root_output_before_complete(
     stage_plan: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:

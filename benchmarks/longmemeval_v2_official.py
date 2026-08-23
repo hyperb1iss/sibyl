@@ -3137,6 +3137,8 @@ def build_artifact_receipt(
         "judge_provider_usage": output_dir / "provider_usage" / "judge.jsonl",
         "aggregated_metrics": aggregated_path,
         "per_question": per_question_path,
+        "prompt_build_summary": output_dir / "prompt_build_summary.json",
+        "prompt_rows": output_dir / "prompt_rows.jsonl",
         "rig_rows": output_dir / "rig_rows.jsonl",
         "run_args": run_args_path,
         "metric_overview": metric_overview_path,

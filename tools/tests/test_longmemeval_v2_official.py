@@ -803,6 +803,31 @@ def test_longmemeval_v2_receipt_gate_rejects_missing_lafs(tmp_path: Path) -> Non
     assert "checks[5] status must be 'PASS'" in failures
 
 
+def test_longmemeval_v2_receipt_binds_prompt_artifacts(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    summary_path = output_dir / "prompt_build_summary.json"
+    rows_path = output_dir / "prompt_rows.jsonl"
+    summary_path.write_text("{}\n", encoding="utf-8")
+    rows_path.write_text("{}\n", encoding="utf-8")
+
+    artifacts = module.build_artifact_receipt(
+        output_dir=output_dir,
+        plan_path=output_dir / "longmemeval_v2_official_plan.json",
+        aggregated_path=output_dir / "aggregated_metrics.json",
+        per_question_path=output_dir / "per_question.jsonl",
+        run_args_path=output_dir / "run_args.json",
+        metric_overview_path=output_dir / "metric_overview.json",
+        combined_metrics_path=None,
+        submission_overview_path=None,
+        submission_archive_path=None,
+    )
+
+    assert artifacts["prompt_build_summary"] == module.artifact_path_record(summary_path)
+    assert artifacts["prompt_rows"] == module.artifact_path_record(rows_path)
+
+
 def test_longmemeval_v2_receipt_rejects_corrupt_provider_usage(tmp_path: Path) -> None:
     module = _load_runner_module()
     data_root = tmp_path / "data"
@@ -8494,6 +8519,14 @@ def _write_official_outputs(
     )
     (output_dir / "longmemeval_v2_official_receipt.json").write_text(
         json.dumps({"domain": domain, "schema_version": "fixture"}),
+        encoding="utf-8",
+    )
+    (output_dir / "prompt_build_summary.json").write_text(
+        json.dumps({"prompt_row_count": 1, "question_ids": [f"q-{domain}"]}),
+        encoding="utf-8",
+    )
+    (output_dir / "prompt_rows.jsonl").write_text(
+        json.dumps({"question_id": f"q-{domain}", "messages": []}) + "\n",
         encoding="utf-8",
     )
     (runtime_dir / "questions.json").write_text(
