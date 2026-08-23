@@ -94,6 +94,8 @@ _DOMAIN_FILES = frozenset(
         "longmemeval_v2_official_plan.json",
         "longmemeval_v2_official_receipt.json",
         "per_question.jsonl",
+        "prompt_build_summary.json",
+        "prompt_rows.jsonl",
         "rig_rows.jsonl",
         "run_args.json",
     }

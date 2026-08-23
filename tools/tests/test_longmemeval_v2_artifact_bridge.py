@@ -342,6 +342,8 @@ def _domain_run(
         "run_args": output_dir / "run_args.json",
         "aggregated_metrics": output_dir / "aggregated_metrics.json",
         "per_question": output_dir / "per_question.jsonl",
+        "prompt_build_summary": output_dir / "prompt_build_summary.json",
+        "prompt_rows": output_dir / "prompt_rows.jsonl",
         "rig_rows": output_dir / "rig_rows.jsonl",
         "runtime_questions": runtime_dir / "questions.json",
         "runtime_haystack": runtime_dir / "haystack.json",
@@ -366,6 +368,11 @@ def _domain_run(
     )
     _write_json(paths["aggregated_metrics"], {"complete": True})
     _write_jsonl(paths["per_question"], per_question)
+    _write_json(paths["prompt_build_summary"], {"prompt_row_count": len(question_ids)})
+    _write_jsonl(
+        paths["prompt_rows"],
+        [{"question_id": question_id, "messages": []} for question_id in question_ids],
+    )
     _write_jsonl(paths["rig_rows"], rig_rows)
     _write_json(paths["runtime_questions"], runtime_questions)
     _write_json(paths["runtime_haystack"], {qid: ["trajectory"] for qid in question_ids})
@@ -421,6 +428,8 @@ def _domain_run(
         "run_args": _artifact(paths["run_args"]),
         "aggregated_metrics": _artifact(paths["aggregated_metrics"]),
         "per_question": _artifact(paths["per_question"]),
+        "prompt_build_summary": _artifact(paths["prompt_build_summary"]),
+        "prompt_rows": _artifact(paths["prompt_rows"]),
         "rig_rows": _artifact(paths["rig_rows"]),
         "runtime_inputs": {
             "questions": _artifact(paths["runtime_questions"]),

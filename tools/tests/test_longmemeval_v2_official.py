@@ -628,6 +628,23 @@ def _assert_question_id_hash_propagates(
     assert dataset_receipt["selection_complete"] is True
 
 
+def _assert_source_prompt_artifacts(
+    receipt: dict[str, Any],
+    module: ModuleType,
+    output_dirs: dict[str, Path],
+) -> None:
+    assert "prompt_build_summary" not in receipt["artifacts"]
+    assert "prompt_rows" not in receipt["artifacts"]
+    for domain, output_dir in output_dirs.items():
+        source = receipt["source_runs"]["domains"][domain]
+        assert source["prompt_build_summary"] == module.artifact_path_record(
+            output_dir / "prompt_build_summary.json"
+        )
+        assert source["prompt_rows"] == module.artifact_path_record(
+            output_dir / "prompt_rows.jsonl"
+        )
+
+
 def test_official_runner_receipt_only_emits_citable_contract(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -699,6 +716,11 @@ def test_official_runner_receipt_only_emits_citable_contract(
     ].startswith("sha256:")
     assert receipt["source_runs"]["domains"]["web"]["official_receipt"]["sha256"].startswith(
         "sha256:"
+    )
+    _assert_source_prompt_artifacts(
+        receipt,
+        module,
+        {"web": web_output_dir, "enterprise": enterprise_output_dir},
     )
     effective_config = receipt["source_runs"]["domains"]["web"]["effective_memory_config"]
     assert "api_token" not in effective_config["memory_params"]
@@ -801,6 +823,32 @@ def test_longmemeval_v2_receipt_gate_rejects_missing_lafs(tmp_path: Path) -> Non
 
     assert "metrics['lafs_gain'] must be finite numeric" in failures
     assert "checks[5] status must be 'PASS'" in failures
+
+
+def test_longmemeval_v2_receipt_binds_prompt_artifacts(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    summary_path = output_dir / "prompt_build_summary.json"
+    rows_path = output_dir / "prompt_rows.jsonl"
+    summary_path.write_text("{}\n", encoding="utf-8")
+    rows_path.write_text("{}\n", encoding="utf-8")
+
+    artifacts = module.build_artifact_receipt(
+        output_dir=output_dir,
+        prompt_artifact_dir=output_dir,
+        plan_path=output_dir / "longmemeval_v2_official_plan.json",
+        aggregated_path=output_dir / "aggregated_metrics.json",
+        per_question_path=output_dir / "per_question.jsonl",
+        run_args_path=output_dir / "run_args.json",
+        metric_overview_path=output_dir / "metric_overview.json",
+        combined_metrics_path=None,
+        submission_overview_path=None,
+        submission_archive_path=None,
+    )
+
+    assert artifacts["prompt_build_summary"] == module.artifact_path_record(summary_path)
+    assert artifacts["prompt_rows"] == module.artifact_path_record(rows_path)
 
 
 def test_longmemeval_v2_receipt_rejects_corrupt_provider_usage(tmp_path: Path) -> None:
@@ -8494,6 +8542,14 @@ def _write_official_outputs(
     )
     (output_dir / "longmemeval_v2_official_receipt.json").write_text(
         json.dumps({"domain": domain, "schema_version": "fixture"}),
+        encoding="utf-8",
+    )
+    (output_dir / "prompt_build_summary.json").write_text(
+        json.dumps({"prompt_row_count": 1, "question_ids": [f"q-{domain}"]}),
+        encoding="utf-8",
+    )
+    (output_dir / "prompt_rows.jsonl").write_text(
+        json.dumps({"question_id": f"q-{domain}", "messages": []}) + "\n",
         encoding="utf-8",
     )
     (runtime_dir / "questions.json").write_text(

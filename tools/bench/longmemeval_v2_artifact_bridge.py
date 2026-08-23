@@ -167,6 +167,8 @@ DOMAIN_SOURCE_KEYS = frozenset(
         "run_args",
         "aggregated_metrics",
         "per_question",
+        "prompt_build_summary",
+        "prompt_rows",
         "rig_rows",
         "runtime_inputs",
         "provider_usage",
@@ -334,6 +336,8 @@ SOURCE_ARTIFACT_NAMES = frozenset(
         "run_args",
         "aggregated_metrics",
         "per_question",
+        "prompt_build_summary",
+        "prompt_rows",
         "rig_rows",
         "runtime_questions",
         "runtime_haystack",
@@ -938,6 +942,8 @@ def _domain_artifacts(  # noqa: PLR0912, PLR0915
         "run_args": output_dir / "run_args.json",
         "aggregated_metrics": output_dir / "aggregated_metrics.json",
         "per_question": output_dir / "per_question.jsonl",
+        "prompt_build_summary": output_dir / "prompt_build_summary.json",
+        "prompt_rows": output_dir / "prompt_rows.jsonl",
         "rig_rows": output_dir / "rig_rows.jsonl",
     }
     paths: dict[str, Path] = {}
