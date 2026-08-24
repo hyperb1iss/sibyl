@@ -299,7 +299,7 @@ def _memory_path(
         return Path(external[domain]["path"]), False
     if memory_source not in builders:
         raise StagePlanError(f"memory source {memory_source!r} has no earlier builder")
-    return builders[memory_source] / domain / "checkpoint", True
+    return builders[memory_source] / domain / "memory_state", True
 
 
 def _domain_run(
