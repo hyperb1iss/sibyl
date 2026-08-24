@@ -510,7 +510,10 @@ def _check_pending_writes() -> DoctorCheck:
         "pending-writes",
         "warn",
         f"{count} write{plural} buffered locally and not saved on the server.",
-        f"Replay with 'sibyl pending-writes flush'; queued at {pending_writes_dir()}.",
+        (
+            "Sibyl retries replayable writes after the next successful API request; "
+            f"inspect the queue at {pending_writes_dir()}."
+        ),
     )
 
 

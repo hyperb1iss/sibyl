@@ -217,7 +217,8 @@ def pending_writes_summary(count: int) -> str:
     plural = "s" if count != 1 else ""
     return (
         f"{count} write{plural} buffered locally and not saved on the server. "
-        "Run 'sibyl pending-writes flush' to replay them."
+        "Sibyl retries replayable writes after the next successful API request; "
+        "run 'sibyl pending-writes list' if the count stops falling."
     )
 
 

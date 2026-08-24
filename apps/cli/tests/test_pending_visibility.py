@@ -58,7 +58,7 @@ def test_a_queued_write_warns_on_stderr_at_command_completion(
 
     captured = capsys.readouterr()
     assert "2 writes buffered locally" in captured.err
-    assert "sibyl pending-writes flush" in captured.err
+    assert "retries replayable writes" in captured.err
     assert "buffered locally" not in captured.out
 
 
@@ -156,7 +156,7 @@ def test_doctor_checks_the_queue(sandbox_home: Path) -> None:
     assert check.status == "warn"
     assert "1 write buffered locally" in check.message
     assert check.detail is not None
-    assert "sibyl pending-writes flush" in check.detail
+    assert "retries replayable writes" in check.detail
 
 
 def test_doctor_passes_on_an_empty_queue(sandbox_home: Path) -> None:

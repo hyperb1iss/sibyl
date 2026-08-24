@@ -42,11 +42,12 @@ These rules exist because real agent sessions consistently fail without them.
    non-interactively, STOP treating memory as available. State in your final output that memory was
    unavailable and list any learnings that could not be captured. The failure hint may say
    `Run 'sibyl auth login'`. Do NOT run `auth login` while `sibyl health` fails; a down server
-   produces the same message and login cannot fix it. After the server recovers, run
-   `sibyl pending-writes flush`; expect it to skip read-like queued requests (rerun those commands
-   instead) and explicitly re-run any writes it reports as failed. In a sandboxed environment,
-   `sibyl config context --quick` succeeding from local state while context retrieval or health
-   cannot connect means blocked network egress, not a server outage.
+   produces the same message and login cannot fix it. Sibyl retries buffered writes automatically
+   after the next successful API request. Use `sibyl pending-writes list` to inspect anything still
+   queued. Older read-like entries are not replayed, because reads should be rerun instead. Remove
+   those with `sibyl pending-writes discard --read-like`. In a sandboxed environment, `sibyl config
+   context --quick` succeeding from local state while context retrieval or health cannot connect
+   means blocked network egress, not a server outage.
 
 6. **Never invent subcommands, flags, or enum values.** If you're unsure whether a command exists,
    run `sibyl <group> --help`. Do not guess, and do not pass any flag you have not seen in this

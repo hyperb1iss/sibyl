@@ -7,6 +7,8 @@ import os
 import re
 import stat
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, get_args
@@ -39,6 +41,45 @@ def pending_writes_dir() -> Path:
 
 def pending_metrics_path() -> Path:
     return Path.home() / ".config" / "sibyl" / "pending_writes_metrics.json"
+
+
+@contextmanager
+def pending_replay_lock() -> Iterator[bool]:
+    """Try to serialize pending-write replay without delaying the caller."""
+    root = pending_writes_dir()
+    _ensure_secure_dir(root)
+    path = root / ".replay.lock"
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    locked = False
+    try:
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                if os.fstat(fd).st_size == 0:
+                    os.write(fd, b"\0")
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            locked = True
+        except OSError:
+            yield False
+            return
+        yield True
+    finally:
+        if locked and os.name == "nt":
+            import msvcrt
+
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        elif locked:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
 
 
 def _ensure_secure_dir(path: Path) -> None:
@@ -200,6 +241,7 @@ def create_pending_write(
     base_url: str,
     json_payload: dict[str, Any] | None,
     params: dict[str, Any] | None,
+    replay_scope: str | None = None,
 ) -> dict[str, Any]:
     write_id = uuid4().hex
     idempotency_key = str(uuid4())
@@ -208,6 +250,7 @@ def create_pending_write(
         "idempotency_key": idempotency_key,
         "created_at": datetime.now(UTC).isoformat(),
         "base_url": base_url,
+        "replay_scope": replay_scope,
         "method": method.upper(),
         "path": path,
         "json": json_payload,

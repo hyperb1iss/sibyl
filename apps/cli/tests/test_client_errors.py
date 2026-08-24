@@ -190,6 +190,240 @@ async def test_mutating_request_survives_connect_drop_and_replays(
 
 
 @pytest.mark.asyncio
+async def test_successful_api_request_replays_buffered_writes_automatically(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(client_transport_module, "AUTO_REPLAY_GRACE_SECONDS", 0.0)
+    requests: list[tuple[str, str, str | None]] = []
+
+    def healthy_then_replay(request: httpx.Request) -> httpx.Response:
+        requests.append(
+            (
+                request.method,
+                request.url.path,
+                request.headers.get("Idempotency-Key"),
+            )
+        )
+        return httpx.Response(200, json={"ok": True})
+
+    client = _client_with_transport(httpx.MockTransport(healthy_then_replay))
+    queued = pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url="http://testserver/api",
+        json_payload={"title": "Recover me", "raw_content": "Body"},
+        params=None,
+        replay_scope=client._replay_scope,
+    )
+    result = await client.get("/health")
+
+    await client.close()
+    assert result == {"ok": True}
+    assert requests == [
+        ("GET", "/api/health", None),
+        ("POST", "/api/memory/raw", queued["idempotency_key"]),
+    ]
+    assert pending_writes.list_pending_writes() == []
+    assert pending_writes.read_pending_metrics()["replayed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_automatic_replay_does_not_fail_the_triggering_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(client_transport_module, "AUTO_REPLAY_GRACE_SECONDS", 0.0)
+
+    def healthy_but_replay_fails(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json={"status": "healthy"})
+        return httpx.Response(
+            500,
+            json={"error": "internal_error", "message": "SurrealDB unavailable"},
+        )
+
+    client = _client_with_transport(httpx.MockTransport(healthy_but_replay_fails))
+    pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url="http://testserver/api",
+        json_payload={"title": "Keep me", "raw_content": "Body"},
+        params=None,
+        replay_scope=client._replay_scope,
+    )
+    result = await client.get("/health")
+
+    await client.close()
+    queued = pending_writes.list_pending_writes()
+    assert result == {"status": "healthy"}
+    assert len(queued) == 1
+    assert queued[0]["attempts"] == 1
+
+
+@pytest.mark.asyncio
+async def test_automatic_replay_stops_after_the_first_transient_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(client_transport_module, "AUTO_REPLAY_GRACE_SECONDS", 0.0)
+    client_transport_module._FAILURE_WINDOWS.clear()
+    posts = 0
+
+    def healthy_then_unavailable(request: httpx.Request) -> httpx.Response:
+        nonlocal posts
+        if request.method == "GET":
+            return httpx.Response(200, json={"status": "healthy"})
+        posts += 1
+        return httpx.Response(
+            503,
+            json={"error": "unavailable", "message": "SurrealDB unavailable"},
+        )
+
+    client = _client_with_transport(httpx.MockTransport(healthy_then_unavailable))
+    for index in range(8):
+        pending_writes.create_pending_write(
+            method="POST",
+            path="/memory/raw",
+            base_url=client.base_url,
+            json_payload={"title": f"queued {index}", "raw_content": "Body"},
+            params=None,
+            replay_scope=client._replay_scope,
+        )
+
+    result = await client.get("/health")
+
+    await client.close()
+    attempts = sorted(int(item["attempts"]) for item in pending_writes.list_pending_writes())
+    assert result == {"status": "healthy"}
+    assert posts == 1
+    assert attempts == [0] * 7 + [1]
+    key = client_transport_module._failure_key(client.base_url)
+    assert len(client_transport_module._FAILURE_WINDOWS[key]) == 1
+    client_transport_module._FAILURE_WINDOWS.clear()
+
+
+@pytest.mark.asyncio
+async def test_automatic_replay_never_crosses_credential_scopes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(client_transport_module, "AUTO_REPLAY_GRACE_SECONDS", 0.0)
+    requests: list[str] = []
+
+    def healthy(request: httpx.Request) -> httpx.Response:
+        requests.append(request.method)
+        return httpx.Response(200, json={"status": "healthy"})
+
+    client = _client_with_transport(httpx.MockTransport(healthy))
+    pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url=client.base_url,
+        json_payload={"title": "Org alpha", "raw_content": "Body"},
+        params=None,
+        replay_scope=client_transport_module._auth_replay_scope(None, "token-for-org-alpha"),
+    )
+
+    result = await client.get("/health")
+
+    await client.close()
+    assert result == {"status": "healthy"}
+    assert requests == ["GET"]
+    assert len(pending_writes.list_pending_writes()) == 1
+
+
+@pytest.mark.asyncio
+async def test_environment_token_scope_overrides_active_context_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(client_transport_module, "AUTO_REPLAY_GRACE_SECONDS", 0.0)
+    monkeypatch.setenv("SIBYL_AUTH_TOKEN", "automation-token")
+    monkeypatch.setattr(
+        client_module,
+        "_auth_credential_scope",
+        lambda _context_name: "context:alpha:org:alpha-org",
+    )
+    monkeypatch.setattr(
+        SibylClient,
+        "_get_insecure_from_context",
+        lambda _self, _context_name: False,
+    )
+    requests: list[str] = []
+
+    def healthy(request: httpx.Request) -> httpx.Response:
+        requests.append(request.method)
+        return httpx.Response(200, json={"status": "healthy"})
+
+    client = SibylClient(base_url="http://testserver/api", context_name="alpha")
+    client._client = httpx.AsyncClient(
+        base_url=client.base_url,
+        transport=httpx.MockTransport(healthy),
+        headers=client._default_headers(),
+    )
+    pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url=client.base_url,
+        json_payload={"title": "Alpha only", "raw_content": "Body"},
+        params=None,
+        replay_scope="context:alpha:org:alpha-org",
+    )
+
+    result = await client.get("/health")
+
+    await client.close()
+    assert result == {"status": "healthy"}
+    assert client._replay_scope == client_transport_module._auth_replay_scope(
+        None, "automation-token"
+    )
+    assert requests == ["GET"]
+    assert len(pending_writes.list_pending_writes()) == 1
+
+
+@pytest.mark.asyncio
+async def test_automatic_replay_uses_backoff_without_abandoning_writes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(client_transport_module, "AUTO_REPLAY_GRACE_SECONDS", 0.0)
+    monkeypatch.setattr(client_transport_module, "AUTO_REPLAY_BACKOFF_BASE_SECONDS", 0.0)
+    posts = 0
+
+    def recovered(request: httpx.Request) -> httpx.Response:
+        nonlocal posts
+        if request.method == "POST":
+            posts += 1
+        return httpx.Response(200, json={"status": "healthy"})
+
+    client = _client_with_transport(httpx.MockTransport(recovered))
+    queued = pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url=client.base_url,
+        json_payload={"title": "Eventually", "raw_content": "Body"},
+        params=None,
+        replay_scope=client._replay_scope,
+    )
+    for _ in range(5):
+        pending_writes.increment_attempts(str(queued["id"]))
+
+    result = await client.get("/health")
+
+    await client.close()
+    assert result == {"status": "healthy"}
+    assert posts == 1
+    assert pending_writes.list_pending_writes() == []
+
+
+@pytest.mark.asyncio
 async def test_mutating_request_refreshes_401_and_retries_same_pending_write(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

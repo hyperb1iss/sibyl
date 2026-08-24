@@ -7,7 +7,7 @@ from typing import Annotated, Any
 
 import typer
 
-from sibyl_cli.auth_store import normalize_api_url
+from sibyl_cli.auth_store import credential_scope, normalize_api_url
 from sibyl_cli.client import SibylClient, SibylClientError, _is_read_like_post
 from sibyl_cli.common import (
     console,
@@ -25,6 +25,7 @@ from sibyl_cli.pending_writes import (
     is_canonical_pending_write_id,
     is_corrupt_pending_write,
     list_pending_writes,
+    pending_replay_lock,
     pending_write_label,
     pending_writes_dir,
     read_pending_write,
@@ -80,8 +81,19 @@ def _partition_replayable(
     return replayable, skipped
 
 
-def _context_name_for_base_url(base_url: str) -> str | None:
+def _context_name_for_base_url(
+    base_url: str,
+    replay_scope: object = None,
+) -> str | None:
     from sibyl_cli import config_store
+
+    if isinstance(replay_scope, str) and replay_scope:
+        for ctx in config_store.list_contexts():
+            context_url = normalize_api_url(f"{ctx.server_url}/api")
+            context_scope = credential_scope(ctx.name, ctx.org_slug)
+            if context_url == normalize_api_url(base_url) and context_scope == replay_scope:
+                return ctx.name
+        return None
 
     ctx = config_store.get_active_context()
     if ctx is None:
@@ -235,19 +247,35 @@ def flush_writes(
         replayed = 0
         contended = 0
         async with AsyncExitStack() as stack:
-            clients: dict[tuple[str, str | None], SibylClient] = {}
+            clients: dict[tuple[str, str | None, str | None], SibylClient] = {}
             for item in replayable:
                 write_id = str(item["id"])
-                current = increment_attempts(write_id)
+                try:
+                    current = increment_attempts(write_id)
+                except FileNotFoundError:
+                    continue
                 base_url = str(current["base_url"])
-                context_name = _context_name_for_base_url(base_url)
-                client_key = (normalize_api_url(base_url), context_name)
+                replay_scope = current.get("replay_scope")
+                context_name = _context_name_for_base_url(base_url, replay_scope)
+                client_key = (
+                    normalize_api_url(base_url),
+                    context_name,
+                    str(replay_scope) if replay_scope else None,
+                )
                 client = clients.get(client_key)
                 if client is None:
                     client = await stack.enter_async_context(
                         SibylClient(base_url=base_url, context_name=context_name)
                     )
                     clients[client_key] = client
+                if replay_scope and client._replay_scope != replay_scope:
+                    failures += 1
+                    replay_failures += 1
+                    error(
+                        f"Failed {write_id[:12]}: no configured credential scope matches "
+                        "the buffered write"
+                    )
+                    continue
                 try:
                     await client._request(
                         str(current["method"]),
@@ -290,4 +318,8 @@ def flush_writes(
                 )
             raise typer.Exit(code=1)
 
-    run_flush()
+    with pending_replay_lock() as acquired:
+        if not acquired:
+            warn("Another pending-write replay is already running.")
+            return
+        run_flush()
