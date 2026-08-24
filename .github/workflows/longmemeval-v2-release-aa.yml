@@ -22,20 +22,36 @@ permissions:
   actions: read
   contents: read
 
-concurrency:
-  group: >-
-    longmemeval-v2-release-aa-${{ github.event_name == 'workflow_dispatch' &&
-    inputs.experiment_id || github.event.workflow_run.head_sha }}
-  cancel-in-progress: false
-
 defaults:
   run:
     shell: bash
 
 jobs:
+  identify-workflow-run:
+    name: Identify release orchestration
+    if: github.event_name == 'workflow_run'
+    runs-on: ubuntu-latest
+    outputs:
+      orchestration_id: ${{ steps.identity.outputs.orchestration_id }}
+      arm_id: ${{ steps.identity.outputs.arm_id }}
+    steps:
+      - name: Parse sealed child identity
+        id: identity
+        env:
+          TRIGGER_TITLE: ${{ github.event.workflow_run.display_title }}
+        run: |
+          set -euo pipefail
+          if [[ "$TRIGGER_TITLE" =~ ^LongMemEval\ V2\ (aa-[1-9][0-9]*)\ (aa-(1-left|1-right|2-left|2-right|3-left|3-right))$ ]]; then
+            printf 'orchestration_id=%s\n' "${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            printf 'arm_id=%s\n' "${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
+          fi
+
   orchestrate:
     name: Dispatch, verify, and seal A/A
     if: github.event_name == 'workflow_dispatch'
+    concurrency:
+      group: longmemeval-v2-release-aa-${{ inputs.experiment_id }}-controller
+      cancel-in-progress: false
     permissions:
       actions: write
       contents: read
@@ -224,9 +240,11 @@ jobs:
 
   dispatch-consumers:
     name: Dispatch frozen baseline consumers
-    if: >-
-      github.event_name == 'workflow_run' &&
-      endsWith(github.event.workflow_run.display_title, ' aa-1-left')
+    needs: identify-workflow-run
+    if: needs.identify-workflow-run.outputs.arm_id == 'aa-1-left'
+    concurrency:
+      group: longmemeval-v2-release-aa-${{ needs.identify-workflow-run.outputs.orchestration_id }}-dispatch
+      cancel-in-progress: false
     permissions:
       actions: write
       contents: read
@@ -446,13 +464,16 @@ jobs:
 
   aggregate:
     name: Verify and seal completed A/A
+    needs: identify-workflow-run
     if: >-
-      github.event_name == 'workflow_run' &&
-      (endsWith(github.event.workflow_run.display_title, ' aa-1-right') ||
-      endsWith(github.event.workflow_run.display_title, ' aa-2-left') ||
-      endsWith(github.event.workflow_run.display_title, ' aa-2-right') ||
-      endsWith(github.event.workflow_run.display_title, ' aa-3-left') ||
-      endsWith(github.event.workflow_run.display_title, ' aa-3-right'))
+      needs.identify-workflow-run.outputs.arm_id == 'aa-1-right' ||
+      needs.identify-workflow-run.outputs.arm_id == 'aa-2-left' ||
+      needs.identify-workflow-run.outputs.arm_id == 'aa-2-right' ||
+      needs.identify-workflow-run.outputs.arm_id == 'aa-3-left' ||
+      needs.identify-workflow-run.outputs.arm_id == 'aa-3-right'
+    concurrency:
+      group: longmemeval-v2-release-aa-${{ needs.identify-workflow-run.outputs.orchestration_id }}-aggregate
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:

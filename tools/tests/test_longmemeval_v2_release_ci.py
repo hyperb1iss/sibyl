@@ -264,10 +264,13 @@ def test_release_workflows_preserve_distributed_execution_contract() -> None:
         "actions: read",
         "actions: write",
         'workflows: ["LongMemEval V2"]',
+        "identify-workflow-run:",
+        "needs: identify-workflow-run",
+        "needs.identify-workflow-run.outputs.orchestration_id",
         'orchestration_id="aa-${GITHUB_RUN_ID}"',
-        "endsWith(github.event.workflow_run.display_title, ' aa-1-left')",
-        "endsWith(github.event.workflow_run.display_title, ' aa-1-right')",
-        "endsWith(github.event.workflow_run.display_title, ' aa-3-right')",
+        "needs.identify-workflow-run.outputs.arm_id == 'aa-1-left'",
+        "needs.identify-workflow-run.outputs.arm_id == 'aa-1-right'",
+        "needs.identify-workflow-run.outputs.arm_id == 'aa-3-right'",
         "dispatch_arm aa-1-left save",
         "Dispatch five frozen baseline consumers",
         'memory_mode: "load"',
@@ -286,6 +289,8 @@ def test_release_workflows_preserve_distributed_execution_contract() -> None:
     ):
         assert fragment in controller
     assert controller.count("actions: write") == DISPATCHING_JOB_COUNT
+    assert "github.event.workflow_run.head_sha }}\n  cancel-in-progress" not in controller
+    assert controller.count("needs: identify-workflow-run") == 2
     assert (
         controller.count('(.conclusion | IN("success", "failure"))')
         == CONTROLLER_ACCEPTANCE_GATE_COUNT
