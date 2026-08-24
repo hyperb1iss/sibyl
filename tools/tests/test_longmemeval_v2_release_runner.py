@@ -245,11 +245,19 @@ def test_stage_plan_expands_exact_domains_waves_and_local_execution(
         "immutable_descendant_rename": True,
     }
     first_saved_memory = str(
-        sealed_inputs["output_root"] / "runs" / "aa-1-left" / "web" / "checkpoint"
+        sealed_inputs["output_root"] / "runs" / "aa-1-left" / "web" / "memory_state"
     )
     right_web = stage_plan["runs"][1]["domains"]["web"]
     assert right_web["planning_memory_dir"] == first_saved_memory
     assert right_web["execution_memory_dir"] == first_saved_memory
+    assert (
+        right_web["plan_command"][right_web["plan_command"].index("--checkpoint-dir") + 1]
+        == first_saved_memory
+    )
+    assert (
+        right_web["run_command"][right_web["run_command"].index("--load-memory-dir") + 1]
+        == first_saved_memory
+    )
     plan.require_stage_plan(stage_plan, check_checkout=False)
 
 
