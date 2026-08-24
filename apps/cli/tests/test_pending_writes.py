@@ -52,6 +52,18 @@ def test_pending_write_list_and_prefix_delete(
     assert pending_writes.list_pending_writes() == []
 
 
+def test_pending_replay_lock_is_nonblocking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+
+    with pending_writes.pending_replay_lock() as first:
+        with pending_writes.pending_replay_lock() as second:
+            assert first is True
+            assert second is False
+
+
 def test_corrupt_pending_write_remains_counted_as_a_structured_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

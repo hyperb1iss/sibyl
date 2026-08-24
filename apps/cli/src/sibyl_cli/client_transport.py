@@ -6,6 +6,8 @@ import sys
 import time
 from collections import deque
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from hashlib import sha256
 from typing import Any, Self, cast
 
 import httpx
@@ -19,6 +21,10 @@ from sibyl_cli.pending_writes import (
     PendingMetric,
     create_pending_write,
     delete_pending_write,
+    increment_attempts,
+    is_corrupt_pending_write,
+    list_pending_writes,
+    pending_replay_lock,
     record_pending_metric,
 )
 
@@ -28,7 +34,13 @@ FAILURE_WINDOW_SECONDS = 10.0
 FAILURE_THRESHOLD = 3
 _FAILURE_WINDOWS: dict[tuple[str, str], deque[float]] = {}
 BUFFERED_WRITE_METHODS = {"POST", "PATCH", "DELETE"}
-PENDING_WRITE_REMEDIATION = "Run 'sibyl auth login' then 'sibyl pending-writes flush'."
+AUTO_REPLAY_LIMIT = 8
+AUTO_REPLAY_GRACE_SECONDS = 30.0
+AUTO_REPLAY_BACKOFF_BASE_SECONDS = 2.0
+AUTO_REPLAY_BACKOFF_MAX_SECONDS = 300.0
+PENDING_WRITE_REMEDIATION = (
+    "Run 'sibyl auth login'; buffered writes retry after the next successful API request."
+)
 INIT_REMEDIATION = "Run 'sibyl init' for local mode or 'sibyl init --remote <url>'."
 
 
@@ -211,6 +223,15 @@ def _failure_key(base_url: str) -> tuple[str, str]:
     return (_subcommand_key(), base_url)
 
 
+def _auth_replay_scope(credential_scope_name: str | None, auth_token: str | None) -> str | None:
+    if credential_scope_name:
+        return credential_scope_name
+    if auth_token:
+        digest = sha256(auth_token.encode("utf-8")).hexdigest()
+        return f"token-sha256:{digest}"
+    return None
+
+
 def _prune_failures(window: deque[float], now: float) -> None:
     while window and now - window[0] > FAILURE_WINDOW_SECONDS:
         window.popleft()
@@ -273,6 +294,34 @@ def _should_buffer_request(method: str, path: str) -> bool:
     if path.startswith("/auth/"):
         return False
     return not _is_read_like_post(path)
+
+
+def _ready_for_auto_replay(item: dict[str, Any]) -> bool:
+    try:
+        created_at = datetime.fromisoformat(str(item.get("created_at") or ""))
+    except ValueError:
+        return False
+    if created_at.tzinfo is None:
+        return False
+    age = datetime.now(UTC) - created_at
+    if age.total_seconds() < AUTO_REPLAY_GRACE_SECONDS:
+        return False
+
+    attempts = int(item.get("attempts") or 0)
+    last_attempt_text = item.get("last_attempt_at")
+    if attempts == 0 or not isinstance(last_attempt_text, str):
+        return True
+    try:
+        last_attempt_at = datetime.fromisoformat(last_attempt_text)
+    except ValueError:
+        return False
+    if last_attempt_at.tzinfo is None:
+        return False
+    backoff_seconds = min(
+        AUTO_REPLAY_BACKOFF_BASE_SECONDS * (2 ** min(attempts - 1, 16)),
+        AUTO_REPLAY_BACKOFF_MAX_SECONDS,
+    )
+    return (datetime.now(UTC) - last_attempt_at).total_seconds() >= backoff_seconds
 
 
 def _requires_initialized_context(method: str, path: str) -> bool:
@@ -399,6 +448,56 @@ class ClientTransportMixin:
             await self._client.aclose()
             self._client = None
 
+    async def _maybe_replay_pending_writes(self) -> None:
+        """Replay a bounded batch after this client proves the API is healthy."""
+        try:
+            if not list_pending_writes():
+                return
+            with pending_replay_lock() as acquired:
+                if not acquired:
+                    return
+                matching = [
+                    item
+                    for item in list_pending_writes()
+                    if not is_corrupt_pending_write(item)
+                    and str(item.get("base_url")) == self.base_url
+                    and item.get("replay_scope") == self._replay_scope
+                    and self._replay_scope is not None
+                    and not (
+                        str(item.get("method") or "").upper() == "POST"
+                        and _is_read_like_post(str(item.get("path") or ""))
+                    )
+                ]
+                matching.sort(key=lambda item: str(item.get("created_at") or ""))
+                batch: list[dict[str, Any]] = []
+                for item in matching:
+                    if not _ready_for_auto_replay(item):
+                        break
+                    batch.append(item)
+                    if len(batch) == AUTO_REPLAY_LIMIT:
+                        break
+                for item in batch:
+                    write_id = str(item["id"])
+                    try:
+                        current = increment_attempts(write_id)
+                        await self._request(
+                            str(current["method"]),
+                            str(current["path"]),
+                            json=current.get("json"),
+                            params=current.get("params"),
+                            _buffer_pending=False,
+                            _pending_write_id=write_id,
+                            _idempotency_key=str(current["idempotency_key"]),
+                        )
+                        record_pending_metric("replayed")
+                    except SibylClientError as exc:
+                        if exc.status_code not in UNAPPLIED_WRITE_STATUS_CODES:
+                            break
+                    except (FileNotFoundError, OSError, ValueError):
+                        break
+        except Exception:
+            return
+
     async def __aenter__(self) -> Self:
         """Async context manager entry."""
         return self
@@ -459,6 +558,7 @@ class ClientTransportMixin:
                 base_url=self.base_url,
                 json_payload=json,
                 params=params,
+                replay_scope=self._replay_scope,
             )
             pending_write_id = str(pending["id"])
             pending_write_created = True
@@ -557,11 +657,15 @@ class ClientTransportMixin:
             if response.status_code == 204:
                 _resolve_pending_write(pending_write_id, applied_outcome)
                 _record_success(breaker_key)
+                if pending_write_id is None or pending_write_created:
+                    await self._maybe_replay_pending_writes()
                 return {}
 
             data = response.json()
             _resolve_pending_write(pending_write_id, applied_outcome)
             _record_success(breaker_key)
+            if pending_write_id is None or pending_write_created:
+                await self._maybe_replay_pending_writes()
             return data
 
         except httpx.ConnectError as e:
