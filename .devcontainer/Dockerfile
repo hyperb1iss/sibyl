@@ -15,11 +15,21 @@ RUN rm -f /etc/apt/sources.list.d/yarn.list \
 ENV PROTO_HOME=/opt/proto
 ENV PATH="/opt/proto/shims:/opt/proto/bin:${PATH}"
 
-RUN curl -fsSL https://moonrepo.dev/install/proto.sh | bash -s -- 0.60.2 --yes \
-    && proto install moon 2.5.2 --pin global \
+ARG PROTO_VERSION=0.61.1
+ARG PROTO_INSTALLER_SHA256=71e0a91c9dab49b714c701d9ea62d4ac5016783b29d8d553463e1c16ac7a3047
+
+RUN installer="$(mktemp)" \
+    && curl -fsSL \
+        "https://github.com/moonrepo/proto/releases/download/v${PROTO_VERSION}/proto_cli-installer.sh" \
+        -o "$installer" \
+    && printf '%s  %s\n' "$PROTO_INSTALLER_SHA256" "$installer" \
+        | sha256sum -c - \
+    && bash "$installer" \
+    && rm -f "$installer" \
+    && proto install moon 2.5.3 --pin global \
     && proto install python 3.13.15 --pin global \
     && proto install node 24.19.0 --pin global \
-    && proto install pnpm 11.22.0 --pin global \
+    && proto install pnpm 11.23.0 --pin global \
     && printf '%s\n' \
         'export PROTO_HOME=/opt/proto' \
         'export PATH="/opt/proto/shims:/opt/proto/bin:$PATH"' \

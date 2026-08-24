@@ -33,8 +33,8 @@ $ITALIC          = "$ESC[3m"
 $BOLD            = "$ESC[1m"
 $RESET           = "$ESC[0m"
 
-$PROTO_INSTALLER_VERSION = '0.60.2'
-$PROTO_INSTALLER_SHA256 = '91de41e2ba3ac62d26d9c6197001e44acedf451a6281908696b9ed2c76b9bcc8'
+$PROTO_INSTALLER_VERSION = '0.61.1'
+$PROTO_INSTALLER_SHA256 = '2dbe76851e4740517bb60ee0957f9f2de33c03c7ae68f2b5abc89ec8f4f0e862'
 $PROTO_INSTALLER_URL = "https://github.com/moonrepo/proto/releases/download/v${PROTO_INSTALLER_VERSION}/proto_cli-installer.ps1"
 
 # Banner gradient (electric purple → neon cyan)
@@ -202,6 +202,41 @@ function Assert-Windows {
 # Proto Installation
 # ═══════════════════════════════════════════════════════════════════════════════
 
+function Install-VerifiedProto ([string]$Expected) {
+    if ($Expected -ne $PROTO_INSTALLER_VERSION) {
+        Write-Err "No verified proto installer is pinned for v$Expected"
+        exit 1
+    }
+    $installer = Join-Path ([IO.Path]::GetTempPath()) (
+        "proto-install-$([guid]::NewGuid()).ps1"
+    )
+    try {
+        Invoke-WebRequest `
+            -Uri $PROTO_INSTALLER_URL `
+            -OutFile $installer `
+            -UseBasicParsing `
+            -ErrorAction Stop
+        $actualSha256 = (Get-FileHash -Path $installer -Algorithm SHA256).Hash
+        if (-not [String]::Equals(
+            $actualSha256,
+            $PROTO_INSTALLER_SHA256,
+            [StringComparison]::OrdinalIgnoreCase
+        )) {
+            throw 'proto installer checksum mismatch'
+        }
+        & $installer
+        $installerSucceeded = $?
+        if (-not $installerSucceeded) {
+            throw "Verified proto v$Expected installation failed"
+        }
+    }
+    finally {
+        if (Test-Path $installer) {
+            Remove-Item $installer -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Install-Proto {
     # Make sure proto's default install dir is on PATH for this session before
     # the existence check — a previous install may not have updated this shell.
@@ -219,40 +254,16 @@ function Install-Proto {
         Write-Info "Upgrading proto from v$current to v$expected..."
         $proto = Get-ApplicationCommand -Name 'proto'
         & $proto.Source upgrade $expected
-        if ($LASTEXITCODE -ne 0) {
-            Write-Err "proto v$expected upgrade failed"
-            exit 1
+        $upgradeSucceeded = $LASTEXITCODE -eq 0
+        Set-ProtoPath -ProtoHome $protoHome
+        $current = if (Test-Command proto) { Get-VersionString -Tool 'proto' } else { '' }
+        if (-not $upgradeSucceeded -or $current -ne $expected) {
+            Write-Warn "proto self-upgrade did not activate v$expected; using the verified installer"
+            Install-VerifiedProto -Expected $expected
         }
     } else {
         Write-Info "Installing proto v$expected (toolchain version manager)..."
-        if ($expected -ne $PROTO_INSTALLER_VERSION) {
-            Write-Err "No verified proto installer is pinned for v$expected"
-            exit 1
-        }
-        $installer = Join-Path ([IO.Path]::GetTempPath()) (
-            "proto-install-$([guid]::NewGuid()).ps1"
-        )
-        try {
-            Invoke-WebRequest `
-                -Uri $PROTO_INSTALLER_URL `
-                -OutFile $installer `
-                -UseBasicParsing `
-                -ErrorAction Stop
-            $actualSha256 = (Get-FileHash -Path $installer -Algorithm SHA256).Hash
-            if (-not [String]::Equals(
-                $actualSha256,
-                $PROTO_INSTALLER_SHA256,
-                [StringComparison]::OrdinalIgnoreCase
-            )) {
-                throw 'proto installer checksum mismatch'
-            }
-            & $installer
-        }
-        finally {
-            if (Test-Path $installer) {
-                Remove-Item $installer -Force -ErrorAction SilentlyContinue
-            }
-        }
+        Install-VerifiedProto -Expected $expected
     }
 
     # Refresh PATH for the bin we just dropped on disk.
