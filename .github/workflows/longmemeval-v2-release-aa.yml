@@ -1,0 +1,353 @@
+name: LongMemEval V2 Release A/A
+run-name: >-
+  LongMemEval V2 Release A/A ${{ github.event_name == 'workflow_dispatch' &&
+  inputs.experiment_id || github.event.workflow_run.display_title }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      experiment_id:
+        description: "Path-safe identity for this v1.3 release evaluation"
+        type: string
+        required: true
+      source_sha:
+        description: "Exact main commit to evaluate; blank uses the controller SHA"
+        type: string
+        default: ""
+  workflow_run:
+    workflows: ["LongMemEval V2"]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: >-
+    longmemeval-v2-release-aa-${{ github.event_name == 'workflow_dispatch' &&
+    inputs.experiment_id || github.event.workflow_run.display_title }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  orchestrate:
+    name: Dispatch, verify, and seal A/A
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OFFICIAL_DATASET_REVISION: f152293e235517d504809563c833d7190b8c713b
+      PLAN_PATH: .moon/cache/evals/longmemeval-v2-release-ci/dispatch-plan.json
+      RUNS_PATH: .moon/cache/evals/longmemeval-v2-release-ci/runs.json
+      RUN_MAP_PATH: .moon/cache/evals/longmemeval-v2-release-ci/run-map.json
+      CHILD_ARTIFACTS: .moon/cache/evals/longmemeval-v2-release-ci/child-artifacts
+      BUNDLE_ROOT: .moon/cache/evals/longmemeval-v2-release-ci/aa-bundle
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup moonrepo toolchain
+        uses: moonrepo/setup-toolchain@v0.6.4
+        with:
+          proto-version: "0.61.1"
+          auto-install: true
+          auto-setup: true
+          cache-version: longmemeval-v2-release-aa-v1
+
+      - name: Cache uv
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/uv
+          key: uv-longmemeval-v2-release-aa-${{ runner.os }}-${{ hashFiles('**/uv.lock') }}
+          restore-keys: |
+            uv-longmemeval-v2-release-aa-${{ runner.os }}-
+
+      - name: Seal distributed A/A dispatch plan
+        env:
+          REQUESTED_SOURCE_SHA: ${{ inputs.source_sha }}
+          EXPERIMENT_ID: ${{ inputs.experiment_id }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::The release A/A controller only runs from main."
+            exit 1
+          fi
+          source_sha="${REQUESTED_SOURCE_SHA:-$GITHUB_SHA}"
+          if [[ "$source_sha" != "$GITHUB_SHA" ]]; then
+            echo "::error::Requested source SHA differs from the controller checkout."
+            exit 1
+          fi
+          orchestration_id="aa-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$(dirname "$PLAN_PATH")"
+          moon run bench-longmemeval-v2-release-ci -- \
+            plan \
+            --experiment-id "$EXPERIMENT_ID" \
+            --orchestration-id "$orchestration_id" \
+            --repository "$GITHUB_REPOSITORY" \
+            --ref "$GITHUB_REF" \
+            --sha "$source_sha" \
+            --output "$PLAN_PATH"
+          printf 'SOURCE_SHA=%s\n' "$source_sha" >> "$GITHUB_ENV"
+          printf 'ORCHESTRATION_ID=%s\n' "$orchestration_id" >> "$GITHUB_ENV"
+
+      - name: Dispatch six independent paid arms
+        env:
+          EXPERIMENT_ID: ${{ inputs.experiment_id }}
+        run: |
+          set -euo pipefail
+          runs='{}'
+
+          find_child_run() {
+            local arm_id="$1"
+            local title="LongMemEval V2 ${ORCHESTRATION_ID} ${arm_id}"
+            local matches
+            for attempt in {1..60}; do
+              matches="$(gh run list \
+                --repo "$GITHUB_REPOSITORY" \
+                --workflow longmemeval-v2.yml \
+                --event workflow_dispatch \
+                --branch "$GITHUB_REF_NAME" \
+                --limit 100 \
+                --json databaseId,displayTitle,headSha \
+                --jq ".[] | select(.displayTitle == \"${title}\" and .headSha == \"${SOURCE_SHA}\") | .databaseId")"
+              if [[ "$(wc -w <<< "$matches")" -eq 1 ]]; then
+                printf '%s\n' "$matches"
+                return 0
+              fi
+              if [[ "$(wc -w <<< "$matches")" -gt 1 ]]; then
+                echo "::error::Multiple child runs matched ${arm_id}." >&2
+                return 1
+              fi
+              echo "Attempt $attempt: waiting for ${arm_id} workflow identity." >&2
+              sleep 5
+            done
+            echo "::error::Child workflow identity never appeared for ${arm_id}." >&2
+            return 1
+          }
+
+          dispatch_arm() {
+            local arm_id="$1"
+            local memory_mode="$2"
+            local memory_source_run_id="$3"
+            local ci_context
+            local manifest
+            local run_id
+            manifest="$(jq -er \
+              --arg arm "$arm_id" \
+              '.arms[] | select(.arm_id == $arm) | .official_arm_manifest_json' \
+              "$PLAN_PATH")"
+            ci_context="$(jq -cn \
+              --arg orchestration_id "$ORCHESTRATION_ID" \
+              --arg arm_id "$arm_id" \
+              --arg source_sha "$SOURCE_SHA" \
+              --arg memory_mode "$memory_mode" \
+              --arg memory_source_run_id "$memory_source_run_id" \
+              '{
+                orchestration_id: $orchestration_id,
+                arm_id: $arm_id,
+                source_sha: $source_sha,
+                memory_mode: $memory_mode,
+                memory_source_run_id: $memory_source_run_id
+              }')"
+            gh workflow run longmemeval-v2.yml \
+              --repo "$GITHUB_REPOSITORY" \
+              --ref "$GITHUB_REF_NAME" \
+              -f run_official_full=true \
+              -f official_ci_context_json="$ci_context" \
+              -f official_arm_manifest_json="$manifest" \
+              -f official_tier=small \
+              -f official_domain=both \
+              -f official_limit= \
+              -f official_validation_slice=none \
+              -f official_dataset_revision="$OFFICIAL_DATASET_REVISION" \
+              -f official_reader_base_url=https://openrouter.ai/api/v1 \
+              -f official_reader_model=qwen/qwen3.5-9b \
+              -f official_reader_api_key_env=OPENROUTER_API_KEY \
+              -f official_reader_max_concurrent_requests=16 \
+              -f official_reader_retry_attempts=4 \
+              -f official_evidence_composition_mode=shared_relevance \
+              -f official_source_evidence_bundling=false \
+              -f official_retrieval_max_planned_queries=3 \
+              -f official_max_context_chars_per_item=18000 \
+              -f official_typed_stream_retrieval=false \
+              -f official_typed_stream_limit=8 \
+              -f official_note_distillation=false \
+              -f official_note_distillation_model=gpt-5.4-nano \
+              -f official_api_retry_attempts=3 \
+              -f official_prompt_build_max_workers=1 \
+              -f official_evaluator_model=gpt-5.2 \
+              -f official_include_screenshots=false
+            run_id="$(find_child_run "$arm_id")"
+            runs="$(jq -cn \
+              --argjson current "$runs" \
+              --arg arm "$arm_id" \
+              --arg run "$run_id" \
+              '$current + {($arm): $run}')"
+          }
+
+          dispatch_arm aa-1-left save ""
+          builder_run_id="$(jq -er '.["aa-1-left"]' <<< "$runs")"
+          while IFS= read -r arm_id; do
+            dispatch_arm "$arm_id" load "$builder_run_id"
+          done < <(jq -r '.arms[1:][] | .arm_id' "$PLAN_PATH")
+
+          printf '%s\n' "$runs" > "$RUNS_PATH"
+          moon run bench-longmemeval-v2-release-ci -- \
+            run-map \
+            --dispatch-plan "$PLAN_PATH" \
+            --runs "$RUNS_PATH" \
+            --output "$RUN_MAP_PATH"
+
+      - name: Upload controller evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: longmemeval-v2-release-aa-controller-${{ github.run_id }}
+          path: |
+            .moon/cache/evals/longmemeval-v2-release-ci/dispatch-plan.json
+            .moon/cache/evals/longmemeval-v2-release-ci/runs.json
+            .moon/cache/evals/longmemeval-v2-release-ci/run-map.json
+          if-no-files-found: error
+          retention-days: 30
+
+  aggregate:
+    name: Verify and seal completed A/A
+    if: >-
+      github.event_name == 'workflow_run' &&
+      endsWith(github.event.workflow_run.display_title, ' aa-3-right')
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CONTROLLER_ROOT: .moon/cache/evals/longmemeval-v2-release-ci/controller
+      RUN_MAP_PATH: .moon/cache/evals/longmemeval-v2-release-ci/controller/run-map.json
+      CHILD_ARTIFACTS: .moon/cache/evals/longmemeval-v2-release-ci/child-artifacts
+      BUNDLE_ROOT: .moon/cache/evals/longmemeval-v2-release-ci/aa-bundle
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup moonrepo toolchain
+        uses: moonrepo/setup-toolchain@v0.6.4
+        with:
+          proto-version: "0.61.1"
+          auto-install: true
+          auto-setup: true
+          cache-version: longmemeval-v2-release-aa-v1
+
+      - name: Recover sealed controller state
+        env:
+          TRIGGER_TITLE: ${{ github.event.workflow_run.display_title }}
+          TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TRIGGER_TITLE" =~ ^LongMemEval\ V2\ (aa-([1-9][0-9]*)-([1-9][0-9]*))\ aa-3-right$ ]]; then
+            echo "::error::The aggregation trigger identity is invalid."
+            exit 1
+          fi
+          orchestration_id="${BASH_REMATCH[1]}"
+          controller_run_id="${BASH_REMATCH[2]}"
+          controller_json="$(gh run view "$controller_run_id" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json conclusion,event,headSha,workflowName)"
+          if ! jq -e \
+            --arg sha "$TRIGGER_SHA" \
+            '.conclusion == "success" and
+             .event == "workflow_dispatch" and
+             .headSha == $sha and
+             .workflowName == "LongMemEval V2 Release A/A"' \
+            <<< "$controller_json" >/dev/null; then
+            echo "::error::The A/A controller provenance is invalid."
+            exit 1
+          fi
+          mkdir -p "$CONTROLLER_ROOT"
+          gh run download "$controller_run_id" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "longmemeval-v2-release-aa-controller-${controller_run_id}" \
+            --dir "$CONTROLLER_ROOT"
+          if [[ ! -s "$RUN_MAP_PATH" ]]; then
+            echo "::error::The sealed A/A run map is missing."
+            exit 1
+          fi
+          if ! jq -e \
+            --arg orchestration "$orchestration_id" \
+            --arg sha "$TRIGGER_SHA" \
+            '.orchestration_id == $orchestration and .source.sha == $sha' \
+            "$RUN_MAP_PATH" >/dev/null; then
+            echo "::error::The sealed A/A run map differs from its trigger."
+            exit 1
+          fi
+          {
+            printf 'CONTROLLER_RUN_ID=%s\n' "$controller_run_id"
+            printf 'ORCHESTRATION_ID=%s\n' "$orchestration_id"
+            printf 'SOURCE_SHA=%s\n' "$TRIGGER_SHA"
+          } >> "$GITHUB_ENV"
+
+      - name: Wait for every paid arm
+        run: |
+          set -euo pipefail
+          while true; do
+            pending=0
+            while IFS=$'\t' read -r arm_id run_id; do
+              run_json="$(gh run view "$run_id" \
+                --repo "$GITHUB_REPOSITORY" \
+                --json conclusion,displayTitle,event,headSha,status,workflowName)"
+              if ! jq -e \
+                --arg sha "$SOURCE_SHA" \
+                --arg title "LongMemEval V2 ${ORCHESTRATION_ID} ${arm_id}" \
+                '.event == "workflow_dispatch" and
+                 .headSha == $sha and
+                 .displayTitle == $title and
+                 .workflowName == "LongMemEval V2"' \
+                <<< "$run_json" >/dev/null; then
+                echo "::error::Child workflow provenance drifted for ${arm_id}."
+                exit 1
+              fi
+              status="$(jq -r '.status' <<< "$run_json")"
+              conclusion="$(jq -r '.conclusion // ""' <<< "$run_json")"
+              if [[ "$status" == "completed" && "$conclusion" != "success" ]]; then
+                echo "::error::Child workflow ${arm_id} completed as ${conclusion}."
+                exit 1
+              fi
+              if [[ "$status" != "completed" ]]; then
+                pending=$((pending + 1))
+              fi
+            done < <(jq -r '.runs | to_entries[] | [.key, .value] | @tsv' "$RUN_MAP_PATH")
+            if [[ "$pending" -eq 0 ]]; then
+              break
+            fi
+            echo "Waiting for ${pending} of 6 paid arms."
+            sleep 30
+          done
+
+      - name: Download and seal portable A/A evidence
+        run: |
+          set -euo pipefail
+          mkdir -p "$CHILD_ARTIFACTS"
+          while IFS=$'\t' read -r arm_id run_id; do
+            gh run download "$run_id" \
+              --repo "$GITHUB_REPOSITORY" \
+              --name "longmemeval-v2-combined-small-${SOURCE_SHA}-${run_id}" \
+              --dir "$CHILD_ARTIFACTS/$arm_id"
+          done < <(jq -r '.runs | to_entries[] | [.key, .value] | @tsv' "$RUN_MAP_PATH")
+          moon run bench-longmemeval-v2-release-ci -- \
+            aggregate \
+            --artifacts-root "$CHILD_ARTIFACTS" \
+            --run-map "$RUN_MAP_PATH" \
+            --output-root "$BUNDLE_ROOT"
+
+      - name: Upload authoritative A/A bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: longmemeval-v2-release-aa-${{ env.SOURCE_SHA }}-${{ env.CONTROLLER_RUN_ID }}
+          path: .moon/cache/evals/longmemeval-v2-release-ci/aa-bundle
+          if-no-files-found: error
+          retention-days: 30

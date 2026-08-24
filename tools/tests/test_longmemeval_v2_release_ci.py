@@ -15,6 +15,8 @@ from tools.tests.test_longmemeval_v2_rig import (
     _paired_pass,
 )
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 @pytest.fixture(autouse=True)
 def _use_synthetic_official_corpus(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -124,6 +126,24 @@ def test_run_map_rejects_reused_workflow_execution() -> None:
         release_ci.require_run_map(run_map)
 
 
+def test_run_map_binds_the_exact_dispatch_plan() -> None:
+    dispatch = release_ci.build_dispatch_plan(
+        experiment_id="experiment-v1.3",
+        orchestration_id="release-aa-test",
+        source={
+            "repository": "hyperb1iss/sibyl",
+            "ref": "refs/heads/main",
+            "sha": "a" * 40,
+        },
+    )
+    runs = {arm_id: str(index) for index, arm_id in enumerate(release_ci.ARM_IDS, start=1)}
+
+    run_map = release_ci.build_run_map(dispatch_plan=dispatch, runs=runs)
+
+    assert run_map["builder_run_id"] == "1"
+    assert run_map["runs"] == runs
+
+
 def test_aggregate_and_import_publish_portable_authority(tmp_path: Path) -> None:
     bundle = _bundle(tmp_path)
     output = tmp_path / "aa-authorization.json"
@@ -150,3 +170,43 @@ def test_import_rejects_tampered_download(tmp_path: Path) -> None:
             bundle_root=bundle,
             output=tmp_path / "aa-authorization.json",
         )
+
+
+def test_release_workflows_preserve_distributed_execution_contract() -> None:
+    child = (REPO_ROOT / ".github/workflows/longmemeval-v2.yml").read_text(encoding="utf-8")
+    controller = (REPO_ROOT / ".github/workflows/longmemeval-v2-release-aa.yml").read_text(
+        encoding="utf-8"
+    )
+
+    for fragment in (
+        "official_ci_context_json:",
+        '"memory_source_run_id"',
+        "needs: [official-preflight, official-memory-source]",
+        "environment: longmemeval-paid",
+        "SIBYL_GRAPH_EMBEDDING_PROVIDER: local",
+        "SIBYL_COORDINATION_BACKEND: redis",
+        "sentence-transformers/all-MiniLM-L6-v2",
+        "--save-memory --checkpoint-dir",
+        "--load-memory-dir",
+        "database_snapshot_manifest.json",
+        "longmemeval-v2-frozen-memory-",
+        "github-token: ${{ github.token }}",
+        "${{ github.run_id }}",
+    ):
+        assert fragment in child
+    for fragment in (
+        "actions: write",
+        'workflows: ["LongMemEval V2"]',
+        "endsWith(github.event.workflow_run.display_title, ' aa-3-right')",
+        "dispatch_arm aa-1-left save",
+        'dispatch_arm "$arm_id" load "$builder_run_id"',
+        'official_ci_context_json="$ci_context"',
+        'official_dataset_revision="$OFFICIAL_DATASET_REVISION"',
+        "official_reader_model=qwen/qwen3.5-9b",
+        "official_evaluator_model=gpt-5.2",
+        "run-map",
+        "aggregate",
+        "Recover sealed controller state",
+        "Upload authoritative A/A bundle",
+    ):
+        assert fragment in controller

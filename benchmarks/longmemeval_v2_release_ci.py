@@ -212,6 +212,37 @@ def require_run_map(raw: object) -> dict[str, Any]:
     return {**raw, "source": source, "runs": dict(runs)}
 
 
+def build_run_map(
+    *,
+    dispatch_plan: dict[str, Any],
+    runs: dict[str, str],
+) -> dict[str, Any]:
+    """Bind every planned arm to the distinct workflow run that executed it."""
+
+    if dispatch_plan.get("schema_version") != DISPATCH_PLAN_SCHEMA_VERSION:
+        raise StagePlanError("CI dispatch plan schema is invalid")
+    unsigned_plan = {
+        key: value for key, value in dispatch_plan.items() if key != "dispatch_plan_sha256"
+    }
+    if dispatch_plan.get("dispatch_plan_sha256") != rig.canonical_sha256(unsigned_plan):
+        raise StagePlanError("CI dispatch plan digest is invalid")
+    planned_arms = dispatch_plan.get("arms")
+    if not isinstance(planned_arms, list) or [
+        arm.get("arm_id") for arm in planned_arms if isinstance(arm, dict)
+    ] != list(ARM_IDS):
+        raise StagePlanError("CI dispatch plan arm order or membership is invalid")
+    payload = {
+        "schema_version": RUN_MAP_SCHEMA_VERSION,
+        "experiment_id": dispatch_plan["experiment_id"],
+        "orchestration_id": dispatch_plan["orchestration_id"],
+        "source": dispatch_plan["source"],
+        "builder_run_id": runs.get(BUILDER_ARM_ID),
+        "runs": runs,
+    }
+    payload["run_map_sha256"] = rig.canonical_sha256(payload)
+    return require_run_map(payload)
+
+
 def _find_arm_run(root: Path, arm_id: str) -> Path:
     arm_root = (root / arm_id).resolve()
     if not arm_root.is_dir() or not arm_root.is_relative_to(root.resolve()):
@@ -407,6 +438,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     aggregate.add_argument("--artifacts-root", required=True)
     aggregate.add_argument("--run-map", required=True)
     aggregate.add_argument("--output-root", required=True)
+    run_map = commands.add_parser("run-map")
+    run_map.add_argument("--dispatch-plan", required=True)
+    run_map.add_argument("--runs", required=True)
+    run_map.add_argument("--output", required=True)
     import_aa = commands.add_parser("import-aa")
     import_aa.add_argument("--bundle-root", required=True)
     import_aa.add_argument("--output", required=True)
@@ -420,6 +455,12 @@ def main(argv: list[str] | None = None) -> int:
             experiment_id=args.experiment_id,
             orchestration_id=args.orchestration_id,
             source={"repository": args.repository, "ref": args.ref, "sha": args.sha},
+        )
+        release_io.write_json_once_atomic(Path(args.output).resolve(), payload)
+    elif args.command == "run-map":
+        payload = build_run_map(
+            dispatch_plan=load_json(Path(args.dispatch_plan)),
+            runs=load_json(Path(args.runs)),
         )
         release_io.write_json_once_atomic(Path(args.output).resolve(), payload)
     elif args.command == "aggregate":

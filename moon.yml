@@ -1045,6 +1045,7 @@ tasks:
       - tools/**/*.py
       - .github/workflows/eval.yml
       - .github/workflows/longmemeval-v2.yml
+      - .github/workflows/longmemeval-v2-release-aa.yml
       - benchmarks/context_pack_eval.py
       - benchmarks/compare_eval_reports.py
       - benchmarks/git_provenance.py
@@ -1788,6 +1789,8 @@ tasks:
     command:
       uv run pytest tools/tests/test_longmemeval_v2_release_ci.py -v
     inputs:
+      - .github/workflows/longmemeval-v2.yml
+      - .github/workflows/longmemeval-v2-release-aa.yml
       - benchmarks/longmemeval_v2_release_ci.py
       - benchmarks/longmemeval_v2_release_authorization*.py
       - benchmarks/longmemeval_v2_release_contract.py
