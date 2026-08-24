@@ -69,14 +69,16 @@ These rules exist because real agent sessions consistently fail without them.
    quote the separator (`echo "==="`, not `echo ===`): zsh equals-expansion turns bare `===` into a
    phantom exit-1 that makes a successful sibyl call look failed.
 
-8. **A failed write is lost knowledge.** A non-zero exit from `remember` means nothing was saved.
-   Retry exactly once after applying the printed remediation; if it still fails, include the unsaved
-   learning verbatim in your final message so the user can capture it. Never claim a memory was
-   stored unless you can quote the returned entity ID (e.g. `error_pattern_5f40ca...`) as the
-   receipt. On `internal_error`, retry once at most, then walk the fallback ladder instead of
-   spiraling: for a completion, `task complete` → `task update <id> -s done` plus a separate
-   `remember` for the learnings. Never silently drop a capture because the server is sick. Write the
-   body to a scratch file and say so.
+8. **A failed write needs a receipt.** A non-zero exit from `remember` does not confirm a server
+   save. If the CLI says the write was buffered, do not rerun it with a new idempotency key. Wait for
+   automatic replay or inspect it with `sibyl pending-writes list`. Retry exactly once after applying
+   the printed remediation only when the failure was not buffered. If that retry still fails,
+   include the unsaved learning verbatim in your final message so the user can capture it. Never
+   claim a memory was stored unless you can quote the returned entity ID (e.g.
+   `error_pattern_5f40ca...`) as the receipt. On an unbuffered `internal_error`, retry once at most,
+   then walk the fallback ladder instead of spiraling: for a completion, `task complete` → `task
+   update <id> -s done` plus a separate `remember` for the learnings. Never silently drop a capture
+   because the server is sick. Write the body to a scratch file and say so.
 
 9. **Fetch IDs fresh.** Re-run the list command immediately before `show`/`update`/`complete`; never
    reuse an entity or task UUID remembered from earlier in a long session, and never run the list

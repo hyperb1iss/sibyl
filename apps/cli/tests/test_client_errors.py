@@ -307,6 +307,49 @@ async def test_automatic_replay_stops_after_the_first_transient_failure(
 
 
 @pytest.mark.asyncio
+async def test_automatic_replay_does_not_pass_an_older_write_in_cooldown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(client_transport_module, "AUTO_REPLAY_GRACE_SECONDS", 0.0)
+    monkeypatch.setattr(client_transport_module, "AUTO_REPLAY_BACKOFF_BASE_SECONDS", 60.0)
+    requests: list[str] = []
+
+    def healthy(request: httpx.Request) -> httpx.Response:
+        requests.append(request.method)
+        return httpx.Response(200, json={"status": "healthy"})
+
+    client = _client_with_transport(httpx.MockTransport(healthy))
+    older = pending_writes.create_pending_write(
+        method="POST",
+        path="/entities",
+        base_url=client.base_url,
+        json_payload={"name": "Create first"},
+        params=None,
+        replay_scope=client._replay_scope,
+    )
+    pending_writes.increment_attempts(str(older["id"]))
+    newer = pending_writes.create_pending_write(
+        method="PATCH",
+        path="/entities/entity_123",
+        base_url=client.base_url,
+        json_payload={"name": "Update second"},
+        params=None,
+        replay_scope=client._replay_scope,
+    )
+
+    result = await client.get("/health")
+
+    await client.close()
+    queued = pending_writes.list_pending_writes()
+    attempts = {str(item["id"]): int(item["attempts"]) for item in queued}
+    assert result == {"status": "healthy"}
+    assert requests == ["GET"]
+    assert attempts == {str(older["id"]): 1, str(newer["id"]): 0}
+
+
+@pytest.mark.asyncio
 async def test_automatic_replay_never_crosses_credential_scopes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

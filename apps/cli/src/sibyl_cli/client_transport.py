@@ -456,21 +456,26 @@ class ClientTransportMixin:
             with pending_replay_lock() as acquired:
                 if not acquired:
                     return
-                candidates = [
+                matching = [
                     item
                     for item in list_pending_writes()
                     if not is_corrupt_pending_write(item)
                     and str(item.get("base_url")) == self.base_url
                     and item.get("replay_scope") == self._replay_scope
                     and self._replay_scope is not None
-                    and _ready_for_auto_replay(item)
                     and not (
                         str(item.get("method") or "").upper() == "POST"
                         and _is_read_like_post(str(item.get("path") or ""))
                     )
                 ]
-                candidates.sort(key=lambda item: str(item.get("created_at") or ""))
-                batch = candidates[:AUTO_REPLAY_LIMIT]
+                matching.sort(key=lambda item: str(item.get("created_at") or ""))
+                batch: list[dict[str, Any]] = []
+                for item in matching:
+                    if not _ready_for_auto_replay(item):
+                        break
+                    batch.append(item)
+                    if len(batch) == AUTO_REPLAY_LIMIT:
+                        break
                 for item in batch:
                     write_id = str(item["id"])
                     try:
