@@ -347,6 +347,7 @@ tasks:
       benchmarks/local_execution_identity.py benchmarks/longmemeval_v2_official_source.py
       benchmarks/longmemeval_v2_release_authorization.py
       benchmarks/longmemeval_v2_release_authorization_package.py
+      benchmarks/longmemeval_v2_release_ci.py
       benchmarks/longmemeval_v2_release_cli.py
       benchmarks/longmemeval_v2_release_contract.py
       benchmarks/longmemeval_v2_release_evidence.py
@@ -399,6 +400,7 @@ tasks:
       benchmarks/local_execution_identity.py benchmarks/longmemeval_v2_official_source.py
       benchmarks/longmemeval_v2_release_authorization.py
       benchmarks/longmemeval_v2_release_authorization_package.py
+      benchmarks/longmemeval_v2_release_ci.py
       benchmarks/longmemeval_v2_release_cli.py
       benchmarks/longmemeval_v2_release_contract.py
       benchmarks/longmemeval_v2_release_evidence.py
@@ -454,6 +456,7 @@ tasks:
       - benchmarks/longmemeval_v2_official_source.py
       - benchmarks/longmemeval_v2_release_authorization.py
       - benchmarks/longmemeval_v2_release_authorization_package.py
+      - benchmarks/longmemeval_v2_release_ci.py
       - benchmarks/longmemeval_v2_release_cli.py
       - benchmarks/longmemeval_v2_release_contract.py
       - benchmarks/longmemeval_v2_release_evidence.py
@@ -516,6 +519,7 @@ tasks:
       benchmarks/local_execution_identity.py benchmarks/longmemeval_v2_official_source.py
       benchmarks/longmemeval_v2_release_authorization.py
       benchmarks/longmemeval_v2_release_authorization_package.py
+      benchmarks/longmemeval_v2_release_ci.py
       benchmarks/longmemeval_v2_release_cli.py
       benchmarks/longmemeval_v2_release_contract.py
       benchmarks/longmemeval_v2_release_evidence.py
@@ -569,6 +573,7 @@ tasks:
       - benchmarks/longmemeval_v2_official_source.py
       - benchmarks/longmemeval_v2_release_authorization.py
       - benchmarks/longmemeval_v2_release_authorization_package.py
+      - benchmarks/longmemeval_v2_release_ci.py
       - benchmarks/longmemeval_v2_release_cli.py
       - benchmarks/longmemeval_v2_release_contract.py
       - benchmarks/longmemeval_v2_release_evidence.py
@@ -630,6 +635,7 @@ tasks:
       benchmarks/longmemeval_v2_official_source.py
       benchmarks/longmemeval_v2_release_authorization.py
       benchmarks/longmemeval_v2_release_authorization_package.py
+      benchmarks/longmemeval_v2_release_ci.py
       benchmarks/longmemeval_v2_release_cli.py
       benchmarks/longmemeval_v2_release_contract.py
       benchmarks/longmemeval_v2_release_evidence.py
@@ -686,6 +692,7 @@ tasks:
       - benchmarks/longmemeval_v2_official_source.py
       - benchmarks/longmemeval_v2_release_authorization.py
       - benchmarks/longmemeval_v2_release_authorization_package.py
+      - benchmarks/longmemeval_v2_release_ci.py
       - benchmarks/longmemeval_v2_release_cli.py
       - benchmarks/longmemeval_v2_release_contract.py
       - benchmarks/longmemeval_v2_release_evidence.py
@@ -1035,10 +1042,12 @@ tasks:
       tools/tests/test_longmemeval_v2_release_fd_lifecycle.py -v
       tools/tests/test_longmemeval_v2_release_transaction.py -v
       tools/tests/test_longmemeval_v2_release_cli.py -v
+      tools/tests/test_longmemeval_v2_release_ci.py -v
     inputs:
       - tools/**/*.py
       - .github/workflows/eval.yml
       - .github/workflows/longmemeval-v2.yml
+      - .github/workflows/longmemeval-v2-release-aa.yml
       - benchmarks/context_pack_eval.py
       - benchmarks/compare_eval_reports.py
       - benchmarks/git_provenance.py
@@ -1051,6 +1060,7 @@ tasks:
       - benchmarks/longmemeval_v2_official_source.py
       - benchmarks/longmemeval_v2_release_authorization.py
       - benchmarks/longmemeval_v2_release_authorization_package.py
+      - benchmarks/longmemeval_v2_release_ci.py
       - benchmarks/longmemeval_v2_release_cli.py
       - benchmarks/longmemeval_v2_release_contract.py
       - benchmarks/longmemeval_v2_release_evidence.py
@@ -1758,6 +1768,40 @@ tasks:
       - benchmarks/longmemeval_v2_release_assets/SYSTEM_DESCRIPTION.md
       - benchmarks/longmemeval_v2_memory/**/*.py
       - tools/bench/longmemeval_v2_*.py
+      - pyproject.toml
+    options:
+      cache: false
+
+  bench-longmemeval-v2-release-ci:
+    command:
+      uv run python -m benchmarks.longmemeval_v2_release_ci
+    inputs:
+      - benchmarks/longmemeval_v2_release_ci.py
+      - benchmarks/longmemeval_v2_release_authorization*.py
+      - benchmarks/longmemeval_v2_release_contract.py
+      - benchmarks/longmemeval_v2_release_inputs.py
+      - benchmarks/longmemeval_v2_release_io.py
+      - tools/bench/longmemeval_v2_artifact_bridge.py
+      - tools/bench/longmemeval_v2_rig.py
+      - pyproject.toml
+    options:
+      cache: false
+
+  bench-longmemeval-v2-release-ci-test:
+    command:
+      uv run pytest tools/tests/test_longmemeval_v2_release_ci.py -v
+    inputs:
+      - .github/workflows/longmemeval-v2.yml
+      - .github/workflows/longmemeval-v2-release-aa.yml
+      - benchmarks/longmemeval_v2_release_ci.py
+      - benchmarks/longmemeval_v2_release_authorization*.py
+      - benchmarks/longmemeval_v2_release_contract.py
+      - benchmarks/longmemeval_v2_release_inputs.py
+      - benchmarks/longmemeval_v2_release_io.py
+      - tools/bench/longmemeval_v2_artifact_bridge.py
+      - tools/bench/longmemeval_v2_rig.py
+      - tools/tests/test_longmemeval_v2_release_ci.py
+      - tools/tests/test_longmemeval_v2_rig.py
       - pyproject.toml
     options:
       cache: false
