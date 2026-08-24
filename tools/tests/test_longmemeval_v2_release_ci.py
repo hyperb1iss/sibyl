@@ -18,6 +18,7 @@ from tools.tests.test_longmemeval_v2_rig import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DISPATCHING_JOB_COUNT = 2
 CONTROLLER_ACCEPTANCE_GATE_COUNT = 2
+IDENTITY_CONSUMER_JOB_COUNT = 2
 
 
 @pytest.fixture(autouse=True)
@@ -290,7 +291,7 @@ def test_release_workflows_preserve_distributed_execution_contract() -> None:
         assert fragment in controller
     assert controller.count("actions: write") == DISPATCHING_JOB_COUNT
     assert "github.event.workflow_run.head_sha }}\n  cancel-in-progress" not in controller
-    assert controller.count("needs: identify-workflow-run") == 2
+    assert controller.count("needs: identify-workflow-run") == IDENTITY_CONSUMER_JOB_COUNT
     assert (
         controller.count('(.conclusion | IN("success", "failure"))')
         == CONTROLLER_ACCEPTANCE_GATE_COUNT
