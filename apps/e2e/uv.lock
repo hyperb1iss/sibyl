@@ -791,8 +791,8 @@ requires-dist = [
     { name = "mistune", marker = "extra == 'runtime'", specifier = ">=3.3.4" },
     { name = "packaging", specifier = ">=26.0" },
     { name = "pydantic", specifier = ">=2.0" },
-    { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], marker = "extra == 'llm'", specifier = ">=2.30.0,<3" },
-    { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], marker = "extra == 'runtime'", specifier = ">=2.30.0,<3" },
+    { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], marker = "extra == 'llm'", specifier = ">=2.32.0,<3" },
+    { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], marker = "extra == 'runtime'", specifier = ">=2.32.0,<3" },
     { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "pyjwt", specifier = ">=2.10" },
     { name = "python-louvain", marker = "extra == 'graphrag'", specifier = ">=0.16" },
@@ -810,12 +810,13 @@ provides-extras = ["crawler", "embeddings", "graph", "graphrag", "llm", "reranki
 dev = [
     { name = "anthropic", specifier = ">=0.120.2,<1" },
     { name = "numpy", specifier = ">=2.5.1" },
-    { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], specifier = ">=2.30.0,<3" },
+    { name = "pydantic-ai-slim", extras = ["anthropic", "google", "openai"], specifier = ">=2.32.0,<3" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
     { name = "ruff" },
     { name = "surrealdb", specifier = ">=2.0.0,<3.0" },
+    { name = "ty", specifier = ">=0.0.69" },
 ]
 
 [[package]]
