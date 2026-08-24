@@ -15,11 +15,69 @@ The adapter writes trajectories through the live Sibyl API and queries `/api/sea
 gold answer from official query context before backend code can read it, and it never sees gold
 trajectory IDs.
 
-## v1.3 sealed local release experiment
+## v1.3 sealed release experiment
 
-The v1.3 release experiment runs locally from a clean `main` checkout. The release runner is the
-primary execution path for its paid Small-corpus evidence. The lower-level commands later in this
-page remain useful for development, but their outputs do not replace the sealed v1.3 stage receipts.
+The authoritative initial A/A stage runs in GitHub Actions. The `LongMemEval V2 Release A/A`
+workflow dispatches six separate paid workflow runs, builds one frozen baseline for the other five
+arms, and publishes one digest-bound bundle after all six runs pass. A completion-triggered job
+handles aggregation, so no controller job has to remain alive while the builder and consumers
+execute.
+
+The local release runner remains available for later stages and investigation. Its lower-level
+commands are also useful during development, but neither path replaces the sealed CI A/A receipt.
+
+### Run initial A/A in CI
+
+Set `OPENROUTER_API_KEY` and `OPENAI_API_KEY` as repository secrets. The paid child jobs use the
+`longmemeval-paid` environment. Approve the builder first, then approve the five consumers after the
+builder publishes the frozen web and enterprise databases.
+
+Dispatch from the exact `main` commit under evaluation:
+
+```bash
+git fetch origin main
+source_sha="$(git rev-parse origin/main)"
+gh workflow run longmemeval-v2-release-aa.yml \
+  --ref main \
+  -f experiment_id=sibyl-v1.3-aa \
+  -f source_sha="$source_sha"
+```
+
+The controller rejects a non-`main` ref or a requested SHA that differs from its checkout. The six
+child runs bind their workflow run IDs, source SHA, fixed A/A seeds, official dataset revision,
+reader, evaluator, runtime geometry, and shared baseline identity. The builder uploads each frozen
+database separately from scored evidence. Consumer jobs validate its manifest and byte digests
+before restoring it.
+
+After the completion-triggered controller run succeeds, download and import its authoritative
+bundle. Replace the two run IDs with the dispatch run and completion-triggered run shown by GitHub:
+
+```bash
+controller_run_id=<dispatch-run-id>
+aggregation_run_id=<completion-triggered-run-id>
+bundle_root="/absolute/path/to/v1.3-aa-ci-bundle"
+
+gh run download "$aggregation_run_id" \
+  --repo hyperb1iss/sibyl \
+  --name "longmemeval-v2-release-aa-${source_sha}-${controller_run_id}" \
+  --dir "$bundle_root"
+
+moon run bench-longmemeval-v2-release-ci -- \
+  import-aa \
+  --bundle-root "$bundle_root" \
+  --output /absolute/path/to/aa-authorization.json
+```
+
+The import command rechecks every file size and digest, validates the six distinct workflow
+executions, and rewrites only the local artifact paths. Keep the downloaded bundle with the
+generated authorization. Frozen database artifacts expire after seven days. The final A/A bundle and
+controller evidence remain available for 30 days.
+
+If a child run fails, preserve its diagnostics and rerun the controller with a new experiment ID. Do
+not mix successful arms from separate controller runs. The run map and bundle validator reject that
+splice.
+
+### Run a local sealed stage
 
 Do not generate a paid plan from a feature branch. Merge the runner first, create a clean checkout
 of `main`, fetch the remote, and confirm that local `main` and `origin/main` name the same commit.
