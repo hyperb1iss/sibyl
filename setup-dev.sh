@@ -7,8 +7,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly REPO_ROOT
 
-readonly PROTO_INSTALLER_VERSION="0.60.2"
-readonly PROTO_INSTALLER_SHA256="eda7887a3192337b87f62c08328781f08f39f55796efd885ec3472976b4e9adf"
+readonly PROTO_INSTALLER_VERSION="0.61.1"
+readonly PROTO_INSTALLER_SHA256="71e0a91c9dab49b714c701d9ea62d4ac5016783b29d8d553463e1c16ac7a3047"
 readonly PROTO_INSTALLER_URL="https://github.com/moonrepo/proto/releases/download/v${PROTO_INSTALLER_VERSION}/proto_cli-installer.sh"
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -143,6 +143,29 @@ print_banner() {
 # Proto Installation
 # ═══════════════════════════════════════════════════════════════════════════════
 
+install_verified_proto() {
+    local expected="$1"
+
+    if [[ "$expected" != "$PROTO_INSTALLER_VERSION" ]]; then
+        error "No verified proto installer is pinned for v${expected}"
+        return 1
+    fi
+    if ! (
+        installer=$(mktemp "${TMPDIR:-/tmp}/sibyl-proto-installer.XXXXXX") || exit 1
+        trap 'rm -f "$installer"' EXIT
+        curl -fsSL "$PROTO_INSTALLER_URL" -o "$installer" || exit 1
+        actual_sha256=$(calculate_sha256 "$installer") || exit 1
+        if [[ "$actual_sha256" != "$PROTO_INSTALLER_SHA256" ]]; then
+            error "proto installer checksum mismatch"
+            exit 1
+        fi
+        bash "$installer"
+    ); then
+        error "Verified proto v${expected} installation failed"
+        return 1
+    fi
+}
+
 install_proto() {
     local expected
     local current
@@ -158,27 +181,18 @@ install_proto() {
 
     if [[ -n "$current" ]]; then
         info "Upgrading proto from v${current} to v${expected}..."
-        proto upgrade "$expected"
+        if ! proto upgrade "$expected"; then
+            warn "proto self-upgrade failed; using the verified installer"
+        fi
+        hash -r
+        current=$(installed_version proto) || current=""
+        if [[ "$current" != "$expected" ]]; then
+            warn "proto self-upgrade did not activate v${expected}; using the verified installer"
+            install_verified_proto "$expected"
+        fi
     else
         info "Installing proto v${expected} (toolchain version manager)..."
-        if [[ "$expected" != "$PROTO_INSTALLER_VERSION" ]]; then
-            error "No verified proto installer is pinned for v${expected}"
-            return 1
-        fi
-        if ! (
-            installer=$(mktemp "${TMPDIR:-/tmp}/sibyl-proto-installer.XXXXXX") || exit 1
-            trap 'rm -f "$installer"' EXIT
-            curl -fsSL "$PROTO_INSTALLER_URL" -o "$installer" || exit 1
-            actual_sha256=$(calculate_sha256 "$installer") || exit 1
-            if [[ "$actual_sha256" != "$PROTO_INSTALLER_SHA256" ]]; then
-                error "proto installer checksum mismatch"
-                exit 1
-            fi
-            bash "$installer"
-        ); then
-            error "Verified proto v${expected} installation failed"
-            return 1
-        fi
+        install_verified_proto "$expected"
     fi
 
     hash -r

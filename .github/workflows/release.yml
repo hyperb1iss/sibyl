@@ -89,7 +89,7 @@ jobs:
       - name: "◇ Setup moonrepo toolchain"
         uses: moonrepo/setup-toolchain@v0.6.4
         with:
-          proto-version: "0.60.2"
+          proto-version: "0.61.1"
           auto-install: true
           auto-setup: true
           cache-version: release-rc-v1

@@ -14,16 +14,16 @@ from tools.tests.conftest import REPO_ROOT
 
 EXPECTED_NATIVE_SAMPLE_LINES = 3
 EXPECTED_TOOLCHAIN_VERSIONS = {
-    "proto": "0.60.2",
-    "moon": "2.5.2",
+    "proto": "0.61.1",
+    "moon": "2.5.3",
     "node": "24.19.0",
-    "pnpm": "11.22.0",
+    "pnpm": "11.23.0",
     "python": "3.13.15",
     "uv": "0.12.5",
 }
 PROTO_INSTALLER_SHA256 = {
-    "powershell": "91de41e2ba3ac62d26d9c6197001e44acedf451a6281908696b9ed2c76b9bcc8",
-    "shell": "eda7887a3192337b87f62c08328781f08f39f55796efd885ec3472976b4e9adf",
+    "powershell": "2dbe76851e4740517bb60ee0957f9f2de33c03c7ae68f2b5abc89ec8f4f0e862",
+    "shell": "71e0a91c9dab49b714c701d9ea62d4ac5016783b29d8d553463e1c16ac7a3047",
 }
 
 
@@ -42,7 +42,9 @@ if [[ "$tool" == "proto" && "${1:-}" == "install" ]]; then
 fi
 if [[ "$tool" == "proto" && "${1:-}" == "upgrade" ]]; then
   printf 'upgrade %s\\n' "$2" >> "$TOOL_INSTALL_LOG"
-  printf '%s\\n' "$2" > "$TOOL_STATE_DIR/proto"
+  if [[ "${PROTO_UPGRADE_NOOP:-0}" != "1" ]]; then
+    printf '%s\\n' "$2" > "$TOOL_STATE_DIR/proto"
+  fi
   exit 0
 fi
 version="$(<"$TOOL_STATE_DIR/$tool")"
@@ -102,13 +104,76 @@ install_toolchain
         for tool in EXPECTED_TOOLCHAIN_VERSIONS
     } == EXPECTED_TOOLCHAIN_VERSIONS
     assert install_log.read_text(encoding="utf-8").splitlines() == [
-        "upgrade 0.60.2",
-        "install moon 2.5.2 --pin global",
+        "upgrade 0.61.1",
+        "install moon 2.5.3 --pin global",
         "install node 24.19.0 --pin global",
-        "install pnpm 11.22.0 --pin global",
+        "install pnpm 11.23.0 --pin global",
         "install python 3.13.15 --pin global",
         "install uv 0.12.5 --pin global",
     ]
+
+
+@pytest.mark.skipif(which("bash") is None, reason="bash is required for setup-dev.sh")
+def test_shell_setup_falls_back_when_proto_upgrade_is_a_noop(tmp_path: Path) -> None:
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    (repo_dir / "setup-dev.sh").write_bytes((REPO_ROOT / "setup-dev.sh").read_bytes())
+    (repo_dir / ".prototools").write_bytes((REPO_ROOT / ".prototools").read_bytes())
+
+    proto_home = tmp_path / "proto-home"
+    state_dir = tmp_path / "state"
+    install_log = tmp_path / "installs.log"
+    _write_stale_toolchain_stubs(proto_home, state_dir)
+
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    fake_curl = fake_bin / "curl"
+    fake_curl.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+while (($#)); do
+  if [[ "$1" == "-o" ]]; then
+    output="$2"
+    shift 2
+  else
+    shift
+  fi
+done
+printf '#!/usr/bin/env bash\\nprintf "%%s\\n" "$EXPECTED_PROTO" > "$TOOL_STATE_DIR/proto"\\n' > "$output"
+""",
+        encoding="utf-8",
+    )
+    fake_curl.chmod(0o755)
+
+    bash = which("bash")
+    assert bash is not None
+    script = f"""
+source {shlex.quote(str(repo_dir / "setup-dev.sh"))}
+calculate_sha256() {{ printf '%s\\n' "$PROTO_INSTALLER_SHA256"; }}
+install_proto
+"""
+    result = subprocess.run(  # noqa: S603
+        [bash, "-c", script],
+        cwd=repo_dir,
+        env={
+            **os.environ,
+            "EXPECTED_PROTO": EXPECTED_TOOLCHAIN_VERSIONS["proto"],
+            "PATH": f"{fake_bin}{os.pathsep}{proto_home / 'bin'}{os.pathsep}{os.environ['PATH']}",
+            "PROTO_HOME": str(proto_home),
+            "PROTO_UPGRADE_NOOP": "1",
+            "TOOL_INSTALL_LOG": str(install_log),
+            "TOOL_STATE_DIR": str(state_dir),
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (state_dir / "proto").read_text(encoding="utf-8").strip() == (
+        EXPECTED_TOOLCHAIN_VERSIONS["proto"]
+    )
+    assert "using the verified installer" in result.stdout
 
 
 @pytest.mark.skipif(which("bash") is None, reason="bash is required for setup-dev.sh")
@@ -270,6 +335,12 @@ if "%tool%"=="proto" if "%1"=="install" (
   if exist "%TOOL_STATE_DIR%\\%2.fail" del "%TOOL_STATE_DIR%\\%2.fail"
   exit /b 0
 )
+if "%tool%"=="proto" if "%1"=="upgrade" (
+  echo upgrade %2>>"%TOOL_INSTALL_LOG%"
+  if "%PROTO_UPGRADE_FAIL%"=="1" exit /b 42
+  echo %2>"%TOOL_STATE_DIR%\\proto"
+  exit /b 0
+)
 set /p version=<"%TOOL_STATE_DIR%\\%tool%"
 if "%tool%"=="node" (echo v%version%) else if "%tool%"=="python" (echo Python %version%) else (echo %tool% %version%)
 if exist "%TOOL_STATE_DIR%\\%tool%.fail" exit /b 42
@@ -283,6 +354,14 @@ if [[ "$tool" == "proto" && "${1:-}" == "install" ]]; then
   printf 'install %s %s --pin global\\n' "$2" "$3" >> "$TOOL_INSTALL_LOG"
   printf '%s\\n' "$3" > "$TOOL_STATE_DIR/$2"
   rm -f "$TOOL_STATE_DIR/$2.fail"
+  exit 0
+fi
+if [[ "$tool" == "proto" && "${1:-}" == "upgrade" ]]; then
+  printf 'upgrade %s\\n' "$2" >> "$TOOL_INSTALL_LOG"
+  if [[ "${PROTO_UPGRADE_FAIL:-0}" == "1" ]]; then
+    exit 42
+  fi
+  printf '%s\\n' "$2" > "$TOOL_STATE_DIR/proto"
   exit 0
 fi
 version="$(<"$TOOL_STATE_DIR/$tool")"
@@ -300,7 +379,7 @@ fi
     proto = bin_dir / f"proto{suffix}"
     proto.write_text(stub, encoding="utf-8")
     proto.chmod(0o755)
-    (state_dir / "proto").write_text("0.60.2\n", encoding="utf-8")
+    (state_dir / "proto").write_text("0.61.1\n", encoding="utf-8")
     for tool in ("moon", "node", "pnpm", "python", "uv"):
         binary = shims_dir / f"{tool}{suffix}"
         binary.write_text(stub, encoding="utf-8")
@@ -321,6 +400,7 @@ def test_powershell_setup_reconciles_exact_tools_and_executable_sources(
     state_dir = tmp_path / "state"
     install_log = tmp_path / "installs.log"
     _write_powershell_toolchain_stubs(proto_home, state_dir)
+    (state_dir / "proto").write_text("0.1.0\n", encoding="utf-8")
 
     pwsh = which("pwsh")
     assert pwsh is not None
@@ -340,6 +420,18 @@ $env:Path = @(
     $env:Path
 ) -join $separator
 function global:node { 'v99.99.99' }
+function global:Invoke-WebRequest {
+    [CmdletBinding()]
+    param($Uri, $OutFile, [switch]$UseBasicParsing)
+    @'
+Set-Content -Path (Join-Path $env:TOOL_STATE_DIR 'proto') -Value $env:EXPECTED_PROTO
+'@ | Set-Content -Path $OutFile
+}
+function global:Get-FileHash {
+    param($Path, $Algorithm)
+    [PSCustomObject]@{ Hash = $env:PROTO_INSTALLER_SHA256 }
+}
+Install-Proto
 Install-Moon
 Install-Toolchain
 $nodeCommand = Get-ApplicationCommand -Name 'node'
@@ -368,6 +460,12 @@ Write-Output "FINAL_PATH=$env:Path"
         text=True,
         capture_output=True,
         check=False,
+        env={
+            **os.environ,
+            "EXPECTED_PROTO": EXPECTED_TOOLCHAIN_VERSIONS["proto"],
+            "PROTO_INSTALLER_SHA256": PROTO_INSTALLER_SHA256["powershell"],
+            "PROTO_UPGRADE_FAIL": "1",
+        },
     )
 
     assert result.returncode == 0, result.stderr
@@ -376,9 +474,10 @@ Write-Output "FINAL_PATH=$env:Path"
         for tool in EXPECTED_TOOLCHAIN_VERSIONS
     } == EXPECTED_TOOLCHAIN_VERSIONS
     assert install_log.read_text(encoding="utf-8").splitlines() == [
-        "install moon 2.5.2 --pin global",
+        "upgrade 0.61.1",
+        "install moon 2.5.3 --pin global",
         "install node 24.19.0 --pin global",
-        "install pnpm 11.22.0 --pin global",
+        "install pnpm 11.23.0 --pin global",
         "install python 3.13.15 --pin global",
         "install uv 0.12.5 --pin global",
     ]
@@ -413,7 +512,9 @@ def test_proto_bootstrap_uses_verified_pinned_release_installers() -> None:
     assert "releases/download/v${PROTO_INSTALLER_VERSION}/proto_cli-installer.sh" in shell
     assert "releases/download/v${PROTO_INSTALLER_VERSION}/proto_cli-installer.ps1" in powershell
     assert '"$expected" != "$PROTO_INSTALLER_VERSION"' in shell
-    assert "$expected -ne $PROTO_INSTALLER_VERSION" in powershell
+    assert "$Expected -ne $PROTO_INSTALLER_VERSION" in powershell
+    assert "$installerSucceeded = $?" in powershell
+    assert "if (-not $installerSucceeded)" in powershell
     assert "moonrepo.dev/install" not in shell
     assert "moonrepo.dev/install" not in powershell
 
@@ -428,9 +529,14 @@ def test_devcontainer_has_one_exact_node_and_pnpm_owner() -> None:
     assert isinstance(features, dict)
     assert not any(key.startswith("ghcr.io/devcontainers/features/node") for key in features)
     assert 'ENV PATH="/opt/proto/shims:/opt/proto/bin:${PATH}"' in dockerfile
+    assert "ARG PROTO_VERSION=0.61.1" in dockerfile
+    assert f"ARG PROTO_INSTALLER_SHA256={PROTO_INSTALLER_SHA256['shell']}" in dockerfile
+    assert "releases/download/v${PROTO_VERSION}/proto_cli-installer.sh" in dockerfile
+    assert "sha256sum -c -" in dockerfile
+    assert "moonrepo.dev/install" not in dockerfile
     assert "> /etc/profile.d/proto.sh" in dockerfile
     assert "proto install node 24.19.0 --pin global" in dockerfile
-    assert "proto install pnpm 11.22.0 --pin global" in dockerfile
+    assert "proto install pnpm 11.23.0 --pin global" in dockerfile
 
 
 def _write_docker_stub(bin_dir: Path) -> None:
