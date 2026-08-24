@@ -17,6 +17,8 @@ from benchmarks.longmemeval_v2_official_source import (
 from tools.bench import longmemeval_v2_artifact_bridge as bridge
 from tools.bench import longmemeval_v2_rig as rig
 
+TEST_CONTEXT_CHARS_PER_ITEM = 12_000
+
 
 @pytest.fixture(autouse=True)
 def _use_synthetic_official_corpus(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -389,7 +391,7 @@ def _domain_run(
                 "retrieval_mode": mode,
                 "content_max_chars": 18_000,
                 "max_context_items": 8,
-                "max_context_chars_per_item": 12_000,
+                "max_context_chars_per_item": TEST_CONTEXT_CHARS_PER_ITEM,
                 "max_context_total_chars": 60_000,
                 "operational_note_dedupe_mode": "canonical",
                 "operational_note_lane_mode": "grouped",
@@ -533,6 +535,8 @@ def test_bridge_builds_signed_arm_from_official_artifacts(tmp_path: Path) -> Non
         "web": 2,
     }
     assert "longmemeval_v2_domain" not in arm["configuration"]
+    assert arm["configuration"]["max_context_chars_per_item"] == TEST_CONTEXT_CHARS_PER_ITEM
+    assert arm["geometry"]["max_context_chars_per_item"] == TEST_CONTEXT_CHARS_PER_ITEM
 
 
 def test_bridge_builds_signed_arm_from_local_execution(tmp_path: Path) -> None:

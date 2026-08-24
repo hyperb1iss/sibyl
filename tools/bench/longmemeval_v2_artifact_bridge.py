@@ -315,7 +315,7 @@ CONFIG_EXCLUDED_KEYS = frozenset(
         "project_id",
         "run_id",
         "runner_provenance",
-        *rig.GEOMETRY_KEYS,
+        *(rig.GEOMETRY_KEYS - {"max_context_chars_per_item"}),
     }
 )
 PLAN_PROFILE_KEYS = frozenset(
