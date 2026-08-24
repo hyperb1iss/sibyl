@@ -172,6 +172,43 @@ def test_import_rejects_tampered_download(tmp_path: Path) -> None:
         )
 
 
+def test_aggregate_rejects_arm_run_id_outside_the_run_map(tmp_path: Path) -> None:
+    passes = _paired_passes()
+    artifacts = tmp_path / "artifacts"
+    for paired in passes:
+        for side in ("left", "right"):
+            arm_id = f"{paired['pass_id']}-{side}"
+            arm = paired["arms"][side]
+            if arm_id == "aa-2-right":
+                arm["execution"]["run_id"] = "999999"
+            _write_json(artifacts / arm_id / "arm_run.json", arm)
+    run_map_path = tmp_path / "run-map.json"
+    _write_json(run_map_path, _run_map(_paired_passes()))
+
+    with pytest.raises(StagePlanError, match="execution differs from its run map"):
+        release_ci.aggregate_aa_bundle(
+            artifacts_root=artifacts,
+            run_map_path=run_map_path,
+            output_root=tmp_path / "bundle",
+        )
+
+
+def test_import_rejects_bundle_path_traversal(tmp_path: Path) -> None:
+    bundle = _bundle(tmp_path)
+    manifest_path = bundle / "bundle_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["passes"][0]["path"] = "../aa-1.json"
+    unsigned = {key: value for key, value in manifest.items() if key != "bundle_manifest_sha256"}
+    manifest["bundle_manifest_sha256"] = rig.canonical_sha256(unsigned)
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(StagePlanError, match="escapes the CI bundle"):
+        release_ci.import_aa_bundle(
+            bundle_root=bundle,
+            output=tmp_path / "aa-authorization.json",
+        )
+
+
 def test_release_workflows_preserve_distributed_execution_contract() -> None:
     child = (REPO_ROOT / ".github/workflows/longmemeval-v2.yml").read_text(encoding="utf-8")
     controller = (REPO_ROOT / ".github/workflows/longmemeval-v2-release-aa.yml").read_text(
@@ -190,6 +227,7 @@ def test_release_workflows_preserve_distributed_execution_contract() -> None:
         "--load-memory-dir",
         "database_snapshot_manifest.json",
         "longmemeval-v2-frozen-memory-",
+        "Sibyl services did not stop before the database snapshot",
         "github-token: ${{ github.token }}",
         "${{ github.run_id }}",
     ):
@@ -197,16 +235,25 @@ def test_release_workflows_preserve_distributed_execution_contract() -> None:
     for fragment in (
         "actions: write",
         'workflows: ["LongMemEval V2"]',
+        'orchestration_id="aa-${GITHUB_RUN_ID}"',
+        "endsWith(github.event.workflow_run.display_title, ' aa-1-left')",
         "endsWith(github.event.workflow_run.display_title, ' aa-3-right')",
         "dispatch_arm aa-1-left save",
-        'dispatch_arm "$arm_id" load "$builder_run_id"',
+        "Dispatch five frozen baseline consumers",
+        'memory_mode: "load"',
+        "Reusing child workflow",
         'official_ci_context_json="$ci_context"',
         'official_dataset_revision="$OFFICIAL_DATASET_REVISION"',
         "official_reader_model=qwen/qwen3.5-9b",
         "official_evaluator_model=gpt-5.2",
         "run-map",
         "aggregate",
+        "longmemeval-v2-release-aa-run-map-",
         "Recover sealed controller state",
         "Upload authoritative A/A bundle",
     ):
         assert fragment in controller
+    assert "gh run watch" not in child
+    assert controller.index("Upload sealed controller plan") < controller.index(
+        "Dispatch the frozen baseline builder"
+    )

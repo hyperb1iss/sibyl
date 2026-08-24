@@ -635,6 +635,7 @@ tasks:
       benchmarks/longmemeval_v2_official_source.py
       benchmarks/longmemeval_v2_release_authorization.py
       benchmarks/longmemeval_v2_release_authorization_package.py
+      benchmarks/longmemeval_v2_release_ci.py
       benchmarks/longmemeval_v2_release_cli.py
       benchmarks/longmemeval_v2_release_contract.py
       benchmarks/longmemeval_v2_release_evidence.py
@@ -691,6 +692,7 @@ tasks:
       - benchmarks/longmemeval_v2_official_source.py
       - benchmarks/longmemeval_v2_release_authorization.py
       - benchmarks/longmemeval_v2_release_authorization_package.py
+      - benchmarks/longmemeval_v2_release_ci.py
       - benchmarks/longmemeval_v2_release_cli.py
       - benchmarks/longmemeval_v2_release_contract.py
       - benchmarks/longmemeval_v2_release_evidence.py

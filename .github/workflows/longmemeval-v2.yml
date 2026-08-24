@@ -411,25 +411,22 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.run_official_full
     needs: official-preflight
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 15
     permissions:
       actions: read
       contents: read
     env:
       GH_TOKEN: ${{ github.token }}
-      MEMORY_MODE: ${{ fromJSON(inputs.official_ci_context_json).memory_mode }}
+      MEMORY_MODE: ${{ fromJSON(inputs.official_ci_context_json || '{}').memory_mode }}
       MEMORY_SOURCE_RUN_ID:
-        ${{ fromJSON(inputs.official_ci_context_json).memory_source_run_id }}
+        ${{ fromJSON(inputs.official_ci_context_json || '{}').memory_source_run_id }}
       SOURCE_SHA:
-        ${{ fromJSON(inputs.official_ci_context_json).source_sha || github.sha }}
+        ${{ fromJSON(inputs.official_ci_context_json || '{}').source_sha || github.sha }}
     steps:
-      - name: Wait for the frozen baseline builder
+      - name: Validate the completed frozen baseline builder
         if: env.MEMORY_MODE == 'load'
         run: |
           set -euo pipefail
-          gh run watch "$MEMORY_SOURCE_RUN_ID" \
-            --repo "$GITHUB_REPOSITORY" \
-            --exit-status
           run_json="$(gh run view "$MEMORY_SOURCE_RUN_ID" \
             --repo "$GITHUB_REPOSITORY" \
             --json conclusion,event,headSha,workflowName)"
@@ -466,16 +463,16 @@ jobs:
       OUTPUT_ROOT: .moon/cache/evals/longmemeval-v2-official
       OFFICIAL_TIER: ${{ inputs.official_tier || 'small' }}
       FROZEN_MEMORY_ROOT: /tmp/longmemeval-v2-frozen-memory
-      MEMORY_MODE: ${{ fromJSON(inputs.official_ci_context_json).memory_mode }}
+      MEMORY_MODE: ${{ fromJSON(inputs.official_ci_context_json || '{}').memory_mode }}
       MEMORY_SOURCE_RUN_ID:
-        ${{ fromJSON(inputs.official_ci_context_json).memory_source_run_id }}
+        ${{ fromJSON(inputs.official_ci_context_json || '{}').memory_source_run_id }}
       SOURCE_SHA:
-        ${{ fromJSON(inputs.official_ci_context_json).source_sha || github.sha }}
+        ${{ fromJSON(inputs.official_ci_context_json || '{}').source_sha || github.sha }}
       LME_SIBYL_EMAIL:
-        longmemeval-v2-${{ fromJSON(inputs.official_ci_context_json).orchestration_id ||
+        longmemeval-v2-${{ fromJSON(inputs.official_ci_context_json || '{}').orchestration_id ||
         github.run_id }}-${{ matrix.domain }}@example.invalid
       LME_SIBYL_PASSWORD:
-        SibylLongMemEvalV2-${{ fromJSON(inputs.official_ci_context_json).orchestration_id ||
+        SibylLongMemEvalV2-${{ fromJSON(inputs.official_ci_context_json || '{}').orchestration_id ||
         github.run_id }}-${{ matrix.domain }}-password
       OFFICIAL_LIMIT: ${{ inputs.official_limit || '' }}
       OFFICIAL_VALIDATION_SLICE: ${{ inputs.official_validation_slice || 'none' }}
@@ -1122,8 +1119,26 @@ jobs:
               kill -TERM "$(cat "$pid_file")" 2>/dev/null || true
             fi
           done
-          sleep 3
-          pkill -TERM -f 'sibyld (serve|worker)' 2>/dev/null || true
+          pkill -TERM -f '[s]ibyld (serve|worker)' 2>/dev/null || true
+          for attempt in {1..60}; do
+            active=false
+            for pid_file in /tmp/sibyl-worker.pid /tmp/sibyld.pid; do
+              if [[ -s "$pid_file" ]] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
+                active=true
+              fi
+            done
+            if pgrep -f '[s]ibyld (serve|worker)' >/dev/null; then
+              active=true
+            fi
+            if [[ "$active" == "false" ]]; then
+              break
+            fi
+            if [[ "$attempt" -eq 60 ]]; then
+              echo "::error::Sibyl services did not stop before the database snapshot."
+              exit 1
+            fi
+            sleep 1
+          done
           docker compose --env-file /dev/null --profile redis stop redis
           docker compose --env-file /dev/null stop surrealdb
           tar -C "$database_root" -cf "$snapshot" .
@@ -1223,7 +1238,7 @@ jobs:
       OFFICIAL_DATASET_REVISION: ${{ inputs.official_dataset_revision || '' }}
       OFFICIAL_INCLUDE_SCREENSHOTS: ${{ inputs.official_include_screenshots || false }}
       SOURCE_SHA:
-        ${{ fromJSON(inputs.official_ci_context_json).source_sha || github.sha }}
+        ${{ fromJSON(inputs.official_ci_context_json || '{}').source_sha || github.sha }}
     steps:
       - uses: actions/checkout@v7
         with:
