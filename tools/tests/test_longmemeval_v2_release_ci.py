@@ -237,6 +237,7 @@ def test_release_workflows_preserve_distributed_execution_contract() -> None:
         'workflows: ["LongMemEval V2"]',
         'orchestration_id="aa-${GITHUB_RUN_ID}"',
         "endsWith(github.event.workflow_run.display_title, ' aa-1-left')",
+        "endsWith(github.event.workflow_run.display_title, ' aa-1-right')",
         "endsWith(github.event.workflow_run.display_title, ' aa-3-right')",
         "dispatch_arm aa-1-left save",
         "Dispatch five frozen baseline consumers",
@@ -249,6 +250,8 @@ def test_release_workflows_preserve_distributed_execution_contract() -> None:
         "run-map",
         "aggregate",
         "longmemeval-v2-release-aa-run-map-",
+        'dispatcher_run_id="$(sort -n <<< "$dispatcher_runs" | tail -1)"',
+        'echo "ready=false" >> "$GITHUB_OUTPUT"',
         "Recover sealed controller state",
         "Upload authoritative A/A bundle",
     ):
@@ -257,3 +260,4 @@ def test_release_workflows_preserve_distributed_execution_contract() -> None:
     assert controller.index("Upload sealed controller plan") < controller.index(
         "Dispatch the frozen baseline builder"
     )
+    assert "Waiting for ${pending} of 6 paid arms." not in controller

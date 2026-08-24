@@ -49,8 +49,9 @@ reader, evaluator, runtime geometry, and shared baseline identity. The builder u
 database separately from scored evidence. Consumer jobs validate its manifest and byte digests
 before restoring it.
 
-After the completion-triggered controller run succeeds, download and import its authoritative
-bundle. Replace the two run IDs with the dispatch run and completion-triggered run shown by GitHub:
+After the completion-triggered controller publishes the authoritative bundle, download and import
+it. Replace the two run IDs with the dispatch run and the completion-triggered run that owns the
+bundle:
 
 ```bash
 controller_run_id=<dispatch-run-id>

@@ -25,7 +25,7 @@ permissions:
 concurrency:
   group: >-
     longmemeval-v2-release-aa-${{ github.event_name == 'workflow_dispatch' &&
-    inputs.experiment_id || github.event.workflow_run.display_title }}
+    inputs.experiment_id || github.event.workflow_run.head_sha }}
   cancel-in-progress: false
 
 defaults:
@@ -442,9 +442,13 @@ jobs:
     name: Verify and seal completed A/A
     if: >-
       github.event_name == 'workflow_run' &&
-      endsWith(github.event.workflow_run.display_title, ' aa-3-right')
+      (endsWith(github.event.workflow_run.display_title, ' aa-1-right') ||
+      endsWith(github.event.workflow_run.display_title, ' aa-2-left') ||
+      endsWith(github.event.workflow_run.display_title, ' aa-2-right') ||
+      endsWith(github.event.workflow_run.display_title, ' aa-3-left') ||
+      endsWith(github.event.workflow_run.display_title, ' aa-3-right'))
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
       STATE_ROOT: .moon/cache/evals/longmemeval-v2-release-ci/controller
@@ -472,7 +476,7 @@ jobs:
           TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          if [[ ! "$TRIGGER_TITLE" =~ ^LongMemEval\ V2\ (aa-([1-9][0-9]*))\ aa-3-right$ ]]; then
+          if [[ ! "$TRIGGER_TITLE" =~ ^LongMemEval\ V2\ (aa-([1-9][0-9]*))\ aa-(1-right|2-left|2-right|3-left|3-right)$ ]]; then
             echo "::error::The aggregation trigger identity is invalid."
             exit 1
           fi
@@ -500,11 +504,11 @@ jobs:
             --limit 100 \
             --json conclusion,databaseId,displayTitle,headSha,status \
             --jq ".[] | select(.displayTitle == \"${dispatcher_title}\" and .headSha == \"${TRIGGER_SHA}\" and .status == \"completed\" and .conclusion == \"success\") | .databaseId")"
-          if [[ "$(wc -w <<< "$dispatcher_runs")" -ne 1 ]]; then
-            echo "::error::Exactly one successful consumer dispatcher is required."
+          if [[ -z "$dispatcher_runs" ]]; then
+            echo "::error::A successful consumer dispatcher is required."
             exit 1
           fi
-          dispatcher_run_id="$dispatcher_runs"
+          dispatcher_run_id="$(sort -n <<< "$dispatcher_runs" | tail -1)"
           mkdir -p "$STATE_ROOT"
           gh run download "$dispatcher_run_id" \
             --repo "$GITHUB_REPOSITORY" \
@@ -528,44 +532,45 @@ jobs:
             printf 'SOURCE_SHA=%s\n' "$TRIGGER_SHA"
           } >> "$GITHUB_ENV"
 
-      - name: Wait for every paid arm
+      - name: Check whether every paid arm is complete
+        id: readiness
         run: |
           set -euo pipefail
-          while true; do
-            pending=0
-            while IFS=$'\t' read -r arm_id run_id; do
-              run_json="$(gh run view "$run_id" \
-                --repo "$GITHUB_REPOSITORY" \
-                --json conclusion,displayTitle,event,headSha,status,workflowName)"
-              if ! jq -e \
-                --arg sha "$SOURCE_SHA" \
-                --arg title "LongMemEval V2 ${ORCHESTRATION_ID} ${arm_id}" \
-                '.event == "workflow_dispatch" and
-                 .headSha == $sha and
-                 .displayTitle == $title and
-                 .workflowName == "LongMemEval V2"' \
-                <<< "$run_json" >/dev/null; then
-                echo "::error::Child workflow provenance drifted for ${arm_id}."
-                exit 1
-              fi
-              status="$(jq -r '.status' <<< "$run_json")"
-              conclusion="$(jq -r '.conclusion // ""' <<< "$run_json")"
-              if [[ "$status" == "completed" && "$conclusion" != "success" ]]; then
-                echo "::error::Child workflow ${arm_id} completed as ${conclusion}."
-                exit 1
-              fi
-              if [[ "$status" != "completed" ]]; then
-                pending=$((pending + 1))
-              fi
-            done < <(jq -r '.runs | to_entries[] | [.key, .value] | @tsv' "$RUN_MAP_PATH")
-            if [[ "$pending" -eq 0 ]]; then
-              break
+          pending=0
+          while IFS=$'\t' read -r arm_id run_id; do
+            run_json="$(gh run view "$run_id" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json conclusion,displayTitle,event,headSha,status,workflowName)"
+            if ! jq -e \
+              --arg sha "$SOURCE_SHA" \
+              --arg title "LongMemEval V2 ${ORCHESTRATION_ID} ${arm_id}" \
+              '.event == "workflow_dispatch" and
+               .headSha == $sha and
+               .displayTitle == $title and
+               .workflowName == "LongMemEval V2"' \
+              <<< "$run_json" >/dev/null; then
+              echo "::error::Child workflow provenance drifted for ${arm_id}."
+              exit 1
             fi
-            echo "Waiting for ${pending} of 6 paid arms."
-            sleep 30
-          done
+            status="$(jq -r '.status' <<< "$run_json")"
+            conclusion="$(jq -r '.conclusion // ""' <<< "$run_json")"
+            if [[ "$status" == "completed" && "$conclusion" != "success" ]]; then
+              echo "::error::Child workflow ${arm_id} completed as ${conclusion}."
+              exit 1
+            fi
+            if [[ "$status" != "completed" ]]; then
+              pending=$((pending + 1))
+            fi
+          done < <(jq -r '.runs | to_entries[] | [.key, .value] | @tsv' "$RUN_MAP_PATH")
+          if [[ "$pending" -gt 0 ]]; then
+            echo "Deferring aggregation until the remaining ${pending} arms complete."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Download and seal portable A/A evidence
+        if: steps.readiness.outputs.ready == 'true'
         run: |
           set -euo pipefail
           mkdir -p "$CHILD_ARTIFACTS"
@@ -582,9 +587,11 @@ jobs:
             --output-root "$BUNDLE_ROOT"
 
       - name: Upload authoritative A/A bundle
+        if: steps.readiness.outputs.ready == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: longmemeval-v2-release-aa-${{ env.SOURCE_SHA }}-${{ env.CONTROLLER_RUN_ID }}
           path: .moon/cache/evals/longmemeval-v2-release-ci/aa-bundle
           if-no-files-found: error
+          overwrite: true
           retention-days: 30
