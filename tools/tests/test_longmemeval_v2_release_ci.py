@@ -1,0 +1,152 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+from benchmarks import longmemeval_v2_release_ci as release_ci
+from benchmarks import longmemeval_v2_release_contract as contract
+from benchmarks.longmemeval_v2_release_inputs import StagePlanError
+from tools.bench import longmemeval_v2_rig as rig
+from tools.tests.test_longmemeval_v2_rig import (
+    QUESTION_COUNT_PER_DOMAIN,
+    _arm,
+    _paired_pass,
+)
+
+
+@pytest.fixture(autouse=True)
+def _use_synthetic_official_corpus(monkeypatch: pytest.MonkeyPatch) -> None:
+    question_ids = {
+        domain: [f"{domain}-{index}" for index in range(QUESTION_COUNT_PER_DOMAIN)]
+        for domain in rig.DOMAINS
+    }
+    monkeypatch.setattr(
+        rig,
+        "OFFICIAL_SMALL_QUESTION_COUNTS",
+        {domain: len(ids) for domain, ids in question_ids.items()},
+    )
+    monkeypatch.setattr(
+        rig,
+        "OFFICIAL_SMALL_QUESTION_IDS_SHA256",
+        {domain: rig.canonical_sha256(sorted(ids)) for domain, ids in question_ids.items()},
+    )
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _run_map(passes: list[dict[str, Any]]) -> dict[str, Any]:
+    runs = {
+        f"{paired['pass_id']}-{side}": paired["arms"][side]["execution"]["run_id"]
+        for paired in passes
+        for side in ("left", "right")
+    }
+    payload = {
+        "schema_version": release_ci.RUN_MAP_SCHEMA_VERSION,
+        "experiment_id": "experiment-v1.3",
+        "orchestration_id": "release-aa-test",
+        "source": {
+            "repository": "hyperb1iss/sibyl",
+            "ref": "refs/heads/main",
+            "sha": "a" * 40,
+        },
+        "builder_run_id": runs[release_ci.BUILDER_ARM_ID],
+        "runs": runs,
+    }
+    payload["run_map_sha256"] = rig.canonical_sha256(payload)
+    return payload
+
+
+def _paired_passes() -> list[dict[str, Any]]:
+    return [
+        _paired_pass(
+            pass_id,
+            seed=seed,
+            left=_arm("machine", mode="fast", accuracy=0.7),
+            right=_arm("machine", mode="fast", accuracy=0.7),
+        )
+        for pass_id, seed in release_ci.PASS_SEEDS.items()
+    ]
+
+
+def _bundle(tmp_path: Path) -> Path:
+    passes = _paired_passes()
+    artifacts = tmp_path / "artifacts"
+    for paired in passes:
+        for side in ("left", "right"):
+            arm_id = f"{paired['pass_id']}-{side}"
+            _write_json(artifacts / arm_id / "arm_run.json", paired["arms"][side])
+    run_map_path = tmp_path / "run-map.json"
+    _write_json(run_map_path, _run_map(passes))
+    bundle = tmp_path / "bundle"
+    release_ci.aggregate_aa_bundle(
+        artifacts_root=artifacts,
+        run_map_path=run_map_path,
+        output_root=bundle,
+    )
+    return bundle
+
+
+def test_dispatch_plan_matches_the_fixed_release_contract() -> None:
+    payload = release_ci.build_dispatch_plan(
+        experiment_id="sibyl-v1.3-ci-aa",
+        orchestration_id="release-aa-123",
+        source={
+            "repository": "hyperb1iss/sibyl",
+            "ref": "refs/heads/main",
+            "sha": "a" * 40,
+        },
+    )
+
+    assert [arm["arm_id"] for arm in payload["arms"]] == list(release_ci.ARM_IDS)
+    assert payload["arms"][0]["memory_mode"] == "save"
+    assert all(arm["memory_mode"] == "load" for arm in payload["arms"][1:])
+    assert [arm["seed"] for arm in payload["arms"]] == [1301, 1301, 1302, 1302, 1303, 1303]
+    for arm in payload["arms"]:
+        manifest = json.loads(arm["official_arm_manifest_json"])
+        assert manifest["max_spend_usd"] == contract.RELEASE_ROLE_CAPS_USD["machine"]
+        assert "configuration" not in manifest
+        assert "geometry" not in manifest
+
+
+def test_run_map_rejects_reused_workflow_execution() -> None:
+    passes = _paired_passes()
+    run_map = _run_map(passes)
+    run_map["runs"]["aa-1-right"] = run_map["runs"]["aa-1-left"]
+    unsigned = {key: value for key, value in run_map.items() if key != "run_map_sha256"}
+    run_map["run_map_sha256"] = rig.canonical_sha256(unsigned)
+
+    with pytest.raises(StagePlanError, match="reused a workflow run ID"):
+        release_ci.require_run_map(run_map)
+
+
+def test_aggregate_and_import_publish_portable_authority(tmp_path: Path) -> None:
+    bundle = _bundle(tmp_path)
+    output = tmp_path / "aa-authorization.json"
+
+    authority = release_ci.import_aa_bundle(bundle_root=bundle, output=output)
+
+    assert output.is_file()
+    assert authority["status"] == "PASS"
+    assert Path(authority["source_receipt"]["path"]) == bundle / "aa_receipt.json"
+    assert [Path(item["paired_pass_artifact"]["path"]).name for item in authority["passes"]] == [
+        "aa-1.json",
+        "aa-2.json",
+        "aa-3.json",
+    ]
+
+
+def test_import_rejects_tampered_download(tmp_path: Path) -> None:
+    bundle = _bundle(tmp_path)
+    with (bundle / "passes" / "aa-2.json").open("a", encoding="utf-8") as handle:
+        handle.write("\n")
+
+    with pytest.raises(StagePlanError, match="bytes differ"):
+        release_ci.import_aa_bundle(
+            bundle_root=bundle,
+            output=tmp_path / "aa-authorization.json",
+        )
