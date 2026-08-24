@@ -69,8 +69,9 @@ moon run bench-longmemeval-v2-release-ci -- \
   --output /absolute/path/to/aa-authorization.json
 ```
 
-The import command rechecks every file size and digest, validates the six distinct workflow
-executions, and rewrites only the local artifact paths. Keep the downloaded bundle with the
+The import command rechecks every file size and digest. It also validates the six distinct workflow
+executions, builder binding, source identity, experiment, and orchestration against the bundle
+manifest before rewriting only the local artifact paths. Keep the downloaded bundle with the
 generated authorization. Frozen database artifacts expire after seven days. The final A/A bundle and
 controller evidence remain available for 30 days.
 

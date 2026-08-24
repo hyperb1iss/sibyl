@@ -391,7 +391,12 @@ def import_aa_bundle(*, bundle_root: Path, output: Path) -> dict[str, Any]:
     ) != rig.canonical_sha256(unsigned):
         raise StagePlanError("CI A/A bundle manifest schema or digest is invalid")
     receipt_path = _bound_bundle_file(root, manifest.get("aa_receipt"), name="A/A receipt")
-    _bound_bundle_file(root, manifest.get("run_map"), name="CI run map")
+    run_map_path = _bound_bundle_file(root, manifest.get("run_map"), name="CI run map")
+    run_map = require_run_map(load_json(run_map_path))
+    if any(
+        run_map[key] != manifest.get(key) for key in ("experiment_id", "orchestration_id", "source")
+    ):
+        raise StagePlanError("CI A/A bundle manifest differs from its run map")
     raw_passes = manifest.get("passes")
     if not isinstance(raw_passes, list) or [
         item.get("pass_id") for item in raw_passes if isinstance(item, dict)

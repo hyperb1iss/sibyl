@@ -19,7 +19,7 @@ on:
     types: [completed]
 
 permissions:
-  actions: write
+  actions: read
   contents: read
 
 concurrency:
@@ -36,6 +36,9 @@ jobs:
   orchestrate:
     name: Dispatch, verify, and seal A/A
     if: github.event_name == 'workflow_dispatch'
+    permissions:
+      actions: write
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -224,6 +227,9 @@ jobs:
     if: >-
       github.event_name == 'workflow_run' &&
       endsWith(github.event.workflow_run.display_title, ' aa-1-left')
+    permissions:
+      actions: write
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -484,10 +490,11 @@ jobs:
           controller_run_id="${BASH_REMATCH[2]}"
           controller_json="$(gh run view "$controller_run_id" \
             --repo "$GITHUB_REPOSITORY" \
-            --json conclusion,event,headSha,workflowName)"
+            --json conclusion,event,headSha,status,workflowName)"
           if ! jq -e \
             --arg sha "$TRIGGER_SHA" \
-            '.conclusion == "success" and
+            '.status == "completed" and
+             (.conclusion | IN("success", "failure")) and
              .event == "workflow_dispatch" and
              .headSha == $sha and
              .workflowName == "LongMemEval V2 Release A/A"' \

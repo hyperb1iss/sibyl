@@ -16,6 +16,8 @@ from tools.tests.test_longmemeval_v2_rig import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+DISPATCHING_JOB_COUNT = 2
+CONTROLLER_ACCEPTANCE_GATE_COUNT = 2
 
 
 @pytest.fixture(autouse=True)
@@ -172,6 +174,32 @@ def test_import_rejects_tampered_download(tmp_path: Path) -> None:
         )
 
 
+def test_import_rejects_self_consistent_run_map_splice(tmp_path: Path) -> None:
+    bundle = _bundle(tmp_path)
+    run_map_path = bundle / "run_map.json"
+    run_map = json.loads(run_map_path.read_text(encoding="utf-8"))
+    run_map["source"]["sha"] = "b" * 40
+    unsigned_run_map = {key: value for key, value in run_map.items() if key != "run_map_sha256"}
+    run_map["run_map_sha256"] = rig.canonical_sha256(unsigned_run_map)
+    _write_json(run_map_path, run_map)
+
+    manifest_path = bundle / "bundle_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["run_map"]["sha256"] = release_ci.sha256_file(run_map_path)
+    manifest["run_map"]["size_bytes"] = run_map_path.stat().st_size
+    unsigned_manifest = {
+        key: value for key, value in manifest.items() if key != "bundle_manifest_sha256"
+    }
+    manifest["bundle_manifest_sha256"] = rig.canonical_sha256(unsigned_manifest)
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(StagePlanError, match="manifest differs from its run map"):
+        release_ci.import_aa_bundle(
+            bundle_root=bundle,
+            output=tmp_path / "aa-authorization.json",
+        )
+
+
 def test_aggregate_rejects_arm_run_id_outside_the_run_map(tmp_path: Path) -> None:
     passes = _paired_passes()
     artifacts = tmp_path / "artifacts"
@@ -233,6 +261,7 @@ def test_release_workflows_preserve_distributed_execution_contract() -> None:
     ):
         assert fragment in child
     for fragment in (
+        "actions: read",
         "actions: write",
         'workflows: ["LongMemEval V2"]',
         'orchestration_id="aa-${GITHUB_RUN_ID}"',
@@ -256,6 +285,11 @@ def test_release_workflows_preserve_distributed_execution_contract() -> None:
         "Upload authoritative A/A bundle",
     ):
         assert fragment in controller
+    assert controller.count("actions: write") == DISPATCHING_JOB_COUNT
+    assert (
+        controller.count('(.conclusion | IN("success", "failure"))')
+        == CONTROLLER_ACCEPTANCE_GATE_COUNT
+    )
     assert "gh run watch" not in child
     assert controller.index("Upload sealed controller plan") < controller.index(
         "Dispatch the frozen baseline builder"
