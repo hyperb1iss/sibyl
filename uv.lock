@@ -3670,6 +3670,7 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "ruff" },
+    { name = "ty" },
 ]
 
 [package.metadata]
@@ -3690,6 +3691,7 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
     { name = "ruff" },
+    { name = "ty", specifier = ">=0.0.69" },
 ]
 
 [[package]]
