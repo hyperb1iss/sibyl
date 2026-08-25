@@ -23,6 +23,14 @@ class ClientAuthMixin:
         password = str(creds.get("local_login_password") or "").strip()
         if not email or not password:
             return False, "No stored local login credentials are available."
+        scope_marker = ":org:"
+        target_org_slug = (
+            self.credential_scope.rsplit(scope_marker, 1)[1]
+            if self.credential_scope and scope_marker in self.credential_scope
+            else ""
+        )
+        if not target_org_slug or target_org_slug == "default":
+            return False, "Silent local re-login requires an organization-scoped context."
 
         try:
             async with httpx.AsyncClient(
@@ -37,12 +45,28 @@ class ClientAuthMixin:
                 if response.status_code != 200:
                     return False, f"Local login returned HTTP {response.status_code}."
                 data = response.json()
+                personal_access_token = str(data.get("access_token") or "").strip()
+                if not personal_access_token:
+                    return False, "Local login response did not include an access token."
+                response = await client.post(
+                    f"/orgs/{quote(target_org_slug, safe='')}/switch",
+                    headers={"Authorization": f"Bearer {personal_access_token}"},
+                )
+                if response.status_code != 200:
+                    return False, f"Organization switch returned HTTP {response.status_code}."
+                data = response.json()
         except Exception as exc:
             return False, f"Local login failed: {exc}"
 
         new_access_token = str(data.get("access_token") or "").strip()
         if not new_access_token:
-            return False, "Local login response did not include an access token."
+            return False, "Organization switch response did not include an access token."
+        organization = data.get("organization")
+        switched_slug = (
+            str(organization.get("slug") or "").strip() if isinstance(organization, dict) else ""
+        )
+        if switched_slug != target_org_slug:
+            return False, "Organization switch response did not match the selected context."
 
         set_tokens(
             self.base_url,
@@ -51,6 +75,7 @@ class ClientAuthMixin:
             expires_in=int(data["expires_in"]) if data.get("expires_in") else None,
             lock=False,
             credential_scope=self.credential_scope,
+            pending_replay_scope=self._replay_scope,
         )
         self.auth_token = new_access_token
         if self._client and not self._client.is_closed:
@@ -74,20 +99,26 @@ class ClientAuthMixin:
                     credential_scope=self.credential_scope,
                 )
                 stored_access_token = str(creds.get("access_token") or "").strip()
-                expires_at = creds.get("access_token_expires_at")
-                if (
-                    stored_access_token
-                    and stored_access_token != self.auth_token
-                    and not is_access_token_expired(
+                stored_replay_scope = str(creds.get("pending_replay_scope") or "").strip()
+                stored_token_changed = bool(
+                    stored_access_token and stored_access_token != self.auth_token
+                )
+                if stored_token_changed:
+                    if not stored_replay_scope or stored_replay_scope != self._replay_scope:
+                        return (
+                            False,
+                            "Stored credentials changed since this command started; retry the "
+                            "command with the current login.",
+                        )
+                    if not is_access_token_expired(
                         self.base_url,
                         credential_scope=self.credential_scope,
-                    )
-                ):
-                    self.auth_token = stored_access_token
-                    if self._client and not self._client.is_closed:
-                        await self._client.aclose()
-                    self._client = None
-                    return True, None
+                    ):
+                        self.auth_token = stored_access_token
+                        if self._client and not self._client.is_closed:
+                            await self._client.aclose()
+                        self._client = None
+                        return True, None
 
                 refresh_token = get_refresh_token(
                     self.base_url,
@@ -95,17 +126,6 @@ class ClientAuthMixin:
                 )
                 if not refresh_token:
                     return False, "No refresh token is available for automatic renewal."
-
-                if (
-                    stored_access_token
-                    and expires_at is None
-                    and stored_access_token != self.auth_token
-                ):
-                    self.auth_token = stored_access_token
-                    if self._client and not self._client.is_closed:
-                        await self._client.aclose()
-                    self._client = None
-                    return True, None
 
                 async with httpx.AsyncClient(
                     base_url=self.base_url,
@@ -150,6 +170,7 @@ class ClientAuthMixin:
                         expires_in=expires_in,
                         lock=False,
                         credential_scope=self.credential_scope,
+                        pending_replay_scope=self._replay_scope,
                     )
 
                     self.auth_token = new_access_token

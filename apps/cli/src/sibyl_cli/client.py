@@ -28,6 +28,7 @@ from sibyl_cli.client_transport import (
     _is_read_like_post,
     _is_refresh_revoked,
     _load_default_auth_token,
+    _load_default_replay_scope,
     _paired_automation_api_url,
     anyio_sleep,
     resolve_api_base_url,
@@ -99,8 +100,15 @@ class SibylClient(
             if auth_token is not None
             else _load_default_auth_token(self.base_url, self.credential_scope)
         )
-        replay_credential_scope = self.credential_scope if self._uses_stored_auth else None
-        self._replay_scope = _auth_replay_scope(replay_credential_scope, self.auth_token)
+        self._replay_scope = (
+            _load_default_replay_scope(
+                self.base_url,
+                self.credential_scope,
+                self.auth_token,
+            )
+            if self._uses_stored_auth
+            else _auth_replay_scope(None, self.auth_token)
+        )
         self._client: httpx.AsyncClient | None = None
         # Load insecure setting from context
         self.insecure = self._get_insecure_from_context(context_name)

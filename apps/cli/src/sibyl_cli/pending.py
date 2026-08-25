@@ -7,8 +7,17 @@ from typing import Annotated, Any
 
 import typer
 
-from sibyl_cli.auth_store import credential_scope, normalize_api_url
-from sibyl_cli.client import SibylClient, SibylClientError, _is_read_like_post
+from sibyl_cli.auth_store import (
+    credential_scope,
+    normalize_api_url,
+    read_server_credentials,
+)
+from sibyl_cli.client import (
+    SibylClient,
+    SibylClientError,
+    _auth_replay_scope,
+    _is_read_like_post,
+)
 from sibyl_cli.common import (
     console,
     create_table,
@@ -20,6 +29,7 @@ from sibyl_cli.common import (
     warn,
 )
 from sibyl_cli.pending_writes import (
+    claim_pending_write_replay_scope,
     delete_pending_write,
     increment_attempts,
     is_canonical_pending_write_id,
@@ -91,7 +101,14 @@ def _context_name_for_base_url(
         for ctx in config_store.list_contexts():
             context_url = normalize_api_url(f"{ctx.server_url}/api")
             context_scope = credential_scope(ctx.name, ctx.org_slug)
-            if context_url == normalize_api_url(base_url) and context_scope == replay_scope:
+            credentials = read_server_credentials(
+                context_url,
+                credential_scope=context_scope,
+            )
+            context_token = str(credentials.get("access_token") or "").strip() or None
+            stored_replay_scope = str(credentials.get("pending_replay_scope") or "").strip() or None
+            context_replay_scope = _auth_replay_scope(stored_replay_scope, context_token)
+            if context_url == normalize_api_url(base_url) and context_replay_scope == replay_scope:
                 return ctx.name
         return None
 
@@ -105,6 +122,11 @@ def _context_name_for_base_url(
 
 def _should_abort_flush(exc: SibylClientError) -> bool:
     return exc.error_code == "token_refresh_failed" or exc.status_code in {401, 429}
+
+
+def _legacy_claim_candidate(item: dict[str, Any]) -> bool:
+    scope = item.get("replay_scope")
+    return scope is None or str(scope).startswith("context:")
 
 
 @app.command("list")
@@ -197,6 +219,131 @@ def discard_writes(
         raise typer.Exit(code=1)
 
 
+@app.command("claim")
+def claim_writes(
+    write_ids: Annotated[
+        list[str] | None,
+        typer.Argument(help="Pending write IDs or prefixes. Omit to claim all legacy writes."),
+    ] = None,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Approve the displayed user and organization."),
+    ] = False,
+) -> None:
+    """Claim ambiguous legacy writes, then retry them automatically."""
+    mark_pending_writes_reported()
+    try:
+        selected = _selected_writes(write_ids or [])
+    except (FileNotFoundError, ValueError) as exc:
+        error(str(exc))
+        raise typer.Exit(code=1) from exc
+    candidates = [
+        item
+        for item in selected
+        if not is_corrupt_pending_write(item)
+        and not _is_buffered_read_like(item)
+        and _legacy_claim_candidate(item)
+    ]
+    if not candidates:
+        success("No ambiguous legacy writes matched")
+        return
+
+    from sibyl_cli import config_store
+
+    context_name = config_store.resolve_context_name()
+
+    @run_async
+    async def run_claim() -> None:
+        async with SibylClient(context_name=context_name) as client:
+            if client._replay_scope is None:
+                error("No authenticated credential is available for this context.")
+                raise typer.Exit(code=1)
+            matching = [
+                item
+                for item in candidates
+                if normalize_api_url(str(item["base_url"])) == client.base_url
+            ]
+            if len(matching) != len(candidates):
+                error("Some selected writes belong to another server; select its context first.")
+                raise typer.Exit(code=1)
+
+            try:
+                identity = await client.get("/auth/me")
+            except SibylClientError as exc:
+                error(exc.detail or str(exc))
+                raise typer.Exit(code=1) from exc
+            user = identity.get("user") if isinstance(identity.get("user"), dict) else {}
+            organization = (
+                identity.get("organization")
+                if isinstance(identity.get("organization"), dict)
+                else {}
+            )
+            user_label = str(user.get("email") or user.get("name") or user.get("id") or "unknown")
+            org_label = str(
+                organization.get("slug")
+                or organization.get("name")
+                or organization.get("id")
+                or "unknown"
+            )
+            warn(
+                f"Claim {len(matching)} legacy write"
+                f"{'s' if len(matching) != 1 else ''} for {user_label} in {org_label}."
+            )
+            if not yes and not typer.confirm("Continue?"):
+                raise typer.Abort()
+
+            with pending_replay_lock() as acquired:
+                if not acquired:
+                    error("Another pending-write replay is already running; claim did not run.")
+                    raise typer.Exit(code=1)
+                claim_failures: list[tuple[str, str]] = []
+                claimed = 0
+                for item in matching:
+                    write_id = str(item["id"])
+                    try:
+                        claim_pending_write_replay_scope(
+                            write_id,
+                            client._replay_scope,
+                        )
+                    except (FileNotFoundError, ValueError) as exc:
+                        claim_failures.append((write_id, str(exc)))
+                    else:
+                        claimed += 1
+            for write_id, reason in claim_failures:
+                error(f"Could not claim {write_id[:12]}: {reason}")
+            if claimed == 0:
+                raise typer.Exit(code=1)
+            claimed_message = (
+                f"Claimed {claimed} pending write{'s' if claimed != 1 else ''}; retrying now."
+            )
+            if claim_failures:
+                warn(claimed_message)
+            else:
+                success(claimed_message)
+            while True:
+                before = sum(
+                    1
+                    for item in list_pending_writes()
+                    if item.get("replay_scope") == client._replay_scope
+                    and str(item.get("base_url")) == client.base_url
+                )
+                if before == 0:
+                    break
+                await client._maybe_replay_pending_writes(ignore_backoff=True)
+                after = sum(
+                    1
+                    for item in list_pending_writes()
+                    if item.get("replay_scope") == client._replay_scope
+                    and str(item.get("base_url")) == client.base_url
+                )
+                if after >= before:
+                    break
+            if claim_failures:
+                raise typer.Exit(code=1)
+
+    run_claim()
+
+
 @app.command("flush")
 def flush_writes(
     write_ids: Annotated[
@@ -268,7 +415,15 @@ def flush_writes(
                         SibylClient(base_url=base_url, context_name=context_name)
                     )
                     clients[client_key] = client
-                if replay_scope and client._replay_scope != replay_scope:
+                if not replay_scope:
+                    failures += 1
+                    replay_failures += 1
+                    error(
+                        f"Failed {write_id[:12]}: legacy write has no credential owner; "
+                        "run sibyl pending-writes claim first"
+                    )
+                    continue
+                if client._replay_scope != replay_scope:
                     failures += 1
                     replay_failures += 1
                     error(

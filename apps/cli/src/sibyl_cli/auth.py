@@ -453,17 +453,10 @@ def _oauth_pkce_login(
     if not access_token:
         raise _OAuthLoginError("Token response missing access_token", tok)
 
-    # Store tokens and OAuth metadata
+    # Store OAuth metadata. The caller persists the token response once after
+    # the login method returns so one successful login creates one lineage.
     from sibyl_cli.auth_store import write_server_credentials
 
-    set_tokens(
-        api_url,
-        access_token,
-        refresh_token=refresh_token or None,
-        expires_in=expires_in_int,
-        credential_scope=credential_scope_name,
-    )
-    # Also store OAuth metadata for potential token refresh
     write_server_credentials(
         api_url,
         {

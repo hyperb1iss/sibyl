@@ -22,9 +22,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
 
 SCOPES_KEY = "scopes"
 DEFAULT_SCOPE_PART = "default"
+PENDING_REPLAY_SCOPE_KEY = "pending_replay_scope"
 
 
 def auth_path() -> Path:
@@ -286,6 +288,18 @@ def get_refresh_token(
     return str(token) if token else None
 
 
+def get_pending_replay_scope(
+    api_url: str,
+    path: Path | None = None,
+    *,
+    credential_scope: str | None = None,
+) -> str | None:
+    """Get the durable pending-write owner for a stored credential lineage."""
+    creds = read_server_credentials(api_url, path, credential_scope=credential_scope)
+    replay_scope = creds.get(PENDING_REPLAY_SCOPE_KEY)
+    return str(replay_scope) if replay_scope else None
+
+
 def get_access_token_expires_at(
     api_url: str,
     path: Path | None = None,
@@ -321,10 +335,19 @@ def set_tokens(
     *,
     lock: bool = True,
     credential_scope: str | None = None,
+    pending_replay_scope: str | None = None,
 ) -> None:
-    """Store tokens for a specific server."""
+    """Store tokens for a specific server and credential lineage.
+
+    Explicit token writes start a new lineage by default. A server-confirmed
+    refresh passes the existing replay scope so queued writes retain their
+    owner without rewriting the queue.
+    """
     path, credential_scope = _split_path_and_scope(path, credential_scope)
-    creds: dict[str, Any] = {"access_token": access_token}
+    creds: dict[str, Any] = {
+        "access_token": access_token,
+        PENDING_REPLAY_SCOPE_KEY: pending_replay_scope or f"credential:{uuid4().hex}",
+    }
     remove_keys: list[str] = []
     if refresh_token is not None and refresh_token:
         creds["refresh_token"] = refresh_token
