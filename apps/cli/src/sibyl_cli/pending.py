@@ -296,15 +296,30 @@ def claim_writes(
                 if not acquired:
                     warn("Another pending-write replay is already running.")
                     return
+                claim_failures: list[tuple[str, str]] = []
+                claimed = 0
                 for item in matching:
-                    claim_pending_write_replay_scope(
-                        str(item["id"]),
-                        client._replay_scope,
-                    )
-            success(
-                f"Claimed {len(matching)} pending write"
-                f"{'s' if len(matching) != 1 else ''}; retrying now."
+                    write_id = str(item["id"])
+                    try:
+                        claim_pending_write_replay_scope(
+                            write_id,
+                            client._replay_scope,
+                        )
+                    except (FileNotFoundError, ValueError) as exc:
+                        claim_failures.append((write_id, str(exc)))
+                    else:
+                        claimed += 1
+            for write_id, reason in claim_failures:
+                error(f"Could not claim {write_id[:12]}: {reason}")
+            if claimed == 0:
+                raise typer.Exit(code=1)
+            claimed_message = (
+                f"Claimed {claimed} pending write{'s' if claimed != 1 else ''}; retrying now."
             )
+            if claim_failures:
+                warn(claimed_message)
+            else:
+                success(claimed_message)
             while True:
                 before = sum(
                     1
@@ -323,6 +338,8 @@ def claim_writes(
                 )
                 if after >= before:
                     break
+            if claim_failures:
+                raise typer.Exit(code=1)
 
     run_claim()
 

@@ -264,6 +264,64 @@ def test_pending_writes_claim_binds_and_retries_legacy_entries(
     assert pending_writes.list_pending_writes() == []
 
 
+@pytest.mark.parametrize(
+    "claim_error",
+    [
+        FileNotFoundError("Pending write disappeared"),
+        ValueError("Pending write already belongs to another credential"),
+    ],
+)
+def test_pending_writes_claim_reports_a_concurrent_queue_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    claim_error: Exception,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    item = pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url="http://testserver/api",
+        json_payload={"title": "Legacy"},
+        params=None,
+    )
+
+    class FakeClient:
+        def __init__(self, *, context_name: str | None = None) -> None:
+            self.context_name = context_name
+            self.base_url = "http://testserver/api"
+            self._replay_scope = TEST_REPLAY_SCOPE
+
+        async def __aenter__(self) -> FakeClient:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def get(self, path: str) -> dict[str, Any]:
+            assert path == "/auth/me"
+            return {
+                "user": {"email": "bliss@example.test"},
+                "organization": {"slug": "silkcircuit"},
+            }
+
+        async def _maybe_replay_pending_writes(self, *, ignore_backoff: bool = False) -> None:
+            raise AssertionError("an unclaimed write reached replay")
+
+    def fail_claim(_write_id: str, _replay_scope: str) -> dict[str, Any]:
+        raise claim_error
+
+    monkeypatch.setattr(pending, "SibylClient", FakeClient)
+    monkeypatch.setattr(pending, "claim_pending_write_replay_scope", fail_claim)
+    monkeypatch.setattr("sibyl_cli.config_store.resolve_context_name", lambda: "local")
+
+    result = CliRunner().invoke(pending.app, ["claim", "--yes"])
+
+    assert result.exit_code == 1
+    assert "Could not claim" in result.stdout
+    assert "Traceback" not in result.stdout
+    assert pending_writes.resolve_pending_write_path(str(item["id"])).exists()
+
+
 def test_pending_writes_flush_refuses_an_unclaimed_legacy_entry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
