@@ -1045,6 +1045,7 @@ tasks:
       tools/tests/test_longmemeval_v2_release_ci.py -v
     inputs:
       - tools/**/*.py
+      - docker-compose.yml
       - .github/workflows/eval.yml
       - .github/workflows/longmemeval-v2.yml
       - .github/workflows/longmemeval-v2-release-aa.yml

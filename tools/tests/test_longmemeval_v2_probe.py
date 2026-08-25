@@ -278,6 +278,11 @@ def test_longmemeval_v2_workflow_packages_receipts_and_diagnostics() -> None:
         for step in official_job["steps"]
         if step.get("name") == "Start SurrealDB runtime telemetry"
     )
+    runtime_gate_script = next(
+        step["run"]
+        for step in official_job["steps"]
+        if step.get("name") == "Gate SurrealDB runtime integrity"
+    )
 
     assert "build_submission_step_1_single_operating_point.py" in workflow
     assert "build_submission_step_2_build_package.py" in workflow
@@ -294,6 +299,9 @@ def test_longmemeval_v2_workflow_packages_receipts_and_diagnostics() -> None:
     assert 'actual_cache_size="$(' in telemetry_script
     assert '[[ "$actual_cache_size" != "$expected_cache_size" ]]' in telemetry_script
     assert "Could not parse configuration value" in telemetry_script
+    assert "Block cache size: $expected_cache_size" in telemetry_script
+    assert "logs are unavailable for configuration validation" in telemetry_script
+    assert '[[ ! -s "$telemetry/container.id" ]]' in runtime_gate_script
     assert "sibyld.log" in workflow
     assert "sibyl-worker.log" in workflow
     assert "Capture service diagnostics" in workflow

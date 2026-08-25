@@ -821,9 +821,19 @@ jobs:
             echo "::error::SurrealDB RocksDB cache size was not applied exactly."
             exit 1
           fi
-          if docker compose --env-file /dev/null logs --no-color surrealdb |
-            grep -Fq 'Could not parse configuration value'; then
+          if ! surrealdb_logs="$(
+            docker compose --env-file /dev/null logs --no-color surrealdb
+          )"; then
+            echo "::error::SurrealDB logs are unavailable for configuration validation."
+            exit 1
+          fi
+          if grep -Fq 'Could not parse configuration value' <<< "$surrealdb_logs"; then
             echo "::error::SurrealDB rejected a runtime configuration value."
+            exit 1
+          fi
+          if ! grep -Fq "Block cache size: $expected_cache_size" \
+            <<< "$surrealdb_logs"; then
+            echo "::error::SurrealDB did not confirm the requested RocksDB cache size."
             exit 1
           fi
           mkdir -p "$telemetry"
@@ -1115,6 +1125,10 @@ jobs:
         run: |
           set -euo pipefail
           telemetry="$RUNNER_TEMP/surrealdb-runtime"
+          if [[ ! -s "$telemetry/container.id" ]]; then
+            echo "::notice::Skipping the runtime gate because telemetry did not start."
+            exit 0
+          fi
           surrealdb_id="$(cat "$telemetry/container.id")"
           tools/dev/surreal-runtime-monitor.sh gate \
             --container "$surrealdb_id" \
