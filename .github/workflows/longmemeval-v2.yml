@@ -810,6 +810,22 @@ jobs:
             echo "::error::SurrealDB container ID is unavailable."
             exit 1
           fi
+          expected_cache_size="${SURREAL_ROCKSDB_BLOCK_CACHE_SIZE:-}"
+          actual_cache_size="$(
+            docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+              "$surrealdb_id" |
+              sed -n 's/^SURREAL_ROCKSDB_BLOCK_CACHE_SIZE=//p'
+          )"
+          if [[ ! "$expected_cache_size" =~ ^[1-9][0-9]*$ ]] ||
+            [[ "$actual_cache_size" != "$expected_cache_size" ]]; then
+            echo "::error::SurrealDB RocksDB cache size was not applied exactly."
+            exit 1
+          fi
+          if docker compose --env-file /dev/null logs --no-color surrealdb |
+            grep -Fq 'Could not parse configuration value'; then
+            echo "::error::SurrealDB rejected a runtime configuration value."
+            exit 1
+          fi
           mkdir -p "$telemetry"
           tools/dev/surreal-runtime-monitor.sh monitor \
             --container "$surrealdb_id" \

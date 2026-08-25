@@ -269,9 +269,15 @@ def test_longmemeval_v2_workflow_seals_paid_arm_manifest() -> None:
 
 
 def test_longmemeval_v2_workflow_packages_receipts_and_diagnostics() -> None:
-    workflow = (
-        Path(__file__).parents[2] / ".github" / "workflows" / "longmemeval-v2.yml"
-    ).read_text(encoding="utf-8")
+    workflow_path = Path(__file__).parents[2] / ".github" / "workflows" / "longmemeval-v2.yml"
+    workflow = workflow_path.read_text(encoding="utf-8")
+    official_job = yaml.safe_load(workflow)["jobs"]["official-full"]
+    official_env = official_job["env"]
+    telemetry_script = next(
+        step["run"]
+        for step in official_job["steps"]
+        if step.get("name") == "Start SurrealDB runtime telemetry"
+    )
 
     assert "build_submission_step_1_single_operating_point.py" in workflow
     assert "build_submission_step_2_build_package.py" in workflow
@@ -284,7 +290,10 @@ def test_longmemeval_v2_workflow_packages_receipts_and_diagnostics() -> None:
     assert ".moon/cache/evals/longmemeval-v2-official/arm_run.json" in workflow
     assert "Upload service diagnostics" in workflow
     assert "SIBYL_SURREAL_PATH: rocksdb:///data/sibyl-longmemeval-v2.db" in workflow
-    assert 'SURREAL_ROCKSDB_BLOCK_CACHE_SIZE: "4294967296"' in workflow
+    assert official_env["SURREAL_ROCKSDB_BLOCK_CACHE_SIZE"] == "4294967296"
+    assert 'actual_cache_size="$(' in telemetry_script
+    assert '[[ "$actual_cache_size" != "$expected_cache_size" ]]' in telemetry_script
+    assert "Could not parse configuration value" in telemetry_script
     assert "sibyld.log" in workflow
     assert "sibyl-worker.log" in workflow
     assert "Capture service diagnostics" in workflow
@@ -413,10 +422,12 @@ def test_release_compose_service_pins_the_bounded_surreal_runtime() -> None:
 
 
 def test_default_compose_service_forwards_an_explicit_rocksdb_cache_size() -> None:
-    compose = (Path(__file__).parents[2] / "docker-compose.yml").read_text(encoding="utf-8")
-    default_service = compose.split("  surrealdb:", 1)[1].split("  surrealdb-eval:", 1)[0]
+    compose = yaml.safe_load(
+        (Path(__file__).parents[2] / "docker-compose.yml").read_text(encoding="utf-8")
+    )
+    environment = compose["services"]["surrealdb"]["environment"]
 
-    assert "- SURREAL_ROCKSDB_BLOCK_CACHE_SIZE" in default_service
+    assert environment == ["SURREAL_ROCKSDB_BLOCK_CACHE_SIZE"]
 
 
 def _write_dataset(
