@@ -335,6 +335,24 @@ def increment_attempts(write_id: str) -> dict[str, Any]:
     return data
 
 
+def claim_pending_write_replay_scope(write_id: str, replay_scope: str) -> dict[str, Any]:
+    """Bind an ambiguous legacy write after explicit operator approval."""
+    if not replay_scope:
+        raise ValueError("Pending write replay scope cannot be empty")
+    path = resolve_pending_write_path(write_id)
+    data = _read_pending_path(path)
+    if is_corrupt_pending_write(data):
+        raise ValueError(f"Cannot update corrupt pending write {data['filename']}: {data['error']}")
+    current_scope = data.get("replay_scope")
+    if current_scope == replay_scope:
+        return data
+    if current_scope is not None and not str(current_scope).startswith("context:"):
+        raise ValueError("Pending write already belongs to another credential")
+    data["replay_scope"] = replay_scope
+    _secure_write_json(path, data)
+    return data
+
+
 def read_pending_metrics() -> dict[str, int]:
     path = pending_metrics_path()
     defaults: dict[str, int] = dict.fromkeys(PENDING_METRIC_NAMES, 0)

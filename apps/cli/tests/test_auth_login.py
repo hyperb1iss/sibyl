@@ -246,6 +246,71 @@ def test_login_auto_oauth_preserves_access_token_expiry(
     ]
 
 
+def test_oauth_pkce_returns_tokens_without_persisting_them_twice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeServer:
+        def shutdown(self) -> None:
+            return None
+
+    class FakeDone:
+        def wait(self, *, timeout: int) -> bool:
+            assert timeout == 30
+            return True
+
+    metadata_writes: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        auth,
+        "_load_oauth_metadata",
+        lambda **_kwargs: {
+            "authorization_endpoint": "http://issuer/authorize",
+            "token_endpoint": "http://issuer/token",
+            "registration_endpoint": "http://issuer/register",
+        },
+    )
+    monkeypatch.setattr(
+        auth,
+        "_start_callback_server",
+        lambda: (
+            FakeServer(),
+            "http://127.0.0.1/callback",
+            FakeDone(),
+            {"code": "code", "state": "state"},
+        ),
+    )
+    monkeypatch.setattr(auth, "_register_oauth_client", lambda **_kwargs: ("client", "secret"))
+    monkeypatch.setattr(auth.secrets, "token_urlsafe", lambda _length: "state")
+    monkeypatch.setattr(auth.webbrowser, "open", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        auth,
+        "_exchange_oauth_code",
+        lambda **_kwargs: {
+            "access_token": "access-token",
+            "refresh_token": "refresh-token",
+            "expires_in": 3600,
+        },
+    )
+    monkeypatch.setattr(
+        auth,
+        "set_tokens",
+        lambda *_args, **_kwargs: pytest.fail("PKCE helper must not persist tokens"),
+    )
+    monkeypatch.setattr(
+        "sibyl_cli.auth_store.write_server_credentials",
+        lambda *args, **kwargs: metadata_writes.append({"args": args, **kwargs}),
+    )
+
+    result = auth._oauth_pkce_login(
+        api_url="http://testserver/api",
+        no_browser=False,
+        timeout_seconds=30,
+        credential_scope_name="context:local:org:work",
+    )
+
+    assert result == ("access-token", "refresh-token", "http://testserver", 3600)
+    assert len(metadata_writes) == 1
+
+
 def test_login_auto_passes_break_glass_reason_to_local_login(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

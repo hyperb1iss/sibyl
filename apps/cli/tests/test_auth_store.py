@@ -275,6 +275,41 @@ class TestTokenOperations:
         result = auth_store.get_refresh_token("http://localhost:3334", test_file)
         assert result == "refresh123"
 
+    def test_explicit_token_write_starts_a_new_pending_replay_lineage(
+        self, tmp_path: Path
+    ) -> None:
+        test_file = tmp_path / "auth.json"
+        auth_store.set_tokens("http://localhost:3334", "first", path=test_file)
+        first_scope = auth_store.get_pending_replay_scope(
+            "http://localhost:3334", test_file
+        )
+
+        auth_store.set_tokens("http://localhost:3334", "second", path=test_file)
+        second_scope = auth_store.get_pending_replay_scope(
+            "http://localhost:3334", test_file
+        )
+
+        assert first_scope is not None
+        assert second_scope is not None
+        assert second_scope != first_scope
+
+    def test_server_refresh_preserves_pending_replay_lineage(self, tmp_path: Path) -> None:
+        test_file = tmp_path / "auth.json"
+        replay_scope = "credential:stable-lineage"
+
+        auth_store.set_tokens(
+            "http://localhost:3334",
+            "refreshed",
+            refresh_token="refresh",
+            path=test_file,
+            pending_replay_scope=replay_scope,
+        )
+
+        assert (
+            auth_store.get_pending_replay_scope("http://localhost:3334", test_file)
+            == replay_scope
+        )
+
     def test_set_tokens_replaces_stale_refresh_credentials(self, tmp_path: Path) -> None:
         """Access-only token writes do not keep an old refresh token."""
         test_file = tmp_path / "auth.json"

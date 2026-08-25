@@ -16,6 +16,7 @@ from sibyl_cli.auth_store import (
     credential_scope,
     get_access_token,
     is_access_token_expired,
+    read_server_credentials,
 )
 from sibyl_cli.pending_writes import (
     PendingMetric,
@@ -223,13 +224,34 @@ def _failure_key(base_url: str) -> tuple[str, str]:
     return (_subcommand_key(), base_url)
 
 
-def _auth_replay_scope(credential_scope_name: str | None, auth_token: str | None) -> str | None:
-    if credential_scope_name:
-        return credential_scope_name
+def _auth_replay_scope(
+    stored_replay_scope: str | None,
+    auth_token: str | None,
+) -> str | None:
+    if stored_replay_scope:
+        return stored_replay_scope
     if auth_token:
         digest = sha256(auth_token.encode("utf-8")).hexdigest()
         return f"token-sha256:{digest}"
     return None
+
+
+def _load_default_replay_scope(
+    api_base_url: str,
+    credential_scope_name: str | None,
+    auth_token: str | None,
+) -> str | None:
+    if os.environ.get("SIBYL_AUTH_TOKEN", "").strip():
+        return _auth_replay_scope(None, auth_token)
+    stored_credentials = read_server_credentials(
+        api_base_url,
+        credential_scope=credential_scope_name,
+    )
+    stored_token = str(stored_credentials.get("access_token") or "").strip()
+    stored_scope = str(stored_credentials.get("pending_replay_scope") or "").strip()
+    if stored_token != auth_token:
+        stored_scope = ""
+    return _auth_replay_scope(stored_scope, auth_token)
 
 
 def _prune_failures(window: deque[float], now: float) -> None:
@@ -448,7 +470,7 @@ class ClientTransportMixin:
             await self._client.aclose()
             self._client = None
 
-    async def _maybe_replay_pending_writes(self) -> None:
+    async def _maybe_replay_pending_writes(self, *, ignore_backoff: bool = False) -> None:
         """Replay a bounded batch after this client proves the API is healthy."""
         try:
             if not list_pending_writes():
@@ -471,7 +493,7 @@ class ClientTransportMixin:
                 matching.sort(key=lambda item: str(item.get("created_at") or ""))
                 batch: list[dict[str, Any]] = []
                 for item in matching:
-                    if not _ready_for_auto_replay(item):
+                    if not ignore_backoff and not _ready_for_auto_replay(item):
                         break
                     batch.append(item)
                     if len(batch) == AUTO_REPLAY_LIMIT:

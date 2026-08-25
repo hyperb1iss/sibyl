@@ -10,6 +10,8 @@ from typer.testing import CliRunner
 from sibyl_cli import pending, pending_writes
 from sibyl_cli.client import SibylClientError
 
+TEST_REPLAY_SCOPE = "token-sha256:test"
+
 
 def _create_pending(path: str = "/memory/raw") -> dict[str, Any]:
     return pending_writes.create_pending_write(
@@ -22,6 +24,7 @@ def _create_pending(path: str = "/memory/raw") -> dict[str, Any]:
             "memory_scope": "private",
         },
         params=None,
+        replay_scope=TEST_REPLAY_SCOPE,
     )
 
 
@@ -95,6 +98,7 @@ def test_pending_writes_flush_replays_valid_entries_but_keeps_corrupt_ones(
         def __init__(self, *, base_url: str, context_name: str | None = None) -> None:
             self.base_url = base_url
             self.context_name = context_name
+            self._replay_scope = TEST_REPLAY_SCOPE
 
         async def __aenter__(self) -> FakeClient:
             return self
@@ -202,6 +206,102 @@ def test_pending_writes_discard_read_like_removes_only_read_replays(
     assert pending_writes.read_pending_metrics()["discarded"] == 1
 
 
+def test_pending_writes_claim_binds_and_retries_legacy_entries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    item = pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url="http://testserver/api",
+        json_payload={"title": "Legacy", "raw_content": "Sensitive body"},
+        params=None,
+    )
+    pending_writes.increment_attempts(str(item["id"]))
+    replayed: list[str] = []
+    replay_options: list[bool] = []
+
+    class FakeClient:
+        def __init__(self, *, context_name: str | None = None) -> None:
+            self.context_name = context_name
+            self.base_url = "http://testserver/api"
+            self._replay_scope = TEST_REPLAY_SCOPE
+
+        async def __aenter__(self) -> FakeClient:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def get(self, path: str) -> dict[str, Any]:
+            assert path == "/auth/me"
+            return {
+                "user": {"email": "bliss@example.test"},
+                "organization": {"slug": "silkcircuit"},
+            }
+
+        async def _maybe_replay_pending_writes(self, *, ignore_backoff: bool = False) -> None:
+            replay_options.append(ignore_backoff)
+            for queued in pending_writes.list_pending_writes():
+                if queued.get("replay_scope") == self._replay_scope:
+                    replayed.append(str(queued["id"]))
+                    pending_writes.delete_pending_write(str(queued["id"]))
+
+    monkeypatch.setattr(pending, "SibylClient", FakeClient)
+    monkeypatch.setattr(
+        "sibyl_cli.config_store.resolve_context_name",
+        lambda: "local",
+    )
+
+    result = CliRunner().invoke(pending.app, ["claim", "--yes"])
+
+    assert result.exit_code == 0
+    assert "bliss@example.test" in result.stdout
+    assert "silkcircuit" in result.stdout
+    assert replayed == [item["id"]]
+    assert replay_options == [True]
+    assert pending_writes.list_pending_writes() == []
+
+
+def test_pending_writes_flush_refuses_an_unclaimed_legacy_entry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url="http://testserver/api",
+        json_payload={"title": "Legacy"},
+        params=None,
+    )
+
+    class FakeClient:
+        _replay_scope = TEST_REPLAY_SCOPE
+
+        def __init__(self, *, base_url: str, context_name: str | None = None) -> None:
+            self.base_url = base_url
+            self.context_name = context_name
+
+        async def __aenter__(self) -> FakeClient:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def _request(self, *_args: object, **_kwargs: object) -> dict[str, Any]:
+            raise AssertionError("unclaimed write reached the server")
+
+    monkeypatch.setattr(pending, "SibylClient", FakeClient)
+
+    result = CliRunner().invoke(pending.app, ["flush"])
+
+    assert result.exit_code == 1
+    assert "run sibyl pending-writes claim first" in result.stdout
+    assert pending_writes.pending_write_count() == 1
+
+
 def test_pending_writes_flush_replays_and_deletes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -214,6 +314,7 @@ def test_pending_writes_flush_replays_and_deletes(
         def __init__(self, *, base_url: str, context_name: str | None = None) -> None:
             self.base_url = base_url
             self.context_name = context_name
+            self._replay_scope = TEST_REPLAY_SCOPE
 
         async def __aenter__(self) -> FakeClient:
             return self
@@ -252,6 +353,7 @@ def test_pending_writes_flush_skips_read_like_replays(
         def __init__(self, *, base_url: str, context_name: str | None = None) -> None:
             self.base_url = base_url
             self.context_name = context_name
+            self._replay_scope = TEST_REPLAY_SCOPE
 
         async def __aenter__(self) -> FakeClient:
             return self
@@ -290,6 +392,7 @@ def test_pending_writes_flush_reuses_client_per_base_url(
         def __init__(self, *, base_url: str, context_name: str | None = None) -> None:
             self.base_url = base_url
             self.context_name = context_name
+            self._replay_scope = TEST_REPLAY_SCOPE
             instances.append(self)
 
         async def __aenter__(self) -> FakeClient:
@@ -325,6 +428,7 @@ def test_pending_writes_flush_stops_after_auth_refresh_failure(
         def __init__(self, *, base_url: str, context_name: str | None = None) -> None:
             self.base_url = base_url
             self.context_name = context_name
+            self._replay_scope = TEST_REPLAY_SCOPE
 
         async def __aenter__(self) -> FakeClient:
             return self
@@ -364,6 +468,7 @@ def test_pending_writes_flush_failure_summary_names_both_classes(
         def __init__(self, *, base_url: str, context_name: str | None = None) -> None:
             self.base_url = base_url
             self.context_name = context_name
+            self._replay_scope = TEST_REPLAY_SCOPE
 
         async def __aenter__(self) -> FakeClient:
             return self
