@@ -28,6 +28,8 @@ services:
       # `:U` is a podman extension that chowns the bind mount to the container UID
       # on first start (no-op under Docker Engine). Fixes rootless podman perm denied.
       - "${SURREAL_DATA_DIR:-./.moon/cache/surreal-dev}:/data:U"
+    environment:
+      - SURREAL_ROCKSDB_BLOCK_CACHE_SIZE
     restart: unless-stopped
 
   surrealdb-eval:

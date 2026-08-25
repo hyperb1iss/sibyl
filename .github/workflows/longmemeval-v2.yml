@@ -519,6 +519,7 @@ jobs:
       SIBYL_SURREAL_USERNAME: sibyl_ci
       SIBYL_SURREAL_PASSWORD: sibyl_ci_password
       SIBYL_SURREAL_PATH: rocksdb:///data/sibyl-longmemeval-v2.db
+      SURREAL_ROCKSDB_BLOCK_CACHE_SIZE: "4294967296"
       SIBYL_REDIS_HOST: 127.0.0.1
       SIBYL_REDIS_PORT: "6381"
       SIBYL_GRAPH_EMBEDDING_PROVIDER: local

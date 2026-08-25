@@ -284,6 +284,7 @@ def test_longmemeval_v2_workflow_packages_receipts_and_diagnostics() -> None:
     assert ".moon/cache/evals/longmemeval-v2-official/arm_run.json" in workflow
     assert "Upload service diagnostics" in workflow
     assert "SIBYL_SURREAL_PATH: rocksdb:///data/sibyl-longmemeval-v2.db" in workflow
+    assert 'SURREAL_ROCKSDB_BLOCK_CACHE_SIZE: "4294967296"' in workflow
     assert "sibyld.log" in workflow
     assert "sibyl-worker.log" in workflow
     assert "Capture service diagnostics" in workflow
@@ -409,6 +410,13 @@ def test_release_compose_service_pins_the_bounded_surreal_runtime() -> None:
     assert 'SURREAL_ROCKSDB_MAX_WRITE_BUFFER_NUMBER: "4"' in eval_service
     assert '"127.0.0.1:8018:8000"' in eval_service
     assert "${SIBYL_RELEASE_ROOT:-./.moon/cache/surreal-eval}/surreal" in eval_service
+
+
+def test_default_compose_service_forwards_an_explicit_rocksdb_cache_size() -> None:
+    compose = (Path(__file__).parents[2] / "docker-compose.yml").read_text(encoding="utf-8")
+    default_service = compose.split("  surrealdb:", 1)[1].split("  surrealdb-eval:", 1)[0]
+
+    assert "- SURREAL_ROCKSDB_BLOCK_CACHE_SIZE" in default_service
 
 
 def _write_dataset(
