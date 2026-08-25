@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -262,6 +263,52 @@ def test_pending_writes_claim_binds_and_retries_legacy_entries(
     assert replayed == [item["id"]]
     assert replay_options == [True]
     assert pending_writes.list_pending_writes() == []
+
+
+def test_pending_writes_claim_fails_when_replay_lock_is_busy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    item = pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url="http://testserver/api",
+        json_payload={"title": "Legacy"},
+        params=None,
+    )
+
+    class FakeClient:
+        def __init__(self, *, context_name: str | None = None) -> None:
+            self.context_name = context_name
+            self.base_url = "http://testserver/api"
+            self._replay_scope = TEST_REPLAY_SCOPE
+
+        async def __aenter__(self) -> FakeClient:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def get(self, path: str) -> dict[str, Any]:
+            assert path == "/auth/me"
+            return {
+                "user": {"email": "bliss@example.test"},
+                "organization": {"slug": "silkcircuit"},
+            }
+
+        async def _maybe_replay_pending_writes(self, *, ignore_backoff: bool = False) -> None:
+            raise AssertionError("claim replay ran without the replay lock")
+
+    monkeypatch.setattr(pending, "SibylClient", FakeClient)
+    monkeypatch.setattr(pending, "pending_replay_lock", lambda: nullcontext(False))
+    monkeypatch.setattr("sibyl_cli.config_store.resolve_context_name", lambda: "local")
+
+    result = CliRunner().invoke(pending.app, ["claim", "--yes"])
+
+    assert result.exit_code == 1
+    assert "claim did not run" in result.stdout
+    assert pending_writes.read_pending_write(str(item["id"]))["replay_scope"] is None
 
 
 @pytest.mark.parametrize(

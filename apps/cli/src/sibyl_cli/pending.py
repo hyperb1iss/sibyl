@@ -294,8 +294,8 @@ def claim_writes(
 
             with pending_replay_lock() as acquired:
                 if not acquired:
-                    warn("Another pending-write replay is already running.")
-                    return
+                    error("Another pending-write replay is already running; claim did not run.")
+                    raise typer.Exit(code=1)
                 claim_failures: list[tuple[str, str]] = []
                 claimed = 0
                 for item in matching:
