@@ -667,8 +667,12 @@ def test_official_runner_validates_unselected_shared_trajectories(
     )
     assert release is not None
 
-    with pytest.raises(RuntimeError, match=error):
+    with pytest.raises(RuntimeError, match=error) as exc_info:
         harness.load_trajectories(str(trajectory_path))
+
+    if error == "Duplicate":
+        assert str(trajectory_path) in str(exc_info.value)
+        assert str(exc_info.value).endswith(":3")
 
 
 def test_official_runner_rejects_missing_shared_trajectory(tmp_path: Path) -> None:

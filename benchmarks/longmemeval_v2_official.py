@@ -387,7 +387,10 @@ class _SharedTrajectoryRelease:
                         f"Invalid trajectory id at {trajectory_path}:{line_number}"
                     )
                 if trajectory_id in seen_ids:
-                    raise RuntimeError(f"Duplicate trajectory id: {trajectory_id}")
+                    raise RuntimeError(
+                        f"Duplicate trajectory id {trajectory_id!r} "
+                        f"at {trajectory_path}:{line_number}"
+                    )
                 seen_ids.add(trajectory_id)
                 if trajectory_id in self._read_counts:
                     selected[trajectory_id] = trajectory
