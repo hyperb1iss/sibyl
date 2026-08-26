@@ -562,6 +562,55 @@ print("real_registry_rebind=PASS")
     assert result.stdout.strip() == "real_registry_rebind=PASS"
 
 
+def test_official_runner_releases_shared_trajectories_after_final_insert(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_runner_module()
+    loaded = {
+        "kept-once": {"id": "kept-once", "payload": "once"},
+        "kept-twice": {"id": "kept-twice", "payload": "twice"},
+        "unselected": {"id": "unselected", "payload": "unused"},
+    }
+    harness = SimpleNamespace(load_trajectories=lambda _path: loaded)
+
+    assert module.install_shared_trajectory_release(
+        harness,
+        selected_haystack={
+            "question-a": ["kept-once", "kept-twice", "kept-twice"],
+            "question-b": ["kept-once", "kept-twice", "kept-twice"],
+        },
+    )
+    trajectories = harness.load_trajectories("trajectories.jsonl")
+
+    assert loaded == {}
+    assert set(trajectories) == {"kept-once", "kept-twice"}
+    assert trajectories["kept-once"]["payload"] == "once"
+    assert "kept-once" not in trajectories
+    assert trajectories["kept-twice"]["payload"] == "twice"
+    assert "kept-twice" in trajectories
+    assert trajectories["kept-twice"]["payload"] == "twice"
+    assert trajectories == {}
+    assert "consume-on-insert (2 selected)" in capsys.readouterr().out
+
+
+def test_official_runner_keeps_nonshared_trajectory_loading_unchanged() -> None:
+    module = _load_runner_module()
+
+    def original_load(_path: str) -> dict[str, dict[str, str]]:
+        return {"trajectory": {"id": "trajectory"}}
+
+    harness = SimpleNamespace(load_trajectories=original_load)
+
+    assert not module.install_shared_trajectory_release(
+        harness,
+        selected_haystack={
+            "question-a": ["trajectory-a"],
+            "question-b": ["trajectory-b"],
+        },
+    )
+    assert harness.load_trajectories is original_load
+
+
 def test_official_runner_refuses_existing_provider_usage_before_work(tmp_path: Path) -> None:
     module = _load_runner_module()
     output_dir = tmp_path / "output"
