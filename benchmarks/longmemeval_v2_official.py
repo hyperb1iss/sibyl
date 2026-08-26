@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+from collections import Counter
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -251,6 +252,14 @@ def main(argv: list[str] | None = None) -> int:
     import evaluation.harness as official_harness  # noqa: PLC0415
     import evaluation.qa_eval_metrics as official_metrics  # noqa: PLC0415
 
+    trajectory_release = (
+        install_shared_trajectory_release(
+            official_harness,
+            selected_haystack=selected_haystack,
+        )
+        if not args.load_memory_dir
+        else None
+    )
     install_provider_usage_tracking(
         official_harness,
         official_metrics,
@@ -271,6 +280,8 @@ def main(argv: list[str] | None = None) -> int:
             memory_config_path=memory_config_path,
         )
         official_harness.main()
+        if trajectory_release is not None:
+            trajectory_release.assert_complete()
     finally:
         sys.argv = old_argv
     if args.experiment_id:
@@ -311,6 +322,92 @@ def install_official_memory_adapter(official_repo: Path) -> type[Any]:
         raise RuntimeError("Sibyl memory adapter did not register with the official harness")
     globals()["SibylLiveApiMemory"] = memory_cls
     return memory_cls
+
+
+class _ConsumeOnLastReadTrajectories(dict[str, dict[str, Any]]):
+    """Release shared-haystack trajectory payloads after their final insert."""
+
+    def __init__(
+        self,
+        trajectories: dict[str, dict[str, Any]],
+        *,
+        read_counts: Counter[str],
+    ) -> None:
+        super().__init__(trajectories)
+        self._read_counts = read_counts
+
+    def __getitem__(self, trajectory_id: str) -> dict[str, Any]:
+        trajectory = super().__getitem__(trajectory_id)
+        remaining = self._read_counts[trajectory_id] - 1
+        if remaining <= 0:
+            self._read_counts.pop(trajectory_id, None)
+            super().__delitem__(trajectory_id)
+        else:
+            self._read_counts[trajectory_id] = remaining
+        return trajectory
+
+
+class _SharedTrajectoryRelease:
+    def __init__(
+        self,
+        original_load: Any,
+        *,
+        read_counts: Counter[str],
+    ) -> None:
+        self._original_load = original_load
+        self._read_counts = read_counts
+        self._loaded_maps: list[_ConsumeOnLastReadTrajectories] = []
+
+    def load(self, path: str) -> _ConsumeOnLastReadTrajectories:
+        loaded = self._original_load(path)
+        missing = sorted(set(self._read_counts).difference(loaded))
+        if missing:
+            raise RuntimeError(f"Shared haystack references missing trajectories: {missing}")
+        selected = {
+            trajectory_id: loaded[trajectory_id] for trajectory_id in self._read_counts
+        }
+        loaded.clear()
+        print(  # noqa: T201
+            "Shared-haystack trajectory retention: consume-on-insert "
+            f"({len(selected)} selected).",
+            flush=True,
+        )
+        trajectories = _ConsumeOnLastReadTrajectories(
+            selected,
+            read_counts=self._read_counts.copy(),
+        )
+        self._loaded_maps.append(trajectories)
+        return trajectories
+
+    def assert_complete(self) -> None:
+        if not self._loaded_maps:
+            raise RuntimeError("Official harness did not load the shared trajectories")
+        remaining = sum(len(trajectories) for trajectories in self._loaded_maps)
+        if remaining:
+            raise RuntimeError(
+                "Official harness left shared trajectory payloads unread: "
+                f"{remaining} remaining"
+            )
+
+
+def install_shared_trajectory_release(
+    official_harness: Any,
+    *,
+    selected_haystack: dict[str, list[str]],
+) -> _SharedTrajectoryRelease | None:
+    """Bound harness heap retention for one shared ordered haystack."""
+
+    ordered_haystacks = list(selected_haystack.values())
+    if not ordered_haystacks or any(
+        haystack != ordered_haystacks[0] for haystack in ordered_haystacks[1:]
+    ):
+        return None
+    release = _SharedTrajectoryRelease(
+        official_harness.load_trajectories,
+        read_counts=Counter(ordered_haystacks[0]),
+    )
+    official_harness.load_trajectories = release.load
+    return release
 
 
 def _redacted_command_args(command_args: Sequence[str]) -> list[str]:
