@@ -573,13 +573,14 @@ def test_official_runner_releases_shared_trajectories_after_final_insert(
     }
     harness = SimpleNamespace(load_trajectories=lambda _path: loaded)
 
-    assert module.install_shared_trajectory_release(
+    release = module.install_shared_trajectory_release(
         harness,
         selected_haystack={
             "question-a": ["kept-once", "kept-twice", "kept-twice"],
             "question-b": ["kept-once", "kept-twice", "kept-twice"],
         },
     )
+    assert release is not None
     trajectories = harness.load_trajectories("trajectories.jsonl")
 
     assert loaded == {}
@@ -590,6 +591,7 @@ def test_official_runner_releases_shared_trajectories_after_final_insert(
     assert "kept-twice" in trajectories
     assert trajectories["kept-twice"]["payload"] == "twice"
     assert trajectories == {}
+    release.assert_complete()
     assert "consume-on-insert (2 selected)" in capsys.readouterr().out
 
 
@@ -601,14 +603,41 @@ def test_official_runner_keeps_nonshared_trajectory_loading_unchanged() -> None:
 
     harness = SimpleNamespace(load_trajectories=original_load)
 
-    assert not module.install_shared_trajectory_release(
-        harness,
-        selected_haystack={
-            "question-a": ["trajectory-a"],
-            "question-b": ["trajectory-b"],
-        },
+    assert (
+        module.install_shared_trajectory_release(
+            harness,
+            selected_haystack={
+                "question-a": ["trajectory-a"],
+                "question-b": ["trajectory-b"],
+            },
+        )
+        is None
     )
     assert harness.load_trajectories is original_load
+
+
+def test_official_runner_rejects_shared_trajectory_loader_drift() -> None:
+    module = _load_runner_module()
+
+    def load_trajectories(_path: str) -> dict[str, dict[str, str]]:
+        return {"trajectory": {"id": "trajectory", "payload": "retained"}}
+
+    harness = SimpleNamespace(load_trajectories=load_trajectories)
+    release = module.install_shared_trajectory_release(
+        harness,
+        selected_haystack={"question": ["trajectory"]},
+    )
+    assert release is not None
+
+    with pytest.raises(RuntimeError, match="did not load"):
+        release.assert_complete()
+
+    trajectories = harness.load_trajectories("trajectories.jsonl")
+    with pytest.raises(RuntimeError, match="1 remaining"):
+        release.assert_complete()
+
+    assert trajectories["trajectory"]["payload"] == "retained"
+    release.assert_complete()
 
 
 def test_official_runner_refuses_existing_provider_usage_before_work(tmp_path: Path) -> None:
