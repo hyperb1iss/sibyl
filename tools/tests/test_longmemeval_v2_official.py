@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import tracemalloc
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -611,6 +612,35 @@ def test_official_runner_releases_shared_trajectories_after_final_insert(
     assert "streaming consume-on-insert (2 selected)" in capsys.readouterr().out
 
 
+def test_official_runner_bounds_shared_trajectory_heap(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    trajectory_path = tmp_path / "trajectories.jsonl"
+    payload = "x" * 65_536
+    rows = [{"id": f"unselected-{index}", "payload": payload} for index in range(64)]
+    rows.insert(32, {"id": "kept", "payload": payload})
+    trajectory_path.write_text(
+        "".join(f"{json.dumps(row)}\n" for row in rows),
+        encoding="utf-8",
+    )
+    harness = SimpleNamespace(load_trajectories=lambda _path: {})
+    release = module.install_shared_trajectory_release(
+        harness,
+        selected_haystack={"question": ["kept"]},
+    )
+    assert release is not None
+
+    tracemalloc.start()
+    try:
+        trajectories = harness.load_trajectories(str(trajectory_path))
+        _current, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert trajectories["kept"]["payload"] == payload
+    assert peak < trajectory_path.stat().st_size // 4
+    release.assert_complete()
+
+
 @pytest.mark.parametrize(
     ("rows", "error"),
     [
@@ -656,6 +686,24 @@ def test_official_runner_rejects_missing_shared_trajectory(tmp_path: Path) -> No
         harness.load_trajectories(str(trajectory_path))
 
 
+def test_official_runner_reports_invalid_shared_trajectory_json(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    trajectory_path = tmp_path / "trajectories.jsonl"
+    trajectory_path.write_text(
+        '{"id": "kept"}\n\nnot-json\n',
+        encoding="utf-8",
+    )
+    harness = SimpleNamespace(load_trajectories=lambda _path: {})
+    release = module.install_shared_trajectory_release(
+        harness,
+        selected_haystack={"question": ["kept"]},
+    )
+    assert release is not None
+
+    with pytest.raises(RuntimeError, match=rf"{trajectory_path}:3"):
+        harness.load_trajectories(str(trajectory_path))
+
+
 def test_official_runner_rejects_non_jsonl_shared_trajectories(tmp_path: Path) -> None:
     module = _load_runner_module()
     trajectory_path = tmp_path / "trajectories.json"
@@ -690,6 +738,16 @@ def test_official_runner_keeps_nonshared_trajectory_loading_unchanged() -> None:
         is None
     )
     assert harness.load_trajectories is original_load
+
+
+def test_official_runner_rejects_missing_shared_trajectory_loader() -> None:
+    module = _load_runner_module()
+
+    with pytest.raises(RuntimeError, match="does not expose callable load_trajectories"):
+        module.install_shared_trajectory_release(
+            SimpleNamespace(),
+            selected_haystack={"question": ["trajectory"]},
+        )
 
 
 def test_official_runner_rejects_shared_trajectory_loader_drift(tmp_path: Path) -> None:

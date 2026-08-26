@@ -368,15 +368,24 @@ class _SharedTrajectoryRelease:
         selected: dict[str, dict[str, Any]] = {}
         seen_ids: set[str] = set()
         with trajectory_path.open(encoding="utf-8") as handle:
-            for index, line in enumerate(handle):
+            for line_number, line in enumerate(handle, start=1):
                 if not line.strip():
                     continue
-                trajectory = json.loads(line)
+                try:
+                    trajectory = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise RuntimeError(
+                        f"Invalid trajectory JSON at {trajectory_path}:{line_number}"
+                    ) from exc
                 if not isinstance(trajectory, dict):
-                    raise RuntimeError(f"Invalid trajectory at index {index}")
+                    raise RuntimeError(
+                        f"Invalid trajectory at {trajectory_path}:{line_number}"
+                    )
                 trajectory_id = trajectory.get("id")
                 if not isinstance(trajectory_id, str) or not trajectory_id:
-                    raise RuntimeError(f"Invalid trajectory id at index {index}")
+                    raise RuntimeError(
+                        f"Invalid trajectory id at {trajectory_path}:{line_number}"
+                    )
                 if trajectory_id in seen_ids:
                     raise RuntimeError(f"Duplicate trajectory id: {trajectory_id}")
                 seen_ids.add(trajectory_id)
@@ -421,6 +430,8 @@ def install_shared_trajectory_release(
         haystack != ordered_haystacks[0] for haystack in ordered_haystacks[1:]
     ):
         return None
+    if not callable(getattr(official_harness, "load_trajectories", None)):
+        raise RuntimeError("Official harness does not expose callable load_trajectories")
     release = _SharedTrajectoryRelease(
         read_counts=Counter(ordered_haystacks[0]),
     )
