@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import tracemalloc
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -564,14 +565,30 @@ print("real_registry_rebind=PASS")
 
 def test_official_runner_releases_shared_trajectories_after_final_insert(
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     module = _load_runner_module()
-    loaded = {
-        "kept-once": {"id": "kept-once", "payload": "once"},
-        "kept-twice": {"id": "kept-twice", "payload": "twice"},
-        "unselected": {"id": "unselected", "payload": "unused"},
-    }
-    harness = SimpleNamespace(load_trajectories=lambda _path: loaded)
+    trajectory_path = tmp_path / "trajectories.jsonl"
+    trajectory_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"id": "kept-once", "payload": "once"}),
+                json.dumps({"id": "unselected", "payload": "unused"}),
+                json.dumps({"id": "kept-twice", "payload": "twice"}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def original_load(_path: str) -> dict[str, dict[str, str]]:
+        raise AssertionError("shared trajectory loading must bypass the full-file loader")
+
+    def forbidden_read_text(*_args: object, **_kwargs: object) -> str:
+        raise AssertionError("shared trajectory loading must stream the JSONL source")
+
+    harness = SimpleNamespace(load_trajectories=original_load)
 
     release = module.install_shared_trajectory_release(
         harness,
@@ -581,9 +598,9 @@ def test_official_runner_releases_shared_trajectories_after_final_insert(
         },
     )
     assert release is not None
-    trajectories = harness.load_trajectories("trajectories.jsonl")
+    monkeypatch.setattr(Path, "read_text", forbidden_read_text)
+    trajectories = harness.load_trajectories(str(trajectory_path))
 
-    assert loaded == {}
     assert set(trajectories) == {"kept-once", "kept-twice"}
     assert trajectories["kept-once"]["payload"] == "once"
     assert "kept-once" not in trajectories
@@ -592,7 +609,118 @@ def test_official_runner_releases_shared_trajectories_after_final_insert(
     assert trajectories["kept-twice"]["payload"] == "twice"
     assert trajectories == {}
     release.assert_complete()
-    assert "consume-on-insert (2 selected)" in capsys.readouterr().out
+    assert "streaming consume-on-insert (2 selected)" in capsys.readouterr().out
+
+
+def test_official_runner_bounds_shared_trajectory_heap(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    trajectory_path = tmp_path / "trajectories.jsonl"
+    payload = "x" * 65_536
+    rows = [{"id": f"unselected-{index}", "payload": payload} for index in range(64)]
+    rows.insert(32, {"id": "kept", "payload": payload})
+    trajectory_path.write_text(
+        "".join(f"{json.dumps(row)}\n" for row in rows),
+        encoding="utf-8",
+    )
+    harness = SimpleNamespace(load_trajectories=lambda _path: {})
+    release = module.install_shared_trajectory_release(
+        harness,
+        selected_haystack={"question": ["kept"]},
+    )
+    assert release is not None
+
+    tracemalloc.start()
+    try:
+        trajectories = harness.load_trajectories(str(trajectory_path))
+        _current, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert trajectories["kept"]["payload"] == payload
+    assert peak < trajectory_path.stat().st_size // 4
+    release.assert_complete()
+
+
+@pytest.mark.parametrize(
+    ("rows", "error"),
+    [
+        ([{"id": "kept"}, {"id": "duplicate"}, {"id": "duplicate"}], "Duplicate"),
+        ([{"id": "kept"}, {"payload": "missing id"}], "Invalid trajectory id"),
+        ([{"id": "kept"}, ["not", "an", "object"]], "Invalid trajectory"),
+    ],
+)
+def test_official_runner_validates_unselected_shared_trajectories(
+    rows: list[object],
+    error: str,
+    tmp_path: Path,
+) -> None:
+    module = _load_runner_module()
+    trajectory_path = tmp_path / "trajectories.jsonl"
+    trajectory_path.write_text(
+        "".join(f"{json.dumps(row)}\n" for row in rows),
+        encoding="utf-8",
+    )
+    harness = SimpleNamespace(load_trajectories=lambda _path: {})
+    release = module.install_shared_trajectory_release(
+        harness,
+        selected_haystack={"question": ["kept"]},
+    )
+    assert release is not None
+
+    with pytest.raises(RuntimeError, match=error) as exc_info:
+        harness.load_trajectories(str(trajectory_path))
+
+    if error == "Duplicate":
+        assert str(trajectory_path) in str(exc_info.value)
+        assert str(exc_info.value).endswith(":3")
+
+
+def test_official_runner_rejects_missing_shared_trajectory(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    trajectory_path = tmp_path / "trajectories.jsonl"
+    trajectory_path.write_text('{"id": "present"}\n', encoding="utf-8")
+    harness = SimpleNamespace(load_trajectories=lambda _path: {})
+    release = module.install_shared_trajectory_release(
+        harness,
+        selected_haystack={"question": ["missing"]},
+    )
+    assert release is not None
+
+    with pytest.raises(RuntimeError, match=r"missing trajectories.*missing"):
+        harness.load_trajectories(str(trajectory_path))
+
+
+def test_official_runner_reports_invalid_shared_trajectory_json(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    trajectory_path = tmp_path / "trajectories.jsonl"
+    trajectory_path.write_text(
+        '{"id": "kept"}\n\nnot-json\n',
+        encoding="utf-8",
+    )
+    harness = SimpleNamespace(load_trajectories=lambda _path: {})
+    release = module.install_shared_trajectory_release(
+        harness,
+        selected_haystack={"question": ["kept"]},
+    )
+    assert release is not None
+
+    with pytest.raises(RuntimeError, match=rf"{trajectory_path}:3"):
+        harness.load_trajectories(str(trajectory_path))
+
+
+def test_official_runner_rejects_non_jsonl_shared_trajectories(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    trajectory_path = tmp_path / "trajectories.json"
+    trajectory_path.write_text("[]\n", encoding="utf-8")
+    harness = SimpleNamespace(load_trajectories=lambda _path: {})
+    release = module.install_shared_trajectory_release(
+        harness,
+        selected_haystack={"question": ["trajectory"]},
+    )
+    assert release is not None
+
+    with pytest.raises(RuntimeError, match="requires a JSONL source"):
+        harness.load_trajectories(str(trajectory_path))
 
 
 def test_official_runner_keeps_nonshared_trajectory_loading_unchanged() -> None:
@@ -616,13 +744,19 @@ def test_official_runner_keeps_nonshared_trajectory_loading_unchanged() -> None:
     assert harness.load_trajectories is original_load
 
 
-def test_official_runner_rejects_shared_trajectory_loader_drift() -> None:
+def test_official_runner_rejects_missing_shared_trajectory_loader() -> None:
     module = _load_runner_module()
 
-    def load_trajectories(_path: str) -> dict[str, dict[str, str]]:
-        return {"trajectory": {"id": "trajectory", "payload": "retained"}}
+    with pytest.raises(RuntimeError, match="does not expose callable load_trajectories"):
+        module.install_shared_trajectory_release(
+            SimpleNamespace(),
+            selected_haystack={"question": ["trajectory"]},
+        )
 
-    harness = SimpleNamespace(load_trajectories=load_trajectories)
+
+def test_official_runner_rejects_shared_trajectory_loader_drift(tmp_path: Path) -> None:
+    module = _load_runner_module()
+    harness = SimpleNamespace(load_trajectories=lambda _path: {})
     release = module.install_shared_trajectory_release(
         harness,
         selected_haystack={"question": ["trajectory"]},
@@ -632,7 +766,12 @@ def test_official_runner_rejects_shared_trajectory_loader_drift() -> None:
     with pytest.raises(RuntimeError, match="did not load"):
         release.assert_complete()
 
-    trajectories = harness.load_trajectories("trajectories.jsonl")
+    trajectory_path = tmp_path / "trajectories.jsonl"
+    trajectory_path.write_text(
+        '{"id": "trajectory", "payload": "retained"}\n',
+        encoding="utf-8",
+    )
+    trajectories = harness.load_trajectories(str(trajectory_path))
     with pytest.raises(RuntimeError, match="1 remaining"):
         release.assert_complete()
 
