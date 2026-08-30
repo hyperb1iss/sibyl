@@ -1151,9 +1151,9 @@ DISPATCH_REPOSITORY = "hyperb1iss/sibyl"
 DISPATCH_HEAD_SHA = "b" * 40
 
 
-def _ledger_time(hours: float) -> str:
+def _ledger_time(hours: float, *, seconds: int = 0) -> str:
     base = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
-    return (base + timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return (base + timedelta(hours=hours, seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _ledger_run(
@@ -1435,12 +1435,12 @@ def test_aa_span_block_and_dispatch_exhaustion_name_different_reasons() -> None:
         rig.validate_aa_receipt(tampered)
 
 
-def test_rig_blocked_receipt_tolerates_github_skipped_job_clock_skew() -> None:
+def test_rig_blocked_receipt_tolerates_bounded_github_skipped_job_clock_skew() -> None:
     attempts = [_dispatch_attempt(index) for index in range(5)]
     skipped = attempts[1]["builders"][0]["jobs"][-1]
     assert skipped["conclusion"] == "skipped"
-    skipped["completed_at"] = _ledger_time(6 * 1 + 1)
-    skipped["started_at"] = _ledger_time(6 * 1 + 2)
+    skipped["started_at"] = _ledger_time(8, seconds=rig.SKIPPED_JOB_MAX_CLOCK_SKEW_SECONDS)
+    skipped["completed_at"] = _ledger_time(8)
 
     receipt = rig.build_rig_blocked_receipt(_dispatch_ledger(attempts))
 
@@ -1451,8 +1451,36 @@ def test_rig_blocked_receipt_tolerates_github_skipped_job_clock_skew() -> None:
         "completed_at": skipped["completed_at"],
         "html_url": skipped["html_url"],
     }
-    ran = attempts[2]["builders"][0]["jobs"][0]
-    ran["completed_at"] = _ledger_time(6 * 2 + 1)
-    ran["started_at"] = _ledger_time(6 * 2 + 2)
+    assert rig.validate_rig_blocked_receipt(receipt) == receipt
+
+
+@pytest.mark.parametrize(
+    ("conclusion", "reversal_seconds"),
+    [
+        ("skipped", rig.SKIPPED_JOB_MAX_CLOCK_SKEW_SECONDS + 1),
+        ("skipped", 3600),
+        ("failure", 1),
+    ],
+)
+def test_rig_blocked_receipt_rejects_job_clock_reversal_beyond_the_skipped_bound(
+    conclusion: str,
+    reversal_seconds: int,
+) -> None:
+    attempts = [_dispatch_attempt(index) for index in range(5)]
+    job = attempts[2]["builders"][0]["jobs"][-1 if conclusion == "skipped" else 0]
+    assert job["conclusion"] == conclusion
+    job["started_at"] = _ledger_time(14, seconds=reversal_seconds)
+    job["completed_at"] = _ledger_time(14)
     with pytest.raises(rig.RigInputError, match="completed before it started"):
         rig.build_rig_blocked_receipt(_dispatch_ledger(attempts))
+
+    receipt = rig.build_rig_blocked_receipt(_dispatch_ledger())
+    tampered = deepcopy(receipt)
+    row = tampered["attempts"][2]["builders"][0]["official_jobs"]
+    key = "combined_receipt" if conclusion == "skipped" else "enterprise"
+    row[key]["started_at"] = job["started_at"]
+    row[key]["completed_at"] = job["completed_at"]
+    unsigned = {k: v for k, v in tampered.items() if k != "rig_blocked_receipt_sha256"}
+    tampered["rig_blocked_receipt_sha256"] = rig.canonical_sha256(unsigned)
+    with pytest.raises(rig.RigInputError, match="completed before it started"):
+        rig.validate_rig_blocked_receipt(tampered)

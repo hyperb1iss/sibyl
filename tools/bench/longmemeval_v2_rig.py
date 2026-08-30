@@ -59,6 +59,11 @@ DISPATCH_EXHAUSTION_RULE = (
     "a builder run whose official Small domains never both succeeded and whose "
     "combined receipt never succeeded"
 )
+# GitHub stamps a skipped job (one that never ran) with bookkeeping times that can
+# run backwards. Every skipped job in the observed r1-r5 ledger shows a reversal
+# of zero or one second, and both timestamps are second-granular, so two seconds
+# allows one rounding tick on each side and nothing more.
+SKIPPED_JOB_MAX_CLOCK_SKEW_SECONDS = 2
 COMPLETED_RUN_CONCLUSIONS = frozenset({"success", "failure", "cancelled"})
 COMPLETED_JOB_CONCLUSIONS = frozenset({"success", "failure", "cancelled", "skipped"})
 EXPERIMENT_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
@@ -1952,6 +1957,16 @@ def _ledger_run(raw: object, *, name: str, keys: frozenset[str]) -> dict[str, An
     return dict(raw)
 
 
+def _require_job_interval(raw: dict[str, Any], *, name: str) -> None:
+    started = _optional_timestamp(raw.get("started_at"), name=f"{name}.started_at")
+    completed = _optional_timestamp(raw.get("completed_at"), name=f"{name}.completed_at")
+    if started is None or completed is None or completed >= started:
+        return
+    reversal = (started - completed).total_seconds()
+    if raw.get("conclusion") != "skipped" or reversal > SKIPPED_JOB_MAX_CLOCK_SKEW_SECONDS:
+        raise RigInputError(f"{name} completed before it started")
+
+
 def _ledger_job(raw: object, *, name: str) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise RigInputError(f"{name} is not an object")
@@ -1963,17 +1978,7 @@ def _ledger_job(raw: object, *, name: str) -> dict[str, Any]:
         raise RigInputError(f"{name} has not completed")
     if raw.get("conclusion") not in COMPLETED_JOB_CONCLUSIONS:
         raise RigInputError(f"{name} conclusion is not a completed verdict")
-    started = _optional_timestamp(raw.get("started_at"), name=f"{name}.started_at")
-    completed = _optional_timestamp(raw.get("completed_at"), name=f"{name}.completed_at")
-    # GitHub stamps a skipped job with bookkeeping times that can run backwards
-    # by a second; only a job that actually ran owes a forward interval.
-    if (
-        raw.get("conclusion") != "skipped"
-        and started is not None
-        and completed is not None
-        and completed < started
-    ):
-        raise RigInputError(f"{name} completed before it started")
+    _require_job_interval(raw, name=name)
     _nonempty_string(raw.get("name"), name=f"{name}.name")
     _nonempty_string(raw.get("html_url"), name=f"{name}.html_url")
     _git_sha(raw.get("head_sha"), name=f"{name}.head_sha")
@@ -2193,8 +2198,7 @@ def _validate_rig_blocked_job(raw: object, *, name: str) -> dict[str, Any]:
     _positive_int(raw.get("job_id"), name=f"{name}.job_id")
     if raw.get("conclusion") not in COMPLETED_JOB_CONCLUSIONS:
         raise RigInputError(f"{name} conclusion is not a completed verdict")
-    _optional_timestamp(raw.get("started_at"), name=f"{name}.started_at")
-    _optional_timestamp(raw.get("completed_at"), name=f"{name}.completed_at")
+    _require_job_interval(raw, name=name)
     _nonempty_string(raw.get("html_url"), name=f"{name}.html_url")
     return dict(raw)
 
