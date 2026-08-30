@@ -1,0 +1,561 @@
+{
+  "schema_version": "sibyl-longmemeval-v2-dispatch-ledger-v1",
+  "repository": "hyperb1iss/sibyl",
+  "fetched_at": "2026-08-30T07:07:30Z",
+  "source": {
+    "tool": "gh api",
+    "run_endpoint": "repos/{repository}/actions/runs/{run_id}",
+    "jobs_endpoint": "repos/{repository}/actions/runs/{run_id}/jobs?per_page=100",
+    "builder_query": "gh run list --workflow longmemeval-v2.yml --limit 200 --json databaseId,displayTitle | select(displayTitle startswith \"LongMemEval V2 aa-{controller_run_id} \")"
+  },
+  "attempts": [
+    {
+      "controller": {
+        "conclusion": "success",
+        "created_at": "2026-08-25T19:12:11Z",
+        "display_title": "LongMemEval V2 Release A/A sibyl-v1.3-aa-20260825",
+        "event": "workflow_dispatch",
+        "head_branch": "main",
+        "head_sha": "48b4483624305cc020296b6593be3bad968aeac6",
+        "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32888217656",
+        "id": 32888217656,
+        "name": "LongMemEval V2 Release A/A sibyl-v1.3-aa-20260825",
+        "path": ".github/workflows/longmemeval-v2-release-aa.yml",
+        "repository": "hyperb1iss/sibyl",
+        "run_attempt": 1,
+        "run_started_at": "2026-08-25T19:12:11Z",
+        "status": "completed",
+        "updated_at": "2026-08-25T19:13:30Z"
+      },
+      "builders": [
+        {
+          "conclusion": "cancelled",
+          "created_at": "2026-08-25T19:13:08Z",
+          "display_title": "LongMemEval V2 aa-32888217656 aa-1-left",
+          "event": "workflow_dispatch",
+          "head_branch": "main",
+          "head_sha": "48b4483624305cc020296b6593be3bad968aeac6",
+          "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32888310148",
+          "id": 32888310148,
+          "name": "LongMemEval V2 aa-32888217656 aa-1-left",
+          "path": ".github/workflows/longmemeval-v2.yml",
+          "repository": "hyperb1iss/sibyl",
+          "run_attempt": 1,
+          "run_started_at": "2026-08-25T19:13:08Z",
+          "status": "completed",
+          "updated_at": "2026-08-25T20:59:26Z",
+          "jobs": [
+            {
+              "completed_at": "2026-08-25T19:13:17Z",
+              "conclusion": "success",
+              "head_sha": "48b4483624305cc020296b6593be3bad968aeac6",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32888310148/job/97933922087",
+              "id": 97933922087,
+              "name": "Validate sealed paid arm",
+              "run_attempt": 1,
+              "run_id": 32888310148,
+              "started_at": "2026-08-25T19:13:14Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-25T19:13:10Z",
+              "conclusion": "skipped",
+              "head_sha": "48b4483624305cc020296b6593be3bad968aeac6",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32888310148/job/97933923793",
+              "id": 97933923793,
+              "name": "Probe ${{ matrix.tier }}",
+              "run_attempt": 1,
+              "run_id": 32888310148,
+              "started_at": "2026-08-25T19:13:10Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-25T19:13:24Z",
+              "conclusion": "success",
+              "head_sha": "48b4483624305cc020296b6593be3bad968aeac6",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32888310148/job/97933961179",
+              "id": 97933961179,
+              "name": "Validate frozen memory source",
+              "run_attempt": 1,
+              "run_id": 32888310148,
+              "started_at": "2026-08-25T19:13:21Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-25T20:59:25Z",
+              "conclusion": "cancelled",
+              "head_sha": "48b4483624305cc020296b6593be3bad968aeac6",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32888310148/job/97933994691",
+              "id": 97933994691,
+              "name": "Official web small",
+              "run_attempt": 1,
+              "run_id": 32888310148,
+              "started_at": "2026-08-25T19:14:25Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-25T20:40:20Z",
+              "conclusion": "failure",
+              "head_sha": "48b4483624305cc020296b6593be3bad968aeac6",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32888310148/job/97933994796",
+              "id": 97933994796,
+              "name": "Official enterprise small",
+              "run_attempt": 1,
+              "run_id": 32888310148,
+              "started_at": "2026-08-25T19:14:26Z",
+              "status": "completed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "controller": {
+        "conclusion": "success",
+        "created_at": "2026-08-25T20:54:00Z",
+        "display_title": "LongMemEval V2 Release A/A sibyl-v1.3-aa-20260825-r2",
+        "event": "workflow_dispatch",
+        "head_branch": "main",
+        "head_sha": "48b4483624305cc020296b6593be3bad968aeac6",
+        "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32897996847",
+        "id": 32897996847,
+        "name": "LongMemEval V2 Release A/A sibyl-v1.3-aa-20260825-r2",
+        "path": ".github/workflows/longmemeval-v2-release-aa.yml",
+        "repository": "hyperb1iss/sibyl",
+        "run_attempt": 1,
+        "run_started_at": "2026-08-25T20:54:00Z",
+        "status": "completed",
+        "updated_at": "2026-08-25T20:55:17Z"
+      },
+      "builders": [
+        {
+          "conclusion": "failure",
+          "created_at": "2026-08-25T20:55:00Z",
+          "display_title": "LongMemEval V2 aa-32897996847 aa-1-left",
+          "event": "workflow_dispatch",
+          "head_branch": "main",
+          "head_sha": "48b4483624305cc020296b6593be3bad968aeac6",
+          "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32898089824",
+          "id": 32898089824,
+          "name": "LongMemEval V2 aa-32897996847 aa-1-left",
+          "path": ".github/workflows/longmemeval-v2.yml",
+          "repository": "hyperb1iss/sibyl",
+          "run_attempt": 1,
+          "run_started_at": "2026-08-25T20:55:00Z",
+          "status": "completed",
+          "updated_at": "2026-08-25T22:20:42Z",
+          "jobs": [
+            {
+              "completed_at": "2026-08-25T20:55:06Z",
+              "conclusion": "success",
+              "head_sha": "48b4483624305cc020296b6593be3bad968aeac6",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32898089824/job/97965272579",
+              "id": 97965272579,
+              "name": "Validate sealed paid arm",
+              "run_attempt": 1,
+              "run_id": 32898089824,
+              "started_at": "2026-08-25T20:55:04Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-25T20:55:02Z",
+              "conclusion": "skipped",
+              "head_sha": "48b4483624305cc020296b6593be3bad968aeac6",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32898089824/job/97965273421",
+              "id": 97965273421,
+              "name": "Probe ${{ matrix.tier }}",
+              "run_attempt": 1,
+              "run_id": 32898089824,
+              "started_at": "2026-08-25T20:55:02Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-25T20:55:13Z",
+              "conclusion": "success",
+              "head_sha": "48b4483624305cc020296b6593be3bad968aeac6",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32898089824/job/97965295778",
+              "id": 97965295778,
+              "name": "Validate frozen memory source",
+              "run_attempt": 1,
+              "run_id": 32898089824,
+              "started_at": "2026-08-25T20:55:10Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-25T22:20:41Z",
+              "conclusion": "failure",
+              "head_sha": "48b4483624305cc020296b6593be3bad968aeac6",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32898089824/job/97965331052",
+              "id": 97965331052,
+              "name": "Official enterprise small",
+              "run_attempt": 1,
+              "run_id": 32898089824,
+              "started_at": "2026-08-25T20:55:49Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-25T22:08:09Z",
+              "conclusion": "failure",
+              "head_sha": "48b4483624305cc020296b6593be3bad968aeac6",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32898089824/job/97965331077",
+              "id": 97965331077,
+              "name": "Official web small",
+              "run_attempt": 1,
+              "run_id": 32898089824,
+              "started_at": "2026-08-25T20:55:49Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-25T22:20:41Z",
+              "conclusion": "skipped",
+              "head_sha": "48b4483624305cc020296b6593be3bad968aeac6",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32898089824/job/97989142017",
+              "id": 97989142017,
+              "name": "Official combined receipt",
+              "run_attempt": 1,
+              "run_id": 32898089824,
+              "started_at": "2026-08-25T22:20:42Z",
+              "status": "completed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "controller": {
+        "conclusion": "success",
+        "created_at": "2026-08-25T23:30:14Z",
+        "display_title": "LongMemEval V2 Release A/A sibyl-v1-3-aa-20260825-r3",
+        "event": "workflow_dispatch",
+        "head_branch": "main",
+        "head_sha": "74ddb867651c0159ff9d213d2cf952d5fb70a52b",
+        "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32911050360",
+        "id": 32911050360,
+        "name": "LongMemEval V2 Release A/A sibyl-v1-3-aa-20260825-r3",
+        "path": ".github/workflows/longmemeval-v2-release-aa.yml",
+        "repository": "hyperb1iss/sibyl",
+        "run_attempt": 1,
+        "run_started_at": "2026-08-25T23:30:14Z",
+        "status": "completed",
+        "updated_at": "2026-08-25T23:31:16Z"
+      },
+      "builders": [
+        {
+          "conclusion": "failure",
+          "created_at": "2026-08-25T23:31:01Z",
+          "display_title": "LongMemEval V2 aa-32911050360 aa-1-left",
+          "event": "workflow_dispatch",
+          "head_branch": "main",
+          "head_sha": "74ddb867651c0159ff9d213d2cf952d5fb70a52b",
+          "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32911112960",
+          "id": 32911112960,
+          "name": "LongMemEval V2 aa-32911050360 aa-1-left",
+          "path": ".github/workflows/longmemeval-v2.yml",
+          "repository": "hyperb1iss/sibyl",
+          "run_attempt": 1,
+          "run_started_at": "2026-08-25T23:31:01Z",
+          "status": "completed",
+          "updated_at": "2026-08-26T01:34:04Z",
+          "jobs": [
+            {
+              "completed_at": "2026-08-25T23:31:10Z",
+              "conclusion": "success",
+              "head_sha": "74ddb867651c0159ff9d213d2cf952d5fb70a52b",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32911112960/job/98005339504",
+              "id": 98005339504,
+              "name": "Validate sealed paid arm",
+              "run_attempt": 1,
+              "run_id": 32911112960,
+              "started_at": "2026-08-25T23:31:06Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-25T23:31:03Z",
+              "conclusion": "skipped",
+              "head_sha": "74ddb867651c0159ff9d213d2cf952d5fb70a52b",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32911112960/job/98005340467",
+              "id": 98005340467,
+              "name": "Probe ${{ matrix.tier }}",
+              "run_attempt": 1,
+              "run_id": 32911112960,
+              "started_at": "2026-08-25T23:31:03Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-25T23:31:17Z",
+              "conclusion": "success",
+              "head_sha": "74ddb867651c0159ff9d213d2cf952d5fb70a52b",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32911112960/job/98005365377",
+              "id": 98005365377,
+              "name": "Validate frozen memory source",
+              "run_attempt": 1,
+              "run_id": 32911112960,
+              "started_at": "2026-08-25T23:31:13Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-26T01:34:03Z",
+              "conclusion": "failure",
+              "head_sha": "74ddb867651c0159ff9d213d2cf952d5fb70a52b",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32911112960/job/98005390926",
+              "id": 98005390926,
+              "name": "Official web small",
+              "run_attempt": 1,
+              "run_id": 32911112960,
+              "started_at": "2026-08-25T23:31:58Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-26T01:07:17Z",
+              "conclusion": "failure",
+              "head_sha": "74ddb867651c0159ff9d213d2cf952d5fb70a52b",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32911112960/job/98005390966",
+              "id": 98005390966,
+              "name": "Official enterprise small",
+              "run_attempt": 1,
+              "run_id": 32911112960,
+              "started_at": "2026-08-25T23:31:58Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-26T01:34:03Z",
+              "conclusion": "skipped",
+              "head_sha": "74ddb867651c0159ff9d213d2cf952d5fb70a52b",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32911112960/job/98029950637",
+              "id": 98029950637,
+              "name": "Official combined receipt",
+              "run_attempt": 1,
+              "run_id": 32911112960,
+              "started_at": "2026-08-26T01:34:03Z",
+              "status": "completed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "controller": {
+        "conclusion": "success",
+        "created_at": "2026-08-26T02:12:56Z",
+        "display_title": "LongMemEval V2 Release A/A sibyl-v1-3-aa-20260825-r4",
+        "event": "workflow_dispatch",
+        "head_branch": "main",
+        "head_sha": "aed4adb2728953aa015bcafb04172b4efe443a6d",
+        "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32921881380",
+        "id": 32921881380,
+        "name": "LongMemEval V2 Release A/A sibyl-v1-3-aa-20260825-r4",
+        "path": ".github/workflows/longmemeval-v2-release-aa.yml",
+        "repository": "hyperb1iss/sibyl",
+        "run_attempt": 1,
+        "run_started_at": "2026-08-26T02:12:56Z",
+        "status": "completed",
+        "updated_at": "2026-08-26T02:14:14Z"
+      },
+      "builders": [
+        {
+          "conclusion": "failure",
+          "created_at": "2026-08-26T02:13:57Z",
+          "display_title": "LongMemEval V2 aa-32921881380 aa-1-left",
+          "event": "workflow_dispatch",
+          "head_branch": "main",
+          "head_sha": "aed4adb2728953aa015bcafb04172b4efe443a6d",
+          "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32921948833",
+          "id": 32921948833,
+          "name": "LongMemEval V2 aa-32921881380 aa-1-left",
+          "path": ".github/workflows/longmemeval-v2.yml",
+          "repository": "hyperb1iss/sibyl",
+          "run_attempt": 1,
+          "run_started_at": "2026-08-26T02:13:57Z",
+          "status": "completed",
+          "updated_at": "2026-08-26T04:25:39Z",
+          "jobs": [
+            {
+              "completed_at": "2026-08-26T02:14:06Z",
+              "conclusion": "success",
+              "head_sha": "aed4adb2728953aa015bcafb04172b4efe443a6d",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32921948833/job/98037115448",
+              "id": 98037115448,
+              "name": "Validate sealed paid arm",
+              "run_attempt": 1,
+              "run_id": 32921948833,
+              "started_at": "2026-08-26T02:14:02Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-26T02:13:59Z",
+              "conclusion": "skipped",
+              "head_sha": "aed4adb2728953aa015bcafb04172b4efe443a6d",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32921948833/job/98037116586",
+              "id": 98037116586,
+              "name": "Probe ${{ matrix.tier }}",
+              "run_attempt": 1,
+              "run_id": 32921948833,
+              "started_at": "2026-08-26T02:13:59Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-26T02:14:13Z",
+              "conclusion": "success",
+              "head_sha": "aed4adb2728953aa015bcafb04172b4efe443a6d",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32921948833/job/98037138625",
+              "id": 98037138625,
+              "name": "Validate frozen memory source",
+              "run_attempt": 1,
+              "run_id": 32921948833,
+              "started_at": "2026-08-26T02:14:10Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-26T04:18:43Z",
+              "conclusion": "failure",
+              "head_sha": "aed4adb2728953aa015bcafb04172b4efe443a6d",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32921948833/job/98037160887",
+              "id": 98037160887,
+              "name": "Official enterprise small",
+              "run_attempt": 1,
+              "run_id": 32921948833,
+              "started_at": "2026-08-26T02:14:53Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-26T04:25:38Z",
+              "conclusion": "failure",
+              "head_sha": "aed4adb2728953aa015bcafb04172b4efe443a6d",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32921948833/job/98037160889",
+              "id": 98037160889,
+              "name": "Official web small",
+              "run_attempt": 1,
+              "run_id": 32921948833,
+              "started_at": "2026-08-26T02:14:53Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-26T04:25:38Z",
+              "conclusion": "skipped",
+              "head_sha": "aed4adb2728953aa015bcafb04172b4efe443a6d",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32921948833/job/98060775189",
+              "id": 98060775189,
+              "name": "Official combined receipt",
+              "run_attempt": 1,
+              "run_id": 32921948833,
+              "started_at": "2026-08-26T04:25:39Z",
+              "status": "completed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "controller": {
+        "conclusion": "success",
+        "created_at": "2026-08-26T18:15:25Z",
+        "display_title": "LongMemEval V2 Release A/A sibyl-v1-3-aa-20260826-r5",
+        "event": "workflow_dispatch",
+        "head_branch": "main",
+        "head_sha": "7f31a330c0d9a25180a98a4332423b811d18c117",
+        "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32998699090",
+        "id": 32998699090,
+        "name": "LongMemEval V2 Release A/A sibyl-v1-3-aa-20260826-r5",
+        "path": ".github/workflows/longmemeval-v2-release-aa.yml",
+        "repository": "hyperb1iss/sibyl",
+        "run_attempt": 1,
+        "run_started_at": "2026-08-26T18:15:25Z",
+        "status": "completed",
+        "updated_at": "2026-08-26T18:16:35Z"
+      },
+      "builders": [
+        {
+          "conclusion": "failure",
+          "created_at": "2026-08-26T18:16:20Z",
+          "display_title": "LongMemEval V2 aa-32998699090 aa-1-left",
+          "event": "workflow_dispatch",
+          "head_branch": "main",
+          "head_sha": "7f31a330c0d9a25180a98a4332423b811d18c117",
+          "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32998783818",
+          "id": 32998783818,
+          "name": "LongMemEval V2 aa-32998699090 aa-1-left",
+          "path": ".github/workflows/longmemeval-v2.yml",
+          "repository": "hyperb1iss/sibyl",
+          "run_attempt": 1,
+          "run_started_at": "2026-08-26T18:16:20Z",
+          "status": "completed",
+          "updated_at": "2026-08-26T23:15:39Z",
+          "jobs": [
+            {
+              "completed_at": "2026-08-26T18:16:29Z",
+              "conclusion": "success",
+              "head_sha": "7f31a330c0d9a25180a98a4332423b811d18c117",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32998783818/job/98274824542",
+              "id": 98274824542,
+              "name": "Validate sealed paid arm",
+              "run_attempt": 1,
+              "run_id": 32998783818,
+              "started_at": "2026-08-26T18:16:25Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-26T18:16:22Z",
+              "conclusion": "skipped",
+              "head_sha": "7f31a330c0d9a25180a98a4332423b811d18c117",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32998783818/job/98274826404",
+              "id": 98274826404,
+              "name": "Probe ${{ matrix.tier }}",
+              "run_attempt": 1,
+              "run_id": 32998783818,
+              "started_at": "2026-08-26T18:16:22Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-26T18:16:35Z",
+              "conclusion": "success",
+              "head_sha": "7f31a330c0d9a25180a98a4332423b811d18c117",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32998783818/job/98274862415",
+              "id": 98274862415,
+              "name": "Validate frozen memory source",
+              "run_attempt": 1,
+              "run_id": 32998783818,
+              "started_at": "2026-08-26T18:16:32Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-26T23:15:38Z",
+              "conclusion": "success",
+              "head_sha": "7f31a330c0d9a25180a98a4332423b811d18c117",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32998783818/job/98274890058",
+              "id": 98274890058,
+              "name": "Official web small",
+              "run_attempt": 1,
+              "run_id": 32998783818,
+              "started_at": "2026-08-26T18:17:10Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-26T22:01:13Z",
+              "conclusion": "failure",
+              "head_sha": "7f31a330c0d9a25180a98a4332423b811d18c117",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32998783818/job/98274890140",
+              "id": 98274890140,
+              "name": "Official enterprise small",
+              "run_attempt": 1,
+              "run_id": 32998783818,
+              "started_at": "2026-08-26T18:17:09Z",
+              "status": "completed"
+            },
+            {
+              "completed_at": "2026-08-26T23:15:39Z",
+              "conclusion": "skipped",
+              "head_sha": "7f31a330c0d9a25180a98a4332423b811d18c117",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32998783818/job/98356445774",
+              "id": 98356445774,
+              "name": "Official combined receipt",
+              "run_attempt": 1,
+              "run_id": 32998783818,
+              "started_at": "2026-08-26T23:15:39Z",
+              "status": "completed"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -32,6 +32,7 @@ from tools.tests.longmemeval_v2_release_support import (
 )
 from tools.tests.test_longmemeval_v2_rig import _dispatch_ledger
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
 MAX_CAP_HEADROOM_USD = 0.15
 
 
@@ -719,3 +720,34 @@ def test_rig_blocked_authorization_rejects_completed_pass_and_short_ledgers(
         authorization.require_rig_blocked_authorization(
             resealed(attempts=[{**projected["attempts"][0], "accuracy": 0.5}])
         )
+
+
+RELEASE_RESULTS = REPO_ROOT / "benchmarks" / "results" / "longmemeval-v2-release"
+V1_3_DISPATCH_LEDGER = RELEASE_RESULTS / "sibyl-v1-3-aa-dispatch-ledger.json"
+V1_3_RIG_BLOCKED_RECEIPT = RELEASE_RESULTS / "sibyl-v1-3-aa-rig-blocked-receipt.json"
+V1_3_CONTROLLER_RUN_IDS = [32888217656, 32897996847, 32911050360, 32921881380, 32998699090]
+V1_3_BUILDER_RUN_IDS = [32888310148, 32898089824, 32911112960, 32921948833, 32998783818]
+
+
+def test_committed_v1_3_rig_blocked_receipt_is_bound_to_its_ledger() -> None:
+    ledger = inputs.load_json(V1_3_DISPATCH_LEDGER)
+    committed = inputs.load_json(V1_3_RIG_BLOCKED_RECEIPT)
+
+    assert rig.build_rig_blocked_receipt(ledger) == committed
+    assert rig.validate_rig_blocked_receipt(committed) == committed
+    assert committed["blocked_reason"] == rig.BLOCKED_REASON_DISPATCH_EXHAUSTED
+    assert committed["paid_benchmark_allowed"] is False
+    assert committed["score_claim_allowed"] is False
+    assert committed["completed_pass_count"] == 0
+    assert committed["head_branch"] == "main"
+    assert [item["controller"]["run_id"] for item in committed["attempts"]] == (
+        V1_3_CONTROLLER_RUN_IDS
+    )
+    assert [
+        builder["run_id"] for item in committed["attempts"] for builder in item["builders"]
+    ] == V1_3_BUILDER_RUN_IDS
+
+    projected = authorization_package.package_rig_blocked_authorization(V1_3_RIG_BLOCKED_RECEIPT)
+    assert projected["rig_blocked_receipt_sha256"] == committed["rig_blocked_receipt_sha256"]
+    assert projected["ledger_sha256"] == rig.canonical_sha256(ledger)
+    assert projected["attempt_count"] == rig.EXTENDED_AA_PASS_COUNT
