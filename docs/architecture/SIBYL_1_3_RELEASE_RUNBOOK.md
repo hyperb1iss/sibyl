@@ -53,24 +53,28 @@ git rev-parse origin/main
 The rig-blocked receipt is `RIG_BLOCKED` with `blocked_reason: dispatch_exhausted`,
 `paid_benchmark_allowed: false`, `score_claim_allowed: false`, and
 `ledger_provenance: github_verified`. It stops paid benchmark work for 1.3 and forbids any score in
-the release notes. Regenerate it from the committed ledger through the verified path to confirm it
-(exit status 1 is the rig's normal code for a rig-blocked verdict). The verification block carries
-its own timestamp, so the comparison drops that block and the digest:
+the release notes. The provenance label records when the ledger last matched GitHub; it is not the
+evidence. The documented check is the command that projects the receipt into release authority,
+because that command re-fetches every controller run, builder run, and job through `gh api`,
+re-discovers each controller's builders from the workflow run listing, rebuilds the receipt from the
+bound ledger bytes, and writes the authority only when everything matches. Any field drift or fetch
+failure fails closed, and the same live re-verification runs every time the authority is validated:
 
 ```bash
-uv run python tools/bench/longmemeval_v2_rig.py rig-blocked \
+uv run python -m benchmarks.longmemeval_v2_ablations release-rig-blocked-authority \
+  --receipt benchmarks/results/longmemeval-v2-release/sibyl-v1-3-aa-rig-blocked-receipt.json \
   --ledger benchmarks/results/longmemeval-v2-release/sibyl-v1-3-aa-dispatch-ledger.json \
-  --output /tmp/sibyl-1-3-rig-blocked-check.json \
-  --verify-github
-strip='del(.github_verification, .rig_blocked_receipt_sha256)'
-diff <(jq -S "$strip" /tmp/sibyl-1-3-rig-blocked-check.json) \
-  <(jq -S "$strip" benchmarks/results/longmemeval-v2-release/sibyl-v1-3-aa-rig-blocked-receipt.json)
+  --output /tmp/sibyl-1-3-rig-blocked-authority.json
 ```
 
-`--verify-github` re-fetches every controller run, builder run, and job through `gh api`,
-re-discovers each controller's builders from the workflow run listing, and refuses to seal on any
-field difference. A seal without it records `ledger_provenance: unverified`, which the release
-authorization projection rejects.
+The output is the `rig_blocked` authority projection. Keep it with the RC gate receipt. The
+authority carries no score, no paid-work permission, and no stack or arm contract; it exists to
+prove that the benchmark stop was observed, not asserted.
+
+To reseal the receipt after a new dispatch, refresh the ledger and run
+`tools/bench/longmemeval_v2_rig.py rig-blocked --ledger ... --output ... --verify-github`; a seal
+without `--verify-github` records `ledger_provenance: unverified` and the authority command rejects
+it before touching the network.
 
 To refresh the ledger from GitHub (only if a new dispatch is added), fetch each controller run with
 `gh api repos/hyperb1iss/sibyl/actions/runs/<id>`, find its builder with

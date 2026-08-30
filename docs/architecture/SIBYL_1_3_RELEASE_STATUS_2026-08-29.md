@@ -64,7 +64,10 @@ jobs, fetched 2026-08-30T07:07:30Z. The tool reads the ledger from disk. With `-
 re-fetches every controller run, builder run, and job through `gh api`, re-discovers each
 controller's builders from the workflow run listing, and requires field-for-field equality with the
 ledger before sealing; only then does the receipt record `ledger_provenance: github_verified`. An
-offline seal records `unverified`, and the release authorization projection rejects it.
+offline seal records `unverified`, and the release authorization projection rejects it. The label is
+a record, not the evidence: packaging and validating the authority both re-run the same GitHub
+verification on the bound ledger bytes and fail closed on any drift or fetch failure. The runbook's
+`release-rig-blocked-authority` command is that check.
 
 | Field                     | Value                                                                     |
 | ------------------------- | ------------------------------------------------------------------------- |
