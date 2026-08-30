@@ -45,23 +45,32 @@ git rev-parse origin/main
 | Receipt                     | Path                                                                                 | Digest                                                                    | Source runs                                                                 |
 | --------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | Dispatch ledger (observed)  | `benchmarks/results/longmemeval-v2-release/sibyl-v1-3-aa-dispatch-ledger.json`       | `sha256:74339727e600a92a0157db517e6c5ce0b378bf08b4dc8ba2eb274818427a4299` | Controllers 32888217656, 32897996847, 32911050360, 32921881380, 32998699090 |
-| Rig-blocked receipt         | `benchmarks/results/longmemeval-v2-release/sibyl-v1-3-aa-rig-blocked-receipt.json`   | `sha256:6207e4833da2bb6184570f4c0cabb309de1ba3aede54d5f140e0c180f7fc8d77` | Builders 32888310148, 32898089824, 32911112960, 32921948833, 32998783818    |
+| Rig-blocked receipt         | `benchmarks/results/longmemeval-v2-release/sibyl-v1-3-aa-rig-blocked-receipt.json`   | `sha256:5850fd3f31ac8db9090b8e7bb8b62b349823500f0ebac6ebe3ba3a09cccc0df8` | Builders 32888310148, 32898089824, 32911112960, 32921948833, 32998783818    |
 | r5 Web Small artifacts      | `gh run download 32998783818 -R hyperb1iss/sibyl` (retained 30 days from 2026-08-26) | recorded inside the run's result and diagnostics artifacts                | Builder 32998783818 on `7f31a330`                                           |
 | RC gate receipt             | `rc-gate-receipt-<candidate-sha>` artifact of the Release run                        | produced by the dry cut                                                   | The dry-cut Release run                                                     |
 | Release notes claim receipt | `release-notes-claim-receipt.json` inside the same artifact                          | produced by the real cut only                                             | The Release run without `dry_run`                                           |
 
 The rig-blocked receipt is `RIG_BLOCKED` with `blocked_reason: dispatch_exhausted`,
-`paid_benchmark_allowed: false`, and `score_claim_allowed: false`. It stops paid benchmark work for
-1.3 and forbids any score in the release notes. Regenerate it from the committed ledger to confirm
-the bytes (exit status 1 is the rig's normal code for a rig-blocked verdict):
+`paid_benchmark_allowed: false`, `score_claim_allowed: false`, and
+`ledger_provenance: github_verified`. It stops paid benchmark work for 1.3 and forbids any score in
+the release notes. Regenerate it from the committed ledger through the verified path to confirm it
+(exit status 1 is the rig's normal code for a rig-blocked verdict). The verification block carries
+its own timestamp, so the comparison drops that block and the digest:
 
 ```bash
 uv run python tools/bench/longmemeval_v2_rig.py rig-blocked \
   --ledger benchmarks/results/longmemeval-v2-release/sibyl-v1-3-aa-dispatch-ledger.json \
-  --output /tmp/sibyl-1-3-rig-blocked-check.json
-diff /tmp/sibyl-1-3-rig-blocked-check.json \
-  benchmarks/results/longmemeval-v2-release/sibyl-v1-3-aa-rig-blocked-receipt.json
+  --output /tmp/sibyl-1-3-rig-blocked-check.json \
+  --verify-github
+strip='del(.github_verification, .rig_blocked_receipt_sha256)'
+diff <(jq -S "$strip" /tmp/sibyl-1-3-rig-blocked-check.json) \
+  <(jq -S "$strip" benchmarks/results/longmemeval-v2-release/sibyl-v1-3-aa-rig-blocked-receipt.json)
 ```
+
+`--verify-github` re-fetches every controller run, builder run, and job through `gh api`,
+re-discovers each controller's builders from the workflow run listing, and refuses to seal on any
+field difference. A seal without it records `ledger_provenance: unverified`, which the release
+authorization projection rejects.
 
 To refresh the ledger from GitHub (only if a new dispatch is added), fetch each controller run with
 `gh api repos/hyperb1iss/sibyl/actions/runs/<id>`, find its builder with

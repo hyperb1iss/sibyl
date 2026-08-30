@@ -30,7 +30,7 @@ from tools.tests.longmemeval_v2_release_support import (
     race_spec,
     render_spec,
 )
-from tools.tests.test_longmemeval_v2_rig import _dispatch_ledger
+from tools.tests.test_longmemeval_v2_rig import _dispatch_ledger, _github_stub
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MAX_CAP_HEADROOM_USD = 0.15
@@ -643,9 +643,35 @@ def test_paid_stages_require_exact_preregistered_arm_contracts(
             )
 
 
-def test_rig_blocked_authorization_projects_exhausted_dispatches(tmp_path: Path) -> None:
+def _verified_receipt(ledger: dict[str, Any]) -> dict[str, Any]:
+    verification = rig.verify_dispatch_ledger(ledger, fetch=_github_stub(ledger))
+    return rig.build_rig_blocked_receipt(ledger, verification=verification)
+
+
+def test_rig_blocked_authorization_rejects_an_unverified_ledger(tmp_path: Path) -> None:
     ledger = _dispatch_ledger()
     receipt = rig.build_rig_blocked_receipt(ledger)
+    assert receipt["ledger_provenance"] == rig.LEDGER_PROVENANCE_UNVERIFIED
+    receipt_path = tmp_path / "rig-blocked-receipt.json"
+    receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    with pytest.raises(inputs.StagePlanError, match="requires a GitHub-verified ledger"):
+        authorization_package.package_rig_blocked_authorization(receipt_path)
+
+    verified = _verified_receipt(ledger)
+    receipt_path.write_text(json.dumps(verified, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    projected = authorization_package.package_rig_blocked_authorization(receipt_path)
+    assert projected["ledger_provenance"] == rig.LEDGER_PROVENANCE_VERIFIED
+    forged = {**projected, "ledger_provenance": rig.LEDGER_PROVENANCE_UNVERIFIED}
+    unsigned = {key: value for key, value in forged.items() if key != "authorization_sha256"}
+    forged["authorization_sha256"] = rig.canonical_sha256(unsigned)
+    with pytest.raises(inputs.StagePlanError, match="requires a GitHub-verified ledger"):
+        authorization.require_rig_blocked_authorization(forged)
+
+
+def test_rig_blocked_authorization_projects_exhausted_dispatches(tmp_path: Path) -> None:
+    ledger = _dispatch_ledger()
+    receipt = _verified_receipt(ledger)
     receipt_path = tmp_path / "rig-blocked-receipt.json"
     receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -696,7 +722,7 @@ def test_rig_blocked_authorization_projects_exhausted_dispatches(tmp_path: Path)
 def test_rig_blocked_authorization_rejects_completed_pass_and_short_ledgers(
     tmp_path: Path,
 ) -> None:
-    receipt = rig.build_rig_blocked_receipt(_dispatch_ledger())
+    receipt = _verified_receipt(_dispatch_ledger())
     receipt_path = tmp_path / "rig-blocked-receipt.json"
     receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     source = inputs.bind_artifact(receipt_path, name="rig-blocked source receipt")
@@ -733,8 +759,13 @@ def test_committed_v1_3_rig_blocked_receipt_is_bound_to_its_ledger() -> None:
     ledger = inputs.load_json(V1_3_DISPATCH_LEDGER)
     committed = inputs.load_json(V1_3_RIG_BLOCKED_RECEIPT)
 
-    assert rig.build_rig_blocked_receipt(ledger) == committed
+    rebuilt = rig.build_rig_blocked_receipt(ledger)
+    derived = {"ledger_provenance", "github_verification", "rig_blocked_receipt_sha256"}
+    assert {k: v for k, v in rebuilt.items() if k not in derived} == {
+        k: v for k, v in committed.items() if k not in derived
+    }
     assert rig.validate_rig_blocked_receipt(committed) == committed
+    assert committed["ledger_provenance"] == rig.LEDGER_PROVENANCE_VERIFIED
     assert committed["blocked_reason"] == rig.BLOCKED_REASON_DISPATCH_EXHAUSTED
     assert committed["paid_benchmark_allowed"] is False
     assert committed["score_claim_allowed"] is False

@@ -60,13 +60,17 @@ The receipt lives at
 `benchmarks/results/longmemeval-v2-release/sibyl-v1-3-aa-rig-blocked-receipt.json` with its observed
 ledger beside it at `benchmarks/results/longmemeval-v2-release/sibyl-v1-3-aa-dispatch-ledger.json`.
 The ledger is the `gh api` projection of each controller run, its builder run, and the builder's
-jobs, fetched 2026-08-30T07:07:30Z. The tool reads the ledger from disk and never touches the
-network, so the same file reproduces the same receipt.
+jobs, fetched 2026-08-30T07:07:30Z. The tool reads the ledger from disk. With `--verify-github` it
+re-fetches every controller run, builder run, and job through `gh api`, re-discovers each
+controller's builders from the workflow run listing, and requires field-for-field equality with the
+ledger before sealing; only then does the receipt record `ledger_provenance: github_verified`. An
+offline seal records `unverified`, and the release authorization projection rejects it.
 
 | Field                     | Value                                                                     |
 | ------------------------- | ------------------------------------------------------------------------- |
-| Receipt digest            | `sha256:6207e4833da2bb6184570f4c0cabb309de1ba3aede54d5f140e0c180f7fc8d77` |
+| Receipt digest            | `sha256:5850fd3f31ac8db9090b8e7bb8b62b349823500f0ebac6ebe3ba3a09cccc0df8` |
 | Ledger digest             | `sha256:74339727e600a92a0157db517e6c5ce0b378bf08b4dc8ba2eb274818427a4299` |
+| Ledger provenance         | `github_verified`: 10 runs and 29 jobs re-fetched 2026-08-30T07:35:29Z    |
 | Status                    | `RIG_BLOCKED`                                                             |
 | Blocked reason            | `dispatch_exhausted`                                                      |
 | Attempts                  | 5 of 5 required                                                           |
@@ -91,11 +95,12 @@ is a real dispatch, and each builder's head commit matches its controller.
 
 The tool rejects a ledger that fails any of these checks:
 
+- a repository other than `hyperb1iss/sibyl` or a branch other than `main`, anywhere in the ledger;
 - fewer than five successful controller dispatches;
 - a builder whose two official domains both succeeded, or whose combined receipt succeeded (that is
   A/A data, not exhaustion);
 - a builder whose commit or branch differs from the controller that dispatched it;
-- attempts on more than one branch;
+- a job whose run id, run attempt, or commit differs from its builder;
 - a ledger fetched before its last run finished.
 
 The existing span-instability path now carries `blocked_reason: span_unstable`, so the two

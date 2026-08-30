@@ -248,6 +248,12 @@
   "controller_workflow": ".github/workflows/longmemeval-v2-release-aa.yml",
   "exhaustion_rule": "at least five successful controller dispatches on one branch, each binding a builder run whose official Small domains never both succeeded and whose combined receipt never succeeded",
   "first_dispatched_at": "2026-08-25T19:12:11Z",
+  "github_verification": {
+    "builder_query": "repos/{repository}/actions/workflows/{workflow}/runs?event=workflow_dispatch&per_page=100&created=>={date}",
+    "job_count": 29,
+    "run_count": 10,
+    "verified_at": "2026-08-30T07:35:29Z"
+  },
   "head_branch": "main",
   "head_shas": [
     "48b4483624305cc020296b6593be3bad968aeac6",
@@ -257,11 +263,12 @@
   ],
   "last_dispatched_at": "2026-08-26T18:15:25Z",
   "ledger_fetched_at": "2026-08-30T07:07:30Z",
+  "ledger_provenance": "github_verified",
   "ledger_sha256": "sha256:74339727e600a92a0157db517e6c5ce0b378bf08b4dc8ba2eb274818427a4299",
   "paid_benchmark_allowed": false,
   "repository": "hyperb1iss/sibyl",
   "required_attempt_count": 5,
-  "rig_blocked_receipt_sha256": "sha256:6207e4833da2bb6184570f4c0cabb309de1ba3aede54d5f140e0c180f7fc8d77",
+  "rig_blocked_receipt_sha256": "sha256:5850fd3f31ac8db9090b8e7bb8b62b349823500f0ebac6ebe3ba3a09cccc0df8",
   "schema_version": "sibyl-longmemeval-v2-rig-blocked-receipt-v1",
   "score_claim_allowed": false,
   "status": "RIG_BLOCKED"

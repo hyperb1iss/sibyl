@@ -1166,7 +1166,8 @@ def _ledger_run(
     conclusion: str,
     created_at: str,
     updated_at: str,
-    head_branch: str = "main",
+    head_branch: str = rig.TRUSTED_BRANCH,
+    repository: str = DISPATCH_REPOSITORY,
 ) -> dict[str, Any]:
     return {
         "id": run_id,
@@ -1182,8 +1183,8 @@ def _ledger_run(
         "created_at": created_at,
         "updated_at": updated_at,
         "run_started_at": created_at,
-        "html_url": f"https://github.com/{DISPATCH_REPOSITORY}/actions/runs/{run_id}",
-        "repository": DISPATCH_REPOSITORY,
+        "html_url": f"https://github.com/{repository}/actions/runs/{run_id}",
+        "repository": repository,
     }
 
 
@@ -1217,6 +1218,8 @@ def _dispatch_attempt(
     head_sha: str = DISPATCH_HEAD_SHA,
     domain_conclusions: dict[str, str] | None = None,
     combined_conclusion: str | None = "skipped",
+    head_branch: str = rig.TRUSTED_BRANCH,
+    repository: str = DISPATCH_REPOSITORY,
 ) -> dict[str, Any]:
     controller_id = 1000 + index
     builder_id = 2000 + index
@@ -1255,6 +1258,8 @@ def _dispatch_attempt(
         conclusion="success",
         created_at=_ledger_time(start),
         updated_at=_ledger_time(start + 0.05),
+        head_branch=head_branch,
+        repository=repository,
     )
     builder = _ledger_run(
         run_id=builder_id,
@@ -1267,15 +1272,21 @@ def _dispatch_attempt(
         conclusion="failure",
         created_at=_ledger_time(start + 0.05),
         updated_at=_ledger_time(start + 2),
+        head_branch=head_branch,
+        repository=repository,
     )
     return {"controller": controller, "builders": [{**builder, "jobs": jobs}]}
 
 
-def _dispatch_ledger(attempts: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def _dispatch_ledger(
+    attempts: list[dict[str, Any]] | None = None,
+    *,
+    repository: str = DISPATCH_REPOSITORY,
+) -> dict[str, Any]:
     rows = attempts if attempts is not None else [_dispatch_attempt(index) for index in range(5)]
     return {
         "schema_version": rig.DISPATCH_LEDGER_SCHEMA_VERSION,
-        "repository": DISPATCH_REPOSITORY,
+        "repository": repository,
         "fetched_at": _ledger_time(6 * len(rows) + 24),
         "source": {
             "tool": "gh api",
@@ -1381,7 +1392,7 @@ def test_rig_blocked_receipt_rejects_branch_and_controller_drift() -> None:
     branched = [_dispatch_attempt(index) for index in range(5)]
     branched[4]["controller"]["head_branch"] = "release/1.3"
     branched[4]["builders"][0]["head_branch"] = "release/1.3"
-    with pytest.raises(rig.RigInputError, match="span more than one branch"):
+    with pytest.raises(rig.RigInputError, match="not on the trusted release branch"):
         rig.build_rig_blocked_receipt(_dispatch_ledger(branched))
 
     unbound = [_dispatch_attempt(index) for index in range(5)]
@@ -1484,3 +1495,216 @@ def test_rig_blocked_receipt_rejects_job_clock_reversal_beyond_the_skipped_bound
     tampered["rig_blocked_receipt_sha256"] = rig.canonical_sha256(unsigned)
     with pytest.raises(rig.RigInputError, match="completed before it started"):
         rig.validate_rig_blocked_receipt(tampered)
+
+
+def _github_raw_run(row: dict[str, Any]) -> dict[str, Any]:
+    raw = {key: value for key, value in row.items() if key not in {"jobs", "repository"}}
+    raw["repository"] = {"full_name": row["repository"], "private": False}
+    raw["actor"] = {"login": "hyperb1iss"}
+    return raw
+
+
+class _GitHubStub:
+    """Serve ledger rows in GitHub's raw shapes and record every endpoint asked for."""
+
+    def __init__(
+        self,
+        ledger: dict[str, Any],
+        *,
+        extra_builders: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self.runs: dict[int, dict[str, Any]] = {}
+        self.jobs: dict[int, list[dict[str, Any]]] = {}
+        self.listing: list[dict[str, Any]] = []
+        self.calls: list[str] = []
+        for attempt in ledger["attempts"]:
+            self.runs[attempt["controller"]["id"]] = _github_raw_run(attempt["controller"])
+            for builder in attempt["builders"]:
+                self._add_builder(builder)
+        for builder in extra_builders or []:
+            self._add_builder(builder)
+
+    def _add_builder(self, builder: dict[str, Any]) -> None:
+        self.runs[builder["id"]] = _github_raw_run(builder)
+        self.jobs[builder["id"]] = [{**job, "steps": []} for job in builder["jobs"]]
+        self.listing.append(_github_raw_run(builder))
+
+    def __call__(self, endpoint: str) -> list[Any]:
+        self.calls.append(endpoint)
+        if "/actions/workflows/" in endpoint:
+            return [{"total_count": len(self.listing), "workflow_runs": self.listing}]
+        if endpoint.endswith("/jobs?per_page=100"):
+            run_id = int(endpoint.rsplit("/", 2)[-2])
+            return [{"total_count": len(self.jobs[run_id]), "jobs": self.jobs[run_id]}]
+        return [self.runs[int(endpoint.rsplit("/", 1)[-1])]]
+
+
+def _github_stub(
+    ledger: dict[str, Any],
+    *,
+    extra_builders: list[dict[str, Any]] | None = None,
+) -> _GitHubStub:
+    return _GitHubStub(ledger, extra_builders=extra_builders)
+
+
+def test_rig_blocked_offline_seal_is_unverified() -> None:
+    receipt = rig.build_rig_blocked_receipt(_dispatch_ledger())
+
+    assert receipt["ledger_provenance"] == rig.LEDGER_PROVENANCE_UNVERIFIED
+    assert receipt["github_verification"] is None
+    assert rig.validate_rig_blocked_receipt(receipt) == receipt
+
+
+def test_rig_blocked_receipt_verifies_every_run_and_job_against_github(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger = _dispatch_ledger()
+    fetch = _github_stub(ledger)
+
+    verification = rig.verify_dispatch_ledger(ledger, fetch=fetch)
+
+    assert verification["ledger_provenance"] == rig.LEDGER_PROVENANCE_VERIFIED
+    assert verification["github_verification"]["run_count"] == 2 * rig.EXTENDED_AA_PASS_COUNT
+    assert verification["github_verification"]["job_count"] == 3 * rig.EXTENDED_AA_PASS_COUNT
+    assert len(fetch.calls) == 4 * rig.EXTENDED_AA_PASS_COUNT
+    receipt = rig.build_rig_blocked_receipt(ledger, verification=verification)
+    assert receipt["ledger_provenance"] == rig.LEDGER_PROVENANCE_VERIFIED
+    assert receipt["github_verification"] == verification["github_verification"]
+    assert rig.validate_rig_blocked_receipt(receipt) == receipt
+
+    monkeypatch.setattr(rig, "gh_api_fetch", _github_stub(ledger))
+    ledger_path = tmp_path / "ledger.json"
+    output = tmp_path / "receipt.json"
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+    argv = ["rig-blocked", "--ledger", str(ledger_path), "--output", str(output)]
+    assert rig.main([*argv, "--verify-github"]) == 1
+    sealed = json.loads(output.read_text(encoding="utf-8"))
+    assert sealed["ledger_provenance"] == rig.LEDGER_PROVENANCE_VERIFIED
+    assert sealed["github_verification"]["builder_query"] == rig.GITHUB_BUILDER_RUNS_ENDPOINT
+    output.unlink()
+    assert rig.main(argv) == 1
+    assert json.loads(output.read_text(encoding="utf-8"))["ledger_provenance"] == (
+        rig.LEDGER_PROVENANCE_UNVERIFIED
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutate", "match"),
+    [
+        (
+            lambda a: a[1]["builders"][0]["jobs"].__setitem__(
+                0, {**a[1]["builders"][0]["jobs"][0], "conclusion": "cancelled"}
+            ),
+            r"builders\[0\] jobs differ from GitHub",
+        ),
+        (
+            lambda a: a[3]["controller"].__setitem__("html_url", "https://example.invalid/run"),
+            "controller differs from GitHub on html_url",
+        ),
+        (
+            lambda a: a[4]["builders"][0].__setitem__("conclusion", "cancelled"),
+            r"builders\[0\] differs from GitHub on conclusion",
+        ),
+    ],
+)
+def test_rig_blocked_verification_rejects_a_drifted_field(mutate: Any, match: str) -> None:
+    ledger = _dispatch_ledger()
+    fetch = _github_stub(deepcopy(ledger))
+    mutate(ledger["attempts"])
+
+    with pytest.raises(rig.RigInputError, match=match):
+        rig.verify_dispatch_ledger(ledger, fetch=fetch)
+
+
+def test_rig_blocked_verification_rejects_an_omitted_builder() -> None:
+    ledger = _dispatch_ledger()
+    hidden = _dispatch_attempt(
+        2,
+        domain_conclusions={"enterprise": "success", "web": "success"},
+        combined_conclusion="success",
+    )["builders"][0]
+    hidden["id"] = 2999
+    for job in hidden["jobs"]:
+        job["run_id"] = 2999
+    fetch = _github_stub(ledger, extra_builders=[hidden])
+
+    with pytest.raises(rig.RigInputError, match=r"attempts\[2\] builder runs differ from GitHub"):
+        rig.verify_dispatch_ledger(ledger, fetch=fetch)
+
+
+def test_rig_blocked_receipt_rejects_a_foreign_repository() -> None:
+    foreign = "someone/else"
+    ledger = _dispatch_ledger(
+        [_dispatch_attempt(index, repository=foreign) for index in range(5)],
+        repository=foreign,
+    )
+
+    with pytest.raises(rig.RigInputError, match="not the trusted release repository"):
+        rig.build_rig_blocked_receipt(ledger)
+    with pytest.raises(rig.RigInputError, match="not the trusted release repository"):
+        rig.verify_dispatch_ledger(ledger, fetch=_github_stub(ledger))
+
+
+def test_rig_blocked_receipt_rejects_a_uniformly_foreign_branch() -> None:
+    ledger = _dispatch_ledger(
+        [_dispatch_attempt(index, head_branch="release/1.3") for index in range(5)]
+    )
+
+    with pytest.raises(rig.RigInputError, match="not on the trusted release branch"):
+        rig.build_rig_blocked_receipt(ledger)
+
+    receipt = rig.build_rig_blocked_receipt(_dispatch_ledger())
+    tampered = deepcopy(receipt)
+    tampered["head_branch"] = "release/1.3"
+    for row in tampered["attempts"]:
+        row["head_branch"] = "release/1.3"
+    unsigned = {k: v for k, v in tampered.items() if k != "rig_blocked_receipt_sha256"}
+    tampered["rig_blocked_receipt_sha256"] = rig.canonical_sha256(unsigned)
+    with pytest.raises(rig.RigInputError, match="not on the trusted release branch"):
+        rig.validate_rig_blocked_receipt(tampered)
+
+
+def test_rig_blocked_receipt_rejects_a_job_from_another_run_attempt() -> None:
+    attempts = [_dispatch_attempt(index) for index in range(5)]
+    attempts[3]["builders"][0]["jobs"][1]["run_attempt"] = 2
+
+    with pytest.raises(rig.RigInputError, match="does not belong to its builder run"):
+        rig.build_rig_blocked_receipt(_dispatch_ledger(attempts))
+
+
+def test_rig_blocked_receipt_rejects_forged_provenance() -> None:
+    receipt = rig.build_rig_blocked_receipt(_dispatch_ledger())
+
+    def resealed(**changes: Any) -> dict[str, Any]:
+        tampered = {**deepcopy(receipt), **changes}
+        unsigned = {k: v for k, v in tampered.items() if k != "rig_blocked_receipt_sha256"}
+        tampered["rig_blocked_receipt_sha256"] = rig.canonical_sha256(unsigned)
+        return tampered
+
+    with pytest.raises(rig.RigInputError, match="missing its GitHub verification"):
+        rig.validate_rig_blocked_receipt(resealed(ledger_provenance=rig.LEDGER_PROVENANCE_VERIFIED))
+    verification = {
+        "verified_at": _ledger_time(1),
+        "run_count": 2 * rig.EXTENDED_AA_PASS_COUNT,
+        "job_count": 3 * rig.EXTENDED_AA_PASS_COUNT,
+        "builder_query": rig.GITHUB_BUILDER_RUNS_ENDPOINT,
+    }
+    with pytest.raises(rig.RigInputError, match="verified before it was fetched"):
+        rig.validate_rig_blocked_receipt(
+            resealed(
+                ledger_provenance=rig.LEDGER_PROVENANCE_VERIFIED,
+                github_verification=verification,
+            )
+        )
+    with pytest.raises(rig.RigInputError, match="run count does not match"):
+        rig.validate_rig_blocked_receipt(
+            resealed(
+                ledger_provenance=rig.LEDGER_PROVENANCE_VERIFIED,
+                github_verification={
+                    **verification,
+                    "verified_at": receipt["ledger_fetched_at"],
+                    "run_count": 3,
+                },
+            )
+        )

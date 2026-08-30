@@ -8,8 +8,10 @@ import hashlib
 import json
 import math
 import re
+import subprocess
 import sys
-from datetime import datetime
+from collections.abc import Callable
+from datetime import UTC, datetime
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -49,6 +51,19 @@ CONTROLLER_WORKFLOW_PATH = ".github/workflows/longmemeval-v2-release-aa.yml"
 BUILDER_WORKFLOW_NAME = "LongMemEval V2"
 BUILDER_WORKFLOW_PATH = ".github/workflows/longmemeval-v2.yml"
 DISPATCH_BUILDER_ARM_ID = "aa-1-left"
+# Dispatch evidence is trusted only from the release repository and branch. A
+# ledger that names anything else is rejected before any row is read, so a
+# self-consistent foreign ledger cannot seal a release verdict.
+TRUSTED_REPOSITORY = "hyperb1iss/sibyl"
+TRUSTED_BRANCH = "main"
+LEDGER_PROVENANCE_VERIFIED = "github_verified"
+LEDGER_PROVENANCE_UNVERIFIED = "unverified"
+GITHUB_RUN_ENDPOINT = "repos/{repository}/actions/runs/{run_id}"
+GITHUB_JOBS_ENDPOINT = "repos/{repository}/actions/runs/{run_id}/jobs?per_page=100"
+GITHUB_BUILDER_RUNS_ENDPOINT = (
+    "repos/{repository}/actions/workflows/{workflow}/runs"
+    "?event=workflow_dispatch&per_page=100&created=>={date}"
+)
 OFFICIAL_JOB_NAMES = {
     "enterprise": "Official enterprise small",
     "web": "Official web small",
@@ -1896,10 +1911,14 @@ RIG_BLOCKED_RECEIPT_KEYS = frozenset(
         "attempts",
         "ledger_fetched_at",
         "ledger_sha256",
+        "ledger_provenance",
+        "github_verification",
         "exhaustion_rule",
         "rig_blocked_receipt_sha256",
     }
 )
+GITHUB_VERIFICATION_KEYS = frozenset({"verified_at", "run_count", "job_count", "builder_query"})
+GitHubFetch = Callable[[str], list[Any]]
 RIG_BLOCKED_ATTEMPT_KEYS = frozenset(
     {"experiment_id", "head_sha", "head_branch", "controller", "builders"}
 )
@@ -1997,7 +2016,11 @@ def _official_jobs(
     official_names = set(OFFICIAL_JOB_NAMES.values())
     for index, raw_job in enumerate(raw_jobs):
         job = _ledger_job(raw_job, name=f"{name}.jobs[{index}]")
-        if job["run_id"] != builder["id"] or job["head_sha"] != builder["head_sha"]:
+        if (
+            job["run_id"] != builder["id"]
+            or job["run_attempt"] != builder["run_attempt"]
+            or job["head_sha"] != builder["head_sha"]
+        ):
             raise RigInputError(f"{name}.jobs[{index}] does not belong to its builder run")
         if job["name"] in official_names:
             if job["name"] in by_name:
@@ -2059,6 +2082,8 @@ def _dispatch_attempt(  # noqa: PLR0912
         raise RigInputError(f"{name}.controller is not the release A/A controller workflow")
     if controller["conclusion"] != "success":
         raise RigInputError(f"{name}.controller did not complete its dispatch")
+    if controller["head_branch"] != TRUSTED_BRANCH:
+        raise RigInputError(f"{name}.controller is not on the trusted release branch")
     prefix = f"{CONTROLLER_WORKFLOW_NAME} "
     title = controller["display_title"]
     if not title.startswith(prefix):
@@ -2114,14 +2139,18 @@ def _dispatch_attempt(  # noqa: PLR0912
     }
 
 
-def build_rig_blocked_receipt(ledger: dict[str, Any]) -> dict[str, Any]:
-    """Seal dispatch exhaustion: five or more controller dispatches, zero completed passes."""
-    if ledger.get("schema_version") != DISPATCH_LEDGER_SCHEMA_VERSION:
+def validate_dispatch_ledger(ledger: object) -> list[dict[str, Any]]:
+    """Validate one observed dispatch ledger and return its bound attempt rows."""
+    if (
+        not isinstance(ledger, dict)
+        or ledger.get("schema_version") != DISPATCH_LEDGER_SCHEMA_VERSION
+    ):
         raise RigInputError("dispatch ledger schema is missing or invalid")
     _require_exact_keys(ledger, DISPATCH_LEDGER_KEYS, name="dispatch ledger")
     repository = _nonempty_string(ledger.get("repository"), name="dispatch ledger repository")
-    if not GITHUB_REPOSITORY_PATTERN.fullmatch(repository):
-        raise RigInputError("dispatch ledger repository is not a GitHub repository")
+    if repository != TRUSTED_REPOSITORY:
+        raise RigInputError("dispatch ledger repository is not the trusted release repository")
+    _parse_timestamp(ledger.get("fetched_at"), name="dispatch ledger fetched_at")
     source = ledger.get("source")
     if not isinstance(source, dict):
         raise RigInputError("dispatch ledger source is missing")
@@ -2140,9 +2169,166 @@ def build_rig_blocked_receipt(ledger: dict[str, Any]) -> dict[str, Any]:
             f"dispatch exhaustion requires at least {EXTENDED_AA_PASS_COUNT} controller "
             f"dispatches; the ledger holds {len(attempts)}"
         )
-    branches = {attempt["head_branch"] for attempt in attempts}
-    if len(branches) != 1:
-        raise RigInputError("dispatch attempts span more than one branch")
+    return attempts
+
+
+def gh_api_fetch(endpoint: str) -> list[Any]:
+    """Fetch every page of one GitHub REST endpoint through the authenticated gh CLI."""
+    completed = subprocess.run(  # noqa: S603
+        ["gh", "api", "--paginate", "--slurp", endpoint],  # noqa: S607
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise RigInputError(f"gh api {endpoint} failed: {completed.stderr.strip()}")
+    try:
+        pages = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise RigInputError(f"gh api {endpoint} returned invalid JSON") from exc
+    if not isinstance(pages, list):
+        raise RigInputError(f"gh api {endpoint} did not return slurped pages")
+    return pages
+
+
+def _github_object(fetch: GitHubFetch, endpoint: str) -> dict[str, Any]:
+    pages = fetch(endpoint)
+    if len(pages) != 1 or not isinstance(pages[0], dict):
+        raise RigInputError(f"GitHub {endpoint} did not return one object")
+    return pages[0]
+
+
+def _github_collection(fetch: GitHubFetch, endpoint: str, *, key: str) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for page in fetch(endpoint):
+        if not isinstance(page, dict) or not isinstance(page.get(key), list):
+            raise RigInputError(f"GitHub {endpoint} did not return {key} pages")
+        items.extend(item for item in page[key] if isinstance(item, dict))
+    return items
+
+
+def _project_github_run(raw: dict[str, Any]) -> dict[str, Any]:
+    projected = {key: raw.get(key) for key in LEDGER_RUN_KEYS if key != "repository"}
+    repository = raw.get("repository")
+    projected["repository"] = repository.get("full_name") if isinstance(repository, dict) else None
+    return projected
+
+
+def _project_github_job(raw: dict[str, Any]) -> dict[str, Any]:
+    return {key: raw.get(key) for key in LEDGER_JOB_KEYS}
+
+
+def _differing_fields(expected: dict[str, Any], actual: dict[str, Any]) -> list[str]:
+    return sorted(
+        key for key in set(expected) | set(actual) if expected.get(key) != actual.get(key)
+    )
+
+
+def _require_github_equal(expected: dict[str, Any], actual: dict[str, Any], *, name: str) -> None:
+    differing = _differing_fields(expected, actual)
+    if differing:
+        raise RigInputError(f"{name} differs from GitHub on {', '.join(differing)}")
+
+
+def verify_dispatch_ledger(ledger: dict[str, Any], *, fetch: GitHubFetch) -> dict[str, Any]:
+    """Re-fetch every run and job in the ledger and require field-for-field equality."""
+    validate_dispatch_ledger(ledger)
+    repository = ledger["repository"]
+    workflow = BUILDER_WORKFLOW_PATH.rsplit("/", 1)[-1]
+    run_count = 0
+    job_count = 0
+    for index, attempt in enumerate(ledger["attempts"]):
+        name = f"attempts[{index}]"
+        controller = attempt["controller"]
+        live_controller = _project_github_run(
+            _github_object(
+                fetch,
+                GITHUB_RUN_ENDPOINT.format(repository=repository, run_id=controller["id"]),
+            )
+        )
+        _require_github_equal(controller, live_controller, name=f"{name}.controller")
+        run_count += 1
+        listing = _github_collection(
+            fetch,
+            GITHUB_BUILDER_RUNS_ENDPOINT.format(
+                repository=repository,
+                workflow=workflow,
+                date=controller["created_at"][:10],
+            ),
+            key="workflow_runs",
+        )
+        prefix = f"{BUILDER_WORKFLOW_NAME} aa-{controller['id']} "
+        discovered = sorted(
+            run["id"]
+            for run in listing
+            if str(run.get("display_title", "")).startswith(prefix)
+            and isinstance(run.get("id"), int)
+        )
+        ledger_ids = sorted(builder["id"] for builder in attempt["builders"])
+        if discovered != ledger_ids:
+            raise RigInputError(
+                f"{name} builder runs differ from GitHub: ledger {ledger_ids}, GitHub {discovered}"
+            )
+        for builder_index, builder in enumerate(attempt["builders"]):
+            builder_name = f"{name}.builders[{builder_index}]"
+            expected = {key: value for key, value in builder.items() if key != "jobs"}
+            live_builder = _project_github_run(
+                _github_object(
+                    fetch,
+                    GITHUB_RUN_ENDPOINT.format(repository=repository, run_id=builder["id"]),
+                )
+            )
+            _require_github_equal(expected, live_builder, name=builder_name)
+            run_count += 1
+            live_jobs = sorted(
+                (
+                    _project_github_job(job)
+                    for job in _github_collection(
+                        fetch,
+                        GITHUB_JOBS_ENDPOINT.format(repository=repository, run_id=builder["id"]),
+                        key="jobs",
+                    )
+                ),
+                key=lambda job: str(job.get("id")),
+            )
+            ledger_jobs = sorted(builder["jobs"], key=lambda job: str(job.get("id")))
+            if live_jobs != ledger_jobs:
+                raise RigInputError(f"{builder_name} jobs differ from GitHub")
+            job_count += len(ledger_jobs)
+    return {
+        "ledger_provenance": LEDGER_PROVENANCE_VERIFIED,
+        "github_verification": {
+            "verified_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "run_count": run_count,
+            "job_count": job_count,
+            "builder_query": GITHUB_BUILDER_RUNS_ENDPOINT,
+        },
+    }
+
+
+def build_rig_blocked_receipt(
+    ledger: dict[str, Any],
+    *,
+    verification: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Seal dispatch exhaustion: five or more controller dispatches, zero completed passes.
+
+    Without ``verification`` (the result of ``verify_dispatch_ledger``) the receipt
+    records ``ledger_provenance: unverified`` and no release authority accepts it.
+    """
+    attempts = validate_dispatch_ledger(ledger)
+    if verification is None:
+        provenance: dict[str, Any] = {
+            "ledger_provenance": LEDGER_PROVENANCE_UNVERIFIED,
+            "github_verification": None,
+        }
+    else:
+        _require_exact_keys(
+            verification,
+            frozenset({"ledger_provenance", "github_verification"}),
+            name="ledger verification",
+        )
+        provenance = dict(verification)
     head_shas: list[str] = []
     for attempt in attempts:
         if attempt["head_sha"] not in head_shas:
@@ -2153,8 +2339,8 @@ def build_rig_blocked_receipt(ledger: dict[str, Any]) -> dict[str, Any]:
         "blocked_reason": BLOCKED_REASON_DISPATCH_EXHAUSTED,
         "paid_benchmark_allowed": False,
         "score_claim_allowed": False,
-        "repository": repository,
-        "head_branch": branches.pop(),
+        "repository": ledger["repository"],
+        "head_branch": TRUSTED_BRANCH,
         "head_shas": head_shas,
         "controller_workflow": CONTROLLER_WORKFLOW_PATH,
         "builder_workflow": BUILDER_WORKFLOW_PATH,
@@ -2167,6 +2353,7 @@ def build_rig_blocked_receipt(ledger: dict[str, Any]) -> dict[str, Any]:
         "attempts": attempts,
         "ledger_fetched_at": ledger["fetched_at"],
         "ledger_sha256": canonical_sha256(ledger),
+        **provenance,
         "exhaustion_rule": DISPATCH_EXHAUSTION_RULE,
     }
     payload["rig_blocked_receipt_sha256"] = canonical_sha256(payload)
@@ -2276,9 +2463,8 @@ def validate_rig_blocked_receipt(raw: object) -> dict[str, Any]:  # noqa: PLR091
         or raw.get("score_claim_allowed") is not False
     ):
         raise RigInputError("rig-blocked receipt cannot authorize paid work or a score claim")
-    repository = _nonempty_string(raw.get("repository"), name="rig-blocked repository")
-    if not GITHUB_REPOSITORY_PATTERN.fullmatch(repository):
-        raise RigInputError("rig-blocked repository is not a GitHub repository")
+    if raw.get("repository") != TRUSTED_REPOSITORY:
+        raise RigInputError("rig-blocked repository is not the trusted release repository")
     if (
         raw.get("controller_workflow") != CONTROLLER_WORKFLOW_PATH
         or raw.get("builder_workflow") != BUILDER_WORKFLOW_PATH
@@ -2289,6 +2475,8 @@ def validate_rig_blocked_receipt(raw: object) -> dict[str, Any]:  # noqa: PLR091
     if raw.get("required_attempt_count") != EXTENDED_AA_PASS_COUNT:
         raise RigInputError("rig-blocked receipt required attempt count is invalid")
     head_branch = _nonempty_string(raw.get("head_branch"), name="rig-blocked head_branch")
+    if head_branch != TRUSTED_BRANCH:
+        raise RigInputError("rig-blocked receipt is not on the trusted release branch")
     attempts = raw.get("attempts")
     if not isinstance(attempts, list):
         raise RigInputError("rig-blocked attempts is not a list")
@@ -2336,7 +2524,37 @@ def validate_rig_blocked_receipt(raw: object) -> dict[str, Any]:  # noqa: PLR091
     if fetched_at < max(updated):
         raise RigInputError("rig-blocked ledger was fetched before its last run finished")
     _sha256_digest(raw.get("ledger_sha256"), name="rig-blocked ledger_sha256")
+    _validate_ledger_provenance(raw, rows=rows, fetched_at=fetched_at)
     return dict(raw)
+
+
+def _validate_ledger_provenance(
+    raw: dict[str, Any],
+    *,
+    rows: list[dict[str, Any]],
+    fetched_at: datetime,
+) -> None:
+    provenance = raw.get("ledger_provenance")
+    verification = raw.get("github_verification")
+    if provenance == LEDGER_PROVENANCE_UNVERIFIED:
+        if verification is not None:
+            raise RigInputError("unverified rig-blocked receipt carries a GitHub verification")
+        return
+    if provenance != LEDGER_PROVENANCE_VERIFIED:
+        raise RigInputError("rig-blocked ledger provenance is unknown")
+    if not isinstance(verification, dict):
+        raise RigInputError("verified rig-blocked receipt is missing its GitHub verification")
+    _require_exact_keys(verification, GITHUB_VERIFICATION_KEYS, name="GitHub verification")
+    verified_at = _parse_timestamp(verification.get("verified_at"), name="verified_at")
+    if verified_at < fetched_at:
+        raise RigInputError("rig-blocked ledger was verified before it was fetched")
+    builder_count = sum(len(row["builders"]) for row in rows)
+    if verification.get("run_count") != len(rows) + builder_count:
+        raise RigInputError("GitHub verification run count does not match the receipt rows")
+    if _positive_int(verification.get("job_count"), name="job_count") < 2 * builder_count:
+        raise RigInputError("GitHub verification job count cannot cover both official domains")
+    if verification.get("builder_query") != GITHUB_BUILDER_RUNS_ENDPOINT:
+        raise RigInputError("GitHub verification used an unknown builder query")
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -2376,6 +2594,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     rig_blocked = subparsers.add_parser("rig-blocked")
     rig_blocked.add_argument("--ledger", required=True)
     rig_blocked.add_argument("--output", required=True)
+    rig_blocked.add_argument(
+        "--verify-github",
+        action="store_true",
+        help="re-fetch every run and job through gh api and require equality before sealing",
+    )
     return parser.parse_args(argv)
 
 
@@ -2404,7 +2627,11 @@ def main(argv: list[str] | None = None) -> int:
                 [load_json(Path(path)) for path in args.passes],
             )
         elif args.command == "rig-blocked":
-            payload = build_rig_blocked_receipt(load_json(Path(args.ledger)))
+            ledger = load_json(Path(args.ledger))
+            verification = (
+                verify_dispatch_ledger(ledger, fetch=gh_api_fetch) if args.verify_github else None
+            )
+            payload = build_rig_blocked_receipt(ledger, verification=verification)
         else:
             raise RuntimeError(f"unknown command {args.command!r}")
     except (OSError, json.JSONDecodeError, RigInputError) as exc:

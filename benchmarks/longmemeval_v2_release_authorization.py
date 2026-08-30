@@ -28,6 +28,7 @@ RIG_BLOCKED_AUTHORIZATION_KEYS = frozenset(
         "blocked_reason",
         "rig_blocked_receipt_sha256",
         "ledger_sha256",
+        "ledger_provenance",
         "repository",
         "head_branch",
         "head_shas",
@@ -231,7 +232,7 @@ def _rig_blocked_attempt_projection(raw: object, *, name: str) -> dict[str, Any]
     }
 
 
-def require_rig_blocked_authorization(raw: object) -> dict[str, Any]:
+def require_rig_blocked_authorization(raw: object) -> dict[str, Any]:  # noqa: PLR0912
     """Validate one scoreless dispatch-exhaustion authority projection.
 
     The projection stops paid benchmark work. It never feeds a paid stage, so
@@ -251,6 +252,8 @@ def require_rig_blocked_authorization(raw: object) -> dict[str, Any]:
         raw.get("blocked_reason") != rig.BLOCKED_REASON_DISPATCH_EXHAUSTED
     ):
         raise StagePlanError("rig-blocked authorization status or reason is invalid")
+    if raw.get("ledger_provenance") != rig.LEDGER_PROVENANCE_VERIFIED:
+        raise StagePlanError("rig-blocked authorization requires a GitHub-verified ledger")
     source = require_artifact(raw.get("source_receipt"), name="rig-blocked source receipt")
     receipt_digest = rig._sha256_digest(
         raw.get("rig_blocked_receipt_sha256"),
@@ -261,9 +264,11 @@ def require_rig_blocked_authorization(raw: object) -> dict[str, Any]:
         name="rig-blocked authorization ledger digest",
     )
     repository = require_string(raw.get("repository"), name="rig-blocked repository")
-    if not rig.GITHUB_REPOSITORY_PATTERN.fullmatch(repository):
-        raise StagePlanError("rig-blocked repository is not a GitHub repository")
+    if repository != rig.TRUSTED_REPOSITORY:
+        raise StagePlanError("rig-blocked repository is not the trusted release repository")
     head_branch = require_string(raw.get("head_branch"), name="rig-blocked head_branch")
+    if head_branch != rig.TRUSTED_BRANCH:
+        raise StagePlanError("rig-blocked authorization is not on the trusted release branch")
     raw_head_shas = raw.get("head_shas")
     if not isinstance(raw_head_shas, list) or not raw_head_shas:
         raise StagePlanError("rig-blocked head SHAs are missing")

@@ -175,6 +175,8 @@ def build_rig_blocked_authorization(
     """Build dispatch-exhaustion authority from an fd-bound physical receipt."""
 
     receipt = rig.validate_rig_blocked_receipt(receipt)
+    if receipt["ledger_provenance"] != rig.LEDGER_PROVENANCE_VERIFIED:
+        raise StagePlanError("rig-blocked authorization requires a GitHub-verified ledger")
     payload = {
         "schema_version": authorization.RIG_BLOCKED_AUTHORIZATION_SCHEMA_VERSION,
         "kind": "rig_blocked",
@@ -183,6 +185,7 @@ def build_rig_blocked_authorization(
         "blocked_reason": receipt["blocked_reason"],
         "rig_blocked_receipt_sha256": receipt["rig_blocked_receipt_sha256"],
         "ledger_sha256": receipt["ledger_sha256"],
+        "ledger_provenance": receipt["ledger_provenance"],
         "repository": receipt["repository"],
         "head_branch": receipt["head_branch"],
         "head_shas": list(receipt["head_shas"]),
