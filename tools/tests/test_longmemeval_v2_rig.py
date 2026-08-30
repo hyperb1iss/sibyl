@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -1144,3 +1145,291 @@ def test_cli_writes_failure_receipt_and_returns_nonzero(tmp_path: Path) -> None:
     assert receipt["status"] == "FAIL"
     assert receipt["score_claim_allowed"] is False
     assert receipt["paid_benchmark_allowed"] is False
+
+
+DISPATCH_REPOSITORY = "hyperb1iss/sibyl"
+DISPATCH_HEAD_SHA = "b" * 40
+
+
+def _ledger_time(hours: float) -> str:
+    base = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
+    return (base + timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _ledger_run(
+    *,
+    run_id: int,
+    name: str,
+    path: str,
+    display_title: str,
+    head_sha: str,
+    conclusion: str,
+    created_at: str,
+    updated_at: str,
+    head_branch: str = "main",
+) -> dict[str, Any]:
+    return {
+        "id": run_id,
+        "name": name,
+        "path": path,
+        "display_title": display_title,
+        "head_sha": head_sha,
+        "head_branch": head_branch,
+        "event": "workflow_dispatch",
+        "status": "completed",
+        "conclusion": conclusion,
+        "run_attempt": 1,
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "run_started_at": created_at,
+        "html_url": f"https://github.com/{DISPATCH_REPOSITORY}/actions/runs/{run_id}",
+        "repository": DISPATCH_REPOSITORY,
+    }
+
+
+def _ledger_job(
+    *,
+    job_id: int,
+    run_id: int,
+    name: str,
+    conclusion: str,
+    head_sha: str,
+    started_at: str,
+    completed_at: str,
+) -> dict[str, Any]:
+    return {
+        "id": job_id,
+        "run_id": run_id,
+        "run_attempt": 1,
+        "name": name,
+        "status": "completed",
+        "conclusion": conclusion,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "head_sha": head_sha,
+        "html_url": f"https://github.com/{DISPATCH_REPOSITORY}/actions/runs/{run_id}/job/{job_id}",
+    }
+
+
+def _dispatch_attempt(
+    index: int,
+    *,
+    head_sha: str = DISPATCH_HEAD_SHA,
+    domain_conclusions: dict[str, str] | None = None,
+    combined_conclusion: str | None = "skipped",
+) -> dict[str, Any]:
+    controller_id = 1000 + index
+    builder_id = 2000 + index
+    start = 6 * index
+    conclusions = domain_conclusions or {"enterprise": "failure", "web": "failure"}
+    jobs = [
+        _ledger_job(
+            job_id=3000 + 10 * index + offset,
+            run_id=builder_id,
+            name=rig.OFFICIAL_JOB_NAMES[domain],
+            conclusion=conclusions[domain],
+            head_sha=head_sha,
+            started_at=_ledger_time(start + 0.1),
+            completed_at=_ledger_time(start + 2),
+        )
+        for offset, domain in enumerate(sorted(rig.DOMAINS))
+    ]
+    if combined_conclusion is not None:
+        jobs.append(
+            _ledger_job(
+                job_id=3000 + 10 * index + 5,
+                run_id=builder_id,
+                name=rig.OFFICIAL_JOB_NAMES["combined_receipt"],
+                conclusion=combined_conclusion,
+                head_sha=head_sha,
+                started_at=_ledger_time(start + 2),
+                completed_at=_ledger_time(start + 2),
+            )
+        )
+    controller = _ledger_run(
+        run_id=controller_id,
+        name=f"{rig.CONTROLLER_WORKFLOW_NAME} aa-r{index + 1}",
+        path=rig.CONTROLLER_WORKFLOW_PATH,
+        display_title=f"{rig.CONTROLLER_WORKFLOW_NAME} aa-r{index + 1}",
+        head_sha=head_sha,
+        conclusion="success",
+        created_at=_ledger_time(start),
+        updated_at=_ledger_time(start + 0.05),
+    )
+    builder = _ledger_run(
+        run_id=builder_id,
+        name=f"{rig.BUILDER_WORKFLOW_NAME} aa-{controller_id} {rig.DISPATCH_BUILDER_ARM_ID}",
+        path=rig.BUILDER_WORKFLOW_PATH,
+        display_title=(
+            f"{rig.BUILDER_WORKFLOW_NAME} aa-{controller_id} {rig.DISPATCH_BUILDER_ARM_ID}"
+        ),
+        head_sha=head_sha,
+        conclusion="failure",
+        created_at=_ledger_time(start + 0.05),
+        updated_at=_ledger_time(start + 2),
+    )
+    return {"controller": controller, "builders": [{**builder, "jobs": jobs}]}
+
+
+def _dispatch_ledger(attempts: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    rows = attempts if attempts is not None else [_dispatch_attempt(index) for index in range(5)]
+    return {
+        "schema_version": rig.DISPATCH_LEDGER_SCHEMA_VERSION,
+        "repository": DISPATCH_REPOSITORY,
+        "fetched_at": _ledger_time(6 * len(rows) + 24),
+        "source": {
+            "tool": "gh api",
+            "run_endpoint": "repos/{repository}/actions/runs/{run_id}",
+            "jobs_endpoint": "repos/{repository}/actions/runs/{run_id}/jobs?per_page=100",
+            "builder_query": "gh run list --workflow longmemeval-v2.yml",
+        },
+        "attempts": rows,
+    }
+
+
+def test_rig_blocked_receipt_binds_exhausted_dispatches(tmp_path: Path) -> None:
+    ledger = _dispatch_ledger()
+
+    receipt = rig.build_rig_blocked_receipt(ledger)
+
+    assert receipt["status"] == "RIG_BLOCKED"
+    assert receipt["blocked_reason"] == rig.BLOCKED_REASON_DISPATCH_EXHAUSTED
+    assert receipt["paid_benchmark_allowed"] is False
+    assert receipt["score_claim_allowed"] is False
+    assert receipt["attempt_count"] == rig.EXTENDED_AA_PASS_COUNT
+    assert receipt["completed_pass_count"] == 0
+    assert receipt["head_shas"] == [DISPATCH_HEAD_SHA]
+    assert receipt["ledger_sha256"] == rig.canonical_sha256(ledger)
+    assert [item["experiment_id"] for item in receipt["attempts"]] == [
+        f"aa-r{index}" for index in range(1, 6)
+    ]
+    first = receipt["attempts"][0]
+    assert first["controller"]["run_id"] == ledger["attempts"][0]["controller"]["id"]
+    assert first["builders"][0]["run_id"] == ledger["attempts"][0]["builders"][0]["id"]
+    assert first["builders"][0]["official_jobs"]["web"]["conclusion"] == "failure"
+    assert first["builders"][0]["official_jobs"]["combined_receipt"]["conclusion"] == "skipped"
+    assert rig.validate_rig_blocked_receipt(receipt) == receipt
+
+    ledger_path = tmp_path / "ledger.json"
+    output = tmp_path / "receipt.json"
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+    assert rig.main(["rig-blocked", "--ledger", str(ledger_path), "--output", str(output)]) == 1
+    assert json.loads(output.read_text(encoding="utf-8")) == receipt
+
+
+def test_rig_blocked_receipt_requires_five_dispatches() -> None:
+    ledger = _dispatch_ledger([_dispatch_attempt(index) for index in range(4)])
+
+    with pytest.raises(rig.RigInputError, match="at least 5 controller dispatches"):
+        rig.build_rig_blocked_receipt(ledger)
+
+
+@pytest.mark.parametrize(
+    ("domain_conclusions", "combined_conclusion"),
+    [
+        ({"enterprise": "success", "web": "success"}, "skipped"),
+        ({"enterprise": "success", "web": "success"}, None),
+        ({"enterprise": "failure", "web": "success"}, "success"),
+    ],
+)
+def test_rig_blocked_receipt_rejects_completed_two_domain_pass(
+    domain_conclusions: dict[str, str],
+    combined_conclusion: str | None,
+) -> None:
+    attempts = [_dispatch_attempt(index) for index in range(4)]
+    attempts.append(
+        _dispatch_attempt(
+            4,
+            domain_conclusions=domain_conclusions,
+            combined_conclusion=combined_conclusion,
+        )
+    )
+
+    with pytest.raises(rig.RigInputError, match="A/A data, not dispatch exhaustion"):
+        rig.build_rig_blocked_receipt(_dispatch_ledger(attempts))
+
+
+def test_rig_blocked_receipt_rejects_builder_head_sha_drift() -> None:
+    attempts = [_dispatch_attempt(index) for index in range(5)]
+    attempts[2]["builders"][0]["head_sha"] = "c" * 40
+    for job in attempts[2]["builders"][0]["jobs"]:
+        job["head_sha"] = "c" * 40
+
+    with pytest.raises(rig.RigInputError, match="head SHA differs from its controller"):
+        rig.build_rig_blocked_receipt(_dispatch_ledger(attempts))
+
+
+def test_rig_blocked_receipt_records_every_dispatched_head_sha() -> None:
+    attempts = [
+        _dispatch_attempt(index, head_sha=sha)
+        for index, sha in enumerate(["d" * 40, "d" * 40, "e" * 40, "f" * 40, "1" * 40])
+    ]
+
+    receipt = rig.build_rig_blocked_receipt(_dispatch_ledger(attempts))
+
+    assert receipt["head_shas"] == ["d" * 40, "e" * 40, "f" * 40, "1" * 40]
+    assert [item["head_sha"] for item in receipt["attempts"]] == [
+        "d" * 40,
+        "d" * 40,
+        "e" * 40,
+        "f" * 40,
+        "1" * 40,
+    ]
+
+
+def test_rig_blocked_receipt_rejects_branch_and_controller_drift() -> None:
+    branched = [_dispatch_attempt(index) for index in range(5)]
+    branched[4]["controller"]["head_branch"] = "release/1.3"
+    branched[4]["builders"][0]["head_branch"] = "release/1.3"
+    with pytest.raises(rig.RigInputError, match="span more than one branch"):
+        rig.build_rig_blocked_receipt(_dispatch_ledger(branched))
+
+    unbound = [_dispatch_attempt(index) for index in range(5)]
+    unbound[1]["builders"][0]["display_title"] = (
+        f"{rig.BUILDER_WORKFLOW_NAME} aa-999 {rig.DISPATCH_BUILDER_ARM_ID}"
+    )
+    with pytest.raises(rig.RigInputError, match="was not dispatched by controller"):
+        rig.build_rig_blocked_receipt(_dispatch_ledger(unbound))
+
+
+def test_rig_blocked_receipt_rejects_tampered_claims() -> None:
+    receipt = rig.build_rig_blocked_receipt(_dispatch_ledger())
+
+    def resealed(**changes: Any) -> dict[str, Any]:
+        tampered = {**deepcopy(receipt), **changes}
+        unsigned = {
+            key: value for key, value in tampered.items() if key != "rig_blocked_receipt_sha256"
+        }
+        tampered["rig_blocked_receipt_sha256"] = rig.canonical_sha256(unsigned)
+        return tampered
+
+    with pytest.raises(rig.RigInputError, match="digest does not bind"):
+        rig.validate_rig_blocked_receipt({**receipt, "attempt_count": 6})
+    with pytest.raises(rig.RigInputError, match="claims a completed pass"):
+        rig.validate_rig_blocked_receipt(resealed(completed_pass_count=1))
+    with pytest.raises(rig.RigInputError, match="cannot authorize paid work"):
+        rig.validate_rig_blocked_receipt(resealed(paid_benchmark_allowed=True))
+    with pytest.raises(rig.RigInputError, match="status or reason is invalid"):
+        rig.validate_rig_blocked_receipt(resealed(blocked_reason=rig.BLOCKED_REASON_SPAN_UNSTABLE))
+    with pytest.raises(rig.RigInputError, match="fewer than five"):
+        rig.validate_rig_blocked_receipt(
+            resealed(attempts=receipt["attempts"][:4], attempt_count=4)
+        )
+    with pytest.raises(rig.RigInputError, match="head SHAs do not match"):
+        rig.validate_rig_blocked_receipt(resealed(head_shas=["9" * 40]))
+
+
+def test_aa_span_block_and_dispatch_exhaustion_name_different_reasons() -> None:
+    stable = _aa_receipt()
+    unstable = _aa_receipt(right_accuracies=[0.6, 0.6, 0.6, 0.7, 0.8])
+
+    assert stable["status"] == "PASS"
+    assert stable["blocked_reason"] is None
+    assert unstable["status"] == "RIG_BLOCKED"
+    assert unstable["blocked_reason"] == rig.BLOCKED_REASON_SPAN_UNSTABLE
+    assert unstable["blocked_reason"] != rig.BLOCKED_REASON_DISPATCH_EXHAUSTED
+    tampered = {**unstable, "blocked_reason": rig.BLOCKED_REASON_DISPATCH_EXHAUSTED}
+    unsigned = {key: value for key, value in tampered.items() if key != "aa_receipt_sha256"}
+    tampered["aa_receipt_sha256"] = rig.canonical_sha256(unsigned)
+    with pytest.raises(rig.RigInputError, match="blocked reason does not match"):
+        rig.validate_aa_receipt(tampered)

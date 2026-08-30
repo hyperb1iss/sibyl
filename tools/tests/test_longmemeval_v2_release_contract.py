@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -19,6 +20,7 @@ from benchmarks import longmemeval_v2_release_inputs as inputs
 from benchmarks import longmemeval_v2_release_memory as release_memory
 from benchmarks import longmemeval_v2_release_package_root as package_root
 from benchmarks import longmemeval_v2_release_plan as release_plan
+from tools.bench import longmemeval_v2_rig as rig
 from tools.tests.longmemeval_v2_release_support import (
     aa_extension_spec,
     aa_spec,
@@ -28,6 +30,7 @@ from tools.tests.longmemeval_v2_release_support import (
     race_spec,
     render_spec,
 )
+from tools.tests.test_longmemeval_v2_rig import _dispatch_ledger
 
 MAX_CAP_HEADROOM_USD = 0.15
 
@@ -637,3 +640,82 @@ def test_paid_stages_require_exact_preregistered_arm_contracts(
                 geometry_spec,
                 expected_stack=expected_stack,
             )
+
+
+def test_rig_blocked_authorization_projects_exhausted_dispatches(tmp_path: Path) -> None:
+    ledger = _dispatch_ledger()
+    receipt = rig.build_rig_blocked_receipt(ledger)
+    receipt_path = tmp_path / "rig-blocked-receipt.json"
+    receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    projected = authorization_package.package_rig_blocked_authorization(receipt_path)
+
+    assert projected["kind"] == "rig_blocked"
+    assert projected["status"] == "RIG_BLOCKED"
+    assert projected["blocked_reason"] == rig.BLOCKED_REASON_DISPATCH_EXHAUSTED
+    assert projected["rig_blocked_receipt_sha256"] == receipt["rig_blocked_receipt_sha256"]
+    assert projected["ledger_sha256"] == rig.canonical_sha256(ledger)
+    assert projected["source_receipt"]["path"] == str(receipt_path.resolve())
+    assert projected["attempt_count"] == rig.EXTENDED_AA_PASS_COUNT
+    assert projected["completed_pass_count"] == 0
+    assert [item["controller_run_id"] for item in projected["attempts"]] == [
+        item["controller"]["run_id"] for item in receipt["attempts"]
+    ]
+    assert "paid_benchmark_allowed" not in projected
+    authorization.reject_score_bearing_keys(projected, name="rig-blocked authorization")
+    assert authorization.require_rig_blocked_authorization(projected) == projected
+
+    public_path = tmp_path / "public" / "rig-blocked-receipt.json"
+    rebased = authorization_package.rebase_rig_blocked_authorization(
+        projected,
+        public_receipt_path=public_path.resolve(),
+    )
+    assert rebased["source_receipt"]["path"] == str(public_path.resolve())
+    assert rebased["authorization_sha256"] != projected["authorization_sha256"]
+
+    output = tmp_path / "authority" / "rig-blocked-authorization.json"
+    authorization_package.write_authorization(
+        output,
+        projected,
+        paid_output_root=(tmp_path / "paid").resolve(),
+    )
+    assert json.loads(output.read_text(encoding="utf-8")) == projected
+
+    with pytest.raises(inputs.StagePlanError, match="status or reason is invalid"):
+        authorization.require_rig_blocked_authorization(
+            {**projected, "blocked_reason": rig.BLOCKED_REASON_SPAN_UNSTABLE}
+        )
+    with pytest.raises(inputs.StagePlanError, match="A/A authorization"):
+        authorization.require_aa_authorization(projected)
+    receipt_path.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(inputs.StagePlanError, match="path or size changed"):
+        authorization.require_rig_blocked_authorization(projected)
+
+
+def test_rig_blocked_authorization_rejects_completed_pass_and_short_ledgers(
+    tmp_path: Path,
+) -> None:
+    receipt = rig.build_rig_blocked_receipt(_dispatch_ledger())
+    receipt_path = tmp_path / "rig-blocked-receipt.json"
+    receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    source = inputs.bind_artifact(receipt_path, name="rig-blocked source receipt")
+    projected = authorization_package.build_rig_blocked_authorization(source, receipt)
+
+    def resealed(**changes: Any) -> dict[str, Any]:
+        tampered = {**projected, **changes}
+        unsigned = {key: value for key, value in tampered.items() if key != "authorization_sha256"}
+        tampered["authorization_sha256"] = rig.canonical_sha256(unsigned)
+        return tampered
+
+    with pytest.raises(inputs.StagePlanError, match="claims a completed pass"):
+        authorization.require_rig_blocked_authorization(resealed(completed_pass_count=1))
+    with pytest.raises(inputs.StagePlanError, match="fewer than five dispatches"):
+        authorization.require_rig_blocked_authorization(
+            resealed(attempt_count=4, attempts=projected["attempts"][:4])
+        )
+    with pytest.raises(inputs.StagePlanError, match="head SHAs differ from its attempts"):
+        authorization.require_rig_blocked_authorization(resealed(head_shas=["9" * 40]))
+    with pytest.raises(inputs.StagePlanError, match="score-bearing"):
+        authorization.require_rig_blocked_authorization(
+            resealed(attempts=[{**projected["attempts"][0], "accuracy": 0.5}])
+        )

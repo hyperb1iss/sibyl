@@ -9,6 +9,8 @@ import json
 import math
 import re
 import sys
+from datetime import datetime
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -29,11 +31,37 @@ ARM_RUN_SCHEMA_VERSION = "sibyl-longmemeval-v2-arm-run-v2"
 RUN_PAIR_SCHEMA_VERSION = "sibyl-longmemeval-v2-paired-pass-v3"
 EXECUTION_IDENTITY_SCHEMA_VERSION = "sibyl-longmemeval-v2-execution-identity-v1"
 PREREGISTRATION_SCHEMA_VERSION = "sibyl-longmemeval-v2-preregistration-v2"
-AA_SCHEMA_VERSION = "sibyl-longmemeval-v2-aa-receipt-v2"
+AA_SCHEMA_VERSION = "sibyl-longmemeval-v2-aa-receipt-v3"
 ANCHOR_SCHEMA_VERSION = "sibyl-longmemeval-v2-anchor-receipt-v2"
 RACE_SCHEMA_VERSION = "sibyl-longmemeval-v2-machine-race-receipt-v2"
 RENDER_SCHEMA_VERSION = "sibyl-longmemeval-v2-render-receipt-v2"
 FAILURE_SCHEMA_VERSION = "sibyl-longmemeval-v2-rig-failure-v1"
+RIG_BLOCKED_SCHEMA_VERSION = "sibyl-longmemeval-v2-rig-blocked-receipt-v1"
+DISPATCH_LEDGER_SCHEMA_VERSION = "sibyl-longmemeval-v2-dispatch-ledger-v1"
+# The two ways the rig can block. A span-unstable block carries five completed
+# paired passes; a dispatch-exhausted block carries five controller dispatches
+# that never produced a single completed two-domain pass. They are different
+# evidence and must never be read as the same receipt.
+BLOCKED_REASON_SPAN_UNSTABLE = "span_unstable"
+BLOCKED_REASON_DISPATCH_EXHAUSTED = "dispatch_exhausted"
+CONTROLLER_WORKFLOW_NAME = "LongMemEval V2 Release A/A"
+CONTROLLER_WORKFLOW_PATH = ".github/workflows/longmemeval-v2-release-aa.yml"
+BUILDER_WORKFLOW_NAME = "LongMemEval V2"
+BUILDER_WORKFLOW_PATH = ".github/workflows/longmemeval-v2.yml"
+DISPATCH_BUILDER_ARM_ID = "aa-1-left"
+OFFICIAL_JOB_NAMES = {
+    "enterprise": "Official enterprise small",
+    "web": "Official web small",
+    "combined_receipt": "Official combined receipt",
+}
+DISPATCH_EXHAUSTION_RULE = (
+    "at least five successful controller dispatches on one branch, each binding "
+    "a builder run whose official Small domains never both succeeded and whose "
+    "combined receipt never succeeded"
+)
+COMPLETED_RUN_CONCLUSIONS = frozenset({"success", "failure", "cancelled"})
+COMPLETED_JOB_CONCLUSIONS = frozenset({"success", "failure", "cancelled", "skipped"})
+EXPERIMENT_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 DOMAINS = frozenset({"web", "enterprise"})
 OFFICIAL_SMALL_QUESTION_COUNTS = {
     "enterprise": 211,
@@ -77,6 +105,7 @@ AA_RECEIPT_KEYS = frozenset(
     {
         "schema_version",
         "status",
+        "blocked_reason",
         "paid_benchmark_allowed",
         "score_claim_allowed",
         "stack",
@@ -946,6 +975,10 @@ def _aa_outcome(absolute_deltas: list[float]) -> tuple[str, bool]:
     return "PASS", True
 
 
+def _aa_blocked_reason(status: str) -> str | None:
+    return BLOCKED_REASON_SPAN_UNSTABLE if status == "RIG_BLOCKED" else None
+
+
 def build_aa_receipt(raw_passes: list[dict[str, Any]]) -> dict[str, Any]:
     passes = [validate_pass(item) for item in raw_passes]
     if any(item["experiment_phase"] != "aa" for item in passes):
@@ -1001,6 +1034,7 @@ def build_aa_receipt(raw_passes: list[dict[str, Any]]) -> dict[str, Any]:
     payload = {
         "schema_version": AA_SCHEMA_VERSION,
         "status": status,
+        "blocked_reason": _aa_blocked_reason(status),
         "paid_benchmark_allowed": status == "PASS",
         "score_claim_allowed": False,
         "stack": passes[0]["stack"],
@@ -1085,6 +1119,8 @@ def _validate_aa_metrics(raw: dict[str, Any], absolute_deltas: list[float]) -> N
     noise_floor = max(INITIAL_NOISE_FLOOR_PP, observed_span)
     if raw.get("status") != expected_status or raw.get("stabilized") is not expected_stable:
         raise RigInputError("A/A receipt status does not match its pass deltas")
+    if raw.get("blocked_reason") != _aa_blocked_reason(expected_status):
+        raise RigInputError("A/A blocked reason does not match its status")
     if raw.get("paid_benchmark_allowed") is not (expected_status == "PASS"):
         raise RigInputError("A/A paid-work verdict does not match its status")
     if raw.get("score_claim_allowed") is not False:
@@ -1795,6 +1831,503 @@ def build_render_receipt(  # noqa: PLR0912, PLR0915
     return payload
 
 
+DISPATCH_LEDGER_KEYS = frozenset(
+    {"schema_version", "repository", "fetched_at", "source", "attempts"}
+)
+DISPATCH_LEDGER_SOURCE_KEYS = frozenset({"tool", "run_endpoint", "jobs_endpoint", "builder_query"})
+DISPATCH_ATTEMPT_KEYS = frozenset({"controller", "builders"})
+LEDGER_RUN_KEYS = frozenset(
+    {
+        "id",
+        "name",
+        "path",
+        "display_title",
+        "head_sha",
+        "head_branch",
+        "event",
+        "status",
+        "conclusion",
+        "run_attempt",
+        "created_at",
+        "updated_at",
+        "run_started_at",
+        "html_url",
+        "repository",
+    }
+)
+LEDGER_BUILDER_KEYS = LEDGER_RUN_KEYS | {"jobs"}
+LEDGER_JOB_KEYS = frozenset(
+    {
+        "id",
+        "run_id",
+        "run_attempt",
+        "name",
+        "status",
+        "conclusion",
+        "started_at",
+        "completed_at",
+        "head_sha",
+        "html_url",
+    }
+)
+RIG_BLOCKED_RECEIPT_KEYS = frozenset(
+    {
+        "schema_version",
+        "status",
+        "blocked_reason",
+        "paid_benchmark_allowed",
+        "score_claim_allowed",
+        "repository",
+        "head_branch",
+        "head_shas",
+        "controller_workflow",
+        "builder_workflow",
+        "builder_arm_id",
+        "required_attempt_count",
+        "attempt_count",
+        "completed_pass_count",
+        "first_dispatched_at",
+        "last_dispatched_at",
+        "attempts",
+        "ledger_fetched_at",
+        "ledger_sha256",
+        "exhaustion_rule",
+        "rig_blocked_receipt_sha256",
+    }
+)
+RIG_BLOCKED_ATTEMPT_KEYS = frozenset(
+    {"experiment_id", "head_sha", "head_branch", "controller", "builders"}
+)
+RIG_BLOCKED_RUN_KEYS = frozenset(
+    {"run_id", "run_attempt", "event", "conclusion", "created_at", "updated_at", "html_url"}
+)
+RIG_BLOCKED_BUILDER_KEYS = RIG_BLOCKED_RUN_KEYS | {"head_sha", "official_jobs"}
+RIG_BLOCKED_JOB_KEYS = frozenset({"job_id", "conclusion", "started_at", "completed_at", "html_url"})
+
+
+def _parse_timestamp(value: object, *, name: str) -> datetime:
+    text = _nonempty_string(value, name=name)
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise RigInputError(f"{name} is not an ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None:
+        raise RigInputError(f"{name} must carry a UTC offset")
+    return parsed
+
+
+def _optional_timestamp(value: object, *, name: str) -> datetime | None:
+    if value is None:
+        return None
+    return _parse_timestamp(value, name=name)
+
+
+def _git_sha(value: object, *, name: str) -> str:
+    sha = _nonempty_string(value, name=name)
+    if len(sha) != GIT_SHA_LENGTH or any(character not in "0123456789abcdef" for character in sha):
+        raise RigInputError(f"{name} must be a full lowercase Git SHA")
+    return sha
+
+
+def _ledger_run(raw: object, *, name: str, keys: frozenset[str]) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise RigInputError(f"{name} is not an object")
+    _require_exact_keys(raw, keys, name=name)
+    _positive_int(raw.get("id"), name=f"{name}.id")
+    _positive_int(raw.get("run_attempt"), name=f"{name}.run_attempt")
+    if raw.get("status") != "completed":
+        raise RigInputError(f"{name} has not completed")
+    if raw.get("conclusion") not in COMPLETED_RUN_CONCLUSIONS:
+        raise RigInputError(f"{name} conclusion is not a completed verdict")
+    if raw.get("event") != "workflow_dispatch":
+        raise RigInputError(f"{name} was not a workflow dispatch")
+    created = _parse_timestamp(raw.get("created_at"), name=f"{name}.created_at")
+    updated = _parse_timestamp(raw.get("updated_at"), name=f"{name}.updated_at")
+    _parse_timestamp(raw.get("run_started_at"), name=f"{name}.run_started_at")
+    if updated < created:
+        raise RigInputError(f"{name} finished before it was created")
+    for field in ("name", "path", "display_title", "head_branch", "html_url", "repository"):
+        _nonempty_string(raw.get(field), name=f"{name}.{field}")
+    _git_sha(raw.get("head_sha"), name=f"{name}.head_sha")
+    return dict(raw)
+
+
+def _ledger_job(raw: object, *, name: str) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise RigInputError(f"{name} is not an object")
+    _require_exact_keys(raw, LEDGER_JOB_KEYS, name=name)
+    _positive_int(raw.get("id"), name=f"{name}.id")
+    _positive_int(raw.get("run_id"), name=f"{name}.run_id")
+    _positive_int(raw.get("run_attempt"), name=f"{name}.run_attempt")
+    if raw.get("status") != "completed":
+        raise RigInputError(f"{name} has not completed")
+    if raw.get("conclusion") not in COMPLETED_JOB_CONCLUSIONS:
+        raise RigInputError(f"{name} conclusion is not a completed verdict")
+    started = _optional_timestamp(raw.get("started_at"), name=f"{name}.started_at")
+    completed = _optional_timestamp(raw.get("completed_at"), name=f"{name}.completed_at")
+    if started is not None and completed is not None and completed < started:
+        raise RigInputError(f"{name} completed before it started")
+    _nonempty_string(raw.get("name"), name=f"{name}.name")
+    _nonempty_string(raw.get("html_url"), name=f"{name}.html_url")
+    _git_sha(raw.get("head_sha"), name=f"{name}.head_sha")
+    return dict(raw)
+
+
+def _official_jobs(
+    raw_jobs: object,
+    *,
+    builder: dict[str, Any],
+    name: str,
+) -> dict[str, dict[str, Any] | None]:
+    if not isinstance(raw_jobs, list):
+        raise RigInputError(f"{name}.jobs is not a list")
+    by_name: dict[str, dict[str, Any]] = {}
+    official_names = set(OFFICIAL_JOB_NAMES.values())
+    for index, raw_job in enumerate(raw_jobs):
+        job = _ledger_job(raw_job, name=f"{name}.jobs[{index}]")
+        if job["run_id"] != builder["id"] or job["head_sha"] != builder["head_sha"]:
+            raise RigInputError(f"{name}.jobs[{index}] does not belong to its builder run")
+        if job["name"] in official_names:
+            if job["name"] in by_name:
+                raise RigInputError(f"{name} reports the official job {job['name']!r} twice")
+            by_name[job["name"]] = job
+    result: dict[str, dict[str, Any] | None] = {}
+    for key, job_name in OFFICIAL_JOB_NAMES.items():
+        job = by_name.get(job_name)
+        if job is None:
+            if key == "combined_receipt":
+                result[key] = None
+                continue
+            raise RigInputError(f"{name} never ran the official {key} Small domain")
+        result[key] = {
+            "job_id": job["id"],
+            "conclusion": job["conclusion"],
+            "started_at": job["started_at"],
+            "completed_at": job["completed_at"],
+            "html_url": job["html_url"],
+        }
+    return result
+
+
+def _job_succeeded(job: dict[str, Any] | None) -> bool:
+    return job is not None and job["conclusion"] == "success"
+
+
+def _completed_two_domain_arm(official_jobs: dict[str, dict[str, Any] | None]) -> bool:
+    domains_succeeded = all(_job_succeeded(official_jobs[domain]) for domain in sorted(DOMAINS))
+    return domains_succeeded or _job_succeeded(official_jobs["combined_receipt"])
+
+
+def _run_projection(run: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "run_id": run["id"],
+        "run_attempt": run["run_attempt"],
+        "event": run["event"],
+        "conclusion": run["conclusion"],
+        "created_at": run["created_at"],
+        "updated_at": run["updated_at"],
+        "html_url": run["html_url"],
+    }
+
+
+def _dispatch_attempt(  # noqa: PLR0912
+    raw: object,
+    *,
+    index: int,
+    repository: str,
+) -> dict[str, Any]:
+    name = f"attempts[{index}]"
+    if not isinstance(raw, dict):
+        raise RigInputError(f"{name} is not an object")
+    _require_exact_keys(raw, DISPATCH_ATTEMPT_KEYS, name=name)
+    controller = _ledger_run(raw.get("controller"), name=f"{name}.controller", keys=LEDGER_RUN_KEYS)
+    if controller["repository"] != repository:
+        raise RigInputError(f"{name}.controller belongs to another repository")
+    if controller["path"] != CONTROLLER_WORKFLOW_PATH:
+        raise RigInputError(f"{name}.controller is not the release A/A controller workflow")
+    if controller["conclusion"] != "success":
+        raise RigInputError(f"{name}.controller did not complete its dispatch")
+    prefix = f"{CONTROLLER_WORKFLOW_NAME} "
+    title = controller["display_title"]
+    if not title.startswith(prefix):
+        raise RigInputError(f"{name}.controller title does not carry an experiment id")
+    experiment_id = title[len(prefix) :]
+    if not EXPERIMENT_ID_PATTERN.fullmatch(experiment_id):
+        raise RigInputError(f"{name}.controller experiment id is not path-safe")
+    head_sha = controller["head_sha"]
+    head_branch = controller["head_branch"]
+    controller_created = _parse_timestamp(controller["created_at"], name="controller.created_at")
+    raw_builders = raw.get("builders")
+    if not isinstance(raw_builders, list) or not raw_builders:
+        raise RigInputError(f"{name}.controller dispatched no builder run")
+    expected_title = f"{BUILDER_WORKFLOW_NAME} aa-{controller['id']} {DISPATCH_BUILDER_ARM_ID}"
+    builders: list[dict[str, Any]] = []
+    for builder_index, raw_builder in enumerate(raw_builders):
+        builder_name = f"{name}.builders[{builder_index}]"
+        builder = _ledger_run(raw_builder, name=builder_name, keys=LEDGER_BUILDER_KEYS)
+        if builder["repository"] != repository:
+            raise RigInputError(f"{builder_name} belongs to another repository")
+        if builder["path"] != BUILDER_WORKFLOW_PATH:
+            raise RigInputError(f"{builder_name} is not the sealed builder workflow")
+        if builder["display_title"] != expected_title:
+            raise RigInputError(
+                f"{builder_name} was not dispatched by controller {controller['id']}"
+            )
+        if builder["head_sha"] != head_sha:
+            raise RigInputError(f"{builder_name} head SHA differs from its controller dispatch")
+        if builder["head_branch"] != head_branch:
+            raise RigInputError(f"{builder_name} branch differs from its controller dispatch")
+        builder_created = _parse_timestamp(builder["created_at"], name="builder.created_at")
+        if builder_created < controller_created:
+            raise RigInputError(f"{builder_name} predates its controller dispatch")
+        official_jobs = _official_jobs(builder["jobs"], builder=builder, name=builder_name)
+        if _completed_two_domain_arm(official_jobs):
+            raise RigInputError(
+                f"{experiment_id} completed a two-domain arm run in builder {builder['id']}; "
+                "that is A/A data, not dispatch exhaustion"
+            )
+        builders.append(
+            {
+                **_run_projection(builder),
+                "head_sha": builder["head_sha"],
+                "official_jobs": official_jobs,
+            }
+        )
+    return {
+        "experiment_id": experiment_id,
+        "head_sha": head_sha,
+        "head_branch": head_branch,
+        "controller": _run_projection(controller),
+        "builders": builders,
+    }
+
+
+def build_rig_blocked_receipt(ledger: dict[str, Any]) -> dict[str, Any]:
+    """Seal dispatch exhaustion: five or more controller dispatches, zero completed passes."""
+    if ledger.get("schema_version") != DISPATCH_LEDGER_SCHEMA_VERSION:
+        raise RigInputError("dispatch ledger schema is missing or invalid")
+    _require_exact_keys(ledger, DISPATCH_LEDGER_KEYS, name="dispatch ledger")
+    repository = _nonempty_string(ledger.get("repository"), name="dispatch ledger repository")
+    if not GITHUB_REPOSITORY_PATTERN.fullmatch(repository):
+        raise RigInputError("dispatch ledger repository is not a GitHub repository")
+    source = ledger.get("source")
+    if not isinstance(source, dict):
+        raise RigInputError("dispatch ledger source is missing")
+    _require_exact_keys(source, DISPATCH_LEDGER_SOURCE_KEYS, name="dispatch ledger source")
+    for field in DISPATCH_LEDGER_SOURCE_KEYS:
+        _nonempty_string(source.get(field), name=f"dispatch ledger source.{field}")
+    raw_attempts = ledger.get("attempts")
+    if not isinstance(raw_attempts, list):
+        raise RigInputError("dispatch ledger attempts is not a list")
+    attempts = [
+        _dispatch_attempt(item, index=index, repository=repository)
+        for index, item in enumerate(raw_attempts)
+    ]
+    if len(attempts) < EXTENDED_AA_PASS_COUNT:
+        raise RigInputError(
+            f"dispatch exhaustion requires at least {EXTENDED_AA_PASS_COUNT} controller "
+            f"dispatches; the ledger holds {len(attempts)}"
+        )
+    branches = {attempt["head_branch"] for attempt in attempts}
+    if len(branches) != 1:
+        raise RigInputError("dispatch attempts span more than one branch")
+    head_shas: list[str] = []
+    for attempt in attempts:
+        if attempt["head_sha"] not in head_shas:
+            head_shas.append(attempt["head_sha"])
+    payload = {
+        "schema_version": RIG_BLOCKED_SCHEMA_VERSION,
+        "status": "RIG_BLOCKED",
+        "blocked_reason": BLOCKED_REASON_DISPATCH_EXHAUSTED,
+        "paid_benchmark_allowed": False,
+        "score_claim_allowed": False,
+        "repository": repository,
+        "head_branch": branches.pop(),
+        "head_shas": head_shas,
+        "controller_workflow": CONTROLLER_WORKFLOW_PATH,
+        "builder_workflow": BUILDER_WORKFLOW_PATH,
+        "builder_arm_id": DISPATCH_BUILDER_ARM_ID,
+        "required_attempt_count": EXTENDED_AA_PASS_COUNT,
+        "attempt_count": len(attempts),
+        "completed_pass_count": 0,
+        "first_dispatched_at": attempts[0]["controller"]["created_at"],
+        "last_dispatched_at": attempts[-1]["controller"]["created_at"],
+        "attempts": attempts,
+        "ledger_fetched_at": ledger["fetched_at"],
+        "ledger_sha256": canonical_sha256(ledger),
+        "exhaustion_rule": DISPATCH_EXHAUSTION_RULE,
+    }
+    payload["rig_blocked_receipt_sha256"] = canonical_sha256(payload)
+    return validate_rig_blocked_receipt(payload)
+
+
+def _validate_rig_blocked_run(raw: object, *, name: str, keys: frozenset[str]) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise RigInputError(f"{name} is not an object")
+    _require_exact_keys(raw, keys, name=name)
+    _positive_int(raw.get("run_id"), name=f"{name}.run_id")
+    _positive_int(raw.get("run_attempt"), name=f"{name}.run_attempt")
+    if raw.get("event") != "workflow_dispatch":
+        raise RigInputError(f"{name} was not a workflow dispatch")
+    if raw.get("conclusion") not in COMPLETED_RUN_CONCLUSIONS:
+        raise RigInputError(f"{name} conclusion is not a completed verdict")
+    created = _parse_timestamp(raw.get("created_at"), name=f"{name}.created_at")
+    updated = _parse_timestamp(raw.get("updated_at"), name=f"{name}.updated_at")
+    if updated < created:
+        raise RigInputError(f"{name} finished before it was created")
+    _nonempty_string(raw.get("html_url"), name=f"{name}.html_url")
+    return dict(raw)
+
+
+def _validate_rig_blocked_job(raw: object, *, name: str) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise RigInputError(f"{name} is not an object")
+    _require_exact_keys(raw, RIG_BLOCKED_JOB_KEYS, name=name)
+    _positive_int(raw.get("job_id"), name=f"{name}.job_id")
+    if raw.get("conclusion") not in COMPLETED_JOB_CONCLUSIONS:
+        raise RigInputError(f"{name} conclusion is not a completed verdict")
+    _optional_timestamp(raw.get("started_at"), name=f"{name}.started_at")
+    _optional_timestamp(raw.get("completed_at"), name=f"{name}.completed_at")
+    _nonempty_string(raw.get("html_url"), name=f"{name}.html_url")
+    return dict(raw)
+
+
+def _validate_rig_blocked_attempt(  # noqa: PLR0912
+    raw: object,
+    *,
+    index: int,
+    head_branch: str,
+) -> dict[str, Any]:
+    name = f"rig-blocked attempts[{index}]"
+    if not isinstance(raw, dict):
+        raise RigInputError(f"{name} is not an object")
+    _require_exact_keys(raw, RIG_BLOCKED_ATTEMPT_KEYS, name=name)
+    experiment_id = _nonempty_string(raw.get("experiment_id"), name=f"{name}.experiment_id")
+    if not EXPERIMENT_ID_PATTERN.fullmatch(experiment_id):
+        raise RigInputError(f"{name} experiment id is not path-safe")
+    head_sha = _git_sha(raw.get("head_sha"), name=f"{name}.head_sha")
+    if raw.get("head_branch") != head_branch:
+        raise RigInputError(f"{name} branch differs from the receipt branch")
+    controller = _validate_rig_blocked_run(
+        raw.get("controller"),
+        name=f"{name}.controller",
+        keys=RIG_BLOCKED_RUN_KEYS,
+    )
+    if controller["conclusion"] != "success":
+        raise RigInputError(f"{name}.controller did not complete its dispatch")
+    controller_created = _parse_timestamp(controller["created_at"], name="controller.created_at")
+    builders = raw.get("builders")
+    if not isinstance(builders, list) or not builders:
+        raise RigInputError(f"{name} binds no builder run")
+    for builder_index, raw_builder in enumerate(builders):
+        builder_name = f"{name}.builders[{builder_index}]"
+        builder = _validate_rig_blocked_run(
+            raw_builder,
+            name=builder_name,
+            keys=RIG_BLOCKED_BUILDER_KEYS,
+        )
+        if builder["head_sha"] != head_sha:
+            raise RigInputError(f"{builder_name} head SHA differs from its controller dispatch")
+        if _parse_timestamp(builder["created_at"], name="builder.created_at") < controller_created:
+            raise RigInputError(f"{builder_name} predates its controller dispatch")
+        official_jobs = builder.get("official_jobs")
+        if not isinstance(official_jobs, dict) or set(official_jobs) != set(OFFICIAL_JOB_NAMES):
+            raise RigInputError(f"{builder_name} official jobs are missing")
+        for key in OFFICIAL_JOB_NAMES:
+            job = official_jobs[key]
+            if job is None:
+                if key == "combined_receipt":
+                    continue
+                raise RigInputError(f"{builder_name} never ran the official {key} Small domain")
+            _validate_rig_blocked_job(job, name=f"{builder_name}.official_jobs.{key}")
+        if _completed_two_domain_arm(official_jobs):
+            raise RigInputError(
+                f"{experiment_id} completed a two-domain arm run; "
+                "that is A/A data, not dispatch exhaustion"
+            )
+    return dict(raw)
+
+
+def validate_rig_blocked_receipt(raw: object) -> dict[str, Any]:  # noqa: PLR0912, PLR0915
+    """Re-derive every rig-blocked claim from its bound dispatch rows."""
+    if not isinstance(raw, dict) or raw.get("schema_version") != RIG_BLOCKED_SCHEMA_VERSION:
+        raise RigInputError("rig-blocked receipt is missing or invalid")
+    _require_exact_keys(raw, RIG_BLOCKED_RECEIPT_KEYS, name="rig-blocked receipt")
+    unsigned = {key: value for key, value in raw.items() if key != "rig_blocked_receipt_sha256"}
+    if raw.get("rig_blocked_receipt_sha256") != canonical_sha256(unsigned):
+        raise RigInputError("rig-blocked receipt digest does not bind its content")
+    if raw.get("status") != "RIG_BLOCKED" or (
+        raw.get("blocked_reason") != BLOCKED_REASON_DISPATCH_EXHAUSTED
+    ):
+        raise RigInputError("rig-blocked receipt status or reason is invalid")
+    if (
+        raw.get("paid_benchmark_allowed") is not False
+        or raw.get("score_claim_allowed") is not False
+    ):
+        raise RigInputError("rig-blocked receipt cannot authorize paid work or a score claim")
+    repository = _nonempty_string(raw.get("repository"), name="rig-blocked repository")
+    if not GITHUB_REPOSITORY_PATTERN.fullmatch(repository):
+        raise RigInputError("rig-blocked repository is not a GitHub repository")
+    if (
+        raw.get("controller_workflow") != CONTROLLER_WORKFLOW_PATH
+        or raw.get("builder_workflow") != BUILDER_WORKFLOW_PATH
+        or raw.get("builder_arm_id") != DISPATCH_BUILDER_ARM_ID
+        or raw.get("exhaustion_rule") != DISPATCH_EXHAUSTION_RULE
+    ):
+        raise RigInputError("rig-blocked receipt names an unknown workflow contract")
+    if raw.get("required_attempt_count") != EXTENDED_AA_PASS_COUNT:
+        raise RigInputError("rig-blocked receipt required attempt count is invalid")
+    head_branch = _nonempty_string(raw.get("head_branch"), name="rig-blocked head_branch")
+    attempts = raw.get("attempts")
+    if not isinstance(attempts, list):
+        raise RigInputError("rig-blocked attempts is not a list")
+    if raw.get("attempt_count") != len(attempts):
+        raise RigInputError("rig-blocked attempt count does not match its rows")
+    if len(attempts) < EXTENDED_AA_PASS_COUNT:
+        raise RigInputError("rig-blocked receipt holds fewer than five controller dispatches")
+    if raw.get("completed_pass_count") != 0:
+        raise RigInputError("rig-blocked receipt claims a completed pass")
+    rows = [
+        _validate_rig_blocked_attempt(item, index=index, head_branch=head_branch)
+        for index, item in enumerate(attempts)
+    ]
+    experiment_ids = {row["experiment_id"] for row in rows}
+    controller_ids = {row["controller"]["run_id"] for row in rows}
+    builder_ids = [builder["run_id"] for row in rows for builder in row["builders"]]
+    if len(experiment_ids) != len(rows) or len(controller_ids) != len(rows):
+        raise RigInputError("rig-blocked attempts reuse an experiment or controller run")
+    if len(set(builder_ids)) != len(builder_ids):
+        raise RigInputError("rig-blocked attempts reuse a builder run")
+    dispatched = [
+        _parse_timestamp(row["controller"]["created_at"], name="controller.created_at")
+        for row in rows
+    ]
+    if any(later <= earlier for earlier, later in pairwise(dispatched)):
+        raise RigInputError("rig-blocked attempts are not in dispatch order")
+    if raw.get("first_dispatched_at") != rows[0]["controller"]["created_at"] or (
+        raw.get("last_dispatched_at") != rows[-1]["controller"]["created_at"]
+    ):
+        raise RigInputError("rig-blocked dispatch window does not match its rows")
+    head_shas: list[str] = []
+    for row in rows:
+        if row["head_sha"] not in head_shas:
+            head_shas.append(row["head_sha"])
+    if raw.get("head_shas") != head_shas:
+        raise RigInputError("rig-blocked head SHAs do not match its rows")
+    fetched_at = _parse_timestamp(
+        raw.get("ledger_fetched_at"), name="rig-blocked ledger_fetched_at"
+    )
+    updated = [
+        _parse_timestamp(run["updated_at"], name="run.updated_at")
+        for row in rows
+        for run in (row["controller"], *row["builders"])
+    ]
+    if fetched_at < max(updated):
+        raise RigInputError("rig-blocked ledger was fetched before its last run finished")
+    _sha256_digest(raw.get("ledger_sha256"), name="rig-blocked ledger_sha256")
+    return dict(raw)
+
+
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -1828,6 +2361,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     render.add_argument("--preregistration", required=True)
     render.add_argument("--pass", dest="passes", action="append", required=True)
     render.add_argument("--output", required=True)
+
+    rig_blocked = subparsers.add_parser("rig-blocked")
+    rig_blocked.add_argument("--ledger", required=True)
+    rig_blocked.add_argument("--output", required=True)
     return parser.parse_args(argv)
 
 
@@ -1855,6 +2392,8 @@ def main(argv: list[str] | None = None) -> int:
                 load_json(Path(args.preregistration)),
                 [load_json(Path(path)) for path in args.passes],
             )
+        elif args.command == "rig-blocked":
+            payload = build_rig_blocked_receipt(load_json(Path(args.ledger)))
         else:
             raise RuntimeError(f"unknown command {args.command!r}")
     except (OSError, json.JSONDecodeError, RigInputError) as exc:

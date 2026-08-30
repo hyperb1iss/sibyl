@@ -153,6 +153,75 @@ def rebase_aa_authorization(
     return rebased
 
 
+def package_rig_blocked_authorization(
+    receipt_path: Path,
+    *,
+    public_receipt_path: Path | None = None,
+) -> dict[str, Any]:
+    """Project a fully validated dispatch-exhaustion receipt into authority."""
+    source, receipt = _validated_artifact(
+        receipt_path,
+        name="rig-blocked source receipt",
+        validator=rig.validate_rig_blocked_receipt,
+    )
+    validated = build_rig_blocked_authorization(source, receipt)
+    return rebase_rig_blocked_authorization(validated, public_receipt_path=public_receipt_path)
+
+
+def build_rig_blocked_authorization(
+    source: dict[str, Any],
+    receipt: dict[str, Any],
+) -> dict[str, Any]:
+    """Build dispatch-exhaustion authority from an fd-bound physical receipt."""
+
+    receipt = rig.validate_rig_blocked_receipt(receipt)
+    payload = {
+        "schema_version": authorization.RIG_BLOCKED_AUTHORIZATION_SCHEMA_VERSION,
+        "kind": "rig_blocked",
+        "source_receipt": source,
+        "status": receipt["status"],
+        "blocked_reason": receipt["blocked_reason"],
+        "rig_blocked_receipt_sha256": receipt["rig_blocked_receipt_sha256"],
+        "ledger_sha256": receipt["ledger_sha256"],
+        "repository": receipt["repository"],
+        "head_branch": receipt["head_branch"],
+        "head_shas": list(receipt["head_shas"]),
+        "attempt_count": receipt["attempt_count"],
+        "completed_pass_count": receipt["completed_pass_count"],
+        "attempts": [
+            {
+                "experiment_id": item["experiment_id"],
+                "head_sha": item["head_sha"],
+                "controller_run_id": item["controller"]["run_id"],
+                "builder_run_ids": [builder["run_id"] for builder in item["builders"]],
+            }
+            for item in receipt["attempts"]
+        ],
+    }
+    payload["authorization_sha256"] = rig.canonical_sha256(payload)
+    return authorization.require_rig_blocked_authorization(payload)
+
+
+def rebase_rig_blocked_authorization(
+    validated: dict[str, Any],
+    *,
+    public_receipt_path: Path | None,
+) -> dict[str, Any]:
+    """Rebase a physically validated rig-blocked projection to a public path."""
+
+    if public_receipt_path is None:
+        return validated
+    rebased = deepcopy(validated)
+    rebased["source_receipt"]["path"] = _public_path(
+        public_receipt_path,
+        name="rig-blocked source receipt",
+    )
+    rebased["authorization_sha256"] = rig.canonical_sha256(
+        {key: value for key, value in rebased.items() if key != "authorization_sha256"}
+    )
+    return rebased
+
+
 def _package_anchor_gate(
     path: Path,
     preregistration: dict[str, Any],
@@ -353,6 +422,8 @@ def write_authorization(
     """Write a validated authority artifact once, outside paid output roots."""
     if payload.get("kind") == "aa":
         authorization.require_aa_authorization(payload)
+    elif payload.get("kind") == "rig_blocked":
+        authorization.require_rig_blocked_authorization(payload)
     else:
         authorization.require_preregistration_authorization(
             payload,
