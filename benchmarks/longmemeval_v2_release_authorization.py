@@ -24,6 +24,7 @@ RIG_BLOCKED_AUTHORIZATION_KEYS = frozenset(
         "schema_version",
         "kind",
         "source_receipt",
+        "source_ledger",
         "status",
         "blocked_reason",
         "rig_blocked_receipt_sha256",
@@ -232,12 +233,65 @@ def _rig_blocked_attempt_projection(raw: object, *, name: str) -> dict[str, Any]
     }
 
 
+def rig_blocked_projection(
+    source_receipt: dict[str, Any],
+    source_ledger: dict[str, Any],
+    receipt: dict[str, Any],
+) -> dict[str, Any]:
+    """Project one validated rig-blocked receipt into its unsigned authority fields."""
+    return {
+        "schema_version": RIG_BLOCKED_AUTHORIZATION_SCHEMA_VERSION,
+        "kind": "rig_blocked",
+        "source_receipt": dict(source_receipt),
+        "source_ledger": dict(source_ledger),
+        "status": receipt["status"],
+        "blocked_reason": receipt["blocked_reason"],
+        "rig_blocked_receipt_sha256": receipt["rig_blocked_receipt_sha256"],
+        "ledger_sha256": receipt["ledger_sha256"],
+        "ledger_provenance": receipt["ledger_provenance"],
+        "repository": receipt["repository"],
+        "head_branch": receipt["head_branch"],
+        "head_shas": list(receipt["head_shas"]),
+        "attempt_count": receipt["attempt_count"],
+        "completed_pass_count": receipt["completed_pass_count"],
+        "attempts": [
+            {
+                "experiment_id": item["experiment_id"],
+                "head_sha": item["head_sha"],
+                "controller_run_id": item["controller"]["run_id"],
+                "builder_run_ids": [builder["run_id"] for builder in item["builders"]],
+            }
+            for item in receipt["attempts"]
+        ],
+    }
+
+
+def _require_bound_rig_blocked_receipt(
+    source_receipt: dict[str, Any],
+    source_ledger: dict[str, Any],
+) -> dict[str, Any]:
+    """Reload both bound artifacts and prove the receipt derives from the ledger."""
+    receipt = rig.validate_rig_blocked_receipt(load_json(Path(source_receipt["path"])))
+    ledger = load_json(Path(source_ledger["path"]))
+    try:
+        rig.require_receipt_from_ledger(receipt, ledger)
+    except rig.RigInputError as exc:
+        raise StagePlanError(str(exc)) from exc
+    if receipt["ledger_sha256"] != rig.canonical_sha256(ledger):
+        raise StagePlanError("rig-blocked receipt ledger digest differs from its bound ledger")
+    require_artifact(source_receipt, name="rig-blocked source receipt")
+    require_artifact(source_ledger, name="rig-blocked source ledger")
+    return receipt
+
+
 def require_rig_blocked_authorization(raw: object) -> dict[str, Any]:  # noqa: PLR0912
     """Validate one scoreless dispatch-exhaustion authority projection.
 
     The projection stops paid benchmark work. It never feeds a paid stage, so
     unlike A/A authority it carries no stack or arm contract: none of that was
-    observed by a dispatch that produced no completed pass.
+    observed by a dispatch that produced no completed pass. Unlike A/A authority
+    it reloads its bound receipt and ledger: every projected field must equal
+    the projection of the receipt that the ledger actually derives.
     """
     reject_score_bearing_keys(raw, name="rig-blocked authorization")
     if not isinstance(raw, dict):
@@ -255,6 +309,7 @@ def require_rig_blocked_authorization(raw: object) -> dict[str, Any]:  # noqa: P
     if raw.get("ledger_provenance") != rig.LEDGER_PROVENANCE_VERIFIED:
         raise StagePlanError("rig-blocked authorization requires a GitHub-verified ledger")
     source = require_artifact(raw.get("source_receipt"), name="rig-blocked source receipt")
+    source_ledger = require_artifact(raw.get("source_ledger"), name="rig-blocked source ledger")
     receipt_digest = rig._sha256_digest(
         raw.get("rig_blocked_receipt_sha256"),
         name="rig-blocked authorization receipt digest",
@@ -301,9 +356,16 @@ def require_rig_blocked_authorization(raw: object) -> dict[str, Any]:  # noqa: P
         field="authorization_sha256",
         name="rig-blocked authorization",
     )
+    receipt = _require_bound_rig_blocked_receipt(source, source_ledger)
+    if receipt["ledger_provenance"] != rig.LEDGER_PROVENANCE_VERIFIED:
+        raise StagePlanError("rig-blocked authorization requires a GitHub-verified ledger")
+    unsigned = {key: value for key, value in raw.items() if key != "authorization_sha256"}
+    if unsigned != rig_blocked_projection(source, source_ledger, receipt):
+        raise StagePlanError("rig-blocked authorization differs from its bound receipt")
     return {
         **raw,
         "source_receipt": source,
+        "source_ledger": source_ledger,
         "rig_blocked_receipt_sha256": receipt_digest,
         "ledger_sha256": ledger_digest,
         "repository": repository,

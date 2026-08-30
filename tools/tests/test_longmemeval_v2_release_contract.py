@@ -30,7 +30,7 @@ from tools.tests.longmemeval_v2_release_support import (
     race_spec,
     render_spec,
 )
-from tools.tests.test_longmemeval_v2_rig import _dispatch_ledger, _github_stub
+from tools.tests.test_longmemeval_v2_rig import _dispatch_attempt, _dispatch_ledger, _github_stub
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MAX_CAP_HEADROOM_USD = 0.15
@@ -648,34 +648,61 @@ def _verified_receipt(ledger: dict[str, Any]) -> dict[str, Any]:
     return rig.build_rig_blocked_receipt(ledger, verification=verification)
 
 
+def _write(path: Path, payload: dict[str, Any]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+def _resealed_receipt(receipt: dict[str, Any], **changes: Any) -> dict[str, Any]:
+    tampered = {**receipt, **changes}
+    unsigned = {k: v for k, v in tampered.items() if k != "rig_blocked_receipt_sha256"}
+    tampered["rig_blocked_receipt_sha256"] = rig.canonical_sha256(unsigned)
+    return tampered
+
+
+def _resealed_authorization(projected: dict[str, Any], **changes: Any) -> dict[str, Any]:
+    tampered = {**projected, **changes}
+    unsigned = {k: v for k, v in tampered.items() if k != "authorization_sha256"}
+    tampered["authorization_sha256"] = rig.canonical_sha256(unsigned)
+    return tampered
+
+
+def _packaged(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], Path, Path, dict[str, Any]]:
+    ledger = _dispatch_ledger()
+    receipt = _verified_receipt(ledger)
+    receipt_path = _write(tmp_path / "rig-blocked-receipt.json", receipt)
+    ledger_path = _write(tmp_path / "dispatch-ledger.json", ledger)
+    projected = authorization_package.package_rig_blocked_authorization(
+        receipt_path, ledger_path=ledger_path
+    )
+    return ledger, receipt, receipt_path, ledger_path, projected
+
+
 def test_rig_blocked_authorization_rejects_an_unverified_ledger(tmp_path: Path) -> None:
     ledger = _dispatch_ledger()
     receipt = rig.build_rig_blocked_receipt(ledger)
     assert receipt["ledger_provenance"] == rig.LEDGER_PROVENANCE_UNVERIFIED
-    receipt_path = tmp_path / "rig-blocked-receipt.json"
-    receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    receipt_path = _write(tmp_path / "rig-blocked-receipt.json", receipt)
+    ledger_path = _write(tmp_path / "dispatch-ledger.json", ledger)
 
     with pytest.raises(inputs.StagePlanError, match="requires a GitHub-verified ledger"):
-        authorization_package.package_rig_blocked_authorization(receipt_path)
+        authorization_package.package_rig_blocked_authorization(
+            receipt_path, ledger_path=ledger_path
+        )
 
-    verified = _verified_receipt(ledger)
-    receipt_path.write_text(json.dumps(verified, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    projected = authorization_package.package_rig_blocked_authorization(receipt_path)
+    _write(receipt_path, _verified_receipt(ledger))
+    projected = authorization_package.package_rig_blocked_authorization(
+        receipt_path, ledger_path=ledger_path
+    )
     assert projected["ledger_provenance"] == rig.LEDGER_PROVENANCE_VERIFIED
-    forged = {**projected, "ledger_provenance": rig.LEDGER_PROVENANCE_UNVERIFIED}
-    unsigned = {key: value for key, value in forged.items() if key != "authorization_sha256"}
-    forged["authorization_sha256"] = rig.canonical_sha256(unsigned)
+    forged = _resealed_authorization(projected, ledger_provenance=rig.LEDGER_PROVENANCE_UNVERIFIED)
     with pytest.raises(inputs.StagePlanError, match="requires a GitHub-verified ledger"):
         authorization.require_rig_blocked_authorization(forged)
 
 
 def test_rig_blocked_authorization_projects_exhausted_dispatches(tmp_path: Path) -> None:
-    ledger = _dispatch_ledger()
-    receipt = _verified_receipt(ledger)
-    receipt_path = tmp_path / "rig-blocked-receipt.json"
-    receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-    projected = authorization_package.package_rig_blocked_authorization(receipt_path)
+    ledger, receipt, receipt_path, ledger_path, projected = _packaged(tmp_path)
 
     assert projected["kind"] == "rig_blocked"
     assert projected["status"] == "RIG_BLOCKED"
@@ -683,6 +710,7 @@ def test_rig_blocked_authorization_projects_exhausted_dispatches(tmp_path: Path)
     assert projected["rig_blocked_receipt_sha256"] == receipt["rig_blocked_receipt_sha256"]
     assert projected["ledger_sha256"] == rig.canonical_sha256(ledger)
     assert projected["source_receipt"]["path"] == str(receipt_path.resolve())
+    assert projected["source_ledger"]["path"] == str(ledger_path.resolve())
     assert projected["attempt_count"] == rig.EXTENDED_AA_PASS_COUNT
     assert projected["completed_pass_count"] == 0
     assert [item["controller_run_id"] for item in projected["attempts"]] == [
@@ -693,12 +721,19 @@ def test_rig_blocked_authorization_projects_exhausted_dispatches(tmp_path: Path)
     assert authorization.require_rig_blocked_authorization(projected) == projected
 
     public_path = tmp_path / "public" / "rig-blocked-receipt.json"
+    public_ledger = tmp_path / "public" / "dispatch-ledger.json"
     rebased = authorization_package.rebase_rig_blocked_authorization(
         projected,
         public_receipt_path=public_path.resolve(),
+        public_ledger_path=public_ledger.resolve(),
     )
     assert rebased["source_receipt"]["path"] == str(public_path.resolve())
+    assert rebased["source_ledger"]["path"] == str(public_ledger.resolve())
     assert rebased["authorization_sha256"] != projected["authorization_sha256"]
+    with pytest.raises(inputs.StagePlanError, match="paths are incomplete"):
+        authorization_package.rebase_rig_blocked_authorization(
+            projected, public_receipt_path=public_path.resolve(), public_ledger_path=None
+        )
 
     output = tmp_path / "authority" / "rig-blocked-authorization.json"
     authorization_package.write_authorization(
@@ -722,30 +757,110 @@ def test_rig_blocked_authorization_projects_exhausted_dispatches(tmp_path: Path)
 def test_rig_blocked_authorization_rejects_completed_pass_and_short_ledgers(
     tmp_path: Path,
 ) -> None:
-    receipt = _verified_receipt(_dispatch_ledger())
-    receipt_path = tmp_path / "rig-blocked-receipt.json"
-    receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    source = inputs.bind_artifact(receipt_path, name="rig-blocked source receipt")
-    projected = authorization_package.build_rig_blocked_authorization(source, receipt)
-
-    def resealed(**changes: Any) -> dict[str, Any]:
-        tampered = {**projected, **changes}
-        unsigned = {key: value for key, value in tampered.items() if key != "authorization_sha256"}
-        tampered["authorization_sha256"] = rig.canonical_sha256(unsigned)
-        return tampered
+    _ledger, _receipt, _receipt_path, _ledger_path, projected = _packaged(tmp_path)
 
     with pytest.raises(inputs.StagePlanError, match="claims a completed pass"):
-        authorization.require_rig_blocked_authorization(resealed(completed_pass_count=1))
+        authorization.require_rig_blocked_authorization(
+            _resealed_authorization(projected, completed_pass_count=1)
+        )
     with pytest.raises(inputs.StagePlanError, match="fewer than five dispatches"):
         authorization.require_rig_blocked_authorization(
-            resealed(attempt_count=4, attempts=projected["attempts"][:4])
+            _resealed_authorization(projected, attempt_count=4, attempts=projected["attempts"][:4])
         )
     with pytest.raises(inputs.StagePlanError, match="head SHAs differ from its attempts"):
-        authorization.require_rig_blocked_authorization(resealed(head_shas=["9" * 40]))
+        authorization.require_rig_blocked_authorization(
+            _resealed_authorization(projected, head_shas=["9" * 40])
+        )
     with pytest.raises(inputs.StagePlanError, match="score-bearing"):
         authorization.require_rig_blocked_authorization(
-            resealed(attempts=[{**projected["attempts"][0], "accuracy": 0.5}])
+            _resealed_authorization(
+                projected, attempts=[{**projected["attempts"][0], "accuracy": 0.5}]
+            )
         )
+
+
+def test_rig_blocked_packaging_rejects_a_receipt_citing_another_ledger(tmp_path: Path) -> None:
+    _ledger, receipt, receipt_path, ledger_path, _projected = _packaged(tmp_path)
+
+    # Codex probe: a resealed receipt whose ledger digest names a ledger that
+    # holds a successful two-domain pass must not package as RIG_BLOCKED.
+    passing = _dispatch_ledger(
+        [
+            *[_dispatch_attempt(index) for index in range(4)],
+            _dispatch_attempt(
+                4,
+                domain_conclusions={"enterprise": "success", "web": "success"},
+                combined_conclusion="success",
+            ),
+        ]
+    )
+    passing_path = _write(tmp_path / "passing-ledger.json", passing)
+    citing = _resealed_receipt(receipt, ledger_sha256=rig.canonical_sha256(passing))
+    assert rig.validate_rig_blocked_receipt(citing) == citing
+    citing_path = _write(tmp_path / "citing-receipt.json", citing)
+    with pytest.raises(rig.RigInputError, match="A/A data, not dispatch exhaustion"):
+        authorization_package.package_rig_blocked_authorization(
+            citing_path, ledger_path=passing_path
+        )
+    with pytest.raises(inputs.StagePlanError, match="not derived from its bound ledger"):
+        authorization_package.package_rig_blocked_authorization(
+            citing_path, ledger_path=ledger_path
+        )
+
+    # A real ledger digest mismatch against the genuine ledger.
+    wrong_digest = _resealed_receipt(receipt, ledger_sha256=f"sha256:{'f' * 64}")
+    wrong_path = _write(tmp_path / "wrong-digest-receipt.json", wrong_digest)
+    with pytest.raises(inputs.StagePlanError, match="not derived from its bound ledger"):
+        authorization_package.package_rig_blocked_authorization(wrong_path, ledger_path=ledger_path)
+
+    # A different valid ledger than the one the receipt was sealed from.
+    other = _dispatch_ledger([_dispatch_attempt(index, head_sha="e" * 40) for index in range(5)])
+    other_path = _write(tmp_path / "other-ledger.json", other)
+    with pytest.raises(inputs.StagePlanError, match="not derived from its bound ledger"):
+        authorization_package.package_rig_blocked_authorization(
+            receipt_path, ledger_path=other_path
+        )
+
+
+def test_rig_blocked_authorization_rejects_projection_drift_from_its_receipt(
+    tmp_path: Path,
+) -> None:
+    _ledger, _receipt, _receipt_path, ledger_path, projected = _packaged(tmp_path)
+    assert authorization.require_rig_blocked_authorization(projected) == projected
+
+    # Codex probe: keep the genuine source receipt, change projected fields.
+    drifted = [
+        _resealed_authorization(projected, ledger_sha256=f"sha256:{'e' * 64}"),
+        _resealed_authorization(
+            projected,
+            attempts=[
+                {**projected["attempts"][0], "builder_run_ids": [9999]},
+                *projected["attempts"][1:],
+            ],
+        ),
+        _resealed_authorization(
+            projected,
+            attempts=[{**item, "head_sha": "9" * 40} for item in projected["attempts"]],
+            head_shas=["9" * 40],
+        ),
+    ]
+    for tampered in drifted:
+        with pytest.raises(inputs.StagePlanError, match="differs from its bound receipt"):
+            authorization.require_rig_blocked_authorization(tampered)
+    with pytest.raises(inputs.StagePlanError, match="trusted release repository"):
+        authorization.require_rig_blocked_authorization(
+            _resealed_authorization(projected, repository="someone/else")
+        )
+
+    # The bound ledger on disk is swapped for one that does not derive the receipt.
+    other = _dispatch_ledger([_dispatch_attempt(index, head_sha="e" * 40) for index in range(5)])
+    _write(ledger_path, other)
+    swapped = _resealed_authorization(
+        projected,
+        source_ledger=inputs.bind_artifact(ledger_path, name="rig-blocked source ledger"),
+    )
+    with pytest.raises(inputs.StagePlanError, match="not derived from its bound ledger"):
+        authorization.require_rig_blocked_authorization(swapped)
 
 
 RELEASE_RESULTS = REPO_ROOT / "benchmarks" / "results" / "longmemeval-v2-release"
@@ -759,18 +874,15 @@ def test_committed_v1_3_rig_blocked_receipt_is_bound_to_its_ledger() -> None:
     ledger = inputs.load_json(V1_3_DISPATCH_LEDGER)
     committed = inputs.load_json(V1_3_RIG_BLOCKED_RECEIPT)
 
-    rebuilt = rig.build_rig_blocked_receipt(ledger)
-    derived = {"ledger_provenance", "github_verification", "rig_blocked_receipt_sha256"}
-    assert {k: v for k, v in rebuilt.items() if k not in derived} == {
-        k: v for k, v in committed.items() if k not in derived
-    }
+    rig.require_receipt_from_ledger(committed, ledger)
     assert rig.validate_rig_blocked_receipt(committed) == committed
     assert committed["ledger_provenance"] == rig.LEDGER_PROVENANCE_VERIFIED
     assert committed["blocked_reason"] == rig.BLOCKED_REASON_DISPATCH_EXHAUSTED
     assert committed["paid_benchmark_allowed"] is False
     assert committed["score_claim_allowed"] is False
     assert committed["completed_pass_count"] == 0
-    assert committed["head_branch"] == "main"
+    assert committed["head_branch"] == rig.TRUSTED_BRANCH
+    assert committed["repository"] == rig.TRUSTED_REPOSITORY
     assert [item["controller"]["run_id"] for item in committed["attempts"]] == (
         V1_3_CONTROLLER_RUN_IDS
     )
@@ -778,7 +890,10 @@ def test_committed_v1_3_rig_blocked_receipt_is_bound_to_its_ledger() -> None:
         builder["run_id"] for item in committed["attempts"] for builder in item["builders"]
     ] == V1_3_BUILDER_RUN_IDS
 
-    projected = authorization_package.package_rig_blocked_authorization(V1_3_RIG_BLOCKED_RECEIPT)
+    projected = authorization_package.package_rig_blocked_authorization(
+        V1_3_RIG_BLOCKED_RECEIPT, ledger_path=V1_3_DISPATCH_LEDGER
+    )
     assert projected["rig_blocked_receipt_sha256"] == committed["rig_blocked_receipt_sha256"]
     assert projected["ledger_sha256"] == rig.canonical_sha256(ledger)
+    assert projected["source_ledger"]["sha256"]
     assert projected["attempt_count"] == rig.EXTENDED_AA_PASS_COUNT

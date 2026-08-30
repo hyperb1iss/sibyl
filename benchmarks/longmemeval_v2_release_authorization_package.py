@@ -156,51 +156,56 @@ def rebase_aa_authorization(
 def package_rig_blocked_authorization(
     receipt_path: Path,
     *,
+    ledger_path: Path,
     public_receipt_path: Path | None = None,
+    public_ledger_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Project a fully validated dispatch-exhaustion receipt into authority."""
+    """Project a dispatch-exhaustion receipt and the ledger it derives from into authority."""
     source, receipt = _validated_artifact(
         receipt_path,
         name="rig-blocked source receipt",
         validator=rig.validate_rig_blocked_receipt,
     )
-    validated = build_rig_blocked_authorization(source, receipt)
-    return rebase_rig_blocked_authorization(validated, public_receipt_path=public_receipt_path)
+    source_ledger, ledger = _validated_artifact(
+        ledger_path,
+        name="rig-blocked source ledger",
+        validator=rig.require_dispatch_ledger,
+    )
+    validated = build_rig_blocked_authorization(
+        source,
+        receipt,
+        source_ledger=source_ledger,
+        ledger=ledger,
+    )
+    return rebase_rig_blocked_authorization(
+        validated,
+        public_receipt_path=public_receipt_path,
+        public_ledger_path=public_ledger_path,
+    )
 
 
 def build_rig_blocked_authorization(
     source: dict[str, Any],
     receipt: dict[str, Any],
+    *,
+    source_ledger: dict[str, Any],
+    ledger: dict[str, Any],
 ) -> dict[str, Any]:
-    """Build dispatch-exhaustion authority from an fd-bound physical receipt."""
+    """Build dispatch-exhaustion authority from fd-bound receipt and ledger bytes.
+
+    The receipt is rebuilt from the ledger and must match it field for field
+    outside the provenance block, so a receipt cannot cite a ledger it was not
+    sealed from.
+    """
 
     receipt = rig.validate_rig_blocked_receipt(receipt)
     if receipt["ledger_provenance"] != rig.LEDGER_PROVENANCE_VERIFIED:
         raise StagePlanError("rig-blocked authorization requires a GitHub-verified ledger")
-    payload = {
-        "schema_version": authorization.RIG_BLOCKED_AUTHORIZATION_SCHEMA_VERSION,
-        "kind": "rig_blocked",
-        "source_receipt": source,
-        "status": receipt["status"],
-        "blocked_reason": receipt["blocked_reason"],
-        "rig_blocked_receipt_sha256": receipt["rig_blocked_receipt_sha256"],
-        "ledger_sha256": receipt["ledger_sha256"],
-        "ledger_provenance": receipt["ledger_provenance"],
-        "repository": receipt["repository"],
-        "head_branch": receipt["head_branch"],
-        "head_shas": list(receipt["head_shas"]),
-        "attempt_count": receipt["attempt_count"],
-        "completed_pass_count": receipt["completed_pass_count"],
-        "attempts": [
-            {
-                "experiment_id": item["experiment_id"],
-                "head_sha": item["head_sha"],
-                "controller_run_id": item["controller"]["run_id"],
-                "builder_run_ids": [builder["run_id"] for builder in item["builders"]],
-            }
-            for item in receipt["attempts"]
-        ],
-    }
+    try:
+        rig.require_receipt_from_ledger(receipt, ledger)
+    except rig.RigInputError as exc:
+        raise StagePlanError(str(exc)) from exc
+    payload = authorization.rig_blocked_projection(source, source_ledger, receipt)
     payload["authorization_sha256"] = rig.canonical_sha256(payload)
     return authorization.require_rig_blocked_authorization(payload)
 
@@ -209,15 +214,22 @@ def rebase_rig_blocked_authorization(
     validated: dict[str, Any],
     *,
     public_receipt_path: Path | None,
+    public_ledger_path: Path | None,
 ) -> dict[str, Any]:
-    """Rebase a physically validated rig-blocked projection to a public path."""
+    """Rebase a physically validated rig-blocked projection to public paths."""
 
-    if public_receipt_path is None:
+    if public_receipt_path is None and public_ledger_path is None:
         return validated
+    if public_receipt_path is None or public_ledger_path is None:
+        raise StagePlanError("rig-blocked public authorization paths are incomplete")
     rebased = deepcopy(validated)
     rebased["source_receipt"]["path"] = _public_path(
         public_receipt_path,
         name="rig-blocked source receipt",
+    )
+    rebased["source_ledger"]["path"] = _public_path(
+        public_ledger_path,
+        name="rig-blocked source ledger",
     )
     rebased["authorization_sha256"] = rig.canonical_sha256(
         {key: value for key, value in rebased.items() if key != "authorization_sha256"}

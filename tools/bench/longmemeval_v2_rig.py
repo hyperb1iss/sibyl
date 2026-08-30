@@ -2172,6 +2172,30 @@ def validate_dispatch_ledger(ledger: object) -> list[dict[str, Any]]:
     return attempts
 
 
+def require_dispatch_ledger(raw: object) -> dict[str, Any]:
+    """Validate one dispatch ledger and return it unchanged."""
+    validate_dispatch_ledger(raw)
+    assert isinstance(raw, dict)
+    return dict(raw)
+
+
+RECEIPT_PROVENANCE_KEYS = frozenset(
+    {"ledger_provenance", "github_verification", "rig_blocked_receipt_sha256"}
+)
+
+
+def receipt_derivation(receipt: dict[str, Any]) -> dict[str, Any]:
+    """The part of a rig-blocked receipt that a ledger alone determines."""
+    return {key: value for key, value in receipt.items() if key not in RECEIPT_PROVENANCE_KEYS}
+
+
+def require_receipt_from_ledger(receipt: dict[str, Any], ledger: dict[str, Any]) -> None:
+    """Rebuild the receipt from the ledger and require the derived content to match."""
+    rebuilt = build_rig_blocked_receipt(ledger)
+    if receipt_derivation(rebuilt) != receipt_derivation(receipt):
+        raise RigInputError("rig-blocked receipt is not derived from its bound ledger")
+
+
 def gh_api_fetch(endpoint: str) -> list[Any]:
     """Fetch every page of one GitHub REST endpoint through the authenticated gh CLI."""
     completed = subprocess.run(  # noqa: S603
