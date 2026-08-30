@@ -1,5 +1,8 @@
 # Sibyl 1.3 release status
 
+Superseded by [SIBYL_1_3_RELEASE_STATUS_2026-08-29.md](SIBYL_1_3_RELEASE_STATUS_2026-08-29.md); the
+body below is retained as written on 2026-08-26.
+
 - Snapshot date: 2026-08-26
 - Release state: hold
 - Main commit: `7f31a330c0d9a25180a98a4332423b811d18c117`
