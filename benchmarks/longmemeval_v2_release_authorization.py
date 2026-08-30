@@ -269,29 +269,42 @@ def rig_blocked_projection(
 def _require_bound_rig_blocked_receipt(
     source_receipt: dict[str, Any],
     source_ledger: dict[str, Any],
+    *,
+    fetch: rig.GitHubFetch,
 ) -> dict[str, Any]:
-    """Reload both bound artifacts and prove the receipt derives from the ledger."""
+    """Reload both bound artifacts, prove derivation, and re-verify the ledger live.
+
+    The receipt's provenance label is a record of when the ledger last matched
+    GitHub; the evidence is this re-fetch. A fetch failure or any field drift
+    fails closed.
+    """
     receipt = rig.validate_rig_blocked_receipt(load_json(Path(source_receipt["path"])))
     ledger = load_json(Path(source_ledger["path"]))
     try:
         rig.require_receipt_from_ledger(receipt, ledger)
+        if receipt["ledger_sha256"] != rig.canonical_sha256(ledger):
+            raise StagePlanError("rig-blocked receipt ledger digest differs from its bound ledger")
+        rig.verify_dispatch_ledger(ledger, fetch=fetch)
     except rig.RigInputError as exc:
         raise StagePlanError(str(exc)) from exc
-    if receipt["ledger_sha256"] != rig.canonical_sha256(ledger):
-        raise StagePlanError("rig-blocked receipt ledger digest differs from its bound ledger")
     require_artifact(source_receipt, name="rig-blocked source receipt")
     require_artifact(source_ledger, name="rig-blocked source ledger")
     return receipt
 
 
-def require_rig_blocked_authorization(raw: object) -> dict[str, Any]:  # noqa: PLR0912
+def require_rig_blocked_authorization(  # noqa: PLR0912
+    raw: object,
+    *,
+    fetch: rig.GitHubFetch,
+) -> dict[str, Any]:
     """Validate one scoreless dispatch-exhaustion authority projection.
 
     The projection stops paid benchmark work. It never feeds a paid stage, so
     unlike A/A authority it carries no stack or arm contract: none of that was
     observed by a dispatch that produced no completed pass. Unlike A/A authority
     it reloads its bound receipt and ledger: every projected field must equal
-    the projection of the receipt that the ledger actually derives.
+    the projection of the receipt that the ledger actually derives, and the
+    ledger is re-verified against GitHub through ``fetch`` on every validation.
     """
     reject_score_bearing_keys(raw, name="rig-blocked authorization")
     if not isinstance(raw, dict):
@@ -356,7 +369,7 @@ def require_rig_blocked_authorization(raw: object) -> dict[str, Any]:  # noqa: P
         field="authorization_sha256",
         name="rig-blocked authorization",
     )
-    receipt = _require_bound_rig_blocked_receipt(source, source_ledger)
+    receipt = _require_bound_rig_blocked_receipt(source, source_ledger, fetch=fetch)
     if receipt["ledger_provenance"] != rig.LEDGER_PROVENANCE_VERIFIED:
         raise StagePlanError("rig-blocked authorization requires a GitHub-verified ledger")
     unsigned = {key: value for key, value in raw.items() if key != "authorization_sha256"}

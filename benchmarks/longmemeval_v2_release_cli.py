@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from benchmarks import longmemeval_v2_release_authorization_package as authorization_package
+from benchmarks import longmemeval_v2_release_io as release_io
 from benchmarks import longmemeval_v2_release_official_publication as official_publication
 from benchmarks import longmemeval_v2_release_package as release_package
 from benchmarks import longmemeval_v2_release_package_object as package_object
@@ -17,6 +19,7 @@ from benchmarks import longmemeval_v2_release_runner as release_runner
 from benchmarks.longmemeval_v2_release_contract import MAX_WORKERS_CAP
 from benchmarks.longmemeval_v2_release_handoff import require_executed_stage
 from benchmarks.longmemeval_v2_release_inputs import StagePlanError, load_json
+from tools.bench import longmemeval_v2_rig as rig
 
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM_DESCRIPTION = ROOT / "benchmarks" / "longmemeval_v2_release_assets" / "SYSTEM_DESCRIPTION.md"
@@ -109,9 +112,16 @@ def _add_package_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--preregistration-template")
 
 
+def _add_rig_blocked_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--receipt", required=True)
+    parser.add_argument("--ledger", required=True)
+    parser.add_argument("--output", required=True)
+
+
 def add_release_arguments(subparsers: Any) -> None:
     """Register the isolated v1.3 release commands on the benchmark CLI."""
 
+    _add_rig_blocked_arguments(subparsers.add_parser("release-rig-blocked-authority"))
     _add_plan_arguments(subparsers.add_parser("release-plan"))
     _add_run_arguments(subparsers.add_parser("release-run"))
     _add_arm_package_arguments(subparsers.add_parser("release-arm-package"))
@@ -192,6 +202,20 @@ def _verify(args: argparse.Namespace) -> dict[str, Any]:
     return release_package.require_packaged_stage(_supported_plan(_path(args.plan)))
 
 
+def _rig_blocked_authority(args: argparse.Namespace) -> dict[str, Any]:
+    """Project the rig-blocked receipt into authority after re-verifying it on GitHub."""
+    payload = authorization_package.package_rig_blocked_authorization(
+        _path(args.receipt),
+        ledger_path=_path(args.ledger),
+        fetch=rig.gh_api_fetch,
+    )
+    try:
+        release_io.write_json_once_atomic(_path(args.output), payload)
+    except FileExistsError as exc:
+        raise StagePlanError("rig-blocked authority output already exists") from exc
+    return payload
+
+
 def run_release_cli_command(args: argparse.Namespace) -> int:
     """Run exactly the named release phase and print its canonical receipt."""
 
@@ -201,6 +225,7 @@ def run_release_cli_command(args: argparse.Namespace) -> int:
         "release-arm-package": _package_arm,
         "release-package": _package,
         "release-verify": _verify,
+        "release-rig-blocked-authority": _rig_blocked_authority,
     }
     try:
         handler = handlers[args.command]

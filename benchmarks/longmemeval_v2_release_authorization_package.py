@@ -157,10 +157,15 @@ def package_rig_blocked_authorization(
     receipt_path: Path,
     *,
     ledger_path: Path,
+    fetch: rig.GitHubFetch,
     public_receipt_path: Path | None = None,
     public_ledger_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Project a dispatch-exhaustion receipt and the ledger it derives from into authority."""
+    """Project a dispatch-exhaustion receipt and the ledger it derives from into authority.
+
+    ``fetch`` re-verifies the bound ledger against GitHub; there is no default
+    because an unverified projection is not authority.
+    """
     source, receipt = _validated_artifact(
         receipt_path,
         name="rig-blocked source receipt",
@@ -176,6 +181,7 @@ def package_rig_blocked_authorization(
         receipt,
         source_ledger=source_ledger,
         ledger=ledger,
+        fetch=fetch,
     )
     return rebase_rig_blocked_authorization(
         validated,
@@ -190,12 +196,13 @@ def build_rig_blocked_authorization(
     *,
     source_ledger: dict[str, Any],
     ledger: dict[str, Any],
+    fetch: rig.GitHubFetch,
 ) -> dict[str, Any]:
     """Build dispatch-exhaustion authority from fd-bound receipt and ledger bytes.
 
     The receipt is rebuilt from the ledger and must match it field for field
-    outside the provenance block, so a receipt cannot cite a ledger it was not
-    sealed from.
+    outside the provenance block, and the ledger is re-verified against GitHub
+    through ``fetch`` before the projection is accepted.
     """
 
     receipt = rig.validate_rig_blocked_receipt(receipt)
@@ -207,7 +214,7 @@ def build_rig_blocked_authorization(
         raise StagePlanError(str(exc)) from exc
     payload = authorization.rig_blocked_projection(source, source_ledger, receipt)
     payload["authorization_sha256"] = rig.canonical_sha256(payload)
-    return authorization.require_rig_blocked_authorization(payload)
+    return authorization.require_rig_blocked_authorization(payload, fetch=fetch)
 
 
 def rebase_rig_blocked_authorization(
@@ -433,12 +440,19 @@ def write_authorization(
     payload: dict[str, Any],
     *,
     paid_output_root: Path,
+    fetch: rig.GitHubFetch | None = None,
 ) -> None:
-    """Write a validated authority artifact once, outside paid output roots."""
+    """Write a validated authority artifact once, outside paid output roots.
+
+    A rig-blocked authority needs ``fetch`` so it can be re-verified against
+    GitHub before it is written; the other kinds never touch the network.
+    """
     if payload.get("kind") == "aa":
         authorization.require_aa_authorization(payload)
     elif payload.get("kind") == "rig_blocked":
-        authorization.require_rig_blocked_authorization(payload)
+        if fetch is None:
+            raise StagePlanError("rig-blocked authorization needs a GitHub fetcher")
+        authorization.require_rig_blocked_authorization(payload, fetch=fetch)
     else:
         authorization.require_preregistration_authorization(
             payload,

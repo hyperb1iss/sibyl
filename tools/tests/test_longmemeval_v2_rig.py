@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
@@ -1535,8 +1536,13 @@ class _GitHubStub:
             return [{"total_count": len(self.listing), "workflow_runs": self.listing}]
         if endpoint.endswith("/jobs?per_page=100"):
             run_id = int(endpoint.rsplit("/", 2)[-2])
+            if run_id not in self.jobs:
+                raise rig.RigInputError(f"gh api {endpoint} failed: HTTP 404")
             return [{"total_count": len(self.jobs[run_id]), "jobs": self.jobs[run_id]}]
-        return [self.runs[int(endpoint.rsplit("/", 1)[-1])]]
+        run_id = int(endpoint.rsplit("/", 1)[-1])
+        if run_id not in self.runs:
+            raise rig.RigInputError(f"gh api {endpoint} failed: HTTP 404")
+        return [self.runs[run_id]]
 
 
 def _github_stub(
@@ -1562,16 +1568,17 @@ def test_rig_blocked_receipt_verifies_every_run_and_job_against_github(
     ledger = _dispatch_ledger()
     fetch = _github_stub(ledger)
 
-    verification = rig.verify_dispatch_ledger(ledger, fetch=fetch)
+    receipt = rig.build_verified_rig_blocked_receipt(ledger, fetch=fetch)
 
-    assert verification["ledger_provenance"] == rig.LEDGER_PROVENANCE_VERIFIED
-    assert verification["github_verification"]["run_count"] == 2 * rig.EXTENDED_AA_PASS_COUNT
-    assert verification["github_verification"]["job_count"] == 3 * rig.EXTENDED_AA_PASS_COUNT
-    assert len(fetch.calls) == 4 * rig.EXTENDED_AA_PASS_COUNT
-    receipt = rig.build_rig_blocked_receipt(ledger, verification=verification)
     assert receipt["ledger_provenance"] == rig.LEDGER_PROVENANCE_VERIFIED
-    assert receipt["github_verification"] == verification["github_verification"]
+    assert receipt["github_verification"]["run_count"] == 2 * rig.EXTENDED_AA_PASS_COUNT
+    assert receipt["github_verification"]["job_count"] == 3 * rig.EXTENDED_AA_PASS_COUNT
+    assert len(fetch.calls) == 4 * rig.EXTENDED_AA_PASS_COUNT
     assert rig.validate_rig_blocked_receipt(receipt) == receipt
+    assert rig.receipt_derivation(receipt) == rig.receipt_derivation(
+        rig.build_rig_blocked_receipt(ledger)
+    )
+    assert "verification" not in inspect.signature(rig.build_rig_blocked_receipt).parameters
 
     monkeypatch.setattr(rig, "gh_api_fetch", _github_stub(ledger))
     ledger_path = tmp_path / "ledger.json"
@@ -1587,6 +1594,16 @@ def test_rig_blocked_receipt_verifies_every_run_and_job_against_github(
     assert json.loads(output.read_text(encoding="utf-8"))["ledger_provenance"] == (
         rig.LEDGER_PROVENANCE_UNVERIFIED
     )
+
+
+def test_rig_blocked_verified_seal_fails_closed_on_fetch_failure() -> None:
+    ledger = _dispatch_ledger()
+
+    def broken(endpoint: str) -> list[Any]:
+        raise rig.RigInputError(f"gh api {endpoint} failed: HTTP 504")
+
+    with pytest.raises(rig.RigInputError, match="HTTP 504"):
+        rig.build_verified_rig_blocked_receipt(ledger, fetch=broken)
 
 
 @pytest.mark.parametrize(

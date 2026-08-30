@@ -5,6 +5,7 @@ import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
+from copy import deepcopy
 from pathlib import Path
 from threading import Barrier
 from typing import Any
@@ -644,8 +645,7 @@ def test_paid_stages_require_exact_preregistered_arm_contracts(
 
 
 def _verified_receipt(ledger: dict[str, Any]) -> dict[str, Any]:
-    verification = rig.verify_dispatch_ledger(ledger, fetch=_github_stub(ledger))
-    return rig.build_rig_blocked_receipt(ledger, verification=verification)
+    return rig.build_verified_rig_blocked_receipt(ledger, fetch=_github_stub(ledger))
 
 
 def _write(path: Path, payload: dict[str, Any]) -> Path:
@@ -668,19 +668,48 @@ def _resealed_authorization(projected: dict[str, Any], **changes: Any) -> dict[s
     return tampered
 
 
-def _packaged(tmp_path: Path) -> tuple[dict[str, Any], dict[str, Any], Path, Path, dict[str, Any]]:
-    ledger = _dispatch_ledger()
-    receipt = _verified_receipt(ledger)
-    receipt_path = _write(tmp_path / "rig-blocked-receipt.json", receipt)
-    ledger_path = _write(tmp_path / "dispatch-ledger.json", ledger)
-    projected = authorization_package.package_rig_blocked_authorization(
-        receipt_path, ledger_path=ledger_path
-    )
-    return ledger, receipt, receipt_path, ledger_path, projected
+def _remap_run_ids(ledger: dict[str, Any], offset: int) -> dict[str, Any]:
+    """Invent a self-consistent ledger whose runs and jobs GitHub has never seen."""
+    forged = deepcopy(ledger)
+    for attempt in forged["attempts"]:
+        controller = attempt["controller"]
+        controller["id"] += offset
+        controller["html_url"] = (
+            f"https://github.com/{controller['repository']}/actions/runs/{controller['id']}"
+        )
+        for builder in attempt["builders"]:
+            builder["id"] += offset
+            builder["display_title"] = (
+                f"{rig.BUILDER_WORKFLOW_NAME} aa-{controller['id']} {rig.DISPATCH_BUILDER_ARM_ID}"
+            )
+            builder["name"] = builder["display_title"]
+            builder["html_url"] = (
+                f"https://github.com/{builder['repository']}/actions/runs/{builder['id']}"
+            )
+            for job in builder["jobs"]:
+                job["id"] += offset
+                job["run_id"] = builder["id"]
+                job["html_url"] = f"{builder['html_url']}/job/{job['id']}"
+    return forged
+
+
+class _Packaged:
+    def __init__(self, tmp_path: Path, *, name: str = "genuine") -> None:
+        self.ledger = _dispatch_ledger()
+        self.fetch = _github_stub(self.ledger)
+        self.receipt = _verified_receipt(self.ledger)
+        self.receipt_path = _write(tmp_path / name / "rig-blocked-receipt.json", self.receipt)
+        self.ledger_path = _write(tmp_path / name / "dispatch-ledger.json", self.ledger)
+        self.projected = authorization_package.package_rig_blocked_authorization(
+            self.receipt_path,
+            ledger_path=self.ledger_path,
+            fetch=self.fetch,
+        )
 
 
 def test_rig_blocked_authorization_rejects_an_unverified_ledger(tmp_path: Path) -> None:
     ledger = _dispatch_ledger()
+    fetch = _github_stub(ledger)
     receipt = rig.build_rig_blocked_receipt(ledger)
     assert receipt["ledger_provenance"] == rig.LEDGER_PROVENANCE_UNVERIFIED
     receipt_path = _write(tmp_path / "rig-blocked-receipt.json", receipt)
@@ -688,21 +717,25 @@ def test_rig_blocked_authorization_rejects_an_unverified_ledger(tmp_path: Path) 
 
     with pytest.raises(inputs.StagePlanError, match="requires a GitHub-verified ledger"):
         authorization_package.package_rig_blocked_authorization(
-            receipt_path, ledger_path=ledger_path
+            receipt_path, ledger_path=ledger_path, fetch=fetch
         )
+    assert fetch.calls == []
 
     _write(receipt_path, _verified_receipt(ledger))
     projected = authorization_package.package_rig_blocked_authorization(
-        receipt_path, ledger_path=ledger_path
+        receipt_path, ledger_path=ledger_path, fetch=fetch
     )
     assert projected["ledger_provenance"] == rig.LEDGER_PROVENANCE_VERIFIED
+    assert len(fetch.calls) == 4 * rig.EXTENDED_AA_PASS_COUNT
     forged = _resealed_authorization(projected, ledger_provenance=rig.LEDGER_PROVENANCE_UNVERIFIED)
     with pytest.raises(inputs.StagePlanError, match="requires a GitHub-verified ledger"):
-        authorization.require_rig_blocked_authorization(forged)
+        authorization.require_rig_blocked_authorization(forged, fetch=fetch)
 
 
 def test_rig_blocked_authorization_projects_exhausted_dispatches(tmp_path: Path) -> None:
-    ledger, receipt, receipt_path, ledger_path, projected = _packaged(tmp_path)
+    bundle = _Packaged(tmp_path)
+    ledger, receipt, projected = bundle.ledger, bundle.receipt, bundle.projected
+    receipt_path, ledger_path, fetch = bundle.receipt_path, bundle.ledger_path, bundle.fetch
 
     assert projected["kind"] == "rig_blocked"
     assert projected["status"] == "RIG_BLOCKED"
@@ -718,7 +751,9 @@ def test_rig_blocked_authorization_projects_exhausted_dispatches(tmp_path: Path)
     ]
     assert "paid_benchmark_allowed" not in projected
     authorization.reject_score_bearing_keys(projected, name="rig-blocked authorization")
-    assert authorization.require_rig_blocked_authorization(projected) == projected
+    calls_before = len(fetch.calls)
+    assert authorization.require_rig_blocked_authorization(projected, fetch=fetch) == projected
+    assert len(fetch.calls) == calls_before + 4 * rig.EXTENDED_AA_PASS_COUNT
 
     public_path = tmp_path / "public" / "rig-blocked-receipt.json"
     public_ledger = tmp_path / "public" / "dispatch-ledger.json"
@@ -736,51 +771,65 @@ def test_rig_blocked_authorization_projects_exhausted_dispatches(tmp_path: Path)
         )
 
     output = tmp_path / "authority" / "rig-blocked-authorization.json"
+    with pytest.raises(inputs.StagePlanError, match="needs a GitHub fetcher"):
+        authorization_package.write_authorization(
+            output, projected, paid_output_root=(tmp_path / "paid").resolve()
+        )
     authorization_package.write_authorization(
         output,
         projected,
         paid_output_root=(tmp_path / "paid").resolve(),
+        fetch=fetch,
     )
     assert json.loads(output.read_text(encoding="utf-8")) == projected
 
     with pytest.raises(inputs.StagePlanError, match="status or reason is invalid"):
         authorization.require_rig_blocked_authorization(
-            {**projected, "blocked_reason": rig.BLOCKED_REASON_SPAN_UNSTABLE}
+            {**projected, "blocked_reason": rig.BLOCKED_REASON_SPAN_UNSTABLE}, fetch=fetch
         )
     with pytest.raises(inputs.StagePlanError, match="A/A authorization"):
         authorization.require_aa_authorization(projected)
     receipt_path.write_text("{}\n", encoding="utf-8")
     with pytest.raises(inputs.StagePlanError, match="path or size changed"):
-        authorization.require_rig_blocked_authorization(projected)
+        authorization.require_rig_blocked_authorization(projected, fetch=fetch)
 
 
 def test_rig_blocked_authorization_rejects_completed_pass_and_short_ledgers(
     tmp_path: Path,
 ) -> None:
-    _ledger, _receipt, _receipt_path, _ledger_path, projected = _packaged(tmp_path)
+    bundle = _Packaged(tmp_path)
+    projected, fetch = bundle.projected, bundle.fetch
 
     with pytest.raises(inputs.StagePlanError, match="claims a completed pass"):
         authorization.require_rig_blocked_authorization(
-            _resealed_authorization(projected, completed_pass_count=1)
+            _resealed_authorization(projected, completed_pass_count=1), fetch=fetch
         )
     with pytest.raises(inputs.StagePlanError, match="fewer than five dispatches"):
         authorization.require_rig_blocked_authorization(
-            _resealed_authorization(projected, attempt_count=4, attempts=projected["attempts"][:4])
+            _resealed_authorization(projected, attempt_count=4, attempts=projected["attempts"][:4]),
+            fetch=fetch,
         )
     with pytest.raises(inputs.StagePlanError, match="head SHAs differ from its attempts"):
         authorization.require_rig_blocked_authorization(
-            _resealed_authorization(projected, head_shas=["9" * 40])
+            _resealed_authorization(projected, head_shas=["9" * 40]), fetch=fetch
         )
     with pytest.raises(inputs.StagePlanError, match="score-bearing"):
         authorization.require_rig_blocked_authorization(
             _resealed_authorization(
                 projected, attempts=[{**projected["attempts"][0], "accuracy": 0.5}]
-            )
+            ),
+            fetch=fetch,
         )
 
 
 def test_rig_blocked_packaging_rejects_a_receipt_citing_another_ledger(tmp_path: Path) -> None:
-    _ledger, receipt, receipt_path, ledger_path, _projected = _packaged(tmp_path)
+    bundle = _Packaged(tmp_path)
+    receipt, receipt_path, ledger_path, fetch = (
+        bundle.receipt,
+        bundle.receipt_path,
+        bundle.ledger_path,
+        bundle.fetch,
+    )
 
     # Codex probe: a resealed receipt whose ledger digest names a ledger that
     # holds a successful two-domain pass must not package as RIG_BLOCKED.
@@ -800,33 +849,36 @@ def test_rig_blocked_packaging_rejects_a_receipt_citing_another_ledger(tmp_path:
     citing_path = _write(tmp_path / "citing-receipt.json", citing)
     with pytest.raises(rig.RigInputError, match="A/A data, not dispatch exhaustion"):
         authorization_package.package_rig_blocked_authorization(
-            citing_path, ledger_path=passing_path
+            citing_path, ledger_path=passing_path, fetch=_github_stub(passing)
         )
     with pytest.raises(inputs.StagePlanError, match="not derived from its bound ledger"):
         authorization_package.package_rig_blocked_authorization(
-            citing_path, ledger_path=ledger_path
+            citing_path, ledger_path=ledger_path, fetch=fetch
         )
 
     # A real ledger digest mismatch against the genuine ledger.
     wrong_digest = _resealed_receipt(receipt, ledger_sha256=f"sha256:{'f' * 64}")
     wrong_path = _write(tmp_path / "wrong-digest-receipt.json", wrong_digest)
     with pytest.raises(inputs.StagePlanError, match="not derived from its bound ledger"):
-        authorization_package.package_rig_blocked_authorization(wrong_path, ledger_path=ledger_path)
+        authorization_package.package_rig_blocked_authorization(
+            wrong_path, ledger_path=ledger_path, fetch=fetch
+        )
 
     # A different valid ledger than the one the receipt was sealed from.
     other = _dispatch_ledger([_dispatch_attempt(index, head_sha="e" * 40) for index in range(5)])
     other_path = _write(tmp_path / "other-ledger.json", other)
     with pytest.raises(inputs.StagePlanError, match="not derived from its bound ledger"):
         authorization_package.package_rig_blocked_authorization(
-            receipt_path, ledger_path=other_path
+            receipt_path, ledger_path=other_path, fetch=_github_stub(other)
         )
 
 
 def test_rig_blocked_authorization_rejects_projection_drift_from_its_receipt(
     tmp_path: Path,
 ) -> None:
-    _ledger, _receipt, _receipt_path, ledger_path, projected = _packaged(tmp_path)
-    assert authorization.require_rig_blocked_authorization(projected) == projected
+    bundle = _Packaged(tmp_path)
+    projected, ledger_path, fetch = bundle.projected, bundle.ledger_path, bundle.fetch
+    assert authorization.require_rig_blocked_authorization(projected, fetch=fetch) == projected
 
     # Codex probe: keep the genuine source receipt, change projected fields.
     drifted = [
@@ -846,10 +898,10 @@ def test_rig_blocked_authorization_rejects_projection_drift_from_its_receipt(
     ]
     for tampered in drifted:
         with pytest.raises(inputs.StagePlanError, match="differs from its bound receipt"):
-            authorization.require_rig_blocked_authorization(tampered)
+            authorization.require_rig_blocked_authorization(tampered, fetch=fetch)
     with pytest.raises(inputs.StagePlanError, match="trusted release repository"):
         authorization.require_rig_blocked_authorization(
-            _resealed_authorization(projected, repository="someone/else")
+            _resealed_authorization(projected, repository="someone/else"), fetch=fetch
         )
 
     # The bound ledger on disk is swapped for one that does not derive the receipt.
@@ -860,7 +912,69 @@ def test_rig_blocked_authorization_rejects_projection_drift_from_its_receipt(
         source_ledger=inputs.bind_artifact(ledger_path, name="rig-blocked source ledger"),
     )
     with pytest.raises(inputs.StagePlanError, match="not derived from its bound ledger"):
-        authorization.require_rig_blocked_authorization(swapped)
+        authorization.require_rig_blocked_authorization(swapped, fetch=_github_stub(other))
+
+
+def test_rig_blocked_authority_rejects_invented_dispatches_with_a_forged_verification(
+    tmp_path: Path,
+) -> None:
+    """Codex probe: invented run and job ids plus a plausible verification block."""
+    genuine = _dispatch_ledger()
+    github = _github_stub(genuine)
+    forged_ledger = _remap_run_ids(genuine, 500_000)
+    offline = rig.build_rig_blocked_receipt(forged_ledger)
+    forged = _resealed_receipt(
+        offline,
+        ledger_provenance=rig.LEDGER_PROVENANCE_VERIFIED,
+        github_verification={
+            "verified_at": forged_ledger["fetched_at"],
+            "run_count": 2 * rig.EXTENDED_AA_PASS_COUNT,
+            "job_count": 3 * rig.EXTENDED_AA_PASS_COUNT,
+            "builder_query": rig.GITHUB_BUILDER_RUNS_ENDPOINT,
+        },
+    )
+    # The label alone passes receipt validation; it is a record, not evidence.
+    assert rig.validate_rig_blocked_receipt(forged) == forged
+    receipt_path = _write(tmp_path / "forged-receipt.json", forged)
+    ledger_path = _write(tmp_path / "forged-ledger.json", forged_ledger)
+
+    with pytest.raises(inputs.StagePlanError, match="HTTP 404"):
+        authorization_package.package_rig_blocked_authorization(
+            receipt_path, ledger_path=ledger_path, fetch=github
+        )
+
+    source = inputs.bind_artifact(receipt_path, name="rig-blocked source receipt")
+    source_ledger = inputs.bind_artifact(ledger_path, name="rig-blocked source ledger")
+    hand_built = authorization.rig_blocked_projection(source, source_ledger, forged)
+    hand_built["authorization_sha256"] = rig.canonical_sha256(hand_built)
+    with pytest.raises(inputs.StagePlanError, match="HTTP 404"):
+        authorization.require_rig_blocked_authorization(hand_built, fetch=github)
+
+
+def test_rig_blocked_authority_rejects_drift_at_authorization_time(tmp_path: Path) -> None:
+    """A receipt sealed against one GitHub state is rejected once GitHub disagrees."""
+    bundle = _Packaged(tmp_path)
+    drifted = deepcopy(bundle.ledger)
+    web = next(
+        job
+        for job in drifted["attempts"][4]["builders"][0]["jobs"]
+        if job["name"] == rig.OFFICIAL_JOB_NAMES["web"]
+    )
+    web["conclusion"] = "success"
+    github_now = _github_stub(drifted)
+
+    with pytest.raises(inputs.StagePlanError, match="jobs differ from GitHub"):
+        authorization_package.package_rig_blocked_authorization(
+            bundle.receipt_path, ledger_path=bundle.ledger_path, fetch=github_now
+        )
+    with pytest.raises(inputs.StagePlanError, match="jobs differ from GitHub"):
+        authorization.require_rig_blocked_authorization(bundle.projected, fetch=github_now)
+
+    def unavailable(endpoint: str) -> list[Any]:
+        raise rig.RigInputError(f"gh api {endpoint} failed: HTTP 504")
+
+    with pytest.raises(inputs.StagePlanError, match="HTTP 504"):
+        authorization.require_rig_blocked_authorization(bundle.projected, fetch=unavailable)
 
 
 RELEASE_RESULTS = REPO_ROOT / "benchmarks" / "results" / "longmemeval-v2-release"
@@ -890,8 +1004,12 @@ def test_committed_v1_3_rig_blocked_receipt_is_bound_to_its_ledger() -> None:
         builder["run_id"] for item in committed["attempts"] for builder in item["builders"]
     ] == V1_3_BUILDER_RUN_IDS
 
+    # Hermetic: the stub replays the committed ledger as GitHub. The runbook
+    # command runs the same packaging against live GitHub.
     projected = authorization_package.package_rig_blocked_authorization(
-        V1_3_RIG_BLOCKED_RECEIPT, ledger_path=V1_3_DISPATCH_LEDGER
+        V1_3_RIG_BLOCKED_RECEIPT,
+        ledger_path=V1_3_DISPATCH_LEDGER,
+        fetch=_github_stub(ledger),
     )
     assert projected["rig_blocked_receipt_sha256"] == committed["rig_blocked_receipt_sha256"]
     assert projected["ledger_sha256"] == rig.canonical_sha256(ledger)

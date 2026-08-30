@@ -2330,29 +2330,11 @@ def verify_dispatch_ledger(ledger: dict[str, Any], *, fetch: GitHubFetch) -> dic
     }
 
 
-def build_rig_blocked_receipt(
+def _assemble_rig_blocked_receipt(
     ledger: dict[str, Any],
-    *,
-    verification: dict[str, Any] | None = None,
+    attempts: list[dict[str, Any]],
+    provenance: dict[str, Any],
 ) -> dict[str, Any]:
-    """Seal dispatch exhaustion: five or more controller dispatches, zero completed passes.
-
-    Without ``verification`` (the result of ``verify_dispatch_ledger``) the receipt
-    records ``ledger_provenance: unverified`` and no release authority accepts it.
-    """
-    attempts = validate_dispatch_ledger(ledger)
-    if verification is None:
-        provenance: dict[str, Any] = {
-            "ledger_provenance": LEDGER_PROVENANCE_UNVERIFIED,
-            "github_verification": None,
-        }
-    else:
-        _require_exact_keys(
-            verification,
-            frozenset({"ledger_provenance", "github_verification"}),
-            name="ledger verification",
-        )
-        provenance = dict(verification)
     head_shas: list[str] = []
     for attempt in attempts:
         if attempt["head_sha"] not in head_shas:
@@ -2382,6 +2364,36 @@ def build_rig_blocked_receipt(
     }
     payload["rig_blocked_receipt_sha256"] = canonical_sha256(payload)
     return validate_rig_blocked_receipt(payload)
+
+
+def build_rig_blocked_receipt(ledger: dict[str, Any]) -> dict[str, Any]:
+    """Seal dispatch exhaustion offline: five or more dispatches, zero completed passes.
+
+    The receipt records ``ledger_provenance: unverified``. No release authority
+    accepts it; use ``build_verified_rig_blocked_receipt`` for a sealed record.
+    """
+    attempts = validate_dispatch_ledger(ledger)
+    provenance = {
+        "ledger_provenance": LEDGER_PROVENANCE_UNVERIFIED,
+        "github_verification": None,
+    }
+    return _assemble_rig_blocked_receipt(ledger, attempts, provenance)
+
+
+def build_verified_rig_blocked_receipt(
+    ledger: dict[str, Any],
+    *,
+    fetch: GitHubFetch,
+) -> dict[str, Any]:
+    """Seal dispatch exhaustion after re-fetching every run and job from GitHub.
+
+    The verification block is produced here and nowhere else. It records when
+    the ledger last matched GitHub; it is not the authority. Every release
+    authorization boundary re-runs ``verify_dispatch_ledger`` live.
+    """
+    attempts = validate_dispatch_ledger(ledger)
+    provenance = verify_dispatch_ledger(ledger, fetch=fetch)
+    return _assemble_rig_blocked_receipt(ledger, attempts, provenance)
 
 
 def _validate_rig_blocked_run(raw: object, *, name: str, keys: frozenset[str]) -> dict[str, Any]:
@@ -2652,10 +2664,11 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.command == "rig-blocked":
             ledger = load_json(Path(args.ledger))
-            verification = (
-                verify_dispatch_ledger(ledger, fetch=gh_api_fetch) if args.verify_github else None
+            payload = (
+                build_verified_rig_blocked_receipt(ledger, fetch=gh_api_fetch)
+                if args.verify_github
+                else build_rig_blocked_receipt(ledger)
             )
-            payload = build_rig_blocked_receipt(ledger, verification=verification)
         else:
             raise RuntimeError(f"unknown command {args.command!r}")
     except (OSError, json.JSONDecodeError, RigInputError) as exc:

@@ -12,6 +12,8 @@ from benchmarks import longmemeval_v2_ablations as ablations
 from benchmarks import longmemeval_v2_release_cli as cli
 from benchmarks import longmemeval_v2_release_package_root as package_root
 from benchmarks.longmemeval_v2_release_inputs import StagePlanError
+from tools.bench import longmemeval_v2_rig as rig
+from tools.tests.test_longmemeval_v2_rig import _dispatch_ledger, _github_stub
 
 SUPPORTED_RELEASE_HOST = {
     "platform": "darwin",
@@ -531,3 +533,53 @@ def test_release_commands_reject_nonobject_plan_json(tmp_path: Path) -> None:
 
     with pytest.raises(StagePlanError, match="JSON object"):
         cli.run_release_cli_command(args)
+
+
+def test_release_rig_blocked_authority_re_verifies_against_github(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger = _dispatch_ledger()
+    receipt = rig.build_verified_rig_blocked_receipt(ledger, fetch=_github_stub(ledger))
+    receipt_path = _json(tmp_path / "receipt.json", receipt)
+    ledger_path = _json(tmp_path / "ledger.json", ledger)
+    output = tmp_path / "authority" / "rig-blocked-authorization.json"
+    live = _github_stub(ledger)
+    monkeypatch.setattr(rig, "gh_api_fetch", live)
+    args = argparse.Namespace(
+        command="release-rig-blocked-authority",
+        receipt=str(receipt_path),
+        ledger=str(ledger_path),
+        output=str(output),
+    )
+
+    assert cli.run_release_cli_command(args) == 0
+
+    written = json.loads(output.read_text(encoding="utf-8"))
+    assert written["kind"] == "rig_blocked"
+    assert written["ledger_provenance"] == rig.LEDGER_PROVENANCE_VERIFIED
+    assert written["source_ledger"]["path"] == str(ledger_path.resolve())
+    assert len(live.calls) == 4 * rig.EXTENDED_AA_PASS_COUNT
+    with pytest.raises(StagePlanError, match="already exists"):
+        cli.run_release_cli_command(args)
+
+    def unavailable(endpoint: str) -> list[Any]:
+        raise rig.RigInputError(f"gh api {endpoint} failed: HTTP 504")
+
+    monkeypatch.setattr(rig, "gh_api_fetch", unavailable)
+    args.output = str(tmp_path / "authority" / "second.json")
+    with pytest.raises(StagePlanError, match="HTTP 504"):
+        cli.run_release_cli_command(args)
+    assert not Path(args.output).exists()
+    parsed = ablations.parse_args(
+        [
+            "release-rig-blocked-authority",
+            "--receipt",
+            str(receipt_path),
+            "--ledger",
+            str(ledger_path),
+            "--output",
+            str(output),
+        ]
+    )
+    assert parsed.command == "release-rig-blocked-authority"
