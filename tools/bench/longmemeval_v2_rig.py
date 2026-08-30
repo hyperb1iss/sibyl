@@ -1965,7 +1965,14 @@ def _ledger_job(raw: object, *, name: str) -> dict[str, Any]:
         raise RigInputError(f"{name} conclusion is not a completed verdict")
     started = _optional_timestamp(raw.get("started_at"), name=f"{name}.started_at")
     completed = _optional_timestamp(raw.get("completed_at"), name=f"{name}.completed_at")
-    if started is not None and completed is not None and completed < started:
+    # GitHub stamps a skipped job with bookkeeping times that can run backwards
+    # by a second; only a job that actually ran owes a forward interval.
+    if (
+        raw.get("conclusion") != "skipped"
+        and started is not None
+        and completed is not None
+        and completed < started
+    ):
         raise RigInputError(f"{name} completed before it started")
     _nonempty_string(raw.get("name"), name=f"{name}.name")
     _nonempty_string(raw.get("html_url"), name=f"{name}.html_url")

@@ -1433,3 +1433,26 @@ def test_aa_span_block_and_dispatch_exhaustion_name_different_reasons() -> None:
     tampered["aa_receipt_sha256"] = rig.canonical_sha256(unsigned)
     with pytest.raises(rig.RigInputError, match="blocked reason does not match"):
         rig.validate_aa_receipt(tampered)
+
+
+def test_rig_blocked_receipt_tolerates_github_skipped_job_clock_skew() -> None:
+    attempts = [_dispatch_attempt(index) for index in range(5)]
+    skipped = attempts[1]["builders"][0]["jobs"][-1]
+    assert skipped["conclusion"] == "skipped"
+    skipped["completed_at"] = _ledger_time(6 * 1 + 1)
+    skipped["started_at"] = _ledger_time(6 * 1 + 2)
+
+    receipt = rig.build_rig_blocked_receipt(_dispatch_ledger(attempts))
+
+    assert receipt["attempts"][1]["builders"][0]["official_jobs"]["combined_receipt"] == {
+        "job_id": skipped["id"],
+        "conclusion": "skipped",
+        "started_at": skipped["started_at"],
+        "completed_at": skipped["completed_at"],
+        "html_url": skipped["html_url"],
+    }
+    ran = attempts[2]["builders"][0]["jobs"][0]
+    ran["completed_at"] = _ledger_time(6 * 2 + 1)
+    ran["started_at"] = _ledger_time(6 * 2 + 2)
+    with pytest.raises(rig.RigInputError, match="completed before it started"):
+        rig.build_rig_blocked_receipt(_dispatch_ledger(attempts))
