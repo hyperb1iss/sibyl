@@ -618,7 +618,7 @@ Sibyl v1.3 may cut when every required item below has a receipt.
       with no tracked changes. The historical One Surface receipt is recorded in section 9.
 - [x] Targeted lifecycle, MCP authorization, queue retry, readiness, browser, benchmark-contract,
       release-workflow, and Helm gates pass uncached on the harmony head.
-- [ ] The release runbook records the exact commit, generated receipts, deferred work, and rollback
+- [x] The release runbook records the exact commit, generated receipts, deferred work, and rollback
       points.
 
 ## 7. Explicitly deferred to v1.4 or later
