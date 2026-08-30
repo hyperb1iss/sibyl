@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -57,6 +57,7 @@ from sibyl_core.services.graph_common import (
 )
 from sibyl_core.services.graph_entities import EntityManager
 from sibyl_core.services.graph_relationships import RelationshipManager
+from sibyl_core.services.graph_search import bounded_similarity_score
 from sibyl_core.services.usage import (
     MemoryUsageItemKind,
     MemoryUsageStamp,
@@ -498,14 +499,14 @@ class _ExplicitAnchorSearchClient:
             ]
         if params.get("_query_label") == "entity.search.fulltext":
             return [
-                self._row("primary-one", "Primary result one."),
-                self._row("primary-two", "Primary result two."),
-                self._row("primary-three", "Primary result three."),
+                self._row("primary-one", "Primary result one.", day=3),
+                self._row("primary-two", "Primary result two.", day=2),
+                self._row("primary-three", "Primary result three.", day=1),
             ]
         return []
 
-    def _row(self, entity_id: str, content: str) -> dict[str, object]:
-        now = datetime.now(UTC)
+    def _row(self, entity_id: str, content: str, *, day: int = 1) -> dict[str, object]:
+        now = datetime(2026, 8, day, tzinfo=UTC)
         return {
             "record_id": f"entity:{entity_id}",
             "uuid": entity_id,
@@ -1908,6 +1909,199 @@ async def test_native_entity_manager_skips_anchor_probe_for_single_anchor() -> N
         params.get("_query_label") != "entity.search.fulltext_explicit_anchors"
         for _query, params in client.calls
     )
+
+
+class _PerFieldFulltextClient:
+    """Answers each single-field statement with that field's own top-k rows.
+
+    The scores are chosen so every merge property is observable: `shared`
+    scores low on name but highest on content, `summary-only` and `name-only`
+    tie on score and split on created_at, `tie-a` and `tie-b` tie on both and
+    split on uuid, and `content-only` sits inside content's top-k but outside
+    the global top-3.
+    """
+
+    group_id = "org-native"
+    rows_by_field: ClassVar[dict[str, list[tuple[str, float, int]]]] = {
+        "name": [("shared", 0.8, 1), ("name-only", 0.9, 2)],
+        "summary": [("summary-only", 0.9, 3)],
+        "description": [("tie-b", 0.7, 5), ("tie-a", 0.7, 5)],
+        "content": [("shared", 0.95, 1), ("content-only", 0.85, 4)],
+    }
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
+        self.calls.append((query, params))
+        if params.get("_query_label") != "entity.search.fulltext":
+            return []
+        field = next(
+            field
+            for field in graph_entity_search_module._FULLTEXT_FIELDS
+            if f"{field} @0@" in query
+        )
+        ranked = sorted(
+            self.rows_by_field[field],
+            key=lambda row: (row[1], row[2], row[0]),
+            reverse=True,
+        )
+        limit = cast("int", params["limit"])
+        return [self._row(uuid, score=score, day=day) for uuid, score, day in ranked[:limit]]
+
+    @classmethod
+    def single_statement_ranking(cls, limit: int) -> list[str]:
+        # The pre-split statement scored every row with math::max across the
+        # four field sums, then ORDER BY score DESC, created_at DESC, uuid DESC
+        # LIMIT $limit over the whole match set.
+        best: dict[str, tuple[float, int]] = {}
+        for rows in cls.rows_by_field.values():
+            for uuid, score, day in rows:
+                if uuid not in best or score > best[uuid][0]:
+                    best[uuid] = (score, day)
+        ordered = sorted(best, key=lambda uuid: (*best[uuid], uuid), reverse=True)
+        return ordered[:limit]
+
+    def _row(self, uuid: str, *, score: float, day: int) -> dict[str, object]:
+        return {
+            "record_id": f"entity:{uuid}",
+            "uuid": uuid,
+            "name": uuid,
+            "entity_type": "topic",
+            "summary": f"{uuid} surreal replay",
+            "content": f"{uuid} surreal replay verification",
+            "group_id": self.group_id,
+            "attributes": {},
+            "created_at": datetime(2026, 8, day, tzinfo=UTC),
+            "updated_at": datetime(2026, 8, day, tzinfo=UTC),
+            "score": score,
+        }
+
+
+@pytest.mark.asyncio
+async def test_native_entity_manager_fulltext_issues_one_bounded_statement_per_field() -> None:
+    client = _PerFieldFulltextClient()
+    manager = EntityManager(cast("SurrealGraphClient", client), group_id=client.group_id)
+
+    await manager.search(
+        query="surreal replay verification",
+        entity_types=[EntityType.TOPIC],
+        limit=3,
+    )
+
+    fulltext_calls = [
+        (query, params)
+        for query, params in client.calls
+        if params.get("_query_label") == "entity.search.fulltext"
+    ]
+    fields = graph_entity_search_module._FULLTEXT_FIELDS
+    assert len(fulltext_calls) == len(fields) == 4
+    for field in fields:
+        [(query, params)] = [call for call in fulltext_calls if f"{field} @0@ $ft_term0" in call[0]]
+        assert f"{field} @1@ $ft_term1" in query
+        assert f"{field} @2@ $ft_term2" in query
+        assert all(other == field or f"{other} @" not in query for other in fields)
+        assert "math::max" not in query
+        assert "WHERE group_id = $group_id" in query
+        assert "AND entity_type IN $entity_types" in query
+        assert "ORDER BY score DESC, created_at DESC, uuid DESC" in query
+        assert "LIMIT $limit;" in query
+        assert "id AS record_id" in query
+        assert params["group_id"] == "org-native"
+        assert params["entity_types"] == ["topic"]
+        assert params["limit"] == 3
+        assert params["ft_term0"] == "surreal"
+        assert params["ft_term1"] == "replay"
+        assert params["ft_term2"] == "verification"
+
+
+@pytest.mark.asyncio
+async def test_native_entity_manager_fulltext_merge_matches_single_statement_ranking() -> None:
+    client = _PerFieldFulltextClient()
+    manager = EntityManager(cast("SurrealGraphClient", client), group_id=client.group_id)
+    query = "surreal replay verification"
+
+    for limit in (1, 2, 3, 10):
+        results = await manager._fulltext_search(
+            query=query,
+            search_query=query,
+            entity_types=None,
+            limit=limit,
+        )
+        assert [entity.id for entity, _score in results] == client.single_statement_ranking(limit)
+        # BM25 only picks the candidates; the returned score is the bounded
+        # similarity re-score, exactly as before the split.
+        assert [score for _entity, score in results] == [
+            bounded_similarity_score(query, entity) for entity, _score in results
+        ]
+
+    results = await manager._fulltext_search(
+        query=query,
+        search_query=query,
+        entity_types=None,
+        limit=3,
+    )
+    # `shared` ranks first on its content score even though name ranked it
+    # below `name-only`: the merge keeps the max across fields.
+    assert [entity.id for entity, _score in results] == ["shared", "summary-only", "name-only"]
+
+
+@pytest.mark.asyncio
+async def test_native_entity_manager_fulltext_ties_break_on_created_at_then_uuid() -> None:
+    client = _PerFieldFulltextClient()
+    manager = EntityManager(cast("SurrealGraphClient", client), group_id=client.group_id)
+    query = "surreal replay verification"
+
+    results = await manager._fulltext_search(
+        query=query,
+        search_query=query,
+        entity_types=None,
+        limit=10,
+    )
+
+    assert [entity.id for entity, _score in results] == [
+        "shared",
+        "summary-only",
+        "name-only",
+        "content-only",
+        "tie-b",
+        "tie-a",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_native_entity_manager_fulltext_truncates_after_merging() -> None:
+    client = _PerFieldFulltextClient()
+    manager = EntityManager(cast("SurrealGraphClient", client), group_id=client.group_id)
+
+    results = await manager.search(query="surreal replay verification", limit=3)
+
+    assert len(results) == 3
+    assert "content-only" not in {entity.id for entity, _score in results}
+    content_call = next(
+        params for query, params in client.calls if "content @0@ $ft_term0" in query
+    )
+    assert content_call["limit"] == 3
+    assert all(
+        params.get("_query_label") != "entity.search.fulltext_explicit_anchors"
+        for _query, params in client.calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_native_entity_manager_fulltext_skips_query_without_terms() -> None:
+    client = _PerFieldFulltextClient()
+    manager = EntityManager(cast("SurrealGraphClient", client), group_id=client.group_id)
+
+    results = await manager._fulltext_search(
+        query="the of and",
+        search_query="the of and",
+        entity_types=None,
+        limit=3,
+    )
+
+    assert results == []
+    assert client.calls == []
 
 
 @pytest.mark.asyncio
