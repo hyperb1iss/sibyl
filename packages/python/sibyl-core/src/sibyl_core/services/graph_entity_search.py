@@ -41,6 +41,8 @@ from sibyl_core.services.graph_search import row_score as _row_score
 
 log = structlog.get_logger()
 
+_FULLTEXT_FIELDS = ("name", "summary", "description", "content")
+
 
 def _build_explicit_anchor_search_query(query: str) -> str:
     phrases = extract_explicit_anchor_phrases(query)
@@ -250,41 +252,65 @@ class _EntitySearchManager:
         entity_types: Sequence[EntityType] | None,
         limit: int,
     ) -> list[tuple[Entity, float]]:
-        match = build_match_disjunction(
-            ["name", "summary", "description", "content"],
-            build_fulltext_terms(search_query),
-        )
-        if match is None:
+        """BM25 candidates over every fulltext field, one bounded query per field.
+
+        A single four-field disjunction makes the engine score every matching
+        row across all four indexes before LIMIT applies. Splitting it into one
+        top-k statement per field, run concurrently, returns the same top-k:
+        the merged score is the max across fields, so a row outside a field's
+        top-k cannot enter the global top-k when that field already holds k
+        rows with equal or greater score. The merge re-applies the statement
+        order (score, created_at, uuid) descending before truncating.
+        """
+        terms = build_fulltext_terms(search_query)
+        if not terms:
             return []
         type_values = [entity_type.value for entity_type in entity_types or ()]
         type_clause = "AND entity_type IN $entity_types" if type_values else ""
-        rows = normalize_records(
-            await self._client.execute_query(
-                "SELECT "
-                + _ENTITY_SEARCH_FIELDS
-                + f""",
-                       {match.score_expr} AS score
-                FROM entity
-                WHERE group_id = $group_id
-                """
-                + type_clause
-                + f"""
-                  AND {match.where_clause}
-                ORDER BY score DESC, created_at DESC, uuid DESC
-                LIMIT $limit;
-                """,
-                group_id=self._group_id,
-                entity_types=type_values,
-                limit=limit,
-                _query_label="entity.search.fulltext",
-                **match.params,
+        matches = [
+            match
+            for match in (build_match_disjunction([field], terms) for field in _FULLTEXT_FIELDS)
+            if match is not None
+        ]
+        field_rows = await asyncio.gather(
+            *(
+                self._client.execute_query(
+                    "SELECT "
+                    + _ENTITY_SEARCH_FIELDS
+                    + f""",
+                           {match.score_expr} AS score
+                    FROM entity
+                    WHERE group_id = $group_id
+                    """
+                    + type_clause
+                    + f"""
+                      AND {match.where_clause}
+                    ORDER BY score DESC, created_at DESC, uuid DESC
+                    LIMIT $limit;
+                    """,
+                    group_id=self._group_id,
+                    entity_types=type_values,
+                    limit=limit,
+                    _query_label="entity.search.fulltext",
+                    **match.params,
+                )
+                for match in matches
             )
         )
-        fulltext_results: list[tuple[Entity, float]] = []
-        for row in rows:
-            entity = _entity_from_row(row)
-            fulltext_results.append((entity, _bounded_similarity_score(query, entity)))
-        return fulltext_results
+        best_by_uuid: dict[str, tuple[Entity, float]] = {}
+        for rows in field_rows:
+            for row in normalize_records(rows):
+                entity = _entity_from_row(row)
+                score = _row_score(row)
+                current = best_by_uuid.get(entity.id)
+                if current is None or score > current[1]:
+                    best_by_uuid[entity.id] = (entity, score)
+        ranked = sorted(
+            best_by_uuid.values(),
+            key=lambda item: (item[1], item[0].created_at, item[0].id),
+            reverse=True,
+        )[:limit]
+        return [(entity, _bounded_similarity_score(query, entity)) for entity, _score in ranked]
 
     async def _explicit_anchor_fulltext_search(
         self,
