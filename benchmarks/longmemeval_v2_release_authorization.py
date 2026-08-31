@@ -12,11 +12,36 @@ from benchmarks.longmemeval_v2_release_inputs import (
     require_artifact,
     require_exact_keys,
     require_nonnegative_int,
+    require_positive_int,
     require_string,
 )
 from tools.bench import longmemeval_v2_rig as rig
 
 AA_AUTHORIZATION_SCHEMA_VERSION = "sibyl-longmemeval-v2-aa-authorization-v2"
+RIG_BLOCKED_AUTHORIZATION_SCHEMA_VERSION = "sibyl-longmemeval-v2-rig-blocked-authorization-v1"
+RIG_BLOCKED_AUTHORIZATION_KEYS = frozenset(
+    {
+        "schema_version",
+        "kind",
+        "source_receipt",
+        "source_ledger",
+        "status",
+        "blocked_reason",
+        "rig_blocked_receipt_sha256",
+        "ledger_sha256",
+        "ledger_provenance",
+        "repository",
+        "head_branch",
+        "head_shas",
+        "attempt_count",
+        "completed_pass_count",
+        "attempts",
+        "authorization_sha256",
+    }
+)
+RIG_BLOCKED_ATTEMPT_AUTHORIZATION_KEYS = frozenset(
+    {"experiment_id", "head_sha", "controller_run_id", "builder_run_ids"}
+)
 PREREGISTRATION_AUTHORIZATION_SCHEMA_VERSION = (
     "sibyl-longmemeval-v2-preregistration-authorization-v2"
 )
@@ -184,6 +209,183 @@ def require_aa_authorization(raw: object) -> dict[str, Any]:
         "stack": stack,
         "arm_contract": contract,
         "passes": passes,
+    }
+
+
+def _rig_blocked_attempt_projection(raw: object, *, name: str) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise StagePlanError(f"{name} is missing")
+    require_exact_keys(raw, RIG_BLOCKED_ATTEMPT_AUTHORIZATION_KEYS, name=name)
+    builder_run_ids = raw.get("builder_run_ids")
+    if not isinstance(builder_run_ids, list) or not builder_run_ids:
+        raise StagePlanError(f"{name} binds no builder run")
+    return {
+        "experiment_id": require_string(raw.get("experiment_id"), name=f"{name}.experiment_id"),
+        "head_sha": rig._git_sha(raw.get("head_sha"), name=f"{name}.head_sha"),
+        "controller_run_id": require_positive_int(
+            raw.get("controller_run_id"),
+            name=f"{name}.controller_run_id",
+        ),
+        "builder_run_ids": [
+            require_positive_int(item, name=f"{name}.builder_run_ids[{index}]")
+            for index, item in enumerate(builder_run_ids)
+        ],
+    }
+
+
+def rig_blocked_projection(
+    source_receipt: dict[str, Any],
+    source_ledger: dict[str, Any],
+    receipt: dict[str, Any],
+) -> dict[str, Any]:
+    """Project one validated rig-blocked receipt into its unsigned authority fields."""
+    return {
+        "schema_version": RIG_BLOCKED_AUTHORIZATION_SCHEMA_VERSION,
+        "kind": "rig_blocked",
+        "source_receipt": dict(source_receipt),
+        "source_ledger": dict(source_ledger),
+        "status": receipt["status"],
+        "blocked_reason": receipt["blocked_reason"],
+        "rig_blocked_receipt_sha256": receipt["rig_blocked_receipt_sha256"],
+        "ledger_sha256": receipt["ledger_sha256"],
+        "ledger_provenance": receipt["ledger_provenance"],
+        "repository": receipt["repository"],
+        "head_branch": receipt["head_branch"],
+        "head_shas": list(receipt["head_shas"]),
+        "attempt_count": receipt["attempt_count"],
+        "completed_pass_count": receipt["completed_pass_count"],
+        "attempts": [
+            {
+                "experiment_id": item["experiment_id"],
+                "head_sha": item["head_sha"],
+                "controller_run_id": item["controller"]["run_id"],
+                "builder_run_ids": [builder["run_id"] for builder in item["builders"]],
+            }
+            for item in receipt["attempts"]
+        ],
+    }
+
+
+def _require_bound_rig_blocked_receipt(
+    source_receipt: dict[str, Any],
+    source_ledger: dict[str, Any],
+    *,
+    fetch: rig.GitHubFetch,
+) -> dict[str, Any]:
+    """Reload both bound artifacts, prove derivation, and re-verify the ledger live.
+
+    The receipt's provenance label is a record of when the ledger last matched
+    GitHub; the evidence is this re-fetch. A fetch failure or any field drift
+    fails closed.
+    """
+    receipt = rig.validate_rig_blocked_receipt(load_json(Path(source_receipt["path"])))
+    ledger = load_json(Path(source_ledger["path"]))
+    try:
+        rig.require_receipt_from_ledger(receipt, ledger)
+        if receipt["ledger_sha256"] != rig.canonical_sha256(ledger):
+            raise StagePlanError("rig-blocked receipt ledger digest differs from its bound ledger")
+        rig.verify_dispatch_ledger(ledger, fetch=fetch)
+    except rig.RigInputError as exc:
+        raise StagePlanError(str(exc)) from exc
+    require_artifact(source_receipt, name="rig-blocked source receipt")
+    require_artifact(source_ledger, name="rig-blocked source ledger")
+    return receipt
+
+
+def require_rig_blocked_authorization(  # noqa: PLR0912
+    raw: object,
+    *,
+    fetch: rig.GitHubFetch,
+) -> dict[str, Any]:
+    """Validate one scoreless dispatch-exhaustion authority projection.
+
+    The projection stops paid benchmark work. It never feeds a paid stage, so
+    unlike A/A authority it carries no stack or arm contract: none of that was
+    observed by a dispatch that produced no completed pass. Unlike A/A authority
+    it reloads its bound receipt and ledger: every projected field must equal
+    the projection of the receipt that the ledger actually derives, and the
+    ledger is re-verified against GitHub through ``fetch`` on every validation.
+    """
+    reject_score_bearing_keys(raw, name="rig-blocked authorization")
+    if not isinstance(raw, dict):
+        raise StagePlanError("rig-blocked authorization is missing")
+    require_exact_keys(raw, RIG_BLOCKED_AUTHORIZATION_KEYS, name="rig-blocked authorization")
+    if (
+        raw.get("schema_version") != RIG_BLOCKED_AUTHORIZATION_SCHEMA_VERSION
+        or raw.get("kind") != "rig_blocked"
+    ):
+        raise StagePlanError("rig-blocked authorization schema or kind is invalid")
+    if raw.get("status") != "RIG_BLOCKED" or (
+        raw.get("blocked_reason") != rig.BLOCKED_REASON_DISPATCH_EXHAUSTED
+    ):
+        raise StagePlanError("rig-blocked authorization status or reason is invalid")
+    if raw.get("ledger_provenance") != rig.LEDGER_PROVENANCE_VERIFIED:
+        raise StagePlanError("rig-blocked authorization requires a GitHub-verified ledger")
+    source = require_artifact(raw.get("source_receipt"), name="rig-blocked source receipt")
+    source_ledger = require_artifact(raw.get("source_ledger"), name="rig-blocked source ledger")
+    receipt_digest = rig._sha256_digest(
+        raw.get("rig_blocked_receipt_sha256"),
+        name="rig-blocked authorization receipt digest",
+    )
+    ledger_digest = rig._sha256_digest(
+        raw.get("ledger_sha256"),
+        name="rig-blocked authorization ledger digest",
+    )
+    repository = require_string(raw.get("repository"), name="rig-blocked repository")
+    if repository != rig.TRUSTED_REPOSITORY:
+        raise StagePlanError("rig-blocked repository is not the trusted release repository")
+    head_branch = require_string(raw.get("head_branch"), name="rig-blocked head_branch")
+    if head_branch != rig.TRUSTED_BRANCH:
+        raise StagePlanError("rig-blocked authorization is not on the trusted release branch")
+    raw_head_shas = raw.get("head_shas")
+    if not isinstance(raw_head_shas, list) or not raw_head_shas:
+        raise StagePlanError("rig-blocked head SHAs are missing")
+    head_shas = [
+        rig._git_sha(item, name=f"rig-blocked head_shas[{index}]")
+        for index, item in enumerate(raw_head_shas)
+    ]
+    if len(set(head_shas)) != len(head_shas):
+        raise StagePlanError("rig-blocked head SHAs are not unique")
+    attempt_count = require_positive_int(raw.get("attempt_count"), name="rig-blocked attempt_count")
+    if attempt_count < rig.EXTENDED_AA_PASS_COUNT:
+        raise StagePlanError("rig-blocked authorization holds fewer than five dispatches")
+    if require_nonnegative_int(raw.get("completed_pass_count"), name="completed_pass_count") != 0:
+        raise StagePlanError("rig-blocked authorization claims a completed pass")
+    raw_attempts = raw.get("attempts")
+    if not isinstance(raw_attempts, list) or len(raw_attempts) != attempt_count:
+        raise StagePlanError("rig-blocked authorization attempt count does not match its rows")
+    attempts = [
+        _rig_blocked_attempt_projection(item, name=f"rig-blocked attempts[{index}]")
+        for index, item in enumerate(raw_attempts)
+    ]
+    if len({item["experiment_id"] for item in attempts}) != len(attempts) or len(
+        {item["controller_run_id"] for item in attempts}
+    ) != len(attempts):
+        raise StagePlanError("rig-blocked authorization attempts are not unique")
+    if {item["head_sha"] for item in attempts} != set(head_shas):
+        raise StagePlanError("rig-blocked authorization head SHAs differ from its attempts")
+    _authorization_digest(
+        raw,
+        field="authorization_sha256",
+        name="rig-blocked authorization",
+    )
+    receipt = _require_bound_rig_blocked_receipt(source, source_ledger, fetch=fetch)
+    if receipt["ledger_provenance"] != rig.LEDGER_PROVENANCE_VERIFIED:
+        raise StagePlanError("rig-blocked authorization requires a GitHub-verified ledger")
+    unsigned = {key: value for key, value in raw.items() if key != "authorization_sha256"}
+    if unsigned != rig_blocked_projection(source, source_ledger, receipt):
+        raise StagePlanError("rig-blocked authorization differs from its bound receipt")
+    return {
+        **raw,
+        "source_receipt": source,
+        "source_ledger": source_ledger,
+        "rig_blocked_receipt_sha256": receipt_digest,
+        "ledger_sha256": ledger_digest,
+        "repository": repository,
+        "head_branch": head_branch,
+        "head_shas": head_shas,
+        "attempt_count": attempt_count,
+        "attempts": attempts,
     }
 
 

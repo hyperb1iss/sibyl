@@ -153,6 +153,97 @@ def rebase_aa_authorization(
     return rebased
 
 
+def package_rig_blocked_authorization(
+    receipt_path: Path,
+    *,
+    ledger_path: Path,
+    fetch: rig.GitHubFetch,
+    public_receipt_path: Path | None = None,
+    public_ledger_path: Path | None = None,
+) -> dict[str, Any]:
+    """Project a dispatch-exhaustion receipt and the ledger it derives from into authority.
+
+    ``fetch`` re-verifies the bound ledger against GitHub; there is no default
+    because an unverified projection is not authority.
+    """
+    source, receipt = _validated_artifact(
+        receipt_path,
+        name="rig-blocked source receipt",
+        validator=rig.validate_rig_blocked_receipt,
+    )
+    source_ledger, ledger = _validated_artifact(
+        ledger_path,
+        name="rig-blocked source ledger",
+        validator=rig.require_dispatch_ledger,
+    )
+    validated = build_rig_blocked_authorization(
+        source,
+        receipt,
+        source_ledger=source_ledger,
+        ledger=ledger,
+        fetch=fetch,
+    )
+    return rebase_rig_blocked_authorization(
+        validated,
+        public_receipt_path=public_receipt_path,
+        public_ledger_path=public_ledger_path,
+    )
+
+
+def build_rig_blocked_authorization(
+    source: dict[str, Any],
+    receipt: dict[str, Any],
+    *,
+    source_ledger: dict[str, Any],
+    ledger: dict[str, Any],
+    fetch: rig.GitHubFetch,
+) -> dict[str, Any]:
+    """Build dispatch-exhaustion authority from fd-bound receipt and ledger bytes.
+
+    The receipt is rebuilt from the ledger and must match it field for field
+    outside the provenance block, and the ledger is re-verified against GitHub
+    through ``fetch`` before the projection is accepted.
+    """
+
+    receipt = rig.validate_rig_blocked_receipt(receipt)
+    if receipt["ledger_provenance"] != rig.LEDGER_PROVENANCE_VERIFIED:
+        raise StagePlanError("rig-blocked authorization requires a GitHub-verified ledger")
+    try:
+        rig.require_receipt_from_ledger(receipt, ledger)
+    except rig.RigInputError as exc:
+        raise StagePlanError(str(exc)) from exc
+    payload = authorization.rig_blocked_projection(source, source_ledger, receipt)
+    payload["authorization_sha256"] = rig.canonical_sha256(payload)
+    return authorization.require_rig_blocked_authorization(payload, fetch=fetch)
+
+
+def rebase_rig_blocked_authorization(
+    validated: dict[str, Any],
+    *,
+    public_receipt_path: Path | None,
+    public_ledger_path: Path | None,
+) -> dict[str, Any]:
+    """Rebase a physically validated rig-blocked projection to public paths."""
+
+    if public_receipt_path is None and public_ledger_path is None:
+        return validated
+    if public_receipt_path is None or public_ledger_path is None:
+        raise StagePlanError("rig-blocked public authorization paths are incomplete")
+    rebased = deepcopy(validated)
+    rebased["source_receipt"]["path"] = _public_path(
+        public_receipt_path,
+        name="rig-blocked source receipt",
+    )
+    rebased["source_ledger"]["path"] = _public_path(
+        public_ledger_path,
+        name="rig-blocked source ledger",
+    )
+    rebased["authorization_sha256"] = rig.canonical_sha256(
+        {key: value for key, value in rebased.items() if key != "authorization_sha256"}
+    )
+    return rebased
+
+
 def _package_anchor_gate(
     path: Path,
     preregistration: dict[str, Any],
@@ -349,10 +440,19 @@ def write_authorization(
     payload: dict[str, Any],
     *,
     paid_output_root: Path,
+    fetch: rig.GitHubFetch | None = None,
 ) -> None:
-    """Write a validated authority artifact once, outside paid output roots."""
+    """Write a validated authority artifact once, outside paid output roots.
+
+    A rig-blocked authority needs ``fetch`` so it can be re-verified against
+    GitHub before it is written; the other kinds never touch the network.
+    """
     if payload.get("kind") == "aa":
         authorization.require_aa_authorization(payload)
+    elif payload.get("kind") == "rig_blocked":
+        if fetch is None:
+            raise StagePlanError("rig-blocked authorization needs a GitHub fetcher")
+        authorization.require_rig_blocked_authorization(payload, fetch=fetch)
     else:
         authorization.require_preregistration_authorization(
             payload,

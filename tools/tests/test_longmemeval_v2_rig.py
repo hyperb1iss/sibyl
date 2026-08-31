@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import inspect
 import json
 from copy import deepcopy
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -1144,3 +1146,582 @@ def test_cli_writes_failure_receipt_and_returns_nonzero(tmp_path: Path) -> None:
     assert receipt["status"] == "FAIL"
     assert receipt["score_claim_allowed"] is False
     assert receipt["paid_benchmark_allowed"] is False
+
+
+DISPATCH_REPOSITORY = "hyperb1iss/sibyl"
+DISPATCH_HEAD_SHA = "b" * 40
+
+
+def _ledger_time(hours: float, *, seconds: int = 0) -> str:
+    base = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
+    return (base + timedelta(hours=hours, seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _ledger_run(
+    *,
+    run_id: int,
+    name: str,
+    path: str,
+    display_title: str,
+    head_sha: str,
+    conclusion: str,
+    created_at: str,
+    updated_at: str,
+    head_branch: str = rig.TRUSTED_BRANCH,
+    repository: str = DISPATCH_REPOSITORY,
+) -> dict[str, Any]:
+    return {
+        "id": run_id,
+        "name": name,
+        "path": path,
+        "display_title": display_title,
+        "head_sha": head_sha,
+        "head_branch": head_branch,
+        "event": "workflow_dispatch",
+        "status": "completed",
+        "conclusion": conclusion,
+        "run_attempt": 1,
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "run_started_at": created_at,
+        "html_url": f"https://github.com/{repository}/actions/runs/{run_id}",
+        "repository": repository,
+    }
+
+
+def _ledger_job(
+    *,
+    job_id: int,
+    run_id: int,
+    name: str,
+    conclusion: str,
+    head_sha: str,
+    started_at: str,
+    completed_at: str,
+) -> dict[str, Any]:
+    return {
+        "id": job_id,
+        "run_id": run_id,
+        "run_attempt": 1,
+        "name": name,
+        "status": "completed",
+        "conclusion": conclusion,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "head_sha": head_sha,
+        "html_url": f"https://github.com/{DISPATCH_REPOSITORY}/actions/runs/{run_id}/job/{job_id}",
+    }
+
+
+def _dispatch_attempt(
+    index: int,
+    *,
+    head_sha: str = DISPATCH_HEAD_SHA,
+    domain_conclusions: dict[str, str] | None = None,
+    combined_conclusion: str | None = "skipped",
+    head_branch: str = rig.TRUSTED_BRANCH,
+    repository: str = DISPATCH_REPOSITORY,
+) -> dict[str, Any]:
+    controller_id = 1000 + index
+    builder_id = 2000 + index
+    start = 6 * index
+    conclusions = domain_conclusions or {"enterprise": "failure", "web": "failure"}
+    jobs = [
+        _ledger_job(
+            job_id=3000 + 10 * index + offset,
+            run_id=builder_id,
+            name=rig.OFFICIAL_JOB_NAMES[domain],
+            conclusion=conclusions[domain],
+            head_sha=head_sha,
+            started_at=_ledger_time(start + 0.1),
+            completed_at=_ledger_time(start + 2),
+        )
+        for offset, domain in enumerate(sorted(rig.DOMAINS))
+    ]
+    if combined_conclusion is not None:
+        jobs.append(
+            _ledger_job(
+                job_id=3000 + 10 * index + 5,
+                run_id=builder_id,
+                name=rig.OFFICIAL_JOB_NAMES["combined_receipt"],
+                conclusion=combined_conclusion,
+                head_sha=head_sha,
+                started_at=_ledger_time(start + 2),
+                completed_at=_ledger_time(start + 2),
+            )
+        )
+    controller = _ledger_run(
+        run_id=controller_id,
+        name=f"{rig.CONTROLLER_WORKFLOW_NAME} aa-r{index + 1}",
+        path=rig.CONTROLLER_WORKFLOW_PATH,
+        display_title=f"{rig.CONTROLLER_WORKFLOW_NAME} aa-r{index + 1}",
+        head_sha=head_sha,
+        conclusion="success",
+        created_at=_ledger_time(start),
+        updated_at=_ledger_time(start + 0.05),
+        head_branch=head_branch,
+        repository=repository,
+    )
+    builder = _ledger_run(
+        run_id=builder_id,
+        name=f"{rig.BUILDER_WORKFLOW_NAME} aa-{controller_id} {rig.DISPATCH_BUILDER_ARM_ID}",
+        path=rig.BUILDER_WORKFLOW_PATH,
+        display_title=(
+            f"{rig.BUILDER_WORKFLOW_NAME} aa-{controller_id} {rig.DISPATCH_BUILDER_ARM_ID}"
+        ),
+        head_sha=head_sha,
+        conclusion="failure",
+        created_at=_ledger_time(start + 0.05),
+        updated_at=_ledger_time(start + 2),
+        head_branch=head_branch,
+        repository=repository,
+    )
+    return {"controller": controller, "builders": [{**builder, "jobs": jobs}]}
+
+
+def _dispatch_ledger(
+    attempts: list[dict[str, Any]] | None = None,
+    *,
+    repository: str = DISPATCH_REPOSITORY,
+) -> dict[str, Any]:
+    rows = attempts if attempts is not None else [_dispatch_attempt(index) for index in range(5)]
+    return {
+        "schema_version": rig.DISPATCH_LEDGER_SCHEMA_VERSION,
+        "repository": repository,
+        "fetched_at": _ledger_time(6 * len(rows) + 24),
+        "source": {
+            "tool": "gh api",
+            "run_endpoint": "repos/{repository}/actions/runs/{run_id}",
+            "jobs_endpoint": "repos/{repository}/actions/runs/{run_id}/jobs?per_page=100",
+            "builder_query": "gh run list --workflow longmemeval-v2.yml",
+        },
+        "attempts": rows,
+    }
+
+
+def test_rig_blocked_receipt_binds_exhausted_dispatches(tmp_path: Path) -> None:
+    ledger = _dispatch_ledger()
+
+    receipt = rig.build_rig_blocked_receipt(ledger)
+
+    assert receipt["status"] == "RIG_BLOCKED"
+    assert receipt["blocked_reason"] == rig.BLOCKED_REASON_DISPATCH_EXHAUSTED
+    assert receipt["paid_benchmark_allowed"] is False
+    assert receipt["score_claim_allowed"] is False
+    assert receipt["attempt_count"] == rig.EXTENDED_AA_PASS_COUNT
+    assert receipt["completed_pass_count"] == 0
+    assert receipt["head_shas"] == [DISPATCH_HEAD_SHA]
+    assert receipt["ledger_sha256"] == rig.canonical_sha256(ledger)
+    assert [item["experiment_id"] for item in receipt["attempts"]] == [
+        f"aa-r{index}" for index in range(1, 6)
+    ]
+    first = receipt["attempts"][0]
+    assert first["controller"]["run_id"] == ledger["attempts"][0]["controller"]["id"]
+    assert first["builders"][0]["run_id"] == ledger["attempts"][0]["builders"][0]["id"]
+    assert first["builders"][0]["official_jobs"]["web"]["conclusion"] == "failure"
+    assert first["builders"][0]["official_jobs"]["combined_receipt"]["conclusion"] == "skipped"
+    assert rig.validate_rig_blocked_receipt(receipt) == receipt
+
+    ledger_path = tmp_path / "ledger.json"
+    output = tmp_path / "receipt.json"
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+    assert rig.main(["rig-blocked", "--ledger", str(ledger_path), "--output", str(output)]) == 1
+    assert json.loads(output.read_text(encoding="utf-8")) == receipt
+
+
+def test_rig_blocked_receipt_requires_five_dispatches() -> None:
+    ledger = _dispatch_ledger([_dispatch_attempt(index) for index in range(4)])
+
+    with pytest.raises(rig.RigInputError, match="at least 5 controller dispatches"):
+        rig.build_rig_blocked_receipt(ledger)
+
+
+@pytest.mark.parametrize(
+    ("domain_conclusions", "combined_conclusion"),
+    [
+        ({"enterprise": "success", "web": "success"}, "skipped"),
+        ({"enterprise": "success", "web": "success"}, None),
+        ({"enterprise": "failure", "web": "success"}, "success"),
+    ],
+)
+def test_rig_blocked_receipt_rejects_completed_two_domain_pass(
+    domain_conclusions: dict[str, str],
+    combined_conclusion: str | None,
+) -> None:
+    attempts = [_dispatch_attempt(index) for index in range(4)]
+    attempts.append(
+        _dispatch_attempt(
+            4,
+            domain_conclusions=domain_conclusions,
+            combined_conclusion=combined_conclusion,
+        )
+    )
+
+    with pytest.raises(rig.RigInputError, match="A/A data, not dispatch exhaustion"):
+        rig.build_rig_blocked_receipt(_dispatch_ledger(attempts))
+
+
+def test_rig_blocked_receipt_rejects_builder_head_sha_drift() -> None:
+    attempts = [_dispatch_attempt(index) for index in range(5)]
+    attempts[2]["builders"][0]["head_sha"] = "c" * 40
+    for job in attempts[2]["builders"][0]["jobs"]:
+        job["head_sha"] = "c" * 40
+
+    with pytest.raises(rig.RigInputError, match="head SHA differs from its controller"):
+        rig.build_rig_blocked_receipt(_dispatch_ledger(attempts))
+
+
+def test_rig_blocked_receipt_records_every_dispatched_head_sha() -> None:
+    attempts = [
+        _dispatch_attempt(index, head_sha=sha)
+        for index, sha in enumerate(["d" * 40, "d" * 40, "e" * 40, "f" * 40, "1" * 40])
+    ]
+
+    receipt = rig.build_rig_blocked_receipt(_dispatch_ledger(attempts))
+
+    assert receipt["head_shas"] == ["d" * 40, "e" * 40, "f" * 40, "1" * 40]
+    assert [item["head_sha"] for item in receipt["attempts"]] == [
+        "d" * 40,
+        "d" * 40,
+        "e" * 40,
+        "f" * 40,
+        "1" * 40,
+    ]
+
+
+def test_rig_blocked_receipt_rejects_branch_and_controller_drift() -> None:
+    branched = [_dispatch_attempt(index) for index in range(5)]
+    branched[4]["controller"]["head_branch"] = "release/1.3"
+    branched[4]["builders"][0]["head_branch"] = "release/1.3"
+    with pytest.raises(rig.RigInputError, match="not on the trusted release branch"):
+        rig.build_rig_blocked_receipt(_dispatch_ledger(branched))
+
+    unbound = [_dispatch_attempt(index) for index in range(5)]
+    unbound[1]["builders"][0]["display_title"] = (
+        f"{rig.BUILDER_WORKFLOW_NAME} aa-999 {rig.DISPATCH_BUILDER_ARM_ID}"
+    )
+    with pytest.raises(rig.RigInputError, match="was not dispatched by controller"):
+        rig.build_rig_blocked_receipt(_dispatch_ledger(unbound))
+
+
+def test_rig_blocked_receipt_rejects_tampered_claims() -> None:
+    receipt = rig.build_rig_blocked_receipt(_dispatch_ledger())
+
+    def resealed(**changes: Any) -> dict[str, Any]:
+        tampered = {**deepcopy(receipt), **changes}
+        unsigned = {
+            key: value for key, value in tampered.items() if key != "rig_blocked_receipt_sha256"
+        }
+        tampered["rig_blocked_receipt_sha256"] = rig.canonical_sha256(unsigned)
+        return tampered
+
+    with pytest.raises(rig.RigInputError, match="digest does not bind"):
+        rig.validate_rig_blocked_receipt({**receipt, "attempt_count": 6})
+    with pytest.raises(rig.RigInputError, match="claims a completed pass"):
+        rig.validate_rig_blocked_receipt(resealed(completed_pass_count=1))
+    with pytest.raises(rig.RigInputError, match="cannot authorize paid work"):
+        rig.validate_rig_blocked_receipt(resealed(paid_benchmark_allowed=True))
+    with pytest.raises(rig.RigInputError, match="status or reason is invalid"):
+        rig.validate_rig_blocked_receipt(resealed(blocked_reason=rig.BLOCKED_REASON_SPAN_UNSTABLE))
+    with pytest.raises(rig.RigInputError, match="fewer than five"):
+        rig.validate_rig_blocked_receipt(
+            resealed(attempts=receipt["attempts"][:4], attempt_count=4)
+        )
+    with pytest.raises(rig.RigInputError, match="head SHAs do not match"):
+        rig.validate_rig_blocked_receipt(resealed(head_shas=["9" * 40]))
+
+
+def test_aa_span_block_and_dispatch_exhaustion_name_different_reasons() -> None:
+    stable = _aa_receipt()
+    unstable = _aa_receipt(right_accuracies=[0.6, 0.6, 0.6, 0.7, 0.8])
+
+    assert stable["status"] == "PASS"
+    assert stable["blocked_reason"] is None
+    assert unstable["status"] == "RIG_BLOCKED"
+    assert unstable["blocked_reason"] == rig.BLOCKED_REASON_SPAN_UNSTABLE
+    assert unstable["blocked_reason"] != rig.BLOCKED_REASON_DISPATCH_EXHAUSTED
+    tampered = {**unstable, "blocked_reason": rig.BLOCKED_REASON_DISPATCH_EXHAUSTED}
+    unsigned = {key: value for key, value in tampered.items() if key != "aa_receipt_sha256"}
+    tampered["aa_receipt_sha256"] = rig.canonical_sha256(unsigned)
+    with pytest.raises(rig.RigInputError, match="blocked reason does not match"):
+        rig.validate_aa_receipt(tampered)
+
+
+def test_rig_blocked_receipt_tolerates_bounded_github_skipped_job_clock_skew() -> None:
+    attempts = [_dispatch_attempt(index) for index in range(5)]
+    skipped = attempts[1]["builders"][0]["jobs"][-1]
+    assert skipped["conclusion"] == "skipped"
+    skipped["started_at"] = _ledger_time(8, seconds=rig.SKIPPED_JOB_MAX_CLOCK_SKEW_SECONDS)
+    skipped["completed_at"] = _ledger_time(8)
+
+    receipt = rig.build_rig_blocked_receipt(_dispatch_ledger(attempts))
+
+    assert receipt["attempts"][1]["builders"][0]["official_jobs"]["combined_receipt"] == {
+        "job_id": skipped["id"],
+        "conclusion": "skipped",
+        "started_at": skipped["started_at"],
+        "completed_at": skipped["completed_at"],
+        "html_url": skipped["html_url"],
+    }
+    assert rig.validate_rig_blocked_receipt(receipt) == receipt
+
+
+@pytest.mark.parametrize(
+    ("conclusion", "reversal_seconds"),
+    [
+        ("skipped", rig.SKIPPED_JOB_MAX_CLOCK_SKEW_SECONDS + 1),
+        ("skipped", 3600),
+        ("failure", 1),
+    ],
+)
+def test_rig_blocked_receipt_rejects_job_clock_reversal_beyond_the_skipped_bound(
+    conclusion: str,
+    reversal_seconds: int,
+) -> None:
+    attempts = [_dispatch_attempt(index) for index in range(5)]
+    job = attempts[2]["builders"][0]["jobs"][-1 if conclusion == "skipped" else 0]
+    assert job["conclusion"] == conclusion
+    job["started_at"] = _ledger_time(14, seconds=reversal_seconds)
+    job["completed_at"] = _ledger_time(14)
+    with pytest.raises(rig.RigInputError, match="completed before it started"):
+        rig.build_rig_blocked_receipt(_dispatch_ledger(attempts))
+
+    receipt = rig.build_rig_blocked_receipt(_dispatch_ledger())
+    tampered = deepcopy(receipt)
+    row = tampered["attempts"][2]["builders"][0]["official_jobs"]
+    key = "combined_receipt" if conclusion == "skipped" else "enterprise"
+    row[key]["started_at"] = job["started_at"]
+    row[key]["completed_at"] = job["completed_at"]
+    unsigned = {k: v for k, v in tampered.items() if k != "rig_blocked_receipt_sha256"}
+    tampered["rig_blocked_receipt_sha256"] = rig.canonical_sha256(unsigned)
+    with pytest.raises(rig.RigInputError, match="completed before it started"):
+        rig.validate_rig_blocked_receipt(tampered)
+
+
+def _github_raw_run(row: dict[str, Any]) -> dict[str, Any]:
+    raw = {key: value for key, value in row.items() if key not in {"jobs", "repository"}}
+    raw["repository"] = {"full_name": row["repository"], "private": False}
+    raw["actor"] = {"login": "hyperb1iss"}
+    return raw
+
+
+class _GitHubStub:
+    """Serve ledger rows in GitHub's raw shapes and record every endpoint asked for."""
+
+    def __init__(
+        self,
+        ledger: dict[str, Any],
+        *,
+        extra_builders: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self.runs: dict[int, dict[str, Any]] = {}
+        self.jobs: dict[int, list[dict[str, Any]]] = {}
+        self.listing: list[dict[str, Any]] = []
+        self.calls: list[str] = []
+        for attempt in ledger["attempts"]:
+            self.runs[attempt["controller"]["id"]] = _github_raw_run(attempt["controller"])
+            for builder in attempt["builders"]:
+                self._add_builder(builder)
+        for builder in extra_builders or []:
+            self._add_builder(builder)
+
+    def _add_builder(self, builder: dict[str, Any]) -> None:
+        self.runs[builder["id"]] = _github_raw_run(builder)
+        self.jobs[builder["id"]] = [{**job, "steps": []} for job in builder["jobs"]]
+        self.listing.append(_github_raw_run(builder))
+
+    def __call__(self, endpoint: str) -> list[Any]:
+        self.calls.append(endpoint)
+        if "/actions/workflows/" in endpoint:
+            return [{"total_count": len(self.listing), "workflow_runs": self.listing}]
+        if endpoint.endswith("/jobs?per_page=100"):
+            run_id = int(endpoint.rsplit("/", 2)[-2])
+            if run_id not in self.jobs:
+                raise rig.RigInputError(f"gh api {endpoint} failed: HTTP 404")
+            return [{"total_count": len(self.jobs[run_id]), "jobs": self.jobs[run_id]}]
+        run_id = int(endpoint.rsplit("/", 1)[-1])
+        if run_id not in self.runs:
+            raise rig.RigInputError(f"gh api {endpoint} failed: HTTP 404")
+        return [self.runs[run_id]]
+
+
+def _github_stub(
+    ledger: dict[str, Any],
+    *,
+    extra_builders: list[dict[str, Any]] | None = None,
+) -> _GitHubStub:
+    return _GitHubStub(ledger, extra_builders=extra_builders)
+
+
+def test_rig_blocked_offline_seal_is_unverified() -> None:
+    receipt = rig.build_rig_blocked_receipt(_dispatch_ledger())
+
+    assert receipt["ledger_provenance"] == rig.LEDGER_PROVENANCE_UNVERIFIED
+    assert receipt["github_verification"] is None
+    assert rig.validate_rig_blocked_receipt(receipt) == receipt
+
+
+def test_rig_blocked_receipt_verifies_every_run_and_job_against_github(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger = _dispatch_ledger()
+    fetch = _github_stub(ledger)
+
+    receipt = rig.build_verified_rig_blocked_receipt(ledger, fetch=fetch)
+
+    assert receipt["ledger_provenance"] == rig.LEDGER_PROVENANCE_VERIFIED
+    assert receipt["github_verification"]["run_count"] == 2 * rig.EXTENDED_AA_PASS_COUNT
+    assert receipt["github_verification"]["job_count"] == 3 * rig.EXTENDED_AA_PASS_COUNT
+    assert len(fetch.calls) == 4 * rig.EXTENDED_AA_PASS_COUNT
+    assert rig.validate_rig_blocked_receipt(receipt) == receipt
+    assert rig.receipt_derivation(receipt) == rig.receipt_derivation(
+        rig.build_rig_blocked_receipt(ledger)
+    )
+    assert "verification" not in inspect.signature(rig.build_rig_blocked_receipt).parameters
+
+    monkeypatch.setattr(rig, "gh_api_fetch", _github_stub(ledger))
+    ledger_path = tmp_path / "ledger.json"
+    output = tmp_path / "receipt.json"
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+    argv = ["rig-blocked", "--ledger", str(ledger_path), "--output", str(output)]
+    assert rig.main([*argv, "--verify-github"]) == 1
+    sealed = json.loads(output.read_text(encoding="utf-8"))
+    assert sealed["ledger_provenance"] == rig.LEDGER_PROVENANCE_VERIFIED
+    assert sealed["github_verification"]["builder_query"] == rig.GITHUB_BUILDER_RUNS_ENDPOINT
+    output.unlink()
+    assert rig.main(argv) == 1
+    assert json.loads(output.read_text(encoding="utf-8"))["ledger_provenance"] == (
+        rig.LEDGER_PROVENANCE_UNVERIFIED
+    )
+
+
+def test_rig_blocked_verified_seal_fails_closed_on_fetch_failure() -> None:
+    ledger = _dispatch_ledger()
+
+    def broken(endpoint: str) -> list[Any]:
+        raise rig.RigInputError(f"gh api {endpoint} failed: HTTP 504")
+
+    with pytest.raises(rig.RigInputError, match="HTTP 504"):
+        rig.build_verified_rig_blocked_receipt(ledger, fetch=broken)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "match"),
+    [
+        (
+            lambda a: a[1]["builders"][0]["jobs"].__setitem__(
+                0, {**a[1]["builders"][0]["jobs"][0], "conclusion": "cancelled"}
+            ),
+            r"builders\[0\] jobs differ from GitHub",
+        ),
+        (
+            lambda a: a[3]["controller"].__setitem__("html_url", "https://example.invalid/run"),
+            "controller differs from GitHub on html_url",
+        ),
+        (
+            lambda a: a[4]["builders"][0].__setitem__("conclusion", "cancelled"),
+            r"builders\[0\] differs from GitHub on conclusion",
+        ),
+    ],
+)
+def test_rig_blocked_verification_rejects_a_drifted_field(mutate: Any, match: str) -> None:
+    ledger = _dispatch_ledger()
+    fetch = _github_stub(deepcopy(ledger))
+    mutate(ledger["attempts"])
+
+    with pytest.raises(rig.RigInputError, match=match):
+        rig.verify_dispatch_ledger(ledger, fetch=fetch)
+
+
+def test_rig_blocked_verification_rejects_an_omitted_builder() -> None:
+    ledger = _dispatch_ledger()
+    hidden = _dispatch_attempt(
+        2,
+        domain_conclusions={"enterprise": "success", "web": "success"},
+        combined_conclusion="success",
+    )["builders"][0]
+    hidden["id"] = 2999
+    for job in hidden["jobs"]:
+        job["run_id"] = 2999
+    fetch = _github_stub(ledger, extra_builders=[hidden])
+
+    with pytest.raises(rig.RigInputError, match=r"attempts\[2\] builder runs differ from GitHub"):
+        rig.verify_dispatch_ledger(ledger, fetch=fetch)
+
+
+def test_rig_blocked_receipt_rejects_a_foreign_repository() -> None:
+    foreign = "someone/else"
+    ledger = _dispatch_ledger(
+        [_dispatch_attempt(index, repository=foreign) for index in range(5)],
+        repository=foreign,
+    )
+
+    with pytest.raises(rig.RigInputError, match="not the trusted release repository"):
+        rig.build_rig_blocked_receipt(ledger)
+    with pytest.raises(rig.RigInputError, match="not the trusted release repository"):
+        rig.verify_dispatch_ledger(ledger, fetch=_github_stub(ledger))
+
+
+def test_rig_blocked_receipt_rejects_a_uniformly_foreign_branch() -> None:
+    ledger = _dispatch_ledger(
+        [_dispatch_attempt(index, head_branch="release/1.3") for index in range(5)]
+    )
+
+    with pytest.raises(rig.RigInputError, match="not on the trusted release branch"):
+        rig.build_rig_blocked_receipt(ledger)
+
+    receipt = rig.build_rig_blocked_receipt(_dispatch_ledger())
+    tampered = deepcopy(receipt)
+    tampered["head_branch"] = "release/1.3"
+    for row in tampered["attempts"]:
+        row["head_branch"] = "release/1.3"
+    unsigned = {k: v for k, v in tampered.items() if k != "rig_blocked_receipt_sha256"}
+    tampered["rig_blocked_receipt_sha256"] = rig.canonical_sha256(unsigned)
+    with pytest.raises(rig.RigInputError, match="not on the trusted release branch"):
+        rig.validate_rig_blocked_receipt(tampered)
+
+
+def test_rig_blocked_receipt_rejects_a_job_from_another_run_attempt() -> None:
+    attempts = [_dispatch_attempt(index) for index in range(5)]
+    attempts[3]["builders"][0]["jobs"][1]["run_attempt"] = 2
+
+    with pytest.raises(rig.RigInputError, match="does not belong to its builder run"):
+        rig.build_rig_blocked_receipt(_dispatch_ledger(attempts))
+
+
+def test_rig_blocked_receipt_rejects_forged_provenance() -> None:
+    receipt = rig.build_rig_blocked_receipt(_dispatch_ledger())
+
+    def resealed(**changes: Any) -> dict[str, Any]:
+        tampered = {**deepcopy(receipt), **changes}
+        unsigned = {k: v for k, v in tampered.items() if k != "rig_blocked_receipt_sha256"}
+        tampered["rig_blocked_receipt_sha256"] = rig.canonical_sha256(unsigned)
+        return tampered
+
+    with pytest.raises(rig.RigInputError, match="missing its GitHub verification"):
+        rig.validate_rig_blocked_receipt(resealed(ledger_provenance=rig.LEDGER_PROVENANCE_VERIFIED))
+    verification = {
+        "verified_at": _ledger_time(1),
+        "run_count": 2 * rig.EXTENDED_AA_PASS_COUNT,
+        "job_count": 3 * rig.EXTENDED_AA_PASS_COUNT,
+        "builder_query": rig.GITHUB_BUILDER_RUNS_ENDPOINT,
+    }
+    with pytest.raises(rig.RigInputError, match="verified before it was fetched"):
+        rig.validate_rig_blocked_receipt(
+            resealed(
+                ledger_provenance=rig.LEDGER_PROVENANCE_VERIFIED,
+                github_verification=verification,
+            )
+        )
+    with pytest.raises(rig.RigInputError, match="run count does not match"):
+        rig.validate_rig_blocked_receipt(
+            resealed(
+                ledger_provenance=rig.LEDGER_PROVENANCE_VERIFIED,
+                github_verification={
+                    **verification,
+                    "verified_at": receipt["ledger_fetched_at"],
+                    "run_count": 3,
+                },
+            )
+        )

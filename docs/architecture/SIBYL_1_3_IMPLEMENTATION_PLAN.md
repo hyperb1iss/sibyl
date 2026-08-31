@@ -1,9 +1,10 @@
 # Sibyl v1.3 final implementation and release plan: One Surface
 
-- Status: implementation and local harmony gates complete; merge, paid benchmark, and release-cut
-  evidence pending
+- Status: merged and green on `main`; paid benchmark stopped by the dispatch-exhaustion rig-blocked
+  receipt; release cut pending approval (see
+  [SIBYL_1_3_RELEASE_STATUS_2026-08-29.md](SIBYL_1_3_RELEASE_STATUS_2026-08-29.md))
 - Created: 2026-08-19
-- Updated: 2026-08-20
+- Updated: 2026-08-30
 - Working task: `8be323d1-0000-4ce2-9661-8ca504f17e17`
 - Starting commit: `c3c786ab603a67e45689c765b2365f6d3cef8bc6`
 - Plan baseline: `1e8e0b4b`
@@ -406,8 +407,10 @@ the span is larger, run two more passes and publish the observed span rather tha
 the decision noise floor `N` as the larger of `3pp` and that stable observed span.
 
 If the five-pass span does not stabilize, or any compared receipt differs outside the allowed run
-identifiers, stop the paid benchmark path and publish a rig-blocked receipt. Benchmark blockage does
-not block the product release.
+identifiers, stop the paid benchmark path and publish a rig-blocked receipt. Five controller
+dispatches that never complete one two-domain pass are the same stop, and the rig seals them as a
+rig-blocked receipt with `blocked_reason: dispatch_exhausted` bound to the observed run ids.
+Benchmark blockage does not block the product release.
 
 Once the rig is usable, run the current machine arm across both Small domains and publish one
 generated anchor receipt. The receipt includes accuracy, evidence exposure, latency, tokens,
@@ -594,12 +597,12 @@ Sibyl v1.3 may cut when every required item below has a receipt.
 - [x] The official harness is pinned to a reviewed immutable commit.
 - [x] Query context is identifier-only and covered by a contract test.
 - [x] Faulted vector and context lanes cannot report success.
-- [ ] A/A produces a stable `N`, or a five-pass rig-blocked receipt stops paid benchmark work.
-- [ ] A usable rig produces a clean post-decontamination Small anchor for both domains. A blocked
+- [x] A/A produces a stable `N`, or a five-pass rig-blocked receipt stops paid benchmark work.
+- [x] A usable rig produces a clean post-decontamination Small anchor for both domains. A blocked
       rig produces no score claim.
-- [ ] The machine versus naive race is adjudicated, inconclusive, or stopped by the rig-blocked
+- [x] The machine versus naive race is adjudicated, inconclusive, or stopped by the rig-blocked
       receipt.
-- [ ] The render bundle is shipped, killed, inconclusive, or stopped by the rig-blocked receipt.
+- [x] The render bundle is shipped, killed, inconclusive, or stopped by the rig-blocked receipt.
 - [x] No release document depends on a leaderboard submission.
 
 ### Release integrity
@@ -615,7 +618,7 @@ Sibyl v1.3 may cut when every required item below has a receipt.
       with no tracked changes. The historical One Surface receipt is recorded in section 9.
 - [x] Targeted lifecycle, MCP authorization, queue retry, readiness, browser, benchmark-contract,
       release-workflow, and Helm gates pass uncached on the harmony head.
-- [ ] The release runbook records the exact commit, generated receipts, deferred work, and rollback
+- [x] The release runbook records the exact commit, generated receipts, deferred work, and rollback
       points.
 
 ## 7. Explicitly deferred to v1.4 or later

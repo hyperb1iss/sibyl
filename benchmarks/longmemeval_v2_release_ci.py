@@ -29,7 +29,7 @@ RUN_MAP_SCHEMA_VERSION = "sibyl-longmemeval-v2-ci-run-map-v1"
 BUNDLE_MANIFEST_SCHEMA_VERSION = "sibyl-longmemeval-v2-ci-aa-bundle-v1"
 PASS_SEEDS = {"aa-1": 1301, "aa-2": 1302, "aa-3": 1303}
 ARM_IDS = tuple(f"{pass_id}-{side}" for pass_id in PASS_SEEDS for side in ("left", "right"))
-BUILDER_ARM_ID = "aa-1-left"
+BUILDER_ARM_ID = rig.DISPATCH_BUILDER_ARM_ID
 RUN_ID_PATTERN = re.compile(r"^[1-9][0-9]*$")
 ORCHESTRATION_ID_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$")
 

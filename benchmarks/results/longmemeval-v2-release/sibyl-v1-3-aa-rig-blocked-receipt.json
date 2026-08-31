@@ -1,0 +1,275 @@
+{
+  "attempt_count": 5,
+  "attempts": [
+    {
+      "builders": [
+        {
+          "conclusion": "cancelled",
+          "created_at": "2026-08-25T19:13:08Z",
+          "event": "workflow_dispatch",
+          "head_sha": "48b4483624305cc020296b6593be3bad968aeac6",
+          "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32888310148",
+          "official_jobs": {
+            "combined_receipt": null,
+            "enterprise": {
+              "completed_at": "2026-08-25T20:40:20Z",
+              "conclusion": "failure",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32888310148/job/97933994796",
+              "job_id": 97933994796,
+              "started_at": "2026-08-25T19:14:26Z"
+            },
+            "web": {
+              "completed_at": "2026-08-25T20:59:25Z",
+              "conclusion": "cancelled",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32888310148/job/97933994691",
+              "job_id": 97933994691,
+              "started_at": "2026-08-25T19:14:25Z"
+            }
+          },
+          "run_attempt": 1,
+          "run_id": 32888310148,
+          "updated_at": "2026-08-25T20:59:26Z"
+        }
+      ],
+      "controller": {
+        "conclusion": "success",
+        "created_at": "2026-08-25T19:12:11Z",
+        "event": "workflow_dispatch",
+        "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32888217656",
+        "run_attempt": 1,
+        "run_id": 32888217656,
+        "updated_at": "2026-08-25T19:13:30Z"
+      },
+      "experiment_id": "sibyl-v1.3-aa-20260825",
+      "head_branch": "main",
+      "head_sha": "48b4483624305cc020296b6593be3bad968aeac6"
+    },
+    {
+      "builders": [
+        {
+          "conclusion": "failure",
+          "created_at": "2026-08-25T20:55:00Z",
+          "event": "workflow_dispatch",
+          "head_sha": "48b4483624305cc020296b6593be3bad968aeac6",
+          "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32898089824",
+          "official_jobs": {
+            "combined_receipt": {
+              "completed_at": "2026-08-25T22:20:41Z",
+              "conclusion": "skipped",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32898089824/job/97989142017",
+              "job_id": 97989142017,
+              "started_at": "2026-08-25T22:20:42Z"
+            },
+            "enterprise": {
+              "completed_at": "2026-08-25T22:20:41Z",
+              "conclusion": "failure",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32898089824/job/97965331052",
+              "job_id": 97965331052,
+              "started_at": "2026-08-25T20:55:49Z"
+            },
+            "web": {
+              "completed_at": "2026-08-25T22:08:09Z",
+              "conclusion": "failure",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32898089824/job/97965331077",
+              "job_id": 97965331077,
+              "started_at": "2026-08-25T20:55:49Z"
+            }
+          },
+          "run_attempt": 1,
+          "run_id": 32898089824,
+          "updated_at": "2026-08-25T22:20:42Z"
+        }
+      ],
+      "controller": {
+        "conclusion": "success",
+        "created_at": "2026-08-25T20:54:00Z",
+        "event": "workflow_dispatch",
+        "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32897996847",
+        "run_attempt": 1,
+        "run_id": 32897996847,
+        "updated_at": "2026-08-25T20:55:17Z"
+      },
+      "experiment_id": "sibyl-v1.3-aa-20260825-r2",
+      "head_branch": "main",
+      "head_sha": "48b4483624305cc020296b6593be3bad968aeac6"
+    },
+    {
+      "builders": [
+        {
+          "conclusion": "failure",
+          "created_at": "2026-08-25T23:31:01Z",
+          "event": "workflow_dispatch",
+          "head_sha": "74ddb867651c0159ff9d213d2cf952d5fb70a52b",
+          "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32911112960",
+          "official_jobs": {
+            "combined_receipt": {
+              "completed_at": "2026-08-26T01:34:03Z",
+              "conclusion": "skipped",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32911112960/job/98029950637",
+              "job_id": 98029950637,
+              "started_at": "2026-08-26T01:34:03Z"
+            },
+            "enterprise": {
+              "completed_at": "2026-08-26T01:07:17Z",
+              "conclusion": "failure",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32911112960/job/98005390966",
+              "job_id": 98005390966,
+              "started_at": "2026-08-25T23:31:58Z"
+            },
+            "web": {
+              "completed_at": "2026-08-26T01:34:03Z",
+              "conclusion": "failure",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32911112960/job/98005390926",
+              "job_id": 98005390926,
+              "started_at": "2026-08-25T23:31:58Z"
+            }
+          },
+          "run_attempt": 1,
+          "run_id": 32911112960,
+          "updated_at": "2026-08-26T01:34:04Z"
+        }
+      ],
+      "controller": {
+        "conclusion": "success",
+        "created_at": "2026-08-25T23:30:14Z",
+        "event": "workflow_dispatch",
+        "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32911050360",
+        "run_attempt": 1,
+        "run_id": 32911050360,
+        "updated_at": "2026-08-25T23:31:16Z"
+      },
+      "experiment_id": "sibyl-v1-3-aa-20260825-r3",
+      "head_branch": "main",
+      "head_sha": "74ddb867651c0159ff9d213d2cf952d5fb70a52b"
+    },
+    {
+      "builders": [
+        {
+          "conclusion": "failure",
+          "created_at": "2026-08-26T02:13:57Z",
+          "event": "workflow_dispatch",
+          "head_sha": "aed4adb2728953aa015bcafb04172b4efe443a6d",
+          "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32921948833",
+          "official_jobs": {
+            "combined_receipt": {
+              "completed_at": "2026-08-26T04:25:38Z",
+              "conclusion": "skipped",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32921948833/job/98060775189",
+              "job_id": 98060775189,
+              "started_at": "2026-08-26T04:25:39Z"
+            },
+            "enterprise": {
+              "completed_at": "2026-08-26T04:18:43Z",
+              "conclusion": "failure",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32921948833/job/98037160887",
+              "job_id": 98037160887,
+              "started_at": "2026-08-26T02:14:53Z"
+            },
+            "web": {
+              "completed_at": "2026-08-26T04:25:38Z",
+              "conclusion": "failure",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32921948833/job/98037160889",
+              "job_id": 98037160889,
+              "started_at": "2026-08-26T02:14:53Z"
+            }
+          },
+          "run_attempt": 1,
+          "run_id": 32921948833,
+          "updated_at": "2026-08-26T04:25:39Z"
+        }
+      ],
+      "controller": {
+        "conclusion": "success",
+        "created_at": "2026-08-26T02:12:56Z",
+        "event": "workflow_dispatch",
+        "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32921881380",
+        "run_attempt": 1,
+        "run_id": 32921881380,
+        "updated_at": "2026-08-26T02:14:14Z"
+      },
+      "experiment_id": "sibyl-v1-3-aa-20260825-r4",
+      "head_branch": "main",
+      "head_sha": "aed4adb2728953aa015bcafb04172b4efe443a6d"
+    },
+    {
+      "builders": [
+        {
+          "conclusion": "failure",
+          "created_at": "2026-08-26T18:16:20Z",
+          "event": "workflow_dispatch",
+          "head_sha": "7f31a330c0d9a25180a98a4332423b811d18c117",
+          "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32998783818",
+          "official_jobs": {
+            "combined_receipt": {
+              "completed_at": "2026-08-26T23:15:39Z",
+              "conclusion": "skipped",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32998783818/job/98356445774",
+              "job_id": 98356445774,
+              "started_at": "2026-08-26T23:15:39Z"
+            },
+            "enterprise": {
+              "completed_at": "2026-08-26T22:01:13Z",
+              "conclusion": "failure",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32998783818/job/98274890140",
+              "job_id": 98274890140,
+              "started_at": "2026-08-26T18:17:09Z"
+            },
+            "web": {
+              "completed_at": "2026-08-26T23:15:38Z",
+              "conclusion": "success",
+              "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32998783818/job/98274890058",
+              "job_id": 98274890058,
+              "started_at": "2026-08-26T18:17:10Z"
+            }
+          },
+          "run_attempt": 1,
+          "run_id": 32998783818,
+          "updated_at": "2026-08-26T23:15:39Z"
+        }
+      ],
+      "controller": {
+        "conclusion": "success",
+        "created_at": "2026-08-26T18:15:25Z",
+        "event": "workflow_dispatch",
+        "html_url": "https://github.com/hyperb1iss/sibyl/actions/runs/32998699090",
+        "run_attempt": 1,
+        "run_id": 32998699090,
+        "updated_at": "2026-08-26T18:16:35Z"
+      },
+      "experiment_id": "sibyl-v1-3-aa-20260826-r5",
+      "head_branch": "main",
+      "head_sha": "7f31a330c0d9a25180a98a4332423b811d18c117"
+    }
+  ],
+  "blocked_reason": "dispatch_exhausted",
+  "builder_arm_id": "aa-1-left",
+  "builder_workflow": ".github/workflows/longmemeval-v2.yml",
+  "completed_pass_count": 0,
+  "controller_workflow": ".github/workflows/longmemeval-v2-release-aa.yml",
+  "exhaustion_rule": "at least five successful controller dispatches on one branch, each binding a builder run whose official Small domains never both succeeded and whose combined receipt never succeeded",
+  "first_dispatched_at": "2026-08-25T19:12:11Z",
+  "github_verification": {
+    "builder_query": "repos/{repository}/actions/workflows/{workflow}/runs?event=workflow_dispatch&per_page=100&created=>={date}",
+    "job_count": 29,
+    "run_count": 10,
+    "verified_at": "2026-08-30T07:35:29Z"
+  },
+  "head_branch": "main",
+  "head_shas": [
+    "48b4483624305cc020296b6593be3bad968aeac6",
+    "74ddb867651c0159ff9d213d2cf952d5fb70a52b",
+    "aed4adb2728953aa015bcafb04172b4efe443a6d",
+    "7f31a330c0d9a25180a98a4332423b811d18c117"
+  ],
+  "last_dispatched_at": "2026-08-26T18:15:25Z",
+  "ledger_fetched_at": "2026-08-30T07:07:30Z",
+  "ledger_provenance": "github_verified",
+  "ledger_sha256": "sha256:74339727e600a92a0157db517e6c5ce0b378bf08b4dc8ba2eb274818427a4299",
+  "paid_benchmark_allowed": false,
+  "repository": "hyperb1iss/sibyl",
+  "required_attempt_count": 5,
+  "rig_blocked_receipt_sha256": "sha256:5850fd3f31ac8db9090b8e7bb8b62b349823500f0ebac6ebe3ba3a09cccc0df8",
+  "schema_version": "sibyl-longmemeval-v2-rig-blocked-receipt-v1",
+  "score_claim_allowed": false,
+  "status": "RIG_BLOCKED"
+}
