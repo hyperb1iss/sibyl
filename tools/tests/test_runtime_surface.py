@@ -5,6 +5,7 @@ import shutil
 import subprocess
 
 import pytest
+import yaml
 from tools.inventory.runtime_surface import (
     GRAPHITI_COMPATIBILITY_ALLOWLIST,
     GRAPHITI_EXIT_INVENTORY_PATH,
@@ -767,3 +768,137 @@ def test_helm_guard_remediation_refuses_to_interpolate_shell_metacharacters() ->
 
     assert valid.returncode != 0
     assert "kubectl create secret generic ok-name-123" in valid.stderr
+
+
+def _surrealdb_chart_containers() -> list[dict]:
+    """Render the surrealdb wrapper with every ops surface enabled and
+    return each (init)container spec from the manifests."""
+    assert _HELM_BINARY is not None
+    result = subprocess.run(  # noqa: S603
+        [
+            _HELM_BINARY,
+            "template",
+            "drill",
+            "charts/surrealdb",
+            "--set",
+            "export.enabled=true",
+            "--set",
+            "restoreDrill.enabled=true",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    containers: list[dict] = []
+    for document in yaml.safe_load_all(result.stdout):
+        if not document:
+            continue
+        pod_spec = (
+            document.get("spec", {}).get("template", {}).get("spec")
+            or document.get("spec", {})
+            .get("jobTemplate", {})
+            .get("spec", {})
+            .get("template", {})
+            .get("spec")
+            or (document.get("spec") if document.get("kind") == "Pod" else None)
+        )
+        if not pod_spec:
+            continue
+        containers.extend(pod_spec.get("initContainers", []))
+        containers.extend(pod_spec.get("containers", []))
+    assert containers
+    return containers
+
+
+@requires_helm
+def test_helm_surreal_image_never_hosts_a_shell() -> None:
+    """The official surrealdb image is distroless: any container that
+    invokes /bin/sh on it fails at OCI create in a real cluster while
+    rendering green, which is exactly how the strict-bootstrap hook
+    shipped broken. Shell workloads must run on the ops image."""
+    for container in _surrealdb_chart_containers():
+        command = container.get("command") or []
+        args = container.get("args") or []
+        uses_shell = any("/bin/sh" in str(part) for part in [*command, *args])
+        if uses_shell:
+            assert "surrealdb/surrealdb" not in container["image"], (
+                f"container {container['name']} runs a shell on the "
+                f"distroless surreal image {container['image']}"
+            )
+
+
+@requires_helm
+def test_helm_restore_drill_splits_server_and_drill_logic() -> None:
+    """The drill's scratch server is the one piece that needs the surreal
+    binary: it must run as a native sidecar with the plain entrypoint,
+    while the drill logic talks HTTP from the ops image."""
+    containers = {c["name"]: c for c in _surrealdb_chart_containers()}
+
+    server = containers["restore-server"]
+    assert "surrealdb/surrealdb" in server["image"]
+    # No command override: the distroless image resolves the surreal
+    # binary only through its entrypoint, never via $PATH.
+    assert "command" not in server
+    assert (server.get("args") or [])[0] == "start"
+    assert server.get("restartPolicy") == "Always"
+
+    drill = containers["restore-drill"]
+    assert "surrealdb/surrealdb" not in drill["image"]
+    drill_script = "".join(drill.get("args") or [])
+    assert "/import" in drill_script
+    assert "/health" in drill_script
+
+
+def _surrealdb_template(*overrides: str) -> subprocess.CompletedProcess[str]:
+    assert _HELM_BINARY is not None
+    return subprocess.run(  # noqa: S603
+        [_HELM_BINARY, "template", "drill", "charts/surrealdb", *overrides],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+@requires_helm
+def test_helm_ops_endpoint_normalizes_ws_and_rejects_non_http() -> None:
+    """The CLI accepted ws(s) endpoints, but the ops jobs speak the HTTP
+    API. ws maps to http (same port serves both), and anything else
+    non-HTTP fails at render instead of inside a PostSync hook."""
+    normalized = _surrealdb_template("--set", "connection.scheme=ws")
+    assert normalized.returncode == 0, normalized.stderr
+    assert 'value: "http://drill-surrealdb:8000"' in normalized.stdout
+
+    for spelling in (
+        "wss://db.example.test:8000/rpc",
+        "wss://db.example.test:8000/rpc/",
+        "WSS://db.example.test:8000/rpc",
+        "https://db.example.test:8000/",
+        "https://db.example.test:8000//",
+    ):
+        explicit = _surrealdb_template("--set", f"connection.endpoint={spelling}")
+        assert explicit.returncode == 0, f"{spelling}: {explicit.stderr}"
+        assert 'value: "https://db.example.test:8000"' in explicit.stdout, spelling
+
+    rejected = _surrealdb_template("--set", "connection.endpoint=tikv://db:2379")
+    assert rejected.returncode != 0
+    assert "must be http(s)" in rejected.stderr
+
+
+@requires_helm
+def test_helm_restore_drill_pod_never_restarts_in_place() -> None:
+    """A container-level restart would reuse the sidecar's dirty scratch
+    state, so every drill retry must be a fresh Pod."""
+    result = _surrealdb_template("--set", "restoreDrill.enabled=true")
+    assert result.returncode == 0, result.stderr
+    for document in yaml.safe_load_all(result.stdout):
+        if not document or document.get("kind") != "CronJob":
+            continue
+        if "restore-drill" not in document["metadata"]["name"]:
+            continue
+        pod_spec = document["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+        assert pod_spec["restartPolicy"] == "Never"
+        break
+    else:
+        pytest.fail("restore-drill CronJob not rendered")

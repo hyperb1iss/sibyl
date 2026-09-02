@@ -37,14 +37,18 @@ spec:
         {{- toYaml .Values.jobDefaults.podSecurityContext | nindent 8 }}
       containers:
         - name: strict-bootstrap
-          image: {{ include "sibyl-surrealdb.surrealImage" . | quote }}
-          imagePullPolicy: {{ .Values.surrealdb.image.pullPolicy | default "IfNotPresent" }}
+          image: {{ include "sibyl-surrealdb.opsImage" . | quote }}
+          imagePullPolicy: {{ .Values.opsImage.pullPolicy | default "IfNotPresent" }}
           workingDir: /tmp
           securityContext:
             {{- toYaml .Values.jobDefaults.securityContext | nindent 12 }}
           command:
             - /bin/sh
             - -ec
+          # The surreal CLI is unavailable here (the surreal image is
+          # distroless and cannot host a shell), so statements go through
+          # the HTTP API. /sql returns HTTP 200 with per-statement status,
+          # so the jq gate is what actually fails the Job on SQL errors.
           args:
             - |
               cat > /tmp/bootstrap.surql <<'SQL'
@@ -53,12 +57,16 @@ spec:
               DEFINE DATABASE OVERWRITE {{ .database }} STRICT;
               {{- end }}
               SQL
-              surreal sql \
-                --endpoint "$SURREAL_ENDPOINT" \
-                --username "$SURREAL_USER" \
-                --password "$SURREAL_PASS" \
-                --auth-level "$SURREAL_AUTH_LEVEL" \
-                < /tmp/bootstrap.surql
+              response="$(curl -fsS \
+                -u "$SURREAL_USER:$SURREAL_PASS" \
+                -H "Accept: application/json" \
+                -H "Content-Type: text/plain" \
+                --data-binary @/tmp/bootstrap.surql \
+                "$SURREAL_ENDPOINT/sql")"
+              printf '%s\n' "$response" | jq -e 'all(.[]; .status == "OK")' >/dev/null || {
+                printf 'strict bootstrap failed:\n%s\n' "$response" >&2
+                exit 1
+              }
           env:
             - name: HOME
               value: /tmp

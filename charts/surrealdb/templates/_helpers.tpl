@@ -99,7 +99,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "sibyl-surrealdb.surrealEnv" -}}
 - name: SURREAL_ENDPOINT
-  value: {{ include "sibyl-surrealdb.endpoint" . | quote }}
+  value: {{ include "sibyl-surrealdb.httpEndpoint" . | quote }}
 - name: SURREAL_AUTH_LEVEL
   value: {{ .Values.connection.authLevel | quote }}
 - name: SURREAL_USER
@@ -113,4 +113,42 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "sibyl-surrealdb.surrealImage" -}}
 {{- printf "%s:%s" (.Values.surrealdb.image.repository | default "surrealdb/surrealdb") (.Values.surrealdb.image.tag | default .Chart.AppVersion) }}
+{{- end }}
+
+{{/*
+Utility image for the operational jobs. The surreal image cannot host
+them: it is distroless, so /bin/sh, curl, and jq do not exist there.
+*/}}
+{{- define "sibyl-surrealdb.opsImage" -}}
+{{- printf "%s:%s" .Values.opsImage.repository .Values.opsImage.tag }}
+{{- end }}
+
+{{/*
+HTTP form of the connection endpoint for the ops jobs. The old CLI
+accepted ws/wss endpoints, but /sql and /export are HTTP, so ws maps
+to http and wss to https (SurrealDB serves both protocols on one
+port) and a trailing /rpc is dropped. Anything else non-HTTP fails
+the render instead of failing at runtime inside a hook Job.
+*/}}
+{{- define "sibyl-surrealdb.httpEndpoint" -}}
+{{- $endpoint := include "sibyl-surrealdb.endpoint" . | trim -}}
+{{- $lowered := lower $endpoint -}}
+{{- if hasPrefix "ws://" $lowered -}}
+{{- $endpoint = printf "http://%s" (substr 5 (len $endpoint) $endpoint) -}}
+{{- else if hasPrefix "wss://" $lowered -}}
+{{- $endpoint = printf "https://%s" (substr 6 (len $endpoint) $endpoint) -}}
+{{- else if hasPrefix "http://" $lowered -}}
+{{- $endpoint = printf "http://%s" (substr 7 (len $endpoint) $endpoint) -}}
+{{- else if hasPrefix "https://" $lowered -}}
+{{- $endpoint = printf "https://%s" (substr 8 (len $endpoint) $endpoint) -}}
+{{- else -}}
+{{- fail (printf "connection endpoint %q is not usable by the ops jobs: they speak the HTTP API, so the endpoint must be http(s) (ws/wss are normalized automatically)" $endpoint) -}}
+{{- end -}}
+{{- /* Canonicalize the path: the jobs append /sql and /export, so a
+trailing slash or an /rpc segment (with or without its own trailing
+slash) would build /rpc//sql-style URLs. */ -}}
+{{- $endpoint = regexReplaceAll "/+$" $endpoint "" -}}
+{{- $endpoint = trimSuffix "/rpc" $endpoint -}}
+{{- $endpoint = regexReplaceAll "/+$" $endpoint "" -}}
+{{- $endpoint -}}
 {{- end }}

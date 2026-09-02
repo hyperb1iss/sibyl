@@ -28,7 +28,11 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
         spec:
-          restartPolicy: OnFailure
+          # Never, not OnFailure: a container-level restart would leave
+          # the scratch-server sidecar alive with the previous attempt's
+          # imported state, and a drill that validates leftovers proves
+          # nothing. A fresh Pod per retry means a fresh scratch server.
+          restartPolicy: Never
           serviceAccountName: {{ include "sibyl-surrealdb.serviceAccountName" . }}
           {{- with .Values.global.imagePullSecrets }}
           imagePullSecrets:
@@ -36,10 +40,47 @@ spec:
           {{- end }}
           securityContext:
             {{- toYaml .Values.jobDefaults.podSecurityContext | nindent 12 }}
-          containers:
-            - name: restore-drill
+          # The scratch server is the one job the surreal binary can still
+          # do without a shell: it runs as a native sidecar with its plain
+          # entrypoint, and the drill logic talks to it over HTTP from the
+          # ops image. The kubelet reaps the sidecar when the drill exits.
+          initContainers:
+            - name: restore-server
               image: {{ include "sibyl-surrealdb.surrealImage" . | quote }}
               imagePullPolicy: {{ .Values.surrealdb.image.pullPolicy | default "IfNotPresent" }}
+              restartPolicy: Always
+              securityContext:
+                {{- toYaml .Values.jobDefaults.securityContext | nindent 16 }}
+                runAsUser: 65532
+                runAsGroup: 65532
+              # No command override: the distroless image has no $PATH, so
+              # the surreal binary is reachable only as the entrypoint.
+              args:
+                - start
+                - --user
+                - $(SURREAL_RESTORE_USER)
+                - --pass
+                - $(SURREAL_RESTORE_PASS)
+                - $(SURREAL_RESTORE_PATH)
+              env:
+                - name: SURREAL_RESTORE_USER
+                  value: {{ .Values.restoreDrill.restore.username | quote }}
+                - name: SURREAL_RESTORE_PASS
+                  value: {{ .Values.restoreDrill.restore.password | quote }}
+                - name: SURREAL_RESTORE_PATH
+                  value: {{ .Values.restoreDrill.restore.path | quote }}
+              resources:
+                {{- toYaml .Values.jobDefaults.resources | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+                {{- with .Values.restoreDrill.server.extraVolumeMounts }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+          containers:
+            - name: restore-drill
+              image: {{ include "sibyl-surrealdb.opsImage" . | quote }}
+              imagePullPolicy: {{ .Values.opsImage.pullPolicy | default "IfNotPresent" }}
               workingDir: /tmp
               securityContext:
                 {{- toYaml .Values.jobDefaults.securityContext | nindent 16 }}
@@ -56,17 +97,38 @@ spec:
                     {{- end }}
                   }
                   trap 'notify_failure' ERR
-                  surreal start \
-                    --user "$SURREAL_RESTORE_USER" \
-                    --pass "$SURREAL_RESTORE_PASS" \
-                    "$SURREAL_RESTORE_PATH" &
-                  server_pid="$!"
+                  ready=""
                   for _ in $(seq 1 30); do
-                    if surreal isready --endpoint "$SURREAL_RESTORE_ENDPOINT"; then
+                    if curl -fsS "$SURREAL_RESTORE_ENDPOINT/health" >/dev/null 2>&1; then
+                      ready=1
                       break
                     fi
                     sleep 2
                   done
+                  if [ -z "$ready" ]; then
+                    echo "restore server never became healthy at $SURREAL_RESTORE_ENDPOINT" >&2
+                    exit 1
+                  fi
+                  # SurrealDB 3.x does not auto-create namespaces over
+                  # HTTP, and export files assume their namespace exists,
+                  # so the scratch server needs the layout defined first.
+                  cat > /tmp/restore-preamble.surql <<'SQL'
+                  {{- range .Values.databases }}
+                  DEFINE NAMESPACE IF NOT EXISTS {{ .namespace }};
+                  USE NS {{ .namespace }};
+                  DEFINE DATABASE IF NOT EXISTS {{ .database }};
+                  {{- end }}
+                  SQL
+                  preamble_response="$(curl -fsS \
+                    -u "$SURREAL_RESTORE_USER:$SURREAL_RESTORE_PASS" \
+                    -H "Accept: application/json" \
+                    -H "Content-Type: text/plain" \
+                    --data-binary @/tmp/restore-preamble.surql \
+                    "$SURREAL_RESTORE_ENDPOINT/sql")"
+                  printf '%s\n' "$preamble_response" | jq -e 'all(.[]; .status == "OK")' >/dev/null || {
+                    printf 'restore preamble failed:\n%s\n' "$preamble_response" >&2
+                    exit 1
+                  }
                   row_counts_json="{"
                   row_counts_separator=""
                   {{- range .Values.databases }}
@@ -75,24 +137,30 @@ spec:
                     echo "missing export for {{ .namespace }}/{{ .database }}" >&2
                     exit 1
                   fi
-                  surreal import \
-                    --conn "$SURREAL_RESTORE_ENDPOINT" \
-                    --user "$SURREAL_RESTORE_USER" \
-                    --pass "$SURREAL_RESTORE_PASS" \
-                    --ns {{ .namespace | quote }} \
-                    --db {{ .database | quote }} \
-                    "$source_file"
+                  import_response="$(curl -fsS \
+                    -u "$SURREAL_RESTORE_USER:$SURREAL_RESTORE_PASS" \
+                    -H "Accept: application/json" \
+                    -H "Content-Type: text/plain" \
+                    -H "surreal-ns: {{ .namespace }}" \
+                    -H "surreal-db: {{ .database }}" \
+                    --data-binary @"$source_file" \
+                    "$SURREAL_RESTORE_ENDPOINT/import")"
+                  printf '%s\n' "$import_response" \
+                    | jq -e 'if type == "array" then all(.[]; .status == "OK") else true end' >/dev/null || {
+                    printf 'import failed for {{ .namespace }}/{{ .database }}:\n%s\n' "$import_response" >&2
+                    exit 1
+                  }
                   {{- end }}
                   {{- range .Values.restoreDrill.fixtureChecks }}
-                  count_result="$(printf 'SELECT count() AS count FROM %s GROUP ALL;\\n' {{ .table | quote }} \
-                    | surreal sql \
-                        --endpoint "$SURREAL_RESTORE_ENDPOINT" \
-                        --username "$SURREAL_RESTORE_USER" \
-                        --password "$SURREAL_RESTORE_PASS" \
-                        --namespace {{ .namespace | quote }} \
-                        --database {{ .database | quote }} \
-                        --json)"
-                  row_count="$(printf '%s\n' "$count_result" | sed -n 's/.*"count":[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p' | head -n 1)"
+                  count_result="$(curl -fsS \
+                    -u "$SURREAL_RESTORE_USER:$SURREAL_RESTORE_PASS" \
+                    -H "Accept: application/json" \
+                    -H "Content-Type: text/plain" \
+                    -H "surreal-ns: {{ .namespace }}" \
+                    -H "surreal-db: {{ .database }}" \
+                    --data-binary "SELECT count() AS count FROM {{ .table }} GROUP ALL;" \
+                    "$SURREAL_RESTORE_ENDPOINT/sql")"
+                  row_count="$(printf '%s\n' "$count_result" | jq -r '.[-1].result[0].count // 0')"
                   if [ "${row_count:-0}" -lt {{ .minRows }} ]; then
                     echo "fixture {{ .namespace }}/{{ .database }}/{{ .table }} expected >= {{ .minRows }}, got ${row_count:-0}" >&2
                     exit 1
@@ -129,7 +197,6 @@ spec:
                   echo "SIBYL_RESTORE_RECEIPT_JSON_BEGIN"
                   cat "$SIBYL_RESTORE_RECEIPT_PATH"
                   echo "SIBYL_RESTORE_RECEIPT_JSON_END"
-                  kill "$server_pid"
               env:
                 - name: HOME
                   value: /tmp
