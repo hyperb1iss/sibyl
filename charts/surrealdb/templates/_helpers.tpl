@@ -131,15 +131,24 @@ port) and a trailing /rpc is dropped. Anything else non-HTTP fails
 the render instead of failing at runtime inside a hook Job.
 */}}
 {{- define "sibyl-surrealdb.httpEndpoint" -}}
-{{- $endpoint := include "sibyl-surrealdb.endpoint" . -}}
-{{- if hasPrefix "ws://" $endpoint -}}
-{{- $endpoint = printf "http://%s" (trimPrefix "ws://" $endpoint) -}}
-{{- else if hasPrefix "wss://" $endpoint -}}
-{{- $endpoint = printf "https://%s" (trimPrefix "wss://" $endpoint) -}}
-{{- end -}}
-{{- $endpoint = trimSuffix "/rpc" $endpoint -}}
-{{- if not (or (hasPrefix "http://" $endpoint) (hasPrefix "https://" $endpoint)) -}}
+{{- $endpoint := include "sibyl-surrealdb.endpoint" . | trim -}}
+{{- $lowered := lower $endpoint -}}
+{{- if hasPrefix "ws://" $lowered -}}
+{{- $endpoint = printf "http://%s" (substr 5 (len $endpoint) $endpoint) -}}
+{{- else if hasPrefix "wss://" $lowered -}}
+{{- $endpoint = printf "https://%s" (substr 6 (len $endpoint) $endpoint) -}}
+{{- else if hasPrefix "http://" $lowered -}}
+{{- $endpoint = printf "http://%s" (substr 7 (len $endpoint) $endpoint) -}}
+{{- else if hasPrefix "https://" $lowered -}}
+{{- $endpoint = printf "https://%s" (substr 8 (len $endpoint) $endpoint) -}}
+{{- else -}}
 {{- fail (printf "connection endpoint %q is not usable by the ops jobs: they speak the HTTP API, so the endpoint must be http(s) (ws/wss are normalized automatically)" $endpoint) -}}
 {{- end -}}
+{{- /* Canonicalize the path: the jobs append /sql and /export, so a
+trailing slash or an /rpc segment (with or without its own trailing
+slash) would build /rpc//sql-style URLs. */ -}}
+{{- $endpoint = regexReplaceAll "/+$" $endpoint "" -}}
+{{- $endpoint = trimSuffix "/rpc" $endpoint -}}
+{{- $endpoint = regexReplaceAll "/+$" $endpoint "" -}}
 {{- $endpoint -}}
 {{- end }}

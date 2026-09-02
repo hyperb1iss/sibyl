@@ -870,9 +870,16 @@ def test_helm_ops_endpoint_normalizes_ws_and_rejects_non_http() -> None:
     assert normalized.returncode == 0, normalized.stderr
     assert 'value: "http://drill-surrealdb:8000"' in normalized.stdout
 
-    explicit = _surrealdb_template("--set", "connection.endpoint=wss://db.example.test:8000/rpc")
-    assert explicit.returncode == 0, explicit.stderr
-    assert 'value: "https://db.example.test:8000"' in explicit.stdout
+    for spelling in (
+        "wss://db.example.test:8000/rpc",
+        "wss://db.example.test:8000/rpc/",
+        "WSS://db.example.test:8000/rpc",
+        "https://db.example.test:8000/",
+        "https://db.example.test:8000//",
+    ):
+        explicit = _surrealdb_template("--set", f"connection.endpoint={spelling}")
+        assert explicit.returncode == 0, f"{spelling}: {explicit.stderr}"
+        assert 'value: "https://db.example.test:8000"' in explicit.stdout, spelling
 
     rejected = _surrealdb_template("--set", "connection.endpoint=tikv://db:2379")
     assert rejected.returncode != 0
