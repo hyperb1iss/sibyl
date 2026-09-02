@@ -291,8 +291,15 @@ tasks:
       - cli:test
       - web:test
 
+  # Never cache these two: sync-versions mutates the pin files without
+  # declaring them as outputs, so a cache replay applies nothing, and the
+  # 1.3.0 release run proved the trap: the dry cut cached a success at
+  # VERSION=1.3.0 and the real cut replayed it, leaving every pin at the
+  # old version for sync-versions-check to (correctly) reject.
   sync-versions:
     command: uv run python tools/release/sync_versions.py
+    options:
+      cache: false
     inputs:
       - VERSION
       - tools/release/sync_versions.py
@@ -300,6 +307,8 @@ tasks:
 
   sync-versions-check:
     command: uv run python tools/release/sync_versions.py --check
+    options:
+      cache: false
     inputs:
       - VERSION
       - tools/release/sync_versions.py
