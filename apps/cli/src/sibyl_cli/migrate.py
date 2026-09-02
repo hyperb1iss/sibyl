@@ -137,7 +137,7 @@ async def _resolve_target_project(client: Any, wanted: str) -> dict[str, Any] | 
             entity = None
         if entity and str(entity.get("id", "")).lower() == wanted.lower():
             return entity
-    response = await client.explore(mode="list", types=["project"], limit=500)
+    response = await client.explore(mode="list", types=["project"], limit=200)
     lowered = wanted.lower()
     entities = response.get("entities", [])
     for project in entities:
