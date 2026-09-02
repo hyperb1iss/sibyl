@@ -25,26 +25,47 @@ app = typer.Typer(help="Migrate data between Sibyl instances")
 
 _LEDGER_DIR = Path.home() / ".sibyl" / "migrations"
 _PAGE_SIZE = 200
+_MAX_TITLE = 300
+_MAX_CONTENT = 500000
 
 
-def _ledger_path(target_context: str, project_key: str) -> Path:
-    safe = f"{target_context}--{project_key}".replace("/", "_")
+def _ledger_path(route: dict[str, str]) -> Path:
+    safe = "--".join(
+        route[k] for k in ("source_org", "target_context", "target_project_id")
+    ).replace("/", "_")
     return _LEDGER_DIR / f"{safe}.json"
 
 
-def _load_ledger(path: Path) -> dict[str, str]:
+def _load_ledger(path: Path, route: dict[str, str]) -> dict[str, str]:
+    """Load receipts for exactly this migration route.
+
+    The manifest inside the file pins source org, target context, and
+    target project; a mismatch means the file belongs to a different
+    route and must not suppress writes for this one.
+    """
     if not path.exists():
         return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    if data.get("route") != route:
+        raise RuntimeError(
+            f"ledger {path} belongs to a different migration route; "
+            "move it aside or pass a different target"
+        )
+    receipts = data.get("receipts")
+    return receipts if isinstance(receipts, dict) else {}
 
 
-def _save_ledger(path: Path, ledger: dict[str, str]) -> None:
+def _save_ledger(path: Path, route: dict[str, str], ledger: dict[str, str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(ledger, indent=1, sort_keys=True), encoding="utf-8")
+    payload = json.dumps({"route": route, "receipts": ledger}, indent=1, sort_keys=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(payload, encoding="utf-8")
+    tmp.replace(path)
 
 
 def _source_sql(
@@ -109,12 +130,18 @@ def _fetch_source_page(
 async def _resolve_target_project(client: Any, wanted: str) -> dict[str, Any] | None:
     response = await client.explore(mode="list", types=["project"], limit=200)
     lowered = wanted.lower()
-    for project in response.get("entities", []):
-        pid = str(project.get("id", ""))
-        name = str(project.get("name", ""))
-        if lowered in (pid.lower(), name.lower()):
+    entities = response.get("entities", [])
+    for project in entities:
+        if str(project.get("id", "")).lower() == lowered:
             return project
-    return None
+    named = [p for p in entities if str(p.get("name", "")).lower() == lowered]
+    if len(named) > 1:
+        raise RuntimeError(
+            f"target project name '{wanted}' is ambiguous "
+            f"({', '.join(str(p.get('id')) for p in named)}); "
+            "pass --target-project with the exact id"
+        )
+    return named[0] if named else None
 
 
 @app.command("to-team")
@@ -159,7 +186,14 @@ def to_team(
     ] = "root",
     source_surreal_pass: Annotated[
         str,
-        typer.Option("--source-surreal-pass", help="Local SurrealDB password"),
+        typer.Option(
+            "--source-surreal-pass",
+            envvar="SIBYL_SOURCE_SURREAL_PASS",
+            show_default=False,
+            help="Local SurrealDB password (prefer the "
+            "SIBYL_SOURCE_SURREAL_PASS environment variable; a value on "
+            "the command line lands in shell history)",
+        ),
     ] = "root",
     dry_run: Annotated[
         bool,
@@ -212,18 +246,17 @@ def to_team(
         wanted = target_project or project
         resolved = await _resolve_target_project(target, wanted)
         if resolved is None and target_project is None:
-            # Fall back to matching the source project's display name.
-            names = _source_sql(
-                surreal_url=source_surreal_url,
-                username=source_surreal_user,
-                password=source_surreal_pass,
-                statement=(
-                    "SELECT name FROM entity WHERE entity_type = 'project' "
-                    f"AND uuid = '{project.removeprefix('project_')}' LIMIT 1;"
-                ),
-            )[0]
-            if names:
-                resolved = await _resolve_target_project(target, str(names[0]["name"]))
+            # Fall back to the source project's display name via the
+            # source API (project entities live in the org graph, which
+            # the local API serves; the content store does not).
+            source = get_client()
+            try:
+                source_project = await source.get_entity(project)
+            except Exception:
+                source_project = None
+            source_name = str((source_project or {}).get("name") or "").strip()
+            if source_name:
+                resolved = await _resolve_target_project(target, source_name)
         if resolved is None:
             error(
                 f"Target project '{wanted}' not found on {target_context}. "
@@ -234,8 +267,13 @@ def to_team(
         target_project_id = str(resolved.get("id"))
         info(f"Target project: {resolved.get('name')} ({target_project_id})")
 
-        ledger_file = _ledger_path(target_context, project)
-        ledger = _load_ledger(ledger_file)
+        route = {
+            "source_org": org_id,
+            "target_context": target_context,
+            "target_project_id": target_project_id,
+        }
+        ledger_file = _ledger_path(route)
+        ledger = _load_ledger(ledger_file, route)
 
         migrated = 0
         skipped = 0
@@ -296,7 +334,7 @@ def to_team(
             await asyncio.sleep(0)
 
         if not dry_run:
-            _save_ledger(ledger_file, ledger)
+            _save_ledger(ledger_file, route, ledger)
 
         verb = "Would migrate" if dry_run else "Migrated"
         success(f"{verb} {migrated} raw memories ({skipped} already in ledger)")
