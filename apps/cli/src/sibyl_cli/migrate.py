@@ -128,7 +128,16 @@ def _fetch_source_page(
 
 
 async def _resolve_target_project(client: Any, wanted: str) -> dict[str, Any] | None:
-    response = await client.explore(mode="list", types=["project"], limit=200)
+    if wanted.startswith("project_"):
+        # Exact ids resolve directly, so a project beyond the listing
+        # window is still reachable.
+        try:
+            entity = await client.get_entity(wanted)
+        except Exception:
+            entity = None
+        if entity and str(entity.get("id", "")).lower() == wanted.lower():
+            return entity
+    response = await client.explore(mode="list", types=["project"], limit=500)
     lowered = wanted.lower()
     entities = response.get("entities", [])
     for project in entities:
@@ -300,6 +309,18 @@ def to_team(
                 if dry_run:
                     migrated += 1
                     continue
+                raw_content = str(row.get("raw_content") or "")
+                if not raw_content.strip():
+                    failed.append(f"{original_id}: empty content, not migrated")
+                    continue
+                if len(raw_content) > _MAX_CONTENT:
+                    failed.append(
+                        f"{original_id}: content exceeds the API limit "
+                        f"({len(raw_content)} > {_MAX_CONTENT}); migrate "
+                        "this record manually"
+                    )
+                    continue
+                title = str(row.get("title") or "")
                 provenance = dict(row.get("provenance") or {})
                 provenance["migration"] = {
                     "origin_org": org_id,
@@ -308,15 +329,28 @@ def to_team(
                     "origin_capture_surface": row.get("capture_surface"),
                     "tool": "sibyl migrate to-team",
                 }
+                if len(title) > _MAX_TITLE:
+                    provenance["migration"]["origin_title"] = title
+                    title = title[: _MAX_TITLE - 1] + "…"
+                # The retrieval layer prefers metadata.project_id over the
+                # scope key (_search_candidates), so a copied source
+                # project id would misroute or hide the memory on the
+                # target.
+                metadata = dict(row.get("metadata") or {})
+                if metadata.get("project_id"):
+                    provenance["migration"]["origin_metadata_project_id"] = str(
+                        metadata["project_id"]
+                    )
+                    metadata["project_id"] = target_project_id
                 try:
                     response = await target.remember_raw_memory(
-                        title=str(row.get("title") or ""),
-                        raw_content=str(row.get("raw_content") or ""),
+                        title=title,
+                        raw_content=raw_content,
                         source_id=str(row.get("source_id") or "") or f"migrated:{original_id}",
                         memory_scope="project",
                         scope_key=target_project_id,
                         tags=list(row.get("tags") or []),
-                        metadata=dict(row.get("metadata") or {}),
+                        metadata=metadata,
                         provenance=provenance,
                         capture_surface="migration",
                     )
@@ -324,9 +358,9 @@ def to_team(
                     failed.append(f"{original_id}: {exc}")
                     continue
                 ledger[original_id] = str(response.get("id") or response.get("uuid") or "ok")
+                _save_ledger(ledger_file, route, ledger)
                 migrated += 1
                 if migrated % 25 == 0:
-                    _save_ledger(ledger_file, ledger)
                     info(f"  {migrated} migrated...")
             if limit is not None and migrated >= limit:
                 break
