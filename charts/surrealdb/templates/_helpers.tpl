@@ -99,7 +99,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "sibyl-surrealdb.surrealEnv" -}}
 - name: SURREAL_ENDPOINT
-  value: {{ include "sibyl-surrealdb.endpoint" . | quote }}
+  value: {{ include "sibyl-surrealdb.httpEndpoint" . | quote }}
 - name: SURREAL_AUTH_LEVEL
   value: {{ .Values.connection.authLevel | quote }}
 - name: SURREAL_USER
@@ -121,4 +121,25 @@ them: it is distroless, so /bin/sh, curl, and jq do not exist there.
 */}}
 {{- define "sibyl-surrealdb.opsImage" -}}
 {{- printf "%s:%s" .Values.opsImage.repository .Values.opsImage.tag }}
+{{- end }}
+
+{{/*
+HTTP form of the connection endpoint for the ops jobs. The old CLI
+accepted ws/wss endpoints, but /sql and /export are HTTP, so ws maps
+to http and wss to https (SurrealDB serves both protocols on one
+port) and a trailing /rpc is dropped. Anything else non-HTTP fails
+the render instead of failing at runtime inside a hook Job.
+*/}}
+{{- define "sibyl-surrealdb.httpEndpoint" -}}
+{{- $endpoint := include "sibyl-surrealdb.endpoint" . -}}
+{{- if hasPrefix "ws://" $endpoint -}}
+{{- $endpoint = printf "http://%s" (trimPrefix "ws://" $endpoint) -}}
+{{- else if hasPrefix "wss://" $endpoint -}}
+{{- $endpoint = printf "https://%s" (trimPrefix "wss://" $endpoint) -}}
+{{- end -}}
+{{- $endpoint = trimSuffix "/rpc" $endpoint -}}
+{{- if not (or (hasPrefix "http://" $endpoint) (hasPrefix "https://" $endpoint)) -}}
+{{- fail (printf "connection endpoint %q is not usable by the ops jobs: they speak the HTTP API, so the endpoint must be http(s) (ws/wss are normalized automatically)" $endpoint) -}}
+{{- end -}}
+{{- $endpoint -}}
 {{- end }}

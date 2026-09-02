@@ -28,7 +28,11 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
         spec:
-          restartPolicy: OnFailure
+          # Never, not OnFailure: a container-level restart would leave
+          # the scratch-server sidecar alive with the previous attempt's
+          # imported state, and a drill that validates leftovers proves
+          # nothing. A fresh Pod per retry means a fresh scratch server.
+          restartPolicy: Never
           serviceAccountName: {{ include "sibyl-surrealdb.serviceAccountName" . }}
           {{- with .Values.global.imagePullSecrets }}
           imagePullSecrets:
@@ -70,6 +74,9 @@ spec:
               volumeMounts:
                 - name: tmp
                   mountPath: /tmp
+                {{- with .Values.restoreDrill.server.extraVolumeMounts }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
           containers:
             - name: restore-drill
               image: {{ include "sibyl-surrealdb.opsImage" . | quote }}

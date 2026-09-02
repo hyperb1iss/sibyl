@@ -848,3 +848,50 @@ def test_helm_restore_drill_splits_server_and_drill_logic() -> None:
     drill_script = "".join(drill.get("args") or [])
     assert "/import" in drill_script
     assert "/health" in drill_script
+
+
+def _surrealdb_template(*overrides: str) -> subprocess.CompletedProcess[str]:
+    assert _HELM_BINARY is not None
+    return subprocess.run(  # noqa: S603
+        [_HELM_BINARY, "template", "drill", "charts/surrealdb", *overrides],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+@requires_helm
+def test_helm_ops_endpoint_normalizes_ws_and_rejects_non_http() -> None:
+    """The CLI accepted ws(s) endpoints, but the ops jobs speak the HTTP
+    API. ws maps to http (same port serves both), and anything else
+    non-HTTP fails at render instead of inside a PostSync hook."""
+    normalized = _surrealdb_template("--set", "connection.scheme=ws")
+    assert normalized.returncode == 0, normalized.stderr
+    assert 'value: "http://drill-surrealdb:8000"' in normalized.stdout
+
+    explicit = _surrealdb_template("--set", "connection.endpoint=wss://db.example.test:8000/rpc")
+    assert explicit.returncode == 0, explicit.stderr
+    assert 'value: "https://db.example.test:8000"' in explicit.stdout
+
+    rejected = _surrealdb_template("--set", "connection.endpoint=tikv://db:2379")
+    assert rejected.returncode != 0
+    assert "must be http(s)" in rejected.stderr
+
+
+@requires_helm
+def test_helm_restore_drill_pod_never_restarts_in_place() -> None:
+    """A container-level restart would reuse the sidecar's dirty scratch
+    state, so every drill retry must be a fresh Pod."""
+    result = _surrealdb_template("--set", "restoreDrill.enabled=true")
+    assert result.returncode == 0, result.stderr
+    for document in yaml.safe_load_all(result.stdout):
+        if not document or document.get("kind") != "CronJob":
+            continue
+        if "restore-drill" not in document["metadata"]["name"]:
+            continue
+        pod_spec = document["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+        assert pod_spec["restartPolicy"] == "Never"
+        break
+    else:
+        pytest.fail("restore-drill CronJob not rendered")

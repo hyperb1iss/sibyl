@@ -146,6 +146,12 @@ restoreDrill:
     username: drill
     password: drill
     path: memory
+  # The scratch server runs as its own sidecar container, so a restore
+  # path that lives on a volume (anything other than "memory" or a
+  # path under /tmp) needs its mount declared here as well; the
+  # drill-container extraVolumeMounts below do not reach the sidecar.
+  server:
+    extraVolumeMounts: []
   receipt:
     path: /tmp/restore-drill-receipt.json
   recallCheck:
