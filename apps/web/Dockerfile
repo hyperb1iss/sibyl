@@ -52,6 +52,10 @@ RUN pnpm exec next build --webpack
 # Stage 3: Runtime
 FROM node:24-alpine AS runner
 
+# The node:24-alpine snapshot lags Alpine security releases, so pull the
+# current package set at build time; the CVE gate scans this final stage.
+RUN apk upgrade --no-cache
+
 WORKDIR /app/apps/web
 
 # Create non-root user with a high service UID to avoid host user collisions.
