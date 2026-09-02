@@ -114,3 +114,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "sibyl-surrealdb.surrealImage" -}}
 {{- printf "%s:%s" (.Values.surrealdb.image.repository | default "surrealdb/surrealdb") (.Values.surrealdb.image.tag | default .Chart.AppVersion) }}
 {{- end }}
+
+{{/*
+Utility image for the operational jobs. The surreal image cannot host
+them: it is distroless, so /bin/sh, curl, and jq do not exist there.
+*/}}
+{{- define "sibyl-surrealdb.opsImage" -}}
+{{- printf "%s:%s" .Values.opsImage.repository .Values.opsImage.tag }}
+{{- end }}

@@ -38,28 +38,32 @@ spec:
             {{- toYaml .Values.jobDefaults.podSecurityContext | nindent 12 }}
           containers:
             - name: export
-              image: {{ include "sibyl-surrealdb.surrealImage" . | quote }}
-              imagePullPolicy: {{ .Values.surrealdb.image.pullPolicy | default "IfNotPresent" }}
+              image: {{ include "sibyl-surrealdb.opsImage" . | quote }}
+              imagePullPolicy: {{ .Values.opsImage.pullPolicy | default "IfNotPresent" }}
               workingDir: /tmp
               securityContext:
                 {{- toYaml .Values.jobDefaults.securityContext | nindent 16 }}
               command:
                 - /bin/sh
                 - -ec
+              # GET /export streams the same .surql the CLI would produce;
+              # the surreal-ns/surreal-db headers scope it per database.
               args:
                 - |
                   mkdir -p "$SIBYL_EXPORT_DESTINATION_PATH"
                   timestamp="$(date -u +%Y%m%d%H%M%S)"
                   {{- range .Values.databases }}
                   target="$SIBYL_EXPORT_DESTINATION_PATH/{{ $.Values.export.filePrefix }}-{{ .namespace }}-{{ .database }}-${timestamp}.surql"
-                  surreal export \
-                    --conn "$SURREAL_ENDPOINT" \
-                    --user "$SURREAL_USER" \
-                    --pass "$SURREAL_PASS" \
-                    --auth-level "$SURREAL_AUTH_LEVEL" \
-                    --ns {{ .namespace | quote }} \
-                    --db {{ .database | quote }} \
-                    "$target"
+                  curl -fsS \
+                    -u "$SURREAL_USER:$SURREAL_PASS" \
+                    -H "Accept: application/octet-stream" \
+                    -H "surreal-ns: {{ .namespace }}" \
+                    -H "surreal-db: {{ .database }}" \
+                    "$SURREAL_ENDPOINT/export" -o "$target"
+                  if [ ! -s "$target" ]; then
+                    echo "empty export for {{ .namespace }}/{{ .database }}" >&2
+                    exit 1
+                  fi
                   {{- if $.Values.export.encryption.enabled }}
                   export SIBYL_EXPORT_FILE="$target"
                   {{ $.Values.export.encryption.command | nindent 18 }}
