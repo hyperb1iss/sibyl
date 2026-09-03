@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { ExternalLink } from '@/components/ui/icons';
 import type { RAGChunkResult, RAGPageResult } from '@/lib/api/search';
+import { formatScorePercent } from '@/lib/constants/formatting';
 
 interface DocChunkResultProps {
   result: RAGChunkResult;
@@ -47,7 +48,7 @@ function HighlightedSnippet({ value }: { value: string }) {
  * Shows source, heading path, and snippet with similarity score.
  */
 export function DocChunkResult({ result }: DocChunkResultProps) {
-  const scorePercent = Math.round(result.similarity * 100);
+  const scorePercent = formatScorePercent(result.similarity);
   const internalUrl = `/sources/${result.source_id}/documents/${result.document_id}`;
   const preview = result.snippet || result.content;
 
@@ -129,7 +130,7 @@ interface DocPageResultProps {
  * Shows full page with metadata.
  */
 export function DocPageResult({ result }: DocPageResultProps) {
-  const scorePercent = Math.round(result.best_chunk_similarity * 100);
+  const scorePercent = formatScorePercent(result.best_chunk_similarity);
   const internalUrl = `/sources/${result.source_id}/documents/${result.document_id}`;
 
   return (

@@ -40,3 +40,13 @@ export function formatDistanceToNow(date: string | Date): string {
   // For older dates, show the full date
   return formatDateTime(date);
 }
+
+/**
+ * Relevance scores are not bounded to [0, 1]: hybrid ranking fuses several
+ * lanes and a strong match can land above 1.0. Clamp before showing a percent
+ * so the badge and the bar never claim more than 100%.
+ */
+export function formatScorePercent(score: number | null | undefined): number {
+  if (typeof score !== 'number' || !Number.isFinite(score)) return 0;
+  return Math.round(Math.min(1, Math.max(0, score)) * 100);
+}
