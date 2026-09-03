@@ -117,6 +117,33 @@ describe('CommandPalette', () => {
     await waitFor(() => expect(opener).toHaveFocus());
   });
 
+  it('flips between the two visible themes instead of cycling through system', async () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        store.set(key, value);
+      },
+      removeItem: (key: string) => {
+        store.delete(key);
+      },
+      clear: () => store.clear(),
+      key: () => null,
+      length: 0,
+    });
+
+    try {
+      const { user } = render(<CommandPalette isOpen onClose={vi.fn()} />);
+      const option = screen.getByRole('option', { name: /toggle theme/i });
+      expect(option).toHaveTextContent('Switch to Dawn (Light)');
+
+      await user.click(option);
+      expect(store.get('sibyl-theme')).toBe('dawn');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('lists commands and navigation with an always-present search handoff', async () => {
     render(<CommandPalette isOpen onClose={vi.fn()} />);
 

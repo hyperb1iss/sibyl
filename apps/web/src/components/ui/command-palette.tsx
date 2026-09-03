@@ -1,7 +1,7 @@
 'use client';
 
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { HalfMoon } from 'iconoir-react';
+import { HalfMoon, SunLight } from 'iconoir-react';
 import { motion, useReducedMotion } from 'motion/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { ReactNode } from 'react';
@@ -18,7 +18,7 @@ import { useSearch } from '@/lib/hooks/search';
 import { useDebouncedValue } from '@/lib/hooks/shared';
 import { isEditableTarget } from '@/lib/keyboard';
 import { getSearchResultHref } from '@/lib/search-links';
-import { useTheme } from '@/lib/theme';
+import { type Theme, useTheme } from '@/lib/theme';
 
 /**
  * The Cmd+K omnibox: commands, navigation, and live search in one list.
@@ -156,7 +156,7 @@ export function CommandPalette({ isOpen, onClose, onCreateTask }: CommandPalette
 function PaletteBody({ onClose, onCreateTask }: Omit<CommandPaletteProps, 'isOpen'>) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { preference, toggleTheme } = useTheme();
+  const { theme, setPreference } = useTheme();
   const listId = useId();
   const listRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState('');
@@ -188,8 +188,12 @@ function PaletteBody({ onClose, onCreateTask }: Omit<CommandPaletteProps, 'isOpe
   );
 
   const groups = useMemo<PaletteGroup[]>(() => {
-    const themeLabel =
-      THEME_OPTIONS.find(option => option.value === preference)?.label ?? THEME_OPTIONS[0].label;
+    // Flip between the two visible themes. The header toggle cycles through
+    // System, which from here reads as a no-op whenever System already
+    // resolves to the theme on screen.
+    const nextTheme: Theme = theme === 'dawn' ? 'neon' : 'dawn';
+    const nextThemeLabel =
+      THEME_OPTIONS.find(option => option.value === nextTheme)?.label ?? nextTheme;
 
     const commands: PaletteItem[] = [
       {
@@ -212,13 +216,17 @@ function PaletteBody({ onClose, onCreateTask }: Omit<CommandPaletteProps, 'isOpe
         id: 'cmd-toggle-theme',
         group: 'commands',
         label: 'Toggle theme',
-        description: `Now ${themeLabel}`,
-        icon: <HalfMoon width={16} height={16} />,
-        hint: '⌘⇧L',
-        keywords: 'dark light neon dawn system appearance',
+        description: `Switch to ${nextThemeLabel}`,
+        icon:
+          theme === 'dawn' ? (
+            <HalfMoon width={16} height={16} />
+          ) : (
+            <SunLight width={16} height={16} />
+          ),
+        keywords: 'dark light neon dawn appearance',
         run: () => {
           onClose();
-          toggleTheme();
+          setPreference(nextTheme);
         },
       },
     ];
@@ -282,9 +290,9 @@ function PaletteBody({ onClose, onCreateTask }: Omit<CommandPaletteProps, 'isOpe
     needle,
     onClose,
     onCreateTask,
-    preference,
     projects,
-    toggleTheme,
+    setPreference,
+    theme,
     trimmedQuery,
   ]);
 
