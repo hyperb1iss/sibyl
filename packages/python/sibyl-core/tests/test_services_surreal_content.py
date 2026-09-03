@@ -265,6 +265,54 @@ class TestSurrealContentHelpers:
             await client.close()
 
     @pytest.mark.asyncio
+    async def test_raw_memory_save_keeps_the_projection_stamp(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A full-row save from a stale copy must not erase the capture queue stamp."""
+        client = SurrealContentClient(url="memory://")
+        try:
+            await bootstrap_content_schema(client, reset=True)
+
+            @asynccontextmanager
+            async def fake_session():
+                yield client
+
+            monkeypatch.setattr(content_client, "surreal_content_client", fake_session)
+            created = await remember_raw_memory(
+                organization_id="org-stamp",
+                principal_id="bliss",
+                source_id="cli:manual",
+                raw_content="Stamped memory",
+                embedding_provider=None,
+            )
+            await client.execute_query(
+                "UPDATE raw_captures SET metadata.projected_capture_id = $stamp "
+                "WHERE organization_id = $organization_id AND uuid = $uuid;",
+                stamp="capture-1",
+                organization_id="org-stamp",
+                uuid=created.id,
+            )
+
+            saved = await save_raw_memory(
+                replace(created, raw_content="Stamped memory, edited"),
+                embedding_provider=None,
+            )
+
+            assert saved.metadata["projected_capture_id"] == "capture-1"
+            stored = await content_client.select_one(
+                client,
+                "SELECT metadata FROM raw_captures "
+                "WHERE organization_id = $organization_id AND uuid = $uuid LIMIT 1;",
+                organization_id="org-stamp",
+                uuid=created.id,
+            )
+            assert stored is not None
+            assert stored["metadata"]["projected_capture_id"] == "capture-1"
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
     async def test_raw_memory_save_returns_saved_record_after_commit(
         self,
         monkeypatch: pytest.MonkeyPatch,

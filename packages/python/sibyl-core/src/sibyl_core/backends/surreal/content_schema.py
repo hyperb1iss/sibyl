@@ -62,7 +62,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 25
+CONTENT_SCHEMA_CURRENT_VERSION = 26
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -587,6 +587,39 @@ CONTENT_SCHEMAFULL_REPAIR_DEFINITIONS = "\n".join(
 )
 
 
+# Projected captures carry metadata.raw_memory_id; the raw rows they project
+# did not know about them, so listings showed both. Stamp every raw row that
+# already has a projection so the review queue can hide it with a plain
+# column predicate.
+#
+# The stamp matches organization and principal, never the uuid alone:
+# raw_memory_id arrives in a client request body, so a capture in another
+# organization naming a foreign uuid would otherwise hide that row from its
+# own owner's queue.
+#
+# The rows go through LET and a coalesce rather than FOR over the SELECT
+# directly: SurrealDB 3.x rejects `FOR $x IN (SELECT ...)` with "Cannot
+# execute statement using value: NONE" whether or not the table has rows,
+# while the SDK-embedded engine the unit tests run on accepts it. Passed as
+# one statement on purpose, since the block carries its own semicolons and
+# must not go through split_statements.
+CONTENT_RAW_CAPTURE_PROJECTION_FOLD_MIGRATION = """
+LET $projections = (
+    SELECT uuid, organization_id, principal_id, metadata.raw_memory_id AS raw_memory_id
+    FROM raw_captures
+    WHERE metadata.raw_memory_id IS NOT NONE
+);
+FOR $projection IN ($projections ?? []) {
+    UPDATE raw_captures SET metadata.projected_capture_id = $projection.uuid
+    WHERE uuid = $projection.raw_memory_id
+        AND organization_id = $projection.organization_id
+        AND principal_id = $projection.principal_id
+        AND entity_type = 'raw_memory'
+        AND metadata.projected_capture_id IS NONE;
+};
+""".strip()
+
+
 def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
     compatible_schema = render_fulltext_compatible_sql(
         CONTENT_SCHEMA_DEFINITIONS,
@@ -743,6 +776,11 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             statements=tuple(
                 split_statements(CONTENT_SOURCE_IMPORT_REVISION_MIGRATION_DEFINITIONS)
             ),
+        ),
+        SchemaMigration(
+            version=26,
+            name="content_raw_capture_projection_fold",
+            statements=(CONTENT_RAW_CAPTURE_PROJECTION_FOLD_MIGRATION,),
         ),
     )
 

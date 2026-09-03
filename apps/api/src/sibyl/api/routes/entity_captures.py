@@ -52,30 +52,43 @@ async def archive_raw_capture(
     tags: list[str],
     metadata: dict[str, object],
 ) -> None:
-    """Persist the write-once capture sidecar."""
+    """Persist the write-once capture sidecar.
+
+    When the entity is the projection of a raw memory (metadata carries
+    raw_memory_id), the raw row is stamped with this capture's id so the
+    review queue lists the memory once instead of raw and projection side
+    by side.
+    """
     capture_surface_value = metadata.get("capture_surface")
-    await save_raw_capture_record(
-        session,
-        capture=RawCaptureRecord(
-            organization_id=organization_id,
-            principal_id=str(user_id) if user_id else "",
-            memory_scope=str(metadata.get("memory_scope") or "private"),
-            scope_key=str(metadata["scope_key"]) if metadata.get("scope_key") else None,
-            agent_id=str(metadata["agent_id"]) if metadata.get("agent_id") else None,
-            project_id=str(metadata["project_id"]) if metadata.get("project_id") else None,
-            review_state=serialization.normalized_raw_capture_review_state(
-                metadata.get("review_state")
-            ),
-            entity_id=entity_id,
-            title=entity_name,
-            raw_content=entity_content,
-            entity_type=entity_type,
-            tags=tags,
-            metadata=metadata,
-            capture_surface=str(capture_surface_value) if capture_surface_value else None,
-            created_by_user_id=user_id,
+    capture = RawCaptureRecord(
+        organization_id=organization_id,
+        principal_id=str(user_id) if user_id else "",
+        memory_scope=str(metadata.get("memory_scope") or "private"),
+        scope_key=str(metadata["scope_key"]) if metadata.get("scope_key") else None,
+        agent_id=str(metadata["agent_id"]) if metadata.get("agent_id") else None,
+        project_id=str(metadata["project_id"]) if metadata.get("project_id") else None,
+        review_state=serialization.normalized_raw_capture_review_state(
+            metadata.get("review_state")
         ),
+        entity_id=entity_id,
+        title=entity_name,
+        raw_content=entity_content,
+        entity_type=entity_type,
+        tags=tags,
+        metadata=metadata,
+        capture_surface=str(capture_surface_value) if capture_surface_value else None,
+        created_by_user_id=user_id,
     )
+    await save_raw_capture_record(session, capture=capture)
+    raw_memory_id = metadata.get("raw_memory_id")
+    if raw_memory_id:
+        await content_runtime.mark_raw_capture_projected(
+            session,
+            organization_id=organization_id,
+            raw_capture_id=str(raw_memory_id),
+            projected_capture_id=capture.id,
+            principal_id=capture.principal_id,
+        )
 
 
 @router.get("/captures", response_model=RawCaptureListResponse)
