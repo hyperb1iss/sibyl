@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@/test/utils';
 import { MobileNavProvider } from './mobile-nav-context';
 import { Sidebar } from './sidebar';
-import { SIDEBAR_COLLAPSED_STORAGE_KEY } from './sidebar-collapse';
+import { SIDEBAR_COLLAPSED_STORAGE_KEY, setSidebarCollapsed } from './sidebar-collapse';
 
 function renderSidebar() {
   return render(
@@ -41,6 +41,8 @@ function createMemoryStorage(): Storage {
 describe('Sidebar', () => {
   beforeEach(() => {
     vi.stubGlobal('localStorage', createMemoryStorage());
+    // The store keeps its value in module memory across tests; start expanded.
+    setSidebarCollapsed(false);
     document.documentElement.removeAttribute('data-sidebar');
     document.documentElement.removeAttribute('data-sidebar-hydrated');
   });
@@ -108,6 +110,33 @@ describe('Sidebar', () => {
 
     expect(desktopRail()).toHaveAttribute('data-collapsed');
     expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument();
+  });
+
+  it('keeps toggling in memory when storage throws', async () => {
+    const memory = createMemoryStorage();
+    const denied = () => {
+      throw new Error('storage denied');
+    };
+    // Only the sidebar key is poisoned; the theme provider reads storage too.
+    vi.stubGlobal('localStorage', {
+      ...memory,
+      getItem: (key: string) =>
+        key === SIDEBAR_COLLAPSED_STORAGE_KEY ? denied() : memory.getItem(key),
+      setItem: (key: string, value: string) =>
+        key === SIDEBAR_COLLAPSED_STORAGE_KEY ? denied() : memory.setItem(key, value),
+    });
+
+    const { user } = renderSidebar();
+    const rail = desktopRail();
+    expect(rail).not.toHaveAttribute('data-collapsed');
+
+    await user.click(screen.getByRole('button', { name: 'Collapse sidebar' }));
+    expect(rail).toHaveAttribute('data-collapsed');
+    expect(document.documentElement).toHaveAttribute('data-sidebar', 'collapsed');
+
+    await user.keyboard('[[');
+    expect(rail).not.toHaveAttribute('data-collapsed');
+    expect(document.documentElement).not.toHaveAttribute('data-sidebar');
   });
 
   it('toggles the rail from the keyboard with Cmd+B and [', async () => {
