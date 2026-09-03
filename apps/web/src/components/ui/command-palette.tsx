@@ -255,11 +255,13 @@ function PaletteBody({
         const count = (seen[group] ?? 0) + 1;
         seen[group] = count;
         if (count > LIVE_RESULTS_PER_GROUP) continue;
+        const snippet = cleanSnippet(result.content);
         live.push({
           id: `live-${result.id}`,
           group,
           label: result.name,
-          description: cleanSnippet(result.content),
+          // Many work items carry their title as content; skip the echo.
+          description: snippet === result.name ? undefined : snippet,
           icon: <EntityIcon type={result.type} size={16} />,
           badgeType: result.type,
           run: () => navigate(getSearchResultHref(result)),
