@@ -72,6 +72,7 @@ const liveResults = {
 function renderGlobalPalette() {
   return render(
     <CommandPaletteProvider>
+      <button type="button">Opener</button>
       <GlobalCommandPalette />
     </CommandPaletteProvider>
   );
@@ -100,6 +101,20 @@ describe('CommandPalette', () => {
 
     await user.keyboard('{Control>}{Shift>}k{/Shift}{/Control}');
     expect(screen.getByRole('dialog', { name: /command palette/i })).toBeInTheDocument();
+  });
+
+  it('returns focus to the element that opened it', async () => {
+    const { user } = renderGlobalPalette();
+    const opener = screen.getByRole('button', { name: 'Opener' });
+
+    await user.click(opener);
+    expect(opener).toHaveFocus();
+
+    await user.keyboard('{Meta>}k{/Meta}');
+    expect(screen.getByRole('combobox', { name: /search or run a command/i })).toHaveFocus();
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(opener).toHaveFocus());
   });
 
   it('lists commands and navigation with an always-present search handoff', async () => {

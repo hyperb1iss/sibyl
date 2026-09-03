@@ -107,6 +107,10 @@ interface CommandPaletteProps {
 
 export function CommandPalette({ isOpen, onClose, onCreateTask }: CommandPaletteProps) {
   const reduceMotion = useReducedMotion();
+  // Whatever had focus when the palette opened. Radix restores focus to a
+  // Dialog.Trigger on close and this palette has none (it opens from a chord
+  // or the header button), so the restore is done here instead.
+  const openerRef = useRef<HTMLElement | null>(null);
 
   return (
     <DialogPrimitive.Root
@@ -119,6 +123,18 @@ export function CommandPalette({ isOpen, onClose, onCreateTask }: CommandPalette
         <DialogOverlay />
         <DialogPrimitive.Content
           aria-describedby={undefined}
+          onOpenAutoFocus={() => {
+            const active = document.activeElement;
+            openerRef.current = active instanceof HTMLElement ? active : null;
+          }}
+          onCloseAutoFocus={event => {
+            event.preventDefault();
+            const opener = openerRef.current;
+            openerRef.current = null;
+            if (opener && document.contains(opener)) {
+              opener.focus();
+            }
+          }}
           className="fixed left-1/2 top-[15vh] z-50 w-[calc(100vw-2rem)] max-w-[640px] -translate-x-1/2 focus:outline-none"
         >
           <DialogPrimitive.Title className="sr-only">Command palette</DialogPrimitive.Title>
