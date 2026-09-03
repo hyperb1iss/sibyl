@@ -88,7 +88,16 @@ def check_schema_bootstrap_ready() -> DependencyStatus | None:
 
     status = get_runtime_schema_bootstrap_status()
     if not status.attempted:
-        return None
+        # Bootstrap runs unconditionally in runtime startup, so an
+        # unattempted state means startup has not finished: the process
+        # is NOT ready. Returning None here opened a first-boot window
+        # where /health/ready answered 200 while the auth schema did not
+        # exist yet and signups 500ed (#461).
+        return DependencyStatus(
+            name="schemas",
+            ready=False,
+            detail="Surreal schema bootstrap has not started",
+        )
     if status.ready:
         return DependencyStatus(name="schemas", ready=True)
     detail = "; ".join(

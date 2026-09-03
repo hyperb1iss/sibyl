@@ -52,6 +52,8 @@ def test_readiness_returns_200_when_dependencies_ready() -> None:
         backend="local",
     )
 
+    schemas = DependencyStatus(name="schemas", ready=True)
+
     with (
         patch(
             "sibyl.api.readiness.check_surreal_ready",
@@ -60,6 +62,10 @@ def test_readiness_returns_200_when_dependencies_ready() -> None:
         patch(
             "sibyl.api.readiness.check_coordination_ready",
             AsyncMock(return_value=coordination),
+        ),
+        patch(
+            "sibyl.api.readiness.check_schema_bootstrap_ready",
+            return_value=schemas,
         ),
     ):
         response = client.get("/health/ready")
@@ -75,6 +81,7 @@ def test_readiness_returns_200_when_dependencies_ready() -> None:
             "latency_ms": 0.4,
             "backend": "local",
         },
+        {"name": "schemas", "ready": True},
     ]
 
 
@@ -295,3 +302,19 @@ async def test_coordination_readiness_rejects_dead_required_redis() -> None:
     assert status.backend == "redis"
     assert status.detail == "redis coordination broker unavailable"
     assert status.latency_ms is not None
+
+
+def test_schema_bootstrap_unattempted_reports_not_ready() -> None:
+    """Before startup marks the bootstrap attempted, readiness must say
+    NOT ready rather than dropping the dependency: the silent-drop
+    behavior opened a first-boot window where /health/ready answered 200
+    while the auth schema did not exist and signups 500ed (#461)."""
+    from sibyl.api.readiness import check_schema_bootstrap_ready
+    from sibyl.surreal_runtime_startup import reset_runtime_schema_bootstrap_status
+
+    reset_runtime_schema_bootstrap_status()
+    status = check_schema_bootstrap_ready()
+
+    assert status is not None
+    assert status.ready is False
+    assert "not started" in (status.detail or "")
