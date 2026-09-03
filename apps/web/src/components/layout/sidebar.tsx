@@ -4,81 +4,188 @@ import { AnimatePresence, motion } from 'motion/react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect } from 'react';
-import { Github, Heart, X } from '@/components/ui/icons';
+import { Database, Github, Heart, NavArrowLeft, X } from '@/components/ui/icons';
 import { Tooltip } from '@/components/ui/tooltip';
 import { APP_CONFIG } from '@/lib/constants/app';
-import { NAVIGATION } from '@/lib/constants/navigation';
+import { NAVIGATION_SECTIONS } from '@/lib/constants/navigation';
+import { isEditableTarget, isModifierChord } from '@/lib/keyboard';
 import { useMobileNav } from './mobile-nav-context';
 import { NavLink } from './nav-link';
+import {
+  SIDEBAR_COLLAPSED_WIDTH,
+  SIDEBAR_EXPANDED_WIDTH,
+  useSidebarCollapsed,
+} from './sidebar-collapse';
+
+const PRIMARY_SECTIONS = NAVIGATION_SECTIONS.filter(section => section.id !== 'system');
+const SYSTEM_ITEMS = NAVIGATION_SECTIONS.find(section => section.id === 'system')?.items ?? [];
+
+const FOOTER_ICON_LINK =
+  'rounded-lg p-1.5 text-sc-fg-subtle transition-colors duration-200 hover:bg-sc-bg-highlight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base';
 
 interface SidebarContentProps {
+  collapsed?: boolean;
   onNavClick?: () => void;
+  onToggleCollapse?: () => void;
 }
 
-function SidebarContent({ onNavClick }: SidebarContentProps) {
+function SidebarLogo({
+  collapsed,
+  onNavClick,
+}: Pick<SidebarContentProps, 'collapsed' | 'onNavClick'>) {
+  if (collapsed) {
+    return (
+      <div className="flex justify-center border-b border-sc-fg-subtle/10 py-4">
+        <Tooltip content="Sibyl" side="right">
+          <Link
+            href="/"
+            onClick={onNavClick}
+            aria-label="Sibyl home"
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-sc-purple via-sc-magenta to-sc-coral animate-logo-glow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
+          >
+            <Database width={18} height={18} className="text-sc-on-accent" />
+          </Link>
+        </Tooltip>
+      </div>
+    );
+  }
+
+  return (
+    <div className="py-4 pr-4 pl-0 md:py-5 md:pr-6 md:pl-0 border-b border-sc-fg-subtle/10">
+      <Link href="/" className="block text-center" onClick={onNavClick}>
+        <Image
+          src="/sibyl-logo.png"
+          alt="Sibyl"
+          width={180}
+          height={52}
+          className="h-12 w-auto mx-auto animate-logo-glow"
+          priority
+        />
+        <div className="mt-1 text-center">
+          <p className="tagline text-[10px] uppercase tracking-[0.08em] font-medium whitespace-nowrap">
+            <span className="tagline-word">Collective</span>
+            <span className="tagline-separator mx-1 opacity-50">·</span>
+            <span className="tagline-word">Intelligence</span>
+          </p>
+        </div>
+      </Link>
+    </div>
+  );
+}
+
+function SidebarContent({ collapsed = false, onNavClick, onToggleCollapse }: SidebarContentProps) {
   return (
     <>
-      {/* Logo */}
-      <div className="py-4 pr-4 pl-0 md:py-6 md:pr-6 md:pl-0 border-b border-sc-fg-subtle/10">
-        <Link href="/" className="block text-center" onClick={onNavClick}>
-          <Image
-            src="/sibyl-logo.png"
-            alt="Sibyl"
-            width={180}
-            height={52}
-            className="h-14 w-auto mx-auto animate-logo-glow"
-            priority
-          />
-          <div className="mt-1.5 text-center">
-            <p className="tagline text-[10px] uppercase tracking-[0.08em] font-medium">
-              <span className="tagline-word">Collective</span>
-              <span className="tagline-separator mx-1 opacity-50">·</span>
-              <span className="tagline-word">Intelligence</span>
-            </p>
-          </div>
-        </Link>
-      </div>
+      <SidebarLogo collapsed={collapsed} onNavClick={onNavClick} />
 
       {/* Navigation */}
-      <nav className="flex-1 p-3 md:p-4 space-y-1 overflow-y-auto">
-        {NAVIGATION.map(item => (
-          <NavLink key={item.name} href={item.href} icon={item.icon} onClick={onNavClick}>
-            {item.name}
-          </NavLink>
+      <nav
+        aria-label="Main navigation"
+        className={`flex-1 overflow-y-auto overflow-x-hidden p-3 md:p-4 ${collapsed ? 'space-y-3' : 'space-y-4'}`}
+      >
+        {PRIMARY_SECTIONS.map((section, index) => (
+          <div key={section.id} role="group" aria-label={section.label}>
+            {collapsed ? (
+              index > 0 && (
+                <div aria-hidden="true" className="mx-2 mb-3 border-t border-sc-fg-subtle/10" />
+              )
+            ) : (
+              <div className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-sc-fg-subtle">
+                {section.label}
+              </div>
+            )}
+            <div className="space-y-1">
+              {section.items.map(item => (
+                <NavLink
+                  key={item.href}
+                  href={item.href}
+                  icon={item.icon}
+                  collapsed={collapsed}
+                  onClick={onNavClick}
+                >
+                  {item.name}
+                </NavLink>
+              ))}
+            </div>
+          </div>
         ))}
       </nav>
 
       {/* Footer */}
       <div className="p-3 md:p-4 border-t border-sc-fg-subtle/10 space-y-2">
+        {SYSTEM_ITEMS.length > 0 && (
+          <div className="space-y-1" role="group" aria-label="System">
+            {SYSTEM_ITEMS.map(item => (
+              <NavLink
+                key={item.href}
+                href={item.href}
+                icon={item.icon}
+                collapsed={collapsed}
+                preserveProjectsContext={false}
+                onClick={onNavClick}
+              >
+                {item.name}
+              </NavLink>
+            ))}
+          </div>
+        )}
+
         <div className="flex items-center justify-center gap-1">
-          <Tooltip content="GitHub">
+          <Tooltip content="GitHub" side={collapsed ? 'right' : 'top'}>
             <a
               href={APP_CONFIG.GITHUB_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-lg p-1.5 text-sc-fg-subtle transition-colors duration-200 hover:bg-sc-bg-highlight hover:text-sc-cyan focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
+              className={`${FOOTER_ICON_LINK} hover:text-sc-cyan`}
               aria-label="Sibyl on GitHub"
             >
               <Github width={15} height={15} />
             </a>
           </Tooltip>
-          <Tooltip content="Sponsor">
+          <Tooltip content="Sponsor" side={collapsed ? 'right' : 'top'}>
             <a
               href={APP_CONFIG.SPONSOR_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-lg p-1.5 text-sc-fg-subtle transition-colors duration-200 hover:bg-sc-bg-highlight hover:text-sc-coral focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
+              className={`${FOOTER_ICON_LINK} hover:text-sc-coral`}
               aria-label="Sponsor Sibyl"
             >
               <Heart width={15} height={15} />
             </a>
           </Tooltip>
         </div>
-        <div className="flex items-center justify-center text-[10px] text-sc-fg-muted">
-          <span className="uppercase tracking-wider">
-            {APP_CONFIG.NAME} v{APP_CONFIG.VERSION}
-          </span>
-        </div>
+
+        {!collapsed && (
+          <div className="flex items-center justify-center text-[10px] text-sc-fg-muted">
+            <span className="uppercase tracking-wider whitespace-nowrap">
+              {APP_CONFIG.NAME} v{APP_CONFIG.VERSION}
+            </span>
+          </div>
+        )}
+
+        {onToggleCollapse && (
+          <div className={`flex ${collapsed ? 'justify-center' : 'justify-end'}`}>
+            <Tooltip
+              content={collapsed ? 'Expand sidebar (⌘B)' : 'Collapse sidebar (⌘B)'}
+              side="right"
+            >
+              <button
+                type="button"
+                onClick={onToggleCollapse}
+                aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                aria-expanded={!collapsed}
+                aria-controls="app-sidebar"
+                className={`${FOOTER_ICON_LINK} hover:text-sc-purple`}
+              >
+                <NavArrowLeft
+                  width={16}
+                  height={16}
+                  className={`transition-transform duration-200 ${collapsed ? 'rotate-180' : ''}`}
+                />
+              </button>
+            </Tooltip>
+          </div>
+        )}
       </div>
     </>
   );
@@ -86,6 +193,7 @@ function SidebarContent({ onNavClick }: SidebarContentProps) {
 
 export function Sidebar() {
   const { isOpen, close } = useMobileNav();
+  const { collapsed, toggle, animate } = useSidebarCollapsed();
 
   // Close mobile nav on route change
   useEffect(() => {
@@ -103,12 +211,45 @@ export function Sidebar() {
     return () => document.removeEventListener('keydown', handleEscape);
   }, [isOpen, close]);
 
+  // Cmd/Ctrl+B anywhere, or a bare "[" outside text fields, flips the rail.
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isModifierChord(event) && !event.shiftKey && event.key.toLowerCase() === 'b') {
+        event.preventDefault();
+        toggle();
+        return;
+      }
+      if (
+        event.key === '[' &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !isEditableTarget(event.target)
+      ) {
+        event.preventDefault();
+        toggle();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [toggle]);
+
   return (
     <>
       {/* Desktop Sidebar - hidden on mobile */}
-      <aside className="hidden md:flex w-64 bg-sc-bg-base border-r border-sc-fg-subtle/10 flex-col shadow-sidebar">
-        <SidebarContent />
-      </aside>
+      <motion.aside
+        id="app-sidebar"
+        data-sidebar-rail=""
+        data-collapsed={collapsed ? '' : undefined}
+        initial={false}
+        animate={{ width: collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH }}
+        transition={{ duration: animate ? 0.2 : 0, ease: 'easeOut' }}
+        className="hidden md:flex shrink-0 overflow-hidden bg-sc-bg-base border-r border-sc-fg-subtle/10 flex-col shadow-sidebar"
+      >
+        <div data-sidebar-content="" className="flex min-h-0 flex-1 flex-col">
+          <SidebarContent collapsed={collapsed} onToggleCollapse={toggle} />
+        </div>
+      </motion.aside>
 
       {/* Mobile Drawer */}
       <AnimatePresence>

@@ -267,6 +267,18 @@
     inset -1px 0 0 oklch(100% 0 0 / 0.05);
 }
 
+/* Pre-hydration rail: the root inline script stamps data-sidebar="collapsed"
+   from localStorage, and this pins the desktop sidebar to its rail width until
+   React hydrates and takes over the width (data-sidebar-hydrated). */
+html[data-sidebar="collapsed"]:not([data-sidebar-hydrated]) [data-sidebar-rail] {
+  /* biome-ignore lint/complexity/noImportantStyles: must beat motion's inline width until hydration */
+  width: 64px !important;
+}
+
+html[data-sidebar="collapsed"]:not([data-sidebar-hydrated]) [data-sidebar-content] {
+  visibility: hidden;
+}
+
 [data-theme="dawn"] .shadow-sidebar {
   box-shadow:
     1px 0 3px oklch(0% 0 0 / 0.06),
