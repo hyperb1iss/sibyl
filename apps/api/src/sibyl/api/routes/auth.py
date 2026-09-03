@@ -427,13 +427,18 @@ async def _require_signup_allowed(
     if invite_token is not None:
         await _validate_invitation_for_email(token=invite_token, email=body.email)
         return invite_token
-    if config_module.settings.public_signups_enabled or await is_setup_mode():
+    if config_module.settings.public_signups_enabled or (
+        await is_setup_mode() and not config_module.settings.sso_only_instance
+    ):
         return None
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=SIGNUP_DISABLED_DETAIL)
 
 
 async def _require_local_auth_allowed(request: Request) -> None:
-    if await is_setup_mode():
+    # Setup mode unlocks local auth only when this instance actually
+    # owns identity; an SSO-only deployment completes setup through the
+    # first provider login instead (#456).
+    if await is_setup_mode() and not config_module.settings.sso_only_instance:
         return
     if config_module.settings.break_glass_enabled:
         _require_break_glass_allowed(request)

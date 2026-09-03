@@ -198,6 +198,18 @@ class Settings(BaseSettings):
         default=False,
         description="Treat local auth as an active break-glass access path",
     )
+
+    @property
+    def sso_only_instance(self) -> bool:
+        """Identity is delegated entirely to OIDC.
+
+        On such an instance the first SSO login IS the setup, so setup
+        mode must never unlock local signup, local login, or
+        unauthenticated configuration: that window is claimable by
+        whoever reaches the URL first (#456).
+        """
+        return bool(self.oidc.providers) and not self.local_auth_enabled
+
     break_glass_allowed_ips: list[str] = Field(
         default_factory=list,
         description="Optional CIDR ranges allowed to use break-glass local auth",

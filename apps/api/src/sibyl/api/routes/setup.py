@@ -32,6 +32,12 @@ class SetupStatus(BaseModel):
     """Current setup state of the Sibyl instance."""
 
     needs_setup: bool = Field(description="True until setup has initialized an owner/admin org")
+    sso_first_run: bool = Field(
+        default=False,
+        description="True when identity is SSO-only and no owner/admin exists "
+        "yet: the first provider login completes setup, so clients should "
+        "route to the provider instead of the local setup wizard",
+    )
     has_users: bool = Field(description="True if at least one user exists")
     has_orgs: bool = Field(description="True if at least one org exists")
     setup_complete: bool = Field(
@@ -167,6 +173,7 @@ async def get_setup_status(
 
     return SetupStatus(
         needs_setup=not setup_status.setup_complete,
+        sso_first_run=(not setup_status.setup_complete) and settings.sso_only_instance,
         has_users=setup_status.has_users,
         has_orgs=setup_status.has_orgs,
         setup_complete=setup_status.setup_complete,
