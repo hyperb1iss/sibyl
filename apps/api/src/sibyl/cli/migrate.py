@@ -9,7 +9,7 @@ import shutil
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any
@@ -58,8 +58,8 @@ def _archive_json_default(value: object) -> str:
     falls back to str so an export of a real store never dies on a type
     the SDK grows next release (#459).
     """
-    if hasattr(value, "isoformat"):
-        return value.isoformat()  # type: ignore[union-attr]
+    if isinstance(value, datetime | date):
+        return value.isoformat()
     return str(value)
 
 
