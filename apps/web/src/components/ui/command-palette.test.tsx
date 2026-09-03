@@ -224,7 +224,7 @@ describe('CommandPalette', () => {
         include_graph: true,
         include_raw_memory: true,
       }),
-      { enabled: true }
+      { enabled: true, keepPreviousResults: false }
     );
 
     await user.click(within(docs).getByRole('option', { name: /surrealql reference/i }));

@@ -176,7 +176,7 @@ function PaletteBody({ onClose, onCreateTask }: Omit<CommandPaletteProps, 'isOpe
       include_graph: true,
       include_raw_memory: true,
     },
-    { enabled: liveEnabled }
+    { enabled: liveEnabled, keepPreviousResults: false }
   );
 
   const navigate = useCallback(
