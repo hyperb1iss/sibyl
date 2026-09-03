@@ -9,10 +9,10 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from starlette.requests import Request
 
+from sibyl import config as config_module
 from sibyl.auth.dependencies import build_auth_context
 from sibyl.auth.http import select_access_token
 from sibyl.auth.jwt import JwtError, verify_access_token
-from sibyl.config import settings
 from sibyl.persistence.setup_common import SetupStatus
 from sibyl.persistence.surreal.auth import (
     SurrealOrganizationRepository,
@@ -107,7 +107,7 @@ def _verify_token_claims(token: str) -> dict[str, object]:
 
 async def require_setup_mode_or_auth(request: Request) -> None:
     """Allow setup mode access, otherwise require a valid access token."""
-    if await is_setup_mode() and not settings.sso_only_instance:
+    if await is_setup_mode() and not config_module.settings.sso_only_instance:
         return
 
     token = _require_request_token(request)
@@ -116,7 +116,7 @@ async def require_setup_mode_or_auth(request: Request) -> None:
 
 async def require_setup_mode_or_admin(request: Request) -> AuthUser | None:
     """Allow setup mode access, otherwise require an authenticated global admin."""
-    if await is_setup_mode() and not settings.sso_only_instance:
+    if await is_setup_mode() and not config_module.settings.sso_only_instance:
         return None
 
     token = _require_request_token(request)
@@ -141,7 +141,7 @@ async def require_setup_mode_or_admin(request: Request) -> AuthUser | None:
 
 async def require_settings_admin(request: Request) -> None:
     """Allow setup-mode bootstrap access, otherwise require an org admin."""
-    if await is_setup_mode() and not settings.sso_only_instance:
+    if await is_setup_mode() and not config_module.settings.sso_only_instance:
         return
 
     ctx = await build_auth_context(request, None)
