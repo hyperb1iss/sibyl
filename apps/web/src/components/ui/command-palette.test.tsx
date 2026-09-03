@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CaptureMemoryProvider } from '@/components/layout/capture-memory-context';
 import { CommandPaletteProvider } from '@/components/layout/command-palette-context';
 import { GlobalCommandPalette } from '@/components/layout/global-command-palette';
 import { render, screen, waitFor, within } from '@/test/utils';
@@ -72,11 +71,9 @@ const liveResults = {
 
 function renderGlobalPalette() {
   return render(
-    <CaptureMemoryProvider>
-      <CommandPaletteProvider>
-        <GlobalCommandPalette />
-      </CommandPaletteProvider>
-    </CaptureMemoryProvider>
+    <CommandPaletteProvider>
+      <GlobalCommandPalette />
+    </CommandPaletteProvider>
   );
 }
 
@@ -106,11 +103,13 @@ describe('CommandPalette', () => {
   });
 
   it('lists commands and navigation with an always-present search handoff', async () => {
-    render(<CommandPalette isOpen onClose={vi.fn()} onCaptureMemory={vi.fn()} />);
+    render(<CommandPalette isOpen onClose={vi.fn()} />);
 
     const dialog = screen.getByRole('dialog', { name: /command palette/i });
     expect(within(dialog).getByRole('option', { name: /new task/i })).toBeInTheDocument();
-    expect(within(dialog).getByRole('option', { name: /capture memory/i })).toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole('option', { name: /capture memory/i })
+    ).not.toBeInTheDocument();
     expect(within(dialog).getByRole('option', { name: /toggle theme/i })).toBeInTheDocument();
     expect(within(dialog).getByRole('option', { name: /go to settings/i })).toBeInTheDocument();
     expect(within(dialog).getByRole('option', { name: /open search/i })).toBeInTheDocument();
@@ -190,18 +189,12 @@ describe('CommandPalette', () => {
     expect(router.push).toHaveBeenCalledWith('/sources/src_1/documents/doc_1');
   });
 
-  it('runs commands: new task routes to the board and capture memory fires the callback', async () => {
+  it('routes the new task command to the board with project context', async () => {
     const onClose = vi.fn();
-    const onCaptureMemory = vi.fn();
-    const { user } = render(
-      <CommandPalette isOpen onClose={onClose} onCaptureMemory={onCaptureMemory} />
-    );
-
-    await user.click(screen.getByRole('option', { name: /capture memory/i }));
-    expect(onCaptureMemory).toHaveBeenCalledTimes(1);
-    expect(onClose).toHaveBeenCalled();
+    const { user } = render(<CommandPalette isOpen onClose={onClose} />);
 
     await user.click(screen.getByRole('option', { name: /new task/i }));
+    expect(onClose).toHaveBeenCalled();
     expect(router.push).toHaveBeenCalledWith('/tasks?new=1&projects=proj-a');
   });
 });

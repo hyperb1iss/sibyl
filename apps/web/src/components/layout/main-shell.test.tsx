@@ -83,7 +83,7 @@ describe('MainShell', () => {
     expect(screen.getByRole('dialog', { name: /command palette/i })).toBeInTheDocument();
   });
 
-  it('reaches memory capture through the command palette', async () => {
+  it('omits capture from the global command palette', async () => {
     const { user } = render(
       <MobileNavProvider>
         <MainShell>
@@ -94,8 +94,12 @@ describe('MainShell', () => {
 
     await user.keyboard('{Meta>}{Shift>}{k}{/Shift}{/Meta}');
     const palette = screen.getByRole('dialog', { name: /command palette/i });
-    await user.click(within(palette).getByRole('option', { name: /capture memory/i }));
 
-    expect(screen.getByLabelText('Memory')).toBeInTheDocument();
+    expect(
+      within(palette).queryByRole('button', { name: /capture memory/i })
+    ).not.toBeInTheDocument();
+    expect(
+      within(palette).queryByRole('option', { name: /capture memory/i })
+    ).not.toBeInTheDocument();
   });
 });

@@ -1,7 +1,7 @@
 'use client';
 
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { HalfMoon, Sparks } from 'iconoir-react';
+import { HalfMoon } from 'iconoir-react';
 import { motion, useReducedMotion } from 'motion/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { ReactNode } from 'react';
@@ -103,16 +103,9 @@ interface CommandPaletteProps {
   onClose: () => void;
   /** Override for "New task"; defaults to routing to /tasks?new=1. */
   onCreateTask?: () => void;
-  /** Adds the "Capture memory" command when provided. */
-  onCaptureMemory?: () => void;
 }
 
-export function CommandPalette({
-  isOpen,
-  onClose,
-  onCreateTask,
-  onCaptureMemory,
-}: CommandPaletteProps) {
+export function CommandPalette({ isOpen, onClose, onCreateTask }: CommandPaletteProps) {
   const reduceMotion = useReducedMotion();
 
   return (
@@ -135,11 +128,7 @@ export function CommandPalette({
             transition={{ duration: 0.18, ease: 'easeOut' }}
             className="overflow-hidden rounded-xl border border-sc-fg-subtle/20 bg-sc-bg-elevated shadow-glow-purple"
           >
-            <PaletteBody
-              onClose={onClose}
-              onCreateTask={onCreateTask}
-              onCaptureMemory={onCaptureMemory}
-            />
+            <PaletteBody onClose={onClose} onCreateTask={onCreateTask} />
           </motion.div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
@@ -148,11 +137,7 @@ export function CommandPalette({
 }
 
 // Mounted only while the dialog is open, so query and selection reset for free.
-function PaletteBody({
-  onClose,
-  onCreateTask,
-  onCaptureMemory,
-}: Omit<CommandPaletteProps, 'isOpen'>) {
+function PaletteBody({ onClose, onCreateTask }: Omit<CommandPaletteProps, 'isOpen'>) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { preference, toggleTheme } = useTheme();
@@ -207,22 +192,6 @@ function PaletteBody({
           navigate(withProjectsContext('/tasks?new=1', projects));
         },
       },
-      ...(onCaptureMemory
-        ? [
-            {
-              id: 'cmd-capture-memory',
-              group: 'commands' as const,
-              label: 'Capture memory',
-              description: 'Save a learning, pattern, or failure mode',
-              icon: <Sparks width={16} height={16} />,
-              keywords: 'remember note learning quick',
-              run: () => {
-                onClose();
-                onCaptureMemory();
-              },
-            },
-          ]
-        : []),
       {
         id: 'cmd-toggle-theme',
         group: 'commands',
@@ -295,7 +264,6 @@ function PaletteBody({
     liveEnabled,
     navigate,
     needle,
-    onCaptureMemory,
     onClose,
     onCreateTask,
     preference,
