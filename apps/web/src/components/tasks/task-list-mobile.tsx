@@ -9,6 +9,11 @@ import { useProjectContext, useProjectFilter } from '@/lib/project-context';
 import { TaskCard } from './task-card';
 
 // Mobile-friendly status tabs (fewer options for cleaner UX)
+/** 1087 reads as 1.1k inside a 390px tab row. */
+function formatCompactCount(count: number): string {
+  return count >= 1000 ? `${(count / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(count);
+}
+
 const MOBILE_STATUSES: TaskStatusType[] = ['todo', 'doing', 'review', 'done'];
 
 type SortOption = 'priority' | 'due_date' | 'created' | 'name';
@@ -144,8 +149,8 @@ export const TaskListMobile = memo(function TaskListMobile({
               type="button"
               onClick={() => setActiveStatus(status)}
               className={`
-                flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg
-                text-xs font-medium transition-all duration-200
+                flex-1 flex items-center justify-center gap-1 py-2 px-1.5 rounded-lg
+                text-[11px] font-medium transition-all duration-200 min-w-0
                 ${
                   isActive
                     ? `${config.bgClass} ${config.textClass}`
@@ -153,16 +158,15 @@ export const TaskListMobile = memo(function TaskListMobile({
                 }
               `}
             >
-              <span>{config.icon}</span>
-              <span className="hidden xs:inline">{config.label}</span>
+              <span className="truncate">{config.label}</span>
               {count > 0 && (
                 <span
                   className={`
-                    text-[10px] px-1.5 py-0.5 rounded-full
+                    text-[10px] px-1 py-0.5 rounded-full tabular-nums
                     ${isActive ? 'bg-white/20' : 'bg-sc-bg-highlight'}
                   `}
                 >
-                  {count}
+                  {formatCompactCount(count)}
                 </span>
               )}
             </button>

@@ -27,6 +27,13 @@ const SORT_OPTIONS: Array<{ value: SortOption; label: string; icon: React.ReactN
   { value: 'manual', label: 'Manual', icon: <ArrowUpDown width={14} height={14} /> },
 ];
 
+/**
+ * Cards rendered per column before a "show more" row takes over. A board
+ * that loads every active task can hold hundreds of todo cards, and
+ * painting them all at once is what made the old 200-task cap feel needed.
+ */
+const COLUMN_WINDOW = 40;
+
 const PRIORITY_ORDER: Record<string, number> = {
   critical: 0,
   high: 1,
@@ -107,6 +114,8 @@ interface KanbanBoardProps {
 interface KanbanColumnProps {
   status: TaskStatus;
   tasks: TaskSummary[];
+  /** Empty columns fold into a slim rail until a drag starts. */
+  collapsed: boolean;
   projectMap: Map<string, string>;
   showProjectOnCards: boolean;
   sortBy: SortOption;
@@ -186,6 +195,7 @@ const SortDropdown = memo(function SortDropdown({
 const KanbanColumn = memo(function KanbanColumn({
   status,
   tasks,
+  collapsed,
   projectMap,
   showProjectOnCards,
   sortBy,
@@ -202,6 +212,10 @@ const KanbanColumn = memo(function KanbanColumn({
   const containerRef = useRef<HTMLDivElement>(null);
 
   const sortedTasks = useMemo(() => sortTasks(tasks, sortBy), [tasks, sortBy]);
+  const [visibleCount, setVisibleCount] = useState(COLUMN_WINDOW);
+  const visibleTasks =
+    visibleCount >= sortedTasks.length ? sortedTasks : sortedTasks.slice(0, visibleCount);
+  const hiddenCount = sortedTasks.length - visibleTasks.length;
 
   const urgentCount = tasks.filter(
     t => t.metadata.priority === 'critical' || t.metadata.priority === 'high'
@@ -217,7 +231,7 @@ const KanbanColumn = memo(function KanbanColumn({
       const cards = container.querySelectorAll('[data-task-card]');
       const mouseY = e.clientY;
 
-      let newIndex = sortedTasks.length;
+      let newIndex = visibleTasks.length;
 
       for (let i = 0; i < cards.length; i++) {
         const card = cards[i] as HTMLElement;
@@ -232,7 +246,7 @@ const KanbanColumn = memo(function KanbanColumn({
 
       onDragOver(status, newIndex);
     },
-    [status, sortedTasks.length, onDragOver]
+    [status, visibleTasks.length, onDragOver]
   );
 
   const handleDrop = (e: React.DragEvent) => {
@@ -244,9 +258,32 @@ const KanbanColumn = memo(function KanbanColumn({
     onDragLeave();
   };
 
+  if (collapsed) {
+    return (
+      <section
+        className="w-12 shrink-0 snap-start sm:snap-align-none"
+        onDragOver={handleDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={handleDrop}
+        aria-label={`${config?.label} column`}
+        data-collapsed
+      >
+        <div className="flex min-h-[240px] h-full flex-col items-center gap-3 rounded-xl border-2 border-dashed border-transparent bg-sc-bg-highlight/20 px-1 py-3">
+          <span className={`text-base ${config?.textClass}`}>{config?.icon}</span>
+          <span className="rotate-180 text-[10px] font-semibold uppercase tracking-[0.14em] text-sc-fg-muted [writing-mode:vertical-rl]">
+            {config?.label}
+          </span>
+          <span className="rounded-full bg-sc-bg-elevated px-1.5 py-0.5 text-[10px] text-sc-fg-subtle">
+            0
+          </span>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section
-      className="flex-1 min-w-[260px] sm:min-w-[300px] max-w-[320px] sm:max-w-[380px] snap-start sm:snap-align-none"
+      className="flex-1 min-w-[250px] sm:min-w-[270px] max-w-[460px] snap-start sm:snap-align-none"
       onDragOver={handleDragOver}
       onDragLeave={onDragLeave}
       onDrop={handleDrop}
@@ -286,7 +323,7 @@ const KanbanColumn = memo(function KanbanColumn({
             {isDragOver && dropIndex === 0 && <DropIndicator key="drop-indicator-top" />}
           </AnimatePresence>
 
-          {sortedTasks.map((task, index) => {
+          {visibleTasks.map((task, index) => {
             const projectId = task.metadata.project_id as string | undefined;
             const projectName = projectId ? projectMap.get(projectId) : undefined;
 
@@ -326,6 +363,16 @@ const KanbanColumn = memo(function KanbanColumn({
           })}
         </div>
 
+        {hiddenCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setVisibleCount(count => count + COLUMN_WINDOW)}
+            className="mt-2 w-full rounded-lg border border-dashed border-sc-fg-subtle/30 py-2 text-xs font-medium text-sc-fg-muted transition-colors hover:border-sc-purple/50 hover:text-sc-purple focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base"
+          >
+            Show {Math.min(COLUMN_WINDOW, hiddenCount)} more ({hiddenCount} hidden)
+          </button>
+        )}
+
         {tasks.length === 0 && !isDragOver && (
           <div className="flex flex-col items-center justify-center h-24 text-center">
             <span className="text-sc-fg-subtle text-sm">No tasks</span>
@@ -352,6 +399,9 @@ export function KanbanBoard({
   const projectFilter = useProjectFilter();
   const { selectProject } = useProjectContext();
   const [dragState, setDragState] = useState<{ status: TaskStatus; index: number } | null>(null);
+  // Empty columns fold into rails; a drag in flight unfolds them so every
+  // status stays a valid drop target.
+  const [isDragging, setIsDragging] = useState(false);
   const [columnSorts, setColumnSorts] = useState<Record<TaskStatusType, SortOption>>({
     backlog: 'priority',
     todo: 'priority',
@@ -398,6 +448,7 @@ export function KanbanBoard({
   const showProjectOnCards = !projectFilter;
 
   const handleDrop = (taskId: string, newStatus: TaskStatus) => {
+    setIsDragging(false);
     onStatusChange?.(taskId, newStatus);
   };
 
@@ -420,10 +471,7 @@ export function KanbanBoard({
     return (
       <div className="flex gap-3 sm:gap-4 overflow-x-auto pb-4 -mx-3 px-3 sm:mx-0 sm:px-0">
         {TASK_STATUSES.map(status => (
-          <div
-            key={status}
-            className="flex-1 min-w-[260px] sm:min-w-[300px] max-w-[320px] sm:max-w-[380px]"
-          >
+          <div key={status} className="flex-1 min-w-[250px] sm:min-w-[270px] max-w-[460px]">
             <div className="flex items-center gap-2 mb-3 px-1">
               <div className="w-5 h-5 bg-sc-bg-elevated rounded animate-pulse" />
               <div className="w-16 h-4 bg-sc-bg-elevated rounded animate-pulse" />
@@ -439,12 +487,17 @@ export function KanbanBoard({
   }
 
   return (
-    <div className="flex gap-3 sm:gap-4 overflow-x-auto pb-4 -mx-3 px-3 sm:mx-0 sm:px-0 snap-x snap-mandatory sm:snap-none">
+    <div
+      className="flex gap-3 sm:gap-4 overflow-x-auto pb-4 -mx-3 px-3 sm:mx-0 sm:px-0 snap-x snap-mandatory sm:snap-none"
+      onDragStartCapture={() => setIsDragging(true)}
+      onDragEndCapture={() => setIsDragging(false)}
+    >
       {TASK_STATUSES.map(status => (
         <KanbanColumn
           key={status}
           status={status}
           tasks={tasksByStatus[status] || []}
+          collapsed={(tasksByStatus[status] ?? []).length === 0 && !isDragging}
           projectMap={projectMap}
           showProjectOnCards={showProjectOnCards}
           sortBy={columnSorts[status]}
