@@ -64,6 +64,7 @@ from sibyl_cli.memory_display import (
     is_raw_memory_reference,
     print_memory_source_inspect,
 )
+from sibyl_cli.migrate import app as migrate_app
 from sibyl_cli.org import app as org_app
 from sibyl_cli.pending import app as pending_writes_app
 from sibyl_cli.pending_writes import pending_write_count, pending_write_status
@@ -147,6 +148,7 @@ app.add_typer(archive_app, name="archive")
 app.add_typer(session_app, name="session")
 app.add_typer(entity_app, name="entity")
 app.add_typer(explore_app, name="explore")
+app.add_typer(migrate_app, name="migrate")
 app.add_typer(export_app, name="export")
 app.add_typer(crawl_app, name="crawl")
 app.add_typer(docs_app, name="docs")

@@ -486,3 +486,64 @@ feels right.
 - Export command source: `apps/api/src/sibyl/cli/migrate.py` (at commit `290b824b`)
 - Import command source: `apps/api/src/sibyl/cli/migrate.py` (at tag `v0.10.0`, the last version
   with the `legacy-archive` on-ramp; removed in `903a738d`)
+
+---
+
+## Migrating a Personal Instance into a Team Server (to-team replay)
+
+Use this when a user wants their local project knowledge in a shared team server (an
+enterprise deployment with SSO) and they are not an operator of that server. This is the
+self-service lane; several teammates can each run it with their own login.
+
+**Do not reach for the archive/consolidate lane here.** It is operator-shaped (SSH or
+kubectl to the target, root store access), it migrates whole orgs rather than one
+project, and its exporter fails on live stores that contain record links (RecordID
+serialization, issue #459). The replay lane goes through the target's ordinary
+authenticated API instead: ownership lands on the caller's own server identity by
+construction, and the target re-projects and re-embeds from the verbatim raw records.
+
+One-time setup per person:
+
+```bash
+sibyl config context create <team> --server https://<team-server> --use
+sibyl auth login --server https://<team-server>   # their own SSO login
+```
+
+The target project must exist on the team server first (any member with project-create
+rights, once for the whole team):
+
+```bash
+sibyl project create "<Project Name>" --description "..."
+```
+
+Then, from the person's normal local context:
+
+```bash
+sibyl migrate to-team --target-context <team> --project project_<source-scope-key> --dry-run
+sibyl migrate to-team --target-context <team> --project project_<source-scope-key>
+```
+
+What the verb guarantees, and what to check:
+
+- Scope: only raw captures with `memory_scope=project` and the given scope key move.
+  Private memories stay local. Find the scope key distribution first when unsure:
+  the source content store's `raw_captures` table, grouped by `scope_key`.
+- Idempotence: a per-route ledger under `~/.sibyl/migrations` (keyed and
+  manifest-pinned to source org + target context + target project) persists after every
+  successful post, so interrupts and re-runs never duplicate.
+- Provenance: `provenance.migration` on each replayed record carries the origin org,
+  raw id, original `created_at`, capture surface, and any truncated original title.
+- Failures are per-row and reported at the end; empty and oversize bodies are named
+  individually rather than aborting the run.
+- Replayed records carry today's `created_at` (the original lives in provenance);
+  decay-aware backdating is a known follow-up, not a bug to chase.
+- The target needs a working embedding key before the run, or ingestion will queue
+  projection failures.
+- Server/client version skew is enforced by the version contract: the server stamps
+  `X-Sibyl-Server-Version` and may publish a `minimum_client_version` floor that fails
+  old clients closed, so run the migration with a CLI at least as new as the target
+  server's release.
+
+Verification after a run: a few `sibyl context "<known topic>"` recalls against the
+team context that the user can grade themselves, plus the run's own migrated/skipped/
+failed counts.
