@@ -314,7 +314,7 @@ def register_retrieval_tools(mcp: MCPServer) -> None:
             category: Filter by category
             project: Filter tasks by project ID (for list mode with tasks)
             status: Filter tasks by status (for list mode with tasks)
-            limit: Maximum results (1-200, default: 50)
+            limit: Maximum results (1-1000, default: 50)
 
         Returns:
             Exploration results with entities and/or relationships

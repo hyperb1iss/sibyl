@@ -124,7 +124,7 @@ async def explore(
         complexity: Filter tasks by complexity (trivial, simple, medium, complex, epic).
         feature: Filter tasks by feature area.
         tags: Filter tasks by tags (comma-separated, matches if task has ANY).
-        limit: Maximum results (1-200, default 50).
+        limit: Maximum results (1-1000, default 50).
         offset: Offset for pagination (default 0).
         principal_id: Reader identity used to authorize scoped memory rows.
         allowed_memory_scope_keys: API-key memory-space grants, when the caller
@@ -147,7 +147,7 @@ async def explore(
         explore(mode="dependencies", entity_id="task_123")
     """
     # Clamp values
-    limit = max(1, min(limit, 200))
+    limit = max(1, min(limit, 1000))
     offset = max(0, offset)
     depth = max(1, min(depth, 3))
 
@@ -414,6 +414,10 @@ async def _explore_list(
     # Over-fetch to detect has_more after any remaining client-side filters
     fetch_limit = limit + offset + 50
     all_entities = []
+    # A type whose fetch came back full may have rows past the window that
+    # client-side filtering never saw, so has_more cannot trust the filtered
+    # count alone in that case.
+    window_full = False
     for entity_type in target_types:
         query_project_id = None if entity_type == EntityType.PROJECT else project_id_filter
         entities = await entity_manager.list_by_type(
@@ -430,6 +434,8 @@ async def _explore_list(
             include_archived=include_archived,
             enrich_epic_progress=entity_type == EntityType.EPIC,
         )
+        if len(entities) >= fetch_limit:
+            window_full = True
         all_entities.extend(entities)
 
     # Apply remaining filters not handled by DB (language, category, accessible_projects)
@@ -457,7 +463,7 @@ async def _explore_list(
     # Apply pagination
     actual_total = len(filtered_entities)
     paginated_entities = filtered_entities[offset : offset + limit]
-    has_more = offset + len(paginated_entities) < actual_total
+    has_more = offset + len(paginated_entities) < actual_total or window_full
 
     # Build result summaries
     results = [

@@ -12,8 +12,16 @@ import type {
   TaskListResponse,
   TaskPriority,
   TaskStatus,
+  TaskSummary,
 } from '../api/work-items';
-import { epicsApi, metricsApi, projectsApi, tasksApi } from '../api/work-items';
+import {
+  epicsApi,
+  LEGACY_TASK_PAGE_SIZE,
+  metricsApi,
+  projectsApi,
+  TASK_PAGE_SIZE,
+  tasksApi,
+} from '../api/work-items';
 import { TIMING } from '../constants/app';
 import { queryKeys } from './query-keys';
 
@@ -36,10 +44,66 @@ export function useTasks(
 
   return useQuery({
     queryKey: queryKeys.tasks.list(normalized),
-    queryFn: () => tasksApi.list(normalized),
+    queryFn: () => fetchAllTasks(normalized),
     enabled: options?.enabled ?? true,
     initialData: options?.initialData,
   });
+}
+
+/** Hard stop so a runaway has_more can never loop forever. */
+const MAX_TASK_PAGES = 25;
+
+/** The server rejected the page size itself (an API still on the 200-row cap). */
+function pageSizeRejected(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('"body.limit"');
+}
+
+/**
+ * Page through the explore list until the server reports no more rows.
+ * The board and the project views bucket every task client-side, so a
+ * single capped page silently dropped everything past the newest rows and
+ * the column counts disagreed with the dashboard. An older API that still
+ * caps pages at 200 rejects the first request; the pager drops to that page
+ * size instead of leaving the board empty during a rolling upgrade.
+ *
+ * The explore list filters some rows after its database window, so a page
+ * can come back empty while the server still reports more. Offset widens
+ * that window, so an empty page advances by the page size rather than
+ * stopping; the page cap is what terminates the loop. When the cap is what
+ * ends it, the response says so instead of claiming the set is complete.
+ */
+export async function fetchAllTasks(
+  params?: Parameters<typeof tasksApi.list>[0]
+): Promise<TaskListResponse> {
+  const entities: TaskSummary[] = [];
+  let response: TaskListResponse | undefined;
+  let pageSize = TASK_PAGE_SIZE;
+  let offset = 0;
+  let truncated = false;
+  for (let page = 0; page < MAX_TASK_PAGES; page++) {
+    try {
+      response = await tasksApi.list(params, { limit: pageSize, offset });
+    } catch (error) {
+      if (pageSize !== LEGACY_TASK_PAGE_SIZE && pageSizeRejected(error)) {
+        pageSize = LEGACY_TASK_PAGE_SIZE;
+        page -= 1;
+        continue;
+      }
+      throw error;
+    }
+    entities.push(...response.entities);
+    offset += response.entities.length || pageSize;
+    if (!response.has_more) break;
+    truncated = page === MAX_TASK_PAGES - 1;
+  }
+  return {
+    mode: response?.mode ?? 'list',
+    filters: response?.filters ?? {},
+    entities,
+    total: entities.length,
+    actual_total: response?.actual_total ?? entities.length,
+    has_more: truncated,
+  };
 }
 
 export function useTask(id: string) {
