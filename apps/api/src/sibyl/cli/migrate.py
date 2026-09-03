@@ -48,6 +48,21 @@ from sibyl_core.migrate.merge import (
     merge_archives,
 )
 
+
+def _archive_json_default(value: object) -> str:
+    """Canonical JSON fallback for archive payloads.
+
+    Live stores hand back values the stdlib encoder refuses: Surreal
+    record links arrive as RecordID objects whose str() form is already
+    the canonical table:id, and datetimes want ISO 8601. Anything else
+    falls back to str so an export of a real store never dies on a type
+    the SDK grows next release (#459).
+    """
+    if hasattr(value, "isoformat"):
+        return value.isoformat()  # type: ignore[union-attr]
+    return str(value)
+
+
 app = typer.Typer(
     name="migrate",
     help="Migration archives, verification, and rehearsal tooling",
@@ -679,7 +694,7 @@ def _load_graph_export(org_id: str) -> tuple[dict[str, object], bytes]:
             msg = result.message or "graph export failed"
             raise RuntimeError(msg)
         payload = asdict(result.backup_data)
-        encoded = json.dumps(payload, indent=2, default=str).encode("utf-8")
+        encoded = json.dumps(payload, indent=2, default=_archive_json_default).encode("utf-8")
         return payload, encoded
 
     return _export()
@@ -689,7 +704,9 @@ def _load_auth_export() -> tuple[dict[str, object], bytes]:
     @run_async
     async def _export() -> tuple[dict[str, object], bytes]:
         payload = await export_auth_archive_payload()
-        encoded = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
+        encoded = json.dumps(
+            payload, indent=2, sort_keys=True, default=_archive_json_default
+        ).encode("utf-8")
         return payload, encoded
 
     return _export()
@@ -699,7 +716,9 @@ def _load_content_export() -> tuple[dict[str, object], bytes]:
     @run_async
     async def _export() -> tuple[dict[str, object], bytes]:
         payload = await export_content_archive_payload()
-        encoded = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
+        encoded = json.dumps(
+            payload, indent=2, sort_keys=True, default=_archive_json_default
+        ).encode("utf-8")
         return payload, encoded
 
     return _export()
@@ -725,14 +744,18 @@ def _load_runtime_exports(
             payload = await export_auth_archive_payload()
             auth_export = (
                 payload,
-                json.dumps(payload, indent=2, sort_keys=True).encode("utf-8"),
+                json.dumps(payload, indent=2, sort_keys=True, default=_archive_json_default).encode(
+                    "utf-8"
+                ),
             )
 
         if include_content:
             payload = await export_content_archive_payload()
             content_export = (
                 payload,
-                json.dumps(payload, indent=2, sort_keys=True).encode("utf-8"),
+                json.dumps(payload, indent=2, sort_keys=True, default=_archive_json_default).encode(
+                    "utf-8"
+                ),
             )
 
         return auth_export, content_export
@@ -1569,6 +1592,15 @@ def export_archive(
             "--include-content/--skip-content", help="Include content/operations snapshot"
         ),
     ] = True,
+    allow_empty: Annotated[
+        bool,
+        typer.Option(
+            "--allow-empty",
+            help="Permit an archive whose included payloads contain zero rows "
+            "and zero entities (the default refuses, because an empty export "
+            "usually means the CLI is pointed at the wrong store)",
+        ),
+    ] = False,
 ) -> None:
     """Export a manifest-driven migration archive from the active store."""
     del include_database_dump
@@ -1649,6 +1681,20 @@ def export_archive(
         }
         archive_metadata["content_table_count"] = len(row_counts)
         archive_metadata["content_total_rows"] = int(content_payload.get("total_rows", 0))
+
+    exported_total = (
+        int(archive_metadata.get("graph_entity_count", 0))
+        + int(archive_metadata.get("auth_total_rows", 0))
+        + int(archive_metadata.get("content_total_rows", 0))
+    )
+    if exported_total == 0 and not allow_empty:
+        error(
+            "Export produced zero entities and zero rows across every included "
+            "payload. This almost always means the CLI resolved an empty or "
+            "wrong store (check SIBYL_SURREAL_URL and credentials match the "
+            "running server). Pass --allow-empty to export anyway."
+        )
+        raise typer.Exit(code=1)
 
     manifest = build_manifest(
         organization_id=org_id,
