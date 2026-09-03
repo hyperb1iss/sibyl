@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { EntityBadge } from '@/components/ui/badge';
 import { ExternalLink } from '@/components/ui/icons';
 import { ENTITY_ICONS, type EntityType, getEntityStyles } from '@/lib/constants/entities';
+import { getSearchResultHref } from '@/lib/search-links';
 
 interface SearchResult {
   id: string;
@@ -57,20 +58,8 @@ export function SearchResultCard({ result }: SearchResultCardProps) {
   const icon = ENTITY_ICONS[result.type as EntityType] ?? '◇';
   const scorePercent = Math.round(result.score * 100);
 
-  // Determine the link based on result type
-  // Documents with source_id/document_id link to the document viewer
-  const documentId = result.metadata?.document_id as string | undefined;
-  const sourceId = result.metadata?.source_id as string | undefined;
   const externalUrl = result.url;
-
-  const isDocument = result.result_origin === 'document' && sourceId && documentId;
-  const rawMemoryId =
-    result.result_origin === 'raw_memory' ? result.id.replace(/^raw_memory:/, '') : null;
-  const href = isDocument
-    ? `/sources/${sourceId}/documents/${documentId}`
-    : rawMemoryId
-      ? `/memory/captures?id=${encodeURIComponent(rawMemoryId)}`
-      : `/entities/${result.id}`;
+  const href = getSearchResultHref(result);
 
   return (
     <Link

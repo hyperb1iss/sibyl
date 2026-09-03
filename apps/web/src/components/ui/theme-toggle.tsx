@@ -5,7 +5,7 @@ import { useEffect } from 'react';
 
 import { type ThemePreference, useTheme } from '@/lib/theme';
 
-const THEME_OPTIONS: { value: ThemePreference; icon: typeof HalfMoon; label: string }[] = [
+export const THEME_OPTIONS: { value: ThemePreference; icon: typeof HalfMoon; label: string }[] = [
   { value: 'neon', icon: HalfMoon, label: 'Neon (Dark)' },
   { value: 'dawn', icon: SunLight, label: 'Dawn (Light)' },
   { value: 'system', icon: Computer, label: 'System' },
