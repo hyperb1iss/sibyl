@@ -1,6 +1,6 @@
 'use client';
 
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, animate, motion, useMotionValue } from 'motion/react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect } from 'react';
@@ -193,7 +193,19 @@ function SidebarContent({ collapsed = false, onNavClick, onToggleCollapse }: Sid
 
 export function Sidebar() {
   const { isOpen, close } = useMobileNav();
-  const { collapsed, toggle, animate } = useSidebarCollapsed();
+  const { collapsed, toggle, animate: animateWidth } = useSidebarCollapsed();
+  const width = useMotionValue(SIDEBAR_EXPANDED_WIDTH);
+
+  // Drive the rail width through a motion value rather than the declarative
+  // animate prop: state-driven re-animation of the prop did not fire under
+  // the React Compiler build, while a value bound to style always does.
+  useEffect(() => {
+    const controls = animate(width, collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH, {
+      duration: animateWidth ? 0.2 : 0,
+      ease: 'easeOut',
+    });
+    return () => controls.stop();
+  }, [animateWidth, collapsed, width]);
 
   // Close mobile nav on route change
   useEffect(() => {
@@ -241,9 +253,7 @@ export function Sidebar() {
         id="app-sidebar"
         data-sidebar-rail=""
         data-collapsed={collapsed ? '' : undefined}
-        initial={false}
-        animate={{ width: collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH }}
-        transition={{ duration: animate ? 0.2 : 0, ease: 'easeOut' }}
+        style={{ width }}
         className="hidden md:flex shrink-0 overflow-hidden bg-sc-bg-base border-r border-sc-fg-subtle/10 flex-col shadow-sidebar"
       >
         <div data-sidebar-content="" className="flex min-h-0 flex-1 flex-col">
