@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException, Response
+from surrealdb.errors import SurrealError
 
 from sibyl.api.errors import http_exception_payload
 from sibyl.api.routes import auth as auth_routes
@@ -1417,3 +1418,36 @@ async def test_update_me_uses_runtime_helper(monkeypatch: pytest.MonkeyPatch) ->
 
     assert response["user"]["email"] == "updated@example.com"
     update_user.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "storage_error",
+    [
+        ConnectionError("socket closed mid-reload"),
+        OSError("connection reset"),
+        SurrealError("The table 'user_sessions' does not exist"),
+    ],
+)
+async def test_refresh_tokens_returns_503_when_auth_storage_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    storage_error: Exception,
+) -> None:
+    """Storage-layer failures during rotation are service conditions,
+    never internal errors: a 500 here halts the CLI's pending-writes
+    replay client-side (#461)."""
+    user_id = uuid4()
+    request = FakeRequest(json_data={"refresh_token": "refresh-token"})
+    rotate = AsyncMock(side_effect=storage_error)
+
+    monkeypatch.setattr(
+        auth_routes,
+        "verify_refresh_token",
+        lambda _: {"sub": str(user_id)},
+    )
+    monkeypatch.setattr(auth_routes, "rotate_refresh_exchange", rotate)
+
+    response = await _call_route(auth_routes.refresh_tokens, request=request)
+
+    assert response.status_code == 503
+    assert json.loads(response.body)["detail"] == "Authentication storage temporarily unavailable"

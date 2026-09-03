@@ -10,9 +10,11 @@ from urllib.parse import quote, urlencode, urlparse
 from uuid import UUID
 
 import httpx
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field, field_validator
+from surrealdb.errors import SurrealError
 
 from sibyl import config as config_module
 from sibyl.api.rate_limit import limiter
@@ -58,6 +60,8 @@ from sibyl.persistence.auth_runtime import (
 )
 from sibyl.persistence.operations_runtime import is_setup_mode
 from sibyl_core.auth import AuthUser, GitHubUserIdentity
+
+log = structlog.get_logger()
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -1601,7 +1605,18 @@ async def refresh_tokens(request: Request):
             organization_id=org_id,
             request=request,
         )
-    except TimeoutError:
+    except (TimeoutError, ConnectionError, OSError) as e:
+        # A refresh that cannot reach or query auth storage is a
+        # temporary service condition, never an internal error: a 500
+        # here makes clients treat their session as broken and halts
+        # the CLI's pending-writes replay (#461).
+        log.warning("refresh_storage_unavailable", error=str(e))
+        return JSONResponse(
+            content={"detail": "Authentication storage temporarily unavailable"},
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    except SurrealError as e:
+        log.warning("refresh_storage_unavailable", error=str(e))
         return JSONResponse(
             content={"detail": "Authentication storage temporarily unavailable"},
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
