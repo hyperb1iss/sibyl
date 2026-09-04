@@ -30,6 +30,8 @@ from tools.showcase.seed import (
     validate_fixture,
 )
 
+from sibyl_cli import auth_store
+
 TEST_FORBIDDEN_TERMS = ("blocked alpha", "blocked beta", "blocked gamma")
 
 
@@ -287,8 +289,6 @@ async def test_showcase_never_borrows_a_foreign_environment_credential(
 async def test_showcase_uses_its_stored_login_when_environment_targets_another_server(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from sibyl_cli import auth_store
-
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setenv("SIBYL_AUTH_TOKEN", "synthetic-foreign-token")
     monkeypatch.setenv("SIBYL_API_URL", "http://localhost:3334/api")

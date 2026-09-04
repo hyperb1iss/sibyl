@@ -188,8 +188,8 @@ Authentication commands use the selected context (including a directory pin or t
 unless an explicit server is supplied. Specify the server when logging into an automation target.
 
 A paired environment token is used only for its API URL. Selecting a different server uses that
-server's stored credentials; a missing login never falls back to the other server's token.
-A standalone `SIBYL_AUTH_TOKEN` without `SIBYL_API_URL` applies to the selected server.
+server's stored credentials; a missing login never falls back to the other server's token. A
+standalone `SIBYL_AUTH_TOKEN` without `SIBYL_API_URL` applies to the selected server.
 
 For parallel work, select each command's context with `sibyl -C <name> ...` rather than switching
 the shared active context. CLI processes coordinate token refresh through the credential file lock.
