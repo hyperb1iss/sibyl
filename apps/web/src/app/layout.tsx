@@ -31,7 +31,7 @@ export const viewport: Viewport = {
   themeColor: '#0a0812',
 };
 
-// Inline script to prevent FOUC - runs before React hydrates
+// Inline script to prevent FOUC (theme + sidebar rail) - runs before React hydrates
 const themeScript = `
 (function() {
   const stored = localStorage.getItem('sibyl-theme');
@@ -42,6 +42,11 @@ const themeScript = `
     theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'dawn' : 'neon';
   }
   document.documentElement.setAttribute('data-theme', theme);
+  try {
+    if (localStorage.getItem('sibyl-sidebar-collapsed') === 'true') {
+      document.documentElement.setAttribute('data-sidebar', 'collapsed');
+    }
+  } catch (_) {}
 })();
 `;
 

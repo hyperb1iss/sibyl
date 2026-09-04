@@ -60,3 +60,32 @@ describe('NavLink', () => {
     );
   });
 });
+
+describe('NavLink rail mode', () => {
+  beforeEach(() => {
+    navigationState.pathname = '/tasks';
+    navigationState.searchParams = new URLSearchParams();
+  });
+
+  it('keeps an accessible name and marks the active page when collapsed', () => {
+    render(
+      <NavLink href="/tasks" icon={LayoutDashboard} collapsed>
+        Tasks
+      </NavLink>
+    );
+
+    const link = screen.getByRole('link', { name: 'Tasks' });
+    expect(link).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByText('Tasks')).toHaveClass('sr-only');
+  });
+
+  it('hides the description block when collapsed', () => {
+    render(
+      <NavLink href="/settings/profile" icon={LayoutDashboard} description="Personal" collapsed>
+        Profile
+      </NavLink>
+    );
+
+    expect(screen.queryByText('Personal')).not.toBeInTheDocument();
+  });
+});

@@ -72,3 +72,18 @@ export function useMediaQuery(query: string): boolean {
 
   return matches;
 }
+
+/**
+ * Trail a fast-changing value by `delayMs` so downstream queries fire once
+ * typing settles instead of on every keystroke.
+ */
+export function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(id);
+  }, [value, delayMs]);
+
+  return debounced;
+}

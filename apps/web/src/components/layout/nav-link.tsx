@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useMemo } from 'react';
 import type { IconComponent } from '@/components/ui/icons';
+import { Tooltip } from '@/components/ui/tooltip';
 import { withProjectsContext } from '@/lib/constants/navigation';
 
 interface NavLinkProps {
@@ -13,6 +14,8 @@ interface NavLinkProps {
   description?: string;
   isActive?: boolean;
   preserveProjectsContext?: boolean;
+  /** Icon-only rail mode: label moves to a tooltip and screen-reader text. */
+  collapsed?: boolean;
   onClick?: () => void;
 }
 
@@ -23,6 +26,7 @@ export function NavLink({
   description,
   isActive,
   preserveProjectsContext = true,
+  collapsed = false,
   onClick,
 }: NavLinkProps) {
   const pathname = usePathname();
@@ -37,14 +41,18 @@ export function NavLink({
     return withProjectsContext(href, searchParams.get('projects'));
   }, [href, preserveProjectsContext, searchParams]);
 
-  return (
+  const link = (
     <Link
       href={hrefWithContext}
       onClick={onClick}
+      aria-current={active ? 'page' : undefined}
       className={`
-        flex items-center gap-3 px-3 py-2.5 rounded-lg
+        flex items-center gap-3 rounded-lg py-2.5
         text-sm font-medium transition-all duration-200
         group relative
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan
+        focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base
+        ${collapsed ? 'justify-center px-0' : 'px-3'}
         ${
           active
             ? 'bg-sc-purple/10 text-sc-purple'
@@ -60,21 +68,33 @@ export function NavLink({
       <Icon
         width={18}
         height={18}
-        className={`transition-all duration-200 ${
+        className={`shrink-0 transition-all duration-200 ${
           active
             ? 'text-sc-purple drop-shadow-[0_0_6px_color-mix(in_oklch,var(--sc-purple)_50%,transparent)]'
             : 'text-sc-cyan/70 group-hover:text-sc-cyan'
         }`}
       />
 
-      {description ? (
+      {collapsed ? (
+        <span className="sr-only">{children}</span>
+      ) : description ? (
         <div className="flex-1 min-w-0">
-          <span className="block text-sm font-medium">{children}</span>
+          <span className="block text-sm font-medium whitespace-nowrap">{children}</span>
           <span className="block text-xs text-sc-fg-subtle truncate">{description}</span>
         </div>
       ) : (
-        <span className="flex-1">{children}</span>
+        <span className="flex-1 whitespace-nowrap">{children}</span>
       )}
     </Link>
+  );
+
+  if (!collapsed) {
+    return link;
+  }
+
+  return (
+    <Tooltip content={children} side="right">
+      {link}
+    </Tooltip>
   );
 }

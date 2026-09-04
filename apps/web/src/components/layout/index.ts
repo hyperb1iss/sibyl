@@ -1,5 +1,7 @@
 export * from './breadcrumb';
 export { CaptureMemoryProvider, useCaptureMemory } from './capture-memory-context';
+export { CommandPaletteProvider, useCommandPalette } from './command-palette-context';
+export * from './global-command-palette';
 export * from './header';
 export * from './main-shell';
 export * from './mobile-nav-context';

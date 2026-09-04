@@ -69,6 +69,20 @@ describe('MainShell', () => {
     expect(screen.queryByRole('button', { name: /capture memory/i })).not.toBeInTheDocument();
   });
 
+  it('opens the omnibox from the header search control', async () => {
+    const { user } = render(
+      <MobileNavProvider>
+        <MainShell>
+          <div>Shell content</div>
+        </MainShell>
+      </MobileNavProvider>
+    );
+
+    await user.click(screen.getByRole('button', { name: /search knowledge/i }));
+
+    expect(screen.getByRole('dialog', { name: /command palette/i })).toBeInTheDocument();
+  });
+
   it('omits capture from the global command palette', async () => {
     const { user } = render(
       <MobileNavProvider>
@@ -83,6 +97,9 @@ describe('MainShell', () => {
 
     expect(
       within(palette).queryByRole('button', { name: /capture memory/i })
+    ).not.toBeInTheDocument();
+    expect(
+      within(palette).queryByRole('option', { name: /capture memory/i })
     ).not.toBeInTheDocument();
   });
 });

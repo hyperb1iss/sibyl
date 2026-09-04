@@ -14,13 +14,17 @@ import { queryKeys } from './query-keys';
 
 export function useSearch(
   params: Parameters<typeof searchApi.query>[0],
-  options?: { enabled?: boolean; initialData?: SearchResponse }
+  options?: { enabled?: boolean; initialData?: SearchResponse; keepPreviousResults?: boolean }
 ) {
   return useQuery({
     queryKey: queryKeys.search.query(params),
     queryFn: () => searchApi.query(params),
     enabled: (options?.enabled ?? true) && !!params.query,
     initialData: options?.initialData,
+    // The app-wide default (placeholderData: keepPreviousData) keeps the last
+    // result set on screen while a new query loads. Per-keystroke consumers
+    // opt out so stale rows never sit under a new query.
+    ...(options?.keepPreviousResults === false ? { placeholderData: undefined } : {}),
   });
 }
 

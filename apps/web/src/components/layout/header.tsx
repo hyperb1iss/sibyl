@@ -1,38 +1,16 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
 import { Command, Database, Menu, Search } from '@/components/ui/icons';
 import { ThemeToggleCompact } from '@/components/ui/theme-toggle';
+import { useCommandPalette } from './command-palette-context';
 import { useMobileNav } from './mobile-nav-context';
 import { ProjectSelector } from './project-selector';
 import { UserMenu } from './user-menu';
 
 export function Header() {
-  const router = useRouter();
   const { toggle } = useMobileNav();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isFocused, setIsFocused] = useState(false);
-
-  const handleSearch = useCallback(() => {
-    if (searchQuery.trim()) {
-      router.push(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
-    }
-  }, [router, searchQuery]);
-
-  // Global keyboard shortcut
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        const input = document.getElementById('global-search') as HTMLInputElement;
-        input?.focus();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  const { open: openCommandPalette } = useCommandPalette();
 
   return (
     <header className="h-14 bg-sc-bg-base border-b border-sc-fg-subtle/10 flex items-center justify-between px-3 md:px-6 gap-3 shadow-header z-40">
@@ -54,74 +32,49 @@ export function Header() {
         </Link>
       </div>
 
-      {/* Search - responsive */}
+      {/* Search launcher: looks like the old input, opens the omnibox */}
       <div className="flex-1 max-w-md hidden sm:block">
-        <div className={`relative transition-all duration-300 ${isFocused ? 'scale-[1.02]' : ''}`}>
-          <label htmlFor="global-search" className="sr-only">
-            Search knowledge base
-          </label>
-
+        <button
+          type="button"
+          onClick={openCommandPalette}
+          aria-label="Search knowledge"
+          aria-haspopup="dialog"
+          aria-keyshortcuts="Meta+K Control+K"
+          className={`
+            group relative flex w-full items-center rounded-lg
+            border border-sc-fg-subtle/20 bg-sc-bg-dark/80
+            py-2.5 pl-10 pr-20 text-left text-sm text-sc-fg-muted/80
+            transition-all duration-300
+            hover:border-sc-purple/40 hover:text-sc-fg-muted
+            hover:shadow-[0_0_12px_color-mix(in_oklch,var(--sc-purple)_12%,transparent)]
+            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan
+            focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base
+          `}
+        >
           <Search
             width={16}
             height={16}
-            className={`absolute left-3 top-1/2 -translate-y-1/2 transition-all duration-300 ${
-              isFocused
-                ? 'text-sc-purple drop-shadow-[0_0_8px_color-mix(in_oklch,var(--sc-purple)_50%,transparent)]'
-                : 'text-sc-fg-muted'
-            }`}
-          />
-
-          <input
-            id="global-search"
-            type="search"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSearch()}
-            onFocus={() => setIsFocused(true)}
-            onBlur={() => setIsFocused(false)}
-            placeholder="Search knowledge..."
-            className={`
-              w-full pl-10 pr-20 py-2.5 rounded-lg
-              bg-sc-bg-dark/80 border text-sc-fg-primary
-              placeholder:text-sc-fg-subtle/50
-              transition-all duration-300
-              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan
-              focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base
-              ${
-                isFocused
-                  ? 'border-sc-purple bg-sc-bg-dark shadow-glow-purple'
-                  : 'border-sc-fg-subtle/20 hover:border-sc-purple/40 hover:shadow-[0_0_12px_color-mix(in_oklch,var(--sc-purple)_12%,transparent)]'
-              }
-            `}
-          />
-
-          {/* Keyboard hint */}
-          <div
             aria-hidden="true"
-            className={`
-              absolute right-3 top-1/2 -translate-y-1/2
-              text-[10px] font-mono px-1.5 py-1 rounded
-              border hidden md:flex items-center gap-1
-              transition-colors duration-300
-              ${
-                isFocused
-                  ? 'bg-sc-purple/20 border-sc-purple/30 text-sc-purple'
-                  : 'bg-sc-bg-base/50 border-sc-fg-subtle/20 text-sc-fg-subtle'
-              }
-            `}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-sc-fg-muted transition-all duration-300 group-hover:text-sc-purple group-hover:drop-shadow-[0_0_8px_color-mix(in_oklch,var(--sc-purple)_50%,transparent)]"
+          />
+          <span className="truncate">Search knowledge...</span>
+          <span
+            aria-hidden="true"
+            className="absolute right-3 top-1/2 -translate-y-1/2 hidden md:flex items-center gap-1 rounded border border-sc-fg-subtle/20 bg-sc-bg-base/50 px-1.5 py-1 font-mono text-[10px] text-sc-fg-subtle transition-colors duration-300 group-hover:border-sc-purple/30 group-hover:bg-sc-purple/10 group-hover:text-sc-purple"
           >
             <Command width={10} height={10} />
             <span>K</span>
-          </div>
-        </div>
+          </span>
+        </button>
       </div>
 
       {/* Mobile Search Button */}
       <button
         type="button"
-        onClick={() => router.push('/search')}
+        onClick={openCommandPalette}
         className="sm:hidden p-2 rounded-lg text-sc-fg-muted hover:text-sc-fg-primary hover:bg-sc-bg-highlight transition-colors"
         aria-label="Search"
+        aria-haspopup="dialog"
       >
         <Search width={20} height={20} />
       </button>

@@ -7,7 +7,7 @@ import { KanbanBoard } from '@/components/tasks/kanban-board';
 import { type QuickTaskData, QuickTaskModal } from '@/components/tasks/quick-task-modal';
 import { TaskListMobile } from '@/components/tasks/task-list-mobile';
 import { RemovableBadge } from '@/components/ui/badge';
-import { CommandPalette, useKeyboardShortcuts } from '@/components/ui/command-palette';
+import { useKeyboardShortcuts } from '@/components/ui/command-palette';
 import { ErrorState, TasksEmptyState } from '@/components/ui/empty-state';
 import { ChevronDown, Hash, Plus, Search, X } from '@/components/ui/icons';
 import { LoadingState } from '@/components/ui/spinner';
@@ -25,7 +25,6 @@ function TasksPageContent() {
   const tagFilter = searchParams.get('tag') || undefined;
 
   // State for modals and search
-  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isQuickTaskOpen, setIsQuickTaskOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [tagMenuOpen, setTagMenuOpen] = useState(false);
@@ -105,9 +104,20 @@ function TasksPageContent() {
 
   // Keyboard shortcuts
   useKeyboardShortcuts({
-    onCommandPalette: () => setIsCommandPaletteOpen(true),
     onCreateTask: () => setIsQuickTaskOpen(true),
   });
+
+  // The omnibox's "New task" command lands here as /tasks?new=1: open the
+  // quick-create modal and drop the flag so a refresh does not reopen it.
+  const wantsNewTask = searchParams.get('new') === '1';
+  useEffect(() => {
+    if (!wantsNewTask) return;
+    setIsQuickTaskOpen(true);
+    const params = new URLSearchParams(searchParams);
+    params.delete('new');
+    const query = params.toString();
+    router.replace(query ? `/tasks?${query}` : '/tasks');
+  }, [wantsNewTask, router, searchParams]);
 
   const handleTagFilter = useCallback(
     (tag: string | null) => {
@@ -342,13 +352,6 @@ function TasksPageContent() {
         epics={epics}
         defaultProjectId={projectFilters?.length === 1 ? projectFilters[0] : undefined}
         isSubmitting={createEntity.isPending}
-      />
-
-      {/* Command Palette */}
-      <CommandPalette
-        isOpen={isCommandPaletteOpen}
-        onClose={() => setIsCommandPaletteOpen(false)}
-        onCreateTask={() => setIsQuickTaskOpen(true)}
       />
     </div>
   );
