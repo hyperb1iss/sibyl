@@ -17,6 +17,7 @@ from sibyl_core.services.graph_community_models import (
     GRAPH_RESOLUTION_OVERVIEW,
     CommunityConfig,
     HierarchicalGraphData,
+    OverviewLevel,
 )
 from sibyl_core.services.graph_community_selection import (
     _NOISE_RELATIONSHIP_TYPES,
@@ -312,6 +313,26 @@ async def get_hierarchical_graph(
             max_nodes=max_nodes,
             max_edges=max_edges,
         )
+        # Semantic zoom composes the domain map with this sample. Built here
+        # from the same snapshot and clustering, the two levels share cluster
+        # ids by construction; fetched separately they can straddle a cache
+        # refresh and describe two different runs.
+        if cluster_id is None:
+            overview = _build_overview_graph_from_snapshot(
+                entities,
+                relationships,
+                node_to_cluster,
+                clusters_meta,
+                project_ids=project_ids,
+                entity_types=entity_types,
+                max_nodes=max_nodes,
+                max_edges=max_edges,
+            )
+            data.overview = OverviewLevel(
+                nodes=overview.nodes,
+                edges=overview.edges,
+                clusters=overview.clusters,
+            )
 
     if (project_ids or entity_types) and total_node_count == 0 and data.displayed_nodes > 0:
         total_node_count = data.displayed_nodes

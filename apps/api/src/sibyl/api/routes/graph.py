@@ -805,25 +805,28 @@ async def get_hierarchical_graph_data(
     if has_focus_filters and data.total_edges == 0 and data.displayed_edges > 0:
         data.total_edges = data.displayed_edges
 
-    # Transform nodes to include colors
-    colored_nodes = []
-    for node in data.nodes:
+    def decorate(node: dict) -> dict:
         entity_type_str = node.get("type", "episode")
         try:
             entity_type = EntityType(entity_type_str)
         except ValueError:
             entity_type = EntityType.EPISODE
+        return {
+            **node,
+            "label": (node.get("name") or node["id"][:20])[:50],
+            "color": get_entity_color(entity_type),
+        }
 
-        colored_nodes.append(
-            {
-                **node,
-                "label": (node.get("name") or node["id"][:20])[:50],
-                "color": get_entity_color(entity_type),
-            }
-        )
+    overview = None
+    if data.overview is not None:
+        overview = {
+            "nodes": [decorate(node) for node in data.overview.nodes],
+            "edges": data.overview.edges,
+            "clusters": data.overview.clusters,
+        }
 
     return {
-        "nodes": colored_nodes,
+        "nodes": [decorate(node) for node in data.nodes],
         "edges": data.edges,
         "clusters": data.clusters,
         "cluster_edges": data.cluster_edges,
@@ -833,6 +836,7 @@ async def get_hierarchical_graph_data(
         "displayed_edges": data.displayed_edges,
         "resolution": data.resolution,
         "recommended_resolution": data.recommended_resolution,
+        "overview": overview,
     }
 
 

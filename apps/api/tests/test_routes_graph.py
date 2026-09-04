@@ -341,6 +341,7 @@ class TestGraphRoutes:
             displayed_edges=1,
             resolution="overview",
             recommended_resolution="detail",
+            overview=None,
         )
 
         with (
@@ -370,6 +371,7 @@ class TestGraphRoutes:
         assert result["nodes"][0]["label"] == "Task One"
         assert result["nodes"][0]["color"] == graph_routes.get_entity_color(EntityType.TASK)
         assert result["resolution"] == "overview"
+        assert result["overview"] is None
         get_hierarchical_graph.assert_awaited_once_with(
             runtime.client,
             str(_org().id),
@@ -398,6 +400,7 @@ class TestGraphRoutes:
             displayed_edges=1,
             resolution="detail",
             recommended_resolution="detail",
+            overview=None,
         )
 
         with (
@@ -499,6 +502,7 @@ class TestGraphRoutes:
                 displayed_edges=0,
                 resolution="detail",
                 recommended_resolution="detail",
+                overview=None,
             )
 
         with (

@@ -528,6 +528,55 @@ class TestHierarchicalGraph:
         assert any(node["cluster_id"] == cluster_id for node in detail.nodes)
 
     @pytest.mark.asyncio
+    async def test_detail_carries_the_overview_from_the_same_run(
+        self,
+        mock_client: MagicMock,
+    ) -> None:
+        entities = [
+            _make_entity("task-1", "Task 1", EntityType.TASK),
+            _make_entity("task-2", "Task 2", EntityType.TASK),
+            _make_entity("task-3", "Task 3", EntityType.TASK),
+            _make_entity("task-4", "Task 4", EntityType.TASK),
+        ]
+        relationships = [
+            _make_relationship("r1", "task-1", "task-2"),
+            _make_relationship("r2", "task-2", "task-3"),
+            _make_relationship("r3", "task-3", "task-4"),
+            _make_relationship("r4", "task-4", "task-1"),
+        ]
+
+        with (
+            patch(
+                "sibyl_core.services.graph_community_snapshot._list_all_entities",
+                AsyncMock(return_value=entities),
+            ),
+            patch(
+                "sibyl_core.services.graph_community_snapshot._list_all_relationships",
+                AsyncMock(return_value=relationships),
+            ),
+        ):
+            communities.HIERARCHICAL_CACHE.clear()
+            communities.GRAPH_LOD_CACHE.clear()
+            communities.GRAPH_SNAPSHOT_CACHE.clear()
+            detail = await get_hierarchical_graph(mock_client, TEST_ORG_ID, resolution="detail")
+            communities.GRAPH_LOD_CACHE.clear()
+            drilled = await get_hierarchical_graph(
+                mock_client,
+                TEST_ORG_ID,
+                resolution="detail",
+                cluster_id=detail.nodes[0]["cluster_id"],
+            )
+
+        assert detail.overview is not None
+        bubble_ids = {node["cluster_id"] for node in detail.overview.nodes}
+        assert bubble_ids
+        assert bubble_ids <= {cluster["id"] for cluster in detail.clusters}
+        assert all(node["aggregate"] is True for node in detail.overview.nodes)
+        assert all(cluster["label"] for cluster in detail.overview.clusters)
+        # A drill into one cluster is not the whole graph, so it carries no map.
+        assert drilled.overview is None
+
+    @pytest.mark.asyncio
     async def test_prefers_connected_nodes_and_reuses_snapshot(
         self,
         mock_client: MagicMock,
