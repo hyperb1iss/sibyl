@@ -454,6 +454,7 @@ async function main() {
         await readGraphPayload(await graphPayload, forbiddenTerms);
       }
       await waitForCaptureSurface(page, capture, forbiddenTerms);
+      await page.waitForTimeout(3_000);
       await verifyDarkTheme(page);
       await verifyShowcaseCorpus(page, manifest, forbiddenTerms);
       assertNoForbiddenTerms(
@@ -461,7 +462,6 @@ async function main() {
         capture.route,
         forbiddenTerms
       );
-      await page.waitForTimeout(3_000);
       await page.screenshot({
         path: join(captureDirectory, `${index}.png`),
         caret: 'hide',
