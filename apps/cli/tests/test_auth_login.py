@@ -466,6 +466,76 @@ def test_paired_automation_url_and_token_override_the_interactive_context(
         clear_client_cache()
 
 
+@pytest.mark.parametrize("selection", ["context", "base_url", "environment", "flag"])
+@pytest.mark.parametrize("stored", [True, False])
+def test_foreign_automation_credentials_do_not_follow_an_explicit_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    selection: str,
+    stored: bool,
+) -> None:
+    from sibyl_cli import state
+
+    monkeypatch.setattr(config_store.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(state, "_context_override", None)
+    monkeypatch.setattr(state, "_ignore_selection", False)
+    monkeypatch.delenv("SIBYL_CONTEXT", raising=False)
+    config_store.create_context("prod", "https://sibyl.example.com", org_slug="acme")
+    monkeypatch.setenv("SIBYL_API_URL", "http://localhost:3344/api")
+    monkeypatch.setenv("SIBYL_AUTH_TOKEN", "automation-token")
+    scope = None if selection == "base_url" else "context:prod:org:acme"
+    if stored:
+        auth_store.set_tokens(
+            "https://sibyl.example.com/api",
+            "prod-token",
+            refresh_token="prod-refresh",
+            expires_in=3600,
+            credential_scope=scope,
+            pending_replay_scope="credential:prod",
+        )
+
+    clear_client_cache()
+    try:
+        if selection == "context":
+            client = SibylClient(context_name="prod")
+        elif selection == "base_url":
+            client = SibylClient(base_url="https://sibyl.example.com/api")
+        else:
+            if selection == "environment":
+                monkeypatch.setenv("SIBYL_CONTEXT", "prod")
+            else:
+                monkeypatch.setattr(state, "_context_override", "prod")
+            client = get_client()
+        assert client.base_url == "https://sibyl.example.com/api"
+        assert client._default_headers().get("Authorization") == (
+            "Bearer prod-token" if stored else None
+        )
+        assert client._uses_stored_auth is True
+        assert client._replay_scope == ("credential:prod" if stored else None)
+    finally:
+        clear_client_cache()
+
+
+@pytest.mark.parametrize("paired_url", [None, "https://sibyl.example.com/api/"])
+def test_matching_or_unpaired_environment_token_remains_explicit_auth(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    paired_url: str | None,
+) -> None:
+    monkeypatch.setattr(config_store.Path, "home", lambda: tmp_path)
+    config_store.create_context("prod", "https://sibyl.example.com", org_slug="acme")
+    monkeypatch.setenv("SIBYL_AUTH_TOKEN", "automation-token")
+    if paired_url:
+        monkeypatch.setenv("SIBYL_API_URL", paired_url)
+    else:
+        monkeypatch.delenv("SIBYL_API_URL", raising=False)
+
+    client = SibylClient(context_name="prod")
+
+    assert client._default_headers()["Authorization"] == "Bearer automation-token"
+    assert client._uses_stored_auth is False
+
+
 def test_auth_commands_follow_the_context_override_like_the_client(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

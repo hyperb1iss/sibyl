@@ -16,6 +16,7 @@ from sibyl_cli.auth_store import (
     credential_scope,
     get_access_token,
     is_access_token_expired,
+    normalize_api_url,
     read_server_credentials,
 )
 from sibyl_cli.pending_writes import (
@@ -128,6 +129,17 @@ def _auth_credential_scope(context_name: str | None = None) -> str | None:
     return credential_scope(ctx.name, ctx.org_slug)
 
 
+def _environment_auth_token(api_base_url: str) -> str | None:
+    """Keep a paired automation credential bound to its selected API URL."""
+    token = os.environ.get("SIBYL_AUTH_TOKEN", "").strip()
+    if not token:
+        return None
+    paired_url = _paired_automation_api_url()
+    if paired_url and normalize_api_url(paired_url) != normalize_api_url(api_base_url):
+        return None
+    return token
+
+
 def _load_default_auth_token(
     api_base_url: str,
     credential_scope_name: str | None = None,
@@ -135,11 +147,10 @@ def _load_default_auth_token(
     """Load auth token for the given API URL.
 
     Priority:
-    1. SIBYL_AUTH_TOKEN environment variable
+    1. SIBYL_AUTH_TOKEN when its paired URL matches (or no URL is provided)
     2. Stored access token for the specific server
     """
-    env_token = os.environ.get("SIBYL_AUTH_TOKEN", "").strip()
-    if env_token:
+    if env_token := _environment_auth_token(api_base_url):
         return env_token
 
     return get_access_token(api_base_url, credential_scope=credential_scope_name)
@@ -241,7 +252,7 @@ def _load_default_replay_scope(
     credential_scope_name: str | None,
     auth_token: str | None,
 ) -> str | None:
-    if os.environ.get("SIBYL_AUTH_TOKEN", "").strip():
+    if _environment_auth_token(api_base_url):
         return _auth_replay_scope(None, auth_token)
     stored_credentials = read_server_credentials(
         api_base_url,
