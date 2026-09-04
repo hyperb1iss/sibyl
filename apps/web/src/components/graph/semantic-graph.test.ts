@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { HierarchicalGraphResponse } from '@/lib/api';
 import type { GraphNode } from './graph-types';
-import { buildSemanticGraphData, collectClusters, type HierarchySource } from './semantic-graph';
+import {
+  buildSemanticGraphData,
+  collectClusters,
+  type HierarchySource,
+  LOOSE_CLUSTER_ID,
+  LOOSE_NODE_ID,
+} from './semantic-graph';
 
 type ResponseNode = HierarchicalGraphResponse['nodes'][number];
 
@@ -44,6 +50,10 @@ const COLORS = new Map<string, string>([
   ['b', '#00ff00'],
 ]);
 
+/**
+ * Two named domains plus two tail communities: `tail` links into domain a,
+ * `island` links to nothing on the map.
+ */
 function source(): HierarchySource {
   return {
     overview: response(
@@ -51,7 +61,13 @@ function source(): HierarchySource {
       [{ source: 'cluster:a', target: 'cluster:b' }]
     ),
     detail: response(
-      [member('a1', 'a'), member('a2', 'a'), member('b1', 'b'), member('loose', 'tail')],
+      [
+        member('a1', 'a'),
+        member('a2', 'a'),
+        member('b1', 'b'),
+        member('loose', 'tail'),
+        member('lonely', 'island'),
+      ],
       [
         { source: 'a1', target: 'a2' },
         { source: 'a1', target: 'b1' },
@@ -61,60 +77,147 @@ function source(): HierarchySource {
         { id: 'a', member_count: 900 },
         { id: 'b', member_count: 40 },
         { id: 'tail', member_count: 1 },
+        { id: 'island', member_count: 1 },
       ]
     ),
   };
 }
 
-function build(expanded: string[], nodeCache = new Map<string, GraphNode>()) {
+function build(
+  expanded: string[],
+  nodeCache = new Map<string, GraphNode>(),
+  satellites: string[] = expanded
+) {
+  const hierarchy = source();
   return buildSemanticGraphData({
-    source: source(),
+    source: hierarchy,
+    clusters: collectClusters(hierarchy),
     expanded: new Set(expanded),
+    satellites: new Set(satellites),
     clusterColorMap: COLORS,
     searchTerm: '',
     nodeCache,
   });
 }
 
+function ids(graph: { nodes: GraphNode[] }): string[] {
+  return graph.nodes.map(node => node.id).sort();
+}
+
 describe('collectClusters', () => {
-  it('reports bubble clusters and the tail the map does not draw', () => {
+  it('lists bubbles first, then a loose-ends bubble, then the hosted tail', () => {
     expect(collectClusters(source())).toEqual([
-      { id: 'a', memberCount: 900, label: 'Sibyl', loadedMembers: 2, hasBubble: true },
-      { id: 'b', memberCount: 40, label: 'Hypercolor', loadedMembers: 1, hasBubble: true },
-      { id: 'tail', memberCount: 1, label: 'tail', loadedMembers: 1, hasBubble: false },
+      {
+        id: 'a',
+        memberCount: 900,
+        label: 'Sibyl',
+        loadedMembers: 2,
+        hasBubble: true,
+        nodeId: 'cluster:a',
+      },
+      {
+        id: 'b',
+        memberCount: 40,
+        label: 'Hypercolor',
+        loadedMembers: 1,
+        hasBubble: true,
+        nodeId: 'cluster:b',
+      },
+      {
+        id: LOOSE_CLUSTER_ID,
+        memberCount: 1,
+        label: 'Loose ends',
+        loadedMembers: 1,
+        hasBubble: true,
+        nodeId: LOOSE_NODE_ID,
+      },
+      { id: 'tail', memberCount: 1, label: 'tail', loadedMembers: 1, hasBubble: false, host: 'a' },
+      {
+        id: 'island',
+        memberCount: 1,
+        label: 'island',
+        loadedMembers: 1,
+        hasBubble: false,
+        host: LOOSE_CLUSTER_ID,
+      },
     ]);
+  });
+
+  it('hosts a tail cluster on the domain its members link to most', () => {
+    const hierarchy: HierarchySource = {
+      overview: response([bubble('a', 5), bubble('b', 5)], []),
+      detail: response(
+        [member('a1', 'a'), member('b1', 'b'), member('b2', 'b'), member('t1', 'tail')],
+        [
+          { source: 't1', target: 'a1' },
+          { source: 't1', target: 'b1' },
+          { source: 't1', target: 'b2' },
+        ],
+        [{ id: 'tail', member_count: 1 }]
+      ),
+    };
+
+    const tail = collectClusters(hierarchy).find(cluster => cluster.id === 'tail');
+    expect(tail?.host).toBe('b');
+  });
+
+  it('adds no loose-ends bubble when every tail has a host', () => {
+    const hierarchy: HierarchySource = {
+      overview: response([bubble('a', 5)], []),
+      detail: response(
+        [member('a1', 'a'), member('t1', 'tail')],
+        [{ source: 't1', target: 'a1' }],
+        [{ id: 'tail', member_count: 1 }]
+      ),
+    };
+
+    expect(collectClusters(hierarchy).map(cluster => cluster.id)).toEqual(['a', 'tail']);
   });
 });
 
 describe('buildSemanticGraphData', () => {
   it('draws only bubbles when every cluster is collapsed', () => {
     const graph = build([]);
-    const ids = graph.nodes.map(node => node.id).sort();
 
-    expect(ids).toEqual(['cluster:a', 'cluster:b']);
+    expect(ids(graph)).toEqual(['cluster:a', 'cluster:b', LOOSE_NODE_ID].sort());
     expect(graph.links).toHaveLength(1);
   });
 
-  it('holds back the tail the domain map does not draw a bubble for', () => {
-    expect(build([]).nodes.map(node => node.id)).not.toContain('loose');
-    expect(build(['tail']).nodes.map(node => node.id)).toContain('loose');
+  it('opens a hosted tail cluster one stage after its domain', () => {
+    expect(ids(build([]))).not.toContain('loose');
+    // Domain open, satellites still folded: the tail waits and its edge into
+    // the domain waits with it.
+    const membersOnly = build(['a'], new Map(), []);
+    expect(ids(membersOnly)).not.toContain('loose');
+    expect(membersOnly.links.map(link => `${link.source}>${link.target}`)).not.toContain(
+      'loose>a1'
+    );
+    expect(ids(build(['a'], new Map(), ['a']))).toContain('loose');
+  });
+
+  it('opens the loose-ends bubble straight into its communities', () => {
+    expect(ids(build([LOOSE_CLUSTER_ID], new Map(), []))).toContain('lonely');
+  });
+
+  it('replaces the loose-ends bubble with the members no domain claims', () => {
+    expect(ids(build([]))).not.toContain('lonely');
+    const graph = build([LOOSE_CLUSTER_ID]);
+    expect(ids(graph)).toContain('lonely');
+    expect(ids(graph)).not.toContain(LOOSE_NODE_ID);
   });
 
   it('replaces a bubble with its members when the cluster opens', () => {
     const graph = build(['a']);
-    const ids = graph.nodes.map(node => node.id).sort();
 
-    expect(ids).toEqual(['a1', 'a2', 'cluster:b']);
-    expect(ids).not.toContain('cluster:a');
+    expect(ids(graph)).toEqual(['a1', 'a2', 'cluster:b', LOOSE_NODE_ID, 'loose'].sort());
   });
 
   it('routes an edge that crosses a level boundary to the standing bubble', () => {
     const graph = build(['a']);
     const pairs = graph.links.map(link => [link.source, link.target].sort().join('>')).sort();
 
-    // a1-a2 is a real edge now and a1-b1 lands on b's bubble; the tail member
-    // is still closed, so its edge has no visible end to attach to.
-    expect(pairs).toEqual(['a1>a2', 'a1>cluster:b']);
+    // a1-a2 and a1-loose are real edges now; a1-b1 lands on b's bubble.
+    expect(pairs).toEqual(['a1>a2', 'a1>cluster:b', 'a1>loose']);
   });
 
   it('collapses many crossing edges into one edge per bubble', () => {
@@ -136,7 +239,9 @@ describe('buildSemanticGraphData', () => {
 
     const graph = buildSemanticGraphData({
       source: wide,
+      clusters: collectClusters(wide),
       expanded: new Set(['a']),
+      satellites: new Set(),
       clusterColorMap: COLORS,
       searchTerm: '',
       nodeCache: new Map(),
@@ -163,7 +268,7 @@ describe('buildSemanticGraphData', () => {
     expect(again?.x).toBe(42);
   });
 
-  it('seeds new members around the bubble they came from', () => {
+  it('seeds new members, tail included, around the bubble they came from', () => {
     const cache = new Map<string, GraphNode>();
     const collapsed = build([], cache);
     const bubbleNode = collapsed.nodes.find(node => node.id === 'cluster:a');
@@ -172,11 +277,12 @@ describe('buildSemanticGraphData', () => {
     bubbleNode.y = 120;
 
     const expanded = build(['a'], cache);
-    const members = expanded.nodes.filter(node => node.id === 'a1' || node.id === 'a2');
+    const members = expanded.nodes.filter(node => ['a1', 'a2', 'loose'].includes(node.id));
 
-    expect(members).toHaveLength(2);
+    expect(members).toHaveLength(3);
     for (const node of members) {
       expect(Math.hypot((node.x ?? 0) - 300, (node.y ?? 0) - 120)).toBeLessThan(60);
+      expect(node.clusterAnchor).toEqual({ x: 300, y: 120 });
     }
   });
 
@@ -200,9 +306,12 @@ describe('buildSemanticGraphData', () => {
   });
 
   it('degrees and marks search matches on whatever level is showing', () => {
+    const hierarchy = source();
     const graph = buildSemanticGraphData({
-      source: source(),
+      source: hierarchy,
+      clusters: collectClusters(hierarchy),
       expanded: new Set(['a']),
+      satellites: new Set(['a']),
       clusterColorMap: COLORS,
       searchTerm: 'a1',
       nodeCache: new Map(),
@@ -211,14 +320,16 @@ describe('buildSemanticGraphData', () => {
     expect(graph.matchCount).toBe(1);
     const a1 = graph.nodes.find(node => node.id === 'a1');
     expect(a1?.isSearchMatch).toBe(true);
-    expect(a1?.degree).toBe(2);
-    expect(graph.maxDegree).toBe(2);
+    expect(a1?.degree).toBe(3);
+    expect(graph.maxDegree).toBe(3);
   });
 
   it('returns an empty graph when neither level has loaded', () => {
     const graph = buildSemanticGraphData({
       source: { overview: undefined, detail: undefined },
+      clusters: [],
       expanded: new Set(),
+      satellites: new Set(),
       clusterColorMap: COLORS,
       searchTerm: '',
       nodeCache: new Map(),

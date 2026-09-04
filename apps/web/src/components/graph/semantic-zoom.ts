@@ -7,15 +7,16 @@
  * bubble replaces it with the entities it stands for while the rest of the
  * map stays summarized.
  *
- * The decision is per cluster and depends on apparent size rather than the
- * zoom number alone: a 900-member domain earns its detail sooner than a
- * 12-member one because its bubble covers more of the screen at the same
- * zoom. Clusters far outside the viewport stay collapsed however far in the
- * camera is, which is what keeps a push into one corner from paying for the
- * whole graph.
+ * The rule is stated in screen pixels: a bubble opens when it paints large
+ * enough that its members would be legible in its place. That makes the
+ * decision per cluster and about apparent size rather than the zoom number
+ * alone: a 900-member domain earns its detail sooner than a 12-member one
+ * because its bubble covers more of the screen at the same zoom. Clusters far
+ * outside the viewport stay collapsed however far in the camera is, which is
+ * what keeps a push into one corner from paying for the whole graph.
  */
 
-/** Painted radius of a cluster bubble in graph units, before zoom. */
+/** Radius of a cluster bubble in graph units. The layout and the paint share it. */
 export function clusterRadius(memberCount: number): number {
   return 10 + Math.log2(Math.max(memberCount, 1) + 1) * 3.2;
 }
@@ -36,10 +37,19 @@ export const SEMANTIC_ZOOM = {
    */
   VIEWPORT_MARGIN: 0.6,
   /**
-   * How many times the fitted domain map the Entities jump zooms to. Large
-   * enough that every bubble on screen has crossed its opening threshold.
+   * Largest a bubble may paint at the domain fit, as a fraction of the
+   * opening radius. The fit is capped there so a small graph on a large
+   * screen does not open its biggest domain before the reader has seen the
+   * map.
    */
-  ENTITY_ZOOM_FACTOR: 7,
+  DOMAIN_FIT_FRACTION: 0.6,
+  /**
+   * How much further past its opening radius a domain has to grow before the
+   * small communities hanging off it come out too. Opening them with the
+   * domain's own members turns the first bloom into a wall; one stage later
+   * they read as detail on detail.
+   */
+  SATELLITE_FACTOR: 1.6,
 } as const;
 
 export interface ClusterExtent {
@@ -55,6 +65,14 @@ export interface Viewport {
   minY: number;
   maxX: number;
   maxY: number;
+}
+
+/** Zooms that produce each level, derived from the bubbles on the map. */
+export interface ZoomBounds {
+  /** Zoom at which every bubble has crossed its opening radius, or null with no bubbles. */
+  entity: number | null;
+  /** Highest zoom the domain fit may land on without opening a bubble. */
+  domainCap: number;
 }
 
 export function withinViewport(
@@ -77,7 +95,7 @@ export function withinViewport(
 
 export interface ResolveExpansionArgs {
   clusters: ClusterExtent[];
-  /** d3-zoom scale factor: 1 is the layout's own scale. */
+  /** Screen pixels per graph unit: the d3-zoom scale factor. */
   zoom: number;
   /** Visible region in graph coordinates, or null before the canvas reports one. */
   viewport: Viewport | null;
@@ -125,6 +143,77 @@ export function resolveExpandedClusters({
   return expanded;
 }
 
+export interface ResolveSatellitesArgs {
+  clusters: ClusterExtent[];
+  zoom: number;
+  viewport: Viewport | null;
+  /** Bubble clusters currently open. Satellites never show under a closed bubble. */
+  expanded: ReadonlySet<string>;
+  /** Hosts whose satellites were open on the previous frame, for hysteresis. */
+  previous: ReadonlySet<string>;
+  /** Pinned clusters show everything they have. */
+  pinned?: ReadonlySet<string>;
+}
+
+/**
+ * The open clusters whose satellite communities should be drawn as well.
+ *
+ * Same shape as the expansion rule, one stage further in: a host's
+ * satellites open once its bubble would have painted at SATELLITE_FACTOR
+ * times the opening radius.
+ */
+export function resolveSatelliteHosts({
+  clusters,
+  zoom,
+  viewport,
+  expanded,
+  previous,
+  pinned,
+}: ResolveSatellitesArgs): Set<string> {
+  const hosts = new Set<string>();
+  for (const cluster of clusters) {
+    if (!expanded.has(cluster.id)) continue;
+    if (pinned?.has(cluster.id)) {
+      hosts.add(cluster.id);
+      continue;
+    }
+    const screenRadius = clusterRadius(cluster.memberCount) * zoom;
+    const threshold =
+      (previous.has(cluster.id)
+        ? SEMANTIC_ZOOM.COLLAPSE_SCREEN_RADIUS
+        : SEMANTIC_ZOOM.EXPAND_SCREEN_RADIUS) * SEMANTIC_ZOOM.SATELLITE_FACTOR;
+    if (screenRadius < threshold) continue;
+    if (viewport && !withinViewport(cluster, viewport, clusterRadius(cluster.memberCount))) {
+      continue;
+    }
+    hosts.add(cluster.id);
+  }
+  return hosts;
+}
+
+/**
+ * Zooms that produce each level for this set of bubbles.
+ *
+ * The entities zoom is where the smallest bubble crosses its opening radius,
+ * with a little margin so the jump lands past the threshold rather than on
+ * it. The domain cap keeps the largest bubble under its opening radius at
+ * the fit.
+ */
+export function zoomBoundsFor(clusters: ClusterExtent[]): ZoomBounds {
+  if (clusters.length === 0) return { entity: null, domainCap: Number.POSITIVE_INFINITY };
+  let smallest = Number.POSITIVE_INFINITY;
+  let largest = 0;
+  for (const cluster of clusters) {
+    const radius = clusterRadius(cluster.memberCount);
+    smallest = Math.min(smallest, radius);
+    largest = Math.max(largest, radius);
+  }
+  return {
+    entity: (SEMANTIC_ZOOM.EXPAND_SCREEN_RADIUS / smallest) * 1.02,
+    domainCap: (SEMANTIC_ZOOM.EXPAND_SCREEN_RADIUS * SEMANTIC_ZOOM.DOMAIN_FIT_FRACTION) / largest,
+  };
+}
+
 export type ZoomLevelName = 'domains' | 'mixed' | 'entities';
 
 /**
@@ -135,7 +224,14 @@ export type ZoomLevelName = 'domains' | 'mixed' | 'entities';
  * graph is never open at once and a definition that demanded it would never
  * be met.
  */
-export function zoomLevelName(expandedCount: number, collapsedInView: number): ZoomLevelName {
+export function zoomLevelName(
+  expandedCount: number,
+  collapsedInView: number,
+  bubbleCount: number
+): ZoomLevelName {
+  // A graph too small to form any domain has nothing to summarize: every
+  // node on it is an entity, whatever the zoom.
+  if (bubbleCount === 0) return 'entities';
   if (expandedCount === 0) return 'domains';
   if (collapsedInView === 0) return 'entities';
   return 'mixed';

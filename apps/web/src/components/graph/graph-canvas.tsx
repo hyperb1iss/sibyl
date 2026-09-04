@@ -22,7 +22,7 @@ import type {
   GraphNode,
   KnowledgeGraphRef,
 } from './graph-types';
-import { SEMANTIC_ZOOM, type Viewport } from './semantic-zoom';
+import { clusterRadius, SEMANTIC_ZOOM, type Viewport, type ZoomBounds } from './semantic-zoom';
 
 const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), {
   ssr: false,
@@ -33,22 +33,42 @@ const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), {
   ),
 });
 
-function aggregateRadius(memberCount: number): number {
-  return 10 + Math.log2(memberCount + 1) * 3.2;
-}
+/** Smallest a bubble paints on screen, so its count stays legible far out. */
+const MIN_BUBBLE_SCREEN_RADIUS = 12;
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 10;
 
-/** Smallest a domain bubble paints on screen, in pixels, whatever the zoom. */
-const MIN_BUBBLE_SCREEN_RADIUS = 26;
+/**
+ * Layout tuning. Bubbles are an order of magnitude larger than entity nodes,
+ * so every force is per node rather than per mode: opening one domain must
+ * not retune the forces on the rest of the map.
+ */
+const LAYOUT = {
+  BUBBLE_CHARGE: -420,
+  MEMBER_CHARGE: -40,
+  CHARGE_REACH: 700,
+  /** Gravity on bubbles, which gives repulsion something to balance against. */
+  BUBBLE_GRAVITY: 0.06,
+  /** Pull on an opened member toward where its bubble sat. */
+  ANCHOR_GRAVITY: 0.18,
+  /** Gravity on a node with no cluster, so it cannot drift off the map. */
+  LOOSE_GRAVITY: 0.03,
+  BUBBLE_PADDING: 40,
+  MEMBER_COLLISION: 9,
+  BUBBLE_LINK: 230,
+  BRIDGE_LINK: 120,
+  MEMBER_LINK: 45,
+  BUBBLE_LINK_STRENGTH: 0.03,
+} as const;
 
 interface GraphCanvasProps {
   graphData: GraphData;
   graphRenderKey: string;
-  fitKey: string;
   filterKey: string;
-  /** True while every cluster is still summarized, which the forces tune for. */
-  isDomainLevel: boolean;
   /** Labels for clusters currently showing members, drawn under the nodes. */
   expandedClusterLabels: Map<string, string>;
+  /** Zooms that produce each level, derived from the bubble sizes. */
+  zoomBounds: ZoomBounds;
   onViewportChange: (zoom: number, viewport: Viewport | null) => void;
   selectedNodeId: string | null;
   colors: CanvasColors;
@@ -58,14 +78,19 @@ interface GraphCanvasProps {
   onNodeClick: (node: GraphNode) => void;
 }
 
+interface CameraTarget {
+  k: number;
+  x: number;
+  y: number;
+}
+
 export const GraphCanvas = forwardRef<KnowledgeGraphRef, GraphCanvasProps>(function GraphCanvas(
   {
     graphData,
     graphRenderKey,
-    fitKey,
     filterKey,
-    isDomainLevel,
     expandedClusterLabels,
+    zoomBounds,
     onViewportChange,
     selectedNodeId,
     colors,
@@ -82,153 +107,306 @@ export const GraphCanvas = forwardRef<KnowledgeGraphRef, GraphCanvasProps>(funct
   // first render. Force configuration and the opening fit both need it, and a
   // plain ref never re-runs an effect, so its arrival is state.
   const [graphReady, setGraphReady] = useState(false);
-  // The zoom that frames the whole domain map. Expansion thresholds are
-  // measured against it rather than against the raw d3 scale: a sparse graph
-  // fits at 0.2 and a dense one at 1.5, and "two notches in from the map"
-  // should open the same domain on both.
+  // Camera bookkeeping for the mounted instance, reset with the render key.
+  // The fit zoom frames the domain map; label thresholds are measured in
+  // multiples of it so "two notches in" means the same on a sparse graph and
+  // a dense one. Expansion is gated on the fit having run: before it, the
+  // camera is wherever the library left it, and a cluster opened from there
+  // would bloom on a map the reader has not seen yet.
   const fitZoomRef = useRef<number | null>(null);
-  // Effective zoom (multiples of the fitted map), for label thresholds that
-  // should mean the same thing on a sparse graph and a dense one.
+  const fitSettledRef = useRef(false);
+  // Once the reader moves the camera, no automatic fit may move it back.
+  const interactedRef = useRef(false);
   const levelZoomRef = useRef(1);
+  // Recent camera fits, surfaced on the wrapper for tests and automation.
+  const fitLogRef = useRef<Array<{ t: number; k: number; why: string }>>([]);
+  const graphDataRef = useRef(graphData);
+  graphDataRef.current = graphData;
+  const zoomBoundsRef = useRef(zoomBounds);
+  zoomBoundsRef.current = zoomBounds;
   const attachGraph = useCallback((instance: ForceGraphMethods | null) => {
     graphRef.current = instance ?? undefined;
     setGraphReady(Boolean(instance));
   }, []);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
-  const [hasInitialFit, setHasInitialFit] = useState(false);
-  const fitKeyRef = useRef('');
+  const showCanvas = !isLoading && graphData.nodes.length > 0;
+
+  // The library sizes its canvas to the window unless told otherwise, which
+  // puts the camera's centre well outside the wrapper's. Every fit, pan, and
+  // viewport calculation assumes the canvas is the wrapper.
+  const [canvasSize, setCanvasSize] = useState<{ width: number; height: number } | null>(null);
+  useEffect(() => {
+    const element = canvasWrapperRef.current;
+    if (!element || !showCanvas) return;
+    const measure = () => {
+      const { clientWidth, clientHeight } = element;
+      if (clientWidth > 0 && clientHeight > 0) {
+        setCanvasSize(size =>
+          size?.width === clientWidth && size.height === clientHeight
+            ? size
+            : { width: clientWidth, height: clientHeight }
+        );
+      }
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [showCanvas]);
 
   useEffect(() => {
     if (!filterKey) return;
     setHoveredNode(null);
   }, [filterKey]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new render key mounts a fresh instance with a fresh camera
   useEffect(() => {
-    if (fitKeyRef.current !== fitKey) {
-      fitKeyRef.current = fitKey;
-      setHasInitialFit(false);
-    }
-  }, [fitKey]);
+    fitZoomRef.current = null;
+    fitSettledRef.current = false;
+    interactedRef.current = false;
+    levelZoomRef.current = 1;
+    fitLogRef.current = [];
+  }, [graphRenderKey]);
 
-  // Configure d3 forces whenever the graph dataset/mode changes.
+  // Forces are configured once per mounted instance. Every strength is a
+  // per-node accessor, so a dataset change (a cluster opening or closing)
+  // only needs the reheat the library already performs.
   // biome-ignore lint/correctness/useExhaustiveDependencies: graphReady re-runs this once the dynamically imported instance exists
   useEffect(() => {
-    const nodeCount = graphData.nodes.length;
-    const linkCount = graphData.links.length;
-    if (!graphRef.current || !graphRenderKey || (nodeCount === 0 && linkCount === 0)) return;
+    const graph = graphRef.current;
+    if (!graph || !graphRenderKey) return;
 
-    const isOverview = isDomainLevel;
+    const isBubble = (node: d3Force.SimulationNodeDatum) => Boolean((node as GraphNode).aggregate);
+    const members = (node: d3Force.SimulationNodeDatum) => (node as GraphNode).member_count || 1;
 
-    // Overview: a few large bubbles that must spread and never overlap — strong
-    // repulsion, long links, and a per-node collision radius matching each
-    // bubble's painted size. Detail: strong repulsion + long links spread a
-    // dense subgraph into an explorable web instead of a hairball.
-    // Overview is a handful of big bubbles: let collision do the spacing, keep
-    // charge low and centering strong so the map stays a compact, framed cluster
-    // instead of flinging outliers off-canvas.
-    // Domain bubbles are an order of magnitude larger than entity nodes, so
-    // they need repulsion and link lengths to match: at entity-scale settings
-    // a dozen bubbles pile into one overlapping clump.
-    const chargeStrength = isOverview
-      ? -520
-      : nodeCount >= 600
-        ? -240
-        : nodeCount >= 300
-          ? -200
-          : -150;
-    const linkDistance = isOverview
-      ? 170
-      : nodeCount >= 600
-        ? 75
-        : nodeCount >= 300
-          ? 65
-          : GRAPH_DEFAULTS.LINK_DISTANCE;
-    const baseCollision = nodeCount >= 600 ? 18 : nodeCount >= 300 ? 16 : 14;
-    const centerStrength = isOverview ? 0.08 : 0.04;
-
-    graphRef.current.d3Force(
+    // Bubbles repel hard and members softly; gravity toward the origin (or
+    // toward the bubble a member came from) is what repulsion balances
+    // against, so the map settles instead of spreading on every reheat.
+    graph.d3Force('center', null);
+    graph.d3Force(
       'charge',
       d3Force
         .forceManyBody()
-        .strength(chargeStrength)
-        .distanceMax(linkDistance * 12)
+        .strength(node => (isBubble(node) ? LAYOUT.BUBBLE_CHARGE : LAYOUT.MEMBER_CHARGE))
+        .distanceMax(LAYOUT.CHARGE_REACH)
     );
-    graphRef.current.d3Force('center', d3Force.forceCenter().strength(centerStrength));
-    graphRef.current.d3Force(
+    const gravityStrength = (node: d3Force.SimulationNodeDatum) => {
+      const graphNode = node as GraphNode;
+      if (graphNode.clusterAnchor) return LAYOUT.ANCHOR_GRAVITY;
+      return graphNode.aggregate ? LAYOUT.BUBBLE_GRAVITY : LAYOUT.LOOSE_GRAVITY;
+    };
+    graph.d3Force(
+      'gravityX',
+      d3Force
+        .forceX((node: d3Force.SimulationNodeDatum) => (node as GraphNode).clusterAnchor?.x ?? 0)
+        .strength(gravityStrength)
+    );
+    graph.d3Force(
+      'gravityY',
+      d3Force
+        .forceY((node: d3Force.SimulationNodeDatum) => (node as GraphNode).clusterAnchor?.y ?? 0)
+        .strength(gravityStrength)
+    );
+    // Collision radius matches the painted radius, so spacing on the map is
+    // spacing on screen.
+    graph.d3Force(
       'collision',
       d3Force
         .forceCollide()
-        .radius((node: d3Force.SimulationNodeDatum) => {
-          const graphNode = node as GraphNode;
-          return graphNode.aggregate
-            ? aggregateRadius(graphNode.member_count || 1) + 34
-            : baseCollision;
-        })
-        .strength(0.95)
+        .radius(node =>
+          isBubble(node)
+            ? clusterRadius(members(node)) + LAYOUT.BUBBLE_PADDING
+            : LAYOUT.MEMBER_COLLISION
+        )
+        .strength(0.9)
     );
 
-    // Opened members are pulled gently back toward the bubble they came from,
-    // so a domain that opens stays a region on the map rather than a burst of
-    // nodes radiating across it. Bubbles and unanchored nodes feel nothing.
-    const anchorStrength = (node: d3Force.SimulationNodeDatum) =>
-      (node as GraphNode).clusterAnchor ? 0.14 : 0;
-    graphRef.current.d3Force(
-      'anchorX',
-      d3Force
-        .forceX((node: d3Force.SimulationNodeDatum) => {
-          const graphNode = node as GraphNode;
-          return graphNode.clusterAnchor?.x ?? graphNode.x ?? 0;
-        })
-        .strength(anchorStrength)
-    );
-    graphRef.current.d3Force(
-      'anchorY',
-      d3Force
-        .forceY((node: d3Force.SimulationNodeDatum) => {
-          const graphNode = node as GraphNode;
-          return graphNode.clusterAnchor?.y ?? graphNode.y ?? 0;
-        })
-        .strength(anchorStrength)
-    );
-
-    // Link force with distance - ForceFn has [key: string]: any so we can access distance directly
-    const linkForce = graphRef.current.d3Force('link');
+    // Links between bubbles stay long and weak so a heavily bridged set of
+    // domains does not yank into a clump; member links use d3's degree-scaled
+    // default so hubs do not collapse their neighbourhoods.
+    const linkForce = graph.d3Force('link');
     if (linkForce && typeof linkForce.distance === 'function') {
-      linkForce.distance(linkDistance);
+      linkForce.distance((link: GraphLink) => {
+        const ends = [link.source, link.target].filter(
+          (end): end is GraphNode => typeof end === 'object' && end !== null
+        );
+        const bubbles = ends.filter(end => end.aggregate).length;
+        if (bubbles === 2) return LAYOUT.BUBBLE_LINK;
+        if (bubbles === 1) return LAYOUT.BRIDGE_LINK;
+        return LAYOUT.MEMBER_LINK;
+      });
     }
-    // In overview, keep links weak so a heavily-bridged set of domains doesn't
-    // yank into a tight clump — collision and centering set the spacing instead.
-    if (linkForce && typeof linkForce.strength === 'function' && isOverview) {
-      linkForce.strength(0.04);
+    if (linkForce && typeof linkForce.strength === 'function') {
+      linkForce.strength((link: GraphLink) => {
+        const ends = [link.source, link.target].filter(
+          (end): end is GraphNode => typeof end === 'object' && end !== null
+        );
+        if (ends.length === 2 && ends.every(end => end.aggregate)) {
+          return LAYOUT.BUBBLE_LINK_STRENGTH;
+        }
+        const degrees = ends.map(end => Math.max(end.degree || 1, 1));
+        return 1 / Math.max(Math.min(...degrees), 1);
+      });
     }
 
-    // Reheat simulation after re-keyed graph mounts (project/type/cluster switches).
-    const graph = graphRef.current as ForceGraphMethods & {
-      d3ReheatSimulation?: () => void;
-    };
-    if (typeof graph.d3ReheatSimulation === 'function') {
-      graph.d3ReheatSimulation();
-    }
-  }, [graphData.nodes.length, graphData.links.length, graphRenderKey, isDomainLevel, graphReady]);
+    const reheat = graph as ForceGraphMethods & { d3ReheatSimulation?: () => void };
+    if (typeof reheat.d3ReheatSimulation === 'function') reheat.d3ReheatSimulation();
+  }, [graphRenderKey, graphReady]);
 
-  // Reliably frame the layout once it has settled. onEngineStop can fire before
-  // the reheated simulation finishes spreading, leaving the graph small and
-  // off-center, so re-fit on a short delay whenever the dataset changes. The
-  // node count is deliberately not a trigger: a cluster opening changes it
-  // too, and refitting there would zoom the camera back out and shut the
-  // cluster the reader just opened.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: graphRenderKey and fitKey are the intentional re-fit triggers
+  const markInteracted = useCallback(() => {
+    interactedRef.current = true;
+  }, []);
+
+  // The camera that frames every node currently on the canvas, capped so the
+  // largest bubble stays under its opening radius: a fit that opened a domain
+  // by itself would make the map impossible to return to.
+  const computeFit = useCallback((): CameraTarget | null => {
+    const element = canvasWrapperRef.current;
+    if (!element) return null;
+    const width = element.clientWidth;
+    const height = element.clientHeight;
+    if (width === 0 || height === 0) return null;
+
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (const node of graphDataRef.current.nodes) {
+      if (node.x === undefined || node.y === undefined) continue;
+      const radius = node.aggregate ? clusterRadius(node.member_count || 1) : 8;
+      minX = Math.min(minX, node.x - radius);
+      minY = Math.min(minY, node.y - radius);
+      maxX = Math.max(maxX, node.x + radius);
+      maxY = Math.max(maxY, node.y + radius);
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
+
+    // Extra room below for the labels painted under each node.
+    const pad = GRAPH_DEFAULTS.FIT_PADDING + 20;
+    const spanX = Math.max(maxX - minX, 1);
+    const spanY = Math.max(maxY - minY, 1);
+    const fit = Math.min((width - pad * 2) / spanX, (height - pad * 2) / spanY);
+    const k = Math.min(Math.max(fit, MIN_ZOOM), zoomBoundsRef.current.domainCap, MAX_ZOOM);
+    return { k, x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+  }, []);
+
+  // Pan, then zoom. The library runs centerAt and zoom as two transitions on
+  // the same element, and starting both at once lets the second interrupt
+  // the first, which lands the camera short of the centre every time.
+  const flightRef = useRef<number | null>(null);
+  const flyTo = useCallback((target: CameraTarget, durationMs: number, why: string) => {
+    const graph = graphRef.current;
+    if (!graph) return;
+    fitLogRef.current = [
+      ...fitLogRef.current.slice(-7),
+      { t: Math.round(performance.now()), k: Number(target.k.toFixed(3)), why },
+    ];
+    const element = canvasWrapperRef.current;
+    if (element) element.dataset.fitLog = JSON.stringify(fitLogRef.current);
+    if (flightRef.current !== null) window.clearTimeout(flightRef.current);
+    const half = Math.round(durationMs / 2);
+    graph.centerAt(target.x, target.y, half);
+    flightRef.current = window.setTimeout(() => {
+      flightRef.current = null;
+      graphRef.current?.zoom(target.k, half);
+    }, half);
+  }, []);
+
+  // Once the domain map has settled, its bubbles stay where they are. Members
+  // bloom around fixed anchors, the rest of the map holds still while one
+  // domain is open, and the reader comes back to the same picture they left.
+  // A bubble the reader drags keeps its new place for the same reason.
+  const freezeBubbles = useCallback(() => {
+    for (const node of graphDataRef.current.nodes) {
+      if (!node.aggregate || node.fx !== undefined) continue;
+      if (node.x === undefined || node.y === undefined) continue;
+      node.fx = node.x;
+      node.fy = node.y;
+    }
+  }, []);
+
+  const effectiveZoom = useCallback((rawZoom: number) => {
+    const fitZoom = fitZoomRef.current;
+    return fitZoom ? rawZoom / fitZoom : 1;
+  }, []);
+
+  // The canvas is the only place that knows the camera, so it reports each
+  // change up to the state that decides which clusters are open. Nothing here
+  // is throttled: the expansion set only changes when a threshold is actually
+  // crossed, and an unchanged set returns the previous reference.
+  const reportViewport = useCallback(
+    (transform: { k: number }) => {
+      const graph = graphRef.current;
+      const element = canvasWrapperRef.current;
+      levelZoomRef.current = effectiveZoom(transform.k);
+      // Surfaced on the wrapper so tests and browser automation can read the
+      // camera without reaching into the canvas.
+      if (element) {
+        element.dataset.zoom = transform.k.toFixed(3);
+        element.dataset.levelZoom = levelZoomRef.current.toFixed(3);
+        element.dataset.fitSettled = String(fitSettledRef.current);
+      }
+      if (!graph || !fitSettledRef.current) return;
+
+      const width = element?.clientWidth ?? 0;
+      const height = element?.clientHeight ?? 0;
+      if (width === 0 || height === 0) {
+        onViewportChange(transform.k, null);
+        return;
+      }
+      const topLeft = graph.screen2GraphCoords(0, 0);
+      const bottomRight = graph.screen2GraphCoords(width, height);
+      onViewportChange(transform.k, {
+        minX: Math.min(topLeft.x, bottomRight.x),
+        minY: Math.min(topLeft.y, bottomRight.y),
+        maxX: Math.max(topLeft.x, bottomRight.x),
+        maxY: Math.max(topLeft.y, bottomRight.y),
+      });
+    },
+    [onViewportChange, effectiveZoom]
+  );
+
+  // Frame the domain map once the layout has a shape. The fit is recorded
+  // even when it is not applied, so a reader who started zooming before the
+  // layout settled still gets label thresholds measured against the map.
+  const settleFit = useCallback(
+    (durationMs: number, why: string) => {
+      const graph = graphRef.current;
+      if (!graph) return;
+      const target = computeFit();
+      if (!target) return;
+      fitZoomRef.current = target.k;
+      const first = !fitSettledRef.current;
+      fitSettledRef.current = true;
+      if (!interactedRef.current) {
+        flyTo(target, durationMs, why);
+      } else if (first) {
+        reportViewport({ k: graph.zoom() });
+      }
+    },
+    [computeFit, flyTo, reportViewport]
+  );
+
+  // The layout keeps spreading for a few seconds after the first frame, so
+  // the fit runs early (a short delay, so the reader is not staring at an
+  // off-centre map) and again once the simulation actually stops. Neither
+  // moves a camera the reader has already taken hold of, and node count is
+  // deliberately not a trigger: a cluster opening changes it too, and
+  // refitting there would zoom the camera back out and shut the cluster the
+  // reader just opened.
+  const handleEngineStop = useCallback(() => {
+    freezeBubbles();
+    if (fitSettledRef.current && interactedRef.current) return;
+    settleFit(400, 'engine-stop');
+  }, [freezeBubbles, settleFit]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: graphRenderKey is the intentional re-fit trigger
   useEffect(() => {
-    if (!graphRef.current || graphData.nodes.length === 0) return;
-    const timer = setTimeout(() => {
-      graphRef.current?.zoomToFit(600, GRAPH_DEFAULTS.FIT_PADDING);
-      window.setTimeout(() => {
-        const zoom = graphRef.current?.zoom();
-        if (typeof zoom === 'number' && zoom > 0) fitZoomRef.current = zoom;
-      }, 700);
-    }, 1500);
+    if (!graphReady) return;
+    const timer = setTimeout(() => settleFit(600, 'backstop'), 1500);
     return () => clearTimeout(timer);
-  }, [graphRenderKey, fitKey, graphReady]);
+  }, [graphRenderKey, graphReady, settleFit]);
 
   // Clean node rendering - entity colors + degree-based sizing
   // Labels scale with zoom: more labels appear as you zoom in
@@ -258,11 +436,10 @@ export const GraphCanvas = forwardRef<KnowledgeGraphRef, GraphCanvasProps>(funct
       if (isProject) {
         size = 14 + combinedScale * 10;
       } else if (isAggregate) {
-        // A bubble is a summary the reader has to be able to read at any zoom,
-        // so it never paints below a fixed screen size. The natural radius
-        // takes over once the camera is close enough for it to be larger.
-        const naturalRadius = aggregateRadius(memberCount) + combinedScale * 6;
-        size = Math.max(naturalRadius, MIN_BUBBLE_SCREEN_RADIUS / globalScale);
+        // A bubble paints at the radius the expansion rule measures, so the
+        // reader watches it grow toward its opening size. A floor keeps the
+        // count legible when the camera is far out.
+        size = Math.max(clusterRadius(memberCount), MIN_BUBBLE_SCREEN_RADIUS / globalScale);
       } else if (isSelected) {
         size = Math.max(12, 6 + combinedScale * 10);
       } else if (isHovered) {
@@ -326,7 +503,7 @@ export const GraphCanvas = forwardRef<KnowledgeGraphRef, GraphCanvasProps>(funct
         // A bubble close to its opening threshold says so, so the reader knows
         // the zoom is about to buy them something rather than just scale.
         const screenRadius = size * globalScale;
-        if (screenRadius > SEMANTIC_ZOOM.COLLAPSE_SCREEN_RADIUS * 0.8) {
+        if (screenRadius > SEMANTIC_ZOOM.EXPAND_SCREEN_RADIUS * SEMANTIC_ZOOM.DOMAIN_FIT_FRACTION) {
           const hintFont = Math.max(5, 9 / globalScale);
           ctx.font = `${hintFont}px "JetBrains Mono", monospace`;
           ctx.fillStyle = `${colors.fgMuted}cc`;
@@ -404,8 +581,10 @@ export const GraphCanvas = forwardRef<KnowledgeGraphRef, GraphCanvasProps>(funct
       if (showLabel) {
         const label = node.label || node.name || node.id.slice(0, 8);
 
-        // Truncate based on zoom - show more text as you zoom in
-        const maxLen = Math.min(40, Math.floor(10 + levelZoom * 4));
+        // Truncate based on zoom - show more text as you zoom in. Domain
+        // names are the map's main text and there are only a dozen or two,
+        // so they get room from the start.
+        const maxLen = Math.min(40, Math.floor((isAggregate ? 24 : 10) + levelZoom * 4));
         const displayLabel = label.length > maxLen ? `${label.slice(0, maxLen - 3)}...` : label;
 
         // Font size: DIVIDE by globalScale to keep consistent screen size
@@ -516,137 +695,84 @@ export const GraphCanvas = forwardRef<KnowledgeGraphRef, GraphCanvasProps>(funct
     [getLinkEndpointId, selectedNodeId, hoveredNode]
   );
 
-  const handleEngineStop = useCallback(() => {
-    if (hasInitialFit || !graphRef.current) return;
-    graphRef.current.zoomToFit(400, GRAPH_DEFAULTS.FIT_PADDING);
-    setHasInitialFit(true);
-  }, [hasInitialFit]);
-
   const handleCanvasNodeClick = useCallback(
     (node: GraphNode) => {
       onNodeClick(node);
+      const graph = graphRef.current;
+      if (!graph || node.x === undefined || node.y === undefined) return;
+      interactedRef.current = true;
 
-      // Click zooms are multiples of the fitted map, like the thresholds: a
-      // bubble opens at a zoom where its members are legible, an entity at
-      // one where its label and neighbours are.
-      const fitZoom = fitZoomRef.current ?? graphRef.current?.zoom() ?? 1;
       if (node.aggregate) {
-        if (graphRef.current && node.x !== undefined && node.y !== undefined) {
-          graphRef.current.centerAt(node.x, node.y, 800);
-          graphRef.current.zoom(Math.max(graphRef.current.zoom(), fitZoom * 3.5), 800);
-        }
+        // Fly to just past the zoom where this bubble crosses its own opening
+        // radius, so the pin and the zoom agree about what the reader sees.
+        const opening =
+          (SEMANTIC_ZOOM.EXPAND_SCREEN_RADIUS / clusterRadius(node.member_count || 1)) * 1.2;
+        graph.centerAt(node.x, node.y, 800);
+        graph.zoom(Math.min(Math.max(graph.zoom(), opening), MAX_ZOOM), 800);
         return;
       }
 
-      const isDeselecting = selectedNodeId === node.id;
-      if (!isDeselecting && graphRef.current && node.x !== undefined && node.y !== undefined) {
-        graphRef.current.centerAt(node.x, node.y, 800);
-        const currentZoom = graphRef.current.zoom();
-        if (currentZoom < fitZoom * 6) {
-          graphRef.current.zoom(fitZoom * 6, 800);
-        }
-      }
+      if (selectedNodeId === node.id) return;
+      graph.centerAt(node.x, node.y, 800);
+      // An entity is read at a zoom where its label and neighbours fit.
+      const readable = (fitZoomRef.current ?? 1) * 6;
+      if (graph.zoom() < readable) graph.zoom(Math.min(readable, MAX_ZOOM), 800);
     },
     [onNodeClick, selectedNodeId]
   );
 
-  // Largest bubble at its natural size, in graph units. At the fitted zoom
-  // that bubble paints at the minimum screen radius, so mapping it there
-  // makes the expansion thresholds mean "this many times the fitted view".
-  const maxNaturalRadius = (() => {
-    let largest = 0;
-    for (const node of graphData.nodes) {
-      if (!node.aggregate) continue;
-      largest = Math.max(largest, aggregateRadius(node.member_count || 1));
-    }
-    return largest;
-  })();
-
-  const effectiveZoom = useCallback(
-    (rawZoom: number) => {
-      const fitZoom = fitZoomRef.current;
-      if (!fitZoom || maxNaturalRadius === 0) return rawZoom;
-      return (rawZoom / fitZoom) * (MIN_BUBBLE_SCREEN_RADIUS / maxNaturalRadius);
-    },
-    [maxNaturalRadius]
-  );
-
-  // The canvas is the only place that knows the camera, so it reports each
-  // change up to the state that decides which clusters are open. Nothing here
-  // is throttled: the expansion set only changes when a threshold is actually
-  // crossed, and an unchanged set returns the previous reference.
-  const reportViewport = useCallback(
-    (transform: { k: number }) => {
-      const graph = graphRef.current;
-      if (!graph) {
-        onViewportChange(effectiveZoom(transform.k), null);
-        return;
-      }
-      const element = canvasWrapperRef.current;
-      const width = element?.clientWidth ?? 0;
-      const height = element?.clientHeight ?? 0;
-      // Surfaced on the wrapper so tests and browser automation can read the
-      // camera without reaching into the canvas.
-      levelZoomRef.current = effectiveZoom(transform.k);
-      if (element) {
-        element.dataset.zoom = transform.k.toFixed(3);
-        element.dataset.levelZoom = levelZoomRef.current.toFixed(3);
-      }
-      if (width === 0 || height === 0) {
-        onViewportChange(effectiveZoom(transform.k), null);
-        return;
-      }
-      const topLeft = graph.screen2GraphCoords(0, 0);
-      const bottomRight = graph.screen2GraphCoords(width, height);
-      onViewportChange(effectiveZoom(transform.k), {
-        minX: Math.min(topLeft.x, bottomRight.x),
-        minY: Math.min(topLeft.y, bottomRight.y),
-        maxX: Math.max(topLeft.x, bottomRight.x),
-        maxY: Math.max(topLeft.y, bottomRight.y),
-      });
-    },
-    [onViewportChange, effectiveZoom]
-  );
-
   const zoomIn = useCallback(() => {
-    if (graphRef.current) {
-      const currentZoom = graphRef.current.zoom();
-      graphRef.current.zoom(currentZoom * 1.5, 300);
-    }
+    const graph = graphRef.current;
+    if (!graph) return;
+    interactedRef.current = true;
+    graph.zoom(Math.min(graph.zoom() * 1.5, MAX_ZOOM), 300);
   }, []);
 
   const zoomOut = useCallback(() => {
-    if (graphRef.current) {
-      const currentZoom = graphRef.current.zoom();
-      graphRef.current.zoom(currentZoom / 1.5, 300);
-    }
+    const graph = graphRef.current;
+    if (!graph) return;
+    interactedRef.current = true;
+    graph.zoom(Math.max(graph.zoom() / 1.5, MIN_ZOOM), 300);
   }, []);
 
   const fitView = useCallback(() => {
-    graphRef.current?.zoomToFit(400, GRAPH_DEFAULTS.FIT_PADDING);
-  }, []);
+    interactedRef.current = true;
+    const target = computeFit();
+    if (target) flyTo(target, 400, 'fit');
+  }, [computeFit, flyTo]);
 
-  const resetView = useCallback(() => {
-    graphRef.current?.zoomToFit(400, GRAPH_DEFAULTS.FIT_PADDING);
-    graphRef.current?.centerAt(0, 0, 300);
-  }, []);
+  const zoomToLevel = useCallback(
+    (level: 'domains' | 'entities') => {
+      const graph = graphRef.current;
+      if (!graph) return;
+      interactedRef.current = true;
+      if (level === 'domains') {
+        // Two steps. First back to the recorded domain fit, which drops the
+        // zoom under every threshold and folds the open clusters; a fresh fit
+        // of what is open right now would frame the spread of their members
+        // instead. Then, once the bubbles are back, a fit of the map as it
+        // actually stands.
+        const target = computeFit();
+        if (!target) return;
+        flyTo({ ...target, k: fitZoomRef.current ?? target.k }, 600, 'domains');
+        window.setTimeout(() => {
+          const settled = computeFit();
+          if (!settled) return;
+          fitZoomRef.current = settled.k;
+          flyTo(settled, 400, 'domains-settled');
+        }, 900);
+        return;
+      }
+      const entityZoom = zoomBoundsRef.current.entity;
+      if (entityZoom) graph.zoom(Math.min(entityZoom, MAX_ZOOM), 600);
+    },
+    [computeFit, flyTo]
+  );
 
-  const zoomToLevel = useCallback((level: 'domains' | 'entities') => {
-    const graph = graphRef.current;
-    if (!graph) return;
-    if (level === 'domains') {
-      graph.zoomToFit(600, GRAPH_DEFAULTS.FIT_PADDING);
-      return;
-    }
-    const fitZoom = fitZoomRef.current ?? graph.zoom();
-    graph.zoom(fitZoom * SEMANTIC_ZOOM.ENTITY_ZOOM_FACTOR, 600);
-  }, []);
-
-  useImperativeHandle(ref, () => ({ zoomIn, zoomOut, fitView, resetView, zoomToLevel }), [
+  useImperativeHandle(ref, () => ({ zoomIn, zoomOut, fitView, resetView: fitView, zoomToLevel }), [
     zoomIn,
     zoomOut,
     fitView,
-    resetView,
     zoomToLevel,
   ]);
 
@@ -692,12 +818,19 @@ export const GraphCanvas = forwardRef<KnowledgeGraphRef, GraphCanvasProps>(funct
         </div>
       )}
 
-      {!isLoading && graphData.nodes.length > 0 && (
-        <div ref={canvasWrapperRef} className="absolute inset-0">
+      {showCanvas && (
+        <div
+          ref={canvasWrapperRef}
+          className="absolute inset-0"
+          onWheelCapture={markInteracted}
+          onPointerDownCapture={markInteracted}
+        >
           <ForceGraph2D
             key={graphRenderKey}
             ref={attachGraph as unknown as MutableRefObject<ForceGraphMethods | undefined>}
             graphData={graphData as { nodes: object[]; links: object[] }}
+            width={canvasSize?.width}
+            height={canvasSize?.height}
             nodeLabel={() => ''}
             nodeCanvasObject={
               paintNode as (
@@ -718,8 +851,8 @@ export const GraphCanvas = forwardRef<KnowledgeGraphRef, GraphCanvasProps>(funct
             enableZoomInteraction={true}
             enablePanInteraction={true}
             enableNodeDrag={true}
-            minZoom={0.1}
-            maxZoom={10}
+            minZoom={MIN_ZOOM}
+            maxZoom={MAX_ZOOM}
             d3AlphaDecay={GRAPH_DEFAULTS.ALPHA_DECAY}
             d3VelocityDecay={GRAPH_DEFAULTS.VELOCITY_DECAY}
             onZoom={reportViewport}

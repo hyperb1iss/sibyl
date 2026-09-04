@@ -121,10 +121,9 @@ function GraphPageContent() {
             ref={graphRef}
             graphData={graph.graphData}
             graphRenderKey={graph.graphRenderKey}
-            fitKey={graph.fitKey}
             filterKey={graph.filterKey}
-            isDomainLevel={graph.zoomLevel === 'domains'}
             expandedClusterLabels={graph.expandedClusterLabels}
+            zoomBounds={graph.zoomBounds}
             onViewportChange={graph.handleViewportChange}
             selectedNodeId={graph.selectedNodeId}
             colors={colors}

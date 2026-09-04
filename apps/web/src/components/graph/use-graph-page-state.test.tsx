@@ -45,6 +45,25 @@ const response: HierarchicalGraphResponse = {
   total_edges: 0,
 };
 
+const overview: NonNullable<HierarchicalGraphResponse['overview']> = {
+  nodes: [
+    {
+      id: 'cluster:cluster-a',
+      name: 'Cluster A',
+      label: 'Cluster A',
+      type: 'cluster',
+      color: '',
+      summary: '',
+      cluster_id: 'cluster-a',
+      aggregate: true,
+      member_count: 1,
+    },
+  ],
+  edges: [],
+  clusters: response.clusters,
+};
+const withOverview: HierarchicalGraphResponse = { ...response, overview };
+
 describe('useGraphPageState', () => {
   beforeEach(() => {
     mocks.useProjectContext.mockReturnValue({ selectedProjects: ['project-a'] });
@@ -56,7 +75,11 @@ describe('useGraphPageState', () => {
         ],
       },
     });
-    mocks.useHierarchicalGraph.mockReturnValue({ data: response, isLoading: false, error: null });
+    mocks.useHierarchicalGraph.mockReturnValue({
+      data: withOverview,
+      isLoading: false,
+      error: null,
+    });
   });
 
   it('keeps all projects as the default and adds shared only in explicit focus mode', async () => {
@@ -65,8 +88,8 @@ describe('useGraphPageState', () => {
     expect(mocks.useHierarchicalGraph).toHaveBeenCalledWith(
       expect.objectContaining({ projects: undefined, resolution: 'detail' })
     );
-    expect(mocks.useHierarchicalGraph).toHaveBeenCalledWith(
-      expect.objectContaining({ projects: undefined, resolution: 'overview' })
+    expect(mocks.useHierarchicalGraph).not.toHaveBeenCalledWith(
+      expect.objectContaining({ resolution: 'overview' })
     );
     expect(result.current.focusProjects).toBe(false);
 
@@ -122,5 +145,38 @@ describe('useGraphPageState', () => {
 
     act(() => result.current.handleClusterClick('cluster-a'));
     await waitFor(() => expect(result.current.zoomLevel).not.toBe('domains'));
+  });
+
+  it('derives the level jumps from the bubbles on the map', () => {
+    const { result } = renderHook(() => useGraphPageState('neon'));
+
+    expect(result.current.zoomBounds.entity).toBeGreaterThan(0);
+    expect(result.current.zoomBounds.domainCap).toBeLessThan(result.current.zoomBounds.entity ?? 0);
+  });
+
+  it('opens a tail cluster by opening the domain that hosts it', async () => {
+    mocks.useHierarchicalGraph.mockReturnValue({
+      data: {
+        ...withOverview,
+        nodes: [
+          ...response.nodes,
+          { ...response.nodes[0], id: 'node-t', name: 'Tail', cluster_id: 'tail' },
+        ],
+        edges: [{ source: 'node-t', target: 'node-a', type: 'relates_to' }],
+        clusters: [...response.clusters, { ...response.clusters[0], id: 'tail' }],
+      },
+      isLoading: false,
+      error: null,
+    });
+    const { result } = renderHook(() => useGraphPageState('neon'));
+
+    act(() => result.current.handleClusterClick('tail'));
+    await waitFor(() => expect([...result.current.expandedClusters]).toEqual(['cluster-a']));
+    expect([...result.current.satelliteHosts]).toEqual(['cluster-a']);
+    expect(result.current.selectedCluster).toBe('tail');
+    expect(result.current.graphData.nodes.map(node => node.id).sort()).toEqual([
+      'node-a',
+      'node-t',
+    ]);
   });
 });

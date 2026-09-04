@@ -13,7 +13,9 @@ import {
   type ClusterExtent,
   countCollapsedInView,
   resolveExpandedClusters,
+  resolveSatelliteHosts,
   type Viewport,
+  zoomBoundsFor,
   zoomLevelName,
 } from './semantic-zoom';
 
@@ -22,12 +24,17 @@ export function useGraphPageState(theme: Theme) {
   const { data: projectsData } = useProjects();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedCluster, setSelectedCluster] = useState<string | null>(null);
-  // Clusters currently showing their members. Zoom drives this set; a reader
-  // who opens one by hand pins it so panning away does not shut it.
+  // Bubble clusters currently showing their members. Zoom drives this set; a
+  // reader who opens one by hand pins it so panning away does not shut it.
   const [expandedClusters, setExpandedClusters] = useState<ReadonlySet<string>>(
     () => new Set<string>()
   );
   const [pinnedClusters, setPinnedClusters] = useState<ReadonlySet<string>>(
+    () => new Set<string>()
+  );
+  // Open clusters whose satellite communities are out too: one stage past
+  // expansion, so a domain blooms into its members before its long tail.
+  const [satelliteHosts, setSatelliteHosts] = useState<ReadonlySet<string>>(
     () => new Set<string>()
   );
   // Closed bubbles inside the viewport, which is what separates "mixed" from
@@ -83,18 +90,18 @@ export function useGraphPageState(theme: Theme) {
   const projectKey = projectFilter?.join(',') || 'all';
   const selectedTypesKey = selectedTypes.join(',');
   const filterKey = `${projectKey}:${selectedTypesKey}`;
-  const fitKey = `${projectKey}:${selectedTypesKey}`;
   // Expansion deliberately stays out of the render key: remounting the canvas
   // on every level change would throw away the layout that makes a bloom read
   // as one continuous move.
   const graphRenderKey = `${theme}-${projectKey}-${selectedTypesKey}`;
 
-  // Both levels at once. The overview is the domain map, the detail response
-  // carries every node's cluster_id, and semantic zoom picks between them per
-  // cluster without another round trip.
+  // One request carries both levels: the detail sample with every node's
+  // cluster_id, and inside it the domain map built from the same community
+  // run. Fetching the map separately let the two straddle a cache refresh
+  // and describe different clusterings, which no client rule can reconcile.
   const {
-    data: detailData,
-    isLoading: detailLoading,
+    data,
+    isLoading,
     error: graphError,
   } = useHierarchicalGraph({
     max_nodes: GRAPH_DEFAULTS.SEMANTIC_MAX_NODES,
@@ -103,21 +110,32 @@ export function useGraphPageState(theme: Theme) {
     types: selectedTypes.length > 0 ? selectedTypes : undefined,
     resolution: 'detail',
   });
-  const { data: overviewData, isLoading: overviewLoading } = useHierarchicalGraph({
-    max_nodes: GRAPH_DEFAULTS.MAX_NODES,
-    max_edges: GRAPH_DEFAULTS.MAX_EDGES,
-    projects: projectFilter,
-    types: selectedTypes.length > 0 ? selectedTypes : undefined,
-    resolution: 'overview',
-  });
-
-  const data = detailData ?? overviewData;
-  const isLoading = detailLoading || overviewLoading;
-  const hierarchySource = useMemo(
-    () => ({ overview: overviewData, detail: detailData }),
-    [overviewData, detailData]
-  );
+  const detailData = data;
+  const hierarchySource = useMemo(() => {
+    const overview = detailData?.overview;
+    return {
+      overview:
+        detailData && overview
+          ? {
+              ...detailData,
+              nodes: overview.nodes,
+              edges: overview.edges,
+              clusters: overview.clusters,
+              resolution: 'overview' as const,
+            }
+          : undefined,
+      detail: detailData,
+    };
+  }, [detailData]);
   const semanticClusters = useMemo(() => collectClusters(hierarchySource), [hierarchySource]);
+  // The unit of expansion: bubbles with something behind them. A bubble whose
+  // members never made the detail sample has nothing to open into, so it
+  // stays a bubble at every zoom and stays out of the level readout.
+  const expandableClusters = useMemo(
+    () => semanticClusters.filter(cluster => cluster.hasBubble && cluster.loadedMembers > 0),
+    [semanticClusters]
+  );
+  const zoomBounds = useMemo(() => zoomBoundsFor(expandableClusters), [expandableClusters]);
 
   useEffect(() => {
     if (!filterKey) return;
@@ -135,12 +153,21 @@ export function useGraphPageState(theme: Theme) {
     () =>
       buildSemanticGraphData({
         source: hierarchySource,
+        clusters: semanticClusters,
         expanded: expandedClusters,
+        satellites: satelliteHosts,
         clusterColorMap,
         searchTerm,
         nodeCache: nodeCacheRef.current,
       }),
-    [hierarchySource, expandedClusters, clusterColorMap, searchTerm]
+    [
+      hierarchySource,
+      semanticClusters,
+      expandedClusters,
+      satelliteHosts,
+      clusterColorMap,
+      searchTerm,
+    ]
   );
 
   // Filters rebuild the world, so the cached layout no longer describes it.
@@ -148,60 +175,85 @@ export function useGraphPageState(theme: Theme) {
   useEffect(() => {
     nodeCacheRef.current = new Map();
     setExpandedClusters(new Set());
+    setSatelliteHosts(new Set());
     setPinnedClusters(new Set());
   }, [filterKey]);
+
+  // Mirrors for the viewport handler, which runs on every zoom tick and must
+  // read the current sets without queuing a state updater to get at them.
+  const expandedRef = useRef(expandedClusters);
+  const satellitesRef = useRef(satelliteHosts);
+  useEffect(() => {
+    expandedRef.current = expandedClusters;
+    satellitesRef.current = satelliteHosts;
+  }, [expandedClusters, satelliteHosts]);
+
+  const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>) =>
+    a.size === b.size && [...a].every(id => b.has(id));
 
   const handleViewportChange = useCallback(
     (zoom: number, viewport: Viewport | null) => {
       const cache = nodeCacheRef.current;
-      const extents: ClusterExtent[] = semanticClusters.map(cluster => {
-        const bubble = cache.get(`cluster:${cluster.id}`) ?? cache.get(cluster.id);
+      const extents: ClusterExtent[] = expandableClusters.map(cluster => {
+        const bubble = cluster.nodeId ? cache.get(cluster.nodeId) : undefined;
         const extent: ClusterExtent = { id: cluster.id, memberCount: cluster.memberCount };
         if (bubble?.x !== undefined) extent.x = bubble.x;
         if (bubble?.y !== undefined) extent.y = bubble.y;
         return extent;
       });
 
-      setExpandedClusters(previous => {
-        const next = resolveExpandedClusters({
-          clusters: extents,
-          zoom,
-          viewport,
-          previous,
-          pinned: pinnedClusters,
-        });
-        setCollapsedInView(countCollapsedInView(extents, next, viewport));
-        if (next.size === previous.size && [...next].every(id => previous.has(id))) {
-          return previous;
-        }
-        return next;
+      const previous = expandedRef.current;
+      const next = resolveExpandedClusters({
+        clusters: extents,
+        zoom,
+        viewport,
+        previous,
+        pinned: pinnedClusters,
       });
+      setCollapsedInView(countCollapsedInView(extents, next, viewport));
+      const nextSatellites = resolveSatelliteHosts({
+        clusters: extents,
+        zoom,
+        viewport,
+        expanded: next,
+        previous: satellitesRef.current,
+        pinned: pinnedClusters,
+      });
+      if (!sameSet(nextSatellites, satellitesRef.current)) {
+        satellitesRef.current = nextSatellites;
+        setSatelliteHosts(nextSatellites);
+      }
+      if (sameSet(next, previous)) return;
+      expandedRef.current = next;
+      setExpandedClusters(next);
     },
-    [semanticClusters, pinnedClusters]
+    [expandableClusters, pinnedClusters]
   );
 
+  const expandedCount = useMemo(
+    () => expandableClusters.filter(cluster => expandedClusters.has(cluster.id)).length,
+    [expandableClusters, expandedClusters]
+  );
+  // The map is what appears first, so the readout starts there while the
+  // responses are still in flight rather than on what an empty graph would
+  // be called.
   const zoomLevel = useMemo(
-    () => zoomLevelName(expandedClusters.size, collapsedInView),
-    [expandedClusters.size, collapsedInView]
+    () =>
+      isLoading || !data
+        ? 'domains'
+        : zoomLevelName(expandedCount, collapsedInView, expandableClusters.length),
+    [isLoading, data, expandedCount, collapsedInView, expandableClusters.length]
   );
 
-  // Bubble clusters arrive named; the tail the map does not draw only has an
-  // id, so those borrow the legend's rule and name themselves after their
-  // best-connected members.
   const expandedClusterLabels = useMemo(() => {
     const labels = new Map<string, string>();
     for (const cluster of semanticClusters) {
-      if (!expandedClusters.has(cluster.id)) continue;
-      if (cluster.hasBubble) {
+      if (cluster.hasBubble && expandedClusters.has(cluster.id)) {
         labels.set(cluster.id, cluster.label);
-        continue;
       }
-      const meta = data?.clusters.find(item => item.id === cluster.id);
-      const derived = meta ? getClusterLabel(meta, allNodesWithDegree) : '';
-      if (derived && !derived.startsWith('comm_')) labels.set(cluster.id, derived);
     }
     return labels;
-  }, [semanticClusters, expandedClusters, data?.clusters, allNodesWithDegree]);
+  }, [semanticClusters, expandedClusters]);
 
   useEffect(() => {
     if (!selectedNodeId) return;
@@ -209,18 +261,32 @@ export function useGraphPageState(theme: Theme) {
     setSelectedNodeId(null);
   }, [graphData.nodes, selectedNodeId]);
 
-  const pinCluster = useCallback((clusterId: string) => {
-    setPinnedClusters(previous => {
-      const next = new Set(previous);
-      next.add(clusterId);
-      return next;
-    });
-    setExpandedClusters(previous => {
-      const next = new Set(previous);
-      next.add(clusterId);
-      return next;
-    });
-  }, []);
+  // Pins land on bubble clusters. Opening a tail cluster from the legend
+  // means opening the domain it lives in.
+  const pinCluster = useCallback(
+    (clusterId: string) => {
+      const cluster = semanticClusters.find(item => item.id === clusterId);
+      const target = cluster?.host ?? clusterId;
+      setPinnedClusters(previous => {
+        const next = new Set(previous);
+        next.add(target);
+        return next;
+      });
+      setExpandedClusters(previous => {
+        const next = new Set(previous);
+        next.add(target);
+        expandedRef.current = next;
+        return next;
+      });
+      setSatelliteHosts(previous => {
+        const next = new Set(previous);
+        next.add(target);
+        satellitesRef.current = next;
+        return next;
+      });
+    },
+    [semanticClusters]
+  );
 
   const handleNodeClick = useCallback(
     (node: GraphNode) => {
@@ -247,6 +313,7 @@ export function useGraphPageState(theme: Theme) {
         setSelectedCluster(null);
         setPinnedClusters(new Set());
         setExpandedClusters(new Set());
+        setSatelliteHosts(new Set());
       }
     },
     [pinCluster]
@@ -262,6 +329,7 @@ export function useGraphPageState(theme: Theme) {
     setSelectedCluster(null);
     setPinnedClusters(new Set());
     setExpandedClusters(new Set());
+    setSatelliteHosts(new Set());
   }, []);
 
   const selectedNodeRelated = useMemo(
@@ -269,11 +337,11 @@ export function useGraphPageState(theme: Theme) {
     [graphData, selectedNodeId]
   );
   const selectedClusterLabel = useMemo(() => {
-    if (!selectedCluster || !data?.clusters) return null;
-    const cluster = data.clusters.find(item => item.id === selectedCluster);
-    if (!cluster) return null;
-    return cluster.label || getClusterLabel(cluster, allNodesWithDegree);
-  }, [selectedCluster, data?.clusters, allNodesWithDegree]);
+    if (!selectedCluster) return null;
+    const cluster = data?.clusters.find(item => item.id === selectedCluster);
+    if (cluster) return cluster.label || getClusterLabel(cluster, allNodesWithDegree);
+    return semanticClusters.find(item => item.id === selectedCluster)?.label ?? null;
+  }, [selectedCluster, data?.clusters, allNodesWithDegree, semanticClusters]);
 
   return {
     data,
@@ -281,10 +349,11 @@ export function useGraphPageState(theme: Theme) {
     graphError,
     graphData,
     graphRenderKey,
-    fitKey,
     filterKey,
     zoomLevel,
+    zoomBounds,
     expandedClusters,
+    satelliteHosts,
     expandedClusterLabels,
     semanticClusters,
     selectedNodeId,

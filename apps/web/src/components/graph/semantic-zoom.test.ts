@@ -5,8 +5,10 @@ import {
   countCollapsedInView,
   memberSeedPosition,
   resolveExpandedClusters,
+  resolveSatelliteHosts,
   SEMANTIC_ZOOM,
   type Viewport,
+  zoomBoundsFor,
   zoomLevelName,
 } from './semantic-zoom';
 
@@ -138,15 +140,84 @@ describe('resolveExpandedClusters', () => {
   });
 });
 
-describe('zoomLevelName', () => {
-  it('names the three levels', () => {
-    expect(zoomLevelName(0, 10)).toBe('domains');
-    expect(zoomLevelName(4, 6)).toBe('mixed');
-    expect(zoomLevelName(4, 0)).toBe('entities');
+describe('resolveSatelliteHosts', () => {
+  it('opens satellites one stage after the domain itself', () => {
+    const clusters = [cluster('a', 900)];
+    const justOpen = zoomFor(900, SEMANTIC_ZOOM.EXPAND_SCREEN_RADIUS + 1);
+    const wellOpen = zoomFor(
+      900,
+      SEMANTIC_ZOOM.EXPAND_SCREEN_RADIUS * SEMANTIC_ZOOM.SATELLITE_FACTOR + 1
+    );
+    const args = {
+      clusters,
+      viewport: VIEWPORT,
+      expanded: new Set(['a']),
+      previous: new Set<string>(),
+    };
+
+    expect(resolveSatelliteHosts({ ...args, zoom: justOpen }).has('a')).toBe(false);
+    expect(resolveSatelliteHosts({ ...args, zoom: wellOpen }).has('a')).toBe(true);
   });
 
-  it('does not call an empty graph fully expanded', () => {
-    expect(zoomLevelName(0, 0)).toBe('domains');
+  it('never opens satellites under a closed bubble, however far in', () => {
+    const hosts = resolveSatelliteHosts({
+      clusters: [cluster('a', 900)],
+      zoom: 50,
+      viewport: VIEWPORT,
+      expanded: new Set(),
+      previous: new Set(),
+    });
+
+    expect(hosts.size).toBe(0);
+  });
+
+  it('shows everything a pinned cluster has', () => {
+    const hosts = resolveSatelliteHosts({
+      clusters: [cluster('a', 900)],
+      zoom: 0.1,
+      viewport: VIEWPORT,
+      expanded: new Set(['a']),
+      previous: new Set(),
+      pinned: new Set(['a']),
+    });
+
+    expect(hosts.has('a')).toBe(true);
+  });
+});
+
+describe('zoomBoundsFor', () => {
+  it('puts the entities jump past the smallest bubble opening radius', () => {
+    const { entity } = zoomBoundsFor([cluster('big', 900), cluster('small', 2)]);
+    if (entity === null) throw new Error('expected an entities zoom');
+
+    expect(clusterRadius(2) * entity).toBeGreaterThan(SEMANTIC_ZOOM.EXPAND_SCREEN_RADIUS);
+    expect(clusterRadius(2) * entity).toBeLessThan(SEMANTIC_ZOOM.EXPAND_SCREEN_RADIUS * 1.05);
+  });
+
+  it('caps the domain fit so the largest bubble stays short of opening', () => {
+    const { domainCap } = zoomBoundsFor([cluster('big', 900), cluster('small', 2)]);
+
+    expect(clusterRadius(900) * domainCap).toBeLessThan(SEMANTIC_ZOOM.EXPAND_SCREEN_RADIUS);
+    expect(clusterRadius(900) * domainCap).toBeCloseTo(
+      SEMANTIC_ZOOM.EXPAND_SCREEN_RADIUS * SEMANTIC_ZOOM.DOMAIN_FIT_FRACTION,
+      5
+    );
+  });
+
+  it('leaves both ends open when the map has no bubbles', () => {
+    expect(zoomBoundsFor([])).toEqual({ entity: null, domainCap: Number.POSITIVE_INFINITY });
+  });
+});
+
+describe('zoomLevelName', () => {
+  it('names the three levels', () => {
+    expect(zoomLevelName(0, 10, 18)).toBe('domains');
+    expect(zoomLevelName(4, 6, 18)).toBe('mixed');
+    expect(zoomLevelName(4, 0, 18)).toBe('entities');
+  });
+
+  it('calls a graph with no domains entities from the start', () => {
+    expect(zoomLevelName(0, 0, 0)).toBe('entities');
   });
 });
 
