@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
+from tools.showcase import seed
 from tools.showcase.fixtures import (
     KNOWLEDGE,
     PROJECTS,
@@ -253,3 +255,50 @@ def test_idempotency_keys_are_deterministic_and_payload_bound() -> None:
 
     assert first == _idempotency_key("task", {"name": "One"})
     assert first != _idempotency_key("task", {"name": "Two"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("paired_url", [None, "http://localhost:3434/api/"])
+async def test_showcase_accepts_matching_or_unpaired_environment_credentials(
+    monkeypatch: pytest.MonkeyPatch, paired_url: str | None
+) -> None:
+    monkeypatch.setenv("SIBYL_AUTH_TOKEN", "synthetic-showcase-token")
+    if paired_url:
+        monkeypatch.setenv("SIBYL_API_URL", paired_url)
+    else:
+        monkeypatch.delenv("SIBYL_API_URL", raising=False)
+
+    assert await seed.active_cli_token("http://localhost:3434") == "synthetic-showcase-token"
+
+
+@pytest.mark.asyncio
+async def test_showcase_never_borrows_a_foreign_environment_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SIBYL_AUTH_TOKEN", "synthetic-foreign-token")
+    monkeypatch.setenv("SIBYL_API_URL", "http://localhost:3334/api")
+    monkeypatch.setattr(seed.config_store, "resolve_effective_context", lambda: None)
+
+    with pytest.raises(ShowcaseSafetyError, match="No active Sibyl CLI context"):
+        await seed.active_cli_token("http://localhost:3434")
+
+
+@pytest.mark.asyncio
+async def test_showcase_uses_its_stored_login_when_environment_targets_another_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sibyl_cli import auth_store
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("SIBYL_AUTH_TOKEN", "synthetic-foreign-token")
+    monkeypatch.setenv("SIBYL_API_URL", "http://localhost:3334/api")
+    context = seed.config_store.create_context("showcase", "http://localhost:3434")
+    monkeypatch.setattr(seed.config_store, "resolve_effective_context", lambda: context)
+    monkeypatch.setattr(seed.SibylClient, "list_orgs", AsyncMock(return_value=[]))
+    auth_store.set_tokens(
+        "http://localhost:3434/api",
+        "synthetic-stored-token",
+        credential_scope="context:showcase:org:default",
+    )
+
+    assert await seed.active_cli_token("http://localhost:3434") == "synthetic-stored-token"

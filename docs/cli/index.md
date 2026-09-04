@@ -174,15 +174,27 @@ with no matching context is a hard error: the command stops instead of quietly r
 active context, so a typo in a CI variable can never write to the wrong server. Scope a command to a
 project with `--project` instead.
 
-`SIBYL_API_URL` is a legacy fallback, not an override. Server selection resolves in this order, and
-`sibyl auth login` follows the same order as every other command so a login always writes its token
-under the server key the next command reads:
+API commands select their server in this order:
 
 1. An explicit server argument (`sibyl auth login https://...`, `--server`)
-2. The selected context (`--context` / `-C`, `SIBYL_CONTEXT`, directory pin, active context)
-3. `SIBYL_API_URL`
-4. `[server] url` in the legacy config file
-5. `http://localhost:3334/api`
+2. An explicit context (`--context` / `-C` or `SIBYL_CONTEXT`)
+3. A paired `SIBYL_API_URL` and `SIBYL_AUTH_TOKEN` automation environment
+4. The directory-pinned context, then the active context
+5. `SIBYL_API_URL` without a paired token
+6. `[server] url` in the legacy config file
+7. `http://localhost:3334/api`
+
+Authentication commands use the selected context (including a directory pin or the active context)
+unless an explicit server is supplied. Specify the server when logging into an automation target.
+
+A paired environment token is used only for its API URL. Selecting a different server uses that
+server's stored credentials; a missing login never falls back to the other server's token.
+A standalone `SIBYL_AUTH_TOKEN` without `SIBYL_API_URL` applies to the selected server.
+
+For parallel work, select each command's context with `sibyl -C <name> ...` rather than switching
+the shared active context. CLI processes coordinate token refresh through the credential file lock.
+Authenticate browser automation independently: copying the CLI's rotating refresh token into a
+browser cookie lets browser refresh invalidate the CLI's saved token.
 
 ## Configuration
 

@@ -163,6 +163,7 @@ async def test_silent_local_relogin_refuses_an_unscoped_organization(
 async def test_environment_token_ignores_expired_stored_credential(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("SIBYL_API_URL", raising=False)
     monkeypatch.setenv("SIBYL_AUTH_TOKEN", "automation-token")
 
     def unexpected_stored_expiry_check(*_args: object, **_kwargs: object) -> bool:
