@@ -8,6 +8,7 @@ import {
   LOOSE_CLUSTER_ID,
   LOOSE_NODE_ID,
 } from './semantic-graph';
+import { clusterRadius } from './semantic-zoom';
 
 type ResponseNode = HierarchicalGraphResponse['nodes'][number];
 
@@ -312,7 +313,7 @@ describe('buildSemanticGraphData', () => {
     expect(members).toHaveLength(3);
     for (const node of members) {
       expect(Math.hypot((node.x ?? 0) - 300, (node.y ?? 0) - 120)).toBeLessThan(60);
-      expect(node.clusterAnchor).toEqual({ x: 300, y: 120 });
+      expect(node.clusterAnchor).toEqual({ x: 300, y: 120, radius: clusterRadius(900) });
     }
   });
 

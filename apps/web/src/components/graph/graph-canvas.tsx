@@ -38,8 +38,6 @@ const MIN_BUBBLE_SCREEN_RADIUS = 12;
 /** Largest an entity paints on screen, so a close zoom shows labels, not discs. */
 const MAX_NODE_SCREEN_RADIUS = 16;
 const MAX_PROJECT_SCREEN_RADIUS = 24;
-/** Room the fit leaves around the spot an open domain's bubble occupied. */
-const ANCHOR_FIT_RADIUS = 40;
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 10;
 
@@ -293,7 +291,7 @@ export const GraphCanvas = forwardRef<KnowledgeGraphRef, GraphCanvasProps>(funct
       } else if (node.clusterAnchor) {
         x = node.clusterAnchor.x;
         y = node.clusterAnchor.y;
-        radius = ANCHOR_FIT_RADIUS;
+        radius = node.clusterAnchor.radius;
       }
       if (x === undefined || y === undefined) continue;
       minX = Math.min(minX, x - radius);

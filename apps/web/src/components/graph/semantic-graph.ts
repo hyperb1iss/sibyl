@@ -1,7 +1,7 @@
 import type { HierarchicalGraphResponse } from '@/lib/api';
 import { getEntityColor } from '@/lib/constants/entities';
 import type { GraphData, GraphLink, GraphNode } from './graph-types';
-import { memberSeedPosition } from './semantic-zoom';
+import { clusterRadius, memberSeedPosition } from './semantic-zoom';
 
 /**
  * Assembling one canvas dataset from both levels of the hierarchy.
@@ -296,7 +296,7 @@ export function buildSemanticGraphData({
 
   function emit(
     raw: ResponseNode,
-    options: { seed?: { x: number; y: number }; anchor?: { x: number; y: number } }
+    options: { seed?: { x: number; y: number }; anchor?: GraphNode['clusterAnchor'] }
   ) {
     const cached = nodeCache.get(raw.id);
     const nodeDegree = degree.get(raw.id) ?? 0;
@@ -349,11 +349,15 @@ export function buildSemanticGraphData({
     const cachedBubble = bubble ? nodeCache.get(bubble.id) : undefined;
 
     let seed: { x: number; y: number } | undefined;
-    let anchor: { x: number; y: number } | undefined;
+    let anchor: GraphNode['clusterAnchor'];
     if (levelCluster && cachedBubble?.x !== undefined && cachedBubble.y !== undefined) {
       const index = seedIndex.get(levelCluster) ?? 0;
       seedIndex.set(levelCluster, index + 1);
-      anchor = { x: cachedBubble.x, y: cachedBubble.y };
+      anchor = {
+        x: cachedBubble.x,
+        y: cachedBubble.y,
+        radius: clusterRadius(bubble?.member_count || 1),
+      };
       seed = memberSeedPosition(
         cachedBubble.x,
         cachedBubble.y,

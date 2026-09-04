@@ -17,7 +17,7 @@ export interface GraphNode extends HierarchicalNode {
    * it keeps an opened cluster inside its own territory instead of flinging
    * members across the map.
    */
-  clusterAnchor?: { x: number; y: number };
+  clusterAnchor?: { x: number; y: number; radius: number };
   __highlightTime?: number;
 }
 
