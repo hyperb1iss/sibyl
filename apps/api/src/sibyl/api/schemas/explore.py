@@ -39,7 +39,7 @@ class ExploreRequest(BaseModel):
     include_archived: bool = Field(
         default=False, description="Include archived projects in results"
     )
-    limit: int = Field(default=50, ge=1, le=200)
+    limit: int = Field(default=50, ge=1, le=1000)
     offset: int = Field(default=0, ge=0, description="Offset for pagination")
 
 

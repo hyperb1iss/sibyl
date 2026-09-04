@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { ExternalLink } from '@/components/ui/icons';
 import type { CodeExampleResult } from '@/lib/api/search';
+import { formatScorePercent } from '@/lib/constants/formatting';
 
 // Language identity mapped onto the SilkCircuit palette so the chips stay
 // distinguishable yet theme-correct in both neon and dawn (no frozen brand hex).
@@ -34,7 +35,7 @@ interface CodeResultProps {
  * Shows syntax highlighted code with context.
  */
 export function CodeResult({ result }: CodeResultProps) {
-  const scorePercent = Math.round(result.similarity * 100);
+  const scorePercent = formatScorePercent(result.similarity);
   const language = result.language?.toLowerCase() || 'code';
   const langColor =
     LANGUAGE_COLORS[language] || 'bg-sc-purple/20 text-sc-purple border-sc-purple/30';

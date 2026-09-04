@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
 from typing import cast
@@ -244,6 +244,31 @@ async def _raw_memory_with_save_embedding(
         else cast("EmbeddingProvider | None", embedding_provider)
     )
     return await _raw_memory_with_embedding(_raw_memory_without_embedding(memory), provider)
+
+
+_PROJECTION_STAMP_KEY = "projected_capture_id"
+
+
+def _with_projection_stamp(memory: RawMemory, existing_record: Mapping[str, object]) -> RawMemory:
+    """Carry the capture queue's projection stamp across a full-row save.
+
+    The API stamps metadata.projected_capture_id on the stored raw row when
+    its projection is archived. A job that loaded the RawMemory seconds
+    earlier and saves it back wholesale would otherwise erase the stamp,
+    and the queue would list the memory twice again with nothing left to
+    repair it.
+    """
+    if memory.metadata.get(_PROJECTION_STAMP_KEY):
+        return memory
+    existing_metadata = existing_record.get("metadata")
+    stamp = (
+        existing_metadata.get(_PROJECTION_STAMP_KEY)
+        if isinstance(existing_metadata, Mapping)
+        else None
+    )
+    if not stamp:
+        return memory
+    return replace(memory, metadata={**memory.metadata, _PROJECTION_STAMP_KEY: stamp})
 
 
 async def _raw_memory_prepared_for_save(
@@ -632,6 +657,7 @@ async def save_raw_memory(
                 record=models.raw_memory_record(memory),
             )
         else:
+            memory = _with_projection_stamp(memory, existing_record)
             update_record = models.raw_memory_record(memory)
             update_record.pop("revision", None)
             supersession = None

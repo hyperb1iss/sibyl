@@ -177,6 +177,8 @@ export interface TaskListResponse {
   entities: TaskSummary[];
   total: number;
   filters: Record<string, unknown>;
+  has_more?: boolean;
+  actual_total?: number | null;
 }
 
 export interface TaskSummary {
@@ -311,8 +313,16 @@ export interface CreateNoteRequest {
   author_name?: string;
 }
 
+/** Explore list pages are capped server-side at 1000 rows. */
+export const TASK_PAGE_SIZE = 1000;
+/** The cap an API from before 1.3.1 still enforces. */
+export const LEGACY_TASK_PAGE_SIZE = 200;
+
 export const tasksApi = {
-  list: (params?: { project?: string; project_ids?: string[]; status?: TaskStatus }) =>
+  list: (
+    params?: { project?: string; project_ids?: string[]; status?: TaskStatus },
+    page?: { limit?: number; offset?: number }
+  ) =>
     fetchApi<TaskListResponse>('/search/explore', {
       method: 'POST',
       body: JSON.stringify({
@@ -321,7 +331,8 @@ export const tasksApi = {
         project: params?.project,
         project_ids: params?.project_ids,
         status: params?.status,
-        limit: 200,
+        limit: page?.limit ?? TASK_PAGE_SIZE,
+        offset: page?.offset ?? 0,
       }),
     }),
 

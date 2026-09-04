@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Breadcrumb } from '@/components/layout/breadcrumb';
+import { useSetBreadcrumb } from '@/components/layout/breadcrumb';
 import { PageHeader } from '@/components/layout/page-header';
 import { EntityBadge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -115,6 +115,9 @@ export function RawCaptureReview({
   title = DEFAULT_TITLE,
   description = DEFAULT_DESCRIPTION,
 }: RawCaptureReviewProps) {
+  // The shell already renders the breadcrumb trail; feed it instead of
+  // painting a second one above the page header.
+  useSetBreadcrumb(breadcrumbItems);
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialLinkFilter = normalizeLinkFilter(searchParams.get('link'));
@@ -306,7 +309,6 @@ export function RawCaptureReview({
   if (error) {
     return (
       <div className="space-y-4">
-        <Breadcrumb items={breadcrumbItems} />
         <PageHeader title={title} description={description} />
         <ErrorState
           title="Failed to load captures"
@@ -319,7 +321,6 @@ export function RawCaptureReview({
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <Breadcrumb items={breadcrumbItems} />
         <PageHeader title={title} description={description} />
         <LoadingState message="Loading captures..." />
       </div>
@@ -329,7 +330,6 @@ export function RawCaptureReview({
   if (captures.length === 0) {
     return (
       <div className="space-y-4">
-        <Breadcrumb items={breadcrumbItems} />
         <PageHeader title={title} description={description} />
         <EnhancedEmptyState
           icon={<FileText width={40} height={40} className="text-sc-cyan" />}
@@ -343,8 +343,6 @@ export function RawCaptureReview({
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <Breadcrumb items={breadcrumbItems} />
-
       <PageHeader
         title={title}
         description={description}

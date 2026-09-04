@@ -9,6 +9,7 @@ import pytest
 from fastapi import HTTPException
 
 from sibyl.api.routes.entity_captures import (
+    archive_raw_capture,
     get_raw_capture,
     list_raw_captures,
     update_raw_capture_review_state,
@@ -289,3 +290,71 @@ async def test_update_raw_capture_review_state_hidden_for_other_user() -> None:
 
     assert exc.value.status_code == 404
     update_capture.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_archive_raw_capture_stamps_the_raw_memory_it_projects() -> None:
+    org_id = uuid4()
+    user_id = uuid4()
+    saved: list[RawCaptureRecord] = []
+
+    async def fake_save(_session, *, capture: RawCaptureRecord) -> RawCaptureRecord:
+        saved.append(capture)
+        return capture
+
+    mark = AsyncMock(return_value=True)
+    with (
+        patch("sibyl.api.routes.entity_captures.save_raw_capture_record", fake_save),
+        patch(
+            "sibyl.api.routes.entity_captures.content_runtime.mark_raw_capture_projected",
+            mark,
+        ),
+    ):
+        await archive_raw_capture(
+            None,
+            organization_id=org_id,
+            user_id=user_id,
+            entity_id="error_pattern_abc123",
+            entity_name="zsh pipeline trap",
+            entity_content="paste mid-pipeline swallows stray stdin",
+            entity_type="error_pattern",
+            tags=[],
+            metadata={"capture_mode": "remember", "raw_memory_id": "raw-1"},
+        )
+
+    assert len(saved) == 1
+    mark.assert_awaited_once_with(
+        None,
+        organization_id=org_id,
+        raw_capture_id="raw-1",
+        projected_capture_id=saved[0].id,
+        principal_id=str(user_id),
+    )
+
+
+@pytest.mark.asyncio
+async def test_archive_raw_capture_leaves_unprojected_quick_captures_alone() -> None:
+    mark = AsyncMock(return_value=True)
+    with (
+        patch(
+            "sibyl.api.routes.entity_captures.save_raw_capture_record",
+            AsyncMock(side_effect=lambda _session, *, capture: capture),
+        ),
+        patch(
+            "sibyl.api.routes.entity_captures.content_runtime.mark_raw_capture_projected",
+            mark,
+        ),
+    ):
+        await archive_raw_capture(
+            None,
+            organization_id=uuid4(),
+            user_id=None,
+            entity_id="note_1",
+            entity_name="quick note",
+            entity_content="body",
+            entity_type="note",
+            tags=[],
+            metadata={"capture_mode": "quick"},
+        )
+
+    mark.assert_not_awaited()

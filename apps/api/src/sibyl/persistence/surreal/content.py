@@ -1674,6 +1674,20 @@ async def count_remaining_unlinked_chunks(
         )
 
 
+# A `sibyl remember` archives the verbatim raw memory as a raw_memory capture
+# and then archives the projected graph entity as a second capture. Listing
+# both doubled every memory in the review queue. The projection write stamps
+# metadata.projected_capture_id on the raw row (see mark_raw_capture_projected
+# and the content_raw_capture_projection_fold migration for history), and the
+# list hides raw rows carrying that stamp. Raw rows that never projected still
+# surface, which is the "needs link" case the queue exists for. The stamp is a
+# plain column predicate on purpose: a join against the projection rows takes
+# seconds on SurrealDB 3.x at a few thousand captures.
+_PROJECTED_RAW_MEMORY_EXCLUSION = (
+    "NOT (entity_type = 'raw_memory' AND metadata.projected_capture_id IS NOT NONE)"
+)
+
+
 def _raw_capture_filter_clause(
     *,
     organization_id: UUID,
@@ -1718,6 +1732,7 @@ async def list_raw_captures(
         rows = await _select_many(
             client,
             f"SELECT * FROM raw_captures WHERE {where_clause} "  # noqa: S608
+            f"AND {_PROJECTED_RAW_MEMORY_EXCLUSION} "
             "ORDER BY created_at DESC, uuid DESC START $offset LIMIT $lookahead;",
             offset=max(offset, 0),
             lookahead=max(limit, 0) + 1,
@@ -1726,6 +1741,40 @@ async def list_raw_captures(
 
     captures = [_raw_capture_from_record(row) for row in rows]
     return captures[:limit], len(captures) > limit
+
+
+async def mark_raw_capture_projected(
+    _session: object,
+    *,
+    organization_id: UUID,
+    raw_capture_id: str,
+    projected_capture_id: UUID,
+    principal_id: str,
+) -> bool:
+    """Record that a raw memory now has a projected capture row.
+
+    The raw_memory_id arrives in the entity request body, so the stamp is
+    bound to the principal that wrote the raw row: a writer can only fold
+    their own memories. Returns True when the raw row was stamped, False
+    when it was already stamped, belongs to another organization or
+    principal, or is not a raw memory.
+    """
+    if not principal_id:
+        return False
+    async with surreal_content_client() as client:
+        rows = await _select_many(
+            client,
+            "UPDATE raw_captures SET metadata.projected_capture_id = $projected_capture_id "
+            "WHERE uuid = $raw_capture_id AND organization_id = $organization_id "
+            "AND principal_id = $principal_id "
+            "AND entity_type = 'raw_memory' AND metadata.projected_capture_id IS NONE "
+            "RETURN uuid;",
+            raw_capture_id=raw_capture_id,
+            organization_id=str(organization_id),
+            principal_id=principal_id,
+            projected_capture_id=str(projected_capture_id),
+        )
+    return len(rows) > 0
 
 
 async def get_raw_capture(

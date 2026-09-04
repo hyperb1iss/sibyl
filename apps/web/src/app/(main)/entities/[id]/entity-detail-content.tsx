@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { MetadataFields } from '@/components/entities/metadata-fields';
 import { RelatedEntitiesSection } from '@/components/entities/related-entities-section';
 import { EntityBreadcrumb } from '@/components/layout/breadcrumb';
 import { EntityBadge } from '@/components/ui/badge';
@@ -19,6 +20,19 @@ import { useDeleteEntity, useEntity, useUpdateEntity } from '@/lib/hooks';
 
 interface EntityDetailContentProps {
   initialEntity: Entity;
+}
+
+const TRAILING_ELLIPSIS = /(\.{3}|\u2026)\s*$/;
+
+/** True when the description adds nothing the content does not already say. */
+export function descriptionRepeatsContent(
+  description: string | null | undefined,
+  content: string | null | undefined
+): boolean {
+  const body = content?.trim() ?? '';
+  const preview = (description ?? '').trim().replace(TRAILING_ELLIPSIS, '').trim();
+  if (!body || !preview) return false;
+  return body === preview || body.startsWith(preview);
 }
 
 export function EntityDetailContent({ initialEntity }: EntityDetailContentProps) {
@@ -39,6 +53,13 @@ export function EntityDetailContent({ initialEntity }: EntityDetailContentProps)
   // Use entity from query (may be more up-to-date) or fall back to initial
   const currentEntity = entity ?? initialEntity;
   const color = getEntityColorVar(currentEntity.entity_type);
+
+  // Projected memories carry the same text in description and content, or a
+  // truncated preview of the content as the description. Painting both stacks
+  // the same paragraph twice, so collapse to one card when the description is
+  // the content or a prefix of it (edit mode keeps both fields addressable).
+  const showDescriptionCard =
+    isEditing || !descriptionRepeatsContent(currentEntity.description, currentEntity.content);
 
   const handleStartEdit = () => {
     setEditedName(currentEntity.name);
@@ -155,21 +176,23 @@ export function EntityDetailContent({ initialEntity }: EntityDetailContentProps)
         {/* Content Section */}
         <div className="lg:col-span-2 space-y-6">
           {/* Description */}
-          <Card>
-            <h2 className="text-lg font-semibold text-sc-fg-primary mb-4">Description</h2>
-            {isEditing ? (
-              <Textarea
-                value={editedDescription}
-                onChange={e => setEditedDescription(e.target.value)}
-                rows={3}
-                placeholder="Enter description..."
-              />
-            ) : currentEntity.description ? (
-              <Markdown content={currentEntity.description} />
-            ) : (
-              <p className="text-sc-fg-muted italic">No description available</p>
-            )}
-          </Card>
+          {showDescriptionCard && (
+            <Card>
+              <h2 className="text-lg font-semibold text-sc-fg-primary mb-4">Description</h2>
+              {isEditing ? (
+                <Textarea
+                  value={editedDescription}
+                  onChange={e => setEditedDescription(e.target.value)}
+                  rows={3}
+                  placeholder="Enter description..."
+                />
+              ) : currentEntity.description ? (
+                <Markdown content={currentEntity.description} />
+              ) : (
+                <p className="text-sc-fg-muted italic">No description available</p>
+              )}
+            </Card>
+          )}
 
           {/* Content */}
           <Card>
@@ -250,9 +273,7 @@ export function EntityDetailContent({ initialEntity }: EntityDetailContentProps)
           {currentEntity.metadata && Object.keys(currentEntity.metadata).length > 0 && (
             <Card>
               <h2 className="text-lg font-semibold text-sc-fg-primary mb-4">Metadata</h2>
-              <pre className="rounded-lg border border-sc-fg-subtle/20 bg-sc-bg-highlight p-3 font-mono text-xs text-sc-fg-muted whitespace-pre-wrap overflow-x-auto">
-                {JSON.stringify(currentEntity.metadata, null, 2)}
-              </pre>
+              <MetadataFields metadata={currentEntity.metadata} />
             </Card>
           )}
         </div>

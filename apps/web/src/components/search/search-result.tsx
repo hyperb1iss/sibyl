@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { EntityBadge } from '@/components/ui/badge';
 import { ExternalLink } from '@/components/ui/icons';
 import { ENTITY_ICONS, type EntityType, getEntityStyles } from '@/lib/constants/entities';
+import { formatScorePercent } from '@/lib/constants/formatting';
 import { getSearchResultHref } from '@/lib/search-links';
 
 interface SearchResult {
@@ -56,7 +57,7 @@ function HighlightedText({ value }: { value: string }) {
 export function SearchResultCard({ result }: SearchResultCardProps) {
   const styles = getEntityStyles(result.type);
   const icon = ENTITY_ICONS[result.type as EntityType] ?? '◇';
-  const scorePercent = Math.round(result.score * 100);
+  const scorePercent = formatScorePercent(result.score);
 
   const externalUrl = result.url;
   const href = getSearchResultHref(result);

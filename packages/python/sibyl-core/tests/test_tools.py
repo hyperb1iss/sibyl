@@ -3050,10 +3050,66 @@ class TestExploreTool:
         ):
             response = await explore(
                 mode="list",
-                limit=300,  # Over max of 200
+                limit=3000,  # Over max of 1000
                 organization_id="org_123",
             )
-            assert response.limit == 200
+            assert response.limit == 1000
+
+    @pytest.mark.asyncio
+    async def test_explore_list_reports_more_when_the_fetch_window_is_full(self) -> None:
+        """A full over-fetch window means rows past it were never filtered."""
+        from sibyl_core.tools.explore import explore
+
+        def task(index: int, project_id: str) -> MockEntity:
+            return MockEntity(
+                id=f"task_{project_id}_{index}",
+                entity_type=EntityType.TASK,
+                name=f"Task {index}",
+                metadata={"project_id": project_id, "status": "todo"},
+                project_id=project_id,
+            )
+
+        # limit 2 + offset 0 + 50 = a 52-row window; 51 rows fall to the
+        # client-side project filter, so the page holds one task even though
+        # the table may hold hundreds more past the window.
+        window = [task(0, "project_a"), *[task(i, "project_other") for i in range(1, 52)]]
+        mock_entity_manager = AsyncMock()
+        mock_entity_manager.list_by_type = AsyncMock(return_value=window)
+
+        with patch(
+            "sibyl_core.tools.explore.get_graph_runtime",
+            AsyncMock(return_value=make_graph_runtime(entity_manager=mock_entity_manager)),
+        ):
+            response = await explore(
+                mode="list",
+                types=["task"],
+                project_ids=["project_a", "project_b"],
+                limit=2,
+                organization_id="org_123",
+                principal_id="reader-1",
+                accessible_projects={"project_a", "project_b", "project_other"},
+            )
+
+        assert [entity.id for entity in response.entities] == ["task_project_a_0"]
+        assert response.has_more is True
+
+        # One row short of the window: the filter saw everything, nothing more.
+        mock_entity_manager.list_by_type = AsyncMock(return_value=window[:-1])
+        with patch(
+            "sibyl_core.tools.explore.get_graph_runtime",
+            AsyncMock(return_value=make_graph_runtime(entity_manager=mock_entity_manager)),
+        ):
+            response = await explore(
+                mode="list",
+                types=["task"],
+                project_ids=["project_a", "project_b"],
+                limit=2,
+                organization_id="org_123",
+                principal_id="reader-1",
+                accessible_projects={"project_a", "project_b", "project_other"},
+            )
+
+        assert response.has_more is False
 
     @pytest.mark.asyncio
     async def test_explore_clamps_depth(self) -> None:
