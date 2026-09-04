@@ -9,6 +9,7 @@ toolchains:
 fileGroups:
   sources:
     - src/**/*
+    - scripts/**/*
   tests:
     - src/**/*.test.{ts,tsx}
     - src/**/*.spec.{ts,tsx}
@@ -54,9 +55,30 @@ tasks:
   # Testing
   test:
     command: pnpm vitest run
+    deps:
+      - ~:capture-showcase-test
     inputs:
       - "@group(sources)"
       - "@group(tests)"
+
+  capture-showcase-test:
+    command: node --test scripts/capture-showcase.test.mjs
+    inputs:
+      - scripts/capture-showcase.mjs
+      - scripts/capture-showcase.test.mjs
+
+  capture-showcase:
+    command: node scripts/capture-showcase.mjs
+    deps:
+      - root:showcase-seed
+    inputs:
+      - scripts/capture-showcase.mjs
+      - scripts/capture-showcase.test.mjs
+      - /tools/showcase/**/*.py
+      - /docs/SCREENSHOTS_NEEDED.md
+    options:
+      cache: false
+      runInCI: false
 
   overview-perf-test:
     command: pnpm vitest run 'src/app/(main)/dashboard-content.test.tsx' src/lib/api-server.test.ts
@@ -110,6 +132,9 @@ tasks:
 
   test-cov:
     command: pnpm vitest run --coverage
+    deps:
+      - root:showcase-test
+      - ~:capture-showcase-test
     inputs:
       - "@group(sources)"
       - "@group(tests)"

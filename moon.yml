@@ -227,6 +227,7 @@ tasks:
       - ~:storage-access-check
       - ~:storage-access-test
       - ~:baseline-test
+      - ~:showcase-test
       - ~:memory-trust-gate-test
       - ~:usage-loop-gate-test
       - ~:trust-control-gate-test
@@ -266,6 +267,7 @@ tasks:
       - ~:chaos-test
       - ~:storage-access-test
       - ~:baseline-test
+      - ~:showcase-test
       - ~:memory-trust-gate-test
       - ~:usage-loop-gate-test
       - ~:trust-control-gate-test
@@ -1250,6 +1252,30 @@ tasks:
       - .github/workflows/eval.yml
       - .github/workflows/nightly-regression.yml
       - pyproject.toml
+
+  showcase-seed:
+    command: uv run python -m tools.showcase.seed
+    inputs:
+      - tools/showcase/**/*.py
+      - tools/baselines/common.py
+      - apps/api/src/**/*.py
+      - packages/python/sibyl-core/src/**/*.py
+      - pyproject.toml
+      - apps/api/pyproject.toml
+      - packages/python/sibyl-core/pyproject.toml
+    outputs:
+      - .moon/cache/showcase-runtime-manifest.json
+    options:
+      cache: false
+
+  showcase-test:
+    command: uv run pytest tools/tests/test_showcase.py -v
+    inputs:
+      - tools/showcase/**/*.py
+      - tools/tests/conftest.py
+      - tools/tests/test_showcase.py
+      - pyproject.toml
+      - moon.yml
 
   memory-trust-gate:
     command: uv run python -m tools.trust.memory_trust_gate
