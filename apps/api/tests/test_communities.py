@@ -577,6 +577,68 @@ class TestHierarchicalGraph:
         assert drilled.overview is None
 
     @pytest.mark.asyncio
+    async def test_overview_skips_communities_isolated_inside_the_focus(
+        self,
+        mock_client: MagicMock,
+    ) -> None:
+        def project_task(entity_id: str, project_id: str) -> Entity:
+            return Entity(
+                id=entity_id,
+                name=entity_id,
+                entity_type=EntityType.TASK,
+                metadata={"project_id": project_id},
+            )
+
+        # A four-cycle inside project A, plus one project A task whose only
+        # edge leads to project B. Detection runs on the whole graph, so that
+        # pair forms a community of its own; inside the project A focus its
+        # one member has no edge at all.
+        entities = [
+            project_task("task-1", "proj-a"),
+            project_task("task-2", "proj-a"),
+            project_task("task-3", "proj-a"),
+            project_task("task-4", "proj-a"),
+            project_task("task-5", "proj-a"),
+            project_task("task-6", "proj-b"),
+        ]
+        relationships = [
+            _make_relationship("r1", "task-1", "task-2"),
+            _make_relationship("r2", "task-2", "task-3"),
+            _make_relationship("r3", "task-3", "task-4"),
+            _make_relationship("r4", "task-4", "task-1"),
+            _make_relationship("r5", "task-5", "task-6"),
+        ]
+
+        with (
+            patch(
+                "sibyl_core.services.graph_community_snapshot._list_all_entities",
+                AsyncMock(return_value=entities),
+            ),
+            patch(
+                "sibyl_core.services.graph_community_snapshot._list_all_relationships",
+                AsyncMock(return_value=relationships),
+            ),
+        ):
+            communities.HIERARCHICAL_CACHE.clear()
+            communities.GRAPH_LOD_CACHE.clear()
+            communities.GRAPH_SNAPSHOT_CACHE.clear()
+            detail = await get_hierarchical_graph(
+                mock_client,
+                TEST_ORG_ID,
+                resolution="detail",
+                project_ids=["proj-a"],
+                principal_id="reader",
+                accessible_projects={"proj-a", "proj-b"},
+            )
+
+        assert detail.overview is not None
+        assert {node["id"] for node in detail.nodes} == {"task-1", "task-2", "task-3", "task-4"}
+        bubble_ids = {node["cluster_id"] for node in detail.overview.nodes}
+        assert bubble_ids
+        assert bubble_ids <= {cluster["id"] for cluster in detail.clusters}
+        assert all(node["member_count"] >= 2 for node in detail.overview.nodes)
+
+    @pytest.mark.asyncio
     async def test_prefers_connected_nodes_and_reuses_snapshot(
         self,
         mock_client: MagicMock,

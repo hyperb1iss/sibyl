@@ -35,6 +35,11 @@ const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), {
 
 /** Smallest a bubble paints on screen, so its count stays legible far out. */
 const MIN_BUBBLE_SCREEN_RADIUS = 12;
+/** Largest an entity paints on screen, so a close zoom shows labels, not discs. */
+const MAX_NODE_SCREEN_RADIUS = 16;
+const MAX_PROJECT_SCREEN_RADIUS = 24;
+/** Room the fit leaves around the spot an open domain's bubble occupied. */
+const ANCHOR_FIT_RADIUS = 40;
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 10;
 
@@ -167,6 +172,10 @@ export const GraphCanvas = forwardRef<KnowledgeGraphRef, GraphCanvasProps>(funct
     interactedRef.current = false;
     levelZoomRef.current = 1;
     fitLogRef.current = [];
+    if (flightRef.current !== null) {
+      window.clearTimeout(flightRef.current);
+      flightRef.current = null;
+    }
   }, [graphRenderKey]);
 
   // Forces are configured once per mounted instance. Every strength is a
@@ -258,9 +267,12 @@ export const GraphCanvas = forwardRef<KnowledgeGraphRef, GraphCanvasProps>(funct
     interactedRef.current = true;
   }, []);
 
-  // The camera that frames every node currently on the canvas, capped so the
-  // largest bubble stays under its opening radius: a fit that opened a domain
-  // by itself would make the map impossible to return to.
+  // The camera that frames the domain map, capped so the largest bubble
+  // stays under its opening radius: a fit that opened a domain by itself
+  // would make the map impossible to return to. An open cluster contributes
+  // the spot its bubble occupied (its members' anchor) rather than the
+  // spread of its members, so the fit means the same thing whether or not
+  // anything is open and never has to wait for a collapse to land.
   const computeFit = useCallback((): CameraTarget | null => {
     const element = canvasWrapperRef.current;
     if (!element) return null;
@@ -273,12 +285,21 @@ export const GraphCanvas = forwardRef<KnowledgeGraphRef, GraphCanvasProps>(funct
     let maxX = Number.NEGATIVE_INFINITY;
     let maxY = Number.NEGATIVE_INFINITY;
     for (const node of graphDataRef.current.nodes) {
-      if (node.x === undefined || node.y === undefined) continue;
-      const radius = node.aggregate ? clusterRadius(node.member_count || 1) : 8;
-      minX = Math.min(minX, node.x - radius);
-      minY = Math.min(minY, node.y - radius);
-      maxX = Math.max(maxX, node.x + radius);
-      maxY = Math.max(maxY, node.y + radius);
+      let x = node.x;
+      let y = node.y;
+      let radius = 8;
+      if (node.aggregate) {
+        radius = clusterRadius(node.member_count || 1);
+      } else if (node.clusterAnchor) {
+        x = node.clusterAnchor.x;
+        y = node.clusterAnchor.y;
+        radius = ANCHOR_FIT_RADIUS;
+      }
+      if (x === undefined || y === undefined) continue;
+      minX = Math.min(minX, x - radius);
+      minY = Math.min(minY, y - radius);
+      maxX = Math.max(maxX, x + radius);
+      maxY = Math.max(maxY, y + radius);
     }
     if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
 
@@ -450,6 +471,13 @@ export const GraphCanvas = forwardRef<KnowledgeGraphRef, GraphCanvasProps>(funct
         size = 4 + combinedScale * 8; // Smaller context nodes
       } else {
         size = 5 + combinedScale * 12;
+      }
+      // Entities are sized in graph units for the layout; on screen they stop
+      // growing once the camera is close, so a deep zoom reads as labels with
+      // room between them rather than overlapping discs.
+      if (!isAggregate) {
+        const cap = isProject ? MAX_PROJECT_SCREEN_RADIUS : MAX_NODE_SCREEN_RADIUS;
+        size = Math.min(size, cap / globalScale);
       }
 
       const isDawn = theme === 'dawn';
@@ -707,18 +735,17 @@ export const GraphCanvas = forwardRef<KnowledgeGraphRef, GraphCanvasProps>(funct
         // radius, so the pin and the zoom agree about what the reader sees.
         const opening =
           (SEMANTIC_ZOOM.EXPAND_SCREEN_RADIUS / clusterRadius(node.member_count || 1)) * 1.2;
-        graph.centerAt(node.x, node.y, 800);
-        graph.zoom(Math.min(Math.max(graph.zoom(), opening), MAX_ZOOM), 800);
+        const k = Math.min(Math.max(graph.zoom(), opening), MAX_ZOOM);
+        flyTo({ k, x: node.x, y: node.y }, 800, 'bubble');
         return;
       }
 
       if (selectedNodeId === node.id) return;
-      graph.centerAt(node.x, node.y, 800);
       // An entity is read at a zoom where its label and neighbours fit.
-      const readable = (fitZoomRef.current ?? 1) * 6;
-      if (graph.zoom() < readable) graph.zoom(Math.min(readable, MAX_ZOOM), 800);
+      const readable = Math.min((fitZoomRef.current ?? 1) * 6, MAX_ZOOM);
+      flyTo({ k: Math.max(graph.zoom(), readable), x: node.x, y: node.y }, 800, 'entity');
     },
-    [onNodeClick, selectedNodeId]
+    [onNodeClick, selectedNodeId, flyTo]
   );
 
   const zoomIn = useCallback(() => {
@@ -747,20 +774,12 @@ export const GraphCanvas = forwardRef<KnowledgeGraphRef, GraphCanvasProps>(funct
       if (!graph) return;
       interactedRef.current = true;
       if (level === 'domains') {
-        // Two steps. First back to the recorded domain fit, which drops the
-        // zoom under every threshold and folds the open clusters; a fresh fit
-        // of what is open right now would frame the spread of their members
-        // instead. Then, once the bubbles are back, a fit of the map as it
-        // actually stands.
+        // The fit frames the map by bubble positions and anchors, so it is
+        // the same camera whether the clusters have folded yet or not.
         const target = computeFit();
         if (!target) return;
-        flyTo({ ...target, k: fitZoomRef.current ?? target.k }, 600, 'domains');
-        window.setTimeout(() => {
-          const settled = computeFit();
-          if (!settled) return;
-          fitZoomRef.current = settled.k;
-          flyTo(settled, 400, 'domains-settled');
-        }, 900);
+        fitZoomRef.current = target.k;
+        flyTo(target, 600, 'domains');
         return;
       }
       const entityZoom = zoomBoundsRef.current.entity;

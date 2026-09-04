@@ -302,7 +302,10 @@ export function buildSemanticGraphData({
     else if (raw.type === 'task') zIndex += 50;
     if (isSearchMatch) zIndex += 2000;
 
-    const node: GraphNode = cached ?? { ...raw };
+    // A cached object keeps its position and velocity; everything the
+    // response says about the node is refreshed, so a bubble that survives a
+    // rebuild paints the count and name the current payload gives it.
+    const node: GraphNode = cached ? Object.assign(cached, raw) : { ...raw };
     if (options.anchor) node.clusterAnchor = options.anchor;
     node.degree = nodeDegree;
     node.clusterColor = clusterColorMap.get(raw.cluster_id) || '#8b85a0';

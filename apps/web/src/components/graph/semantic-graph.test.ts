@@ -253,6 +253,36 @@ describe('buildSemanticGraphData', () => {
     expect(toBubble).toHaveLength(2);
   });
 
+  it('refreshes what the payload says about a cached node', () => {
+    const cache = new Map<string, GraphNode>();
+    build([], cache);
+    const bubbleNode = cache.get('cluster:a');
+    if (!bubbleNode) throw new Error('expected bubble');
+    bubbleNode.x = 5;
+    bubbleNode.y = 7;
+
+    const renamed = source();
+    const aggregate = renamed.overview?.nodes.find(node => node.id === 'cluster:a');
+    if (!aggregate) throw new Error('expected aggregate');
+    aggregate.member_count = 12;
+    aggregate.label = 'Sibyl (filtered)';
+    const graph = buildSemanticGraphData({
+      source: renamed,
+      clusters: collectClusters(renamed),
+      expanded: new Set(),
+      satellites: new Set(),
+      clusterColorMap: COLORS,
+      searchTerm: '',
+      nodeCache: cache,
+    });
+
+    const again = graph.nodes.find(node => node.id === 'cluster:a');
+    expect(again).toBe(bubbleNode);
+    expect(again?.member_count).toBe(12);
+    expect(again?.label).toBe('Sibyl (filtered)');
+    expect(again?.x).toBe(5);
+  });
+
   it('keeps node objects across rebuilds so the layout survives', () => {
     const cache = new Map<string, GraphNode>();
     const first = build(['a'], cache);

@@ -19,6 +19,9 @@ import {
   zoomLevelName,
 } from './semantic-zoom';
 
+const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>) =>
+  a.size === b.size && [...a].every(id => b.has(id));
+
 export function useGraphPageState(theme: Theme) {
   const { selectedProjects } = useProjectContext();
   const { data: projectsData } = useProjects();
@@ -99,17 +102,20 @@ export function useGraphPageState(theme: Theme) {
   // cluster_id, and inside it the domain map built from the same community
   // run. Fetching the map separately let the two straddle a cache refresh
   // and describe different clusterings, which no client rule can reconcile.
-  const {
-    data,
-    isLoading,
-    error: graphError,
-  } = useHierarchicalGraph({
+  const query = useHierarchicalGraph({
     max_nodes: GRAPH_DEFAULTS.SEMANTIC_MAX_NODES,
     max_edges: GRAPH_DEFAULTS.MAX_EDGES,
     projects: projectFilter,
     types: selectedTypes.length > 0 ? selectedTypes : undefined,
     resolution: 'detail',
   });
+  // The query keeps the previous filter's payload as placeholder data while
+  // the next one loads. Rendering it under the new key would lay out and pin
+  // the old map, and the new one would then inherit its positions and its
+  // bubble counts, so a filter change shows the loading state instead.
+  const data = query.isPlaceholderData ? undefined : query.data;
+  const isLoading = query.isLoading || Boolean(query.isPlaceholderData);
+  const graphError = query.error;
   const detailData = data;
   const hierarchySource = useMemo(() => {
     const overview = detailData?.overview;
@@ -187,9 +193,6 @@ export function useGraphPageState(theme: Theme) {
     expandedRef.current = expandedClusters;
     satellitesRef.current = satelliteHosts;
   }, [expandedClusters, satelliteHosts]);
-
-  const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>) =>
-    a.size === b.size && [...a].every(id => b.has(id));
 
   const handleViewportChange = useCallback(
     (zoom: number, viewport: Viewport | null) => {

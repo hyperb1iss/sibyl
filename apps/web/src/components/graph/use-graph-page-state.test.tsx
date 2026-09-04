@@ -147,6 +147,19 @@ describe('useGraphPageState', () => {
     await waitFor(() => expect(result.current.zoomLevel).not.toBe('domains'));
   });
 
+  it('shows the loading state instead of the previous filter payload', () => {
+    mocks.useHierarchicalGraph.mockReturnValue({
+      data: withOverview,
+      isLoading: false,
+      isPlaceholderData: true,
+      error: null,
+    });
+    const { result } = renderHook(() => useGraphPageState('neon'));
+
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.graphData.nodes).toHaveLength(0);
+  });
+
   it('derives the level jumps from the bubbles on the map', () => {
     const { result } = renderHook(() => useGraphPageState('neon'));
 
