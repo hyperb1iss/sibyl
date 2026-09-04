@@ -1,7 +1,5 @@
 """Public HTTP client contract for the Sibyl CLI."""
 
-import os
-
 import httpx
 
 from sibyl_cli.auth_store import normalize_api_url
@@ -25,6 +23,7 @@ from sibyl_cli.client_transport import (
     SibylClientError,
     _auth_credential_scope,
     _auth_replay_scope,
+    _environment_auth_token,
     _is_read_like_post,
     _is_refresh_revoked,
     _load_default_auth_token,
@@ -93,7 +92,7 @@ class SibylClient(
         )
         self.timeout = timeout
         self._uses_stored_auth = (
-            auth_token is None and not os.environ.get("SIBYL_AUTH_TOKEN", "").strip()
+            auth_token is None and _environment_auth_token(self.base_url) is None
         )
         self.auth_token = (
             auth_token
@@ -140,10 +139,15 @@ def get_client(context_name: str | None = None) -> SibylClient:
     global _clients
 
     # Resolve the effective context when one isn't explicitly provided.
-    if context_name is None and _paired_automation_api_url() is None:
+    if context_name is None:
         from sibyl_cli import config_store
+        from sibyl_cli.state import get_context_override
 
-        context_name = config_store.resolve_context_name()
+        context_name = (
+            get_context_override()
+            if _paired_automation_api_url()
+            else config_store.resolve_context_name()
+        )
 
     cache_key = context_name
 

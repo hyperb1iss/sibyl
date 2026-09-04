@@ -387,6 +387,7 @@ async def test_environment_token_scope_overrides_active_context_scope(
 ) -> None:
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
     monkeypatch.setattr(client_transport_module, "AUTO_REPLAY_GRACE_SECONDS", 0.0)
+    monkeypatch.delenv("SIBYL_API_URL", raising=False)
     monkeypatch.setenv("SIBYL_AUTH_TOKEN", "automation-token")
     monkeypatch.setattr(
         client_module,

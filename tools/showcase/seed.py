@@ -19,6 +19,7 @@ import httpx
 
 from sibyl_cli import config_store
 from sibyl_cli.client import SibylClient, SibylClientError
+from sibyl_cli.client_transport import _environment_auth_token
 from tools.baselines.common import api_base_url, auth_headers, emit
 from tools.showcase.fixtures import (
     KNOWLEDGE,
@@ -136,8 +137,7 @@ def validate_fixture(terms: Iterable[str]) -> None:
 async def active_cli_token(base_url: str) -> str:
     """Load the active local CLI token without printing or persisting it elsewhere."""
     api_url = api_base_url(base_url)
-    env_token = os.getenv("SIBYL_AUTH_TOKEN", "").strip()
-    if env_token:
+    if env_token := _environment_auth_token(api_url):
         return env_token
 
     context = config_store.resolve_effective_context()
