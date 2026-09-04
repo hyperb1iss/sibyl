@@ -186,6 +186,14 @@ export function buildSemanticGraphData({
   const { overview, detail } = source;
   if (!overview && !detail) return EMPTY;
 
+  // A pin can outlive the sampled members after a refresh. Keep the bubble
+  // until the current response contains something to replace it with.
+  const openClusters = new Set(
+    clusters
+      .filter(cluster => cluster.hasBubble && cluster.loadedMembers > 0 && expanded.has(cluster.id))
+      .map(cluster => cluster.id)
+  );
+
   const bubbleByCluster = new Map<string, ResponseNode>();
   for (const node of overview?.nodes ?? []) {
     if (!node.aggregate) continue;
@@ -210,7 +218,7 @@ export function buildSemanticGraphData({
   // attached to it wait for the satellite stage. The loose-ends bubble has
   // nothing but satellites, so opening it shows them at once.
   const isDrawn = (node: ResponseNode, levelCluster: string): boolean => {
-    if (!expanded.has(levelCluster)) return false;
+    if (!openClusters.has(levelCluster)) return false;
     if (levelCluster === node.cluster_id || levelCluster === LOOSE_CLUSTER_ID) return true;
     return satellites.has(levelCluster);
   };
@@ -235,7 +243,7 @@ export function buildSemanticGraphData({
     // Hidden behind a closed bubble, the bubble stands in for it. Hidden
     // behind an open domain whose satellites are still folded, nothing does:
     // its edges wait for the next stage along with it.
-    if (expanded.has(levelCluster)) continue;
+    if (openClusters.has(levelCluster)) continue;
     const bubble = bubbleByCluster.get(levelCluster);
     if (bubble) {
       standIn.set(node.id, bubble.id);
@@ -246,7 +254,7 @@ export function buildSemanticGraphData({
   // A collapsed cluster whose members never made the detail sample still gets
   // its bubble: the summary is all there is to show for it.
   for (const [clusterId, bubble] of bubbleByCluster) {
-    if (!expanded.has(clusterId)) visibleNodeIds.add(bubble.id);
+    if (!openClusters.has(clusterId)) visibleNodeIds.add(bubble.id);
   }
 
   const degree = new Map<string, number>();
@@ -328,7 +336,7 @@ export function buildSemanticGraphData({
   }
 
   for (const [clusterId, bubble] of bubbleByCluster) {
-    if (expanded.has(clusterId)) continue;
+    if (openClusters.has(clusterId)) continue;
     if (!visibleNodeIds.has(bubble.id)) continue;
     emit(bubble, {});
   }

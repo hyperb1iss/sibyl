@@ -354,6 +354,28 @@ describe('buildSemanticGraphData', () => {
     expect(graph.maxDegree).toBe(3);
   });
 
+  it('keeps an unsampled domain and its overview edges visible despite a stale expansion', () => {
+    const hierarchy = {
+      overview: response(
+        [bubble('a', 900), bubble('b', 40)],
+        [{ source: 'cluster:a', target: 'cluster:b' }]
+      ),
+      detail: response([member('b1', 'b')], []),
+    };
+    const graph = buildSemanticGraphData({
+      source: hierarchy,
+      clusters: collectClusters(hierarchy),
+      expanded: new Set(['a']),
+      satellites: new Set(['a']),
+      clusterColorMap: COLORS,
+      searchTerm: '',
+      nodeCache: new Map(),
+    });
+
+    expect(ids(graph)).toEqual(['cluster:a', 'cluster:b']);
+    expect(graph.links).toEqual([{ source: 'cluster:a', target: 'cluster:b', type: 'relates_to' }]);
+  });
+
   it('returns an empty graph when neither level has loaded', () => {
     const graph = buildSemanticGraphData({
       source: { overview: undefined, detail: undefined },

@@ -108,6 +108,27 @@ describe('useGraphPageState', () => {
     });
   });
 
+  it.each(['bubble', 'legend'])(
+    'keeps unsampled domains visible when clicked through the %s',
+    target => {
+      mocks.useHierarchicalGraph.mockReturnValue({
+        data: { ...withOverview, nodes: [] },
+        isLoading: false,
+        error: null,
+      });
+      const { result } = renderHook(() => useGraphPageState('neon'));
+
+      act(() => {
+        if (target === 'bubble') result.current.handleNodeClick(result.current.graphData.nodes[0]);
+        else result.current.handleClusterClick('cluster-a');
+      });
+      act(() => result.current.handleViewportChange(10, null));
+
+      expect(result.current.expandedClusters.size).toBe(0);
+      expect(result.current.graphData.nodes.map(node => node.id)).toEqual(['cluster:cluster-a']);
+    }
+  );
+
   it('clears cluster and node focus when entity filters change', async () => {
     const { result } = renderHook(() => useGraphPageState('neon'));
 

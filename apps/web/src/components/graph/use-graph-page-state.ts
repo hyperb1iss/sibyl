@@ -270,6 +270,7 @@ export function useGraphPageState(theme: Theme) {
     (clusterId: string) => {
       const cluster = semanticClusters.find(item => item.id === clusterId);
       const target = cluster?.host ?? clusterId;
+      if (!expandableClusters.some(item => item.id === target)) return;
       setPinnedClusters(previous => {
         const next = new Set(previous);
         next.add(target);
@@ -288,7 +289,7 @@ export function useGraphPageState(theme: Theme) {
         return next;
       });
     },
-    [semanticClusters]
+    [semanticClusters, expandableClusters]
   );
 
   const handleNodeClick = useCallback(
