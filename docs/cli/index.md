@@ -163,11 +163,11 @@ sibyl task list --csv > tasks.csv            # CSV export
 
 ## Environment Variables
 
-| Variable             | Description                       | Example                     |
-| -------------------- | --------------------------------- | --------------------------- |
-| `SIBYL_CONTEXT`      | Named context (server/org bundle) | `prod`                      |
-| `SIBYL_API_URL`      | Server URL (legacy)               | `http://localhost:3334/api` |
-| `SIBYL_ACCESS_TOKEN` | Auth token (rarely needed)        | `eyJhbG...`                 |
+| Variable           | Description                       | Example                     |
+| ------------------ | --------------------------------- | --------------------------- |
+| `SIBYL_CONTEXT`    | Named context (server/org bundle) | `prod`                      |
+| `SIBYL_API_URL`    | Server URL (legacy)               | `http://localhost:3334/api` |
+| `SIBYL_AUTH_TOKEN` | Auth token (rarely needed)        | `eyJhbG...`                 |
 
 `SIBYL_CONTEXT` names a context created with `sibyl config context create`, not a project ID. A name
 with no matching context is a hard error: the command stops instead of quietly running against the
