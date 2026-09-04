@@ -70,9 +70,14 @@ class TestFrontendBrowserContracts:
         assert_path(authenticated_page, "/graph")
 
         expect(authenticated_page.locator("canvas")).to_be_visible(timeout=20_000)
-        detail_toggle = authenticated_page.get_by_role("button", name="Detail", exact=True)
-        detail_toggle.click()
-        expect(detail_toggle).to_have_attribute("aria-pressed", "true")
+        # Zoom drives the level of detail; the toolbar buttons jump between
+        # levels. Which level a seeded graph lands on depends on whether it is
+        # big enough to form domains, so the stable contract is that jumping
+        # to entities leaves the domain map behind.
+        entities_jump = authenticated_page.get_by_role("button", name="Entities", exact=True)
+        domains_jump = authenticated_page.get_by_role("button", name="Domains", exact=True)
+        entities_jump.click()
+        expect(domains_jump).to_have_attribute("aria-pressed", "false")
         expect(authenticated_page.get_by_placeholder("Search nodes...")).to_be_visible()
 
     def test_global_search_renders_seeded_result(

@@ -113,6 +113,16 @@ export interface HierarchicalGraphResponse {
   displayed_edges?: number;
   resolution?: GraphResolution;
   recommended_resolution?: GraphResolution;
+  /**
+   * The domain map built from the same community run, present on a
+   * whole-graph detail response. Semantic zoom composes both levels from
+   * this one payload so their cluster ids always agree.
+   */
+  overview?: {
+    nodes: HierarchicalNode[];
+    edges: HierarchicalEdge[];
+    clusters: HierarchicalCluster[];
+  } | null;
 }
 
 export const entitiesApi = {

@@ -39,6 +39,15 @@ function GraphPageContent() {
   const handleZoomIn = useCallback(() => graphRef.current?.zoomIn(), []);
   const handleZoomOut = useCallback(() => graphRef.current?.zoomOut(), []);
   const handleFitView = useCallback(() => graphRef.current?.fitView(), []);
+  const handleJumpToLevel = useCallback(
+    (level: 'domains' | 'entities') => {
+      // Jumping to the domain map means the whole map: pins the reader left
+      // open would otherwise hold their clusters open underneath it.
+      if (level === 'domains') graph.clearCluster();
+      graphRef.current?.zoomToLevel(level);
+    },
+    [graph.clearCluster]
+  );
 
   const handleReset = useCallback(() => {
     graphRef.current?.resetView();
@@ -71,8 +80,8 @@ function GraphPageContent() {
           suppressHydrationWarning
         >
           <GraphToolbar
-            resolution={graph.graphResolution}
-            onResolutionChange={graph.handleResolutionChange}
+            zoomLevel={graph.zoomLevel}
+            onJumpToLevel={handleJumpToLevel}
             selectedClusterLabel={graph.selectedClusterLabel}
             onClearCluster={graph.clearCluster}
             onZoomIn={handleZoomIn}
@@ -102,8 +111,8 @@ function GraphPageContent() {
             <StatsOverlay
               totalNodes={graph.data.total_nodes}
               totalEdges={graph.data.total_edges}
-              displayedNodes={graph.data.displayed_nodes ?? nodeCount}
-              displayedEdges={graph.data.displayed_edges ?? edgeCount}
+              displayedNodes={nodeCount}
+              displayedEdges={edgeCount}
               clusterCount={graph.data.clusters.length}
             />
           )}
@@ -112,9 +121,10 @@ function GraphPageContent() {
             ref={graphRef}
             graphData={graph.graphData}
             graphRenderKey={graph.graphRenderKey}
-            fitKey={graph.fitKey}
             filterKey={graph.filterKey}
-            resolution={graph.graphResolution}
+            expandedClusterLabels={graph.expandedClusterLabels}
+            zoomBounds={graph.zoomBounds}
+            onViewportChange={graph.handleViewportChange}
             selectedNodeId={graph.selectedNodeId}
             colors={colors}
             theme={theme}

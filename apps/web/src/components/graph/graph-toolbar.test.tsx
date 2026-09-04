@@ -4,8 +4,8 @@ import { GraphToolbar } from './graph-toolbar';
 
 function toolbarProps() {
   return {
-    resolution: 'detail' as const,
-    onResolutionChange: vi.fn(),
+    zoomLevel: 'entities' as const,
+    onJumpToLevel: vi.fn(),
     onZoomIn: vi.fn(),
     onZoomOut: vi.fn(),
     onFitView: vi.fn(),
@@ -27,16 +27,16 @@ describe('GraphToolbar', () => {
     vi.clearAllMocks();
   });
 
-  it('forwards resolution, search, and view controls', async () => {
+  it('forwards level, search, and view controls', async () => {
     const props = toolbarProps();
     const { user } = render(<GraphToolbar {...props} />);
 
-    await user.click(screen.getByRole('button', { name: 'Overview' }));
+    await user.click(screen.getByRole('button', { name: 'Domains' }));
     await user.type(screen.getByPlaceholderText('Search nodes...'), 'sibyl');
     await user.click(screen.getByTitle('Zoom in'));
     await user.click(screen.getByTitle('Reset view'));
 
-    expect(props.onResolutionChange).toHaveBeenCalledWith('overview');
+    expect(props.onJumpToLevel).toHaveBeenCalledWith('domains');
     expect(props.onSearchChange).toHaveBeenCalledTimes(5);
     expect(props.onZoomIn).toHaveBeenCalledOnce();
     expect(props.onReset).toHaveBeenCalledOnce();

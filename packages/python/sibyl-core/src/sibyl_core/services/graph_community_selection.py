@@ -630,14 +630,19 @@ def _build_overview_graph_from_snapshot(
         entity_type = entity.entity_type.value
         type_counts[entity_type] = type_counts.get(entity_type, 0) + 1
 
-    # Map the largest real communities only — exclude the unclustered remainder
+    # Map the largest real communities only: exclude the unclustered remainder
     # and the long tail of tiny communities so the overview reads as a clean
-    # domain map, not a field of dots.
+    # domain map, not a field of dots. A community whose focused members are
+    # all isolated inside the focus (their edges lead out of it) is excluded
+    # too: the detail sample and the totals keep only connected nodes, so a
+    # bubble for it would stand for nothing the detail can ever show. Member
+    # counts still cover the whole focused membership, matching the legend.
     ranked_clusters = sorted(
         (
             (cluster_id, members)
             for cluster_id, members in members_by_cluster.items()
             if cluster_id != "unclustered"
+            and any(degrees.get(member_id, 0) > 0 for member_id in members)
         ),
         key=lambda item: len(item[1]),
         reverse=True,

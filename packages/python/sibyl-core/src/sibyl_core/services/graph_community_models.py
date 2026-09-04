@@ -33,6 +33,17 @@ class ClusterSummary:
 
 
 @dataclass
+class OverviewLevel:
+    """The domain map: one aggregate bubble per large community plus the
+    edges between them. Carried inside a detail response so a client that
+    composes both levels always pairs them from the same community run."""
+
+    nodes: list[dict[str, Any]]
+    edges: list[dict[str, Any]]
+    clusters: list[dict[str, Any]]
+
+
+@dataclass
 class HierarchicalGraphData:
     """Graph data with cluster assignments for rich visualization.
 
@@ -53,6 +64,9 @@ class HierarchicalGraphData:
     displayed_edges: int  # How many we're sending to UI
     resolution: str = GRAPH_RESOLUTION_DETAIL
     recommended_resolution: str = GRAPH_RESOLUTION_DETAIL  # server hint for initial mode
+    # Present on a whole-graph detail response: the overview built from the
+    # same snapshot and clustering, so the two levels cannot disagree.
+    overview: OverviewLevel | None = None
 
 
 @dataclass

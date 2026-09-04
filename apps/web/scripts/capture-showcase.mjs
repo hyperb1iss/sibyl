@@ -346,10 +346,10 @@ async function waitForCaptureSurface(page, capture, forbiddenTerms) {
     await page.locator('canvas').waitFor({ state: 'visible', timeout: 20_000 });
     await page.waitForTimeout(3_000);
     await page.getByRole('button', { name: capture.graphCluster }).click();
-    await page.getByRole('button', { name: 'Clusters (1)', exact: true }).waitFor({
-      state: 'visible',
-      timeout: 20_000,
-    });
+    await page
+      .getByTitle('Back to all clusters', { exact: true })
+      .filter({ hasText: capture.graphCluster })
+      .waitFor({ state: 'visible', timeout: 20_000 });
     await page.waitForTimeout(5_000);
     await page.getByRole('button', { name: 'Fit to view', exact: true }).click();
     await page.waitForTimeout(700);

@@ -56,6 +56,13 @@ export const GRAPH_DEFAULTS = {
   // web reads as an explorable galaxy, where 1000+ collapses into a hairball.
   MAX_NODES: 500,
   MAX_EDGES: 2500,
+  /**
+   * Detail budget for semantic zoom. Higher than MAX_NODES because the
+   * response is a reservoir the canvas draws from per cluster rather than a
+   * set it renders all at once: only opened clusters put their members on
+   * screen, so the budget buys depth per domain instead of clutter.
+   */
+  SEMANTIC_MAX_NODES: 1500,
   // Node sizing
   NODE_SIZE_MIN: 3,
   NODE_SIZE_MAX: 10,
@@ -74,8 +81,6 @@ export const GRAPH_DEFAULTS = {
   // Initial view
   INITIAL_ZOOM: 1.2,
   FIT_PADDING: 60,
-  DETAIL_ZOOM_IN_THRESHOLD: 1.8,
-  DETAIL_ZOOM_OUT_THRESHOLD: 1.3,
   // Labels
   LABEL_SIZE_MIN: 2,
   LABEL_SIZE_MAX: 4,

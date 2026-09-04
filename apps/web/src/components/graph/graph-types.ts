@@ -12,6 +12,12 @@ export interface GraphNode extends HierarchicalNode {
   isNeighbor?: boolean;
   isSearchMatch?: boolean;
   zIndex?: number;
+  /**
+   * Where the member's domain bubble sat when it opened. A weak pull toward
+   * it keeps an opened cluster inside its own territory instead of flinging
+   * members across the map.
+   */
+  clusterAnchor?: { x: number; y: number; radius: number };
   __highlightTime?: number;
 }
 
@@ -41,4 +47,6 @@ export interface KnowledgeGraphRef {
   zoomOut: () => void;
   fitView: () => void;
   resetView: () => void;
+  /** Fly to the zoom that produces a whole level, for the toolbar shortcuts. */
+  zoomToLevel: (level: 'domains' | 'entities') => void;
 }
