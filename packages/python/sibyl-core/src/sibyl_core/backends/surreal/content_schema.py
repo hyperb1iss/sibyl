@@ -62,7 +62,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 26
+CONTENT_SCHEMA_CURRENT_VERSION = 25
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -587,10 +587,18 @@ CONTENT_SCHEMAFULL_REPAIR_DEFINITIONS = "\n".join(
 )
 
 
+# Maintenance backfill, deliberately NOT in the migration list.
+#
 # Projected captures carry metadata.raw_memory_id; the raw rows they project
-# did not know about them, so listings showed both. Stamp every raw row that
-# already has a projection so the review queue can hide it with a plain
-# column predicate.
+# do not know about them, so a raw row written before the projection stamp
+# existed still lists alongside its projection. This statement stamps those
+# pairs so the review queue can hide them.
+#
+# It runs one UPDATE per projection row (22ms each against a live 3.x server,
+# so about 48s for 2,200 pairs) and holds the connection for the duration,
+# which is why schema bootstrap must never run it: an API start would block
+# on it and wedge the database for every other client. Run it deliberately
+# against a quiet instance instead.
 #
 # The stamp matches organization and principal, never the uuid alone:
 # raw_memory_id arrives in a client request body, so a capture in another
@@ -600,10 +608,8 @@ CONTENT_SCHEMAFULL_REPAIR_DEFINITIONS = "\n".join(
 # The rows go through LET and a coalesce rather than FOR over the SELECT
 # directly: SurrealDB 3.x rejects `FOR $x IN (SELECT ...)` with "Cannot
 # execute statement using value: NONE" whether or not the table has rows,
-# while the SDK-embedded engine the unit tests run on accepts it. Passed as
-# one statement on purpose, since the block carries its own semicolons and
-# must not go through split_statements.
-CONTENT_RAW_CAPTURE_PROJECTION_FOLD_MIGRATION = """
+# while the SDK-embedded engine accepts it.
+CONTENT_RAW_CAPTURE_PROJECTION_FOLD_BACKFILL = """
 LET $projections = (
     SELECT uuid, organization_id, principal_id, metadata.raw_memory_id AS raw_memory_id
     FROM raw_captures
@@ -776,11 +782,6 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             statements=tuple(
                 split_statements(CONTENT_SOURCE_IMPORT_REVISION_MIGRATION_DEFINITIONS)
             ),
-        ),
-        SchemaMigration(
-            version=26,
-            name="content_raw_capture_projection_fold",
-            statements=(CONTENT_RAW_CAPTURE_PROJECTION_FOLD_MIGRATION,),
         ),
     )
 
