@@ -47,7 +47,7 @@ sibyl docker init [options]
 sibyl docker init
 
 # Pin a tag and add the worker + crawler services
-sibyl docker init --tag 1.3.1 --with-worker --with-crawler
+sibyl docker init --tag 1.3.2 --with-worker --with-crawler
 
 # Regenerate over an existing install
 sibyl docker init --force
@@ -117,7 +117,7 @@ sibyl docker upgrade [options]
 ### Example
 
 ```bash
-sibyl docker upgrade --tag 1.3.1
+sibyl docker upgrade --tag 1.3.2
 ```
 
 ## Notes
