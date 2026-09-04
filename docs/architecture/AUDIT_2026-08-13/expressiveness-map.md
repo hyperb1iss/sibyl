@@ -476,7 +476,7 @@ domain-general personal memory (`models/entities.py:54-55`) and `recall` can nev
   the 11-word regex vocabulary in reflection (`services/reflection.py:145-161`).
 - **Entity aliasing / merge.** No `same_as` predicate, no merge verb, no canonical-id indirection.
   Extraction dedupes only within a single batch by `f"{type}:{name.lower()}"`
-  (`projection/memory.py:849`), so "Bliss", "Stefanie", and "stef@gradial.com" become three
+  (`projection/memory.py:849`), so "Morgan", "M. Lee", and "morgan@example.com" become three
   permanent nodes.
 - **TTL / explicit decay.** `raw_captures` has `purge_after` (`10_tables.surql:145`); `entity` has
   none. Decay is job-driven (`jobs/consolidation.py:319-331`) with no writer-facing knob beyond

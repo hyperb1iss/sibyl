@@ -1,57 +1,81 @@
-# Screenshots Needed for Documentation
+# Public screenshot capture
 
-This file tracks all screenshots required for the documentation. Each screenshot should be captured
-and placed in `docs/public/screenshots/`.
+Public screenshots must come from the isolated `Sibyl Showcase` organization. Never capture a
+personal organization and never rename live data to make it look generic. Project names are only one
+place where private text can appear. Tasks, memories, graph labels, search results, and source names
+can expose the same data.
 
-## Naming Pattern
+## Prepare the showcase organization
 
-`{section}-{description}.png` - e.g., `cli-task-list-output.png`
+Create the local filter at `.moon/cache/showcase-private-terms.json`. The cache directory is ignored
+by Git, so organization and product names never enter the repository or pull request:
 
-## Screenshots to Capture
+```json
+{
+  "forbidden_terms": ["private organization", "private product"]
+}
+```
 
-### Guide Section
+Start the local app and seed the curated fixture:
 
-- [ ] `guide-architecture-diagram.png` - High-level architecture overview
-- [ ] `guide-web-dashboard.png` - Web UI dashboard view
-- [ ] `guide-knowledge-graph-visualization.png` - SurrealDB graph visualization
+```bash
+moon run dev
+moon run showcase-seed
+```
 
-### CLI Section
+The seed command only accepts a loopback server. It creates or reuses the `sibyl-showcase`
+organization, then refuses to continue if the organization contains an unknown entity, an unknown
+source, an unmarked entity, or a forbidden private term. A successful second run should create zero
+rows.
 
-- [ ] `cli-task-list.png` - Task list table output
-- [ ] `cli-search-results.png` - Search results with semantic matches
-- [ ] `cli-task-show.png` - Task detail view
-- [ ] `cli-project-list.png` - Project listing
-- [ ] `cli-context.png` - Context command showing linked project
+Use the normal local owner account only to prepare the organization. Invite
+`sibyl-showcase@localhost` to `Sibyl Showcase`, then accept the invitation in a clean browser
+profile with the account name `Sibyl Showcase`. Keep the account out of every other team
+organization. Its automatically created personal organization is safe because it carries the same
+showcase name.
 
-### Web UI Section
+Run the capture task and finish signing in through the visible browser window:
 
-- [ ] `web-dashboard.png` - Main dashboard
-- [ ] `web-task-detail.png` - Task detail page
-- [ ] `web-entity-explorer.png` - Entity explorer view
-- [ ] `web-search.png` - Search interface
+```bash
+moon run web:capture-showcase
+```
 
-### API Section
+The task reruns the seed gate, then binds the browser to the organization ID from the verified
+manifest. Before every frame, it reads the full corpus through the authenticated browser and
+compares it with the exact snapshot sealed by the seed. It refuses any other account identity, any
+unexpected team organization, or forbidden text in the account menu and rendered page. Screenshots
+stay in a temporary directory until every route passes, then the complete set replaces the public
+files. Credentials stay in the browser and never enter a command line, environment variable, or
+committed file.
 
-- [ ] `api-swagger.png` - OpenAPI docs at /api/docs
-- [ ] `api-health-check.png` - Health endpoint response
+## Capture set
 
-### Deployment Section
+The capture task uses a 1322 by 916 viewport at 2x pixel density. Browser chrome stays out of the
+image. The task captures these routes:
 
-- [ ] `deploy-tilt-ui.png` - Tilt dashboard showing all resources
-- [ ] `deploy-k8s-pods.png` - kubectl get pods output
-- [ ] `deploy-kong-routes.png` - Kong gateway routes
+| Route       | Documentation image                         | README image                |
+| ----------- | ------------------------------------------- | --------------------------- |
+| `/`         | `docs/public/screenshots/web-dashboard.png` | `docs/images/dashboard.png` |
+| `/projects` | `docs/public/screenshots/web-projects.png`  | `docs/images/projects.png`  |
+| `/graph`    | `docs/public/screenshots/web-graph.png`     | `docs/images/graph.png`     |
+| `/tasks`    | `docs/public/screenshots/web-tasks.png`     | `docs/images/tasks.png`     |
+| `/entities` | `docs/public/screenshots/web-entities.png`  |                             |
+| `/search`   | `docs/public/screenshots/web-search.png`    |                             |
+| `/sources`  | `docs/public/screenshots/web-sources.png`   |                             |
 
----
+The task searches for `Project scope belongs on every graph write` before capturing `/search` and
+lets the graph settle before capturing `/graph`. The four README images are copied from their
+documentation versions so each pair stays identical.
 
-## Capture Instructions
+## Safety gate
 
-1. Start the dev environment: `moon run dev`
-2. Wait for services to be healthy
-3. Use macOS screenshot tool (Cmd+Shift+4) or similar
-4. Crop to relevant content
-5. Save to `docs/public/screenshots/`
-6. Update this file marking items as complete
+The capture task runs the seed command immediately before opening the browser:
 
-## Post-Processing
+```bash
+moon run showcase-seed
+```
 
-Consider running through ImageOptim or similar to reduce file sizes before committing.
+Stop if the command creates rows or reports an isolation failure. After capture, inspect every image
+at full size. Check project chips, task descriptions, graph nodes, tooltips, account menus, recent
+activity, search snippets, and source URLs. The committed image set must contain only the curated
+showcase corpus.

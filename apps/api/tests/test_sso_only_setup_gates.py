@@ -26,7 +26,7 @@ def _entra_provider() -> OIDCProviderSettings:
         issuer="https://login.microsoftonline.com/tenant/v2.0",
         client_id="client-id",
         client_secret_env="SIBYL_OIDC_ENTRA_CLIENT_SECRET",
-        organization_slug="gradial",
+        organization_slug="example-org",
     )
 
 
