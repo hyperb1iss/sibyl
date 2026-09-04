@@ -1,6 +1,6 @@
 import { copyFile, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
 import { isDeepStrictEqual } from 'node:util';
@@ -9,8 +9,13 @@ import { chromium } from 'playwright';
 const SHOWCASE_EMAIL = 'sibyl-showcase@localhost';
 const SHOWCASE_NAME = 'Sibyl Showcase';
 const SHOWCASE_SLUG = 'sibyl-showcase';
+const SHOWCASE_THEME = 'neon';
+const THEME_STORAGE_KEY = 'sibyl-theme';
 const WEB_URL = process.env.SIBYL_SHOWCASE_WEB_URL ?? 'http://localhost:3337';
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
+const STORAGE_STATE_PATH = process.env.SIBYL_SHOWCASE_STORAGE_STATE
+  ? resolve(ROOT, process.env.SIBYL_SHOWCASE_STORAGE_STATE)
+  : undefined;
 const MANIFEST_PATH = join(ROOT, '.moon/cache/showcase-runtime-manifest.json');
 const FILTER_CONFIG_PATH = join(ROOT, '.moon/cache/showcase-private-terms.json');
 
@@ -19,19 +24,20 @@ const CAPTURES = [
     route: '/',
     output: 'docs/public/screenshots/web-dashboard.png',
     copy: 'docs/images/dashboard.png',
-    readyText: 'Recent Activity',
+    readyText: 'Task Overview',
   },
   {
     route: '/projects',
     output: 'docs/public/screenshots/web-projects.png',
     copy: 'docs/images/projects.png',
-    readyText: 'Hypercolor',
+    project: 'Hypercolor',
   },
   {
     route: '/graph',
     output: 'docs/public/screenshots/web-graph.png',
     copy: 'docs/images/graph.png',
     canvas: true,
+    graphCluster: /^Hypercolor,/,
   },
   {
     route: '/tasks',
@@ -48,6 +54,7 @@ const CAPTURES = [
     route: '/search',
     output: 'docs/public/screenshots/web-search.png',
     search: true,
+    searchTab: /Knowledge/,
   },
   {
     route: '/sources',
@@ -92,6 +99,12 @@ export function assertNoForbiddenTerms(value, surface, forbiddenTerms) {
   }
 }
 
+export function assertDarkTheme(theme) {
+  if (theme !== SHOWCASE_THEME) {
+    throw new Error('Showcase capture requires the neon dark theme.');
+  }
+}
+
 export function validateSession(me, orgs, manifest, forbiddenTerms) {
   assertNoForbiddenTerms({ me, orgs }, 'Capture account', forbiddenTerms);
   if (me.user?.email !== SHOWCASE_EMAIL || me.user?.name !== SHOWCASE_NAME) {
@@ -116,6 +129,29 @@ export function validateSession(me, orgs, manifest, forbiddenTerms) {
   }
 }
 
+const DYNAMIC_METADATA_FIELDS = new Set([
+  'added_at',
+  'citation_count',
+  'created_by',
+  'embedding_metadata',
+  'entity_type',
+  'last_recalled_at',
+  'last_used_at',
+  'misled_count',
+  'modified_by',
+  'organization_id',
+  'record_id',
+  'retrieval_count',
+  'revision',
+  'updated_at',
+]);
+
+function stableMetadata(metadata) {
+  return Object.fromEntries(
+    Object.entries(metadata ?? {}).filter(([key]) => !DYNAMIC_METADATA_FIELDS.has(key))
+  );
+}
+
 function entityProjection(entity) {
   return {
     id: String(entity.id ?? ''),
@@ -126,7 +162,7 @@ function entityProjection(entity) {
     category: entity.category ?? null,
     languages: [...(entity.languages ?? [])],
     tags: [...(entity.tags ?? [])],
-    metadata: { ...(entity.metadata ?? {}) },
+    metadata: stableMetadata(entity.metadata),
     source_file: entity.source_file ?? null,
     created_at: entity.created_at ?? null,
     updated_at: entity.updated_at ?? null,
@@ -252,6 +288,26 @@ async function bindShowcaseSession(page, manifest, forbiddenTerms) {
   await page.keyboard.press('Escape');
 }
 
+async function dismissFirstRunTour(page) {
+  const skipButton = page.getByRole('button', { name: 'Skip for now', exact: true });
+  try {
+    await skipButton.waitFor({ state: 'visible', timeout: 5_000 });
+  } catch {
+    return;
+  }
+  await skipButton.click();
+  await skipButton.waitFor({ state: 'hidden', timeout: 10_000 });
+}
+
+async function verifyDarkTheme(page) {
+  await page.waitForFunction(
+    expectedTheme => document.documentElement.getAttribute('data-theme') === expectedTheme,
+    SHOWCASE_THEME,
+    { timeout: 5_000 }
+  );
+  assertDarkTheme(await page.locator('html').getAttribute('data-theme'));
+}
+
 async function verifyShowcaseCorpus(page, manifest, forbiddenTerms) {
   const me = await fetchJson(page, '/api/auth/me');
   if (me.organization?.id !== manifest.organization.id) {
@@ -275,15 +331,38 @@ async function verifyShowcaseCorpus(page, manifest, forbiddenTerms) {
   );
   const sourcePage = await fetchJson(page, '/api/sources?limit=200');
   const sources = assertCompleteSourcePage(sourcePage);
+  assertNoForbiddenTerms(
+    { entities, sources },
+    'Authenticated showcase corpus',
+    forbiddenTerms
+  );
   validateCorpusSnapshot(buildCorpusSnapshot(entities, sources), manifest, forbiddenTerms);
 }
 
 async function waitForCaptureSurface(page, capture, forbiddenTerms) {
+  await page.addStyleTag({ content: 'nextjs-portal { display: none !important; }' });
   await page.getByRole('main').waitFor({ state: 'visible', timeout: 20_000 });
   if (capture.canvas) {
     await page.locator('canvas').waitFor({ state: 'visible', timeout: 20_000 });
     await page.waitForTimeout(3_000);
+    await page.getByRole('button', { name: capture.graphCluster }).click();
+    await page.getByRole('button', { name: 'Clusters (1)', exact: true }).waitFor({
+      state: 'visible',
+      timeout: 20_000,
+    });
+    await page.waitForTimeout(5_000);
+    await page.getByRole('button', { name: 'Fit to view', exact: true }).click();
+    await page.waitForTimeout(700);
+    const zoomOut = page.getByRole('button', { name: 'Zoom out', exact: true });
+    await zoomOut.click();
+    await page.waitForTimeout(500);
+    await page.mouse.move(600, 300);
+    await page.mouse.down();
+    await page.mouse.move(450, 210, { steps: 12 });
+    await page.mouse.up();
+    await page.waitForTimeout(400);
   } else if (capture.search) {
+    await page.getByRole('tab', { name: capture.searchTab }).click();
     const form = page.getByRole('main').locator('form').first();
     await form.getByLabel('Search', { exact: true }).fill(
       'Project scope belongs on every graph write'
@@ -293,6 +372,14 @@ async function waitForCaptureSurface(page, capture, forbiddenTerms) {
       name: 'Project scope belongs on every graph write',
       exact: true,
     }).first().waitFor({ state: 'visible', timeout: 20_000 });
+  } else if (capture.project) {
+    await page
+      .getByRole('button', { name: `Open project ${capture.project}`, exact: true })
+      .click();
+    await page.getByRole('heading', { name: 'Progress', exact: true }).waitFor({
+      state: 'visible',
+      timeout: 20_000,
+    });
   } else if (capture.readyText) {
     await page.getByText(capture.readyText, { exact: true }).first().waitFor({
       state: 'visible',
@@ -331,17 +418,31 @@ async function main() {
   const context = await browser.newContext({
     viewport: { width: 1322, height: 916 },
     deviceScaleFactor: 2,
+    colorScheme: 'dark',
+    ...(STORAGE_STATE_PATH ? { storageState: STORAGE_STATE_PATH } : {}),
   });
+  await context.addInitScript(
+    ({ storageKey, theme }) => localStorage.setItem(storageKey, theme),
+    { storageKey: THEME_STORAGE_KEY, theme: SHOWCASE_THEME }
+  );
   const page = await context.newPage();
-  const terminal = createInterface({ input: process.stdin, output: process.stdout });
+  const terminal = STORAGE_STATE_PATH
+    ? null
+    : createInterface({ input: process.stdin, output: process.stdout });
   const captureDirectory = await mkdtemp(join(tmpdir(), 'sibyl-showcase-'));
 
   try {
-    await page.goto(`${webUrl}/login`, { waitUntil: 'domcontentloaded' });
-    await terminal.question(
-      `Sign in as ${SHOWCASE_EMAIL} in the browser, then press Enter here to verify and capture. `
-    );
+    await page.goto(`${webUrl}${STORAGE_STATE_PATH ? '/' : '/login'}`, {
+      waitUntil: 'domcontentloaded',
+    });
+    if (terminal) {
+      await terminal.question(
+        `Sign in as ${SHOWCASE_EMAIL} in the browser, then press Enter here to verify and capture. `
+      );
+    }
     await page.waitForURL(url => url.pathname !== '/login', { timeout: 20_000 });
+    await dismissFirstRunTour(page);
+    await verifyDarkTheme(page);
     await bindShowcaseSession(page, manifest, forbiddenTerms);
 
     for (const [index, capture] of CAPTURES.entries()) {
@@ -353,13 +454,18 @@ async function main() {
         await readGraphPayload(await graphPayload, forbiddenTerms);
       }
       await waitForCaptureSurface(page, capture, forbiddenTerms);
+      await verifyDarkTheme(page);
       await verifyShowcaseCorpus(page, manifest, forbiddenTerms);
       assertNoForbiddenTerms(
         await page.locator('body').innerText(),
         capture.route,
         forbiddenTerms
       );
-      await page.screenshot({ path: join(captureDirectory, `${index}.png`) });
+      await page.waitForTimeout(3_000);
+      await page.screenshot({
+        path: join(captureDirectory, `${index}.png`),
+        caret: 'hide',
+      });
       console.log(`staged ${capture.route} for ${capture.output}`);
     }
 
@@ -372,7 +478,7 @@ async function main() {
       console.log(`captured ${capture.route} -> ${capture.output}`);
     }
   } finally {
-    terminal.close();
+    terminal?.close();
     await browser.close();
     await rm(captureDirectory, { recursive: true, force: true });
   }

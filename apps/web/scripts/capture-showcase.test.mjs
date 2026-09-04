@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   assertCompleteSourcePage,
+  assertDarkTheme,
   assertNoForbiddenTerms,
   buildCorpusSnapshot,
   parseForbiddenTerms,
@@ -38,6 +39,11 @@ test('capture accepts only loopback web servers', () => {
 
 test('capture accepts the dedicated showcase identity and organizations', () => {
   assert.doesNotThrow(() => validateSession(me, orgs, manifest, forbiddenTerms));
+});
+
+test('capture requires the neon dark theme', () => {
+  assert.doesNotThrow(() => assertDarkTheme('neon'));
+  assert.throws(() => assertDarkTheme('dawn'), /requires the neon dark theme/);
 });
 
 test('capture refuses a normal account with another team organization', () => {
@@ -136,6 +142,21 @@ test('capture compares the authenticated corpus with the sealed seed snapshot', 
   assert.doesNotThrow(() =>
     validateCorpusSnapshot(corpus, sealedManifest, forbiddenTerms)
   );
+  const serverBookkeeping = buildCorpusSnapshot(
+    [
+      {
+        ...entities[0],
+        metadata: {
+          ...entities[0].metadata,
+          embedding_metadata: { provider: 'local' },
+          retrieval_count: 12,
+          revision: 3,
+        },
+      },
+    ],
+    sources
+  );
+  assert.deepEqual(serverBookkeeping, corpus);
   const drifted = buildCorpusSnapshot(
     [{ ...entities[0], metadata: { ...entities[0].metadata, assignees: ['private@example.com'] } }],
     sources

@@ -175,6 +175,27 @@ def test_complete_showcase_corpus_is_accepted() -> None:
     _validate_existing_data(entities, sources, require_complete=True)
 
 
+def test_server_managed_entity_metadata_is_ignored() -> None:
+    entities, sources = _complete_corpus()
+    for entity in entities:
+        metadata = entity["metadata"]
+        assert isinstance(metadata, dict)
+        metadata.update(
+            {
+                "citation_count": 0,
+                "embedding_metadata": {},
+                "entity_type": entity["entity_type"],
+                "last_recalled_at": None,
+                "last_used_at": None,
+                "misled_count": 0,
+                "retrieval_count": 0,
+                "revision": 1,
+            }
+        )
+
+    _validate_existing_data(entities, sources, require_complete=True)
+
+
 def test_truncated_source_page_is_refused() -> None:
     assert _complete_source_page({"sources": [{"id": "one"}], "total": 1}) == [{"id": "one"}]
     with pytest.raises(ShowcaseSafetyError, match="over 200 sources"):
@@ -186,6 +207,10 @@ def test_corpus_snapshot_is_deterministic_and_binds_generated_ids() -> None:
     expected = build_corpus_snapshot(entities, sources)
 
     assert build_corpus_snapshot(reversed(entities), reversed(sources)) == expected
+    metadata = entities[0]["metadata"]
+    assert isinstance(metadata, dict)
+    metadata["retrieval_count"] = 12
+    assert build_corpus_snapshot(entities, sources) == expected
     entities[0]["id"] = "replacement-project"
     assert build_corpus_snapshot(entities, sources) != expected
 
