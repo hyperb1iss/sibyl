@@ -16,8 +16,8 @@ import {
   Search,
   X,
 } from '@/components/ui/icons';
-import type { GraphResolution } from '@/lib/api';
 import { ENTITY_TYPES, getEntityColor } from '@/lib/constants/entities';
+import type { ZoomLevelName } from './semantic-zoom';
 
 const ENTITY_TYPE_LABELS: Record<string, string> = {
   task: 'Tasks',
@@ -44,8 +44,8 @@ const ENTITY_TYPE_LABELS: Record<string, string> = {
 };
 
 export function GraphToolbar({
-  resolution,
-  onResolutionChange,
+  zoomLevel,
+  onJumpToLevel,
   selectedClusterLabel,
   onClearCluster,
   onZoomIn,
@@ -70,8 +70,8 @@ export function GraphToolbar({
   focusedProjectCount,
   focusAvailable,
 }: {
-  resolution: GraphResolution;
-  onResolutionChange: (next: GraphResolution) => void;
+  zoomLevel: ZoomLevelName;
+  onJumpToLevel: (level: 'domains' | 'entities') => void;
   selectedClusterLabel?: string | null;
   onClearCluster?: () => void;
   onZoomIn: () => void;
@@ -200,32 +200,40 @@ export function GraphToolbar({
       <div className="absolute top-4 left-4 z-10 hidden md:block">
         <Card className="!p-1.5 flex items-center gap-2">
           {/* Resolution toggle: aggregate overview vs. node detail */}
-          <div className="flex items-center rounded-lg bg-sc-bg-base p-0.5">
+          <div className="flex items-center gap-1 rounded-lg bg-sc-bg-highlight/40 p-0.5">
             <button
               type="button"
-              onClick={() => onResolutionChange('overview')}
-              aria-pressed={resolution === 'overview'}
+              onClick={() => onJumpToLevel('domains')}
+              aria-pressed={zoomLevel === 'domains'}
               className={`px-2.5 py-1 text-xs font-medium rounded-lg transition-colors ${
-                resolution === 'overview'
+                zoomLevel === 'domains'
                   ? 'bg-sc-purple/20 text-sc-purple'
                   : 'text-sc-fg-muted hover:text-sc-fg-primary'
-              }`}
-              title="Cluster overview"
+              } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base`}
+              title="Zoom out to the domain map"
             >
-              Overview
+              Domains
             </button>
+            <span
+              className={`px-2 py-1 text-xs font-medium rounded-lg ${
+                zoomLevel === 'mixed' ? 'bg-sc-cyan/15 text-sc-cyan' : 'text-sc-fg-subtle'
+              }`}
+              title="Zoom in on a domain to open it; the rest stay summarized"
+            >
+              Mixed
+            </span>
             <button
               type="button"
-              onClick={() => onResolutionChange('detail')}
-              aria-pressed={resolution === 'detail'}
+              onClick={() => onJumpToLevel('entities')}
+              aria-pressed={zoomLevel === 'entities'}
               className={`px-2.5 py-1 text-xs font-medium rounded-lg transition-colors ${
-                resolution === 'detail'
+                zoomLevel === 'entities'
                   ? 'bg-sc-purple/20 text-sc-purple'
                   : 'text-sc-fg-muted hover:text-sc-fg-primary'
-              }`}
-              title="Node detail"
+              } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-base`}
+              title="Zoom in until every domain in view is open"
             >
-              Detail
+              Entities
             </button>
           </div>
 

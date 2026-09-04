@@ -57,7 +57,11 @@ export interface Viewport {
   maxY: number;
 }
 
-function withinViewport(cluster: ClusterExtent, viewport: Viewport, radius: number): boolean {
+export function withinViewport(
+  cluster: ClusterExtent,
+  viewport: Viewport,
+  radius: number
+): boolean {
   if (cluster.x === undefined || cluster.y === undefined) return true;
   const width = viewport.maxX - viewport.minX;
   const height = viewport.maxY - viewport.minY;
@@ -123,11 +127,35 @@ export function resolveExpandedClusters({
 
 export type ZoomLevelName = 'domains' | 'mixed' | 'entities';
 
-/** What to call the current level in the toolbar. */
-export function zoomLevelName(totalClusters: number, expandedCount: number): ZoomLevelName {
+/**
+ * What to call the current level in the toolbar.
+ *
+ * Entities means every bubble the reader can see has opened, not every
+ * bubble in the graph: expansion is viewport scoped on purpose, so the whole
+ * graph is never open at once and a definition that demanded it would never
+ * be met.
+ */
+export function zoomLevelName(expandedCount: number, collapsedInView: number): ZoomLevelName {
   if (expandedCount === 0) return 'domains';
-  if (expandedCount >= totalClusters && totalClusters > 0) return 'entities';
+  if (collapsedInView === 0) return 'entities';
   return 'mixed';
+}
+
+/** Bubbles still closed inside the viewport, for the level readout. */
+export function countCollapsedInView(
+  clusters: ClusterExtent[],
+  expanded: ReadonlySet<string>,
+  viewport: Viewport | null
+): number {
+  let count = 0;
+  for (const cluster of clusters) {
+    if (expanded.has(cluster.id)) continue;
+    if (viewport && !withinViewport(cluster, viewport, clusterRadius(cluster.memberCount))) {
+      continue;
+    }
+    count += 1;
+  }
+  return count;
 }
 
 /**

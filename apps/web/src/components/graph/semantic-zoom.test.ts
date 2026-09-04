@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type ClusterExtent,
   clusterRadius,
+  countCollapsedInView,
   memberSeedPosition,
   resolveExpandedClusters,
   SEMANTIC_ZOOM,
@@ -139,13 +140,31 @@ describe('resolveExpandedClusters', () => {
 
 describe('zoomLevelName', () => {
   it('names the three levels', () => {
-    expect(zoomLevelName(10, 0)).toBe('domains');
-    expect(zoomLevelName(10, 4)).toBe('mixed');
-    expect(zoomLevelName(10, 10)).toBe('entities');
+    expect(zoomLevelName(0, 10)).toBe('domains');
+    expect(zoomLevelName(4, 6)).toBe('mixed');
+    expect(zoomLevelName(4, 0)).toBe('entities');
   });
 
   it('does not call an empty graph fully expanded', () => {
     expect(zoomLevelName(0, 0)).toBe('domains');
+  });
+});
+
+describe('countCollapsedInView', () => {
+  it('counts only closed bubbles the reader can see', () => {
+    const clusters = [
+      cluster('open', 100, 0, 0),
+      cluster('closed-near', 100, 50, 50),
+      cluster('closed-far', 100, 40_000, 40_000),
+    ];
+
+    expect(countCollapsedInView(clusters, new Set(['open']), VIEWPORT)).toBe(1);
+  });
+
+  it('counts every closed bubble before the canvas reports a viewport', () => {
+    const clusters = [cluster('a', 10, 0, 0), cluster('b', 10, 99_999, 99_999)];
+
+    expect(countCollapsedInView(clusters, new Set(), null)).toBe(2);
   });
 });
 
