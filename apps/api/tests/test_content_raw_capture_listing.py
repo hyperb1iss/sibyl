@@ -12,7 +12,7 @@ from sibyl.persistence.content_common import RawCaptureRecord
 from sibyl.persistence.surreal import content as surreal_content
 from sibyl_core.backends.surreal import SurrealContentClient, bootstrap_content_schema
 from sibyl_core.backends.surreal.content_schema import (
-    CONTENT_RAW_CAPTURE_PROJECTION_FOLD_MIGRATION,
+    CONTENT_RAW_CAPTURE_PROJECTION_FOLD_BACKFILL,
 )
 
 
@@ -183,7 +183,7 @@ async def test_fold_composes_with_type_and_review_filters(content_client) -> Non
 
 
 @pytest.mark.asyncio
-async def test_projection_fold_migration_ignores_foreign_projections(content_client) -> None:
+async def test_projection_fold_backfill_ignores_foreign_projections(content_client) -> None:
     """A projection may not hide a raw row in another org or another principal."""
     org = uuid4()
     victim = _capture(org, title="mine", principal_id="owner")
@@ -203,7 +203,7 @@ async def test_projection_fold_migration_ignores_foreign_projections(content_cli
     )
     await _save(victim, foreign_org_projection, other_principal_projection)
 
-    await content_client.execute_query(CONTENT_RAW_CAPTURE_PROJECTION_FOLD_MIGRATION)
+    await content_client.execute_query(CONTENT_RAW_CAPTURE_PROJECTION_FOLD_BACKFILL)
 
     stored = await surreal_content.get_raw_capture(None, organization_id=org, capture_id=victim.id)
     assert stored is not None
@@ -213,7 +213,7 @@ async def test_projection_fold_migration_ignores_foreign_projections(content_cli
 
 
 @pytest.mark.asyncio
-async def test_projection_fold_migration_stamps_legacy_pairs(content_client) -> None:
+async def test_projection_fold_backfill_stamps_legacy_pairs(content_client) -> None:
     org = uuid4()
     raw = _capture(org)
     projected = _capture(
@@ -229,7 +229,7 @@ async def test_projection_fold_migration_stamps_legacy_pairs(content_client) -> 
     before, _ = await _list(org)
     assert {capture.id for capture in before} == {raw.id, projected.id, lone.id}
 
-    await content_client.execute_query(CONTENT_RAW_CAPTURE_PROJECTION_FOLD_MIGRATION)
+    await content_client.execute_query(CONTENT_RAW_CAPTURE_PROJECTION_FOLD_BACKFILL)
 
     after, _ = await _list(org)
     assert {capture.id for capture in after} == {projected.id, lone.id}
