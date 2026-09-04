@@ -421,6 +421,7 @@ class TestInaccessibleProjectWire:
                 displayed_edges=0,
                 resolution="detail",
                 recommended_resolution="detail",
+                overview=None,
             )
 
         with (
