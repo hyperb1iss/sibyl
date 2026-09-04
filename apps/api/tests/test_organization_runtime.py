@@ -1616,6 +1616,47 @@ async def test_surreal_create_org_invitation_rejects_admin_owner_role(
 
 
 @pytest.mark.asyncio
+async def test_surreal_signup_invitation_avoids_protected_token_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    email = "ember@example.com"
+    invite_record = {
+        "uuid": str(uuid4()),
+        "organization_id": str(uuid4()),
+        "invited_email": email,
+        "invited_role": OrganizationRole.MEMBER.value,
+        "created_by_user_id": str(uuid4()),
+        "expires_at": datetime.now(UTC) + timedelta(days=7),
+        "accepted_at": None,
+        "accepted_by_user_id": None,
+        "created_at": datetime.now(UTC),
+        "updated_at": datetime.now(UTC),
+    }
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class FakeClient:
+        async def execute_query(self, query: str, **params: object) -> object:
+            calls.append((query, params))
+            return [invite_record]
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield FakeClient()
+
+    monkeypatch.setattr(surreal_organization_runtime, "_auth_client_scope", fake_scope)
+
+    await surreal_organization_runtime.validate_org_invitation_for_signup(
+        token="invite-token",
+        email=email,
+    )
+
+    query, params = calls[0]
+    assert "token = $invitation_token" in query
+    assert params["invitation_token"] == "invite-token"
+    assert "token" not in params
+
+
+@pytest.mark.asyncio
 async def test_surreal_accept_org_invitation_rejects_admin_created_owner_invite(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1791,6 +1832,9 @@ async def test_surreal_accept_org_invitation_creates_session_and_marks_accepted(
     assert fake_client.written_invitation["accepted_by_user_id"] == str(user.id)
     queries = [query for query, _params in fake_client.calls]
     assert "RETURN" in queries[0]
+    first_params = fake_client.calls[0][1]
+    assert "invitation_token" in first_params
+    assert "token" not in first_params
     assert any("CREATE organization_members CONTENT $record" in query for query in queries)
     assert any("UPSERT organization_invitations CONTENT $record" in query for query in queries)
     assert all("DELETE FROM organization_invitations" not in query for query in queries)
