@@ -532,14 +532,14 @@ async def _load_invitation_accept_records(
             RETURN {
                 invitation: (
                     SELECT * FROM organization_invitations
-                    WHERE token_hash = $token_hash OR token = $token
+                    WHERE token_hash = $token_hash OR token = $invitation_token
                     LIMIT 1
                 )[0],
                 organization: (
                     SELECT * FROM organizations
                     WHERE uuid IN (
                         SELECT VALUE organization_id FROM organization_invitations
-                        WHERE token_hash = $token_hash OR token = $token
+                        WHERE token_hash = $token_hash OR token = $invitation_token
                         LIMIT 1
                     )
                     LIMIT 1
@@ -548,7 +548,7 @@ async def _load_invitation_accept_records(
                     SELECT * FROM organization_members
                     WHERE organization_id IN (
                         SELECT VALUE organization_id FROM organization_invitations
-                        WHERE token_hash = $token_hash OR token = $token
+                        WHERE token_hash = $token_hash OR token = $invitation_token
                         LIMIT 1
                     )
                         AND user_id = $user_id
@@ -558,19 +558,19 @@ async def _load_invitation_accept_records(
                     SELECT * FROM organization_members
                     WHERE organization_id IN (
                         SELECT VALUE organization_id FROM organization_invitations
-                        WHERE token_hash = $token_hash OR token = $token
+                        WHERE token_hash = $token_hash OR token = $invitation_token
                         LIMIT 1
                     )
                         AND user_id IN (
                             SELECT VALUE created_by_user_id FROM organization_invitations
-                            WHERE token_hash = $token_hash OR token = $token
+                            WHERE token_hash = $token_hash OR token = $invitation_token
                             LIMIT 1
                         )
                     LIMIT 1
                 )[0],
             };
         """,
-        token=token,
+        invitation_token=token,
         token_hash=_hash_invitation_token(token),
         user_id=str(user_id),
     )
@@ -1344,8 +1344,8 @@ async def validate_org_invitation_for_signup(*, token: str, email: str) -> Invit
         records = _normalize_records(
             await client.execute_query(
                 "SELECT * FROM organization_invitations "
-                "WHERE token_hash = $token_hash OR token = $token LIMIT 1;",
-                token=token.strip(),
+                "WHERE token_hash = $token_hash OR token = $invitation_token LIMIT 1;",
+                invitation_token=token.strip(),
                 token_hash=_hash_invitation_token(token),
             )
         )

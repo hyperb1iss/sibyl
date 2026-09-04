@@ -372,10 +372,18 @@ def _expected_entity_projections(project_ids: Mapping[str, str]) -> dict[tuple[s
 _DYNAMIC_METADATA_FIELDS = frozenset(
     {
         "added_at",
+        "citation_count",
         "created_by",
+        "embedding_metadata",
+        "entity_type",
+        "last_recalled_at",
+        "last_used_at",
+        "misled_count",
         "modified_by",
         "organization_id",
         "record_id",
+        "retrieval_count",
+        "revision",
         "updated_at",
     }
 )
@@ -455,7 +463,6 @@ def build_corpus_snapshot(
         {
             "id": str(entity.get("id") or ""),
             **_entity_projection(entity),
-            "metadata": dict(entity.get("metadata") or {}),
             "created_at": entity.get("created_at"),
             "updated_at": entity.get("updated_at"),
             "related": entity.get("related"),
