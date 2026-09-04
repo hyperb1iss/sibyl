@@ -41,6 +41,16 @@ This is the human half of the reflection workflow. The
 [dream-cycle](./memory-loop.md#the-reflection-dream-cycle) handles automatic review; the captures
 surface handles the judgment calls.
 
+Starting with 1.3.2, a newly projected memory appears once in the capture queue. Sibyl keeps the
+verbatim raw memory and its projection, but hides the raw row after recording their relationship.
+
+Existing raw memory and projection pairs can still appear twice after an upgrade. Startup does not
+backfill those pairs: the operation scales with stored captures and can delay readiness and other
+database clients. Operators can schedule the optional `CONTENT_RAW_CAPTURE_PROJECTION_FOLD_BACKFILL`
+operation from `sibyl_core.backends.surreal.content_schema` during a quiet maintenance window. The
+backfill marks matching pairs for the same organization and principal without deleting either
+record.
+
 ## Imports
 
 The imports surface tracks [source import](./sources.md#source-import) jobs. Source import ingests
