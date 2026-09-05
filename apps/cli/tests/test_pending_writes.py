@@ -408,12 +408,29 @@ def test_invalid_identity_is_never_written(tmp_path: Path, monkeypatch: pytest.M
     assert pending_writes.read_pending_metrics()["attempted"] == 0
 
 
-def test_unknown_and_bulk_resources_are_ordering_barriers() -> None:
+def test_bulk_resources_are_ordering_barriers() -> None:
     assert pending_writes.pending_write_resource({"path": "/entities/bulk"}) == "*"
-    assert pending_writes.pending_write_resource({"path": "/context/reflect"}) == "*"
     assert (
         pending_writes.pending_write_resource(
             {"path": "/entities", "method": "POST", "json": {"id": "123"}}
         )
         == "entity:123"
     )
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/context/reflect", "/sources", "/memory/promote", "/teams", "/orgs", "/projects"],
+)
+def test_ordinary_resource_fallback_does_not_form_a_global_barrier(path: str) -> None:
+    resource = pending_writes.pending_write_resource({"method": "POST", "path": path})
+    assert resource == f"path:{path.lstrip('/')}"
+    assert resource != pending_writes.pending_write_resource(
+        {"method": "PATCH", "path": "/tasks/123"}
+    )
+
+
+def test_fallback_groups_actions_on_the_same_source() -> None:
+    resource = pending_writes.pending_write_resource
+    assert resource({"path": "/sources/123/sync"}) == resource({"path": "/sources/123"})
+    assert resource({"path": "/sources/123"}) != resource({"path": "/sources/456"})

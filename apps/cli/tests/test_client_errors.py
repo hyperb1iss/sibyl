@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
@@ -18,6 +19,7 @@ from sibyl_cli.common import handle_client_error
 
 def _client_with_transport(transport: httpx.MockTransport) -> SibylClient:
     client = SibylClient(base_url="http://testserver/api", auth_token="token")
+
     async def legacy_transport(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/auth/replay-identity":
             return httpx.Response(404, json={"detail": "Not Found"})
@@ -275,6 +277,7 @@ async def test_automatic_replay_attempts_independent_writes_after_transient_fail
 ) -> None:
     monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
     monkeypatch.setattr(client_transport_module, "AUTO_REPLAY_GRACE_SECONDS", 0.0)
+    monkeypatch.setattr(client_transport_module, "time", SimpleNamespace(monotonic=lambda: 100.0))
     client_transport_module._FAILURE_WINDOWS.clear()
     posts = 0
     monkeypatch.setattr(client_transport_module, "anyio_sleep", AsyncMock())
@@ -310,6 +313,39 @@ async def test_automatic_replay_attempts_independent_writes_after_transient_fail
     key = client_transport_module._failure_key(client.base_url)
     assert len(client_transport_module._FAILURE_WINDOWS[key]) == 8
     client_transport_module._FAILURE_WINDOWS.clear()
+
+
+@pytest.mark.asyncio
+async def test_buffered_reflection_does_not_block_a_new_task(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pending_writes.Path, "home", lambda: tmp_path)
+    requests: list[httpx.Request] = []
+
+    def healthy(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "new-task"})
+
+    client = _client_with_transport(httpx.MockTransport(healthy))
+    reflection = pending_writes.create_pending_write(
+        method="POST",
+        path="/context/reflect",
+        base_url=client.base_url,
+        json_payload={"content": "Preserve this reflection"},
+        params=None,
+        replay_scope=client._replay_scope,
+    )
+    pending_writes.record_pending_failure(reflection["id"], category="rejected", status_code=404)
+
+    result = await client.post("/tasks", json={"name": "Independent task"})
+    await client.close()
+
+    assert result == {"id": "new-task"}
+    assert [(request.method, request.url.path) for request in requests] == [("POST", "/api/tasks")]
+    remaining = pending_writes.list_pending_writes()
+    assert [item["id"] for item in remaining] == [reflection["id"]]
+    assert remaining[0]["status"] == "attention"
 
 
 @pytest.mark.asyncio

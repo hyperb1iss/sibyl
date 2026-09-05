@@ -428,7 +428,7 @@ def pending_write_resource(item: dict[str, Any]) -> str:
         return f"entity:{parts[1]}"
     if len(parts) >= 2 and parts[0] == "projects":
         return f"project:{parts[1]}"
-    return "*"
+    return f"path:{'/'.join(parts[:2])}"
 
 
 def bind_pending_write_identity(
