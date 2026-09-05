@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
@@ -30,10 +29,8 @@ from sibyl_core.services.surreal_content import (
     list_raw_memories_for_scope,
     raw_memory_recallable,
 )
-from sibyl_core.tools.add import add as default_add
 from sibyl_core.tools.responses import AddResponse
 
-AddFn = Callable[..., Awaitable[AddResponse]]
 log = structlog.get_logger()
 
 
@@ -64,7 +61,6 @@ async def reflect_memory(
     persist_review: bool = False,
     existing_source_id: str | None = None,
     limit: int = 12,
-    add_fn: AddFn = default_add,
     extractor: ReflectionExtractor | None = None,
 ) -> ReflectionPack:
     """Reflect raw notes into reviewable, optionally persisted memory candidates."""
@@ -145,7 +141,6 @@ async def reflect_memory(
             )
 
     source_id: str | None = existing_source_id
-    use_native_write = persist and _reflection_write_enabled()
     if persist and persist_source and source_id is None:
         if persist_review:
             source = await _persist_reflection_source_review(
@@ -161,7 +156,7 @@ async def reflect_memory(
                 extraction_prompt_metadata=extraction_prompt_metadata,
                 policy_metadata=persist_policy_metadata,
             )
-        elif use_native_write:
+        else:
             source = await _persist_reflection_source(
                 title=source_title,
                 content=content,
@@ -173,37 +168,6 @@ async def reflect_memory(
                 accessible_projects=accessible_projects,
                 memory_scope=memory_scope,
                 scope_key=scope_key,
-            )
-        else:
-            source_metadata: dict[str, Any] = {
-                "organization_id": organization_id,
-                "capture_mode": "reflect",
-                "capture_surface": "reflection",
-                "remember_kind": "session",
-                "reflection_intent": intent,
-                "reflection_source": True,
-                **persist_policy_metadata,
-            }
-            if domain:
-                source_metadata["domain"] = domain
-            if project:
-                source_metadata["project_id"] = project
-            source = await add_fn(
-                title=source_title,
-                content=content,
-                entity_type="session",
-                category=domain,
-                tags=_tags_for("session", domain),
-                related_to=related_to,
-                metadata=source_metadata,
-                # Keep reflection source checkpoints as episodic memories so they
-                # are tenant-scoped writes and avoid deterministic direct-entity
-                # UUID collisions across organizations/projects.
-                sync=False,
-                check_conflicts=False,
-                memory_scope=resolved_scope.value,
-                scope_key=resolved_scope_key,
-                principal_id=principal_id,
             )
         if source.success:
             source_id = source.id
@@ -243,9 +207,6 @@ async def reflect_memory(
             persisted.append(candidate)
             continue
 
-        candidate_related_to = list(related_to or [])
-        if source_id:
-            candidate_related_to.append(source_id)
         metadata = {
             **candidate.metadata,
             "organization_id": organization_id,
@@ -283,47 +244,25 @@ async def reflect_memory(
                 )
             )
             continue
-        if use_native_write:
-            candidate_result = await _persist_reflection_candidate(
-                candidate=replace(candidate, metadata=metadata),
-                organization_id=str(organization_id),
-                principal_id=principal_id,
-                domain=domain,
-                project=project,
-                source_id=source_id,
-                related_to=related_to,
-                accessible_projects=accessible_projects,
-                memory_scope=memory_scope,
-                scope_key=scope_key,
-            )
-            persisted.append(
-                replace(
-                    candidate,
-                    metadata={**metadata, **candidate_result.metadata},
-                    persisted_id=candidate_result.response.id
-                    if candidate_result.response.success
-                    else None,
-                )
-            )
-            continue
-
-        result = await add_fn(
-            title=candidate.title,
-            content=candidate.content,
-            entity_type=candidate.kind,
-            category=domain,
-            tags=candidate.tags,
-            related_to=candidate_related_to or None,
-            metadata=metadata,
-            sync=True,
-            check_conflicts=True,
-            memory_scope=resolved_scope.value,
-            scope_key=resolved_scope_key,
+        candidate_result = await _persist_reflection_candidate(
+            candidate=replace(candidate, metadata=metadata),
+            organization_id=str(organization_id),
             principal_id=principal_id,
+            domain=domain,
+            project=project,
+            source_id=source_id,
+            related_to=related_to,
+            accessible_projects=accessible_projects,
+            memory_scope=memory_scope,
+            scope_key=scope_key,
         )
         persisted.append(
             replace(
-                candidate, metadata=metadata, persisted_id=result.id if result.success else None
+                candidate,
+                metadata={**metadata, **candidate_result.metadata},
+                persisted_id=candidate_result.response.id
+                if candidate_result.response.success
+                else None,
             )
         )
 
@@ -387,12 +326,6 @@ __all__ = [
     "reflection_pack_to_dict",
     "reflection_pack_to_markdown",
 ]
-
-
-def _reflection_write_enabled() -> bool:
-    from sibyl_core.services.memory import reflection_write_enabled
-
-    return reflection_write_enabled()
 
 
 def _resolve_reflection_scope(

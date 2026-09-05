@@ -1,0 +1,378 @@
+{
+  "entities": [
+    {
+      "content": "We decided to preserve source evidence before publishing decisions.",
+      "created_by": "user_123",
+      "description": "We decided to preserve source evidence before publishing decisions.",
+      "embedding": null,
+      "entity_type": "session",
+      "id": "session_9c6ad27491fa",
+      "metadata": {
+        "capture_mode": "reflect",
+        "capture_surface": "reflection",
+        "category": "sibyl",
+        "confidence": 1.0,
+        "lifecycle_action": "promote",
+        "lifecycle_flags": [],
+        "lifecycle_reason": "preserves raw reflection source material",
+        "lifecycle_state": "active",
+        "memory_lifecycle": {
+          "action": "promote",
+          "created_at": "2026-09-04T12:00:00+00:00",
+          "derived_ids": [
+            "session_9c6ad27491fa"
+          ],
+          "duplicate_of_source_id": null,
+          "flags": [],
+          "metadata": {
+            "promoted_entity_id": "session_9c6ad27491fa"
+          },
+          "prior_state": null,
+          "reason": "preserves raw reflection source material",
+          "replacement_source_id": null,
+          "reversible": true,
+          "source_id": "session_9c6ad27491fa",
+          "state": "active"
+        },
+        "memory_scope": "project",
+        "native_write_mode": "enabled",
+        "native_write_path": "reflection_promotion",
+        "organization_id": "org_123",
+        "policy_actions": [
+          "reflect",
+          "write"
+        ],
+        "policy_allowed": true,
+        "policy_reasons": [
+          "same_scope_reflect_allowed",
+          "same_scope_write_allowed"
+        ],
+        "principal_id": "user_123",
+        "project_id": "project_123",
+        "raw_source_ids": [],
+        "reflection_findings": [
+          {
+            "action": "promote",
+            "confidence": 1.0,
+            "created_at": "2026-09-04T12:00:00+00:00",
+            "id": "finding_00000000000000000000000000000001",
+            "kind": "promotion",
+            "lifecycle_state": "active",
+            "metadata": {
+              "promoted_entity_id": "session_9c6ad27491fa"
+            },
+            "policy_reasons": [
+              "same_scope_reflect_allowed",
+              "same_scope_write_allowed"
+            ],
+            "reason": "preserves raw reflection source material",
+            "related_source_ids": [
+              "session_9c6ad27491fa"
+            ],
+            "reversible": true,
+            "source_ids": [],
+            "target_source_id": "session_9c6ad27491fa"
+          }
+        ],
+        "reflection_reason": "preserves raw reflection source material",
+        "reflection_source": true,
+        "remember_kind": "session",
+        "scope_key": "project_123",
+        "source_ids": [],
+        "tags": [
+          "reflection",
+          "session"
+        ]
+      },
+      "modified_by": null,
+      "name": "Evidence review",
+      "organization_id": "org_123",
+      "revision": 1,
+      "source_file": null
+    },
+    {
+      "content": "We decided to preserve source evidence before publishing decisions.",
+      "created_by": "user_123",
+      "description": "We decided to preserve source evidence before publishing decisions.",
+      "embedding": null,
+      "entity_type": "decision",
+      "id": "decision_cfeb13f7083a",
+      "metadata": {
+        "capture_mode": "reflect",
+        "capture_surface": "reflection",
+        "category": "sibyl",
+        "confidence": 0.86,
+        "domain": "sibyl",
+        "extraction_prompt_metadata": {
+          "domain": "sibyl",
+          "extractor": "sibyl_reflection_extractor",
+          "extractor_version": "v0.12",
+          "intent": "build",
+          "limit": 12,
+          "project": "project_123"
+        },
+        "extractor_kind": "heuristic",
+        "lifecycle_action": "promote",
+        "lifecycle_flags": [],
+        "lifecycle_reason": "captures a choice or direction future agents should preserve",
+        "lifecycle_state": "active",
+        "memory_lifecycle": {
+          "action": "promote",
+          "created_at": "2026-09-04T12:00:00+00:00",
+          "derived_ids": [
+            "decision_cfeb13f7083a"
+          ],
+          "duplicate_of_source_id": null,
+          "flags": [],
+          "metadata": {
+            "promoted_entity_id": "decision_cfeb13f7083a"
+          },
+          "prior_state": "pending",
+          "reason": "captures a choice or direction future agents should preserve",
+          "replacement_source_id": null,
+          "reversible": true,
+          "source_id": "session_9c6ad27491fa",
+          "state": "active"
+        },
+        "memory_scope": "project",
+        "native_write_mode": "enabled",
+        "native_write_path": "reflection_promotion",
+        "normalized_text_hash": "4d6b9e78cf84109cc734b511e3482f84aa25ce32d2828ae5cafaff520078d048",
+        "organization_id": "org_123",
+        "policy_actions": [
+          "reflect",
+          "write"
+        ],
+        "policy_allowed": true,
+        "policy_reasons": [
+          "same_scope_reflect_allowed",
+          "same_scope_write_allowed"
+        ],
+        "principal_id": "user_123",
+        "project_id": "project_123",
+        "raw_source_ids": [
+          "session_9c6ad27491fa"
+        ],
+        "reflection_findings": [
+          {
+            "action": "promote",
+            "confidence": 1.0,
+            "created_at": "2026-09-04T12:00:00+00:00",
+            "id": "finding_00000000000000000000000000000002",
+            "kind": "promotion",
+            "lifecycle_state": "active",
+            "metadata": {
+              "promoted_entity_id": "decision_cfeb13f7083a"
+            },
+            "policy_reasons": [
+              "same_scope_reflect_allowed",
+              "same_scope_write_allowed"
+            ],
+            "reason": "captures a choice or direction future agents should preserve",
+            "related_source_ids": [
+              "decision_cfeb13f7083a"
+            ],
+            "reversible": true,
+            "source_ids": [
+              "session_9c6ad27491fa"
+            ],
+            "target_source_id": "session_9c6ad27491fa"
+          }
+        ],
+        "reflection_index": 0,
+        "reflection_intent": "build",
+        "reflection_reason": "captures a choice or direction future agents should preserve",
+        "reflection_source_id": "session_9c6ad27491fa",
+        "reflection_source_title": "Evidence review",
+        "relationship_records": [
+          {
+            "confidence": 1.0,
+            "created_at": "2026-09-04T12:00:00+00:00",
+            "metadata": {},
+            "reason": "candidate was reflected in a project-scoped session",
+            "relationship_type": "BELONGS_TO",
+            "source_id": "candidate:0",
+            "source_ids": [
+              "session_9c6ad27491fa"
+            ],
+            "target_id": "project_123"
+          }
+        ],
+        "remember_kind": "decision",
+        "review_state": "pending",
+        "scope_key": "project_123",
+        "source_ids": [
+          "session_9c6ad27491fa"
+        ],
+        "suggested_memory_scope": "project",
+        "suggested_scope_key": null,
+        "tags": [
+          "reflection",
+          "decision",
+          "sibyl"
+        ]
+      },
+      "modified_by": null,
+      "name": "Decision: We decided to preserve source evidence before publishing decisions.",
+      "organization_id": "org_123",
+      "revision": 1,
+      "source_file": "session_9c6ad27491fa"
+    }
+  ],
+  "markdown": "# Sibyl Reflection: Evidence review\nIntent: build\nSource: `session_9c6ad27491fa`\nDomain: sibyl\nProject: project_123\n\n## Decision: Decision: We decided to preserve source evidence before publishing decisions. `decision_cfeb13f7083a`\n- Confidence: 0.86\n- Why: captures a choice or direction future agents should preserve\n- Memory: We decided to preserve source evidence before publishing decisions.\n\n_Hint: Review candidates, persist the durable ones, and keep raw session source as provenance._",
+  "pack": {
+    "candidates": [
+      {
+        "claim_records": [],
+        "confidence": 0.86,
+        "content": "We decided to preserve source evidence before publishing decisions.",
+        "kind": "decision",
+        "metadata": {
+          "capture_mode": "reflect",
+          "capture_surface": "reflection",
+          "confidence": 0.86,
+          "domain": "sibyl",
+          "extraction_prompt_metadata": {
+            "domain": "sibyl",
+            "extractor": "sibyl_reflection_extractor",
+            "extractor_version": "v0.12",
+            "intent": "build",
+            "limit": 12,
+            "project": "project_123"
+          },
+          "extractor_kind": "heuristic",
+          "invalidated_entity_count": 0,
+          "invalidated_entity_ids": [],
+          "invalidated_source_count": 0,
+          "invalidated_source_ids": [],
+          "invalidation_skipped_source_count": 0,
+          "invalidation_skipped_source_ids": [],
+          "memory_scope": "project",
+          "native_relationship_count": 2,
+          "native_relationship_failed_count": 0,
+          "native_relationship_requested_count": 2,
+          "native_write_mode": "enabled",
+          "native_write_path": "reflection_promotion",
+          "normalized_text_hash": "4d6b9e78cf84109cc734b511e3482f84aa25ce32d2828ae5cafaff520078d048",
+          "organization_id": "org_123",
+          "policy_actions": [
+            "reflect",
+            "write"
+          ],
+          "policy_allowed": true,
+          "policy_reasons": [
+            "same_scope_reflect_allowed",
+            "same_scope_write_allowed"
+          ],
+          "project_id": "project_123",
+          "promotion_errors": [],
+          "promotion_state": "complete",
+          "raw_source_ids": [
+            "session_9c6ad27491fa"
+          ],
+          "reflection_index": 0,
+          "reflection_intent": "build",
+          "reflection_reason": "captures a choice or direction future agents should preserve",
+          "reflection_source_id": "session_9c6ad27491fa",
+          "reflection_source_title": "Evidence review",
+          "relationship_records": [
+            {
+              "confidence": 1.0,
+              "created_at": "2026-09-04T12:00:00+00:00",
+              "metadata": {},
+              "reason": "candidate was reflected in a project-scoped session",
+              "relationship_type": "BELONGS_TO",
+              "source_id": "candidate:0",
+              "source_ids": [
+                "session_9c6ad27491fa"
+              ],
+              "target_id": "project_123"
+            }
+          ],
+          "remember_kind": "decision",
+          "review_state": "pending",
+          "scope_key": "project_123",
+          "source_ids": [
+            "session_9c6ad27491fa"
+          ],
+          "suggested_memory_scope": "project",
+          "suggested_scope_key": null
+        },
+        "persisted_id": "decision_cfeb13f7083a",
+        "raw_source_ids": [
+          "session_9c6ad27491fa"
+        ],
+        "reason": "captures a choice or direction future agents should preserve",
+        "reflection_findings": [],
+        "relationship_records": [
+          {
+            "confidence": 1.0,
+            "created_at": "2026-09-04T12:00:00+00:00",
+            "metadata": {},
+            "reason": "candidate was reflected in a project-scoped session",
+            "relationship_type": "BELONGS_TO",
+            "source_id": "candidate:0",
+            "source_ids": [
+              "session_9c6ad27491fa"
+            ],
+            "target_id": "project_123"
+          }
+        ],
+        "review_state": "pending",
+        "sensitivity_flags": [],
+        "suggested_memory_scope": "project",
+        "suggested_scope_key": null,
+        "tags": [
+          "reflection",
+          "decision",
+          "sibyl"
+        ],
+        "title": "Decision: We decided to preserve source evidence before publishing decisions."
+      }
+    ],
+    "domain": "sibyl",
+    "intent": "build",
+    "persisted_count": 1,
+    "project": "project_123",
+    "source_id": "session_9c6ad27491fa",
+    "source_title": "Evidence review",
+    "total_candidates": 1,
+    "usage_hint": "Review candidates, persist the durable ones, and keep raw session source as provenance."
+  },
+  "relationships": [
+    {
+      "id": "rel_session_9c6ad27491fa_belongs_to_project_123",
+      "metadata": {
+        "created_at": "2026-09-04T12:00:00+00:00",
+        "native_write_path": "reflection_promotion"
+      },
+      "relationship_type": "BELONGS_TO",
+      "source_id": "session_9c6ad27491fa",
+      "target_id": "project_123",
+      "weight": 1.0
+    },
+    {
+      "id": "rel_decision_cfeb13f7083a_belongs_to_project_123",
+      "metadata": {
+        "created_at": "2026-09-04T12:00:00+00:00",
+        "native_write_path": "reflection_promotion"
+      },
+      "relationship_type": "BELONGS_TO",
+      "source_id": "decision_cfeb13f7083a",
+      "target_id": "project_123",
+      "weight": 1.0
+    },
+    {
+      "id": "rel_decision_cfeb13f7083a_derived_from_session_9c6ad27491fa",
+      "metadata": {
+        "created_at": "2026-09-04T12:00:00+00:00",
+        "native_write_path": "reflection_promotion",
+        "source_id": "session_9c6ad27491fa"
+      },
+      "relationship_type": "DERIVED_FROM",
+      "source_id": "decision_cfeb13f7083a",
+      "target_id": "session_9c6ad27491fa",
+      "weight": 1.0
+    }
+  ]
+}

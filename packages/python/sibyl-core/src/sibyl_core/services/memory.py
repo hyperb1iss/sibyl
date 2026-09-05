@@ -22,15 +22,12 @@ from sibyl_core.services.memory_policy import (
     declared_suppression_allowed as declared_suppression_allowed,
 )
 from sibyl_core.services.memory_reflection import (
-    coerce_write_mode,
     persist_reflection_candidate,
     persist_reflection_source,
     preview_raw_memory_promotion,
     preview_reflection_candidate_promotion,
     promote_raw_memory,
     promote_reflection_candidate_review,
-    reflection_write_enabled,
-    write_mode_from_env,
 )
 from sibyl_core.services.memory_sharing import (
     preview_memory_access,
@@ -49,7 +46,6 @@ __all__ = [
     "ReflectionWriteResult",
     "WriteMode",
     "apply_memory_correction",
-    "coerce_write_mode",
     "persist_reflection_candidate",
     "persist_reflection_source",
     "preview_memory_access",
@@ -59,7 +55,5 @@ __all__ = [
     "preview_reflection_candidate_promotion",
     "promote_raw_memory",
     "promote_reflection_candidate_review",
-    "reflection_write_enabled",
     "share_memory",
-    "write_mode_from_env",
 ]

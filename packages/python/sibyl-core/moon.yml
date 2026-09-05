@@ -75,14 +75,15 @@ tasks:
   reflection-quality-test:
     command:
       uv run pytest tests/test_reflection_models.py tests/test_reflection_extractor.py
-      tests/test_reflect.py tests/test_native_memory.py tests/test_memory_autonomy.py
+      tests/test_reflect.py tests/test_memory.py tests/test_memory_autonomy.py
       tests/test_context_pack.py -v
     inputs:
     - '@group(sources)'
     - tests/test_reflection_models.py
     - tests/test_reflection_extractor.py
     - tests/test_reflect.py
-    - tests/test_native_memory.py
+    - tests/fixtures/reflection_native_contract.json
+    - tests/test_memory.py
     - tests/test_memory_autonomy.py
     - tests/test_context_pack.py
   write-path-integrity-test:
@@ -178,6 +179,7 @@ fileGroups:
   - src/**/*.py
   tests:
   - tests/**/*.py
+  - tests/fixtures/reflection_native_contract.json
   configs:
   - pyproject.toml
   - /pyproject.toml
