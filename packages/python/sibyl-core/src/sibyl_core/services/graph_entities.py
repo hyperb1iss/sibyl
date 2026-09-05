@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
@@ -13,7 +12,6 @@ from sibyl_core.models.entities import Entity
 from sibyl_core.services.graph_common import (
     execute_graph_transaction as _execute_graph_transaction,
 )
-from sibyl_core.services.graph_common import select_one as _select_one
 from sibyl_core.services.graph_embeddings import (
     _entities_with_native_embeddings,
     _entity_with_native_embedding,
@@ -87,17 +85,13 @@ class EntityManager(_EntityWorkItemManager):
         *,
         embedding_batch_size: int = 64,
     ) -> list[str]:
-        async def load_matching_entity(expected: Entity) -> Entity | None:
-            row = await _select_one(
-                self._client,
-                """
-                SELECT * FROM entity
-                WHERE group_id = $group_id AND uuid = $uuid
-                LIMIT 1;
-                """,
-                group_id=self._group_id,
-                uuid=expected.id,
-            )
+        rows_by_id = {
+            str(row["uuid"]): row
+            for row in await self._get_many_rows([entity.id for entity in entities])
+        }
+
+        def load_matching_entity(expected: Entity) -> Entity | None:
+            row = rows_by_id.get(expected.id)
             if row is None:
                 return None
             hydrated = entity_from_surreal_row(row)
@@ -115,7 +109,8 @@ class EntityManager(_EntityWorkItemManager):
                 }
             )
 
-        loaded = await asyncio.gather(*(load_matching_entity(entity) for entity in entities))
+        loaded = [load_matching_entity(entity) for entity in entities]
+        rows_by_id.clear()
         current_entities = [entity for entity in loaded if entity is not None]
         provider_metadata = (
             self._embedding_provider.metadata.to_dict() if self._embedding_provider else None

@@ -34,6 +34,7 @@ from sibyl_core.backends.surreal.schema_version import (
 )
 from sibyl_core.embeddings.providers import (
     DeterministicEmbeddingProvider,
+    EmbeddingInputKind,
     EmbeddingMetadata,
 )
 from sibyl_core.errors import RevisionConflictError
@@ -5036,5 +5037,202 @@ async def test_the_v17_migration_backfills_scope_from_attributes() -> None:
             )
         )
         assert rows[0]["memory_scope"] == "private"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_native_embedding_backfill_hydrates_thousands_in_one_scoped_rpc() -> None:
+    provider = _deterministic_provider()
+    metadata = provider.metadata.to_dict()
+    rows = [
+        {
+            "uuid": f"bulk_{index}",
+            "name": f"Bulk {index}",
+            "entity_type": "session",
+            "content": f"Evidence {index}",
+            "group_id": "org-bulk-hydration",
+            "name_embedding": [1.0] * 4,
+            "attributes": {"embedding_metadata": metadata},
+        }
+        for index in range(2000)
+    ]
+    entities = [entity_from_surreal_row(row) for row in rows]
+    foreign = entities[0].model_copy(update={"id": "foreign"})
+    stale = entities[1].model_copy(update={"content": "recaptured evidence"})
+    missing = entities[0].model_copy(update={"id": "missing"})
+    client = AsyncMock()
+    client.execute_query.return_value = [
+        *reversed(rows),
+        {**rows[0], "uuid": "foreign", "group_id": "other-org"},
+        None,
+    ]
+    manager = EntityManager(client, group_id="org-bulk-hydration", embedding_provider=provider)
+    embed = AsyncMock(wraps=provider.embed_texts)
+    provider.embed_texts = embed  # type: ignore[method-assign]
+    requested = [entities[-1], *entities, foreign, stale, missing, entities[0]]
+
+    ready = await manager.backfill_embeddings_if_current(requested)
+
+    assert ready == [entities[-1].id, *[entity.id for entity in entities], entities[0].id]
+    embed.assert_not_awaited()
+    client.execute_query.assert_awaited_once()
+    query = client.execute_query.call_args.args[0]
+    assert "$uuids.map" in query
+    assert "uuid = $u" in query
+    assert "uuid IN" not in query
+    assert client.execute_query.call_args.kwargs == {
+        "uuids": list(dict.fromkeys(entity.id for entity in requested))
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("description", "content"),
+    [(None, None), ("", ""), ("  description\n", "  content\n")],
+)
+async def test_native_embedding_backfill_preserves_raw_fields_and_provider_fence(
+    monkeypatch: pytest.MonkeyPatch, description: str | None, content: str | None
+) -> None:
+    provider = _deterministic_provider()
+    row = {
+        "uuid": "raw-backfill",
+        "name": "  raw name\n",
+        "entity_type": "session",
+        "description": description,
+        "content": content,
+        "summary": "summary fallback",
+        "group_id": "org-raw-backfill",
+        "name_embedding": [0.25] * 4,
+        "attributes": {"embedding_metadata": {"provider": "old-provider"}},
+    }
+    client = AsyncMock()
+    client.execute_query.return_value = [row]
+    manager = EntityManager(client, group_id="org-raw-backfill", embedding_provider=provider)
+    update = AsyncMock(return_value={"raw-backfill"})
+    monkeypatch.setattr(graph_entities_module, "_update_entity_embeddings_if_current", update)
+
+    assert await manager.backfill_embeddings_if_current([entity_from_surreal_row(row)]) == [
+        "raw-backfill"
+    ]
+
+    update.assert_awaited_once()
+    prepared = update.call_args.args[1][0]
+    assert prepared.name == row["name"]
+    assert prepared.description == (description or "")
+    assert prepared.content == (content or "")
+    assert prepared.metadata["embedding_metadata"] == provider.metadata.to_dict()
+    assert prepared.embedding != row["name_embedding"]
+    assert update.call_args.kwargs == {"group_id": "org-raw-backfill"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mutation", ["recapture", "delete"])
+async def test_native_embedding_bulk_hydration_keeps_atomic_currency_fence(mutation: str) -> None:
+    client = SurrealGraphClient(group_id=f"org-bulk-fence-{mutation}", url="memory://")
+    provider = DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
+            provider="deterministic",
+            model="unit-test",
+            dimensions=1024,
+            cache_namespace="bulk-hydration-currency-fence",
+            tokenizer_estimate_method="utf8-byte-length",
+        )
+    )
+    manager = EntityManager(client, group_id=client.group_id, embedding_provider=provider)
+    original = Entity(
+        id="recaptured-during-embedding",
+        entity_type=EntityType.SESSION,
+        name="  raw name\n",
+        description="  original description\n",
+        content="  original evidence\n",
+        organization_id=client.group_id,
+    )
+    embed_texts = provider.embed_texts
+
+    async def mutate_then_embed(
+        texts: list[str], *, input_kind: EmbeddingInputKind = "document"
+    ) -> list[list[float]]:
+        if mutation == "delete":
+            await manager.delete(original.id)
+        else:
+            await manager.create_direct(original.model_copy(update={"content": "new capture"}))
+        return await embed_texts(texts, input_kind=input_kind)
+
+    provider.embed_texts = mutate_then_embed  # type: ignore[method-assign]
+    try:
+        await prepare_graph_schema(client)
+        await manager.create_direct(original)
+        hydrated = await manager.get(original.id)
+        assert await manager.backfill_embeddings_if_current([hydrated]) == []
+        if mutation == "delete":
+            with pytest.raises(KeyError):
+                await manager.get(original.id)
+        else:
+            stored = await manager.get(original.id)
+            assert stored.content == "new capture"
+            assert stored.embedding is None
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_native_entity_bulk_lookup_empty_input_avoids_rpc() -> None:
+    client = AsyncMock()
+    manager = EntityManager(client, group_id="org-empty")
+    assert await manager.get_many([]) == []
+    assert await manager.backfill_embeddings_if_current([]) == []
+    client.execute_query.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stored_shape", ["null", "mirrored", "whitespace"])
+async def test_native_embedding_bulk_hydration_preserves_stored_cas_fields(
+    stored_shape: str,
+) -> None:
+    client = SurrealGraphClient(group_id=f"org-bulk-raw-{stored_shape}", url="memory://")
+    provider = DeterministicEmbeddingProvider(
+        EmbeddingMetadata(
+            provider="deterministic",
+            model="unit-test",
+            dimensions=1024,
+            cache_namespace="bulk-hydration-raw-fields",
+            tokenizer_estimate_method="utf8-byte-length",
+        )
+    )
+    manager = EntityManager(client, group_id=client.group_id, embedding_provider=provider)
+    original = Entity(
+        id="raw-fields",
+        entity_type=EntityType.TASK if stored_shape == "mirrored" else EntityType.PATTERN,
+        name="  stored name\n",
+        description="  stored description\n",
+        content="  stored description\n" if stored_shape == "mirrored" else "  stored content\n",
+        organization_id=client.group_id,
+    )
+    try:
+        await prepare_graph_schema(client)
+        await manager.create_direct(original)
+        if stored_shape == "null":
+            await client.execute_query(
+                "UPDATE entity SET description = NONE, content = NONE WHERE uuid = $uuid;",
+                uuid=original.id,
+            )
+        before = await manager._get_many_rows([original.id])
+        hydrated = await manager.get(original.id)
+        ready = await manager.backfill_embeddings_if_current([hydrated])
+        after = await manager._get_many_rows([original.id])
+        assert len(before) == len(after) == 1
+        assert {key: after[0].get(key) for key in ("name", "description", "content")} == {
+            key: before[0].get(key) for key in ("name", "description", "content")
+        }
+        if stored_shape == "null":
+            # Existing CAS rejects NULL fields rather than equating them with empty strings.
+            assert ready == []
+            assert not after[0].get("name_embedding")
+        else:
+            assert ready == [original.id]
+            assert after[0].get("name_embedding")
+        if stored_shape == "mirrored":
+            assert before[0]["content"] == original.description
     finally:
         await client.close()
