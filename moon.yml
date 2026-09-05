@@ -354,7 +354,7 @@ tasks:
 
   inventory-lint:
     script:
-      uv run ruff check tools benchmarks/provider_usage.py benchmarks/longmemeval_qa.py
+      uv run ruff check tools benchmarks/agent_tasks benchmarks/provider_usage.py benchmarks/longmemeval_qa.py
       benchmarks/local_execution_identity.py benchmarks/longmemeval_v2_official_source.py
       benchmarks/longmemeval_v2_release_authorization.py
       benchmarks/longmemeval_v2_release_authorization_package.py
@@ -407,7 +407,7 @@ tasks:
       benchmarks/longmemeval_v2_live_smoke.py
       benchmarks/longmemeval_v2_projection_audit.py
       benchmarks/longmemeval_v2_chunk_geometry benchmarks/usage_rerank
-      && uv run ruff format --check tools benchmarks/longmemeval_qa.py
+      && uv run ruff format --check tools benchmarks/agent_tasks benchmarks/longmemeval_qa.py
       benchmarks/local_execution_identity.py benchmarks/longmemeval_v2_official_source.py
       benchmarks/longmemeval_v2_release_authorization.py
       benchmarks/longmemeval_v2_release_authorization_package.py
@@ -461,6 +461,7 @@ tasks:
       benchmarks/longmemeval_v2_live_smoke.py benchmarks/longmemeval_v2_projection_audit.py
       benchmarks/usage_rerank
     inputs:
+      - benchmarks/agent_tasks/**/*.py
       - tools/**/*.py
       - benchmarks/provider_usage.py
       - benchmarks/longmemeval_qa.py
@@ -527,7 +528,7 @@ tasks:
 
   inventory-format:
     command:
-      uv run ruff format tools benchmarks/provider_usage.py benchmarks/longmemeval_qa.py
+      uv run ruff format tools benchmarks/agent_tasks benchmarks/provider_usage.py benchmarks/longmemeval_qa.py
       benchmarks/local_execution_identity.py benchmarks/longmemeval_v2_official_source.py
       benchmarks/longmemeval_v2_release_authorization.py
       benchmarks/longmemeval_v2_release_authorization_package.py
@@ -579,6 +580,7 @@ tasks:
       benchmarks/longmemeval_v2_live_smoke.py benchmarks/longmemeval_v2_projection_audit.py
       benchmarks/longmemeval_v2_chunk_geometry benchmarks/usage_rerank
     inputs:
+      - benchmarks/agent_tasks/**/*.py
       - tools/**/*.py
       - benchmarks/provider_usage.py
       - benchmarks/longmemeval_qa.py
@@ -644,7 +646,7 @@ tasks:
 
   inventory-typecheck:
     command:
-      uv run ty check tools benchmarks/longmemeval_qa.py benchmarks/local_execution_identity.py
+      uv run ty check tools benchmarks/agent_tasks benchmarks/longmemeval_qa.py benchmarks/local_execution_identity.py
       benchmarks/longmemeval_v2_official_source.py
       benchmarks/longmemeval_v2_release_authorization.py
       benchmarks/longmemeval_v2_release_authorization_package.py
@@ -698,6 +700,7 @@ tasks:
       benchmarks/usage_rerank/store.py
       benchmarks/usage_rerank/whatif.py
     inputs:
+      - benchmarks/agent_tasks/**/*.py
       - tools/**/*.py
       - benchmarks/git_provenance.py
       - benchmarks/longmemeval_qa.py
@@ -1032,9 +1035,23 @@ tasks:
     options:
       cache: false
 
+  agent-task-run:
+    command: uv run python -m benchmarks.agent_tasks
+    inputs:
+      - benchmarks/agent_tasks/**/*.py
+    options:
+      cache: false
+
+  agent-task-test:
+    command: uv run pytest tools/tests/test_agent_task_runner.py -v
+    inputs:
+      - benchmarks/agent_tasks/**/*.py
+      - tools/tests/test_agent_task_runner.py
+      - tools/tests/fixtures/agent_tasks/**/*.py
+
   bench-gate-test:
     command:
-      uv run pytest tools/tests/test_evidence_bundle.py
+      uv run pytest tools/tests/test_agent_task_runner.py tools/tests/test_evidence_bundle.py
       tools/tests/test_benchmark_git_provenance.py tools/tests/test_bench_gate.py
       tools/tests/test_compare_eval_reports.py tools/tests/test_context_pack_eval_script.py
       tools/tests/test_longmemeval_agentic_traversal.py
@@ -1069,6 +1086,7 @@ tasks:
       tools/tests/test_longmemeval_v2_release_cli.py -v
       tools/tests/test_longmemeval_v2_release_ci.py -v
     inputs:
+      - benchmarks/agent_tasks/**/*.py
       - tools/**/*.py
       - docker-compose.yml
       - .github/workflows/eval.yml
