@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import importlib.util
 import json
+import os
+import subprocess
 from pathlib import Path
+from shutil import which
 from types import ModuleType
 from typing import Any
 
 import httpx
 import pytest
+import yaml
 from tools.bench import eval_gate
+
+from sibyl_core.evals.longmemeval import LongMemEvalCorpusDocument
 
 PREFERENCE_CASE_INDEX = 2
 EXPECTED_CREATED_ENTITIES = 3
@@ -68,7 +75,9 @@ def test_eval_workflow_full_run_forces_memory_extraction_off() -> None:
     assert "--require-qa" in full_job
     assert "--require-runtime qa_mode=model" in full_job
     assert "pinned-longmemeval-s-qa.json" in full_job
-    assert "QA limit is set; skipping full-dataset qa_accuracy baseline comparison." in full_job
+    assert "Claim-bearing QA requires a complete matching pinned baseline." in full_job
+    assert "bootstrap_longmemeval_qa_baseline:" in workflow
+    assert "Guard QA comparison contract before spending" in full_job
     assert "--baseline-metric qa_accuracy" in full_job
     assert "--max-regression qa_accuracy=0.01" in full_job
     assert "--qa-mode model" not in smoke_job
@@ -356,9 +365,30 @@ def test_longmemeval_live_refuses_localhost_without_explicit_allow() -> None:
     module.validate_target("http://localhost:3334/api", allow_localhost=True)
 
 
+def _native_context_response(request: httpx.Request, expected_budget: int) -> httpx.Response:
+    assert request.url.path == "/api/context/pack"
+    payload = json.loads(request.content)
+    assert request.headers["Authorization"] == "Bearer fixture-access-token"
+    assert payload["goal"] == "What did I buy?"
+    assert payload["markdown_token_budget"] == expected_budget
+    assert payload["record_exposure"] is False
+    assert "answer" not in payload
+    return _json_response(
+        request,
+        {
+            "markdown": "# Native compiled context\nA native-only fact, with its date: 2026/01/02.",
+            "total_items": 1,
+            "sections": [],
+            "usage_metadata": {},
+        },
+    )
+
+
+@pytest.mark.parametrize("qa_context_arm", ["historical-prefix-v1", "native-context-v1"])
 def test_longmemeval_live_builds_gate_valid_report(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    qa_context_arm: str,
 ) -> None:
     module = _load_live_module()
     monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_PROVIDER", "openai")
@@ -488,7 +518,7 @@ def test_longmemeval_live_builds_gate_valid_report(
                 for index, entity in enumerate(entities)
             ]
             return _json_response(request, {"results": results, "total": len(results)})
-        return _json_response(request, {"detail": "not found"}, status_code=404)
+        return _native_context_response(request, module.DEFAULT_QA_CONTEXT_TOKENS)
 
     report = asyncio.run(
         module.run_benchmark(
@@ -504,12 +534,21 @@ def test_longmemeval_live_builds_gate_valid_report(
             wait_for_memory_extraction=True,
             memory_extraction_timeout_seconds=1,
             qa_mode="fixture",
+            qa_context_arm=qa_context_arm,
             transport=httpx.MockTransport(handler),
         )
     )
 
     _assert_gate_valid_report(module, report)
-    _assert_fixture_qa_report(report)
+    if qa_context_arm == "historical-prefix-v1":
+        _assert_fixture_qa_report(report)
+    else:
+        qa = report["case_results"][0]["qa"]
+        assert qa["context_receipt"]["rendered_context"] == qa["native_context"]["markdown"]
+        assert "native-only fact" in qa["context_receipt"]["reader_prompt"]
+        assert "I bought markers" not in qa["context_receipt"]["reader_prompt"]
+        assert qa["context_session_ids"] == []
+        assert report["runtime"]["qa_retrieval_surface"] == "POST /api/context/pack"
     _assert_memory_extraction_stats(report)
     _assert_memory_projection_stats(report)
     _assert_chunked_entities(module, state)
@@ -688,3 +727,309 @@ def test_longmemeval_live_stratified_selection_and_diagnostics(tmp_path: Path) -
     assert worst["case_index"] == PREFERENCE_CASE_INDEX
     assert "salty snacks" in worst["answer_snippets"]["s-pref-answer"]
     assert "sweet desserts" in worst["top_distractor_snippets"]["s-pref-distractor"]
+
+
+def test_qa_historical_prompt_stays_byte_identical() -> None:
+    _load_live_module()
+    qa = importlib.import_module("longmemeval_qa")
+
+    entry = {
+        "question": "What degree did I graduate with?",
+        "question_date": "2026/01/03",
+        "answer": "Business Administration",
+        "answer_session_ids": ["s1"],
+        "haystack_session_ids": ["s1"],
+        "haystack_dates": ["2025/12/01"],
+        "haystack_sessions": [[{"role": "user", "content": "x" * 5000}]],
+    }
+    result = asyncio.run(
+        qa.evaluate_longmemeval_case_qa(
+            entry,
+            ranked_session_ids=["s1"],
+            corpus_text_policy="user-and-assistant-turns-v1",
+            config=qa.LongMemEvalQAConfig(mode="fixture"),
+        )
+    )
+    text = ("User: " + "x" * 5000)[:3985].rstrip() + " [truncated]"
+    assert result["context_receipt"]["reader_prompt"] == (
+        "Question date: 2026/01/03\nQuestion: What degree did I graduate with?\n\n"
+        f"Retrieved sessions:\nRank 1 session s1:\n{text}\n\nAnswer:"
+    )
+    assert result["max_context_tokens"] is None
+
+
+def test_qa_query_passages_preserve_tail_evidence_dates_and_budget() -> None:
+    _load_live_module()
+    qa = importlib.import_module("longmemeval_qa")
+
+    content = "User: An unrelated observation about the weather.\n" * 140
+    content += "User: I graduated with a degree in Business Administration.\n"
+    document = LongMemEvalCorpusDocument("s1", content, "2025/12/01")
+    config = qa.LongMemEvalQAConfig(context_arm="query-passages-v1", max_context_tokens=150)
+    _, rendered, spans = qa.render_qa_context(
+        question="What degree did I graduate with?",
+        documents=[document],
+        ranked_session_ids=["s1"],
+        config=config,
+    )
+    assert "Business Administration" in rendered
+    assert "Date: 2025/12/01" in rendered
+    assert qa.count_context_tokens(rendered) <= config.max_context_tokens
+    assert spans[0]["end"] == len(content)
+    assert content[spans[0]["start"] : spans[0]["end"]] in rendered
+
+
+@pytest.mark.parametrize("arm", ["dated-prefix-v1", "query-passages-v1"])
+def test_qa_selection_cannot_observe_answer_labels(arm: str) -> None:
+    _load_live_module()
+    qa = importlib.import_module("longmemeval_qa")
+
+    entry = {
+        "question": "Which version is current?",
+        "question_date": "2026/01/03",
+        "answer": "first answer",
+        "answer_session_ids": ["s1"],
+        "haystack_session_ids": ["s1"],
+        "haystack_dates": ["2026/01/01"],
+        "haystack_sessions": [
+            [{"role": "user", "content": "Version 3 is current.", "has_answer": True}]
+        ],
+    }
+    config = qa.LongMemEvalQAConfig(mode="fixture", context_arm=arm)
+    before = asyncio.run(
+        qa.evaluate_longmemeval_case_qa(
+            entry,
+            ranked_session_ids=["s1"],
+            corpus_text_policy="user-and-assistant-turns-v1",
+            config=config,
+        )
+    )
+    entry["answer"] = "POISONED_GOLD"
+    entry["answer_session_ids"] = ["absent"]
+    entry["haystack_sessions"][0][0]["has_answer"] = False
+    after = asyncio.run(
+        qa.evaluate_longmemeval_case_qa(
+            entry,
+            ranked_session_ids=["s1"],
+            corpus_text_policy="user-and-assistant-turns-v1",
+            config=config,
+        )
+    )
+    assert before["context_receipt"] == after["context_receipt"]
+
+
+def test_qa_complete_controls_fail_instead_of_truncating() -> None:
+    _load_live_module()
+    qa = importlib.import_module("longmemeval_qa")
+
+    text = "A complete sentence with evidence.\n" * 100
+    for arm in ("full-sessions-v1", "native-context-v1"):
+        with pytest.raises(ValueError, match=r"exceeds? QA token ceiling"):
+            qa.render_qa_context(
+                question="Evidence?",
+                documents=[LongMemEvalCorpusDocument("s1", text)],
+                ranked_session_ids=["s1"],
+                native_markdown=text,
+                config=qa.LongMemEvalQAConfig(context_arm=arm, max_context_tokens=10),
+            )
+    _, rendered, spans = qa.render_qa_context(
+        question="Evidence?",
+        documents=[],
+        ranked_session_ids=[],
+        native_markdown=text,
+        config=qa.LongMemEvalQAConfig(context_arm="native-context-v1"),
+    )
+    assert rendered == text
+    assert spans == []
+
+
+@pytest.mark.parametrize(
+    ("variant", "expected_success"),
+    [
+        ("missing", False),
+        ("bootstrap", True),
+        ("partial", False),
+        ("matching", True),
+        ("wrong-arm", False),
+        ("wrong-budget", False),
+        ("wrong-model", False),
+        ("wrong-rubric", False),
+        ("wrong-corpus", False),
+        ("wrong-policy", False),
+        ("incomplete", False),
+        ("missing-accuracy", False),
+        ("null-accuracy", False),
+        ("string-accuracy", False),
+        ("nan-accuracy", False),
+        ("infinite-accuracy", False),
+        ("negative-accuracy", False),
+        ("excess-accuracy", False),
+        ("missing-correct-count", False),
+        ("fractional-correct-count", False),
+        ("excess-correct-count", False),
+        ("incoherent-accuracy", False),
+    ],
+)
+def test_eval_workflow_qa_guard_fails_closed(
+    tmp_path: Path,
+    variant: str,
+    expected_success: bool,
+) -> None:
+    workflow = yaml.safe_load(
+        (Path(__file__).parents[2] / ".github/workflows/eval.yml").read_text()
+    )
+    step = next(
+        step
+        for step in workflow["jobs"]["longmemeval-live-full"]["steps"]
+        if step.get("name") == "Guard QA comparison contract before spending"
+    )
+    baseline = tmp_path / "benchmarks/results/ai-memory/pinned-longmemeval-s-qa.json"
+    payload: dict[str, Any] = {
+        "qa": {
+            "mode": "model",
+            "context_arm": "query-passages-v1",
+            "reader_provider": "openai",
+            "judge_provider": "openai",
+            "reader_model": "reader",
+            "judge_model": "judge",
+            "reader_prompt_id": "sibyl-longmemeval-reader-v1",
+            "judge_prompt_id": "sibyl-longmemeval-judge-v1",
+            "rubric_id": "longmemeval-s-answer-correctness-v1",
+            "context_tokenizer": "o200k_base",
+            "max_context_tokens": 6000,
+            "max_context_sessions": 5,
+            "max_session_chars": 4000,
+        },
+        "dataset": {"corpus_hash": "sha256:fixture", "corpus_text_policy": "fixture-policy"},
+        "completion_status": "complete",
+        "total_questions": 500,
+        "overall": {"qa_evaluated_count": 500, "qa_correct_count": 131, "qa_accuracy": 0.262},
+    }
+    mutations = {
+        "wrong-arm": ("qa", "context_arm", "native-context-v1"),
+        "wrong-budget": ("qa", "max_context_tokens", 8000),
+        "wrong-model": ("qa", "reader_model", "different-reader"),
+        "wrong-rubric": ("qa", "rubric_id", "different-rubric"),
+        "wrong-corpus": ("dataset", "corpus_hash", "sha256:different"),
+        "wrong-policy": ("dataset", "corpus_text_policy", "different-policy"),
+        "incomplete": ("overall", "qa_evaluated_count", 499),
+        "null-accuracy": ("overall", "qa_accuracy", None),
+        "string-accuracy": ("overall", "qa_accuracy", "0.262"),
+        "nan-accuracy": ("overall", "qa_accuracy", float("nan")),
+        "infinite-accuracy": ("overall", "qa_accuracy", float("inf")),
+        "negative-accuracy": ("overall", "qa_accuracy", -0.1),
+        "excess-accuracy": ("overall", "qa_accuracy", 1.1),
+        "fractional-correct-count": ("overall", "qa_correct_count", 131.5),
+        "excess-correct-count": ("overall", "qa_correct_count", 501),
+        "incoherent-accuracy": ("overall", "qa_accuracy", 0.8),
+    }
+    if variant in mutations:
+        section, key, value = mutations[variant]
+        payload[section][key] = value
+    if variant == "missing-accuracy":
+        del payload["overall"]["qa_accuracy"]
+    if variant == "missing-correct-count":
+        del payload["overall"]["qa_correct_count"]
+    if variant not in {"missing", "bootstrap"}:
+        baseline.parent.mkdir(parents=True)
+        baseline.write_text(json.dumps(payload))
+    bash = which("bash")
+    assert bash is not None
+    assert which("jq") is not None
+    result = subprocess.run(  # noqa: S603
+        [bash, "-euo", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env={
+            "PATH": os.environ["PATH"],
+            "LONGMEMEVAL_QA_BOOTSTRAP": str(variant == "bootstrap").lower(),
+            "LONGMEMEVAL_QA_LIMIT": "25" if variant == "partial" else "",
+            "LONGMEMEVAL_QA_CONTEXT_ARM": "query-passages-v1",
+            "LONGMEMEVAL_QA_CONTEXT_TOKENS": "6000",
+            "LONGMEMEVAL_QA_READER_MODEL": "reader",
+            "LONGMEMEVAL_QA_JUDGE_MODEL": "judge",
+            "LONGMEMEVAL_SHA256": "fixture",
+            "LONGMEMEVAL_CORPUS_TEXT_POLICY": "fixture-policy",
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert (result.returncode == 0) == expected_success, result.stdout + result.stderr
+    if variant == "bootstrap":
+        assert "unclaimed candidate evidence" in result.stdout
+        assert not baseline.exists()
+
+
+def test_qa_passage_keeps_speaker_after_first_sentence() -> None:
+    _load_live_module()
+    qa = importlib.import_module("longmemeval_qa")
+    text = "User: Hello. I graduated in biology.\nAssistant: Great. Biology is fascinating."
+    _, rendered, spans = qa.render_qa_context(
+        question="What did I graduate in?",
+        documents=[LongMemEvalCorpusDocument("s1", text)],
+        ranked_session_ids=["s1"],
+        config=qa.LongMemEvalQAConfig(context_arm="query-passages-v1"),
+    )
+    assert spans[0]["speaker"] == "User"
+    assert "Speaker: User" in rendered
+    assert any(span["speaker"] == "Assistant" for span in spans)
+
+
+@pytest.mark.parametrize(("budget", "sessions"), [(99, 5), (32_001, 5), (6000, 0), (6000, 51)])
+def test_qa_native_invalid_request_fails_before_any_api_call(
+    tmp_path: Path,
+    budget: int,
+    sessions: int,
+) -> None:
+    module = _load_live_module()
+    dataset = tmp_path / "fixture.json"
+    dataset.write_text(
+        json.dumps(
+            [
+                {
+                    "question_id": "q1",
+                    "question": "What did I buy?",
+                    "question_type": "single-session-user",
+                    "answer_session_ids": ["s1"],
+                    "haystack_session_ids": ["s1"],
+                    "haystack_sessions": [[{"role": "user", "content": "I bought pencils."}]],
+                }
+            ]
+        )
+    )
+
+    def unexpected_request(request: httpx.Request) -> httpx.Response:
+        pytest.fail(f"Invalid native config reached API: {request.url.path}")
+
+    with pytest.raises(module.LongMemEvalLiveError, match="Native QA"):
+        asyncio.run(
+            module.run_benchmark(
+                dataset,
+                api_url="http://fixture/api",
+                verify_sha256=False,
+                qa_mode="fixture",
+                qa_context_arm="native-context-v1",
+                qa_max_context_tokens=budget,
+                qa_max_context_sessions=sessions,
+                transport=httpx.MockTransport(unexpected_request),
+            )
+        )
+
+
+@pytest.mark.parametrize(("budget", "sessions"), [(100, 1), (32_000, 50)])
+def test_qa_native_request_accepts_product_boundary_values(budget: int, sessions: int) -> None:
+    module = _load_live_module()
+    config = module._qa_config(
+        mode="fixture",
+        reader_provider="openai",
+        reader_model="reader",
+        judge_provider="openai",
+        judge_model="judge",
+        max_context_sessions=sessions,
+        max_session_chars=4000,
+        timeout_seconds=120,
+        context_arm="native-context-v1",
+        max_context_tokens=budget,
+    )
+    assert config.max_context_tokens == budget
+    assert config.max_context_sessions == sessions

@@ -104,6 +104,24 @@ on:
         description: "Run the GPT-4o/GPT-5.2 LongMemEval-S QA pass on the full job"
         type: boolean
         default: false
+      longmemeval_qa_context_arm:
+        description: "QA context contract; each arm needs its own matching baseline"
+        type: choice
+        options:
+          - query-passages-v1
+          - historical-prefix-v1
+          - dated-prefix-v1
+          - full-sessions-v1
+          - native-context-v1
+        default: query-passages-v1
+      longmemeval_qa_context_tokens:
+        description: "Hard context token ceiling (o200k_base); full-session control needs separate sizing"
+        type: string
+        default: "6000"
+      bootstrap_longmemeval_qa_baseline:
+        description: "Explicit unclaimed baseline bootstrap; skips comparison without publishing a baseline"
+        type: boolean
+        default: false
       longmemeval_qa_limit:
         description: "Optional QA question limit; leave blank for the full dataset"
         type: string
@@ -145,6 +163,9 @@ env:
     ${{ ( inputs.run_longmemeval_qa || (github.event_name == 'schedule' && github.event.schedule ==
     '0 8 * * 0') ) && 'model' || 'disabled' }}
   LONGMEMEVAL_QA_LIMIT: ${{ inputs.longmemeval_qa_limit || '' }}
+  LONGMEMEVAL_QA_CONTEXT_ARM: ${{ inputs.longmemeval_qa_context_arm || 'query-passages-v1' }}
+  LONGMEMEVAL_QA_CONTEXT_TOKENS: ${{ inputs.longmemeval_qa_context_tokens || '6000' }}
+  LONGMEMEVAL_QA_BOOTSTRAP: ${{ github.event_name == 'workflow_dispatch' && inputs.bootstrap_longmemeval_qa_baseline || false }}
   LONGMEMEVAL_QA_READER_MODEL: gpt-4o
   LONGMEMEVAL_QA_JUDGE_MODEL: gpt-5.2
 
@@ -837,6 +858,50 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Guard QA comparison contract before spending
+        if: env.LONGMEMEVAL_QA_MODE == 'model'
+        run: |
+          qa_baseline="benchmarks/results/ai-memory/pinned-longmemeval-s-qa.json"
+          if [[ "${LONGMEMEVAL_QA_BOOTSTRAP}" == "true" ]]; then
+            echo "::notice::Explicit QA bootstrap: output is unclaimed candidate evidence, not a pinned baseline."
+          elif [[ -n "${LONGMEMEVAL_QA_LIMIT}" ]]; then
+            echo "::error::Partial QA cannot certify a full baseline; use explicit bootstrap for a diagnostic slice."
+            exit 1
+          elif [[ ! -f "$qa_baseline" ]]; then
+            echo "::error::Missing pinned QA baseline. Dispatch explicit bootstrap, review its receipt, then pin it separately."
+            exit 1
+          else
+            jq -e --arg arm "${LONGMEMEVAL_QA_CONTEXT_ARM}" \
+              --arg reader "${LONGMEMEVAL_QA_READER_MODEL}" \
+              --arg judge "${LONGMEMEVAL_QA_JUDGE_MODEL}" \
+              --arg corpus "sha256:${LONGMEMEVAL_SHA256}" \
+              --arg policy "${LONGMEMEVAL_CORPUS_TEXT_POLICY}" \
+              --argjson budget "${LONGMEMEVAL_QA_CONTEXT_TOKENS}" '
+                .qa.mode == "model" and
+                .dataset.corpus_hash == $corpus and .dataset.corpus_text_policy == $policy and
+                .qa.context_arm == $arm and
+                .qa.reader_provider == "openai" and .qa.judge_provider == "openai" and
+                .qa.reader_model == $reader and .qa.judge_model == $judge and
+                .qa.max_context_sessions == 5 and .qa.max_session_chars == 4000 and
+                .qa.reader_prompt_id == "sibyl-longmemeval-reader-v1" and
+                .qa.judge_prompt_id == "sibyl-longmemeval-judge-v1" and
+                .qa.rubric_id == "longmemeval-s-answer-correctness-v1" and
+                .qa.context_tokenizer == "o200k_base" and
+                (.qa.max_context_tokens == $budget or
+                  ($arm == "historical-prefix-v1" and .qa.max_context_tokens == null)) and
+                .completion_status == "complete" and .total_questions == 500 and
+                .overall.qa_evaluated_count == 500 and
+                (.overall.qa_accuracy | type == "number" and isfinite and . >= 0 and . <= 1) and
+                (.overall.qa_correct_count |
+                  type == "number" and isfinite and . >= 0 and . <= 500 and . == floor) and
+                ((.overall.qa_accuracy - (.overall.qa_correct_count / .overall.qa_evaluated_count)) |
+                  fabs <= 1e-12)
+              ' "$qa_baseline" > /dev/null || {
+                echo "::error::Pinned QA baseline has invalid metrics or does not match the comparison contract."
+                exit 1
+              }
+          fi
+
       - name: Guard required secrets
         run: |
           if [[ -z "${SIBYL_OPENAI_API_KEY}" ]]; then
@@ -924,6 +989,8 @@ jobs:
           if [[ "${LONGMEMEVAL_QA_MODE}" == "model" ]]; then
             qa_args=(
               --qa-mode model
+              --qa-context-arm "${LONGMEMEVAL_QA_CONTEXT_ARM}"
+              --qa-max-context-tokens "${LONGMEMEVAL_QA_CONTEXT_TOKENS}"
               --qa-reader-provider openai
               --qa-reader-model "${LONGMEMEVAL_QA_READER_MODEL}"
               --qa-judge-provider openai
@@ -963,6 +1030,7 @@ jobs:
             --metadata graph_knn_ef="${SIBYL_GRAPH_KNN_EF}" \
             --metadata native_fusion_backend="${SIBYL_NATIVE_FUSION_BACKEND}" \
             --metadata qa_mode="${LONGMEMEVAL_QA_MODE}" \
+            --metadata qa_baseline_bootstrap="${LONGMEMEVAL_QA_BOOTSTRAP}" \
             "${projection_args[@]}" \
             "${qa_args[@]}"
 
@@ -983,16 +1051,17 @@ jobs:
               --require-runtime qa_judge_model="${LONGMEMEVAL_QA_JUDGE_MODEL}"
             )
             qa_baseline="benchmarks/results/ai-memory/pinned-longmemeval-s-qa.json"
-            if [[ -n "${LONGMEMEVAL_QA_LIMIT}" ]]; then
-              echo "::notice::QA limit is set; skipping full-dataset qa_accuracy baseline comparison."
-            elif [[ -f "$qa_baseline" ]]; then
+            if [[ "${LONGMEMEVAL_QA_BOOTSTRAP}" == "true" ]]; then
+              echo "::notice::Bootstrap output is unclaimed; review and pin a complete receipt separately."
+            elif [[ -f "$qa_baseline" && -z "${LONGMEMEVAL_QA_LIMIT}" ]]; then
               gate_args+=(
                 --baseline "$qa_baseline"
                 --baseline-metric qa_accuracy
                 --max-regression qa_accuracy=0.01
               )
             else
-              echo "::notice::No pinned LongMemEval-S QA baseline found; this run can seed it."
+              echo "::error::Claim-bearing QA requires a complete matching pinned baseline."
+              exit 1
             fi
           fi
           moon run bench-gate -- .moon/cache/evals/longmemeval_live_full.json "${gate_args[@]}"

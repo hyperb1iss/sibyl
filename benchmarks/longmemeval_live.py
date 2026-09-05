@@ -28,6 +28,8 @@ sys.path.insert(0, str(ROOT / "packages" / "python" / "sibyl-core" / "src"))
 
 from git_provenance import git_provenance
 from longmemeval_qa import (
+    DEFAULT_QA_CONTEXT_ARM,
+    DEFAULT_QA_CONTEXT_TOKENS,
     DEFAULT_QA_JUDGE_MODEL,
     DEFAULT_QA_JUDGE_PROVIDER,
     DEFAULT_QA_MAX_CONTEXT_SESSIONS,
@@ -36,8 +38,10 @@ from longmemeval_qa import (
     DEFAULT_QA_READER_MODEL,
     DEFAULT_QA_READER_PROVIDER,
     DEFAULT_QA_TIMEOUT_SECONDS,
+    LONGMEMEVAL_CONTEXT_ARMS,
     LONGMEMEVAL_QA_MODES,
     LLMProviderName,
+    LongMemEvalContextArm,
     LongMemEvalQAConfig,
     LongMemEvalQAMode,
     evaluate_longmemeval_case_qa,
@@ -74,6 +78,9 @@ DEFAULT_DIAGNOSTIC_SEARCH_LIMIT = 50
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 30.0
 DEFAULT_STALL_TIMEOUT_SECONDS = 300.0
 DEFAULT_MEMORY_EXTRACTION_TIMEOUT_SECONDS = 180.0
+NATIVE_CONTEXT_MIN_TOKENS = 100
+NATIVE_CONTEXT_MAX_TOKENS = 32_000
+NATIVE_CONTEXT_MAX_ITEMS = 50
 APPROX_CHARS_PER_TOKEN = 4.0
 APPROX_TOKEN_SAFETY_MARGIN = 1.2
 ACCOUNTING_SCHEMA_VERSION = "sibyl-eval-accounting-v1"
@@ -1018,6 +1025,8 @@ def _qa_config(
     max_context_sessions: int,
     max_session_chars: int,
     timeout_seconds: float,
+    context_arm: str = DEFAULT_QA_CONTEXT_ARM,
+    max_context_tokens: int = DEFAULT_QA_CONTEXT_TOKENS,
 ) -> LongMemEvalQAConfig:
     if mode not in LONGMEMEVAL_QA_MODES:
         msg = f"Unsupported LongMemEval QA mode: {mode}"
@@ -1028,12 +1037,27 @@ def _qa_config(
     if judge_provider not in {"anthropic", "gemini", "openai"}:
         msg = f"Unsupported LongMemEval QA judge provider: {judge_provider}"
         raise LongMemEvalLiveError(msg)
+    if context_arm not in LONGMEMEVAL_CONTEXT_ARMS:
+        raise LongMemEvalLiveError(f"Unsupported QA context arm: {context_arm}")
+    if mode != "disabled" and context_arm == "native-context-v1":
+        if not NATIVE_CONTEXT_MIN_TOKENS <= max_context_tokens <= NATIVE_CONTEXT_MAX_TOKENS:
+            raise LongMemEvalLiveError(
+                f"Native QA token budget must be {NATIVE_CONTEXT_MIN_TOKENS}"
+                f"..{NATIVE_CONTEXT_MAX_TOKENS}, matching /context/pack"
+            )
+        if not 1 <= max_context_sessions <= NATIVE_CONTEXT_MAX_ITEMS:
+            raise LongMemEvalLiveError(
+                f"Native QA context sessions must be 1..{NATIVE_CONTEXT_MAX_ITEMS}, "
+                "matching /context/pack"
+            )
     return LongMemEvalQAConfig(
         mode=cast(LongMemEvalQAMode, mode),
         reader_provider=cast(LLMProviderName, reader_provider),
         reader_model=reader_model,
         judge_provider=cast(LLMProviderName, judge_provider),
         judge_model=judge_model,
+        context_arm=cast(LongMemEvalContextArm, context_arm),
+        max_context_tokens=max_context_tokens,
         max_context_sessions=max_context_sessions,
         max_session_chars=max_session_chars,
         timeout_seconds=timeout_seconds,
@@ -1125,6 +1149,29 @@ async def _run_case(
             diagnostic_search_limit=diagnostic_search_limit,
         )
         timings_ms["search"] = (time.perf_counter() - phase_started) * 1000
+        native_pack: dict[str, Any] | None = None
+        if qa_config.mode != "disabled" and qa_config.context_arm == "native-context-v1":
+            _set_active_phase(active_case, "context", path="/context/pack")
+            phase_started = time.perf_counter()
+            native_pack = await _post_json(
+                client,
+                "/context/pack",
+                payload={
+                    "goal": str(entry["question"]),
+                    "intent": "general",
+                    "layer": "recall",
+                    "limit": qa_config.max_context_sessions,
+                    "markdown_token_budget": qa_config.max_context_tokens,
+                    "record_exposure": False,
+                    "audit": True,
+                },
+            )
+            timings_ms["context"] = (time.perf_counter() - phase_started) * 1000
+            if (
+                not isinstance(native_pack.get("markdown"), str)
+                or not native_pack["markdown"].strip()
+            ):
+                raise LongMemEvalLiveError("Native context response has no compiled markdown")
 
     results_value = search.get("results")
     results = results_value if isinstance(results_value, list) else []
@@ -1138,7 +1185,10 @@ async def _run_case(
         ranked_session_ids=ranked_session_ids,
         corpus_text_policy=corpus_text_policy,
         config=qa_config,
+        native_markdown=native_pack["markdown"] if native_pack is not None else None,
     )
+    if native_pack is not None:
+        qa_result["native_context"] = native_pack
     if qa_result.get("latency_ms"):
         timings_ms["qa"] = float(qa_result["latency_ms"])
     token_accounting = _case_token_accounting(entry, corpus_text_policy=corpus_text_policy)
@@ -1682,6 +1732,14 @@ def _build_live_report(
             "graph_hnsw_m_env": os.environ.get("SIBYL_GRAPH_HNSW_M", ""),
             "graph_knn_ef_env": os.environ.get("SIBYL_GRAPH_KNN_EF", ""),
             "fusion_backend_env": os.environ.get("SIBYL_FUSION_BACKEND", ""),
+            "qa_context_arm": qa_metadata["context_arm"],
+            "qa_context_tokenizer": qa_metadata["context_tokenizer"],
+            "qa_max_context_tokens": qa_metadata["max_context_tokens"],
+            "qa_retrieval_surface": (
+                "POST /api/context/pack"
+                if qa_config.context_arm == "native-context-v1"
+                else "POST /api/search + dataset rendering"
+            ),
             "qa_mode": qa_metadata["mode"],
             "qa_reader_provider": qa_metadata["reader_provider"],
             "qa_reader_model": qa_metadata["reader_model"],
@@ -1769,6 +1827,8 @@ async def run_benchmark(
     qa_max_context_sessions: int = DEFAULT_QA_MAX_CONTEXT_SESSIONS,
     qa_max_session_chars: int = DEFAULT_QA_MAX_SESSION_CHARS,
     qa_timeout_seconds: float = DEFAULT_QA_TIMEOUT_SECONDS,
+    qa_context_arm: str = DEFAULT_QA_CONTEXT_ARM,
+    qa_max_context_tokens: int = DEFAULT_QA_CONTEXT_TOKENS,
     verify_sha256: bool = True,
     output_path: Path | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
@@ -1805,6 +1865,8 @@ async def run_benchmark(
         max_context_sessions=qa_max_context_sessions,
         max_session_chars=qa_max_session_chars,
         timeout_seconds=qa_timeout_seconds,
+        context_arm=qa_context_arm,
+        max_context_tokens=qa_max_context_tokens,
     )
     selected_cases = list(zip(selected_indices, selected_entries, strict=True))
     entries_by_case_index = dict(selected_cases)
@@ -2024,6 +2086,10 @@ def main() -> None:
         default=DEFAULT_QA_MODE,
         help="Optional LongMemEval-S QA pass over retrieved sessions.",
     )
+    parser.add_argument(
+        "--qa-context-arm", choices=LONGMEMEVAL_CONTEXT_ARMS, default=DEFAULT_QA_CONTEXT_ARM
+    )
+    parser.add_argument("--qa-max-context-tokens", type=int, default=DEFAULT_QA_CONTEXT_TOKENS)
     parser.add_argument("--qa-reader-provider", default=DEFAULT_QA_READER_PROVIDER)
     parser.add_argument("--qa-reader-model", default=DEFAULT_QA_READER_MODEL)
     parser.add_argument("--qa-judge-provider", default=DEFAULT_QA_JUDGE_PROVIDER)
@@ -2069,6 +2135,8 @@ def main() -> None:
                 memory_projection_timeout_seconds=args.memory_projection_timeout,
                 memory_extraction_timeout_seconds=args.memory_extraction_timeout,
                 qa_mode=args.qa_mode,
+                qa_context_arm=args.qa_context_arm,
+                qa_max_context_tokens=args.qa_max_context_tokens,
                 qa_reader_provider=args.qa_reader_provider,
                 qa_reader_model=args.qa_reader_model,
                 qa_judge_provider=args.qa_judge_provider,
