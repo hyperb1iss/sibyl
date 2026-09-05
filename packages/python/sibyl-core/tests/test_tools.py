@@ -4993,3 +4993,118 @@ class TestExploreMemoryScope:
             )
 
         assert [entity.id for entity in response.entities] == ["task_root"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("use_enhanced", [False, True])
+@pytest.mark.parametrize("lifecycle_failure", [False, True])
+async def test_search_native_absent_type_preserves_legacy_fallback_gates(
+    use_enhanced: bool,
+    lifecycle_failure: bool,
+) -> None:
+    from sibyl_core.config import core_config
+    from sibyl_core.services.graph_entities import EntityManager
+
+    search_module = import_module("sibyl_core.tools.search")
+    rows = []
+    for uuid, extra in (
+        ("attribute_note", {}),
+        ("label_note", {}),
+        (
+            "private_note",
+            {"memory_scope": "private", "scope_key": "alice", "principal_id": "alice"},
+        ),
+        ("other_project", {"project_id": "other", "scope_key": "other"}),
+        ("deleted_note", {"lifecycle_state": "deleted"}),
+        ("superseded_note", {}),
+    ):
+        attributes = {
+            "entity_type": "note",
+            "category": "operational_distillation",
+            "memory_scope": "project",
+            "scope_key": "project_123",
+            "project_id": "project_123",
+            **extra,
+        }
+        if uuid == "label_note":
+            del attributes["entity_type"]
+        rows.append(
+            {
+                "uuid": uuid,
+                "record_id": f"entity:{uuid}",
+                "group_id": "org_123",
+                "name": f"Legacy recall {uuid}",
+                "content": "legacy recall evidence",
+                "entity_type": None,
+                "labels": ["Entity", "Note"],
+                "attributes": attributes,
+                "created_at": datetime(2026, 8, 1, tzinfo=UTC),
+                "score": 0.9,
+            }
+        )
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def execute_query(query: str, **params: Any) -> list[dict[str, Any]]:
+        calls.append((query, params))
+        if params.get("_query_label") == "entity.search.type_presence":
+            return []
+        if "FROM relates_to" in query and params.get("predicate") == "SUPERSEDES":
+            if lifecycle_failure:
+                raise RuntimeError("supersession lookup failed")
+            if "superseded_note" in params.get("uuids", []):
+                return [
+                    {
+                        "uuid": "replacement_edge",
+                        "source_id": "replacement",
+                        "target_id": "superseded_note",
+                        "created_at": datetime(2026, 8, 2, tzinfo=UTC),
+                    }
+                ]
+            return []
+        if params.get("_query_label") == "entity.search.fulltext":
+            return [] if params.get("entity_types") else rows
+        return []
+
+    client = AsyncMock()
+    client.execute_query = AsyncMock(side_effect=execute_query)
+    manager = EntityManager(client, group_id="org_123")
+    original_search = manager.search
+    manager.search = AsyncMock(wraps=original_search)
+    runtime = SimpleNamespace(client=client, entity_manager=manager)
+    with (
+        patch.object(core_config, "rerank_enabled", False),
+        patch("sibyl_core.tools.search.get_graph_runtime", AsyncMock(return_value=runtime)),
+    ):
+        response = await search_module.search(
+            query="legacy recall",
+            types=["note"],
+            category="operational_distillation",
+            project="project_123",
+            organization_id="org_123",
+            principal_id="bob",
+            accessible_projects={"project_123"},
+            allowed_memory_scope_keys={memory_scope_policy_key("project", "project_123")},
+            include_documents=False,
+            include_raw_memory=False,
+            use_enhanced=use_enhanced,
+            boost_recent=False,
+            record_exposure=False,
+            limit=10,
+        )
+
+    assert {result.id for result in response.results} == (
+        set() if lifecycle_failure else {"attribute_note", "label_note"}
+    )
+    # This is the outer fallback's limit, distinct from the hybrid linking search.
+    assert any(
+        call.kwargs.get("entity_types") is None and call.kwargs["limit"] == 30
+        for call in manager.search.await_args_list
+    )
+    assert any(params.get("_query_label") == "entity.search.type_presence" for _, params in calls)
+    assert all(
+        not params.get("entity_types")
+        for _, params in calls
+        if params.get("_query_label") == "entity.search.fulltext"
+    )
+    if lifecycle_failure:
+        assert response.filters["search_source_failures"]

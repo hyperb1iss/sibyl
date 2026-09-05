@@ -193,6 +193,26 @@ class _EntitySearchManager:
         search_query = build_fulltext_query(query)
         if not search_query:
             return []
+        if entity_types and len(entity_types) == 1:
+            try:
+                presence = await self._client.execute_query(
+                    """
+                    SELECT uuid FROM entity
+                    WHERE group_id = $group_id AND entity_type = $entity_type
+                    LIMIT 1;
+                    """,
+                    group_id=self._group_id,
+                    entity_type=entity_types[0].value,
+                    _query_label="entity.search.type_presence",
+                )
+            except Exception as exc:
+                log.warning("entity_type_presence_failed", error_type=type(exc).__name__)
+            else:
+                # Only the native client's successful empty row list proves absence.
+                # Normalization also drops malformed responses, so do not use it here.
+                # Keep this observation local: later searches must see newly inserted rows.
+                if isinstance(presence, list) and not presence:
+                    return []
         result_limit = max(int(limit), 1)
         anchor_search_query = _build_explicit_anchor_search_query(query)
 
