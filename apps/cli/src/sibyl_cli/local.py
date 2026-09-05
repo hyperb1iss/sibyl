@@ -102,7 +102,7 @@ COMPOSE_CONFIG = {
                     "CMD",
                     "python",
                     "-c",
-                    "import httpx; httpx.get('http://localhost:3334/api/health')",
+                    "import httpx; httpx.get('http://localhost:3334/api/health/ready', trust_env=False).raise_for_status()",
                 ],
                 "interval": "10s",
                 "timeout": "5s",
@@ -291,7 +291,9 @@ def wait_for_healthy(timeout: int = 120) -> bool:
     start = time.time()
     while time.time() - start < timeout:
         try:
-            response = httpx.get("http://localhost:3334/api/health", timeout=2)
+            response = httpx.get(
+                "http://localhost:3334/api/health/ready", timeout=2, trust_env=False
+            )
             if response.status_code == 200:
                 return True
         except Exception:
@@ -336,12 +338,15 @@ def start(
 
     # Check if already running
     if is_running():
-        warn("Sibyl is already running")
+        warn("Existing Sibyl API container found; leaving server images unchanged.")
         console.print()
         console.print(f"  [{NEON_CYAN}]Web UI:[/{NEON_CYAN}]    http://localhost:3337")
         console.print(f"  [{NEON_CYAN}]API:[/{NEON_CYAN}]       http://localhost:3334")
         console.print()
-        console.print("Run [bold]sibyl down[/bold] first if you want to restart.")
+        console.print(
+            "To apply updated server images, run "
+            "[bold]sibyl down && sibyl up --pull[/bold] when ready to restart."
+        )
         return
 
     # First run setup
@@ -363,7 +368,9 @@ def start(
     # Pull images if requested or first run
     if pull or not SIBYL_LOCAL_COMPOSE.exists():
         info("Pulling Docker images...")
-        run_compose(["pull", "--quiet"])
+        if run_compose(["pull", "--quiet"]).returncode != 0:
+            error("Failed to pull Docker images. Run 'sibyl up --pull' to retry.")
+            raise typer.Exit(1)
 
     # Start services
     info("Starting services...")
@@ -378,11 +385,12 @@ def start(
     if wait_for_healthy():
         success("Sibyl is running!")
     else:
-        warn("Services are starting (may take a moment)")
+        error("Sibyl did not become healthy. Run 'sibyl local logs' to inspect startup errors.")
+        raise typer.Exit(1)
 
     # Show info
     console.print()
-    console.print(f"[{SUCCESS_GREEN}][bold]🚀 Sibyl is ready![/bold][/{SUCCESS_GREEN}]")
+    console.print(f"[{SUCCESS_GREEN}][bold]Sibyl is ready![/bold][/{SUCCESS_GREEN}]")
     console.print()
     console.print(f"  [{NEON_CYAN}]Web UI:[/{NEON_CYAN}]    http://localhost:3337")
     console.print(f"  [{NEON_CYAN}]API:[/{NEON_CYAN}]       http://localhost:3334")
