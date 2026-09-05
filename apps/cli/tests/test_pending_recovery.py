@@ -356,3 +356,73 @@ async def test_unconfirmed_response_retains_payload_and_diagnostic(
         "transport" if failure_kind == "protocol" else "server"
     )
     assert entry["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_transient_idempotency_lock_retries_original_request(identity: dict) -> None:
+    item = queued(identity)
+    writes = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/auth/replay-identity":
+            return httpx.Response(200, json=identity)
+        writes.append(request)
+        if len(writes) == 1:
+            return httpx.Response(409, json={"detail": {
+                "error": "idempotency_in_progress", "message": "Still running"
+            }})
+        return httpx.Response(200, json={"ok": True})
+
+    client = attach(SibylClient(base_url=BASE_URL, auth_token="synthetic"), handler)
+    await client._maybe_replay_pending_writes(ignore_backoff=True)
+    failed = pending_writes.read_pending_write(item["id"])
+    assert failed["status"] == "pending"
+    assert failed["last_failure"]["error_code"] == "idempotency_in_progress"
+    await client._maybe_replay_pending_writes(ignore_backoff=True)
+    await client.close()
+    assert len(writes) == 2
+    assert {request.headers["Idempotency-Key"] for request in writes} == {item["idempotency_key"]}
+    assert pending_writes.list_pending_writes() == []
+
+
+@pytest.mark.asyncio
+async def test_new_write_uses_fresh_identity_without_reassigning_older_write(identity: dict) -> None:
+    auth_store.set_tokens(BASE_URL, "synthetic", "refresh")
+    auth_store.cache_pending_replay_identity(BASE_URL, "synthetic", identity)
+    older = queued(identity)
+    current = deepcopy(identity)
+    current["server_instance_id"] = "44444444-4444-4444-4444-444444444444"
+    writes = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/auth/replay-identity":
+            return httpx.Response(200, json=current)
+        writes.append(request)
+        assert request.headers["X-Sibyl-Server-Instance"] == current["server_instance_id"]
+        return httpx.Response(200, json={"ok": True})
+
+    client = attach(SibylClient(base_url=BASE_URL), handler)
+    assert client._pending_identity == identity
+    await client.post("/memory/raw", json={"raw_content": "new draft"})
+    await client.close()
+    assert len(writes) == 1
+    assert pending_writes.read_pending_write(older["id"])["replay_identity"] == identity
+    assert len(pending_writes.list_pending_writes()) == 1
+
+
+@pytest.mark.asyncio
+async def test_offline_draft_keeps_last_verified_owner(identity: dict) -> None:
+    auth_store.set_tokens(BASE_URL, "synthetic", "refresh")
+    auth_store.cache_pending_replay_identity(BASE_URL, "synthetic", identity)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline", request=request)
+
+    client = attach(SibylClient(base_url=BASE_URL), handler)
+    with pytest.raises(SibylClientError):
+        await client.post("/memory/raw", json={"raw_content": "offline draft"})
+    await client.close()
+    item = pending_writes.list_pending_writes()[0]
+    assert item["replay_identity"] == identity
+    assert item["json"] == {"raw_content": "offline draft"}
+    assert item["last_failure"]["category"] == "transport"

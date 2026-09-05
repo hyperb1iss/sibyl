@@ -37,9 +37,10 @@ reason; the CLI cannot reconstruct one.
   prove its lineage, but a new login cannot infer its historical owner.
 - **Corrupt:** the file must be repaired or explicitly discarded before it can be used.
 
-An unresolved write holds later operations on the same entity. Independent writes can continue. Bulk
-operations form an ordering barrier because they can touch multiple entities. Explicitly selecting a
-later write does not bypass its unresolved predecessor.
+Within a verified owner or original credential lineage, an unresolved write holds later operations
+on the same entity. Independent writes can continue. Bulk operations form an ordering barrier
+because they can touch multiple entities. Explicitly selecting a later write does not bypass its
+unresolved predecessor.
 
 ## Flush retryable writes
 

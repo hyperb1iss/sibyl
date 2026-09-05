@@ -517,6 +517,8 @@ class ClientTransportMixin:
             category = "dependency"
         elif status == 401 or exc.error_code == "token_refresh_failed":
             category = "authentication"
+        elif exc.error_code == "idempotency_in_progress":
+            category = "server"
         elif status == 409:
             category = "conflict"
         elif status is not None and 400 <= status < 500 and status not in {408, 429}:
@@ -655,6 +657,11 @@ class ClientTransportMixin:
         pending_write_created = _pending_write_created
         idempotency_key = _idempotency_key
         if _buffer_pending and pending_write_id is None and _should_buffer_request(method, path):
+            identity_failure: SibylClientError | None = None
+            try:
+                await self._ensure_pending_identity()
+            except SibylClientError as exc:
+                identity_failure = exc
             pending = create_pending_write(
                 method=method,
                 path=path,
@@ -667,6 +674,10 @@ class ClientTransportMixin:
             pending_write_id = str(pending["id"])
             pending_write_created = True
             idempotency_key = str(pending["idempotency_key"])
+            if identity_failure is not None:
+                self._record_pending_failure(pending_write_id, identity_failure)
+                identity_failure.remediation = PENDING_WRITE_REMEDIATION
+                raise identity_failure
 
         if pending_write_id is not None:
             try:

@@ -289,7 +289,10 @@ def serialize_idempotent_request[**P, R](
         except LockAcquisitionError as exc:
             raise HTTPException(
                 status_code=409,
-                detail="An identical idempotent request is still in progress. Please retry.",
+                detail={
+                    "error": "idempotency_in_progress",
+                    "message": "An identical idempotent request is still in progress. Please retry.",
+                },
             ) from exc
 
     return wrapper
