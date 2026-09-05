@@ -720,6 +720,20 @@ def _validate_native_qa_receipt(case_qa: dict[str, Any], *, path: str) -> list[s
     receipt = case_qa.get("context_receipt")
     if not isinstance(native_context, dict) or not isinstance(receipt, dict):
         return [f"{path} native QA requires native_context and context_receipt objects"]
+    provenance_status = case_qa.get("render_provenance_status")
+    expected_provenance = (
+        "available" if native_context.get("render_receipt") is not None else "unavailable"
+    )
+    if provenance_status is not None and provenance_status != expected_provenance:
+        failures.append(f"{path} render_provenance_status must match the retained render receipt")
+    if native_context.get("render_receipt") is not None:
+        # Old reports remain usable without loading the optional renderer dependency.
+        from sibyl_core.tools import context_rendering  # noqa: PLC0415
+
+        failures.extend(
+            f"{path} {failure}"
+            for failure in context_rendering.validate_context_render_payload(native_context)
+        )
     markdown = native_context.get("markdown")
     if not isinstance(markdown, str) or not markdown.strip():
         return [f"{path} native_context.markdown must be non-empty"]

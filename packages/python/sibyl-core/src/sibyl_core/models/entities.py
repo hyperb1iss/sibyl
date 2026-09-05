@@ -137,6 +137,12 @@ class Entity(BaseModel):
         description="Last modifier identity (user id/email) when known",
     )
     revision: int = Field(default=1, ge=1, description="Monotonic mutation revision")
+    observed_revision: int | None = Field(
+        default=None,
+        exclude=True,
+        repr=False,
+        description="Revision read from the stored row, absent for synthetic or legacy defaults",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

@@ -34,6 +34,7 @@ def _candidate_from_node_record(
     score: float,
     embedding_metadata: EmbeddingMetadata | None = None,
 ) -> RetrievalCandidate:
+    source_revision = row.get("revision")
     attributes = _record_attributes(row)
     entity_type = _entity_type_for_record(row, attributes)
     content = _content_for_record(row, attributes)
@@ -59,6 +60,9 @@ def _candidate_from_node_record(
     policy_reason = "project_access_verified" if project_id else "graph_projection_allowed"
     return RetrievalCandidate(
         id=str(row.get("uuid", "")),
+        source_revision=source_revision
+        if type(source_revision) is int and source_revision > 0
+        else None,
         type=entity_type,
         name=str(row.get("name") or entity_type),
         content=content,
@@ -295,6 +299,7 @@ def _candidate_from_raw_memory(
     }
     return RetrievalCandidate(
         id=f"raw_memory:{memory.id}",
+        source_revision=memory.observed_revision,
         type="raw_memory",
         name=memory.title or "Untitled raw memory",
         content=memory.raw_content,

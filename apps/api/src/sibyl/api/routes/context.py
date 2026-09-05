@@ -529,7 +529,7 @@ async def context_pack(
         from sibyl_core.tools.context import (
             compile_context,
             context_pack_to_dict,
-            context_pack_to_markdown,
+            render_context_pack,
         )
 
         accessible_projects = await _resolve_accessible_context_projects(
@@ -577,10 +577,13 @@ async def context_pack(
                 compile_pack=compile_pack,
             )
         payload = context_pack_to_dict(pack)
-        payload["markdown"] = context_pack_to_markdown(
+        rendered = render_context_pack(
             pack,
             token_budget=request.markdown_token_budget,
+            request_id=getattr(getattr(http_request, "state", None), "request_id", None),
         )
+        payload["markdown"] = rendered.markdown
+        payload["render_receipt"] = rendered.receipt
         payload["evidence"] = evidence_response
         response = ContextPackResponse.model_validate(payload)
         await log_context_pack_audit(

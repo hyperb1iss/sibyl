@@ -501,6 +501,7 @@ def _search_result_from_candidate(
         metadata["created_at"] = candidate.created_at.isoformat()
     return SearchResult(
         id=candidate.id,
+        source_revision=candidate.source_revision,
         type=candidate.type,
         name=candidate.name,
         content=candidate.content if include_content else "",

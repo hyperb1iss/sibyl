@@ -209,6 +209,10 @@ async def test_compile_mcp_context_pack_audits_render_receipt() -> None:
 
     assert result["layer"] == ContextLayer.WAKE
     assert result["markdown"].startswith("# Sibyl Context Pack")
+    from sibyl_core.tools.context import validate_context_render_payload
+
+    assert result["render_receipt"]["schema_version"] == "sibyl-context-render-v1"
+    assert validate_context_render_payload(result) == []
     resolve_scope.assert_awaited_once_with(ctx, "project-a")
     compile_context.assert_awaited_once()
     assert compile_context.await_args.kwargs["accessible_projects"] == {"project-a"}

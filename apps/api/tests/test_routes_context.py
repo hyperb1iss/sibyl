@@ -184,6 +184,7 @@ class TestContextPackRoute:
         ):
             response = await context_pack(
                 request=ContextPackRequest(goal="ship faster"),
+                http_request=SimpleNamespace(state=SimpleNamespace(request_id="request-123")),
                 org=org,
                 ctx=ctx,
             )
@@ -193,6 +194,12 @@ class TestContextPackRoute:
         assert response.layer == ContextLayer.RECALL
         assert response.markdown is not None
         assert response.markdown.startswith("# Sibyl Context Pack")
+        from sibyl_core.tools.context import validate_context_render_payload
+
+        assert response.render_receipt is not None
+        assert response.render_receipt.request_id == "request-123"
+        assert response.render_receipt.selected_items == response.total_items
+        assert validate_context_render_payload(response.model_dump(mode="json")) == []
         assert compile_context.await_args.kwargs["accessible_projects"] == {"proj_1"}
         assert compile_context.await_args.kwargs["retrieval_query"] == "ship faster"
         assert compile_context.await_args.kwargs["layer"] == ContextLayer.RECALL

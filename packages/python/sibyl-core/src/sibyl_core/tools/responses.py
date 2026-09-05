@@ -18,6 +18,7 @@ class SearchResult:
     url: str | None = None
     result_origin: Literal["graph", "document", "raw_memory"] = "graph"
     metadata: dict[str, Any] = field(default_factory=dict)
+    source_revision: int | None = None
 
 
 @dataclass

@@ -4,7 +4,12 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from sibyl_core.models.context import ContextFacet, ContextIntent, ContextLayer
+from sibyl_core.models.context import (
+    ContextFacet,
+    ContextIntent,
+    ContextLayer,
+    ContextRenderReceipt,
+)
 from sibyl_core.tools.context import DEFAULT_MARKDOWN_TOKEN_BUDGET
 
 from .search import SearchResponse
@@ -160,6 +165,7 @@ class ContextPackRelatedItem(BaseModel):
     distance: int = 1
     content: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    source_revision: int | None = Field(default=None, ge=1)
 
 
 class ContextPackItemQuality(BaseModel):
@@ -188,6 +194,7 @@ class ContextPackItem(BaseModel):
     quality: ContextPackItemQuality = Field(default_factory=ContextPackItemQuality)
     metadata: dict[str, Any] = Field(default_factory=dict)
     related: list[ContextPackRelatedItem] = Field(default_factory=list)
+    source_revision: int | None = Field(default=None, ge=1)
 
 
 class ContextPackSection(BaseModel):
@@ -211,6 +218,7 @@ class ContextPackResponse(BaseModel):
     total_items: int = 0
     usage_metadata: dict[str, Any] = Field(default_factory=dict)
     usage_hint: str
+    render_receipt: ContextRenderReceipt | None = None
     markdown: str | None = Field(
         default=None,
         description="Compact Markdown rendering for agent prompt injection",
