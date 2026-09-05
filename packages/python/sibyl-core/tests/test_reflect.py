@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
+from itertools import count
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
+from uuid import UUID
 
 import pytest
 
+from sibyl_core.models import reflection as reflection_models
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 from sibyl_core.tools.reflect import (
@@ -13,7 +19,160 @@ from sibyl_core.tools.reflect import (
     reflection_pack_to_dict,
     reflection_pack_to_markdown,
 )
-from sibyl_core.tools.responses import AddResponse
+
+
+@pytest.fixture
+def native_reflection_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """Keep the native orchestration real while recording its storage boundary."""
+    entities: list[Entity] = []
+    relationships = []
+
+    async def create_direct(entity):
+        entities.append(entity)
+        return entity.id
+
+    async def create_bulk(items):
+        relationships.extend(items)
+        return len(items), 0
+
+    runtime = SimpleNamespace(
+        entity_manager=SimpleNamespace(
+            create_direct=AsyncMock(side_effect=create_direct),
+            get=AsyncMock(return_value=None),
+        ),
+        relationship_manager=SimpleNamespace(create_bulk=AsyncMock(side_effect=create_bulk)),
+        entities=entities,
+        relationships=relationships,
+    )
+    monkeypatch.setattr(
+        "sibyl_core.services.memory_reflection.get_surreal_graph_runtime",
+        AsyncMock(return_value=runtime),
+    )
+    monkeypatch.setattr(
+        "sibyl_core.tools.reflect._load_reflection_decision_memories", AsyncMock(return_value=[])
+    )
+    return runtime
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retired_mode", [None, "enabled", "disabled", "typo"])
+async def test_native_reflection_frozen_contract(
+    native_reflection_runtime: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    retired_mode: str | None,
+) -> None:
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 9, 4, 12, tzinfo=UTC)
+
+    ids = count(1)
+    monkeypatch.setattr(reflection_models, "datetime", FrozenDatetime)
+    monkeypatch.setattr("sibyl_core.services.memory_lifecycle.datetime", FrozenDatetime)
+    monkeypatch.setattr(reflection_models, "uuid4", lambda: UUID(int=next(ids)))
+    if retired_mode is None:
+        monkeypatch.delenv("SIBYL_NATIVE_WRITE", raising=False)
+    else:
+        monkeypatch.setenv("SIBYL_NATIVE_WRITE", retired_mode)
+    pack = await reflect_memory(
+        "We decided to preserve source evidence before publishing decisions.",
+        source_title="Evidence review",
+        intent="build",
+        domain="sibyl",
+        project="project_123",
+        organization_id="org_123",
+        principal_id="user_123",
+        accessible_projects={"project_123"},
+        persist=True,
+    )
+    assert pack.persisted_count == 1
+    assert len(native_reflection_runtime.entities) == 2
+    actual = {
+        "pack": reflection_pack_to_dict(pack),
+        "markdown": reflection_pack_to_markdown(pack),
+        "entities": [
+            entity.model_dump(mode="json", exclude={"created_at", "updated_at"})
+            for entity in native_reflection_runtime.entities
+        ],
+        "relationships": [
+            relationship.model_dump(mode="json", exclude={"created_at"})
+            for relationship in native_reflection_runtime.relationships
+        ],
+    }
+    fixture = Path(__file__).parent / "fixtures" / "reflection_native_contract.json"
+    assert actual == json.loads(fixture.read_text())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["private", "project"])
+@pytest.mark.parametrize("existing_source_id", [None, "raw-existing-source"])
+@pytest.mark.parametrize("persist_source", [False, True])
+async def test_native_reflection_keeps_scope_and_provenance(
+    native_reflection_runtime: SimpleNamespace,
+    scope: str,
+    existing_source_id: str | None,
+    persist_source: bool,
+) -> None:
+    from sibyl_core.services.reflection import ephemeral_reflection_source_id
+
+    content = "We decided to preserve source evidence before publishing decisions."
+    project = "project_123" if scope == "project" else None
+    pack = await reflect_memory(
+        content,
+        organization_id="org_123",
+        principal_id="user_123",
+        project=project,
+        accessible_projects={"project_123"},
+        memory_scope=scope,
+        scope_key=project,
+        persist=True,
+        persist_source=persist_source,
+        existing_source_id=existing_source_id,
+    )
+    source_created = persist_source and existing_source_id is None
+    assert len(native_reflection_runtime.entities) == (2 if source_created else 1)
+    entity = native_reflection_runtime.entities[-1]
+    assert entity.metadata["memory_scope"] == scope
+    assert entity.metadata.get("scope_key") == project
+    assert entity.metadata["principal_id"] == "user_123"
+    assert entity.organization_id == "org_123"
+    if source_created:
+        source = native_reflection_runtime.entities[0]
+        assert source.entity_type is EntityType.SESSION
+        assert source.content == content
+        assert source.metadata["reflection_source"] is True
+        assert source.metadata["memory_scope"] == scope
+        assert source.metadata.get("scope_key") == project
+        assert source.metadata["principal_id"] == "user_123"
+        assert pack.source_id == source.id
+    else:
+        assert pack.source_id == existing_source_id
+    source_ids = [pack.source_id or ephemeral_reflection_source_id(content)]
+    assert pack.candidates[0].raw_source_ids == source_ids
+    assert entity.metadata["raw_source_ids"] == source_ids
+    assert pack.persisted_count == 1
+
+
+@pytest.mark.asyncio
+async def test_native_reflection_returns_partial_relationship_receipt(
+    native_reflection_runtime: SimpleNamespace,
+) -> None:
+    native_reflection_runtime.relationship_manager.create_bulk.side_effect = None
+    native_reflection_runtime.relationship_manager.create_bulk.return_value = (0, 1)
+    pack = await reflect_memory(
+        "We decided to preserve source evidence before publishing decisions.",
+        organization_id="org_123",
+        principal_id="user_123",
+        project="project_123",
+        accessible_projects={"project_123"},
+        persist=True,
+        persist_source=False,
+    )
+    assert pack.persisted_count == 1
+    metadata = reflection_pack_to_dict(pack)["candidates"][0]["metadata"]
+    assert metadata["native_relationship_failed_count"] == 1
+    assert metadata["promotion_state"] == "partial"
+    assert metadata["promotion_errors"] == ["1 promotion relationships failed"]
 
 
 @pytest.mark.asyncio
@@ -57,116 +216,13 @@ async def test_reflect_memory_dedupes_repeated_candidates_by_kind_and_content() 
 
 
 @pytest.mark.asyncio
-async def test_reflect_memory_can_use_compatibility_write_when_native_disabled(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_reflect_memory_persist_denies_unverified_project(
+    native_reflection_runtime: SimpleNamespace,
 ) -> None:
-    calls: list[dict[str, Any]] = []
-
-    async def fake_add(**kwargs: Any) -> AddResponse:
-        calls.append(kwargs)
-        return AddResponse(
-            success=True,
-            id=f"{kwargs['entity_type']}_{len(calls)}",
-            message="ok",
-            timestamp=datetime.now(UTC),
-        )
-
-    monkeypatch.setenv("SIBYL_NATIVE_WRITE", "disabled")
 
     pack = await reflect_memory(
-        "Confirmed the local Sibyl project is linked. We will migrate it to Cloud later.",
-        source_title="Dogfood setup",
-        intent="build",
-        domain="sibyl",
-        project="project_123",
-        related_to=["project_123"],
-        organization_id="org_123",
-        principal_id="user_123",
-        accessible_projects={"project_123"},
-        memory_scope="project",
-        scope_key="project_123",
-        persist=True,
-        add_fn=fake_add,
-    )
-
-    assert pack.persisted_count == len(pack.candidates)
-    assert pack.source_id == "session_1"
-    assert calls[0]["entity_type"] == "session"
-    assert calls[0]["content"].startswith("Confirmed the local Sibyl project")
-    assert calls[0]["metadata"]["reflection_source"] is True
-    assert calls[1]["metadata"]["organization_id"] == "org_123"
-    assert calls[1]["metadata"]["capture_mode"] == "reflect"
-    assert calls[1]["metadata"]["project_id"] == "project_123"
-    assert calls[1]["metadata"]["reflection_source_id"] == "session_1"
-    assert calls[1]["metadata"]["policy_reasons"] == [
-        "same_scope_reflect_allowed",
-        "same_scope_write_allowed",
-    ]
-    assert calls[1]["related_to"] == ["project_123", "session_1"]
-    assert calls[1]["sync"] is True
-
-
-@pytest.mark.asyncio
-async def test_reflect_memory_hands_add_the_authorized_scope_it_stamps_with(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The compatibility write path has to satisfy add()'s stamp contract.
-
-    Reflection always injects memory_scope and scope_key into the bag it hands
-    over, and add() rebuilds the owner triple from its arguments rather than
-    that bag. A caller that declares a scope in metadata without restating it
-    as an authorized argument is refused, so stubbing add_fn without enforcing
-    that precondition hides a crash on this path.
-    """
-    calls: list[dict[str, Any]] = []
-
-    async def contract_checked_add(**kwargs: Any) -> AddResponse:
-        metadata = kwargs.get("metadata") or {}
-        if metadata.get("memory_scope") is not None and kwargs.get("memory_scope") is None:
-            raise ValueError(
-                "add() received metadata declaring memory_scope without the "
-                "authorized memory_scope that names its audience"
-            )
-        calls.append(kwargs)
-        return AddResponse(
-            success=True,
-            id=f"{kwargs['entity_type']}_{len(calls)}",
-            message="ok",
-            timestamp=datetime.now(UTC),
-        )
-
-    monkeypatch.setenv("SIBYL_NATIVE_WRITE", "disabled")
-
-    pack = await reflect_memory(
-        "Confirmed the local Sibyl project is linked.",
-        source_title="Dogfood setup",
-        intent="build",
-        domain="sibyl",
-        project="project_123",
-        organization_id="org_123",
-        principal_id="user_123",
-        accessible_projects={"project_123"},
-        memory_scope="project",
-        scope_key="project_123",
-        persist=True,
-        add_fn=contract_checked_add,
-    )
-
-    assert pack.persisted_count == len(pack.candidates)
-    assert calls, "every add_fn call was refused by add()'s stamp contract"
-    for call in calls:
-        assert call["memory_scope"] == "project"
-        assert call["scope_key"] == "project_123"
-        assert call["principal_id"] == "user_123"
-
-
-@pytest.mark.asyncio
-async def test_reflect_memory_persist_denies_unverified_project_without_native_write() -> None:
-    add_fn = AsyncMock(side_effect=AssertionError("compatibility add path should not run"))
-
-    pack = await reflect_memory(
-        "We decided unauthorized reflect writes need policy before fallback persistence.",
-        source_title="Fallback reflection denial",
+        "We decided unauthorized reflection writes must fail before persistence.",
+        source_title="Reflection denial",
         intent="build",
         domain="sibyl",
         project="project_123",
@@ -177,12 +233,12 @@ async def test_reflect_memory_persist_denies_unverified_project_without_native_w
         scope_key="project_123",
         persist=True,
         persist_review=False,
-        add_fn=add_fn,
     )
 
+    native_reflection_runtime.entity_manager.create_direct.assert_not_awaited()
+    native_reflection_runtime.relationship_manager.create_bulk.assert_not_awaited()
     assert pack.source_id is None
     assert pack.persisted_count == 0
-    assert add_fn.await_count == 0
     assert pack.candidates[0].metadata["policy_allowed"] is False
     assert pack.candidates[0].metadata["policy_reasons"] == [
         "unverified_membership",
@@ -193,18 +249,13 @@ async def test_reflect_memory_persist_denies_unverified_project_without_native_w
 @pytest.mark.asyncio
 async def test_reflect_memory_can_persist_review_queue(
     monkeypatch: pytest.MonkeyPatch,
+    native_reflection_runtime: SimpleNamespace,
 ) -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
-    add_fn = AsyncMock(side_effect=AssertionError("graph add path should not run"))
 
-    async def fake_source_review(**kwargs: Any) -> AddResponse:
+    async def fake_remember_source(**kwargs: Any) -> SimpleNamespace:
         calls.append(("source", kwargs))
-        return AddResponse(
-            success=True,
-            id="raw-source-1",
-            message="stored",
-            timestamp=datetime.now(UTC),
-        )
+        return SimpleNamespace(id="raw-source-1", title=kwargs["title"])
 
     async def fake_candidate_review(**kwargs: Any) -> RawMemory:
         calls.append(("candidate", kwargs))
@@ -227,8 +278,8 @@ async def test_reflect_memory_can_persist_review_queue(
         )
 
     monkeypatch.setattr(
-        "sibyl_core.tools.reflect._persist_reflection_source_review",
-        fake_source_review,
+        "sibyl_core.services.surreal_content.remember_raw_memory",
+        fake_remember_source,
     )
     monkeypatch.setattr(
         "sibyl_core.tools.reflect._persist_reflection_candidate_review",
@@ -249,7 +300,6 @@ async def test_reflect_memory_can_persist_review_queue(
         suggested_memory_scope="team",
         persist=True,
         persist_review=True,
-        add_fn=add_fn,
     )
 
     assert [kind for kind, _ in calls] == ["source", "candidate"]
@@ -266,22 +316,27 @@ async def test_reflect_memory_can_persist_review_queue(
         "same_scope_reflect_allowed",
         "same_scope_write_allowed",
     ]
-    assert calls[0][1]["policy_metadata"]["policy_reasons"] == [
+    assert calls[0][1]["metadata"]["policy_reasons"] == [
         "same_scope_reflect_allowed",
         "same_scope_write_allowed",
     ]
+    assert calls[0][1]["tags"] == ["reflection", "session", "sibyl"]
+    assert calls[0][1]["memory_scope"] is MemoryScope.PROJECT
+    assert calls[0][1]["scope_key"] == "project_123"
     assert calls[1][1]["memory_scope"] is MemoryScope.PROJECT
     assert calls[1][1]["suggested_memory_scope"] is MemoryScope.TEAM
     assert calls[1][1]["suggested_scope_key"] is None
     assert calls[1][1]["extraction_prompt_metadata"]["extractor"] == ("sibyl_reflection_extractor")
-    assert add_fn.await_count == 0
+
+    native_reflection_runtime.entity_manager.create_direct.assert_not_awaited()
+    native_reflection_runtime.relationship_manager.create_bulk.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_reflect_memory_review_persistence_denies_unverified_project(
     monkeypatch: pytest.MonkeyPatch,
+    native_reflection_runtime: SimpleNamespace,
 ) -> None:
-    add_fn = AsyncMock(side_effect=AssertionError("graph add path should not run"))
     source_review = AsyncMock(side_effect=AssertionError("source review should not persist"))
     candidate_review = AsyncMock(side_effect=AssertionError("candidate review should not persist"))
 
@@ -307,7 +362,6 @@ async def test_reflect_memory_review_persistence_denies_unverified_project(
         scope_key="project_123",
         persist=True,
         persist_review=True,
-        add_fn=add_fn,
     )
 
     assert pack.source_id is None
@@ -319,7 +373,9 @@ async def test_reflect_memory_review_persistence_denies_unverified_project(
     ]
     source_review.assert_not_awaited()
     candidate_review.assert_not_awaited()
-    assert add_fn.await_count == 0
+
+    native_reflection_runtime.entity_manager.create_direct.assert_not_awaited()
+    native_reflection_runtime.relationship_manager.create_bulk.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -328,7 +384,6 @@ async def test_reflect_memory_native_write_uses_policy_and_direct_graph(
 ) -> None:
     created_entities = []
     created_relationships = []
-    add_fn = AsyncMock(side_effect=AssertionError("compatibility add path should not run"))
 
     class FakeEntityManager:
         async def create_direct(self, entity):
@@ -362,7 +417,6 @@ async def test_reflect_memory_native_write_uses_policy_and_direct_graph(
             },
         )()
 
-    monkeypatch.setenv("SIBYL_NATIVE_WRITE", "enabled")
     monkeypatch.setattr(
         "sibyl_core.services.memory_reflection.get_surreal_graph_runtime",
         fake_get_graph_runtime,
@@ -379,12 +433,10 @@ async def test_reflect_memory_native_write_uses_policy_and_direct_graph(
         principal_id="user_123",
         accessible_projects={"project_123"},
         persist=True,
-        add_fn=add_fn,
     )
 
     assert pack.source_id is not None
     assert pack.persisted_count == len(pack.candidates)
-    assert add_fn.await_count == 0
     assert len(created_entities) == 2
     assert {entity.entity_type.value for entity in created_entities} == {"session", "decision"}
     assert created_entities[1].metadata["policy_allowed"] is True
@@ -404,7 +456,6 @@ async def test_reflect_memory_native_write_uses_policy_and_direct_graph(
 async def test_reflect_memory_native_write_denies_unverified_project(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    add_fn = AsyncMock(side_effect=AssertionError("compatibility add path should not run"))
     create_direct = AsyncMock()
 
     async def fake_get_graph_runtime(_organization_id: str):
@@ -421,7 +472,6 @@ async def test_reflect_memory_native_write_denies_unverified_project(
             },
         )()
 
-    monkeypatch.setenv("SIBYL_NATIVE_WRITE", "enabled")
     monkeypatch.setattr(
         "sibyl_core.services.memory_reflection.get_surreal_graph_runtime",
         fake_get_graph_runtime,
@@ -437,12 +487,10 @@ async def test_reflect_memory_native_write_denies_unverified_project(
         principal_id="user_123",
         accessible_projects={"project_other"},
         persist=True,
-        add_fn=add_fn,
     )
 
     assert pack.source_id is None
     assert pack.persisted_count == 0
-    assert add_fn.await_count == 0
     create_direct.assert_not_awaited()
     assert pack.candidates[0].metadata["policy_allowed"] is False
     assert pack.candidates[0].metadata["policy_reasons"] == [

@@ -73,7 +73,9 @@ async def test_reflect_memory_persists_claim_receipts_with_source_grounding(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
-    add_fn = AsyncMock(side_effect=AssertionError("graph add path should not run"))
+    native_write = AsyncMock(side_effect=AssertionError("native graph write should not run"))
+    monkeypatch.setattr("sibyl_core.tools.reflect._persist_reflection_source", native_write)
+    monkeypatch.setattr("sibyl_core.tools.reflect._persist_reflection_candidate", native_write)
 
     async def fake_source_review(**kwargs: Any) -> AddResponse:
         calls.append(("source", kwargs))
@@ -130,7 +132,6 @@ async def test_reflect_memory_persists_claim_receipts_with_source_grounding(
         scope_key="project_123",
         persist=True,
         persist_review=True,
-        add_fn=add_fn,
     )
 
     candidate_call = calls[1][1]
