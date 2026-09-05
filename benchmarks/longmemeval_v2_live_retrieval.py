@@ -14,8 +14,9 @@ from typing import Any
 from uuid import uuid4
 
 BENCHMARKS_ROOT = Path(__file__).resolve().parent
-if str(BENCHMARKS_ROOT) not in sys.path:
-    sys.path.insert(0, str(BENCHMARKS_ROOT))
+for import_root in (BENCHMARKS_ROOT.parent, BENCHMARKS_ROOT):
+    if str(import_root) not in sys.path:
+        sys.path.insert(0, str(import_root))
 
 from benchmarks.git_provenance import git_provenance  # noqa: E402
 from longmemeval_v2_memory.sibyl_memory import (  # noqa: E402

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
+import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -9,6 +11,19 @@ from typing import Any
 import pytest
 
 OPAQUE_INVOCATION_ID_HEX_LENGTH = 32
+
+
+def test_script_help_without_repository_on_pythonpath(tmp_path: Path) -> None:
+    script = Path(__file__).parents[2] / "benchmarks" / "longmemeval_v2_live_retrieval.py"
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-E", str(script), "--help"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--project-id" in result.stdout
 
 
 def _load_module() -> ModuleType:
