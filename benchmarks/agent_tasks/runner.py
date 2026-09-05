@@ -253,6 +253,10 @@ def _checked_snapshot(output: Path, workspace: Path) -> str:
 
 
 def _receipt(manifest: Manifest, task: Task, arm: Arm) -> dict[str, Any]:
+    native_payload = arm.native_render_payload
+    provenance_status = "none" if arm.memory_pack.sha256 == digest(b"") else "unattributed"
+    if native_payload is not None:
+        provenance_status = "native_render_v1"
     return {
         "schema_version": "sibyl-agent-task-receipt-v1",
         "purpose": "trusted_development",
@@ -271,6 +275,11 @@ def _receipt(manifest: Manifest, task: Task, arm: Arm) -> dict[str, Any]:
         "arm_sha256": identity(arm.model_dump(mode="json")),
         "pack_id": arm.memory_pack.sha256,
         "memory_pack_sha256": arm.memory_pack.sha256,
+        "memory_provenance": {
+            "status": provenance_status,
+            "native_payload_sha256": native_payload.sha256 if native_payload else None,
+            "render_schema_version": "sibyl-context-render-v1" if native_payload else None,
+        },
         "runtime": runtime_identity(),
         "runner_source_sha256": {
             name: digest(Path(__file__).with_name(name).read_bytes())

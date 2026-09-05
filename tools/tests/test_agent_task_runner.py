@@ -8,16 +8,30 @@ import signal
 import subprocess
 import sys
 import time
+import unicodedata
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
 from benchmarks.agent_tasks.manifest import (
+    Arm,
+    Manifest,
     ManifestError,
     digest,
     identity,
     runtime_identity,
+    validate_native_render_binding,
 )
 from benchmarks.agent_tasks.runner import _group_quiescent, run_task
+
+from sibyl_core.models.context import (
+    ContextFacet,
+    ContextIntent,
+    ContextItem,
+    ContextPack,
+    ContextSection,
+)
+from sibyl_core.tools.context_rendering import render_context_pack
 
 CONTROLLER_FAILURE = 7
 
@@ -498,3 +512,280 @@ def test_empty_control_and_memory_arm_share_frozen_comparison(experiment):
         assert memory[key] != control[key]
     assert control["pack_id"] == digest(b"")
     assert (output.with_name("control") / "controller-request.json").exists()
+
+
+def native_payload(source_revision=7):
+    """Small Unicode rendering with actual core receipt generation."""
+    item = ContextItem(
+        id="source-record",
+        type="note",
+        name="Café 💜",
+        content="A verified observation. " * 30,
+        score=1.0,
+        facet=ContextFacet.DECISIONS,
+        reason="source",
+        source_revision=source_revision,
+    )
+    pack = ContextPack(
+        goal="Use frozen evidence",
+        intent=ContextIntent.GENERAL,
+        query="observation",
+        domain=None,
+        project=None,
+        sections=[ContextSection(ContextFacet.DECISIONS, "Decisions", [item])],
+        total_items=1,
+    )
+    rendered = render_context_pack(pack, max_content_chars=80)
+    return {
+        **asdict(pack),
+        "markdown": rendered.markdown,
+        "render_receipt": asdict(rendered.receipt),
+    }
+
+
+def bind_native_payload(experiment, payload, *, memory=None):
+    """Freeze a sidecar and a hash-checking fixture oracle outside the workspace."""
+    manifest, freeze, _ = experiment
+    root = freeze().parent
+    packed = payload["markdown"].encode() if memory is None else memory
+    data = json.dumps(payload, default=str).encode()
+    (root / "native.json").write_bytes(data)
+    (root / "memory.txt").write_bytes(packed)
+    arm = manifest["arms"][0]
+    arm["memory_pack"]["sha256"] = digest(packed)
+    arm["native_render_payload"] = {"path": "native.json", "sha256": digest(data)}
+    checker = (
+        "import hashlib,json,sys\nfrom pathlib import Path\njson.load(sys.stdin)\n"
+        f"passed=hashlib.sha256(Path('answer.txt').read_bytes()).hexdigest()=={digest(packed)!r}\n"
+        "print(json.dumps({'passed':passed,'detail':'exact supplied bytes'}))\n"
+    ).encode()
+    (root / "checker.py").write_bytes(checker)
+    manifest["tasks"][0]["checker"]["script"]["sha256"] = digest(checker)
+    return arm
+
+
+def test_native_binding_automatically_retains_input_outside_controller_workspace(experiment):
+    payload = native_payload()
+    arm = bind_native_payload(experiment, payload)
+    receipt = execute(experiment)
+    output = experiment[2]
+    assert receipt["success"] is True
+    request = json.loads((output / "controller-request.json").read_text())
+    assert request["memory_pack"].encode() == payload["markdown"].encode()
+    assert (
+        receipt["pack_id"] == request["memory_pack_sha256"] == digest(payload["markdown"].encode())
+    )
+    assert receipt["memory_provenance"] == {
+        "status": "native_render_v1",
+        "native_payload_sha256": arm["native_render_payload"]["sha256"],
+        "render_schema_version": "sibyl-context-render-v1",
+    }
+    assert receipt["memory_provenance"]["native_payload_sha256"] != request["memory_pack_sha256"]
+    assert "native_render_payload" not in request
+    assert not (output / "controller-workspace/native.json").exists()
+    retained = {
+        name: (output / "inputs" / name).read_bytes() for name in ("native.json", "memory.txt")
+    }
+    validate_native_render_binding(Arm.model_validate(arm), retained)
+    retained["native.json"] += b"\n"
+    with pytest.raises(ManifestError, match="changed artifact bytes"):
+        validate_native_render_binding(Arm.model_validate(arm), retained)
+
+
+@pytest.mark.parametrize("missing", ["native.json", "memory.txt"])
+def test_native_binding_replay_rejects_missing_retained_artifact(experiment, missing):
+    arm = bind_native_payload(experiment, native_payload())
+    root = experiment[1]().parent
+    retained = {
+        name: (root / name).read_bytes()
+        for name in ("native.json", "memory.txt")
+        if name != missing
+    }
+    with pytest.raises(ManifestError, match="missing a retained artifact"):
+        validate_native_render_binding(Arm.model_validate(arm), retained)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing",
+        "null",
+        "version",
+        "receipt_only",
+        "list",
+        "string",
+        "number",
+        "no_markdown",
+        "item",
+        "revision",
+        "span",
+        "input_hash",
+        "disposition",
+        "options",
+    ],
+)
+def test_native_provenance_tamper_fails_before_process_or_output(experiment, monkeypatch, mutation):
+    payload = native_payload()
+    arm = bind_native_payload(experiment, payload)
+    if mutation == "missing":
+        del payload["render_receipt"]
+    elif mutation == "null":
+        payload["render_receipt"] = None
+    elif mutation == "version":
+        payload["render_receipt"]["schema_version"] = "sibyl-context-render-v9"
+    elif mutation == "receipt_only":
+        payload = {"render_receipt": payload["render_receipt"]}
+    elif mutation in {"list", "string", "number"}:
+        payload = {"list": [], "string": "x", "number": 5}[mutation]
+    elif mutation == "no_markdown":
+        del payload["markdown"]
+    elif mutation == "item":
+        payload["sections"][0]["items"][0]["content"] = "Different source"
+    elif mutation == "revision":
+        payload["sections"][0]["items"][0]["source_revision"] = 9
+    elif mutation == "span":
+        payload["render_receipt"]["spans"][0]["start_byte"] += 1
+    elif mutation == "input_hash":
+        payload["render_receipt"]["spans"][0]["input_sha256"] = "0" * 64
+    elif mutation == "disposition":
+        payload["render_receipt"]["dispositions"] = []
+    elif mutation == "options":
+        payload["render_receipt"]["options"]["max_content_chars"] = 1000
+    data = json.dumps(payload, default=str).encode()
+    (experiment[1]().parent / "native.json").write_bytes(data)
+    arm["native_render_payload"]["sha256"] = digest(data)
+
+    def forbidden_process(*args, **kwargs):
+        pytest.fail("preflight launched a controller")
+
+    monkeypatch.setattr(subprocess, "Popen", forbidden_process)
+    with pytest.raises(ManifestError, match="native render"):
+        execute(experiment)
+    assert not experiment[2].exists()
+
+
+@pytest.mark.parametrize("change", ["newline", "crlf", "space", "normalization", "empty"])
+def test_native_memory_join_is_exact_bytes(experiment, change):
+    payload = native_payload()
+    text = payload["markdown"]
+    changed = {
+        "newline": text + "\n",
+        "crlf": text.replace("\n", "\r\n"),
+        "space": text + " ",
+        "normalization": unicodedata.normalize("NFD", text),
+        "empty": "",
+    }[change]
+    assert changed != text
+    bind_native_payload(experiment, payload, memory=changed.encode())
+    with pytest.raises(ManifestError, match="differs from the exact memory pack"):
+        execute(experiment)
+    assert not experiment[2].exists()
+
+
+@pytest.mark.parametrize("explicit_null", [False, True])
+def test_legacy_manifest_and_arm_identity_remain_unchanged(experiment, explicit_null):
+    manifest, _, output = experiment
+    if explicit_null:
+        manifest["arms"][0]["native_render_payload"] = None
+    fixed = {**manifest, "runtime_sha256": "0" * 64}
+    parsed = Manifest.model_validate(fixed)
+    assert (
+        identity(parsed.model_dump(mode="json"))
+        == "0594a4ab474830ceeb267a2252127dd409b1bbd6248ac8d4a79062068b7cecea"
+    )
+    assert (
+        identity(parsed.arms[0].model_dump(mode="json"))
+        == "3b766c6d9ecb19c85a506e3defa112909c774d19e3b429300040674c9803754f"
+    )
+    receipt = execute(experiment)
+    assert receipt["memory_provenance"]["status"] == "unattributed"
+    assert (
+        "native_render_payload" not in json.loads((output / "manifest.json").read_text())["arms"][0]
+    )
+
+
+def test_empty_control_does_not_claim_native_provenance(experiment):
+    manifest, freeze, _ = experiment
+    (freeze().parent / "memory.txt").write_bytes(b"")
+    manifest["arms"][0]["memory_pack"]["sha256"] = digest(b"")
+    manifest["arms"][0]["learning_source_ids"] = []
+    receipt = execute(experiment)
+    assert receipt["memory_provenance"] == {
+        "status": "none",
+        "native_payload_sha256": None,
+        "render_schema_version": None,
+    }
+
+
+@pytest.mark.parametrize("claimed", [False, True])
+def test_manifest_preflight_imports_core_only_for_claims(experiment, claimed):
+    if claimed:
+        bind_native_payload(experiment, native_payload())
+    script = (
+        "import importlib.abc,sys\n"
+        "class RejectCore(importlib.abc.MetaPathFinder):\n"
+        " def find_spec(self,fullname,path=None,target=None):\n"
+        "  if fullname=='sibyl_core' or fullname.startswith('sibyl_core.'):\n"
+        "   raise RuntimeError('unexpected core import')\n"
+        "sys.meta_path.insert(0,RejectCore())\n"
+        "from pathlib import Path\n"
+        "from benchmarks.agent_tasks.manifest import load_manifest\n"
+        "load_manifest(Path(sys.argv[1]))\n"
+    )
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", script, str(experiment[1]())],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if claimed:
+        assert result.returncode != 0
+        assert "unexpected core import" in result.stderr
+    else:
+        assert result.returncode == 0, result.stderr
+
+
+def test_native_claim_changes_arm_and_manifest_identity(experiment):
+    before = Manifest.model_validate(experiment[0])
+    bind_native_payload(experiment, native_payload())
+    after = Manifest.model_validate(experiment[0])
+    assert identity(before.model_dump(mode="json")) != identity(after.model_dump(mode="json"))
+    assert identity(before.arms[0].model_dump(mode="json")) != identity(
+        after.arms[0].model_dump(mode="json")
+    )
+    assert after.arms[0].model_dump(mode="json")["native_render_payload"] is not None
+
+
+def test_native_binding_keeps_unavailable_source_revisions(experiment):
+    payload = native_payload(source_revision=None)
+    bind_native_payload(experiment, payload)
+    receipt = execute(experiment)
+    assert receipt["success"] is True
+    retained = json.loads((experiment[2] / "inputs/native.json").read_text())
+    assert all(span["source_revision"] is None for span in retained["render_receipt"]["spans"])
+    assert all(
+        span["revision_status"] == "unavailable" for span in retained["render_receipt"]["spans"]
+    )
+
+
+@pytest.mark.parametrize("mutation", ["duplicate", "nan", "file_hash"])
+def test_native_sidecar_bytes_fail_preflight(experiment, monkeypatch, mutation):
+    payload = native_payload()
+    arm = bind_native_payload(experiment, payload)
+    data = json.dumps(payload, default=str).encode()
+    if mutation == "duplicate":
+        data = data[:-1] + b',"markdown":"duplicate"}'
+    elif mutation == "nan":
+        data = data[:-1] + b',"extra":NaN}'
+    (experiment[1]().parent / "native.json").write_bytes(data)
+    arm["native_render_payload"]["sha256"] = "0" * 64 if mutation == "file_hash" else digest(data)
+
+    def forbidden_process(*args, **kwargs):
+        pytest.fail("invalid sidecar launched a controller")
+
+    monkeypatch.setattr(subprocess, "Popen", forbidden_process)
+    with pytest.raises(
+        ManifestError, match=r"duplicate JSON key|non-JSON numeric constant|changed input"
+    ):
+        execute(experiment)
+    assert not experiment[2].exists()
