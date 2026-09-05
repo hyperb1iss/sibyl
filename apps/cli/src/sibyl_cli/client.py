@@ -2,7 +2,7 @@
 
 import httpx
 
-from sibyl_cli.auth_store import normalize_api_url
+from sibyl_cli.auth_store import normalize_api_url, read_server_credentials
 from sibyl_cli.client_admin import ClientAdminMixin
 from sibyl_cli.client_auth import ClientAuthMixin
 from sibyl_cli.client_graph import ClientGraphMixin
@@ -17,7 +17,6 @@ from sibyl_cli.client_transport import (
     INIT_REMEDIATION,
     PENDING_WRITE_REMEDIATION,
     READ_LIKE_POST_PATHS,
-    UNAPPLIED_WRITE_STATUS_CODES,
     ClientTransportMixin,
     ErrorPayload,
     SibylClientError,
@@ -33,6 +32,7 @@ from sibyl_cli.client_transport import (
     resolve_api_base_url,
 )
 from sibyl_cli.client_work import ClientWorkMixin
+from sibyl_cli.pending_identity import normalize_replay_identity
 
 __all__ = [
     "BUFFERED_WRITE_METHODS",
@@ -42,7 +42,6 @@ __all__ = [
     "INIT_REMEDIATION",
     "PENDING_WRITE_REMEDIATION",
     "READ_LIKE_POST_PATHS",
-    "UNAPPLIED_WRITE_STATUS_CODES",
     "_FAILURE_WINDOWS",
     "ErrorPayload",
     "SibylClient",
@@ -109,6 +108,18 @@ class SibylClient(
             else _auth_replay_scope(None, self.auth_token)
         )
         self._client: httpx.AsyncClient | None = None
+        creds = (
+            read_server_credentials(self.base_url, credential_scope=self.credential_scope)
+            if self._uses_stored_auth
+            else {}
+        )
+        self._pending_identity = (
+            normalize_replay_identity(creds.get("pending_replay_identity"))
+            if creds.get("access_token") == self.auth_token
+            else None
+        )
+        self._identity_checked = False
+        self._identity_token: str | None = None
         # Load insecure setting from context
         self.insecure = self._get_insecure_from_context(context_name)
 

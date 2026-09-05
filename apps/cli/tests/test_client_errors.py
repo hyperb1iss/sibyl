@@ -18,9 +18,14 @@ from sibyl_cli.common import handle_client_error
 
 def _client_with_transport(transport: httpx.MockTransport) -> SibylClient:
     client = SibylClient(base_url="http://testserver/api", auth_token="token")
+    async def legacy_transport(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/auth/replay-identity":
+            return httpx.Response(404, json={"detail": "Not Found"})
+        return await transport.handle_async_request(request)
+
     client._client = httpx.AsyncClient(
         base_url=client.base_url,
-        transport=transport,
+        transport=httpx.MockTransport(legacy_transport),
         headers=client._default_headers(),
     )
     return client
@@ -264,7 +269,7 @@ async def test_failed_automatic_replay_does_not_fail_the_triggering_request(
 
 
 @pytest.mark.asyncio
-async def test_automatic_replay_stops_after_the_first_transient_failure(
+async def test_automatic_replay_attempts_independent_writes_after_transient_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -272,6 +277,7 @@ async def test_automatic_replay_stops_after_the_first_transient_failure(
     monkeypatch.setattr(client_transport_module, "AUTO_REPLAY_GRACE_SECONDS", 0.0)
     client_transport_module._FAILURE_WINDOWS.clear()
     posts = 0
+    monkeypatch.setattr(client_transport_module, "anyio_sleep", AsyncMock())
 
     def healthy_then_unavailable(request: httpx.Request) -> httpx.Response:
         nonlocal posts
@@ -299,10 +305,10 @@ async def test_automatic_replay_stops_after_the_first_transient_failure(
     await client.close()
     attempts = sorted(int(item["attempts"]) for item in pending_writes.list_pending_writes())
     assert result == {"status": "healthy"}
-    assert posts == 1
-    assert attempts == [0] * 7 + [1]
+    assert posts == 8
+    assert attempts == [1] * 8
     key = client_transport_module._failure_key(client.base_url)
-    assert len(client_transport_module._FAILURE_WINDOWS[key]) == 1
+    assert len(client_transport_module._FAILURE_WINDOWS[key]) == 8
     client_transport_module._FAILURE_WINDOWS.clear()
 
 
@@ -325,7 +331,7 @@ async def test_automatic_replay_does_not_pass_an_older_write_in_cooldown(
         method="POST",
         path="/entities",
         base_url=client.base_url,
-        json_payload={"name": "Create first"},
+        json_payload={"id": "entity_123", "name": "Create first"},
         params=None,
         replay_scope=client._replay_scope,
     )
@@ -589,7 +595,7 @@ async def test_mutating_request_keeps_pending_write_on_auth_failure(
 
 
 @pytest.mark.asyncio
-async def test_mutating_request_deletes_pending_write_on_validation_error(
+async def test_mutating_request_parks_pending_write_on_validation_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -606,13 +612,15 @@ async def test_mutating_request_deletes_pending_write_on_validation_error(
         await client.post("/entities", json={"name": "Invalid"})
 
     await client.close()
-    assert pending_writes.list_pending_writes() == []
-    assert pending_writes.read_pending_metrics()["dropped"] == 1
+    item = pending_writes.list_pending_writes()[0]
+    assert item["status"] == "attention"
+    assert item["last_failure"]["category"] == "rejected"
+    assert pending_writes.read_pending_metrics()["dropped"] == 0
 
 
 @pytest.mark.parametrize("status_code", [400, 422])
 @pytest.mark.asyncio
-async def test_mutating_request_drops_pending_write_when_payload_is_unusable(
+async def test_mutating_request_preserves_rejected_payload_for_inspection(
     status_code: int,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -631,8 +639,10 @@ async def test_mutating_request_drops_pending_write_when_payload_is_unusable(
         await client.post("/memory/raw", json={"title": "Doomed", "raw_content": "Body"})
 
     await client.close()
-    assert pending_writes.list_pending_writes() == []
-    assert pending_writes.read_pending_metrics()["dropped"] == 1
+    item = pending_writes.list_pending_writes()[0]
+    assert item["status"] == "attention"
+    assert item["last_failure"]["category"] == "rejected"
+    assert pending_writes.read_pending_metrics()["dropped"] == 0
 
 
 @pytest.mark.asyncio

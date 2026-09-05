@@ -348,7 +348,9 @@ def set_tokens(
         "access_token": access_token,
         PENDING_REPLAY_SCOPE_KEY: pending_replay_scope or f"credential:{uuid4().hex}",
     }
-    remove_keys: list[str] = []
+    # A refresh retains a verified owner; a fresh login must prove its owner
+    # again before reusing any cached identity.
+    remove_keys: list[str] = [] if pending_replay_scope else ["pending_replay_identity"]
     if refresh_token is not None and refresh_token:
         creds["refresh_token"] = refresh_token
     else:
@@ -374,6 +376,28 @@ def set_tokens(
         path=path,
         credential_scope=credential_scope,
     )
+
+
+def cache_pending_replay_identity(
+    api_url: str,
+    access_token: str,
+    identity: dict[str, Any],
+    *,
+    credential_scope: str | None = None,
+    path: Path | None = None,
+) -> bool:
+    """Cache a verified identity only if the authenticating token is still current."""
+    with auth_file_lock(path):
+        creds = read_server_credentials(api_url, path, credential_scope=credential_scope)
+        if creds.get("access_token") != access_token:
+            return False
+        write_server_credentials(
+            api_url,
+            {"pending_replay_identity": identity},
+            path,
+            credential_scope=credential_scope,
+        )
+        return True
 
 
 def clear_tokens(
