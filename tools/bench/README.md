@@ -62,3 +62,27 @@ First verify the restored dataset digest and run deterministic fixture checks. T
 and retrieval capacity before authorizing a reader/judge campaign. A conversational result and an
 official V2 result have different reader, judge, dataset, latency, and accounting contracts; preserve
 their receipts separately.
+
+## QA context controls
+
+Choose `--qa-context-arm` explicitly when comparing contexts. The CLI keeps the historical arm as
+its default. The CI workflow defaults to query passages and requires a matching reviewed baseline,
+or an explicit bootstrap that produces unclaimed candidate evidence.
+
+| Arm | Reader context |
+| --- | --- |
+| `historical-prefix-v1` | Original per-session character prefixes and prompt |
+| `dated-prefix-v1` | Complete source spans in retrieval order, with dates and speakers |
+| `query-passages-v1` | Complete source spans ranked by query-term overlap, with dates and speakers |
+| `full-sessions-v1` | Every selected session in full; overflow fails |
+| `native-context-v1` | Actual compiled API Markdown, unchanged; overflow fails |
+
+New arms use `--qa-max-context-tokens` (default 6000). The frozen `o200k_base` tokenizer counts
+context text, excluding provider framing. Historical prefixes retain their original character
+limits. QA resolves the tokenizer asset before any API or provider work, so an unavailable asset
+fails before ingestion begins.
+
+Native QA requires model mode. Dataset fixtures cannot score compiled context. Native runs retain
+separate search diagnostics, but the reader receives only `/context/pack` Markdown. The gate checks
+that compiled evidence against its rendering receipt. A native QA score and a search recall score
+therefore describe different retrieval surfaces.

@@ -94,6 +94,8 @@ class LongMemEvalQAConfig:
     max_context_tokens: int = DEFAULT_QA_CONTEXT_TOKENS
 
     def __post_init__(self) -> None:
+        if self.mode == "fixture" and self.context_arm == "native-context-v1":
+            raise ValueError("Native QA requires model mode; fixture scoring uses dataset sessions")
         if self.context_arm not in LONGMEMEVAL_CONTEXT_ARMS:
             raise ValueError(f"Unsupported QA context arm: {self.context_arm}")
         if min(self.max_context_sessions, self.max_session_chars, self.max_context_tokens) <= 0:
@@ -136,6 +138,21 @@ async def evaluate_longmemeval_case_qa(
         return _disabled_result(config)
 
     started = time.perf_counter()
+    documents = (
+        []
+        if config.context_arm == "native-context-v1"
+        else build_longmemeval_corpus(entry, text_policy=corpus_text_policy)
+    )
+    corpus_ids = {document.session_id for document in documents}
+    missing_session_ids = (
+        []
+        if config.context_arm == "native-context-v1"
+        else [
+            session_id
+            for session_id in ranked_session_ids[: config.max_context_sessions]
+            if session_id not in corpus_ids
+        ]
+    )
     if config.context_arm == "historical-prefix-v1":
         context_sessions = _context_sessions(
             entry,
@@ -151,11 +168,7 @@ async def evaluate_longmemeval_case_qa(
         # The selector receives only source documents and the query, never answer labels.
         context_sessions, context_text, spans = render_qa_context(
             question=str(entry.get("question") or ""),
-            documents=(
-                []
-                if config.context_arm == "native-context-v1"
-                else build_longmemeval_corpus(entry, text_policy=corpus_text_policy)
-            ),
+            documents=documents,
             ranked_session_ids=ranked_session_ids,
             config=config,
             native_markdown=native_markdown,
@@ -194,6 +207,7 @@ async def evaluate_longmemeval_case_qa(
         "rendered_context": context_text,
         "reader_prompt": reader_prompt,
         "spans": spans,
+        "missing_session_ids": missing_session_ids,
     }
     result["latency_ms"] = (time.perf_counter() - started) * 1000
     return result
@@ -394,7 +408,7 @@ def render_qa_context(
     for rank, session_id in enumerate(ranked_session_ids[: config.max_context_sessions], 1):
         document = corpus.get(session_id)
         if document is None:
-            raise ValueError(f"Selected session missing from corpus: {session_id}")
+            continue
         boundaries = (
             [(0, len(document.text))]
             if config.context_arm == "full-sessions-v1"

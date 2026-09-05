@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -801,6 +802,101 @@ def test_evaluate_report_require_qa_accepts_longmemeval_fixture_contract() -> No
     failures = eval_gate.evaluate_report(report, profile="ai-memory", require_qa=True)
 
     assert failures == []
+
+
+def _native_qa_report() -> dict[str, Any]:
+    report = _add_qa_report_fields(_ai_memory_report(mode="hybrid"))
+    case_qa = report["case_results"][0]["qa"]
+    contract = {
+        "mode": "model",
+        "context_arm": "native-context-v1",
+        "context_tokenizer": "o200k_base",
+        "max_context_tokens": 100,
+    }
+    report["qa"].update(contract)
+    case_qa.update(contract)
+    markdown = "Native evidence"
+    case_qa.update(
+        {
+            "context_session_ids": [],
+            "native_context": {"markdown": markdown},
+            "context_receipt": {
+                "arm": "native-context-v1",
+                "tokenizer": "o200k_base",
+                "rendered_context": markdown,
+                "context_tokens": 2,
+                "context_sha256": hashlib.sha256(markdown.encode()).hexdigest(),
+            },
+        }
+    )
+    return report
+
+
+def test_evaluate_report_require_qa_accepts_native_receipt_without_dataset_ids() -> None:
+    assert (
+        eval_gate.evaluate_report(_native_qa_report(), profile="ai-memory", require_qa=True) == []
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("context_receipt", None, "requires native_context and context_receipt"),
+        ("native_context", None, "requires native_context and context_receipt"),
+        ("native_context.markdown", "", "markdown must be non-empty"),
+        ("context_receipt.rendered_context", "tampered", "markdown must equal"),
+        ("context_receipt.context_sha256", "tampered", "context_sha256 must match"),
+        ("context_receipt.arm", "historical-prefix-v1", "context_receipt.arm must match"),
+        (
+            "context_receipt.context_tokens",
+            float("nan"),
+            "context_tokens must be a positive integer",
+        ),
+        (
+            "context_receipt.context_tokens",
+            float("inf"),
+            "context_tokens must be a positive integer",
+        ),
+        ("context_receipt.context_tokens", True, "context_tokens must be a positive integer"),
+        ("context_receipt.context_tokens", 1.5, "context_tokens must be a positive integer"),
+        ("context_receipt.context_tokens", -1, "context_tokens must be a positive integer"),
+        ("context_receipt.context_tokens", 101, "tokens exceed max_context_tokens"),
+        ("context_receipt.tokenizer", "other", "tokenizer must match"),
+        ("context_tokenizer", "other", "must match top-level qa context_tokenizer"),
+        ("max_context_tokens", 200, "must match top-level qa max_context_tokens"),
+        ("context_arm", "historical-prefix-v1", "must match top-level qa context_arm"),
+        ("context_session_ids", "not a list", "context_session_ids must be a list"),
+    ],
+)
+def test_evaluate_report_require_qa_rejects_invalid_native_receipt(
+    field: str,
+    value: Any,
+    message: str,
+) -> None:
+    report = _native_qa_report()
+    case_qa = report["case_results"][0]["qa"]
+    parent, separator, child = field.partition(".")
+    if separator:
+        case_qa[parent][child] = value
+    else:
+        case_qa[parent] = value
+    failures = eval_gate.evaluate_report(report, profile="ai-memory", require_qa=True)
+    assert any(message in failure for failure in failures)
+
+
+def test_evaluate_report_native_case_cannot_bypass_historical_dataset_ids() -> None:
+    report = _native_qa_report()
+    report["qa"].pop("context_arm")
+    failures = eval_gate.evaluate_report(report, profile="ai-memory", require_qa=True)
+    assert any("missing non-empty field 'context_session_ids'" in failure for failure in failures)
+
+
+@pytest.mark.parametrize("field", ["context_tokenizer", "max_context_tokens"])
+def test_evaluate_report_native_requires_top_level_context_contract(field: str) -> None:
+    report = _native_qa_report()
+    report["qa"].pop(field)
+    failures = eval_gate.evaluate_report(report, profile="ai-memory", require_qa=True)
+    assert f"qa missing non-empty field {field!r}" in failures
 
 
 def test_evaluate_report_require_qa_rejects_missing_block() -> None:

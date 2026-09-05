@@ -74,6 +74,9 @@ def test_eval_workflow_full_run_forces_memory_extraction_off() -> None:
     assert "--qa-judge-model" in full_job
     assert "--require-qa" in full_job
     assert "--require-runtime qa_mode=model" in full_job
+    assert '--require-runtime qa_context_arm="${LONGMEMEVAL_QA_CONTEXT_ARM}"' in full_job
+    assert "--require-runtime qa_context_tokenizer=o200k_base" in full_job
+    assert '--require-runtime qa_max_context_tokens="${qa_context_budget}"' in full_job
     assert "pinned-longmemeval-s-qa.json" in full_job
     assert "Claim-bearing QA requires a complete matching pinned baseline." in full_job
     assert "bootstrap_longmemeval_qa_baseline:" in workflow
@@ -384,6 +387,67 @@ def _native_context_response(request: httpx.Request, expected_budget: int) -> ht
     )
 
 
+async def _mock_native_reader_judge(
+    _entry: dict[str, Any],
+    *,
+    config: Any,
+    reader_prompt: str,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    qa = importlib.import_module("longmemeval_qa")
+    assert "native-only fact" in reader_prompt
+    return {
+        **qa.qa_report_metadata(config),
+        "evaluated": True,
+        "correct": True,
+        "score": 1.0,
+        "generated_answer": "A native-only fact.",
+        "reference_answer": kwargs["reference_answer"],
+        "context_session_ids": [],
+        "answer_session_ids": kwargs["answer_session_ids"],
+        "judge_rationale": "Test-only reader/judge stub; no provider called.",
+        "reader_estimated_input_tokens": 1.0,
+        "reader_estimated_output_tokens": 1.0,
+        "judge_estimated_input_tokens": 1.0,
+        "judge_estimated_output_tokens": 1.0,
+    }
+
+
+def _assert_native_qa_report(report: dict[str, Any]) -> None:
+    qa = report["case_results"][0]["qa"]
+    assert qa["mode"] == "model"
+    assert qa["generated_answer"] == "A native-only fact."
+    assert qa["context_receipt"]["rendered_context"] == qa["native_context"]["markdown"]
+    assert "native-only fact" in qa["context_receipt"]["reader_prompt"]
+    assert "I bought markers" not in qa["context_receipt"]["reader_prompt"]
+    assert qa["context_session_ids"] == []
+    assert report["runtime"]["qa_retrieval_surface"] == "POST /api/context/pack"
+
+
+def _assert_produced_context_contract_gate(report: dict[str, Any]) -> None:
+    expected = {
+        key: str(report["runtime"][key])
+        for key in ("qa_context_arm", "qa_context_tokenizer", "qa_max_context_tokens")
+    }
+    assert (
+        eval_gate.evaluate_report(
+            report,
+            profile="ai-memory",
+            require_qa=True,
+            required_runtime=expected,
+        )
+        == []
+    )
+    for key in expected:
+        failures = eval_gate.evaluate_report(
+            report,
+            profile="ai-memory",
+            require_qa=True,
+            required_runtime={**expected, key: "mismatched-contract"},
+        )
+        assert any(f"runtime[{key!r}]" in failure for failure in failures)
+
+
 @pytest.mark.parametrize("qa_context_arm", ["historical-prefix-v1", "native-context-v1"])
 def test_longmemeval_live_builds_gate_valid_report(
     tmp_path: Path,
@@ -391,6 +455,9 @@ def test_longmemeval_live_builds_gate_valid_report(
     qa_context_arm: str,
 ) -> None:
     module = _load_live_module()
+    monkeypatch.setattr(
+        importlib.import_module("longmemeval_qa"), "_model_result", _mock_native_reader_judge
+    )
     monkeypatch.setenv("SIBYL_GRAPH_EMBEDDING_PROVIDER", "openai")
     monkeypatch.delenv("SIBYL_OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -533,7 +600,7 @@ def test_longmemeval_live_builds_gate_valid_report(
             memory_projection_timeout_seconds=1,
             wait_for_memory_extraction=True,
             memory_extraction_timeout_seconds=1,
-            qa_mode="fixture",
+            qa_mode="model" if qa_context_arm == "native-context-v1" else "fixture",
             qa_context_arm=qa_context_arm,
             transport=httpx.MockTransport(handler),
         )
@@ -543,12 +610,8 @@ def test_longmemeval_live_builds_gate_valid_report(
     if qa_context_arm == "historical-prefix-v1":
         _assert_fixture_qa_report(report)
     else:
-        qa = report["case_results"][0]["qa"]
-        assert qa["context_receipt"]["rendered_context"] == qa["native_context"]["markdown"]
-        assert "native-only fact" in qa["context_receipt"]["reader_prompt"]
-        assert "I bought markers" not in qa["context_receipt"]["reader_prompt"]
-        assert qa["context_session_ids"] == []
-        assert report["runtime"]["qa_retrieval_surface"] == "POST /api/context/pack"
+        _assert_native_qa_report(report)
+    _assert_produced_context_contract_gate(report)
     _assert_memory_extraction_stats(report)
     _assert_memory_projection_stats(report)
     _assert_chunked_entities(module, state)
@@ -1007,7 +1070,7 @@ def test_qa_native_invalid_request_fails_before_any_api_call(
                 dataset,
                 api_url="http://fixture/api",
                 verify_sha256=False,
-                qa_mode="fixture",
+                qa_mode="model",
                 qa_context_arm="native-context-v1",
                 qa_max_context_tokens=budget,
                 qa_max_context_sessions=sessions,
@@ -1020,7 +1083,7 @@ def test_qa_native_invalid_request_fails_before_any_api_call(
 def test_qa_native_request_accepts_product_boundary_values(budget: int, sessions: int) -> None:
     module = _load_live_module()
     config = module._qa_config(
-        mode="fixture",
+        mode="model",
         reader_provider="openai",
         reader_model="reader",
         judge_provider="openai",
@@ -1033,3 +1096,147 @@ def test_qa_native_request_accepts_product_boundary_values(budget: int, sessions
     )
     assert config.max_context_tokens == budget
     assert config.max_context_sessions == sessions
+
+
+def _preflight_dataset(tmp_path: Path) -> Path:
+    dataset = tmp_path / "fixture.json"
+    dataset.write_text(
+        json.dumps(
+            [
+                {
+                    "question_id": "q1",
+                    "question": "What did I buy?",
+                    "question_type": "single-session-user",
+                    "answer_session_ids": ["s1"],
+                    "haystack_session_ids": ["s1"],
+                    "haystack_sessions": [[{"role": "user", "content": "I bought pencils."}]],
+                }
+            ]
+        )
+    )
+    return dataset
+
+
+@pytest.mark.parametrize(
+    ("mode", "arm"),
+    [
+        ("model", "historical-prefix-v1"),
+        ("fixture", "historical-prefix-v1"),
+        ("fixture", "query-passages-v1"),
+        ("model", "native-context-v1"),
+    ],
+)
+def test_qa_tokenizer_asset_failure_precedes_any_api_call(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    arm: str,
+) -> None:
+    module = _load_live_module()
+    qa = importlib.import_module("longmemeval_qa")
+    tokenizer_calls = []
+
+    def missing_asset(name: str) -> None:
+        tokenizer_calls.append(name)
+        raise OSError("Tokenizer asset unavailable offline")
+
+    def unexpected_request(request: httpx.Request) -> httpx.Response:
+        pytest.fail(f"Missing tokenizer reached API: {request.url.path}")
+
+    monkeypatch.setattr(qa.tiktoken, "get_encoding", missing_asset)
+    with pytest.raises(OSError, match="Tokenizer asset unavailable offline"):
+        asyncio.run(
+            module.run_benchmark(
+                _preflight_dataset(tmp_path),
+                api_url="http://fixture/api",
+                verify_sha256=False,
+                qa_mode=mode,
+                qa_context_arm=arm,
+                transport=httpx.MockTransport(unexpected_request),
+            )
+        )
+    assert tokenizer_calls == [qa.QA_TOKENIZER]
+
+
+def test_qa_disabled_does_not_resolve_tokenizer_asset(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_live_module()
+    qa = importlib.import_module("longmemeval_qa")
+
+    def unexpected_tokenizer(_name: str) -> None:
+        pytest.fail("Disabled QA must not need a tokenizer asset")
+
+    def api_boundary(_request: httpx.Request) -> httpx.Response:
+        raise RuntimeError("API boundary reached")
+
+    monkeypatch.setattr(qa.tiktoken, "get_encoding", unexpected_tokenizer)
+    with pytest.raises(RuntimeError, match="API boundary reached"):
+        asyncio.run(
+            module.run_benchmark(
+                _preflight_dataset(tmp_path),
+                api_url="http://fixture/api",
+                verify_sha256=False,
+                qa_mode="disabled",
+                transport=httpx.MockTransport(api_boundary),
+            )
+        )
+
+
+def test_qa_native_fixture_rejected_before_api_and_in_direct_config(tmp_path: Path) -> None:
+    module = _load_live_module()
+    qa = importlib.import_module("longmemeval_qa")
+
+    def unexpected_request(request: httpx.Request) -> httpx.Response:
+        pytest.fail(f"Native fixture config reached API: {request.url.path}")
+
+    with pytest.raises(ValueError, match="Native QA requires model mode"):
+        asyncio.run(
+            module.run_benchmark(
+                _preflight_dataset(tmp_path),
+                api_url="http://fixture/api",
+                verify_sha256=False,
+                qa_mode="fixture",
+                qa_context_arm="native-context-v1",
+                transport=httpx.MockTransport(unexpected_request),
+            )
+        )
+    with pytest.raises(ValueError, match="Native QA requires model mode"):
+        qa.LongMemEvalQAConfig(mode="fixture", context_arm="native-context-v1")
+
+
+@pytest.mark.parametrize(
+    "arm",
+    [
+        "historical-prefix-v1",
+        "dated-prefix-v1",
+        "query-passages-v1",
+        "full-sessions-v1",
+    ],
+)
+def test_qa_missing_sessions_recorded_without_backfilling_rank_slots(arm: str) -> None:
+    _load_live_module()
+    qa = importlib.import_module("longmemeval_qa")
+    entry = {
+        "question": "What did I buy?",
+        "answer": "pencils",
+        "answer_session_ids": ["s1"],
+        "haystack_session_ids": ["s1", "s2"],
+        "haystack_sessions": [
+            [{"role": "user", "content": "I bought pencils."}],
+            [{"role": "user", "content": "Excluded third-ranked source."}],
+        ],
+    }
+    result = asyncio.run(
+        qa.evaluate_longmemeval_case_qa(
+            entry,
+            ranked_session_ids=["foreign", "s1", "s2"],
+            corpus_text_policy="user-and-assistant-turns-v1",
+            config=qa.LongMemEvalQAConfig(mode="fixture", context_arm=arm, max_context_sessions=2),
+        )
+    )
+    assert result["context_receipt"]["missing_session_ids"] == ["foreign"]
+    assert result["context_session_ids"] == ["s1"]
+    assert "Rank 2 session s1" in result["context_receipt"]["rendered_context"]
+    assert "Excluded third-ranked source" not in result["context_receipt"]["rendered_context"]

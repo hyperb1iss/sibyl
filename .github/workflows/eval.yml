@@ -1044,9 +1044,16 @@ jobs:
             --require-runtime embedding_cache_namespace=graph
           )
           if [[ "${LONGMEMEVAL_QA_MODE}" == "model" ]]; then
+            qa_context_budget="${LONGMEMEVAL_QA_CONTEXT_TOKENS}"
+            if [[ "${LONGMEMEVAL_QA_CONTEXT_ARM}" == "historical-prefix-v1" ]]; then
+              qa_context_budget="None"
+            fi
             gate_args+=(
               --require-qa
               --require-runtime qa_mode=model
+              --require-runtime qa_context_arm="${LONGMEMEVAL_QA_CONTEXT_ARM}"
+              --require-runtime qa_context_tokenizer=o200k_base
+              --require-runtime qa_max_context_tokens="${qa_context_budget}"
               --require-runtime qa_reader_model="${LONGMEMEVAL_QA_READER_MODEL}"
               --require-runtime qa_judge_model="${LONGMEMEVAL_QA_JUDGE_MODEL}"
             )

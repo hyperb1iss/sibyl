@@ -44,6 +44,7 @@ from longmemeval_qa import (
     LongMemEvalContextArm,
     LongMemEvalQAConfig,
     LongMemEvalQAMode,
+    count_context_tokens,
     evaluate_longmemeval_case_qa,
     qa_report_metadata,
 )
@@ -1868,6 +1869,9 @@ async def run_benchmark(
         context_arm=qa_context_arm,
         max_context_tokens=qa_max_context_tokens,
     )
+    if qa_config.mode != "disabled":
+        # Resolve the frozen tokenizer asset before any API or provider work.
+        count_context_tokens("")
     selected_cases = list(zip(selected_indices, selected_entries, strict=True))
     entries_by_case_index = dict(selected_cases)
 
