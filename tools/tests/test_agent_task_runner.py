@@ -122,6 +122,17 @@ def test_controller_final_state_is_independently_checked(experiment, monkeypatch
     assert receipt["status"] == "passed"
     assert receipt["sealed_isolation"] is False
     assert receipt["learning_benefit_established"] is False
+    assert receipt["input_retention"] == (
+        "selected_task_and_arm_only_not_a_complete_experiment_archive"
+    )
+    assert {path.name for path in (output / "inputs").iterdir()} == {
+        "lock.json",
+        "controller.py",
+        "prompt.txt",
+        "baseline.txt",
+        "checker.py",
+        "memory.txt",
+    }
     assert (freeze().parent / "baseline.txt").read_text() == "0"
     assert (output / "checker-workspace/answer.txt").read_text() == "42"
     initial = json.loads((output / "initial-snapshot.json").read_text())
@@ -216,7 +227,7 @@ def test_changed_frozen_inputs_fail_before_output(experiment, filename):
         ("unknown", "Extra inputs are not permitted"),
         ("family", "family or exact content overlaps"),
         ("source", "only declared learning sources"),
-        ("sealed", "development-only"),
+        ("sealed", "supports only learning and development tasks"),
         ("collision", "duplicate workspace destination"),
         ("path", "canonical relative file path"),
         ("runtime", "runtime identity differs"),
@@ -498,6 +509,15 @@ def test_empty_control_and_memory_arm_share_frozen_comparison(experiment):
     # Empty baseline files cannot disqualify an empty no-memory control.
     manifest["tasks"][0]["workspace"].append({"artifact": empty, "destination": "empty.txt"})
     manifest["arms"].append({"id": "control", "memory_pack": empty, "learning_source_ids": []})
+    controller = root / "controller.py"
+    controller.write_text(
+        controller.read_text().replace(
+            "request = json.load(sys.stdin)",
+            'request = json.load(sys.stdin)\nif not request["memory_pack"]:\n'
+            '    assert not Path("../inputs/memory.txt").exists()',
+        )
+    )
+    manifest["controller"]["script"]["sha256"] = digest(controller.read_bytes())
     path = freeze()
     memory = run_task(path, task_id="task-one", arm_id="memory", output=output)
     control = run_task(
@@ -512,6 +532,7 @@ def test_empty_control_and_memory_arm_share_frozen_comparison(experiment):
         assert memory[key] != control[key]
     assert control["pack_id"] == digest(b"")
     assert (output.with_name("control") / "controller-request.json").exists()
+    assert not (output.with_name("control") / "inputs/memory.txt").exists()
 
 
 def native_payload(source_revision=7):
@@ -564,7 +585,9 @@ def bind_native_payload(experiment, payload, *, memory=None):
     return arm
 
 
-def test_native_binding_automatically_retains_input_outside_controller_workspace(experiment):
+@pytest.mark.parametrize("split", ["learning", "development"])
+def test_native_binding_automatically_retains_input_outside_controller_workspace(experiment, split):
+    experiment[0]["tasks"][0]["split"] = split
     payload = native_payload()
     arm = bind_native_payload(experiment, payload)
     receipt = execute(experiment)
@@ -789,3 +812,97 @@ def test_native_sidecar_bytes_fail_preflight(experiment, monkeypatch, mutation):
     ):
         execute(experiment)
     assert not experiment[2].exists()
+
+
+@pytest.mark.parametrize("split", ["learning", "development"])
+@pytest.mark.parametrize("mode", [None, "wrong", "fail", "malformed", "badusage"])
+def test_task_collection_preserves_checked_outcomes_and_split(experiment, split, mode):
+    manifest, _, output = experiment
+    manifest["tasks"][0]["split"] = split
+    if mode:
+        manifest["controller"]["args"] = [mode]
+    receipt = execute(experiment)
+    expected = {
+        None: "passed",
+        "wrong": "task_failed",
+        "fail": "controller_failed",
+        "malformed": "controller_protocol_invalid",
+        "badusage": "controller_protocol_invalid",
+    }
+    assert receipt["status"] == expected[mode]
+    assert receipt["success"] is (mode is None)
+    assert receipt["task_split"] == split
+    assert receipt["task_family_id"] == "task-family"
+    retained = Manifest.model_validate_json((output / "manifest.json").read_bytes())
+    task = retained.tasks[0]
+    assert receipt["task_sha256"] == identity(task.model_dump(mode="json"))
+    assert receipt["manifest_sha256"] == identity(retained.model_dump(mode="json"))
+    assert task.split == receipt["task_split"]
+    assert task.family_id == receipt["task_family_id"]
+    assert receipt["learning_benefit_established"] is False
+    assert receipt["sealed_isolation"] is False
+    saved = json.loads((output / "receipt.json").read_bytes())
+    checksum = saved.pop("receipt_sha256")
+    assert checksum == identity(saved)
+    if mode in (None, "wrong"):
+        assert receipt["outcome"]["passed"] is (mode is None)
+        assert (
+            receipt["controller_final_snapshot_sha256"] == receipt["checker_input_snapshot_sha256"]
+        )
+    else:
+        assert "outcome" not in receipt
+
+
+@pytest.mark.parametrize("heldout_split", ["development", "sealed"])
+@pytest.mark.parametrize("overlap", ["family", "prompt"])
+def test_learning_tasks_cannot_overlap_later_splits(experiment, heldout_split, overlap):
+    manifest, freeze, output = experiment
+    learning = manifest["tasks"][0]
+    learning["split"] = "learning"
+    prompt = {"path": "later-task.txt", "sha256": digest(b"A different task")}
+    (freeze().parent / prompt["path"]).write_bytes(b"A different task")
+    heldout = {
+        **learning,
+        "id": "later-task",
+        "family_id": "different-family",
+        "split": heldout_split,
+        "prompt": prompt,
+    }
+    heldout["family_id" if overlap == "family" else "prompt"] = learning[
+        "family_id" if overlap == "family" else "prompt"
+    ]
+    manifest["tasks"].append(heldout)
+    with pytest.raises(ManifestError, match="family or exact content overlaps"):
+        execute(experiment)
+    assert not output.exists()
+
+
+def test_learning_task_can_coexist_with_separate_heldout_task(experiment):
+    manifest, freeze, output = experiment
+    learning = manifest["tasks"][0]
+    learning["split"] = "learning"
+    prompt = {"path": "sealed-task.txt", "sha256": digest(b"An independent sealed task")}
+    (freeze().parent / prompt["path"]).write_bytes(b"An independent sealed task")
+    manifest["tasks"].append(
+        {
+            **learning,
+            "id": "sealed-task",
+            "family_id": "sealed-family",
+            "split": "sealed",
+            "prompt": prompt,
+        }
+    )
+    controller = freeze().parent / "controller.py"
+    controller.write_bytes(
+        b"from pathlib import Path\nassert not Path('../inputs/sealed-task.txt').exists()\n"
+        + controller.read_bytes()
+    )
+    manifest["controller"]["script"]["sha256"] = digest(controller.read_bytes())
+    receipt = execute(experiment)
+    assert receipt["success"] is True
+    assert receipt["task_split"] == "learning"
+    assert not (output / "inputs/sealed-task.txt").exists()
+    refused = output.parent / "sealed-attempt"
+    with pytest.raises(ManifestError, match="sealed execution requires an isolated agent runtime"):
+        run_task(freeze(), task_id="sealed-task", arm_id="memory", output=refused)
+    assert not refused.exists()
