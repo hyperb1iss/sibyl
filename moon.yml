@@ -1045,6 +1045,7 @@ tasks:
   agent-task-test:
     command: uv run pytest tools/tests/test_agent_task_runner.py -v
     inputs:
+      - packages/python/sibyl-core/src/**/*.py
       - benchmarks/agent_tasks/**/*.py
       - tools/tests/test_agent_task_runner.py
       - tools/tests/fixtures/agent_tasks/**/*.py
@@ -1086,6 +1087,7 @@ tasks:
       tools/tests/test_longmemeval_v2_release_cli.py -v
       tools/tests/test_longmemeval_v2_release_ci.py -v
     inputs:
+      - packages/python/sibyl-core/src/**/*.py
       - benchmarks/agent_tasks/**/*.py
       - tools/**/*.py
       - docker-compose.yml
