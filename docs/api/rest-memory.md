@@ -203,21 +203,23 @@ Compiles a structured context pack for an agent goal. This is the REST equivalen
 Setting the optional `evidence` object runs an enhanced source-evidence search alongside context
 compilation:
 
-| Field                           | Type     | Default       | Description                                                       |
-| ------------------------------- | -------- | ------------- | ----------------------------------------------------------------- |
-| `types`                         | string[] | `["session"]` | Entity types to include in the evidence pool                      |
-| `limit`                         | integer  | 24            | Maximum evidence results (1-50)                                   |
-| `content_max_chars`             | integer  | 500           | Maximum content characters per evidence result (0-50000)          |
-| `include_retrieval_diagnostics` | boolean  | false         | Include authorized evidence ranking diagnostics                   |
-| `retrieval_mode`                | string   | `fast`        | `fast` (one search), `naive` (see below) |
-| `reserve_distilled_notes`       | boolean  | true          | Reserve a typed lane for distilled operational notes              |
+| Field                           | Type     | Default       | Description                                              |
+| ------------------------------- | -------- | ------------- | -------------------------------------------------------- |
+| `types`                         | string[] | `["session"]` | Entity types to include in the evidence pool             |
+| `limit`                         | integer  | 24            | Maximum evidence results (1-50)                          |
+| `content_max_chars`             | integer  | 500           | Maximum content characters per evidence result (0-50000) |
+| `include_retrieval_diagnostics` | boolean  | false         | Include authorized evidence ranking diagnostics          |
+| `retrieval_mode`                | string   | `fast`        | `fast` (one search), `naive` (see below)                 |
+| `reserve_distilled_notes`       | boolean  | true          | Reserve a typed lane for distilled operational notes     |
 
 ::: warning Removed in Sibyl 1.4
-Requests selecting `retrieval_mode=accurate` receive HTTP 422 with migration instructions.
-Set `retrieval_mode=fast` or omit the field. Fast and naive behavior remain unchanged.
-Replay historical accurate-mode experiments against their pinned pre-1.4 Sibyl version.
-The retired `max_results_per_source` and `max_planned_queries` fields are ignored if sent by older
-clients. The fast path never used either field.
+
+Requests selecting `retrieval_mode=accurate` receive HTTP 422 with migration instructions. Set
+`retrieval_mode=fast` or omit the field. Fast and naive behavior remain unchanged. Replay historical
+accurate-mode experiments against their pinned pre-1.4 Sibyl version. The retired
+`max_results_per_source` and `max_planned_queries` fields are ignored if sent by older clients. The
+fast path never used either field.
+
 :::
 
 ::: warning `retrieval_mode=naive` is an experiment, not a product mode Selecting `naive` swaps the
