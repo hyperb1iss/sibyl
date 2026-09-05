@@ -1935,6 +1935,8 @@ class _PerFieldFulltextClient:
 
     async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
         self.calls.append((query, params))
+        if params.get("_query_label") == "entity.search.type_presence":
+            return [{"uuid": "shared"}]
         if params.get("_query_label") != "entity.search.fulltext":
             return []
         field = next(
@@ -5039,6 +5041,230 @@ async def test_the_v17_migration_backfills_scope_from_attributes() -> None:
         assert rows[0]["memory_scope"] == "private"
     finally:
         await client.close()
+
+
+class _TypePresenceSearchClient(_PerFieldFulltextClient):
+    def __init__(self, presence: object) -> None:
+        super().__init__()
+        self.presence = presence
+
+    async def execute_query(self, query: str, **params: object) -> object:
+        if params.get("_query_label") == "entity.search.type_presence":
+            self.calls.append((query, params))
+            if isinstance(self.presence, Exception):
+                raise self.presence
+            return self.presence
+        return await super().execute_query(query, **params)
+
+
+@pytest.mark.asyncio
+async def test_native_entity_manager_absent_type_skips_all_search_work() -> None:
+    client = _TypePresenceSearchClient([])
+    provider = AsyncMock()
+    provider.embed = AsyncMock(side_effect=AssertionError("absent type must not embed"))
+    manager = EntityManager(
+        cast("SurrealGraphClient", client), group_id=client.group_id, embedding_provider=provider
+    )
+
+    result = await manager.search(
+        query='On a `Report` record, what is under "Related Links"?',
+        entity_types=[EntityType.NOTE],
+    )
+
+    assert result == []
+    assert len(client.calls) == 1
+    query, params = client.calls[0]
+    assert "WHERE group_id = $group_id AND entity_type = $entity_type" in query
+    assert "LIMIT 1;" in query
+    assert params == {
+        "group_id": client.group_id,
+        "entity_type": "note",
+        "_query_label": "entity.search.type_presence",
+    }
+    assert provider.mock_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "presence",
+    [
+        [{"uuid": "shared"}],
+        None,
+        0,
+        False,
+        "",
+        {},
+        {"result": []},
+        {"status": "ERR", "result": []},
+        [{"status": "ERR", "result": []}],
+        [None],
+        RuntimeError("presence lookup unavailable"),
+    ],
+)
+async def test_native_entity_manager_uncertain_or_present_type_preserves_ranking(
+    presence: object,
+) -> None:
+    client = _TypePresenceSearchClient(presence)
+    manager = EntityManager(cast("SurrealGraphClient", client), group_id=client.group_id)
+    # A repeated type uses the original pipeline without the single-type probe.
+    expected = await manager.search(
+        query="surreal replay verification",
+        entity_types=[EntityType.TOPIC, EntityType.TOPIC],
+        limit=3,
+    )
+    baseline_calls = [
+        (query, {**params, "entity_types": ["topic"]}) for query, params in client.calls
+    ]
+    client.calls.clear()
+
+    actual = await manager.search(
+        query="surreal replay verification", entity_types=[EntityType.TOPIC], limit=3
+    )
+
+    assert actual == expected
+    assert [entity.id for entity, _score in actual] == ["shared", "summary-only", "name-only"]
+    assert client.calls[1:] == baseline_calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("types", [None, [], [EntityType.NOTE, EntityType.TOPIC]])
+async def test_native_entity_manager_untyped_and_mixed_skip_presence_probe(
+    types: list[EntityType] | None,
+) -> None:
+    client = _TypePresenceSearchClient(AssertionError("unexpected presence probe"))
+    manager = EntityManager(cast("SurrealGraphClient", client), group_id=client.group_id)
+
+    results = await manager.search(query="surreal replay verification", entity_types=types)
+
+    assert results
+    assert all(
+        params.get("_query_label") != "entity.search.type_presence" for _, params in client.calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_native_entity_manager_absence_does_not_outlive_the_search() -> None:
+    client = _TypePresenceSearchClient([])
+    manager = EntityManager(cast("SurrealGraphClient", client), group_id=client.group_id)
+    assert await manager.search(query="surreal replay", entity_types=[EntityType.TOPIC]) == []
+    client.presence = [{"uuid": "shared"}]
+
+    results = await manager.search(query="surreal replay", entity_types=[EntityType.TOPIC])
+
+    assert results
+    assert (
+        sum(
+            params.get("_query_label") == "entity.search.type_presence"
+            for _, params in client.calls
+        )
+        == 2
+    )
+
+
+@pytest.mark.asyncio
+async def test_native_entity_manager_empty_query_does_not_probe_type() -> None:
+    client = _TypePresenceSearchClient([])
+    manager = EntityManager(cast("SurrealGraphClient", client), group_id=client.group_id)
+    assert await manager.search(query="  ", entity_types=[EntityType.NOTE]) == []
+    assert client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_native_entity_manager_presence_is_group_scoped_and_observed_per_call() -> None:
+    client = SurrealGraphClient(group_id="org-presence-race", url="memory://")
+    try:
+        await prepare_graph_schema(client)
+        manager = EntityManager(client, group_id=client.group_id)
+        other = EntityManager(client, group_id="other-group")
+        await other.create_direct(
+            Entity(
+                id="other_note",
+                entity_type=EntityType.NOTE,
+                name="presence race note",
+                organization_id="other-group",
+            )
+        )
+        observed_absence = asyncio.Event()
+        insert_finished = asyncio.Event()
+        original_execute = client.execute_query
+        presence_results: list[object] = []
+
+        async def execute_with_insert_barrier(query: str, **params: Any) -> object:
+            result = await original_execute(query, **params)
+            if params.get("_query_label") == "entity.search.type_presence":
+                presence_results.append(result)
+                if len(presence_results) == 1:
+                    observed_absence.set()
+                    await insert_finished.wait()
+            return result
+
+        client.execute_query = execute_with_insert_barrier  # type: ignore[method-assign]
+        first = asyncio.create_task(
+            manager.search(
+                query="presence race",
+                entity_types=[EntityType.NOTE],
+            )
+        )
+        try:
+            await asyncio.wait_for(observed_absence.wait(), timeout=5)
+            await manager.create_direct(
+                Entity(
+                    id="new_note",
+                    entity_type=EntityType.NOTE,
+                    name="presence race note",
+                    organization_id=client.group_id,
+                )
+            )
+            insert_finished.set()
+            # The first call observes the earlier indexed absence, not a shared cache.
+            assert await first == []
+            assert presence_results == [[]]
+            results = await manager.search(query="presence race", entity_types=[EntityType.NOTE])
+            assert [entity.id for entity, _score in results] == ["new_note"]
+            assert len(presence_results) == 2
+            assert presence_results[1]
+        finally:
+            insert_finished.set()
+            await first
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_native_entity_manager_present_type_preserves_vector_fusion() -> None:
+    client = _TypePresenceSearchClient([{"uuid": "shared"}])
+    original_execute = client.execute_query
+
+    async def with_vector_rows(query: str, **params: object) -> object:
+        if params.get("_query_label") == "entity.search.vector":
+            client.calls.append((query, params))
+            return [
+                client._row("vector-only", score=0.99, day=1),
+                client._row("shared", score=0.8, day=2),
+            ]
+        return await original_execute(query, **params)
+
+    client.execute_query = with_vector_rows  # type: ignore[method-assign]
+    manager = EntityManager(
+        cast("SurrealGraphClient", client),
+        group_id=client.group_id,
+        embedding_provider=_deterministic_provider(),
+    )
+    expected = await manager.search(
+        query="surreal replay",
+        entity_types=[EntityType.TOPIC, EntityType.TOPIC],
+        limit=3,
+    )
+    expected_calls = [
+        (query, {**params, "entity_types": ["topic"]}) for query, params in client.calls
+    ]
+    client.calls.clear()
+
+    actual = await manager.search(query="surreal replay", entity_types=[EntityType.TOPIC], limit=3)
+
+    assert actual == expected
+    assert "vector-only" in {entity.id for entity, _score in actual}
+    assert client.calls[1:] == expected_calls
 
 
 @pytest.mark.asyncio
