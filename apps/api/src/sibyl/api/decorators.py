@@ -20,6 +20,7 @@ from typing import ParamSpec, TypeVar
 import structlog
 from fastapi import HTTPException
 
+from sibyl.api.errors import entity_locked
 from sibyl.coordination.locks import LockAcquisitionError
 from sibyl_core.errors import EntityNotFoundError, InvalidTransitionError, RevisionConflictError
 
@@ -71,10 +72,7 @@ def handle_workflow_errors(
                 raise HTTPException(status_code=400, detail=str(e)) from e
 
             except LockAcquisitionError as e:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Work item is locked by another process. Please retry.",
-                ) from e
+                raise entity_locked() from e
 
             except RevisionConflictError as e:
                 raise HTTPException(status_code=409, detail=e.details) from e

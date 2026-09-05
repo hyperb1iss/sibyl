@@ -7,7 +7,12 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from sibyl.api.decorators import handle_workflow_errors
-from sibyl.api.errors import constraint_violation, sanitize_error_text, unprocessable_entity
+from sibyl.api.errors import (
+    constraint_violation,
+    entity_locked,
+    sanitize_error_text,
+    unprocessable_entity,
+)
 from sibyl.api.event_types import WSEvent
 from sibyl.api.idempotency import (
     replay_idempotent_response,
@@ -448,10 +453,7 @@ async def update_entity(
         # Acquire distributed lock to prevent concurrent updates
         async with entity_lock(group_id, entity_id, blocking=True) as lock_token:
             if not lock_token:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Entity is being updated by another process. Please retry.",
-                )
+                raise entity_locked()
 
             runtime = await policy.get_entity_graph_runtime(group_id)
 
@@ -622,10 +624,7 @@ async def update_entity(
             return response
 
     except LockAcquisitionError as e:
-        raise HTTPException(
-            status_code=409,
-            detail="Entity is locked by another process. Please retry.",
-        ) from e
+        raise entity_locked() from e
     except HTTPException:
         raise
     except Exception as e:
@@ -656,10 +655,7 @@ async def delete_entity(
         # Acquire distributed lock to prevent concurrent modifications
         async with entity_lock(group_id, entity_id, blocking=True) as lock_token:
             if not lock_token:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Entity is being modified by another process. Please retry.",
-                )
+                raise entity_locked()
 
             runtime = await policy.get_entity_graph_runtime(group_id)
 
@@ -743,10 +739,7 @@ async def delete_entity(
             )
 
     except LockAcquisitionError as e:
-        raise HTTPException(
-            status_code=409,
-            detail="Entity is locked by another process. Please retry.",
-        ) from e
+        raise entity_locked() from e
     except HTTPException:
         raise
     except Exception as e:

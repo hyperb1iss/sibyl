@@ -539,3 +539,28 @@ async def test_experience_router_rejects_viewer_role() -> None:
 
     assert exc_info.value.status_code == 403
     await dependency(OrganizationRole.MEMBER)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raises", [False, True])
+async def test_experience_lock_contention_has_retryable_code(monkeypatch, raises) -> None:
+    from sibyl.api.errors import http_exception_payload
+    from sibyl.locks import LockAcquisitionError
+
+    @asynccontextmanager
+    async def unavailable(*_args, **_kwargs):
+        if raises:
+            raise LockAcquisitionError("manifest-1", "org-1")
+        yield None
+
+    monkeypatch.setattr(experience_routes, "entity_lock", unavailable)
+    monkeypatch.setattr(experience_routes, "verify_entity_project_access", AsyncMock())
+    runtime = AsyncMock()
+    monkeypatch.setattr(experience_routes, "get_experience_graph_runtime", runtime)
+    with pytest.raises(HTTPException) as exc:
+        await capture_operational_experience(
+            _request(), org=SimpleNamespace(id="org-1"), ctx=SimpleNamespace(user_id="user-1")
+        )
+    assert exc.value.status_code == 409
+    assert http_exception_payload(exc.value, "request-1")["error"] == "entity_locked"
+    runtime.assert_not_awaited()
