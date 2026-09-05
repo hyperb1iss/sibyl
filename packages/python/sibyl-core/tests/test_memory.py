@@ -19,9 +19,7 @@ from sibyl_core.services import memory_sharing as sharing_module
 from sibyl_core.services.content_models import raw_memory_matches_as_of
 from sibyl_core.services.memory import (
     ReflectionWriteResult,
-    WriteMode,
     apply_memory_correction,
-    coerce_write_mode,
     preview_memory_access,
     preview_memory_correction,
     preview_memory_share,
@@ -29,9 +27,7 @@ from sibyl_core.services.memory import (
     preview_reflection_candidate_promotion,
     promote_raw_memory,
     promote_reflection_candidate_review,
-    reflection_write_enabled,
     share_memory,
-    write_mode_from_env,
 )
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 from sibyl_core.tools.responses import AddResponse
@@ -93,26 +89,6 @@ def _raw_import_memory(**overrides: object) -> RawMemory:
     }
     values.update(overrides)
     return RawMemory(**values)
-
-
-def test_native_write_mode_defaults_enabled() -> None:
-    assert coerce_write_mode(None) is WriteMode.ENABLED
-    assert coerce_write_mode("") is WriteMode.ENABLED
-    assert write_mode_from_env({}) is WriteMode.ENABLED
-    assert reflection_write_enabled({}) is True
-
-
-def test_native_write_mode_accepts_enabled_values() -> None:
-    assert coerce_write_mode("enabled") is WriteMode.ENABLED
-    assert coerce_write_mode("true") is WriteMode.ENABLED
-    assert write_mode_from_env({"SIBYL_NATIVE_WRITE": "1"}) is WriteMode.ENABLED
-
-
-def test_native_write_mode_accepts_disabled_values() -> None:
-    assert coerce_write_mode("disabled") is WriteMode.DISABLED
-    assert coerce_write_mode("false") is WriteMode.DISABLED
-    assert write_mode_from_env({"SIBYL_NATIVE_WRITE": "0"}) is WriteMode.DISABLED
-    assert reflection_write_enabled({"SIBYL_NATIVE_WRITE": "off"}) is False
 
 
 @pytest.mark.asyncio

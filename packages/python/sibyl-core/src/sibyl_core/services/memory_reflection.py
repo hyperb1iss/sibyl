@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import os
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
@@ -83,28 +82,6 @@ async def _load_raw_sources(
         if source is not None:
             memories.append(source)
     return memories
-
-
-def coerce_write_mode(value: str | WriteMode | None) -> WriteMode:
-    if isinstance(value, WriteMode):
-        return value
-    if value is None or not value.strip():
-        return WriteMode.ENABLED
-    normalized = value.strip().lower()
-    if normalized in {"enabled", "enable", "true", "1", "yes", "on"}:
-        return WriteMode.ENABLED
-    if normalized in {"disabled", "disable", "false", "0", "no", "off"}:
-        return WriteMode.DISABLED
-    return WriteMode.DISABLED
-
-
-def write_mode_from_env(environ: Mapping[str, str] | None = None) -> WriteMode:
-    source = os.environ if environ is None else environ
-    return coerce_write_mode(source.get("SIBYL_NATIVE_WRITE"))
-
-
-def reflection_write_enabled(environ: Mapping[str, str] | None = None) -> bool:
-    return write_mode_from_env(environ) is WriteMode.ENABLED
 
 
 async def persist_reflection_source(
