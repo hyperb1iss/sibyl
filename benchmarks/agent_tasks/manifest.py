@@ -93,6 +93,9 @@ class Arm(FrozenModel):
     id: str = Field(pattern=IDENTIFIER_PATTERN)
     memory_pack: Artifact
     learning_source_ids: list[str]
+    native_render_payload: Artifact | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class ControllerBudget(FrozenModel):
@@ -212,6 +215,43 @@ def strict_json(content: bytes) -> Any:
     return json.loads(content, object_pairs_hook=_strict_object, parse_constant=_reject_constant)
 
 
+def validate_native_render_binding(arm: Arm, inputs: dict[str, bytes]) -> None:
+    """Verify retained render provenance and the exact bytes supplied as memory.
+
+    No source is fetched here. Renderer consistency does not establish learning
+    source authenticity, completeness, or subsequent model consumption.
+    """
+    if arm.native_render_payload is None:
+        return
+    try:
+        payload_bytes = inputs[arm.native_render_payload.path]
+        memory = inputs[arm.memory_pack.path]
+    except KeyError as exc:
+        raise ManifestError("native render binding is missing a retained artifact") from exc
+    if (
+        digest(payload_bytes) != arm.native_render_payload.sha256
+        or digest(memory) != arm.memory_pack.sha256
+    ):
+        raise ManifestError("native render binding contains changed artifact bytes")
+    payload = strict_json(payload_bytes)
+    if not isinstance(payload, dict):
+        raise ManifestError("native render payload must be a full JSON object")
+    receipt = payload.get("render_receipt")
+    if not isinstance(receipt, dict) or receipt.get("schema_version") != "sibyl-context-render-v1":
+        raise ManifestError("native render claim requires a sibyl-context-render-v1 receipt")
+    markdown = payload.get("markdown")
+    if not isinstance(markdown, str):
+        raise ManifestError("native render payload requires Markdown text")
+
+    # Unattributed and empty controls do not depend on the core renderer.
+    from sibyl_core.tools.context_rendering import validate_context_render_payload  # noqa: PLC0415
+
+    if failures := validate_context_render_payload(payload):
+        raise ManifestError(f"invalid native render payload: {'; '.join(failures)}")
+    if markdown.encode("utf-8") != memory or receipt.get("markdown_sha256") != digest(memory):
+        raise ManifestError("native rendered Markdown differs from the exact memory pack")
+
+
 def load_manifest(path: Path) -> tuple[Manifest, dict[str, bytes]]:
     """Verify every binding before execution and retain the exact verified bytes."""
     if path.is_symlink():
@@ -223,6 +263,9 @@ def load_manifest(path: Path) -> tuple[Manifest, dict[str, bytes]]:
     artifacts = [manifest.dependency_lock, manifest.controller.script]
     artifacts.extend(item.artifact for item in manifest.experiences)
     artifacts.extend(arm.memory_pack for arm in manifest.arms)
+    artifacts.extend(
+        arm.native_render_payload for arm in manifest.arms if arm.native_render_payload
+    )
     for task in manifest.tasks:
         artifacts.extend([task.prompt, task.checker.script])
         artifacts.extend(item.artifact for item in task.workspace)
@@ -245,4 +288,6 @@ def load_manifest(path: Path) -> tuple[Manifest, dict[str, bytes]]:
     for program in [manifest.controller, *(task.checker for task in manifest.tasks)]:
         if any("\x00" in arg for arg in program.args):
             raise ManifestError("program argument contains a null character")
+    for arm in manifest.arms:
+        validate_native_render_binding(arm, content)
     return manifest, content
