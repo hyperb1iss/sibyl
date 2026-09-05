@@ -497,6 +497,156 @@ async def test_legacy_evidence_is_not_remapped(runtime: GraphRuntime) -> None:
     assert await runtime.entity_manager.get(legacy.id) == before
 
 
+@pytest.mark.parametrize("declared", ["one_missing", "all_missing", "foreign_organization"])
+async def test_review_promotion_requires_every_declared_source_before_reservation(
+    runtime: GraphRuntime,
+    content_store: None,
+    monkeypatch: pytest.MonkeyPatch,
+    declared: str,
+) -> None:
+    from sibyl_core.services import memory_reflection
+
+    source = await remember_raw_memory(
+        organization_id=runtime.client.group_id,
+        principal_id="user_a",
+        source_id="complete-source",
+        title="Present evidence",
+        raw_content="The first source exists and is recallable.",
+        embedding_provider=None,
+    )
+    missing_id = "missing-capture"
+    if declared == "foreign_organization":
+        foreign = await remember_raw_memory(
+            organization_id="other-organization",
+            principal_id="user_a",
+            source_id="foreign-source",
+            title="Foreign evidence",
+            raw_content="This source exists only in another organization.",
+            embedding_provider=None,
+        )
+        missing_id = foreign.id
+    source_ids = [missing_id] if declared == "all_missing" else [source.id, missing_id]
+    review = await remember_reflection_candidate_review(
+        organization_id=runtime.client.group_id,
+        principal_id="user_a",
+        candidate=candidate(),
+        raw_source_ids=source_ids,
+    )
+    reserve = AsyncMock(wraps=memory_reflection._reserve_promotion)
+    persist = AsyncMock(wraps=memory_reflection.persist_reflection_candidate)
+    links = AsyncMock(wraps=runtime.relationship_manager.create_bulk)
+    monkeypatch.setattr(memory_reflection, "_reserve_promotion", reserve)
+    monkeypatch.setattr(memory_reflection, "persist_reflection_candidate", persist)
+    monkeypatch.setattr(runtime.relationship_manager, "create_bulk", links)
+
+    result = await promote_reflection_candidate_review(
+        candidate_id=review.id,
+        organization_id=runtime.client.group_id,
+        principal_id="user_a",
+        promote_to_scope="project",
+        promote_to_scope_key="project_a",
+        accessible_projects={"project_a"},
+    )
+
+    assert not result.success
+    assert result.reason == "source_not_recallable"
+    assert result.promoted_id is None
+    assert result.raw_source_ids == source_ids
+    reserve.assert_not_awaited()
+    persist.assert_not_awaited()
+    links.assert_not_awaited()
+    assert (
+        await get_raw_memory(organization_id=runtime.client.group_id, memory_id=review.id) == review
+    )
+    assert (
+        await runtime.client.execute_query(
+            "SELECT VALUE uuid FROM entity WHERE entity_type != 'project';"
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize("declared", ["empty", "duplicate"])
+async def test_review_source_completeness_preserves_self_fallback_and_duplicates(
+    runtime: GraphRuntime, content_store: None, declared: str
+) -> None:
+    source = await remember_raw_memory(
+        organization_id=runtime.client.group_id,
+        principal_id="user_a",
+        source_id="complete-source",
+        title="Present evidence",
+        raw_content="The declared evidence is complete.",
+        embedding_provider=None,
+    )
+    review = await remember_reflection_candidate_review(
+        organization_id=runtime.client.group_id,
+        principal_id="user_a",
+        candidate=candidate(),
+        raw_source_ids=[] if declared == "empty" else [source.id, source.id],
+    )
+    result = await promote_reflection_candidate_review(
+        candidate_id=review.id,
+        organization_id=runtime.client.group_id,
+        principal_id="user_a",
+        promote_to_scope="project",
+        promote_to_scope_key="project_a",
+        accessible_projects={"project_a"},
+    )
+    assert result.success
+    assert result.raw_source_ids == [review.id if declared == "empty" else source.id]
+
+
+@pytest.mark.parametrize("scope", ["private", "project"])
+async def test_unretained_reflection_input_can_be_reviewed_promoted_and_replayed(
+    runtime: GraphRuntime, content_store: None, scope: str
+) -> None:
+    from sibyl_core.services.reflection import ephemeral_reflection_source_id
+
+    content = "We decided to preserve explicit input provenance without retaining the source."
+    project = "project_a" if scope == "project" else None
+    pack = await reflect_memory(
+        content,
+        organization_id=runtime.client.group_id,
+        principal_id="user_a",
+        project=project,
+        accessible_projects={"project_a"},
+        memory_scope=scope,
+        scope_key=project,
+        persist=True,
+        persist_source=False,
+        persist_review=True,
+    )
+    assert pack.source_id is None
+    assert pack.persisted_count == 1
+    anchor = ephemeral_reflection_source_id(content)
+    review_id = pack.candidates[0].persisted_id
+    review = await get_raw_memory(organization_id=runtime.client.group_id, memory_id=review_id)
+    assert review.source_id == anchor
+    assert review.metadata["raw_source_ids"] == [anchor]
+    assert await get_raw_memory(organization_id=runtime.client.group_id, memory_id=anchor) is None
+    kwargs = {
+        "candidate_id": review_id,
+        "organization_id": runtime.client.group_id,
+        "principal_id": "user_a",
+        "promote_to_scope": scope,
+        "promote_to_scope_key": project,
+        "accessible_projects": {"project_a"},
+    }
+    result = await promote_reflection_candidate_review(**kwargs)
+    assert result.success
+    assert result.raw_source_ids == [anchor]
+    entity = await runtime.entity_manager.get(str(result.promoted_id))
+    assert entity.metadata["raw_source_ids"] == [anchor]
+    assert entity.source_file == anchor
+    assert entity.metadata["reflection_identity"]["source_ids"] == [anchor]
+    assert entity.metadata["reflection_identity"]["primary_source_id"] == anchor
+    replay = await promote_reflection_candidate_review(**kwargs)
+    assert replay.success
+    assert replay.promoted_id == result.promoted_id
+    assert replay.raw_source_ids == [anchor]
+    assert await runtime.entity_manager.get(str(result.promoted_id)) == entity
+
+
 async def test_source_conflict_cannot_publish_orphan_candidates(runtime: GraphRuntime) -> None:
     from sibyl_core.services.memory_reflection import persist_reflection_source
 
