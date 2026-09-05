@@ -1190,6 +1190,9 @@ async def _run_case(
     )
     if native_pack is not None:
         qa_result["native_context"] = native_pack
+        qa_result["render_provenance_status"] = (
+            "available" if native_pack.get("render_receipt") is not None else "unavailable"
+        )
     if qa_result.get("latency_ms"):
         timings_ms["qa"] = float(qa_result["latency_ms"])
     token_accounting = _case_token_accounting(entry, corpus_text_policy=corpus_text_policy)

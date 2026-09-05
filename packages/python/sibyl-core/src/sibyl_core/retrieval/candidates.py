@@ -69,6 +69,7 @@ class RetrievalCandidate:
     kind: CandidateKind | str | None = None
     retrieval_signals: tuple[str, ...] = ()
     scope: CandidateScope | None = None
+    source_revision: int | None = None
 
     def contract_metadata(self) -> dict[str, Any]:
         return candidate_contract_metadata(

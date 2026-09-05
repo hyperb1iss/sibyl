@@ -1,5 +1,6 @@
 """Retrieval and graph-navigation MCP tools."""
 
+from dataclasses import asdict
 from typing import Any, Literal
 
 import structlog
@@ -14,7 +15,7 @@ from sibyl.services.recall_limits import (
     recall_concurrency_slot,
 )
 from sibyl_core.auth.memory_policy import MemoryPolicyAction
-from sibyl_core.tools.context import DEFAULT_MARKDOWN_TOKEN_BUDGET
+from sibyl_core.tools.context import DEFAULT_MARKDOWN_TOKEN_BUDGET, render_context_pack
 from sibyl_core.tools.traverse import (
     DEFAULT_EXPAND_LIMIT,
     DEFAULT_NEIGHBOR_CONTENT_MAX_CHARS,
@@ -43,7 +44,6 @@ async def compile_context_pack(
     from sibyl_core.tools.core import (
         compile_context as _compile_context,
         context_pack_to_dict,
-        context_pack_to_markdown,
     )
 
     ctx = await mcp_context.require_context()
@@ -91,7 +91,9 @@ async def compile_context_pack(
     except RecallConcurrencyLimitExceededError as exc:
         raise ValueError("recall_concurrency_limit_exceeded") from exc
     payload = context_pack_to_dict(pack)
-    payload["markdown"] = context_pack_to_markdown(pack, token_budget=markdown_token_budget)
+    rendered = render_context_pack(pack, token_budget=markdown_token_budget)
+    payload["markdown"] = rendered.markdown
+    payload["render_receipt"] = asdict(rendered.receipt)
     await log_context_pack_audit(
         user_id=ctx.user_id,
         organization_id=ctx.org_id,

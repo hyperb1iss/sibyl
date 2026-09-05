@@ -50,6 +50,7 @@ class ContextRelatedItem:
     distance: int = 1
     content: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    source_revision: int | None = None
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,7 @@ class ContextItem:
     quality: ContextItemQualityMetadata = field(default_factory=ContextItemQualityMetadata)
     metadata: dict[str, Any] = field(default_factory=dict)
     related: list[ContextRelatedItem] = field(default_factory=list)
+    source_revision: int | None = None
 
 
 @dataclass(frozen=True)
@@ -104,3 +106,71 @@ class ContextPack:
     @property
     def items(self) -> list[ContextItem]:
         return [item for section in self.sections for item in section.items]
+
+
+@dataclass(frozen=True)
+class ContextRenderSpan:
+    """A source-bound range of the exact UTF-8 Markdown output.
+
+    Item spans cover the full Markdown block, including its provenance labels.
+    Field spans additionally map visible text back to renderer input bytes.
+    """
+
+    item_index: int
+    record_id: str
+    record_type: str
+    source_alias: str | None
+    source_revision: int | None
+    revision_status: str
+    field: str
+    start_byte: int
+    end_byte: int
+    input_sha256: str
+    transform: str
+    input_start_byte: int | None = None
+    input_end_byte: int | None = None
+
+
+@dataclass(frozen=True)
+class ContextRenderDisposition:
+    """Disposition of one selected top-level item, not its omitted neighbors."""
+
+    item_index: int
+    record_id: str
+    state: str
+    reason: str
+    content_state: str
+
+
+@dataclass(frozen=True)
+class ContextRenderOptions:
+    max_items: int = 8
+    items_per_section: int = 3
+    max_content_chars: int = 280
+    include_related: bool = True
+    token_budget: int | None = None
+
+
+@dataclass(frozen=True)
+class ContextRenderReceipt:
+    """Receipt for exact API Markdown bytes, before CLI display formatting.
+
+    Spans bind typed source_revision values, never similarly named item metadata.
+    Dispositions cover selected top-level items only. request_id is an optional
+    correlation label, which may be client supplied; it is not an attestation.
+    """
+
+    schema_version: str
+    markdown_sha256: str
+    markdown_bytes: int
+    selected_items: int
+    options: ContextRenderOptions
+    spans: list[ContextRenderSpan]
+    dispositions: list[ContextRenderDisposition]
+    request_id: str | None = None
+
+
+@dataclass(frozen=True)
+class RenderedContextPack:
+    markdown: str
+    receipt: ContextRenderReceipt

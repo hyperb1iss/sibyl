@@ -168,6 +168,7 @@ def graph_entity_to_search_result(
     policy_reason: str = "search_scope_verified",
 ) -> SearchResult:
     """Convert an authorized graph entity through the standard search contract."""
+    source_revision = getattr(entity, "observed_revision", None)
     if include_content:
         content = (entity.content or entity.description or "")[:content_max_chars]
     else:
@@ -180,6 +181,9 @@ def graph_entity_to_search_result(
         score=score,
         source=entity.source_file,
         result_origin="graph",
+        source_revision=source_revision
+        if type(source_revision) is int and source_revision > 0
+        else None,
         metadata=_graph_candidate_metadata(
             entity,
             organization_id=organization_id,
@@ -617,6 +621,7 @@ def _raw_memory_search_result(
         score=memory.score,
         source=source,
         result_origin="raw_memory",
+        source_revision=memory.observed_revision,
         metadata=metadata,
     )
 

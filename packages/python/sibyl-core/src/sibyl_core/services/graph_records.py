@@ -195,7 +195,12 @@ def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
             normalized_row.get("name_embedding") or normalized_row.get("embedding")
         ),
     )
-    return _coerce_native_entity(entity)
+    entity = _coerce_native_entity(entity)
+    observed_revision = normalized_row.get("revision")
+    entity.observed_revision = (
+        observed_revision if type(observed_revision) is int and observed_revision > 0 else None
+    )
+    return entity
 
 
 def _entity_from_row(row: SurrealRecord) -> Entity:

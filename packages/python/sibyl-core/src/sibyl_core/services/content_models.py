@@ -138,6 +138,8 @@ class RawMemory:
     score: float = 0.0
     snippet: str | None = None
 
+    observed_revision: int | None = field(default=None, repr=False, compare=False)
+
 
 @dataclass(frozen=True, slots=True)
 class RawMemoryRecallResult:
@@ -597,6 +599,7 @@ def chunk_from_record(record: Mapping[str, object]) -> ContentChunk:
 
 
 def raw_memory_from_record(record: Mapping[str, object]) -> RawMemory:
+    observed_revision = record.get("revision")
     metadata = normalize_memory_quality_metadata(coerce_dict(record.get("metadata")))
     return RawMemory(
         id=coerce_str(record.get("uuid")),
@@ -623,6 +626,9 @@ def raw_memory_from_record(record: Mapping[str, object]) -> RawMemory:
         capture_surface=coerce_optional_str(record.get("capture_surface")),
         created_by_user_id=coerce_optional_str(record.get("created_by_user_id")),
         revision=max(coerce_int(record.get("revision")), 1),
+        observed_revision=observed_revision
+        if type(observed_revision) is int and observed_revision > 0
+        else None,
         captured_at=coerce_datetime(record.get("captured_at")),
         deleted_at=coerce_datetime(record.get("deleted_at")),
         purge_after=coerce_datetime(record.get("purge_after")),

@@ -2,11 +2,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 import pytest
 from tools.bench import eval_gate
+
+from sibyl_core.models.context import (
+    ContextFacet,
+    ContextIntent,
+    ContextItem,
+    ContextPack,
+    ContextSection,
+)
+from sibyl_core.tools.context import render_context_pack
 
 EXPECTED_SUCCESS_AT_5 = 0.5
 EXPECTED_LATENCY_MS = 1200.0
@@ -2497,3 +2507,60 @@ def test_ai_memory_manifest_tracks_full_citable_artifacts() -> None:
         }
     ]
     assert eval_gate.validate_ai_memory_manifest(manifest_path) == []
+
+
+def test_native_qa_gate_validates_versioned_renderer_provenance():
+    pack = ContextPack(
+        goal="a fact",
+        intent=ContextIntent.GENERAL,
+        query="fact",
+        domain=None,
+        project=None,
+        sections=[
+            ContextSection(
+                ContextFacet.DECISIONS,
+                "Decisions",
+                [
+                    ContextItem(
+                        "record",
+                        "note",
+                        "Fact",
+                        "The retained fact.",
+                        1,
+                        ContextFacet.DECISIONS,
+                        "test",
+                        source_revision=2,
+                    )
+                ],
+            )
+        ],
+        total_items=1,
+    )
+    rendered = render_context_pack(pack, token_budget=100)
+    report = _native_qa_report()
+    qa = report["case_results"][0]["qa"]
+    qa["native_context"] = {
+        **asdict(pack),
+        "markdown": rendered.markdown,
+        "render_receipt": asdict(rendered.receipt),
+    }
+    qa["context_receipt"].update(
+        rendered_context=rendered.markdown,
+        context_sha256=hashlib.sha256(rendered.markdown.encode()).hexdigest(),
+    )
+    assert eval_gate.evaluate_report(report, profile="ai-memory", require_qa=True) == []
+    qa["native_context"]["render_receipt"]["spans"] = []
+    failures = eval_gate.evaluate_report(report, profile="ai-memory", require_qa=True)
+    assert any("render receipt" in failure for failure in failures)
+
+
+def test_native_qa_cannot_claim_available_provenance_after_receipt_is_removed():
+    report = _native_qa_report()
+    qa = report["case_results"][0]["qa"]
+    qa["render_provenance_status"] = "available"
+    assert any(
+        "render_provenance_status" in failure
+        for failure in eval_gate.evaluate_report(report, profile="ai-memory", require_qa=True)
+    )
+    qa["render_provenance_status"] = "unavailable"
+    assert eval_gate.evaluate_report(report, profile="ai-memory", require_qa=True) == []

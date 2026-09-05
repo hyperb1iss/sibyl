@@ -38,6 +38,14 @@ from sibyl_core.services.surreal_content import (
     RawMemory,
     recall_raw_memory,
 )
+from sibyl_core.tools.context_rendering import (
+    DEFAULT_MARKDOWN_TOKEN_BUDGET,
+    _compact_metadata_value,
+    _quality_value,
+    context_pack_to_markdown,
+    render_context_pack,
+    validate_context_render_payload,
+)
 from sibyl_core.tools.helpers import _project_id_for_policy
 from sibyl_core.tools.responses import SearchResponse, SearchResult
 from sibyl_core.tools.usage_exposure import (
@@ -322,24 +330,6 @@ def _project_id_for(entity: Any) -> str | None:
     return _project_id_for_policy(entity)
 
 
-def _compact_metadata_value(value: Any, max_chars: int = 120) -> str | None:
-    if value is None:
-        return None
-    if hasattr(value, "isoformat"):
-        value = value.isoformat()
-    elif isinstance(value, bool | int | float):
-        value = str(value)
-    elif not isinstance(value, str):
-        return None
-
-    compact = " ".join(value.strip().split())
-    if not compact:
-        return None
-    if len(compact) <= max_chars:
-        return compact
-    return compact[: max_chars - 3].rstrip() + "..."
-
-
 def _first_metadata_value(metadata: dict[str, Any], *keys: str) -> str | None:
     for key in keys:
         if value := _compact_metadata_value(metadata.get(key)):
@@ -503,6 +493,7 @@ async def _default_related_items(
         related.append(
             ContextRelatedItem(
                 id=str(entity.id),
+                source_revision=getattr(entity, "observed_revision", None),
                 type=str(entity.entity_type.value),
                 name=str(entity.name),
                 relationship=str(relationship.relationship_type.value),
@@ -605,6 +596,7 @@ async def _default_related_items_batch(
             related.append(
                 ContextRelatedItem(
                     id=str(entity.id),
+                    source_revision=getattr(entity, "observed_revision", None),
                     type=_relationship_value(entity.entity_type),
                     name=str(entity.name),
                     relationship=_relationship_value(relationship.relationship_type),
@@ -725,6 +717,7 @@ def _item_from_result(
             metadata.pop("description", None)
     kwargs: dict[str, Any] = {
         "id": result.id,
+        "source_revision": result.source_revision,
         "type": result.type,
         "name": result.name,
         "content": content,
@@ -889,22 +882,6 @@ def _dedupe_sections(
     ]
 
 
-def _compact_text(value: str, max_chars: int) -> str:
-    compact = " ".join(value.strip().split())
-    if len(compact) <= max_chars:
-        return compact
-    cutoff = compact.rfind(" ", 0, max_chars + 1)
-    if cutoff < max_chars // 2:
-        cutoff = max_chars
-    return compact[:cutoff].rstrip() + "..."
-
-
-def _quality_value(quality: Any, key: str) -> str | None:
-    if isinstance(quality, dict):
-        return _compact_metadata_value(quality.get(key))
-    return _compact_metadata_value(getattr(quality, key, None))
-
-
 def context_item_source_id(item: ContextItem) -> str:
     return (
         _compact_metadata_value(item.metadata.get("source_id"))
@@ -948,232 +925,6 @@ def context_item_lifecycle_flags(item: ContextItem) -> list[str]:
         review_state=str(item.metadata.get("review_state") or "pending"),
     )
     return [str(flag) for flag in lifecycle.flags]
-
-
-def _date_only(value: str | None) -> str | None:
-    if not value:
-        return None
-    if len(value) >= 10 and value[4:5] == "-" and value[7:8] == "-":
-        return value[:10]
-    return value
-
-
-def _quality_metadata_to_markdown(
-    quality: Any,
-    *,
-    item_id: str | None = None,
-    pack_project: str | None = None,
-) -> str:
-    """Render provenance that adds signal, skipping values the pack already states."""
-
-    parts: list[str] = []
-    origin = _quality_value(quality, "origin")
-    if origin and origin != "graph":
-        parts.append(origin)
-    source = _quality_value(quality, "source")
-    if source and source != item_id:
-        parts.append(f"src={source}")
-    project_id = _quality_value(quality, "project_id")
-    if project_id and project_id != pack_project:
-        parts.append(f"project={project_id}")
-    if updated_at := _date_only(_quality_value(quality, "updated_at")):
-        parts.append(f"updated={updated_at}")
-    elif created_at := _date_only(_quality_value(quality, "created_at")):
-        parts.append(f"created={created_at}")
-    if valid_at := _date_only(_quality_value(quality, "valid_at")):
-        parts.append(f"valid={valid_at}")
-    if url := _quality_value(quality, "url"):
-        parts.append(f"url={url}")
-    return "; ".join(parts)
-
-
-_MARKDOWN_CHARS_PER_TOKEN = 4
-# What an unbudgeted product request should mean. A pack retrieved from a real
-# graph carries several times more content than the count defaults render, and
-# the discarded remainder was already paid for by search and ranking, so a
-# request that states no constraint gets a budget rather than a stub. Library
-# callers keep `None` so measurement baselines rendered by counts still are.
-DEFAULT_MARKDOWN_TOKEN_BUDGET = 4_000
-_MARKDOWN_ITEM_CEILING = 50
-_MARKDOWN_SECTION_ITEM_CEILING = 10
-_MARKDOWN_CONTENT_CEILING = 1200
-_BUDGET_CONTENT_SHARE = 0.85
-_ACTIVE_WORK_ANCHOR_INTENTS = frozenset({ContextIntent.BUILD, ContextIntent.GENERAL})
-
-
-def _has_active_lookup(section: ContextSection) -> bool:
-    return section.facet is ContextFacet.ACTIVE_WORK and any(
-        item.metadata.get("active_lookup") for item in section.items
-    )
-
-
-def _section_render_score(section: ContextSection) -> float:
-    score = max((item.score for item in section.items), default=0.0)
-    if section.facet is ContextFacet.RECENT_MEMORY:
-        score += 0.25
-    elif _has_active_lookup(section):
-        score = max(score, 0.75)
-    return score
-
-
-def _section_render_key(
-    section: ContextSection,
-    *,
-    index: int,
-    intent: ContextIntent,
-) -> tuple[int, float, int]:
-    if intent in _ACTIVE_WORK_ANCHOR_INTENTS and _has_active_lookup(section):
-        return (0, 0.0, index)
-    return (1, -_section_render_score(section), index)
-
-
-def _sections_for_markdown(
-    sections: Sequence[ContextSection],
-    *,
-    intent: ContextIntent,
-) -> list[ContextSection]:
-    return [
-        section
-        for _key, section in sorted(
-            (
-                (_section_render_key(section, index=index, intent=intent), section)
-                for index, section in enumerate(sections)
-            ),
-            key=lambda item: item[0],
-        )
-    ]
-
-
-def _item_markdown_lines(
-    item: ContextItem,
-    *,
-    pack_project: str | None,
-    max_content_chars: int,
-    include_related: bool,
-) -> list[str]:
-    status = _compact_metadata_value(item.metadata.get("status"))
-    if item.type and status:
-        type_label = f" ({item.type} · {status})"
-    elif item.type:
-        type_label = f" ({item.type})"
-    else:
-        type_label = ""
-    item_quality = getattr(item, "quality", item.metadata.get("quality", {}))
-    quality = _quality_metadata_to_markdown(
-        item_quality,
-        item_id=item.id,
-        pack_project=pack_project,
-    )
-    quality_label = f" _{quality}_" if quality else ""
-    lines = [f"- **{item.name}**{type_label} `{item.id}`{quality_label}"]
-    if item.content and item.content.strip() != (item.name or "").strip():
-        lines.append(f"  - Memory: {_compact_text(item.content, max_content_chars)}")
-    if include_related and item.related:
-        related_entries = [
-            candidate
-            for candidate in item.related
-            if not (candidate.relationship == "BELONGS_TO" and candidate.type == "project")
-        ]
-        if related_entries:
-            related = "; ".join(
-                f"{candidate.relationship} {candidate.name} ({candidate.type})"
-                for candidate in related_entries[:3]
-            )
-            lines.append(f"  - Related: {related}")
-    return lines
-
-
-def context_pack_to_markdown(
-    pack: ContextPack,
-    *,
-    max_items: int = 8,
-    items_per_section: int = 3,
-    max_content_chars: int = 280,
-    include_related: bool = True,
-    token_budget: int | None = None,
-) -> str:
-    """Render a context pack as compact Markdown for agent injection.
-
-    token_budget is the caller's real constraint, so it decides the pack rather
-    than trimming one already sized by counts. Given a budget, breadth and
-    depth both scale toward it: more of the pack's items render, and each is
-    allowed more of its content, up to the hard ceilings. The per-block guard
-    below is what keeps the result inside the budget, and it always emits at
-    least one item so a tight budget degrades to a minimal brief rather than an
-    empty pack. Without a budget the count defaults bind exactly as they always
-    have, because there is nothing to size against.
-    """
-
-    max_items = max(1, min(max_items, _MARKDOWN_ITEM_CEILING))
-    items_per_section = max(1, min(items_per_section, _MARKDOWN_SECTION_ITEM_CEILING))
-    max_content_chars = max(80, min(max_content_chars, _MARKDOWN_CONTENT_CEILING))
-    char_budget = (
-        max(400, token_budget * _MARKDOWN_CHARS_PER_TOKEN) if token_budget is not None else None
-    )
-    if char_budget is not None:
-        renderable = max(1, pack.total_items)
-        max_items = min(_MARKDOWN_ITEM_CEILING, max(max_items, renderable))
-        # Each section may claim its share of the item allowance. A fixed
-        # per-section cap would leave the budget unspent whenever the pack's
-        # items concentrate in few facets, which is the same slot rationing the
-        # budget exists to replace, while a share still spreads a wide pack
-        # across its facets instead of letting the first one take everything.
-        section_count = max(1, len(pack.sections))
-        fair_share = -(-max_items // section_count)
-        items_per_section = max(items_per_section, fair_share)
-        # Reserve a share for headers, titles, and related lines so the content
-        # allowance does not budget for text the block has to carry anyway.
-        content_allowance = int(char_budget * _BUDGET_CONTENT_SHARE) // min(max_items, renderable)
-        max_content_chars = min(
-            _MARKDOWN_CONTENT_CEILING, max(max_content_chars, content_allowance)
-        )
-
-    lines = [
-        f"# Sibyl Context Pack: {pack.goal}",
-        f"Intent: {pack.intent.value}",
-        f"Layer: {pack.layer.value}",
-        f"Query: {pack.query}",
-    ]
-    if pack.domain:
-        lines.append(f"Domain: {pack.domain}")
-    if pack.project:
-        lines.append(f"Project: {pack.project}")
-
-    used = sum(len(line) + 1 for line in lines)
-    remaining = max_items
-    emitted_items = 0
-    trimmed = False
-    for section in _sections_for_markdown(pack.sections, intent=pack.intent):
-        if remaining <= 0 or trimmed:
-            break
-        section_lines = ["", f"## {section.title}"]
-        section_emitted = False
-        for item in section.items[:items_per_section]:
-            if remaining <= 0:
-                break
-            item_lines = _item_markdown_lines(
-                item,
-                pack_project=pack.project,
-                max_content_chars=max_content_chars,
-                include_related=include_related,
-            )
-            block = [*section_lines, *item_lines] if not section_emitted else item_lines
-            block_chars = sum(len(line) + 1 for line in block)
-            if char_budget is not None and emitted_items > 0 and used + block_chars > char_budget:
-                trimmed = True
-                break
-            lines.extend(block)
-            used += block_chars
-            section_emitted = True
-            emitted_items += 1
-            remaining -= 1
-
-    if trimmed:
-        lines.extend(["", f"_Trimmed to ~{token_budget} tokens; raise --budget for more._"])
-    elif pack.usage_hint:
-        lines.extend(["", f"_Hint: {pack.usage_hint}_"])
-
-    return "\n".join(lines)
 
 
 async def _attach_related_items(
@@ -1468,6 +1219,7 @@ def _item_from_active_entity(entity: Any) -> ContextItem:
         reason = "task is currently blocked for this project"
     return ContextItem(
         id=entity_id,
+        source_revision=getattr(entity, "observed_revision", None),
         type=_enum_value(getattr(entity, "entity_type", "task")),
         name=str(entity.name),
         content=content,
@@ -1830,4 +1582,6 @@ __all__ = [
     "context_item_source_id",
     "context_pack_to_dict",
     "context_pack_to_markdown",
+    "render_context_pack",
+    "validate_context_render_payload",
 ]
