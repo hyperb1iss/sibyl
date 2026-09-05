@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -975,6 +976,16 @@ async def _resolve_reflection_promotion_plan(
         organization_id=organization_id,
         raw_source_ids=raw_source_ids,
     )
+    required_source_ids = set(raw_source_ids)
+    loaded_source_ids = {source.id for source in source_memories}
+    if candidate_memory.source_id in required_source_ids and re.fullmatch(
+        r"reflection:input:[0-9a-f]{16}", candidate_memory.source_id
+    ):
+        # Explicit unretained input anchors carry no stored source or revision.
+        # Present rows still participate in the authorization/lifecycle checks below.
+        required_source_ids.remove(candidate_memory.source_id)
+        loaded_source_ids.discard(candidate_memory.source_id)
+    sources_complete = required_source_ids == loaded_source_ids
     raw_source_ids = raw_source_ids or [candidate_memory.id]
     input_memories = [candidate_memory, *source_memories]
 
@@ -998,7 +1009,7 @@ async def _resolve_reflection_promotion_plan(
     if source_scope_denial is not None:
         return source_scope_denial
 
-    if any(not raw_memory_recallable(memory) for memory in input_memories):
+    if not sources_complete or any(not raw_memory_recallable(memory) for memory in input_memories):
         return _promotion_denied(
             candidate_id=candidate_memory.id,
             reason="source_not_recallable",

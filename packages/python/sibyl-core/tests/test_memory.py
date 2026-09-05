@@ -166,6 +166,120 @@ async def test_preview_review_candidate_returns_missing_without_write(
     save.assert_not_awaited()
 
 
+@pytest.mark.parametrize(
+    ("source_state", "missing", "reason"),
+    [
+        ("available", True, "source_not_recallable"),
+        ("revoked", False, "source_not_recallable"),
+        ("other_owner", True, "principal_mismatch"),
+    ],
+)
+async def test_preview_review_source_completeness_preserves_lifecycle_and_owner_denials(
+    monkeypatch: pytest.MonkeyPatch, source_state: str, missing: bool, reason: str
+) -> None:
+    source_ids = ["source-1", "missing"] if missing else ["source-1"]
+    candidate = _raw_review_candidate(
+        metadata={**_raw_review_candidate().metadata, "raw_source_ids": source_ids}
+    )
+    source = _raw_import_memory(
+        id="source-1",
+        principal_id="other-user" if source_state == "other_owner" else "user-1",
+        metadata={"lifecycle_state": "revoked"} if source_state == "revoked" else {},
+    )
+    monkeypatch.setattr(
+        reflection_module, "get_raw_memory", AsyncMock(side_effect=[candidate, source, None])
+    )
+    reserve = AsyncMock()
+    monkeypatch.setattr(reflection_module, "_reserve_promotion", reserve)
+
+    result = await preview_reflection_candidate_promotion(
+        candidate_id=candidate.id,
+        organization_id="org-1",
+        principal_id="user-1",
+        promote_to_scope="project",
+        promote_to_scope_key="project_123",
+        accessible_projects={"project_123"},
+    )
+
+    assert not result.allowed
+    assert result.reason == reason
+    assert result.raw_source_ids == source_ids
+    reserve.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("source_id", "declared"),
+    [
+        ("reflection:input:0123456789abcde", ["reflection:input:0123456789abcde"]),
+        ("reflection:input:0123456789abcdef0", ["reflection:input:0123456789abcdef0"]),
+        ("reflection:input:0123456789abcdeg", ["reflection:input:0123456789abcdeg"]),
+        ("reflection:input:0123456789ABCDEF", ["reflection:input:0123456789ABCDEF"]),
+        ("reflection:input:0123456789abcdef\n", ["reflection:input:0123456789abcdef\n"]),
+        ("retained-source", ["reflection:input:0123456789abcdef"]),
+        (
+            "reflection:input:0123456789abcdef",
+            ["reflection:input:0123456789abcdef", "reflection:input:fedcba9876543210"],
+        ),
+        (
+            "reflection:input:0123456789abcdef",
+            ["reflection:input:0123456789abcdef", "missing-retained-source"],
+        ),
+    ],
+)
+async def test_review_input_anchor_does_not_exempt_other_or_malformed_sources(
+    monkeypatch: pytest.MonkeyPatch, source_id: str, declared: list[str]
+) -> None:
+    candidate = _raw_review_candidate(
+        source_id=source_id,
+        metadata={**_raw_review_candidate().metadata, "raw_source_ids": declared},
+    )
+    monkeypatch.setattr(
+        reflection_module,
+        "get_raw_memory",
+        AsyncMock(
+            side_effect=lambda **kwargs: candidate if kwargs["memory_id"] == candidate.id else None
+        ),
+    )
+    result = await preview_reflection_candidate_promotion(
+        candidate_id=candidate.id,
+        organization_id="org-1",
+        principal_id="user-1",
+        promote_to_scope="private",
+    )
+    assert not result.allowed
+    assert result.reason == "source_not_recallable"
+
+
+@pytest.mark.parametrize(
+    ("source_state", "reason"),
+    [("revoked", "source_not_recallable"), ("other_owner", "principal_mismatch")],
+)
+async def test_present_input_anchor_rows_still_require_lifecycle_and_ownership(
+    monkeypatch: pytest.MonkeyPatch, source_state: str, reason: str
+) -> None:
+    anchor = "reflection:input:0123456789abcdef"
+    candidate = _raw_review_candidate(
+        source_id=anchor,
+        metadata={**_raw_review_candidate().metadata, "raw_source_ids": [anchor]},
+    )
+    source = _raw_import_memory(
+        id=anchor,
+        principal_id="other-user" if source_state == "other_owner" else "user-1",
+        metadata={"lifecycle_state": "revoked"} if source_state == "revoked" else {},
+    )
+    monkeypatch.setattr(
+        reflection_module, "get_raw_memory", AsyncMock(side_effect=[candidate, source])
+    )
+    result = await preview_reflection_candidate_promotion(
+        candidate_id=candidate.id,
+        organization_id="org-1",
+        principal_id="user-1",
+        promote_to_scope="private",
+    )
+    assert not result.allowed
+    assert result.reason == reason
+
+
 @pytest.mark.asyncio
 async def test_preview_raw_memory_promotion_uses_write_policy_gate(
     monkeypatch: pytest.MonkeyPatch,
