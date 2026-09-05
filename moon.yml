@@ -1019,9 +1019,18 @@ tasks:
       - tools/**/*.py
       - pyproject.toml
 
+  bench-evidence:
+    command: uv run python tools/bench/evidence_bundle.py
+    inputs:
+      - tools/bench/evidence_bundle.py
+      - benchmarks/longmemeval_v2_release_package_archive.py
+    options:
+      cache: false
+
   bench-gate-test:
     command:
-      uv run pytest tools/tests/test_benchmark_git_provenance.py tools/tests/test_bench_gate.py
+      uv run pytest tools/tests/test_evidence_bundle.py
+      tools/tests/test_benchmark_git_provenance.py tools/tests/test_bench_gate.py
       tools/tests/test_compare_eval_reports.py tools/tests/test_context_pack_eval_script.py
       tools/tests/test_longmemeval_agentic_traversal.py
       tools/tests/test_longmemeval_bench.py tools/tests/test_longmemeval_live.py
