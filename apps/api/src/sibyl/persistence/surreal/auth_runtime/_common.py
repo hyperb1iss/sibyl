@@ -476,6 +476,17 @@ async def _auth_client_scope() -> AsyncIterator[SurrealAuthClient]:
         yield client
 
 
+async def get_server_instance_id() -> str:
+    """Read the data-instance identity created by the auth schema migration."""
+    async with _auth_client_scope() as client:
+        rows = _normalize_records(
+            await client.execute_query("SELECT instance_id FROM server_identity:singleton;")
+        )
+    if not rows or not isinstance(rows[0].get("instance_id"), str):
+        raise RuntimeError("Server replay identity is missing; auth schema migration is required")
+    return str(UUID(str(rows[0]["instance_id"])))
+
+
 class _SurrealRepository:
     def __init__(self, client: QueryClient) -> None:
         self._client = client

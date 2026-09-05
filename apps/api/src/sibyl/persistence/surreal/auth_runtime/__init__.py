@@ -36,6 +36,7 @@ from sibyl.persistence.surreal.auth_runtime._common import (
     _SurrealRepository,  # noqa: F401
     _utcnow,  # noqa: F401
     config_module,  # noqa: F401
+    get_server_instance_id,
 )
 from sibyl.persistence.surreal.auth_runtime.api_keys import (
     authenticate_api_key,
@@ -130,6 +131,7 @@ from sibyl.persistence.surreal.auth_runtime.users import (
 )
 
 __all__ = [
+    "get_server_instance_id",
     "AuthContextResolver",
     "DeviceBrowserLogin",
     "IssuedAuthSession",

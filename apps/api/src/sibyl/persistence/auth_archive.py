@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import structlog
 
@@ -473,10 +473,16 @@ async def _export_surreal_auth_archive_payload(
     organization_id: str | UUID | None = None,
 ) -> dict[str, object]:
     client = build_surreal_auth_client()
+    server_instance_id = None
 
     try:
         if organization_id is None:
             tables = await _export_all_auth_tables(client)
+            identity_rows = _normalize_records(
+                await client.execute_query("SELECT instance_id FROM server_identity:singleton;")
+            )
+            if identity_rows:
+                server_instance_id = str(UUID(str(identity_rows[0].get("instance_id"))))
         else:
             tables = await _export_org_auth_tables(client, str(organization_id))
     finally:
@@ -487,6 +493,7 @@ async def _export_surreal_auth_archive_payload(
         "version": AUTH_ARCHIVE_VERSION,
         "created_at": datetime.now(UTC).isoformat(),
         "organization_id": str(organization_id) if organization_id is not None else None,
+        **({"server_instance_id": server_instance_id} if server_instance_id else {}),
         "tables": tables,
         "row_counts": row_counts,
         "total_rows": sum(row_counts.values()),
@@ -552,6 +559,11 @@ async def restore_auth_archive_payload(
     organization_id = str(payload_org_id).strip() if payload_org_id is not None else None
     if organization_id == "":
         organization_id = None
+    # Only a full replacement restores data lineage. Org restores and merges
+    # retain the destination identity because they retain other destination data.
+    source_instance_id = None
+    if clean and organization_id is None and payload.get("server_instance_id") is not None:
+        source_instance_id = str(UUID(str(payload["server_instance_id"])))
 
     client = build_surreal_auth_client()
     tables_restored = 0
@@ -562,6 +574,14 @@ async def restore_auth_archive_payload(
     try:
         await bootstrap_auth_schema(client, reset=False)
         if clean:
+            if organization_id is None:
+                # Invalidate the prior destination before any data is removed.
+                # A failed or legacy restore must not inherit its replay owner.
+                identity_result = await client.execute_query(
+                    "UPSERT server_identity:singleton SET instance_id = $instance_id;",
+                    instance_id=str(uuid4()),
+                )
+                _raise_on_error(identity_result, query="restore_auth_archive_payload:new_identity")
             await _clean_auth_archive_rows(client, organization_id)
 
         for table in AUTH_ARCHIVE_TABLES:
@@ -595,6 +615,12 @@ async def restore_auth_archive_payload(
                     errors.append(f"{table}:{uuid}: {exc}")
             if restored_table:
                 tables_restored += 1
+        if not errors and source_instance_id is not None:
+            identity_result = await client.execute_query(
+                "UPSERT server_identity:singleton SET instance_id = $instance_id;",
+                instance_id=source_instance_id,
+            )
+            _raise_on_error(identity_result, query="restore_auth_archive_payload:identity")
         if dropped_fields:
             log.warning(
                 "auth_archive_restore_dropped_undeclared_fields",

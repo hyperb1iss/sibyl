@@ -30,6 +30,7 @@ from sibyl.persistence.surreal.auth_runtime import (
     get_memory_space,
     get_project_record_by_graph_id,
     get_project_record_by_id,
+    get_server_instance_id,
     get_team_record,
     get_user_by_id,
     has_owner_membership,
@@ -81,6 +82,7 @@ from sibyl.persistence.surreal.auth_runtime import (
 )
 
 __all__ = [
+    "get_server_instance_id",
     "AuthContextResolver",
     "InvalidAuthClaimsError",
     "OrganizationMembershipRepository",

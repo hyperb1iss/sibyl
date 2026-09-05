@@ -318,7 +318,8 @@ async def test_auth_archive_export_reads_from_surreal_backend(
 
 
 def test_auth_archive_tables_cover_auth_schema_tables() -> None:
-    assert set(auth_archive.AUTH_ARCHIVE_TABLES) == set(AUTH_TABLES)
+    # The singleton is archive metadata, not a UUID-keyed user/auth record.
+    assert set(auth_archive.AUTH_ARCHIVE_TABLES) | {"server_identity"} == set(AUTH_TABLES)
 
 
 @pytest.mark.asyncio
@@ -910,3 +911,136 @@ async def test_auth_archive_restore_accepts_full_user_rows(
     assert restored_membership.role is OrganizationRole.OWNER
     assert raw_user[0]["email_verified_at"] is not None
     assert raw_user[0]["last_login_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_auth_archive_clean_restore_rotates_legacy_identity_and_restores_lineage(
+    surreal_auth_client: SurrealAuthClient,
+) -> None:
+    original = _normalize_records(
+        await surreal_auth_client.execute_query(
+            "SELECT instance_id FROM server_identity:singleton;"
+        )
+    )[0]["instance_id"]
+    with (
+        patch.object(surreal_auth_client, "close", AsyncMock()),
+        patch(
+            "sibyl.persistence.auth_archive.build_surreal_auth_client",
+            return_value=surreal_auth_client,
+        ),
+    ):
+        archived = await auth_archive.export_auth_archive_payload()
+        assert archived["server_instance_id"] == original
+        legacy = {"version": "1.0", "organization_id": None, "tables": {}}
+        assert (await restore_auth_archive_payload(legacy, clean=True)).success
+        assert (
+            _normalize_records(
+                await surreal_auth_client.execute_query(
+                    "SELECT instance_id FROM server_identity:singleton;"
+                )
+            )[0]["instance_id"]
+            != original
+        )
+        replacement = str(uuid4())
+        await surreal_auth_client.execute_query(
+            "UPDATE server_identity:singleton SET instance_id = $instance_id;",
+            instance_id=replacement,
+        )
+        assert (await restore_auth_archive_payload(archived, clean=True)).success
+        assert (
+            _normalize_records(
+                await surreal_auth_client.execute_query(
+                    "SELECT instance_id FROM server_identity:singleton;"
+                )
+            )[0]["instance_id"]
+            == original
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("clean", "org"), [(False, None), (True, "org-a")])
+async def test_auth_archive_partial_restore_preserves_destination_identity(
+    surreal_auth_client: SurrealAuthClient,
+    clean: bool,
+    org: str | None,
+) -> None:
+    before = await surreal_auth_client.execute_query(
+        "SELECT instance_id FROM server_identity:singleton;"
+    )
+    payload = {
+        "version": "1.0",
+        "organization_id": org,
+        "tables": {},
+        "server_instance_id": str(uuid4()),
+    }
+    with (
+        patch.object(surreal_auth_client, "close", AsyncMock()),
+        patch(
+            "sibyl.persistence.auth_archive.build_surreal_auth_client",
+            return_value=surreal_auth_client,
+        ),
+    ):
+        assert (await restore_auth_archive_payload(payload, clean=clean)).success
+    assert (
+        await surreal_auth_client.execute_query(
+            "SELECT instance_id FROM server_identity:singleton;"
+        )
+        == before
+    )
+
+
+@pytest.mark.asyncio
+async def test_auth_archive_invalid_identity_rejected_before_cleanup() -> None:
+    payload = {"tables": {}, "server_instance_id": "invalid"}
+    with (
+        patch("sibyl.persistence.auth_archive.build_surreal_auth_client") as build,
+        pytest.raises(ValueError),
+    ):
+        await restore_auth_archive_payload(payload, clean=True)
+    build.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["cleanup", "import"])
+async def test_failed_full_restore_invalidates_old_identity_before_cleanup(
+    surreal_auth_client: SurrealAuthClient,
+    failure: str,
+) -> None:
+    before = await surreal_auth_client.execute_query(
+        "SELECT instance_id FROM server_identity:singleton;"
+    )
+    source_id = str(uuid4())
+    payload = {"tables": {"users": "invalid"}, "server_instance_id": source_id}
+    clean_rows = auth_archive._clean_auth_archive_rows
+    observed_identity = None
+
+    async def check_before_cleanup(client, organization_id):
+        nonlocal observed_identity
+        observed_identity = await client.execute_query(
+            "SELECT instance_id FROM server_identity:singleton;"
+        )
+        assert observed_identity != before
+        assert _normalize_records(observed_identity)[0]["instance_id"] != source_id
+        if failure == "cleanup":
+            raise RuntimeError("cleanup failed")
+        await clean_rows(client, organization_id)
+
+    with (
+        patch.object(surreal_auth_client, "close", AsyncMock()),
+        patch(
+            "sibyl.persistence.auth_archive.build_surreal_auth_client",
+            return_value=surreal_auth_client,
+        ),
+        patch.object(auth_archive, "_clean_auth_archive_rows", check_before_cleanup),
+    ):
+        if failure == "cleanup":
+            with pytest.raises(RuntimeError, match="cleanup failed"):
+                await restore_auth_archive_payload(payload, clean=True)
+        else:
+            result = await restore_auth_archive_payload(payload, clean=True)
+            assert not result.success
+        after = await surreal_auth_client.execute_query(
+            "SELECT instance_id FROM server_identity:singleton;"
+        )
+    assert observed_identity is not None
+    assert after == observed_identity

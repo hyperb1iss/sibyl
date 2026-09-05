@@ -3313,3 +3313,21 @@ def test_apply_password_change_rotates_credential_for_local_account() -> None:
 
     assert updated["password_hash"] != existing.hash_hex
     assert updated["password_salt"] != existing.salt_hex
+
+
+@pytest.mark.asyncio
+async def test_server_instance_id_reads_persisted_identity(monkeypatch) -> None:
+    instance = str(uuid4())
+    client = _RecordingAuthClient([{"instance_id": instance}])
+    monkeypatch.setattr(auth_common, "_auth_client_scope", lambda: _StaticAuthClientScope(client))
+    assert await auth_common.get_server_instance_id() == instance
+    assert client.calls[0][0].startswith("SELECT")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rows", [[], [{"instance_id": None}], [{"instance_id": "invalid"}]])
+async def test_server_instance_id_fails_closed_if_missing_or_invalid(monkeypatch, rows) -> None:
+    client = _RecordingAuthClient(rows)
+    monkeypatch.setattr(auth_common, "_auth_client_scope", lambda: _StaticAuthClientScope(client))
+    with pytest.raises((RuntimeError, ValueError)):
+        await auth_common.get_server_instance_id()
