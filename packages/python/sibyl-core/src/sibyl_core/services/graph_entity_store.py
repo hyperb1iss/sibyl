@@ -194,6 +194,38 @@ async def _replace_entity(
     return stored
 
 
+async def _insert_entity_if_absent(
+    client: SurrealGraphClient,
+    entity: Entity,
+    *,
+    group_id: str,
+) -> tuple[SurrealRecord, bool]:
+    """Arbitrate creation by physical record ID without rewriting a retry."""
+    _enforce_entity_content_limit([entity])
+    record = _entity_record(entity, group_id=group_id)
+    record["id"] = entity.id
+    query = "INSERT IGNORE INTO entity $rows;"
+    try:
+        result = await client.execute_query(query, rows=[record])
+    except Exception as exc:
+        if not _is_legacy_updated_at_string_schema_error(exc):
+            raise
+        result = await client.execute_query(
+            query, rows=_records_with_legacy_updated_at_strings([record])
+        )
+    rows = normalize_records(result)
+    if rows:
+        return rows[0], True
+    stored = await _select_one(
+        client,
+        "SELECT * FROM entity WHERE uuid = $uuid LIMIT 1;",
+        uuid=entity.id,
+    )
+    if stored is None:
+        raise RuntimeError(f"failed to insert or find entity {entity.id}")
+    return stored, False
+
+
 async def _replace_entities_bulk(
     client: SurrealGraphClient,
     entities: Sequence[Entity],

@@ -20,6 +20,7 @@ from sibyl_core.services.graph_entity_store import (
     _CONTENT_MIRRORS_DESCRIPTION_TYPES,
     _entity_update_patch,
     _heal_metadata_snapshots_for_write,
+    _insert_entity_if_absent,
     _persisted_entity_embedding_text,
     _replace_entities_bulk,
     _replace_entity,
@@ -32,6 +33,15 @@ from sibyl_core.services.graph_records import _entity_from_row, entity_from_surr
 class EntityManager(_EntityWorkItemManager):
     supports_bounded_entity_list = True
     supports_lightweight_entity_list = True
+
+    async def create_direct_if_absent(self, entity: Entity) -> tuple[Entity, bool]:
+        """Insert once, returning the stored row and whether this call created it."""
+        row, created = await _insert_entity_if_absent(
+            self._client,
+            entity,
+            group_id=self._group_id,
+        )
+        return _entity_from_row(row), created
 
     async def create_direct(self, entity: Entity, *, generate_embedding: bool = False) -> str:
         if generate_embedding:
@@ -179,6 +189,7 @@ class EntityManager(_EntityWorkItemManager):
         updates: dict[str, Any],
         *,
         expected_revision: int | None = None,
+        replace_metadata_keys: Sequence[str] = (),
     ) -> Entity | None:
         if not updates:
             return await self.get(entity_id)
@@ -209,6 +220,14 @@ class EntityManager(_EntityWorkItemManager):
                     RETURN AFTER
                 );
                 UPDATE $updated SET
+                    attributes = IF $metadata_replacements = {} THEN
+                        attributes
+                    ELSE
+                        object::from_entries(array::concat(
+                            object::entries(attributes ?? {}),
+                            object::entries($metadata_replacements)
+                        ))
+                    END,
                     summary = IF description != NONE AND description != '' THEN
                         string::slice(description, 0, 500)
                     ELSE
@@ -230,6 +249,11 @@ class EntityManager(_EntityWorkItemManager):
             expected_revision=expected_revision,
             mirror_content=mirror_content,
             content_mirror_types=list(_CONTENT_MIRRORS_DESCRIPTION_TYPES),
+            metadata_replacements={
+                key: patch_attributes[key]
+                for key in replace_metadata_keys
+                if isinstance(patch_attributes, Mapping) and key in patch_attributes
+            },
         )
         if not rows and expected_revision is not None:
             try:

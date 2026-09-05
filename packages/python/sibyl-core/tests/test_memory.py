@@ -1264,6 +1264,7 @@ async def test_promote_review_candidate_persists_native_record_and_marks_promote
     )
     source = _raw_review_candidate(id="source-1")
     saved: list[RawMemory] = []
+    memories = {candidate.id: candidate, source.id: source}
 
     async def fake_persist(**kwargs):
         assert kwargs["memory_scope"] is MemoryScope.PROJECT
@@ -1288,17 +1289,22 @@ async def test_promote_review_candidate_persists_native_record_and_marks_promote
             },
         )
 
-    async def fake_save(memory: RawMemory) -> RawMemory:
+    async def fake_save(memory: RawMemory, *, expected_revision=None) -> RawMemory:
         saved.append(memory)
+        memories[memory.id] = memory
         return memory
 
     monkeypatch.setattr(
         reflection_module,
         "get_raw_memory",
-        AsyncMock(side_effect=[candidate, source]),
+        AsyncMock(side_effect=lambda **kwargs: memories.get(kwargs["memory_id"])),
     )
     monkeypatch.setattr(reflection_module, "persist_reflection_candidate", fake_persist)
     monkeypatch.setattr(reflection_module, "save_raw_memory", fake_save)
+
+    monkeypatch.setattr(
+        reflection_module, "get_surreal_graph_runtime", AsyncMock(return_value=SimpleNamespace())
+    )
 
     result = await promote_reflection_candidate_review(
         candidate_id="candidate-1",
@@ -1313,14 +1319,14 @@ async def test_promote_review_candidate_persists_native_record_and_marks_promote
     assert result.success
     assert result.promoted_id == "decision_123"
     assert result.reason == "promoted"
-    assert saved[0].review_state == "promoted"
-    assert saved[0].metadata["promoted_entity_id"] == "decision_123"
+    assert saved[-1].review_state == "promoted"
+    assert saved[-1].metadata["promoted_entity_id"] == "decision_123"
     lifecycle = memory_lifecycle_from_metadata(
-        saved[0].metadata,
+        saved[-1].metadata,
         source_id="candidate-1",
-        review_state=saved[0].review_state,
+        review_state=saved[-1].review_state,
     )
-    findings = reflection_findings_from_metadata(saved[0].metadata)
+    findings = reflection_findings_from_metadata(saved[-1].metadata)
     assert lifecycle.state == "active"
     assert lifecycle.source_id == "candidate-1"
     assert lifecycle.derived_ids == ["decision_123"]
@@ -1355,7 +1361,10 @@ async def test_persist_reflection_candidate_reports_partial_relationship_writes(
         )
 
     entity_manager = SimpleNamespace(
-        create_direct=AsyncMock(return_value="decision_partial"),
+        create_direct_if_absent=AsyncMock(side_effect=lambda entity: (entity, True)),
+        update=AsyncMock(
+            return_value=Entity(id="receipt", entity_type=EntityType.DECISION, name="Receipt")
+        ),
         get=AsyncMock(side_effect=get_related),
     )
 
@@ -1419,8 +1428,9 @@ async def test_promote_review_candidate_bounds_contradicted_source_for_as_of_rea
         def __init__(self) -> None:
             self.updated: list[tuple[str, dict[str, object]]] = []
 
-        async def create_direct(self, _entity):
-            return "decision_new"
+        async def create_direct_if_absent(self, entity):
+            self.created_entity = entity
+            return entity, True
 
         async def get(self, entity_id: str):
             if entity_id == "decision_old":
@@ -1430,7 +1440,18 @@ async def test_promote_review_candidate_bounds_contradicted_source_for_as_of_rea
                 )
             return None
 
-        async def update(self, entity_id: str, updates: dict[str, object]):
+        async def update(
+            self,
+            entity_id: str,
+            updates: dict[str, object],
+            *,
+            expected_revision=None,
+            replace_metadata_keys=(),
+        ):
+            if expected_revision is not None:
+                assert entity_id == self.created_entity.id
+                self.created_entity.metadata.update(updates["metadata"])
+                return self.created_entity
             self.updated.append((entity_id, updates))
             return SimpleNamespace(id=entity_id, metadata=updates.get("metadata", {}))
 
@@ -1446,7 +1467,7 @@ async def test_promote_review_candidate_bounds_contradicted_source_for_as_of_rea
         assert organization_id == "org-1"
         return memories.get(memory_id)
 
-    async def fake_save_raw_memory(memory: RawMemory) -> RawMemory:
+    async def fake_save_raw_memory(memory: RawMemory, *, expected_revision=None) -> RawMemory:
         memories[memory.id] = memory
         saved.append(memory)
         return memory
@@ -1477,7 +1498,7 @@ async def test_promote_review_candidate_bounds_contradicted_source_for_as_of_rea
     invalidated = next(memory for memory in saved if memory.id == "source-old")
     assert invalidated.metadata["invalid_at"] == cutoff
     assert invalidated.metadata["valid_to"] == cutoff
-    assert invalidated.metadata["invalidated_by_entity_id"] == "decision_new"
+    assert invalidated.metadata["invalidated_by_entity_id"] == result.promoted_id
     assert raw_memory_matches_as_of(
         invalidated,
         datetime(2026, 1, 15, tzinfo=UTC),
@@ -1519,13 +1540,25 @@ async def test_promote_review_candidate_skips_other_private_principal_invalidati
         def __init__(self) -> None:
             self.updated: list[tuple[str, dict[str, object]]] = []
 
-        async def create_direct(self, _entity):
-            return "decision_new"
+        async def create_direct_if_absent(self, entity):
+            self.created_entity = entity
+            return entity, True
 
         async def get(self, entity_id: str):
             return None
 
-        async def update(self, entity_id: str, updates: dict[str, object]):
+        async def update(
+            self,
+            entity_id: str,
+            updates: dict[str, object],
+            *,
+            expected_revision=None,
+            replace_metadata_keys=(),
+        ):
+            if expected_revision is not None:
+                assert entity_id == self.created_entity.id
+                self.created_entity.metadata.update(updates["metadata"])
+                return self.created_entity
             self.updated.append((entity_id, updates))
             return SimpleNamespace(id=entity_id, metadata=updates.get("metadata", {}))
 
@@ -1541,7 +1574,7 @@ async def test_promote_review_candidate_skips_other_private_principal_invalidati
         assert organization_id == "org-1"
         return memories.get(memory_id)
 
-    async def fake_save_raw_memory(memory: RawMemory) -> RawMemory:
+    async def fake_save_raw_memory(memory: RawMemory, *, expected_revision=None) -> RawMemory:
         memories[memory.id] = memory
         saved.append(memory)
         return memory
@@ -1593,9 +1626,10 @@ async def test_promote_review_candidate_skips_foreign_private_superseded_entity(
             self.created_metadata: dict[str, object] | None = None
             self.updated: list[tuple[str, dict[str, object]]] = []
 
-        async def create_direct(self, entity):
+        async def create_direct_if_absent(self, entity):
             self.created_metadata = entity.metadata
-            return "decision_new"
+            self.created_entity = entity
+            return entity, True
 
         async def get(self, entity_id: str):
             if entity_id == "decision_foreign":
@@ -1605,7 +1639,18 @@ async def test_promote_review_candidate_skips_foreign_private_superseded_entity(
                 )
             return None
 
-        async def update(self, entity_id: str, updates: dict[str, object]):
+        async def update(
+            self,
+            entity_id: str,
+            updates: dict[str, object],
+            *,
+            expected_revision=None,
+            replace_metadata_keys=(),
+        ):
+            if expected_revision is not None:
+                assert entity_id == self.created_entity.id
+                self.created_entity.metadata.update(updates["metadata"])
+                return self.created_entity
             self.updated.append((entity_id, updates))
             return SimpleNamespace(id=entity_id, metadata=updates.get("metadata", {}))
 
@@ -1623,7 +1668,7 @@ async def test_promote_review_candidate_skips_foreign_private_superseded_entity(
 
     monkeypatch.setattr(reflection_module, "get_raw_memory", fake_get_raw_memory)
     monkeypatch.setattr(
-        reflection_module, "save_raw_memory", AsyncMock(side_effect=lambda memory: memory)
+        reflection_module, "save_raw_memory", AsyncMock(side_effect=lambda memory, **kwargs: memory)
     )
     monkeypatch.setattr(
         reflection_module, "get_surreal_graph_runtime", AsyncMock(return_value=runtime)
@@ -1650,6 +1695,7 @@ async def test_promote_raw_memory_persists_native_record_and_marks_promoted(
 ) -> None:
     memory = _raw_import_memory()
     saved: list[RawMemory] = []
+    memories = {memory.id: memory}
 
     async def fake_persist(**kwargs):
         assert kwargs["memory_scope"] is MemoryScope.PROJECT
@@ -1675,13 +1721,22 @@ async def test_promote_raw_memory_persists_native_record_and_marks_promoted(
             },
         )
 
-    async def fake_save(memory: RawMemory) -> RawMemory:
+    async def fake_save(memory: RawMemory, *, expected_revision=None) -> RawMemory:
         saved.append(memory)
+        memories[memory.id] = memory
         return memory
 
-    monkeypatch.setattr(reflection_module, "get_raw_memory", AsyncMock(return_value=memory))
+    monkeypatch.setattr(
+        reflection_module,
+        "get_raw_memory",
+        AsyncMock(side_effect=lambda **kwargs: memories.get(kwargs["memory_id"])),
+    )
     monkeypatch.setattr(reflection_module, "persist_reflection_candidate", fake_persist)
     monkeypatch.setattr(reflection_module, "save_raw_memory", fake_save)
+
+    monkeypatch.setattr(
+        reflection_module, "get_surreal_graph_runtime", AsyncMock(return_value=SimpleNamespace())
+    )
 
     result = await promote_raw_memory(
         raw_memory_id="raw-1",
@@ -1696,15 +1751,15 @@ async def test_promote_raw_memory_persists_native_record_and_marks_promoted(
     assert result.success
     assert result.promoted_id == "episode_123"
     assert result.reason == "promoted"
-    assert saved[0].review_state == "promoted"
-    assert saved[0].metadata["promoted_entity_id"] == "episode_123"
-    assert saved[0].metadata["native_write_path"] == "raw_memory_promotion"
+    assert saved[-1].review_state == "promoted"
+    assert saved[-1].metadata["promoted_entity_id"] == "episode_123"
+    assert saved[-1].metadata["native_write_path"] == "raw_memory_promotion"
     lifecycle = memory_lifecycle_from_metadata(
-        saved[0].metadata,
+        saved[-1].metadata,
         source_id="raw-1",
-        review_state=saved[0].review_state,
+        review_state=saved[-1].review_state,
     )
-    findings = reflection_findings_from_metadata(saved[0].metadata)
+    findings = reflection_findings_from_metadata(saved[-1].metadata)
     assert lifecycle.state == "active"
     assert lifecycle.source_id == "raw-1"
     assert lifecycle.derived_ids == ["episode_123"]
