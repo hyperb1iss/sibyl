@@ -619,7 +619,7 @@ async def _apply_share_plan(
         scope_key=plan.target_scope_key,
         link_source_entity=False,
     )
-    if not result.response.success:
+    if not result.response.success or result.metadata.get("promotion_state") == "partial":
         return _promotion_write_denied(plan=plan, result=result)
 
     metadata = {
