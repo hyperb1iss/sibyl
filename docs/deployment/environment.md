@@ -299,14 +299,19 @@ stored encrypted in the database (using `SIBYL_SETTINGS_KEY`).
 
 ## Native Memory Configuration
 
-| Variable                                         | Default   | Description                                                |
-| ------------------------------------------------ | --------- | ---------------------------------------------------------- |
-| `SIBYL_NATIVE_WRITE`                             | `enabled` | Set `disabled` to skip persisting reflection candidates    |
-| `SIBYL_AUTO_EXTRACT_ENTITIES`                    | `false`   | Queue LLM entity extraction for prose-bearing memories     |
-| `SIBYL_OPERATIONAL_NOTE_DISTILLATION_MAX_TOKENS` | `2048`    | Max output tokens per note distillation call (256-8192)    |
-| `SIBYL_RAW_CAPTURE_CHANGEFEED_POLL_ENABLED`      | `true`    | Poll the raw-captures changefeed for incremental promotion |
-| `SIBYL_RAW_CAPTURE_LIVE_QUERY_ENABLED`           | `false`   | Use SurrealDB live queries for realtime promotion hints    |
-| `SIBYL_RAW_CAPTURE_LIVE_QUERY_RETRY_SECONDS`     | `5.0`     | Delay before reconnecting the raw-capture live query       |
+Reflection persistence always uses the native writer. Sibyl 1.4 removes the `SIBYL_NATIVE_WRITE`
+switch; remove it from deployment configuration. The old `disabled` value selected a compatibility
+writer and did not disable persistence. Use `persist=false` on reflection requests to preview
+candidates without writing, or `persist_review=true` with `persist=true` to store candidates for
+review before promotion.
+
+| Variable                                         | Default | Description                                                |
+| ------------------------------------------------ | ------- | ---------------------------------------------------------- |
+| `SIBYL_AUTO_EXTRACT_ENTITIES`                    | `false` | Queue LLM entity extraction for prose-bearing memories     |
+| `SIBYL_OPERATIONAL_NOTE_DISTILLATION_MAX_TOKENS` | `2048`  | Max output tokens per note distillation call (256-8192)    |
+| `SIBYL_RAW_CAPTURE_CHANGEFEED_POLL_ENABLED`      | `true`  | Poll the raw-captures changefeed for incremental promotion |
+| `SIBYL_RAW_CAPTURE_LIVE_QUERY_ENABLED`           | `false` | Use SurrealDB live queries for realtime promotion hints    |
+| `SIBYL_RAW_CAPTURE_LIVE_QUERY_RETRY_SECONDS`     | `5.0`   | Delay before reconnecting the raw-capture live query       |
 
 ## Runtime Telemetry
 
