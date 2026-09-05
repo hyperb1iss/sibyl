@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
+import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -9,6 +11,19 @@ from typing import Any
 import pytest
 
 OPAQUE_INVOCATION_ID_HEX_LENGTH = 32
+
+
+def test_script_help_without_repository_on_pythonpath(tmp_path: Path) -> None:
+    script = Path(__file__).parents[2] / "benchmarks" / "longmemeval_v2_live_retrieval.py"
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-E", str(script), "--help"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--project-id" in result.stdout
 
 
 def _load_module() -> ModuleType:
@@ -403,3 +418,41 @@ def test_evidence_geometry_flags_thread_into_the_run_config(tmp_path: Path) -> N
     )
     assert armed_config["evidence_types"] == ["passage", "session"]
     assert armed_config["evidence_char_budget"] == armed_char_budget
+
+
+def test_live_retrieval_defaults_to_supported_fast_mode() -> None:
+    module = _load_module()
+    required = [
+        "--api-token-file",
+        "credentials.json",
+        "--project-id",
+        "project_test",
+        "--run-id",
+        "run_test",
+        "--questions",
+        "questions.jsonl",
+        "--haystack",
+        "haystack.json",
+        "--trajectories",
+        "trajectories.jsonl",
+        "--question-ids-file",
+        "ids.json",
+        "--output-dir",
+        "results",
+    ]
+
+    default = module.parse_args(required)
+    assert default.retrieval_mode == "fast"
+    assert default.source_evidence_bundling is True
+    naive = module.parse_args([*required, "--retrieval-mode", "naive"])
+    assert naive.retrieval_mode == "naive"
+    assert naive.source_evidence_bundling is False
+    unbundled = module.parse_args(
+        [*required, "--retrieval-mode", "naive", "--no-source-evidence-bundling"]
+    )
+    assert unbundled.source_evidence_bundling is False
+    with pytest.raises(SystemExit, match=r"^2$"):
+        module.parse_args([*required, "--retrieval-mode", "naive", "--source-evidence-bundling"])
+    # Old experiment configurations remain parseable for a pinned old server.
+    historical = module.parse_args([*required, "--retrieval-mode", "accurate"])
+    assert historical.retrieval_mode == "accurate"

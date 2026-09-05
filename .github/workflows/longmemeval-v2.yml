@@ -107,7 +107,7 @@ on:
         description: "Sealed experiment identity, substrate, geometry, and render profile"
         type: string
         default: >-
-          {"experiment_id":"","experiment_phase":"aa","pass_id":"","pass_seed":0,"arm_role":"machine","substrate":"machine","preregistration_sha256":"","max_spend_usd":8,"retrieval_mode":"accurate","max_context_total_chars":60000,"operational_note_dedupe_mode":"source","operational_note_lane_mode":"reserved","operational_note_distillation_profile":"baseline","render_group_lanes":false,"render_action_spines":false}
+          {"experiment_id":"","experiment_phase":"aa","pass_id":"","pass_seed":0,"arm_role":"machine","substrate":"machine","preregistration_sha256":"","max_spend_usd":8,"retrieval_mode":"fast","max_context_total_chars":60000,"operational_note_dedupe_mode":"source","operational_note_lane_mode":"reserved","operational_note_distillation_profile":"baseline","render_group_lanes":false,"render_action_spines":false}
       official_tier:
         description: "Official haystack tier"
         type: choice

@@ -965,7 +965,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:  # noqa: PL
         choices=["fast", "accurate", "naive"],
         default="fast",
         help=(
-            "Server-side retrieval pipeline. naive selects the 1.3 Phase 0 "
+            "Server-side retrieval pipeline. accurate requires a pinned pre-1.4 server. "
+            "naive selects the 1.3 Phase 0 "
             "control arm (BM25 + dense KNN + plain RRF + a tight pack); it "
             "refuses to run beside --typed-stream-retrieval or "
             "--agentic-traversal, both of which retrieve outside the arm."

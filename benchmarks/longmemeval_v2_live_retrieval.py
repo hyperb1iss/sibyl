@@ -14,8 +14,9 @@ from typing import Any
 from uuid import uuid4
 
 BENCHMARKS_ROOT = Path(__file__).resolve().parent
-if str(BENCHMARKS_ROOT) not in sys.path:
-    sys.path.insert(0, str(BENCHMARKS_ROOT))
+for import_root in (BENCHMARKS_ROOT.parent, BENCHMARKS_ROOT):
+    if str(import_root) not in sys.path:
+        sys.path.insert(0, str(import_root))
 
 from benchmarks.git_provenance import git_provenance  # noqa: E402
 from longmemeval_v2_memory.sibyl_memory import (  # noqa: E402
@@ -138,7 +139,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--retrieval-mode",
         choices=("fast", "accurate", "naive"),
-        default="accurate",
+        default="fast",
+        help="Use fast or naive on Sibyl 1.4; accurate requires a pinned pre-1.4 server.",
     )
     parser.add_argument("--max-planned-queries", type=int, default=3)
     parser.add_argument(
@@ -178,7 +180,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--source-evidence-bundling",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=None,
+        help="Bundle source evidence by default except in the naive control arm.",
     )
     parser.add_argument("--semantic-prior-rescue-weight", type=float, default=0.0)
     parser.add_argument("--typed-pool", default="typed", choices=["typed", "typed_entity_overlap"])
@@ -219,6 +222,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--neighbor-stitch-items must be non-negative")
     if args.neighbor_stitch_span < 0:
         parser.error("--neighbor-stitch-span must be non-negative")
+    return _resolve_source_bundling(parser, args)
+
+
+def _resolve_source_bundling(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> argparse.Namespace:
+    if args.source_evidence_bundling is None:
+        args.source_evidence_bundling = args.retrieval_mode != "naive"
+    elif args.retrieval_mode == "naive" and args.source_evidence_bundling:
+        parser.error("--source-evidence-bundling is incompatible with --retrieval-mode=naive")
     return args
 
 

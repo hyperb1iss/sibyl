@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import sys
@@ -713,16 +714,65 @@ def _validate_applicable_qa_field(
     return [f"{path} field {field!r} must be provider-backed when QA is enabled"]
 
 
+def _validate_native_qa_receipt(case_qa: dict[str, Any], *, path: str) -> list[str]:
+    failures: list[str] = []
+    native_context = case_qa.get("native_context")
+    receipt = case_qa.get("context_receipt")
+    if not isinstance(native_context, dict) or not isinstance(receipt, dict):
+        return [f"{path} native QA requires native_context and context_receipt objects"]
+    markdown = native_context.get("markdown")
+    if not isinstance(markdown, str) or not markdown.strip():
+        return [f"{path} native_context.markdown must be non-empty"]
+    if case_qa.get("mode") != "model":
+        failures.append(f"{path} native QA requires model mode")
+    if receipt.get("arm") != "native-context-v1":
+        failures.append(f"{path} context_receipt.arm must match native-context-v1")
+    if receipt.get("rendered_context") != markdown:
+        failures.append(f"{path} native markdown must equal context_receipt.rendered_context")
+    if receipt.get("context_sha256") != hashlib.sha256(markdown.encode()).hexdigest():
+        failures.append(f"{path} context_receipt.context_sha256 must match native markdown")
+    if receipt.get("tokenizer") != case_qa.get("context_tokenizer"):
+        failures.append(f"{path} context_receipt.tokenizer must match context_tokenizer")
+    tokens = receipt.get("context_tokens")
+    budget = case_qa.get("max_context_tokens")
+    if not _is_finite_number(tokens) or tokens <= 0 or tokens != int(tokens):
+        failures.append(f"{path} context_receipt.context_tokens must be a positive integer")
+    if not _is_finite_number(budget) or budget <= 0:
+        failures.append(f"{path} max_context_tokens must be finite and positive for native QA")
+    elif _is_finite_number(tokens) and tokens > budget:
+        failures.append(f"{path} native context tokens exceed max_context_tokens")
+    return failures
+
+
 def _validate_ai_memory_case_qa(
     case_qa: dict[str, Any],
     *,
     index: int,
     mode: str,
     require_qa: bool,
+    qa_config: dict[str, Any],
 ) -> list[str]:
     failures: list[str] = []
     path = f"case_results[{index}]['qa']"
-    failures.extend(_validate_required_fields(case_qa, path=path, fields=_QA_CASE_REQUIRED_FIELDS))
+    native = qa_config.get("context_arm") == case_qa.get("context_arm") == "native-context-v1"
+    required_fields = tuple(
+        field
+        for field in _QA_CASE_REQUIRED_FIELDS
+        if not (native and field == "context_session_ids")
+    )
+    failures.extend(_validate_required_fields(case_qa, path=path, fields=required_fields))
+    for field in ("context_arm", "context_tokenizer", "max_context_tokens"):
+        if field in qa_config and case_qa.get(field) != qa_config[field]:
+            failures.append(f"{path} {field} must match top-level qa {field}")
+    if native:
+        failures.extend(
+            _validate_required_fields(
+                qa_config,
+                path="qa",
+                fields=("context_tokenizer", "max_context_tokens"),
+            )
+        )
+        failures.extend(_validate_native_qa_receipt(case_qa, path=path))
     if case_qa.get("schema_version") != QA_SCHEMA_VERSION:
         failures.append(f"{path} schema_version must be {QA_SCHEMA_VERSION!r}")
     if mode in _QA_PROVIDER_MODES and case_qa.get("mode") != mode:
@@ -789,6 +839,7 @@ def _validate_ai_memory_qa_cases(
                 index=index,
                 mode=mode,
                 require_qa=require_qa,
+                qa_config=report.get("qa", {}),
             )
         )
         if case_qa.get("evaluated") is True:
