@@ -10,7 +10,7 @@ from uuid import UUID
 import pytest
 from fastapi import HTTPException
 
-from sibyl.api.routes.context import _fuse_context_evidence, context_pack
+from sibyl.api.routes.context import context_pack
 from sibyl.api.schemas import (
     ContextPackRequest,
     ReflectionRequest,
@@ -35,7 +35,6 @@ from sibyl_core.models.context import (
     ContextPack,
     ContextSection,
 )
-from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.models.reflection import (
     ClaimRecord,
     ReflectionCandidate,
@@ -43,11 +42,6 @@ from sibyl_core.models.reflection import (
     ReflectionFindingKind,
     ReflectionPack,
     ReflectionRelationshipRecord,
-)
-from sibyl_core.projection import operational_experience_manifest_id
-from sibyl_core.retrieval.refinement import (
-    DeterministicRefinementQuery,
-    RetrievalFeedbackDocument,
 )
 
 
@@ -171,162 +165,6 @@ def _search_response(
         graph_count=len(results),
         limit=12,
     )
-
-
-def _operational_observation(entity_id: str, ordinal: int, evidence: str) -> Entity:
-    return Entity(
-        id=entity_id,
-        entity_type=EntityType.SESSION,
-        name=f"Observation {ordinal}",
-        content=(
-            "Goal: update an order\n"
-            "Reported outcome: success\n"
-            f"Observation: {ordinal}\n"
-            f"Action producing this observation: action-{ordinal}\n"
-            f"Reasoning: reasoning-{ordinal}\n"
-            "Evidence:\n"
-            f"{evidence}"
-        ),
-        metadata={
-            "operational_source_id": "capture-1",
-            "project_id": "proj_1",
-            "scope_key": None,
-            "projection_kind": "raw_observation",
-            "observation_ordinal": ordinal,
-            "evidence_part_index": 0,
-        },
-    )
-
-
-def _operational_manifest(observations: list[Entity]) -> Entity:
-    manifest_id = operational_experience_manifest_id("capture-1")
-    return Entity(
-        id=manifest_id,
-        entity_type=EntityType.ARTIFACT,
-        name="Operational source manifest",
-        metadata={
-            "operational_source_id": "capture-1",
-            "project_id": "proj_1",
-            "scope_key": None,
-            "projection_kind": "manifest",
-            "operational_projection_state": "complete",
-            "expected_entity_ids": [*[item.id for item in observations], manifest_id],
-        },
-    )
-
-
-def test_accurate_evidence_reservation_receipts_respect_limit() -> None:
-    response = _fuse_context_evidence(
-        question="ship faster",
-        query_specs=[
-            {"name": "original", "query": "ship faster", "facet": "original"},
-            {
-                "name": "supplemental_1",
-                "query": "deployment workflow state",
-                "facet": "state",
-            },
-        ],
-        planned_queries=[
-            {
-                "name": "supplemental_1",
-                "query": "deployment workflow state",
-                "facet": "state",
-            }
-        ],
-        responses=[
-            _search_response("ship faster", ("original", 0.9)),
-            _search_response("deployment workflow state", ("supplemental", 0.95)),
-        ],
-        limit=1,
-        candidate_limit=2,
-        failures=[],
-        planner_usage={},
-    )
-
-    assert [result.id for result in response.results] == ["original"]
-    assert response.filters["original_reservation_target"] == 1
-    assert response.filters["original_reserved_count"] == 1
-    assert response.filters["supplemental_reserved_count"] == 0
-
-
-def test_accurate_evidence_reservation_receipts_report_original_underfill() -> None:
-    response = _fuse_context_evidence(
-        question="ship faster",
-        query_specs=[
-            {"name": "original", "query": "ship faster", "facet": "original"},
-            {"name": "supplemental_1", "query": "workflow state", "facet": "state"},
-            {"name": "supplemental_2", "query": "final outcome", "facet": "outcome"},
-        ],
-        planned_queries=[],
-        responses=[
-            _search_response("ship faster", ("original", 0.9)),
-            _search_response("workflow state", ("state", 0.95), ("detail", 0.8)),
-            _search_response("final outcome", ("outcome", 0.92)),
-        ],
-        limit=4,
-        candidate_limit=8,
-        failures=[],
-        planner_usage={},
-    )
-
-    assert len(response.results) == 4
-    assert response.filters["original_reservation_target"] == 2
-    assert response.filters["original_reserved_count"] == 1
-    assert response.filters["supplemental_reserved_count"] == 2
-
-
-def test_accurate_evidence_prefers_source_diversity_then_backfills() -> None:
-    source_diverse = _search_response(
-        "ship faster",
-        ("source-a-1", 0.99),
-        ("source-a-2", 0.98),
-        ("source-a-3", 0.97),
-        ("source-b-1", 0.96),
-        ("source-c-1", 0.95),
-    )
-    for result, source_id in zip(
-        source_diverse.results,
-        ("source-a", "source-a", "source-a", "source-b", "source-c"),
-        strict=True,
-    ):
-        result.metadata["source_id"] = source_id
-
-    response = _fuse_context_evidence(
-        question="ship faster",
-        query_specs=[{"name": "original", "query": "ship faster", "facet": "original"}],
-        planned_queries=[],
-        responses=[source_diverse],
-        limit=4,
-        candidate_limit=8,
-        max_results_per_source=2,
-        failures=[],
-        planner_usage={},
-    )
-
-    assert [result.id for result in response.results] == [
-        "source-a-1",
-        "source-a-2",
-        "source-b-1",
-        "source-c-1",
-    ]
-    assert response.filters["max_results_per_source"] == 2
-    assert response.filters["source_diversity_selected_count"] == 4
-    assert response.filters["source_diversity_deferred_count"] == 1
-    assert response.filters["source_diversity_backfill_count"] == 0
-
-    backfilled = _fuse_context_evidence(
-        question="ship faster",
-        query_specs=[{"name": "original", "query": "ship faster", "facet": "original"}],
-        planned_queries=[],
-        responses=[source_diverse],
-        limit=5,
-        candidate_limit=10,
-        max_results_per_source=2,
-        failures=[],
-        planner_usage={},
-    )
-    assert len(backfilled.results) == 5
-    assert backfilled.filters["source_diversity_backfill_count"] == 1
 
 
 class TestContextPackRoute:
@@ -756,564 +594,6 @@ class TestContextPackRoute:
             "cost_reported_requests": 1,
             "cost_usd": 0.0001,
         }
-
-    @pytest.mark.asyncio
-    async def test_context_pack_accurate_evidence_preserves_query_coverage(self) -> None:
-        round_plans = [
-            [
-                DeterministicRefinementQuery(
-                    query="deployment workflow state",
-                    facet="feedback",
-                    source_result_ids=("graph:shared",),
-                    added_terms=("deployment", "workflow", "state"),
-                )
-            ],
-            [
-                DeterministicRefinementQuery(
-                    query="release validation receipt",
-                    facet="corroboration",
-                    source_result_ids=("graph:state",),
-                    added_terms=("release", "validation", "receipt"),
-                ),
-                DeterministicRefinementQuery(
-                    query="deployment final outcome",
-                    facet="feedback",
-                    source_result_ids=("graph:state",),
-                    added_terms=("deployment", "final", "outcome"),
-                ),
-            ],
-        ]
-        responses = {
-            "ship faster": _search_response(
-                "ship faster",
-                ("shared", 0.95),
-                ("original-only", 0.8),
-            ),
-            "deployment workflow state": _search_response(
-                "deployment workflow state",
-                ("shared", 0.99),
-                ("state", 0.9),
-            ),
-            "release validation receipt": _search_response(
-                "release validation receipt",
-                ("validation", 0.91),
-            ),
-            "deployment final outcome": _search_response(
-                "deployment final outcome",
-                ("outcome", 0.92),
-            ),
-        }
-        responses["ship faster"].results[0].metadata["operational_source_id"] = "source-one"
-        responses["ship faster"].results[0].metadata["projection_kind"] = "procedure"
-        responses["ship faster"].results[1].metadata["operational_source_id"] = "source-one"
-        responses["deployment workflow state"].results[1].metadata["operational_source_id"] = (
-            "source-two"
-        )
-
-        async def retrieve(request: SearchRequest, **_kwargs: object) -> SearchResponse:
-            await asyncio.sleep(0)
-            return responses[request.query]
-
-        graph_runtime = AsyncMock(side_effect=RuntimeError("graph unavailable"))
-        with (
-            patch(
-                "sibyl.api.routes.context.list_accessible_project_graph_ids",
-                AsyncMock(return_value=["proj_1"]),
-            ),
-            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
-            patch(
-                "sibyl.api.routes.context.plan_deterministic_refinement_queries",
-                side_effect=round_plans,
-            ) as planner,
-            patch("sibyl.api.routes.search.execute_search_request", side_effect=retrieve) as search,
-            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
-            patch("sibyl.api.routes.context.get_context_graph_runtime", graph_runtime),
-        ):
-            response = await context_pack(
-                request=ContextPackRequest(
-                    goal="ship faster",
-                    evidence={
-                        "retrieval_mode": "accurate",
-                        "limit": 4,
-                        "reserve_distilled_notes": False,
-                    },
-                ),
-                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
-                ctx=_ctx(),
-            )
-
-        assert planner.call_count == 2
-        first_documents = planner.call_args_list[0].args[1]
-        second_documents = planner.call_args_list[1].args[1]
-        assert [document.id for document in first_documents] == [
-            "graph:shared",
-            "graph:original-only",
-        ]
-        assert [document.id for document in second_documents] == [
-            "graph:shared",
-            "graph:original-only",
-            "graph:state",
-        ]
-        assert [document.source_id for document in first_documents] == [
-            "source-one",
-            "source-one",
-        ]
-        assert [document.source_id for document in second_documents] == [
-            "source-one",
-            "source-one",
-            "source-two",
-        ]
-        assert [document.projection_kind for document in first_documents] == [
-            "procedure",
-            None,
-        ]
-        assert all(isinstance(document, RetrievalFeedbackDocument) for document in first_documents)
-        assert {call.args[0].query for call in search.call_args_list} == set(responses)
-        assert {call.args[0].limit for call in search.call_args_list} == {8}
-        assert response.evidence is not None
-        assert [result.id for result in response.evidence.results] == [
-            "shared",
-            "original-only",
-            "state",
-            "validation",
-        ]
-        assert response.evidence.filters["planner_status"] == "success"
-        assert response.evidence.filters["planner_usage"] == {
-            "provider": "deterministic",
-            "model": "pseudo_relevance_feedback_v3",
-            "requests": 0,
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0,
-            "cost_usd": 0.0,
-            "cost_complete": True,
-        }
-        assert response.evidence.filters["planner_strategy"] == "deterministic_refinement_v3"
-        assert response.evidence.filters["refinement_rounds"] == 2
-        assert response.evidence.filters["refinement_novel_result_counts"] == [1, 2]
-        assert response.evidence.filters["refinement_stop_reason"] == "query_budget_exhausted"
-        assert response.evidence.filters["query_count"] == 4
-        assert response.evidence.filters["candidate_limit"] == 8
-        assert response.evidence.filters["output_limit"] == 4
-        assert response.evidence.filters["successful_query_count"] == 4
-        assert response.evidence.filters["query_failures"] == []
-        assert response.evidence.filters["original_reservation_target"] == 2
-        assert response.evidence.filters["original_reserved_count"] == 2
-        assert response.evidence.filters["supplemental_reserved_count"] == 2
-        assert response.evidence.filters["query_filters"] == {
-            "original": {"source_query": "ship faster"},
-            "supplemental_1": {"source_query": "deployment workflow state"},
-            "supplemental_2": {"source_query": "release validation receipt"},
-            "supplemental_3": {"source_query": "deployment final outcome"},
-        }
-        assert response.evidence.results[0].metadata["retrieval_fusion"]["sources"] == [
-            "original",
-            "supplemental_1",
-        ]
-        assert response.evidence.filters["operational_source_expansion"] == {
-            "strategy": "manifest_ordered_span_v1",
-            "status": "unavailable",
-            "error_type": "RuntimeError",
-            "attempted_source_ids": ["source-one", "source-two"],
-            "total_result_budget": 0,
-            "sources": [],
-            "inserted_result_ids": [],
-        }
-        graph_runtime.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_context_pack_accurate_evidence_expands_authorized_ordered_source_span(
-        self,
-    ) -> None:
-        search_response = _search_response(
-            "Which controls view ship and add tracking?",
-            ("procedure", 0.96),
-            ("stale-raw", 0.91),
-            ("unrelated", 0.72),
-        )
-        search_response.results[0].metadata.update(
-            {
-                "operational_source_id": "capture-1",
-                "project_id": "proj_1",
-                "projection_kind": "procedure",
-            }
-        )
-        search_response.results[1].metadata.update(
-            {
-                "operational_source_id": "capture-1",
-                "project_id": "proj_1",
-                "projection_kind": "raw_observation",
-            }
-        )
-        observations = [
-            _operational_observation("raw-1", 1, "Dashboard catalog"),
-            _operational_observation("raw-2", 2, "Open profile"),
-            _operational_observation("raw-3", 3, "View order details"),
-            _operational_observation("raw-4", 4, "Ship the order"),
-            _operational_observation("raw-5", 5, "Add Tracking Number"),
-        ]
-        manifest = _operational_manifest(observations)
-        reader = SimpleNamespace(
-            get=AsyncMock(return_value=manifest),
-            get_many=AsyncMock(return_value=[manifest, *reversed(observations)]),
-        )
-
-        async def record_exposures(results: list[Any], **_kwargs: object) -> dict[str, object]:
-            for result in results:
-                result.metadata["usage_exposure"] = {"status": "stamped"}
-            return {"status": "complete", "stamped_count": len(results)}
-
-        exposure = AsyncMock(side_effect=record_exposures)
-        with (
-            patch(
-                "sibyl.api.routes.context.list_accessible_project_graph_ids",
-                AsyncMock(return_value=["proj_1"]),
-            ),
-            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
-            patch(
-                "sibyl.api.routes.context.plan_deterministic_refinement_queries",
-                return_value=[],
-            ),
-            patch(
-                "sibyl.api.routes.search.execute_search_request",
-                AsyncMock(return_value=search_response),
-            ) as search,
-            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
-            patch(
-                "sibyl.api.routes.context.get_context_graph_runtime",
-                AsyncMock(return_value=SimpleNamespace(entity_manager=reader)),
-            ),
-            patch(
-                "sibyl_core.tools.usage_exposure.annotate_search_result_exposures",
-                exposure,
-            ),
-        ):
-            response = await context_pack(
-                request=ContextPackRequest(
-                    goal="Which controls view ship and add tracking?",
-                    evidence={
-                        "retrieval_mode": "accurate",
-                        "limit": 6,
-                    },
-                ),
-                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
-                ctx=_ctx(),
-            )
-
-        assert response.evidence is not None
-        assert [result.id for result in response.evidence.results] == [
-            "procedure",
-            "raw-3",
-            "raw-4",
-            "raw-5",
-            "unrelated",
-        ]
-        receipt = response.evidence.filters["operational_source_expansion"]
-        assert receipt["status"] == "expanded"
-        assert receipt["attempted_source_ids"] == ["capture-1"]
-        assert receipt["inserted_result_ids"] == ["raw-3", "raw-4", "raw-5"]
-        assert receipt["sources"][0]["selected_observation_ordinals"] == [3, 4, 5]
-        assert receipt["sources"][0]["inserted_entity_ids"] == ["raw-3", "raw-4", "raw-5"]
-        composition = response.evidence.filters["evidence_composition"]
-        assert composition["typed_search_status"] == "success"
-        assert composition["selected_typed_count"] == 0
-        assert composition["selected_raw_count"] == 5
-        assert response.evidence.graph_count == 5
-        assert response.evidence.total == 5
-        assert response.evidence.has_more is False
-        assert response.evidence.results[1].metadata["candidate_project_id"] == "proj_1"
-        assert (
-            response.evidence.results[1].metadata["candidate_policy_reason"]
-            == "manifest_scope_verified"
-        )
-        assert response.evidence.results[1].metadata["usage_exposure"] == {"status": "stamped"}
-        assert [result.id for result in exposure.await_args.args[0]] == [
-            "procedure",
-            "raw-3",
-            "raw-4",
-            "raw-5",
-            "unrelated",
-        ]
-        exposure.assert_awaited_once()
-        assert all(call.args[0].record_exposure is False for call in search.call_args_list)
-        reader.get.assert_awaited_once_with(operational_experience_manifest_id("capture-1"))
-        reader.get_many.assert_awaited_once_with(manifest.metadata["expected_entity_ids"])
-
-    @pytest.mark.asyncio
-    async def test_context_pack_skips_source_runtime_without_operational_results(self) -> None:
-        graph_runtime = AsyncMock()
-        with (
-            patch(
-                "sibyl.api.routes.context.list_accessible_project_graph_ids",
-                AsyncMock(return_value=["proj_1"]),
-            ),
-            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
-            patch(
-                "sibyl.api.routes.context.plan_deterministic_refinement_queries",
-                return_value=[],
-            ),
-            patch(
-                "sibyl.api.routes.search.execute_search_request",
-                AsyncMock(return_value=_search_response("ship faster", ("ordinary", 0.9))),
-            ),
-            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
-            patch("sibyl.api.routes.context.get_context_graph_runtime", graph_runtime),
-        ):
-            response = await context_pack(
-                request=ContextPackRequest(
-                    goal="ship faster",
-                    evidence={
-                        "retrieval_mode": "accurate",
-                        "reserve_distilled_notes": False,
-                    },
-                ),
-                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
-                ctx=_ctx(),
-            )
-
-        assert response.evidence is not None
-        assert response.evidence.filters["operational_source_expansion"]["status"] == (
-            "not_applicable"
-        )
-        graph_runtime.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_context_pack_accurate_evidence_preserves_provenance_after_empty_query(
-        self,
-    ) -> None:
-        round_plans = [
-            [
-                DeterministicRefinementQuery(
-                    query="deployment final outcome",
-                    facet="feedback",
-                )
-            ],
-            [],
-        ]
-        responses = {
-            "ship faster": _search_response("ship faster"),
-            "deployment final outcome": _search_response(
-                "deployment final outcome",
-                ("outcome", 0.92),
-            ),
-        }
-
-        async def retrieve(request: SearchRequest, **_kwargs: object) -> SearchResponse:
-            return responses[request.query]
-
-        with (
-            patch(
-                "sibyl.api.routes.context.list_accessible_project_graph_ids",
-                AsyncMock(return_value=["proj_1"]),
-            ),
-            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
-            patch(
-                "sibyl.api.routes.context.plan_deterministic_refinement_queries",
-                side_effect=round_plans,
-            ),
-            patch("sibyl.api.routes.search.execute_search_request", side_effect=retrieve),
-            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
-        ):
-            response = await context_pack(
-                request=ContextPackRequest(
-                    goal="ship faster",
-                    evidence={"retrieval_mode": "accurate", "limit": 4},
-                ),
-                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
-                ctx=_ctx(),
-            )
-
-        assert response.evidence is not None
-        assert response.evidence.results[0].metadata["retrieval_fusion"] == {
-            "sources": ["supplemental_1"],
-            "ranks": {"supplemental_1": 1},
-            "original_scores": {"supplemental_1": 0.92},
-        }
-
-    @pytest.mark.asyncio
-    async def test_context_pack_accurate_evidence_stops_when_results_saturate(self) -> None:
-        plan = [
-            DeterministicRefinementQuery(
-                query="deployment workflow state",
-                facet="feedback",
-            )
-        ]
-        responses = {
-            "ship faster": _search_response("ship faster", ("shared", 0.9)),
-            "deployment workflow state": _search_response(
-                "deployment workflow state",
-                ("shared", 0.95),
-            ),
-        }
-
-        async def retrieve(request: SearchRequest, **_kwargs: object) -> SearchResponse:
-            return responses[request.query]
-
-        with (
-            patch(
-                "sibyl.api.routes.context.list_accessible_project_graph_ids",
-                AsyncMock(return_value=["proj_1"]),
-            ),
-            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
-            patch(
-                "sibyl.api.routes.context.plan_deterministic_refinement_queries",
-                return_value=plan,
-            ) as planner,
-            patch("sibyl.api.routes.search.execute_search_request", side_effect=retrieve),
-            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
-        ):
-            response = await context_pack(
-                request=ContextPackRequest(
-                    goal="ship faster",
-                    evidence={
-                        "retrieval_mode": "accurate",
-                        "reserve_distilled_notes": False,
-                    },
-                ),
-                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
-                ctx=_ctx(),
-            )
-
-        planner.assert_called_once()
-        assert response.evidence is not None
-        assert response.evidence.filters["refinement_rounds"] == 1
-        assert response.evidence.filters["refinement_novel_result_counts"] == [0]
-        assert response.evidence.filters["refinement_stop_reason"] == "no_new_results"
-
-    @pytest.mark.asyncio
-    async def test_context_pack_accurate_evidence_falls_back_when_planner_fails(self) -> None:
-        search = AsyncMock(return_value=_search_response("ship faster", ("original", 0.9)))
-
-        with (
-            patch(
-                "sibyl.api.routes.context.list_accessible_project_graph_ids",
-                AsyncMock(return_value=["proj_1"]),
-            ),
-            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
-            patch(
-                "sibyl.api.routes.context.plan_deterministic_refinement_queries",
-                side_effect=RuntimeError("planner unavailable"),
-            ),
-            patch("sibyl.api.routes.search.execute_search_request", search),
-            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
-        ):
-            response = await context_pack(
-                request=ContextPackRequest(
-                    goal="ship faster",
-                    evidence={
-                        "retrieval_mode": "accurate",
-                        "reserve_distilled_notes": False,
-                    },
-                ),
-                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
-                ctx=_ctx(),
-            )
-
-        search.assert_awaited_once()
-        assert response.evidence is not None
-        assert [result.id for result in response.evidence.results] == ["original"]
-        assert response.evidence.filters["retrieval_mode"] == "accurate"
-        assert response.evidence.filters["planner_status"] == "fallback"
-        assert response.evidence.filters["planner_error_type"] == "RuntimeError"
-        assert response.evidence.filters["query_count"] == 1
-
-    @pytest.mark.asyncio
-    async def test_context_pack_accurate_evidence_reports_late_planner_failure(self) -> None:
-        plan = [
-            DeterministicRefinementQuery(
-                query="deployment workflow state",
-                facet="focus",
-            )
-        ]
-        responses = {
-            "ship faster": _search_response("ship faster", ("original", 0.9)),
-            "deployment workflow state": _search_response(
-                "deployment workflow state",
-                ("novel", 0.8),
-            ),
-        }
-
-        async def retrieve(request: SearchRequest, **_kwargs: object) -> SearchResponse:
-            return responses[request.query]
-
-        with (
-            patch(
-                "sibyl.api.routes.context.list_accessible_project_graph_ids",
-                AsyncMock(return_value=["proj_1"]),
-            ),
-            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
-            patch(
-                "sibyl.api.routes.context.plan_deterministic_refinement_queries",
-                side_effect=[plan, RuntimeError("late planner failure")],
-            ),
-            patch("sibyl.api.routes.search.execute_search_request", side_effect=retrieve),
-            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
-        ):
-            response = await context_pack(
-                request=ContextPackRequest(
-                    goal="ship faster",
-                    evidence={"retrieval_mode": "accurate"},
-                ),
-                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
-                ctx=_ctx(),
-            )
-
-        assert response.evidence is not None
-        assert response.evidence.filters["planner_status"] == "partial"
-        assert response.evidence.filters["planner_error_type"] == "RuntimeError"
-        assert response.evidence.filters["refinement_stop_reason"] == "planner_error"
-        assert response.evidence.filters["refinement_rounds"] == 1
-        assert response.evidence.filters["query_count"] == 2
-
-    @pytest.mark.asyncio
-    async def test_context_pack_accurate_evidence_keeps_partial_results(self) -> None:
-        plan = [
-            DeterministicRefinementQuery(
-                query="deployment workflow state",
-                facet="feedback",
-            )
-        ]
-
-        async def retrieve(request: SearchRequest, **_kwargs: object) -> SearchResponse:
-            if request.query != "ship faster":
-                raise RuntimeError("supplemental search failed")
-            return _search_response("ship faster", ("original", 0.9))
-
-        with (
-            patch(
-                "sibyl.api.routes.context.list_accessible_project_graph_ids",
-                AsyncMock(return_value=["proj_1"]),
-            ),
-            patch("sibyl_core.tools.context.compile_context", AsyncMock(return_value=_pack())),
-            patch(
-                "sibyl.api.routes.context.plan_deterministic_refinement_queries",
-                return_value=plan,
-            ),
-            patch("sibyl.api.routes.search.execute_search_request", side_effect=retrieve),
-            patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
-        ):
-            response = await context_pack(
-                request=ContextPackRequest(
-                    goal="ship faster",
-                    evidence={"retrieval_mode": "accurate"},
-                ),
-                org=SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111")),
-                ctx=_ctx(),
-            )
-
-        assert response.evidence is not None
-        assert [result.id for result in response.evidence.results] == ["original"]
-        assert response.evidence.filters["query_count"] == 2
-        assert response.evidence.filters["successful_query_count"] == 1
-        assert response.evidence.filters["query_failures"] == [
-            {
-                "query_index": 1,
-                "query": "deployment workflow state",
-                "facet": "feedback",
-                "error_type": "RuntimeError",
-            }
-        ]
-        assert response.evidence.filters["refinement_stop_reason"] == "all_queries_failed"
 
     @pytest.mark.asyncio
     async def test_context_pack_cancels_evidence_when_context_fails(self) -> None:
@@ -2489,31 +1769,6 @@ def test_context_pack_request_defaults_to_a_markdown_budget() -> None:
     assert ContextPackRequest(goal="x", markdown_token_budget=None).markdown_token_budget is None
 
 
-def test_accurate_evidence_response_carries_the_deprecation_marker() -> None:
-    """A5: accurate mode is served but announces its own removal in-band."""
-    response = _fuse_context_evidence(
-        question="ship faster",
-        query_specs=[{"name": "original", "query": "ship faster", "facet": "original"}],
-        planned_queries=[],
-        responses=[_search_response("ship faster", ("original", 0.9))],
-        limit=1,
-        candidate_limit=2,
-        failures=[],
-        planner_usage={},
-    )
-
-    marker = response.filters["retrieval_mode_deprecated"]
-    assert "deprecated" in marker
-    assert "fast" in marker
-
-
-def test_retrieval_mode_schema_documents_the_deprecation() -> None:
-    from sibyl.api.schemas.context import ContextEvidenceRequest
-
-    description = ContextEvidenceRequest.model_fields["retrieval_mode"].description
-    assert "DEPRECATED" in description
-
-
 def test_operational_note_composition_defaults_preserve_the_baseline() -> None:
     from sibyl.api.schemas.context import ContextEvidenceRequest
 
@@ -2753,10 +2008,7 @@ class TestNaiveRetrievalArm:
         compile_context = AsyncMock(return_value=_pack())
         machine = AsyncMock(return_value=_search_response("ship faster", ("evidence_1", 0.9)))
 
-        # Every mode other than naive, not just the default: the branch that
-        # routes to the arm is an elif chain, so the third mode is the one a
-        # careless reordering would break.
-        for evidence in (None, self._evidence("fast"), self._evidence("accurate")):
+        for evidence in (None, self._evidence("fast")):
             with (
                 patch(
                     "sibyl.api.routes.context.list_accessible_project_graph_ids",
@@ -2765,10 +2017,6 @@ class TestNaiveRetrievalArm:
                 patch("sibyl_core.tools.context.compile_context", compile_context),
                 patch("sibyl_core.retrieval.naive.naive_search", arm),
                 patch("sibyl.api.routes.search.execute_search_request", machine),
-                patch(
-                    "sibyl.api.routes.context.plan_deterministic_refinement_queries",
-                    return_value=[],
-                ),
                 patch("sibyl.api.routes.context.configured_embedding_provider", return_value=None),
             ):
                 await context_pack(
@@ -2852,3 +2100,78 @@ class TestNaiveRetrievalArm:
         field = ContextEvidenceRequest.model_fields["retrieval_mode"]
         assert "naive" in str(field.annotation)
         assert "EXPERIMENTAL" in field.description
+
+
+@pytest.mark.parametrize("mode", ["fast", "naive"])
+def test_context_evidence_supports_current_retrieval_modes(mode: str) -> None:
+    from sibyl.api.schemas.context import ContextEvidenceRequest
+
+    evidence = ContextEvidenceRequest(retrieval_mode=mode)
+    assert evidence.retrieval_mode == mode
+    assert ContextEvidenceRequest().retrieval_mode == "fast"
+
+
+def test_context_evidence_rejects_accurate_with_migration_instructions() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="set retrieval_mode=fast") as exc:
+        ContextPackRequest(
+            goal="find the release procedure", evidence={"retrieval_mode": "accurate"}
+        )
+
+    assert exc.value.errors()[0]["loc"] == ("evidence", "retrieval_mode")
+    assert "pinned Sibyl version" in str(exc.value)
+
+
+def test_context_evidence_schema_excludes_removed_mode() -> None:
+    from sibyl.api.schemas.context import ContextEvidenceRequest
+
+    schema = ContextEvidenceRequest.model_json_schema()
+    assert schema["properties"]["retrieval_mode"]["enum"] == ["fast", "naive"]
+    assert "max_planned_queries" not in schema["properties"]
+    assert "max_results_per_source" not in schema["properties"]
+
+
+@pytest.mark.parametrize("mode", ["fast", "naive"])
+def test_context_evidence_ignores_retired_planner_fields(mode: str) -> None:
+    from sibyl.api.schemas.context import ContextEvidenceRequest
+
+    legacy = ContextEvidenceRequest.model_validate(
+        {"retrieval_mode": mode, "max_planned_queries": 3, "max_results_per_source": 4}
+    )
+    current = ContextEvidenceRequest(retrieval_mode=mode)
+    assert legacy.model_dump() == current.model_dump()
+    assert legacy.model_fields_set == current.model_fields_set
+
+
+def test_removed_accurate_mode_returns_http_422_before_retrieval() -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from sibyl.api.routes.context import router
+    from sibyl.auth.dependencies import get_auth_context, get_current_organization
+
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+    for dependency in router.dependencies:
+        app.dependency_overrides[dependency.dependency] = lambda: None
+    app.dependency_overrides[get_auth_context] = _ctx
+    app.dependency_overrides[get_current_organization] = lambda: SimpleNamespace(
+        id=UUID("00000000-0000-0000-0000-000000000111")
+    )
+    with (
+        patch("sibyl_core.tools.context.compile_context", AsyncMock()) as compile_pack,
+        patch("sibyl.api.routes.search.execute_search_request", AsyncMock()) as search,
+        TestClient(app) as client,
+    ):
+        response = client.post(
+            "/api/context/pack",
+            json={"goal": "find the release procedure", "evidence": {"retrieval_mode": "accurate"}},
+        )
+
+    assert response.status_code == 422
+    error = response.json()["detail"][0]
+    assert error["loc"] == ["body", "evidence", "retrieval_mode"]
+    assert "set retrieval_mode=fast" in error["msg"]
+    compile_pack.assert_not_awaited()
+    search.assert_not_awaited()

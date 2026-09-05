@@ -354,7 +354,7 @@ tasks:
 
   inventory-lint:
     script:
-      uv run ruff check tools benchmarks/provider_usage.py
+      uv run ruff check tools benchmarks/provider_usage.py benchmarks/longmemeval_qa.py
       benchmarks/local_execution_identity.py benchmarks/longmemeval_v2_official_source.py
       benchmarks/longmemeval_v2_release_authorization.py
       benchmarks/longmemeval_v2_release_authorization_package.py
@@ -407,7 +407,7 @@ tasks:
       benchmarks/longmemeval_v2_live_smoke.py
       benchmarks/longmemeval_v2_projection_audit.py
       benchmarks/longmemeval_v2_chunk_geometry benchmarks/usage_rerank
-      && uv run ruff format --check tools
+      && uv run ruff format --check tools benchmarks/longmemeval_qa.py
       benchmarks/local_execution_identity.py benchmarks/longmemeval_v2_official_source.py
       benchmarks/longmemeval_v2_release_authorization.py
       benchmarks/longmemeval_v2_release_authorization_package.py
@@ -463,6 +463,7 @@ tasks:
     inputs:
       - tools/**/*.py
       - benchmarks/provider_usage.py
+      - benchmarks/longmemeval_qa.py
       - benchmarks/local_execution_identity.py
       - benchmarks/longmemeval_v2_official_source.py
       - benchmarks/longmemeval_v2_release_authorization.py
@@ -526,7 +527,7 @@ tasks:
 
   inventory-format:
     command:
-      uv run ruff format tools benchmarks/provider_usage.py
+      uv run ruff format tools benchmarks/provider_usage.py benchmarks/longmemeval_qa.py
       benchmarks/local_execution_identity.py benchmarks/longmemeval_v2_official_source.py
       benchmarks/longmemeval_v2_release_authorization.py
       benchmarks/longmemeval_v2_release_authorization_package.py
@@ -580,6 +581,7 @@ tasks:
     inputs:
       - tools/**/*.py
       - benchmarks/provider_usage.py
+      - benchmarks/longmemeval_qa.py
       - benchmarks/local_execution_identity.py
       - benchmarks/longmemeval_v2_official_source.py
       - benchmarks/longmemeval_v2_release_authorization.py
@@ -642,7 +644,7 @@ tasks:
 
   inventory-typecheck:
     command:
-      uv run ty check tools benchmarks/local_execution_identity.py
+      uv run ty check tools benchmarks/longmemeval_qa.py benchmarks/local_execution_identity.py
       benchmarks/longmemeval_v2_official_source.py
       benchmarks/longmemeval_v2_release_authorization.py
       benchmarks/longmemeval_v2_release_authorization_package.py
@@ -698,6 +700,7 @@ tasks:
     inputs:
       - tools/**/*.py
       - benchmarks/git_provenance.py
+      - benchmarks/longmemeval_qa.py
       - benchmarks/longmemeval_v2_official.py
       - benchmarks/local_execution_identity.py
       - benchmarks/longmemeval_v2_official_source.py
@@ -1019,9 +1022,18 @@ tasks:
       - tools/**/*.py
       - pyproject.toml
 
+  bench-evidence:
+    command: uv run python tools/bench/evidence_bundle.py
+    inputs:
+      - tools/bench/evidence_bundle.py
+      - benchmarks/longmemeval_v2_release_package_archive.py
+    options:
+      cache: false
+
   bench-gate-test:
     command:
-      uv run pytest tools/tests/test_benchmark_git_provenance.py tools/tests/test_bench_gate.py
+      uv run pytest tools/tests/test_evidence_bundle.py
+      tools/tests/test_benchmark_git_provenance.py tools/tests/test_bench_gate.py
       tools/tests/test_compare_eval_reports.py tools/tests/test_context_pack_eval_script.py
       tools/tests/test_longmemeval_agentic_traversal.py
       tools/tests/test_longmemeval_bench.py tools/tests/test_longmemeval_live.py
@@ -1066,6 +1078,7 @@ tasks:
       - benchmarks/local_execution_identity.py
       - benchmarks/longmemeval_bench.py
       - benchmarks/longmemeval_live.py
+      - benchmarks/longmemeval_qa.py
       - benchmarks/longmemeval_replay.py
       - benchmarks/longmemeval_v2_probe.py
       - benchmarks/longmemeval_v2_official.py
