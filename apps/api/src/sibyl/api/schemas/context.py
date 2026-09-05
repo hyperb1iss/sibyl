@@ -2,10 +2,9 @@
 
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from sibyl_core.models.context import ContextFacet, ContextIntent, ContextLayer
-from sibyl_core.retrieval.refinement import MAX_REFINEMENT_QUERIES
 from sibyl_core.tools.context import DEFAULT_MARKDOWN_TOKEN_BUDGET
 
 from .search import SearchResponse
@@ -27,14 +26,6 @@ class ContextEvidenceRequest(BaseModel):
             "Bound composed evidence by characters of returned content instead of item count"
         ),
     )
-    max_results_per_source: int | None = Field(
-        default=None,
-        ge=1,
-        le=50,
-        description=(
-            "In accurate mode, prefer source-diverse evidence before deterministic backfill"
-        ),
-    )
     content_max_chars: int = Field(
         default=500,
         ge=0,
@@ -45,24 +36,14 @@ class ContextEvidenceRequest(BaseModel):
         default=False,
         description="Include authorized evidence ranking diagnostics",
     )
-    retrieval_mode: Literal["fast", "accurate", "naive"] = Field(
+    retrieval_mode: Literal["fast", "naive"] = Field(
         default="fast",
         description=(
-            "Use one search (fast), deterministic multi-step evidence refinement "
-            "(accurate), or the naive-strong control arm (naive). DEPRECATED: "
-            "accurate measured lower accuracy at 2.5x the latency of fast at full "
-            "benchmark scale and will be removed in a future release; requests "
-            "selecting it are served but warned. EXPERIMENTAL: naive is the 1.3 "
-            "Phase 0 control arm (BM25 + dense KNN + plain RRF + a tight pack, "
-            "with no traversal, synthesis, query planning, or coverage ranking) "
-            "and it governs the whole pack, not the evidence block alone."
+            "Use one search (fast), or the naive-strong control arm (naive). "
+            "The accurate mode was removed in 1.4; select fast explicitly. "
+            "EXPERIMENTAL: naive uses BM25, dense KNN, and plain RRF with no traversal, synthesis, "
+            "query planning, or coverage ranking, and governs the whole pack."
         ),
-    )
-    max_planned_queries: int = Field(
-        default=3,
-        ge=1,
-        le=MAX_REFINEMENT_QUERIES,
-        description="Maximum feedback searches across two accurate-mode refinement rounds",
     )
     reserve_distilled_notes: bool = Field(
         default=True,
@@ -93,6 +74,17 @@ class ContextEvidenceRequest(BaseModel):
             "0 keeps the classic typed query."
         ),
     )
+
+    @field_validator("retrieval_mode", mode="before")
+    @classmethod
+    def reject_removed_accurate_mode(cls, value: object) -> object:
+        if value == "accurate":
+            raise ValueError(
+                "retrieval_mode=accurate was removed in Sibyl 1.4; "
+                "set retrieval_mode=fast (or omit it). Replay historical accurate runs "
+                "against their pinned Sibyl version."
+            )
+        return value
 
     @model_validator(mode="after")
     def require_note_lane_for_explicit_composition(self) -> Self:

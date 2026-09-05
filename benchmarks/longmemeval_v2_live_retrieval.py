@@ -138,7 +138,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--retrieval-mode",
         choices=("fast", "accurate", "naive"),
-        default="accurate",
+        default="fast",
+        help="Use fast or naive on Sibyl 1.4; accurate requires a pinned pre-1.4 server.",
     )
     parser.add_argument("--max-planned-queries", type=int, default=3)
     parser.add_argument(

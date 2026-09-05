@@ -403,3 +403,31 @@ def test_evidence_geometry_flags_thread_into_the_run_config(tmp_path: Path) -> N
     )
     assert armed_config["evidence_types"] == ["passage", "session"]
     assert armed_config["evidence_char_budget"] == armed_char_budget
+
+
+def test_live_retrieval_defaults_to_supported_fast_mode() -> None:
+    module = _load_module()
+    required = [
+        "--api-token-file",
+        "credentials.json",
+        "--project-id",
+        "project_test",
+        "--run-id",
+        "run_test",
+        "--questions",
+        "questions.jsonl",
+        "--haystack",
+        "haystack.json",
+        "--trajectories",
+        "trajectories.jsonl",
+        "--question-ids-file",
+        "ids.json",
+        "--output-dir",
+        "results",
+    ]
+
+    assert module.parse_args(required).retrieval_mode == "fast"
+    assert module.parse_args([*required, "--retrieval-mode", "naive"]).retrieval_mode == "naive"
+    # Old experiment configurations remain parseable for a pinned old server.
+    historical = module.parse_args([*required, "--retrieval-mode", "accurate"])
+    assert historical.retrieval_mode == "accurate"

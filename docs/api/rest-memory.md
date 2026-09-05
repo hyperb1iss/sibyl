@@ -207,18 +207,18 @@ compilation:
 | ------------------------------- | -------- | ------------- | ----------------------------------------------------------------- |
 | `types`                         | string[] | `["session"]` | Entity types to include in the evidence pool                      |
 | `limit`                         | integer  | 24            | Maximum evidence results (1-50)                                   |
-| `max_results_per_source`        | integer  | -             | In accurate mode, prefer source-diverse evidence first (1-50)     |
 | `content_max_chars`             | integer  | 500           | Maximum content characters per evidence result (0-50000)          |
 | `include_retrieval_diagnostics` | boolean  | false         | Include authorized evidence ranking diagnostics                   |
-| `retrieval_mode`                | string   | `fast`        | `fast` (one search), `accurate` (deprecated), `naive` (see below) |
-| `max_planned_queries`           | integer  | 3             | Maximum feedback searches across accurate-mode refinement (1-3)   |
+| `retrieval_mode`                | string   | `fast`        | `fast` (one search), `naive` (see below) |
 | `reserve_distilled_notes`       | boolean  | true          | Reserve a typed lane for distilled operational notes              |
 
-::: warning `retrieval_mode=accurate` is deprecated Measured at full benchmark scale, accurate mode
-returned lower accuracy than `fast` at 2.5x the latency, so it is scheduled for removal. Requests
-selecting it are still served; the server logs a deprecation warning and the evidence response
-carries a `retrieval_mode_deprecated` filter naming the replacement. Use `fast`, the default, which
-also makes `max_results_per_source` and `max_planned_queries` irrelevant. :::
+::: warning Removed in Sibyl 1.4
+Requests selecting `retrieval_mode=accurate` receive HTTP 422 with migration instructions.
+Set `retrieval_mode=fast` or omit the field. Fast and naive behavior remain unchanged.
+Replay historical accurate-mode experiments against their pinned pre-1.4 Sibyl version.
+The retired `max_results_per_source` and `max_planned_queries` fields are ignored if sent by older
+clients. The fast path never used either field.
+:::
 
 ::: warning `retrieval_mode=naive` is an experiment, not a product mode Selecting `naive` swaps the
 whole pack onto the naive-strong control arm: BM25 fulltext plus dense KNN, fused with plain

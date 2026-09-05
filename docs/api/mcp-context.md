@@ -215,7 +215,7 @@ project raw memory.
 - The `markdown` field is a rendered view of the same pack, convenient for direct prompt injection.
 - Context pack compilation is audited per call.
 - Enhanced evidence retrieval (`evidence` request field with `retrieval_mode`,
-  `max_planned_queries`, `reserve_distilled_notes`, and diagnostics) is a REST-only surface on
+  `reserve_distilled_notes`, and diagnostics) is a REST-only surface on
   `POST /api/context/pack`; the MCP tool does not accept it. See
   [rest-memory.md](./rest-memory.md#compile-context-pack).
 
