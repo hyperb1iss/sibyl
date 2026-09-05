@@ -13,6 +13,11 @@ from sibyl_core.models.entities import Entity, EntityType, Relationship, Relatio
 from sibyl_core.models.reflection import ReflectionCandidate
 from sibyl_core.models.relations import declared_relation_targets
 from sibyl_core.services.memory_contract import ReflectionPromotionResult
+from sibyl_core.services.memory_identity import (
+    IDENTITY_KEY,
+    reflection_entity_id,
+    reflection_identity,
+)
 from sibyl_core.services.memory_lifecycle import _relationship
 from sibyl_core.services.memory_policy import (
     _candidate_source_ids,
@@ -25,7 +30,6 @@ from sibyl_core.services.surreal_content import (
     MemoryScope,
     RawMemory,
 )
-from sibyl_core.tools.helpers import _generate_id
 
 _SCOPE_RANK: dict[MemoryScope, int] = {
     MemoryScope.PRIVATE: 0,
@@ -265,8 +269,7 @@ def _entity_from_candidate(
     policy_metadata: Mapping[str, Any],
 ) -> Entity:
     entity_type = _entity_type(candidate.kind)
-    entity_id = _generate_id(entity_type.value, candidate.title, domain or "general")
-    source_ids = _candidate_source_ids(candidate, source_id)
+    source_ids = sorted(_candidate_source_ids(candidate, source_id))
     primary_source_id = source_id or (source_ids[0] if source_ids else None)
     native_write_path = _metadata_str(candidate.metadata, "native_write_path")
     if not native_write_path:
@@ -305,11 +308,13 @@ def _entity_from_candidate(
         metadata.pop("category", None)
     if project:
         metadata["project_id"] = project
+    else:
+        metadata.pop("project_id", None)
     if primary_source_id:
         metadata["reflection_source_id"] = primary_source_id
 
-    return Entity(
-        id=entity_id,
+    entity = Entity(
+        id="reflection_pending",
         entity_type=entity_type,
         name=candidate.title,
         description=candidate.content[:500],
@@ -319,6 +324,9 @@ def _entity_from_candidate(
         metadata=metadata,
         source_file=primary_source_id,
     )
+    entity.id = reflection_entity_id(entity)
+    entity.metadata[IDENTITY_KEY] = reflection_identity(entity)
+    return entity
 
 
 async def _linkable_related_targets(
