@@ -517,7 +517,7 @@ class ClientTransportMixin:
             category = "dependency"
         elif status == 401 or exc.error_code == "token_refresh_failed":
             category = "authentication"
-        elif exc.error_code == "idempotency_in_progress":
+        elif status == 409 and exc.error_code in {"idempotency_in_progress", "entity_locked"}:
             category = "server"
         elif status == 409:
             category = "conflict"

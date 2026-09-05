@@ -359,7 +359,8 @@ async def test_unconfirmed_response_retains_payload_and_diagnostic(
 
 
 @pytest.mark.asyncio
-async def test_transient_idempotency_lock_retries_original_request(identity: dict) -> None:
+@pytest.mark.parametrize("error_code", ["idempotency_in_progress", "entity_locked"])
+async def test_transient_lock_retries_original_request(identity: dict, error_code: str) -> None:
     item = queued(identity)
     writes = []
 
@@ -369,7 +370,7 @@ async def test_transient_idempotency_lock_retries_original_request(identity: dic
         writes.append(request)
         if len(writes) == 1:
             return httpx.Response(409, json={"detail": {
-                "error": "idempotency_in_progress", "message": "Still running"
+                "error": error_code, "message": "Still running"
             }})
         return httpx.Response(200, json={"ok": True})
 
@@ -377,7 +378,7 @@ async def test_transient_idempotency_lock_retries_original_request(identity: dic
     await client._maybe_replay_pending_writes(ignore_backoff=True)
     failed = pending_writes.read_pending_write(item["id"])
     assert failed["status"] == "pending"
-    assert failed["last_failure"]["error_code"] == "idempotency_in_progress"
+    assert failed["last_failure"]["error_code"] == error_code
     await client._maybe_replay_pending_writes(ignore_backoff=True)
     await client.close()
     assert len(writes) == 2

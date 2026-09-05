@@ -42,6 +42,7 @@ _SAFE_FAILURE_CODES = frozenset(
         "service_unavailable",
         "idempotency_conflict",
         "idempotency_in_progress",
+        "entity_locked",
         "replay_identity_mismatch",
         "pending_dependency",
         "response_unconfirmed",

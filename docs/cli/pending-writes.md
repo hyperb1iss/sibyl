@@ -40,7 +40,8 @@ reason; the CLI cannot reconstruct one.
 Within a verified owner or original credential lineage, an unresolved write holds later operations
 on the same entity. Independent writes can continue. Bulk operations form an ordering barrier
 because they can touch multiple entities. Explicitly selecting a later write does not bypass its
-unresolved predecessor.
+unresolved predecessor. Outside task, entity, and project routes, ordering follows the first two URL
+path segments; different action paths do not share an ordering lane.
 
 ## Flush retryable writes
 
@@ -91,6 +92,9 @@ through its own context.
 sibyl pending-writes discard <write-id>...
 sibyl pending-writes discard --read-like
 ```
+
+Offline drafts retain their last verified owner. Replacing the database does not transfer those
+drafts to the new instance. Keep their payloads for inspection before deciding how to recover them.
 
 Discard permanently removes the named local copies without replay. Export or copy any payload you
 need before discarding it. The `--read-like` option removes requests buffered by older CLI versions
