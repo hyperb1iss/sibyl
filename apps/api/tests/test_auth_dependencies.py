@@ -373,3 +373,29 @@ async def test_legacy_mutations_and_reads_do_not_require_server_identity(
     monkeypatch.setattr(dependencies, "get_server_instance_id", lookup)
     assert await dependencies.build_auth_context(request) is ctx
     lookup.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cached", [False, True])
+@pytest.mark.parametrize("matches", [False, True])
+async def test_user_only_mutation_checks_server_instance(monkeypatch, cached, matches) -> None:
+    user_id = uuid4()
+    instance = str(uuid4())
+    request = _make_request(user_id=str(user_id), org_id="")
+    request.state.jwt_claims = {"sub": str(user_id)}
+    request.scope["method"] = "POST"
+    request.scope["headers"] = [(b"x-sibyl-server-instance", instance.encode())]
+    user = SimpleNamespace(id=user_id)
+    if cached:
+        request.state.auth_context = SimpleNamespace(user=user)
+    monkeypatch.setattr(dependencies, "get_user_by_id", AsyncMock(return_value=user))
+    lookup = AsyncMock(return_value=instance if matches else str(uuid4()))
+    monkeypatch.setattr(dependencies, "get_server_instance_id", lookup)
+    if matches:
+        assert await dependencies.get_current_user(request) is user
+    else:
+        with pytest.raises(dependencies.HTTPException) as exc:
+            await dependencies.get_current_user(request)
+        assert exc.value.status_code == 409
+        assert exc.value.detail["error"] == "replay_identity_mismatch"
+    lookup.assert_awaited_once()

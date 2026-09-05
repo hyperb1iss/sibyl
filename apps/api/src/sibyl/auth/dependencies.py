@@ -158,6 +158,7 @@ async def get_current_user(
     cached_ctx = getattr(request.state, "auth_context", None)
     cached_user = getattr(cached_ctx, "user", None)
     if getattr(cached_user, "id", None) == user_id:
+        await _validate_replay_server_instance(request)
         return cast("AuthUser", cached_user)
 
     if cached_ctx is not None:
@@ -175,6 +176,7 @@ async def get_current_user(
         ) from e
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    await _validate_replay_server_instance(request)
     return user
 
 

@@ -6,11 +6,17 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
-from sibyl_core.backends.surreal import SurrealContentClient, bootstrap_content_schema
+from sibyl_core.backends.surreal import (
+    SurrealAuthClient,
+    SurrealContentClient,
+    bootstrap_auth_schema,
+    bootstrap_content_schema,
+)
+from sibyl_core.backends.surreal.auth_schema import AUTH_SCHEMA_NAME
 from sibyl_core.backends.surreal.content_schema import (
     CONTENT_SCHEMA_CURRENT_VERSION,
     CONTENT_SCHEMA_NAME,
@@ -956,3 +962,47 @@ async def test_live_surreal_server_executes_3x_ingestion_primitives(
                 await _drop_surreal_namespace(namespace)
         else:
             await _drop_surreal_namespace(namespace)
+
+
+@pytest.mark.asyncio
+async def test_live_auth_replay_identity_migration_preserves_data_lineage() -> None:
+    namespace = f"replay_identity_{uuid4().hex}"
+    client = SurrealAuthClient(
+        url=_live_surreal_url(),
+        username=_surreal_username(),
+        password=_surreal_password(),
+        namespace=namespace,
+        database="auth",
+    )
+    replacement = SurrealAuthClient(
+        url=_live_surreal_url(),
+        username=_surreal_username(),
+        password=_surreal_password(),
+        namespace=namespace,
+        database="replacement",
+    )
+    try:
+        await bootstrap_auth_schema(client)
+        assert await get_schema_version(client.execute_query, name=AUTH_SCHEMA_NAME) >= 7
+        first = normalize_records(
+            await client.execute_query("SELECT instance_id FROM server_identity:singleton;")
+        )
+        assert len(first) == 1
+        assert UUID(str(first[0]["instance_id"]))
+        await bootstrap_auth_schema(client)
+        assert (
+            normalize_records(
+                await client.execute_query("SELECT instance_id FROM server_identity:singleton;")
+            )
+            == first
+        )
+        await bootstrap_auth_schema(replacement)
+        other = normalize_records(
+            await replacement.execute_query("SELECT instance_id FROM server_identity:singleton;")
+        )
+        assert len(other) == 1
+        assert other != first
+    finally:
+        await client.close()
+        await replacement.close()
+        await _drop_surreal_namespace(namespace)
