@@ -441,8 +441,18 @@ def test_live_retrieval_defaults_to_supported_fast_mode() -> None:
         "results",
     ]
 
-    assert module.parse_args(required).retrieval_mode == "fast"
-    assert module.parse_args([*required, "--retrieval-mode", "naive"]).retrieval_mode == "naive"
+    default = module.parse_args(required)
+    assert default.retrieval_mode == "fast"
+    assert default.source_evidence_bundling is True
+    naive = module.parse_args([*required, "--retrieval-mode", "naive"])
+    assert naive.retrieval_mode == "naive"
+    assert naive.source_evidence_bundling is False
+    unbundled = module.parse_args(
+        [*required, "--retrieval-mode", "naive", "--no-source-evidence-bundling"]
+    )
+    assert unbundled.source_evidence_bundling is False
+    with pytest.raises(SystemExit, match=r"^2$"):
+        module.parse_args([*required, "--retrieval-mode", "naive", "--source-evidence-bundling"])
     # Old experiment configurations remain parseable for a pinned old server.
     historical = module.parse_args([*required, "--retrieval-mode", "accurate"])
     assert historical.retrieval_mode == "accurate"

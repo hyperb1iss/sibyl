@@ -180,7 +180,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--source-evidence-bundling",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=None,
+        help="Bundle source evidence by default except in the naive control arm.",
     )
     parser.add_argument("--semantic-prior-rescue-weight", type=float, default=0.0)
     parser.add_argument("--typed-pool", default="typed", choices=["typed", "typed_entity_overlap"])
@@ -221,6 +222,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--neighbor-stitch-items must be non-negative")
     if args.neighbor_stitch_span < 0:
         parser.error("--neighbor-stitch-span must be non-negative")
+    return _resolve_source_bundling(parser, args)
+
+
+def _resolve_source_bundling(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> argparse.Namespace:
+    if args.source_evidence_bundling is None:
+        args.source_evidence_bundling = args.retrieval_mode != "naive"
+    elif args.retrieval_mode == "naive" and args.source_evidence_bundling:
+        parser.error("--source-evidence-bundling is incompatible with --retrieval-mode=naive")
     return args
 
 
