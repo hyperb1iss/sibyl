@@ -27,9 +27,14 @@ def native_reflection_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespac
     entities: list[Entity] = []
     relationships = []
 
-    async def create_direct(entity):
+    async def create_direct_if_absent(entity):
         entities.append(entity)
-        return entity.id
+        return entity, True
+
+    async def update(entity_id, updates, **kwargs):
+        entity = next(entity for entity in entities if entity.id == entity_id)
+        entity.metadata.update(updates["metadata"])
+        return entity
 
     async def create_bulk(items):
         relationships.extend(items)
@@ -37,7 +42,8 @@ def native_reflection_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespac
 
     runtime = SimpleNamespace(
         entity_manager=SimpleNamespace(
-            create_direct=AsyncMock(side_effect=create_direct),
+            create_direct_if_absent=AsyncMock(side_effect=create_direct_if_absent),
+            update=AsyncMock(side_effect=update),
             get=AsyncMock(return_value=None),
         ),
         relationship_manager=SimpleNamespace(create_bulk=AsyncMock(side_effect=create_bulk)),
@@ -235,7 +241,7 @@ async def test_reflect_memory_persist_denies_unverified_project(
         persist_review=False,
     )
 
-    native_reflection_runtime.entity_manager.create_direct.assert_not_awaited()
+    native_reflection_runtime.entity_manager.create_direct_if_absent.assert_not_awaited()
     native_reflection_runtime.relationship_manager.create_bulk.assert_not_awaited()
     assert pack.source_id is None
     assert pack.persisted_count == 0
@@ -328,7 +334,7 @@ async def test_reflect_memory_can_persist_review_queue(
     assert calls[1][1]["suggested_scope_key"] is None
     assert calls[1][1]["extraction_prompt_metadata"]["extractor"] == ("sibyl_reflection_extractor")
 
-    native_reflection_runtime.entity_manager.create_direct.assert_not_awaited()
+    native_reflection_runtime.entity_manager.create_direct_if_absent.assert_not_awaited()
     native_reflection_runtime.relationship_manager.create_bulk.assert_not_awaited()
 
 
@@ -374,7 +380,7 @@ async def test_reflect_memory_review_persistence_denies_unverified_project(
     source_review.assert_not_awaited()
     candidate_review.assert_not_awaited()
 
-    native_reflection_runtime.entity_manager.create_direct.assert_not_awaited()
+    native_reflection_runtime.entity_manager.create_direct_if_absent.assert_not_awaited()
     native_reflection_runtime.relationship_manager.create_bulk.assert_not_awaited()
 
 
@@ -386,9 +392,14 @@ async def test_reflect_memory_native_write_uses_policy_and_direct_graph(
     created_relationships = []
 
     class FakeEntityManager:
-        async def create_direct(self, entity):
+        async def create_direct_if_absent(self, entity):
             created_entities.append(entity)
-            return entity.id
+            return entity, True
+
+        async def update(self, entity_id, updates, **kwargs):
+            entity = next(entity for entity in created_entities if entity.id == entity_id)
+            entity.metadata.update(updates["metadata"])
+            return entity
 
         # Promotion links only targets it can resolve and the writer can see,
         # so the declared link has to exist for the RELATED_TO edge to appear.

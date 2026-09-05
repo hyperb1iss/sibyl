@@ -171,6 +171,37 @@ async def reflect_memory(
             )
         if source.success:
             source_id = source.id
+        else:
+            # A requested source is an evidence prerequisite. Never publish a
+            # candidate after its source was denied or retired.
+            return ReflectionPack(
+                source_title=source_title,
+                source_id=source.id,
+                intent=intent,
+                domain=domain,
+                project=project,
+                candidates=[
+                    ground_reflection_candidate(
+                        replace(
+                            candidate,
+                            metadata={
+                                **candidate.metadata,
+                                **persist_policy_metadata,
+                                "promotion_state": "denied",
+                                "promotion_errors": [source.message],
+                            },
+                        ),
+                        raw_source_ids=[],
+                        suggested_memory_scope=resolved_suggested_scope.value,
+                        suggested_scope_key=resolved_suggested_scope_key,
+                        extraction_prompt_metadata=extraction_prompt_metadata,
+                        source_id=None,
+                    )
+                    for candidate in candidates
+                ],
+                total_candidates=len(candidates),
+                persisted_count=0,
+            )
 
     source_anchor_id = source_id
     if persist and source_anchor_id is None and not persist_source:

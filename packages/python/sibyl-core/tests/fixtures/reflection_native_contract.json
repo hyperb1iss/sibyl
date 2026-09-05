@@ -6,7 +6,7 @@
       "description": "We decided to preserve source evidence before publishing decisions.",
       "embedding": null,
       "entity_type": "session",
-      "id": "session_9c6ad27491fa",
+      "id": "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a",
       "metadata": {
         "capture_mode": "reflect",
         "capture_surface": "reflection",
@@ -20,18 +20,18 @@
           "action": "promote",
           "created_at": "2026-09-04T12:00:00+00:00",
           "derived_ids": [
-            "session_9c6ad27491fa"
+            "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
           ],
           "duplicate_of_source_id": null,
           "flags": [],
           "metadata": {
-            "promoted_entity_id": "session_9c6ad27491fa"
+            "promoted_entity_id": "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
           },
           "prior_state": null,
           "reason": "preserves raw reflection source material",
           "replacement_source_id": null,
           "reversible": true,
-          "source_id": "session_9c6ad27491fa",
+          "source_id": "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a",
           "state": "active"
         },
         "memory_scope": "project",
@@ -59,7 +59,7 @@
             "kind": "promotion",
             "lifecycle_state": "active",
             "metadata": {
-              "promoted_entity_id": "session_9c6ad27491fa"
+              "promoted_entity_id": "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
             },
             "policy_reasons": [
               "same_scope_reflect_allowed",
@@ -67,13 +67,61 @@
             ],
             "reason": "preserves raw reflection source material",
             "related_source_ids": [
-              "session_9c6ad27491fa"
+              "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
             ],
             "reversible": true,
             "source_ids": [],
-            "target_source_id": "session_9c6ad27491fa"
+            "target_source_id": "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
           }
         ],
+        "reflection_identity": {
+          "content_sha256": "eaa25e41b0f392837f10c4a37512205fd867b9dd72b8f829d5c787b9c4a83d0c",
+          "created_by": "user_123",
+          "domain": "sibyl",
+          "kind": "session",
+          "memory_scope": "project",
+          "organization_id": "org_123",
+          "principal_id": "user_123",
+          "project_id": "project_123",
+          "purpose": "source",
+          "scope_key": "project_123",
+          "source_ids": [],
+          "title": "Evidence review",
+          "version": 2
+        },
+        "reflection_publication": {
+          "receipt": {
+            "invalidation_details_available": false,
+            "memory_scope": "project",
+            "native_relationship_count": 1,
+            "native_relationship_failed_count": 0,
+            "native_relationship_requested_count": 1,
+            "native_write_mode": "enabled",
+            "native_write_path": "reflection_promotion",
+            "policy_actions": [
+              "reflect",
+              "write"
+            ],
+            "policy_allowed": true,
+            "policy_reasons": [
+              "same_scope_reflect_allowed",
+              "same_scope_write_allowed"
+            ],
+            "promotion_errors": [],
+            "promotion_state": "complete",
+            "raw_source_ids": [],
+            "scope_key": "project_123",
+            "source_ids": []
+          },
+          "request": {
+            "invalidation_cutoff": {},
+            "invalidation_targets": [],
+            "relationships": [
+              "rel_session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a_belongs_to_project_123"
+            ]
+          },
+          "state": "complete"
+        },
         "reflection_reason": "preserves raw reflection source material",
         "reflection_source": true,
         "remember_kind": "session",
@@ -96,7 +144,7 @@
       "description": "We decided to preserve source evidence before publishing decisions.",
       "embedding": null,
       "entity_type": "decision",
-      "id": "decision_cfeb13f7083a",
+      "id": "decision_v2_4de9394e566cd6c22aed2b2a269bdc27f91e086fe9acd61b0bb188762dd5817f",
       "metadata": {
         "capture_mode": "reflect",
         "capture_surface": "reflection",
@@ -120,18 +168,18 @@
           "action": "promote",
           "created_at": "2026-09-04T12:00:00+00:00",
           "derived_ids": [
-            "decision_cfeb13f7083a"
+            "decision_v2_4de9394e566cd6c22aed2b2a269bdc27f91e086fe9acd61b0bb188762dd5817f"
           ],
           "duplicate_of_source_id": null,
           "flags": [],
           "metadata": {
-            "promoted_entity_id": "decision_cfeb13f7083a"
+            "promoted_entity_id": "decision_v2_4de9394e566cd6c22aed2b2a269bdc27f91e086fe9acd61b0bb188762dd5817f"
           },
           "prior_state": "pending",
           "reason": "captures a choice or direction future agents should preserve",
           "replacement_source_id": null,
           "reversible": true,
-          "source_id": "session_9c6ad27491fa",
+          "source_id": "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a",
           "state": "active"
         },
         "memory_scope": "project",
@@ -151,7 +199,7 @@
         "principal_id": "user_123",
         "project_id": "project_123",
         "raw_source_ids": [
-          "session_9c6ad27491fa"
+          "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
         ],
         "reflection_findings": [
           {
@@ -162,7 +210,7 @@
             "kind": "promotion",
             "lifecycle_state": "active",
             "metadata": {
-              "promoted_entity_id": "decision_cfeb13f7083a"
+              "promoted_entity_id": "decision_v2_4de9394e566cd6c22aed2b2a269bdc27f91e086fe9acd61b0bb188762dd5817f"
             },
             "policy_reasons": [
               "same_scope_reflect_allowed",
@@ -170,19 +218,75 @@
             ],
             "reason": "captures a choice or direction future agents should preserve",
             "related_source_ids": [
-              "decision_cfeb13f7083a"
+              "decision_v2_4de9394e566cd6c22aed2b2a269bdc27f91e086fe9acd61b0bb188762dd5817f"
             ],
             "reversible": true,
             "source_ids": [
-              "session_9c6ad27491fa"
+              "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
             ],
-            "target_source_id": "session_9c6ad27491fa"
+            "target_source_id": "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
           }
         ],
+        "reflection_identity": {
+          "content_sha256": "eaa25e41b0f392837f10c4a37512205fd867b9dd72b8f829d5c787b9c4a83d0c",
+          "created_by": "user_123",
+          "domain": "sibyl",
+          "kind": "decision",
+          "memory_scope": "project",
+          "organization_id": "org_123",
+          "primary_source_id": "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a",
+          "principal_id": "user_123",
+          "project_id": "project_123",
+          "purpose": "candidate",
+          "scope_key": "project_123",
+          "source_ids": [
+            "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
+          ],
+          "title": "Decision: We decided to preserve source evidence before publishing decisions.",
+          "version": 2
+        },
         "reflection_index": 0,
         "reflection_intent": "build",
+        "reflection_publication": {
+          "receipt": {
+            "invalidation_details_available": false,
+            "memory_scope": "project",
+            "native_relationship_count": 2,
+            "native_relationship_failed_count": 0,
+            "native_relationship_requested_count": 2,
+            "native_write_mode": "enabled",
+            "native_write_path": "reflection_promotion",
+            "policy_actions": [
+              "reflect",
+              "write"
+            ],
+            "policy_allowed": true,
+            "policy_reasons": [
+              "same_scope_reflect_allowed",
+              "same_scope_write_allowed"
+            ],
+            "promotion_errors": [],
+            "promotion_state": "complete",
+            "raw_source_ids": [
+              "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
+            ],
+            "scope_key": "project_123",
+            "source_ids": [
+              "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
+            ]
+          },
+          "request": {
+            "invalidation_cutoff": {},
+            "invalidation_targets": [],
+            "relationships": [
+              "rel_decision_v2_4de9394e566cd6c22aed2b2a269bdc27f91e086fe9acd61b0bb188762dd5817f_belongs_to_project_123",
+              "rel_decision_v2_4de9394e566cd6c22aed2b2a269bdc27f91e086fe9acd61b0bb188762dd5817f_derived_from_session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
+            ]
+          },
+          "state": "complete"
+        },
         "reflection_reason": "captures a choice or direction future agents should preserve",
-        "reflection_source_id": "session_9c6ad27491fa",
+        "reflection_source_id": "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a",
         "reflection_source_title": "Evidence review",
         "relationship_records": [
           {
@@ -193,7 +297,7 @@
             "relationship_type": "BELONGS_TO",
             "source_id": "candidate:0",
             "source_ids": [
-              "session_9c6ad27491fa"
+              "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
             ],
             "target_id": "project_123"
           }
@@ -202,7 +306,7 @@
         "review_state": "pending",
         "scope_key": "project_123",
         "source_ids": [
-          "session_9c6ad27491fa"
+          "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
         ],
         "suggested_memory_scope": "project",
         "suggested_scope_key": null,
@@ -216,10 +320,10 @@
       "name": "Decision: We decided to preserve source evidence before publishing decisions.",
       "organization_id": "org_123",
       "revision": 1,
-      "source_file": "session_9c6ad27491fa"
+      "source_file": "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
     }
   ],
-  "markdown": "# Sibyl Reflection: Evidence review\nIntent: build\nSource: `session_9c6ad27491fa`\nDomain: sibyl\nProject: project_123\n\n## Decision: Decision: We decided to preserve source evidence before publishing decisions. `decision_cfeb13f7083a`\n- Confidence: 0.86\n- Why: captures a choice or direction future agents should preserve\n- Memory: We decided to preserve source evidence before publishing decisions.\n\n_Hint: Review candidates, persist the durable ones, and keep raw session source as provenance._",
+  "markdown": "# Sibyl Reflection: Evidence review\nIntent: build\nSource: `session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a`\nDomain: sibyl\nProject: project_123\n\n## Decision: Decision: We decided to preserve source evidence before publishing decisions. `decision_v2_4de9394e566cd6c22aed2b2a269bdc27f91e086fe9acd61b0bb188762dd5817f`\n- Confidence: 0.86\n- Why: captures a choice or direction future agents should preserve\n- Memory: We decided to preserve source evidence before publishing decisions.\n\n_Hint: Review candidates, persist the durable ones, and keep raw session source as provenance._",
   "pack": {
     "candidates": [
       {
@@ -245,6 +349,7 @@
           "invalidated_entity_ids": [],
           "invalidated_source_count": 0,
           "invalidated_source_ids": [],
+          "invalidation_details_available": true,
           "invalidation_skipped_source_count": 0,
           "invalidation_skipped_source_ids": [],
           "memory_scope": "project",
@@ -267,13 +372,14 @@
           "project_id": "project_123",
           "promotion_errors": [],
           "promotion_state": "complete",
+          "publication_outcome": "created",
           "raw_source_ids": [
-            "session_9c6ad27491fa"
+            "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
           ],
           "reflection_index": 0,
           "reflection_intent": "build",
           "reflection_reason": "captures a choice or direction future agents should preserve",
-          "reflection_source_id": "session_9c6ad27491fa",
+          "reflection_source_id": "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a",
           "reflection_source_title": "Evidence review",
           "relationship_records": [
             {
@@ -284,7 +390,7 @@
               "relationship_type": "BELONGS_TO",
               "source_id": "candidate:0",
               "source_ids": [
-                "session_9c6ad27491fa"
+                "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
               ],
               "target_id": "project_123"
             }
@@ -293,14 +399,14 @@
           "review_state": "pending",
           "scope_key": "project_123",
           "source_ids": [
-            "session_9c6ad27491fa"
+            "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
           ],
           "suggested_memory_scope": "project",
           "suggested_scope_key": null
         },
-        "persisted_id": "decision_cfeb13f7083a",
+        "persisted_id": "decision_v2_4de9394e566cd6c22aed2b2a269bdc27f91e086fe9acd61b0bb188762dd5817f",
         "raw_source_ids": [
-          "session_9c6ad27491fa"
+          "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
         ],
         "reason": "captures a choice or direction future agents should preserve",
         "reflection_findings": [],
@@ -313,7 +419,7 @@
             "relationship_type": "BELONGS_TO",
             "source_id": "candidate:0",
             "source_ids": [
-              "session_9c6ad27491fa"
+              "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
             ],
             "target_id": "project_123"
           }
@@ -334,44 +440,44 @@
     "intent": "build",
     "persisted_count": 1,
     "project": "project_123",
-    "source_id": "session_9c6ad27491fa",
+    "source_id": "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a",
     "source_title": "Evidence review",
     "total_candidates": 1,
     "usage_hint": "Review candidates, persist the durable ones, and keep raw session source as provenance."
   },
   "relationships": [
     {
-      "id": "rel_session_9c6ad27491fa_belongs_to_project_123",
+      "id": "rel_session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a_belongs_to_project_123",
       "metadata": {
         "created_at": "2026-09-04T12:00:00+00:00",
         "native_write_path": "reflection_promotion"
       },
       "relationship_type": "BELONGS_TO",
-      "source_id": "session_9c6ad27491fa",
+      "source_id": "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a",
       "target_id": "project_123",
       "weight": 1.0
     },
     {
-      "id": "rel_decision_cfeb13f7083a_belongs_to_project_123",
+      "id": "rel_decision_v2_4de9394e566cd6c22aed2b2a269bdc27f91e086fe9acd61b0bb188762dd5817f_belongs_to_project_123",
       "metadata": {
         "created_at": "2026-09-04T12:00:00+00:00",
         "native_write_path": "reflection_promotion"
       },
       "relationship_type": "BELONGS_TO",
-      "source_id": "decision_cfeb13f7083a",
+      "source_id": "decision_v2_4de9394e566cd6c22aed2b2a269bdc27f91e086fe9acd61b0bb188762dd5817f",
       "target_id": "project_123",
       "weight": 1.0
     },
     {
-      "id": "rel_decision_cfeb13f7083a_derived_from_session_9c6ad27491fa",
+      "id": "rel_decision_v2_4de9394e566cd6c22aed2b2a269bdc27f91e086fe9acd61b0bb188762dd5817f_derived_from_session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a",
       "metadata": {
         "created_at": "2026-09-04T12:00:00+00:00",
         "native_write_path": "reflection_promotion",
-        "source_id": "session_9c6ad27491fa"
+        "source_id": "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a"
       },
       "relationship_type": "DERIVED_FROM",
-      "source_id": "decision_cfeb13f7083a",
-      "target_id": "session_9c6ad27491fa",
+      "source_id": "decision_v2_4de9394e566cd6c22aed2b2a269bdc27f91e086fe9acd61b0bb188762dd5817f",
+      "target_id": "session_v2_0498b6e4b78075fa5232986a42e053790d07a04c8a8a3b26da4b95a31163543a",
       "weight": 1.0
     }
   ]
