@@ -83,7 +83,7 @@ class Experience(FrozenModel):
 class Task(FrozenModel):
     id: str = Field(pattern=IDENTIFIER_PATTERN)
     family_id: str = Field(pattern=IDENTIFIER_PATTERN)
-    split: Literal["development", "sealed"]
+    split: Literal["learning", "development", "sealed"]
     prompt: Artifact
     workspace: list[WorkspaceFile]
     checker: Program

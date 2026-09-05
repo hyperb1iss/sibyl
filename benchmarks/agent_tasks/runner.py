@@ -265,11 +265,14 @@ def _receipt(manifest: Manifest, task: Task, arm: Arm) -> dict[str, Any]:
         "sealed_isolation": False,
         "learning_benefit_established": False,
         "process_isolation": "owned_process_group_only_no_detached_process_guarantee",
+        "input_retention": "selected_task_and_arm_only_not_a_complete_experiment_archive",
         "run_id": uuid4().hex,
         "attempt_id": uuid4().hex,
         "request_id": uuid4().hex,
         "manifest_sha256": identity(manifest.model_dump(mode="json")),
         "task_id": task.id,
+        "task_family_id": task.family_id,
+        "task_split": task.split,
         "task_sha256": identity(task.model_dump(mode="json")),
         "arm_id": arm.id,
         "arm_sha256": identity(arm.model_dump(mode="json")),
@@ -363,8 +366,18 @@ def _perform_attempt(
     receipt: dict[str, Any],
 ) -> None:
     _write_json(output / "manifest.json", manifest.model_dump(mode="json"))
-    for name, content in inputs.items():
-        _put(output / "inputs" / name, content, 292)
+    retained_paths = {
+        manifest.dependency_lock.path,
+        manifest.controller.script.path,
+        task.prompt.path,
+        task.checker.script.path,
+        arm.memory_pack.path,
+        *(item.artifact.path for item in task.workspace),
+    }
+    if arm.native_render_payload is not None:
+        retained_paths.add(arm.native_render_payload.path)
+    for name in sorted(retained_paths):
+        _put(output / "inputs" / name, inputs[name], 292)
     workspace = output / "controller-workspace"
     workspace.mkdir()
     for item in task.workspace:
@@ -424,9 +437,10 @@ def run_task(manifest_path: Path, *, task_id: str, arm_id: str, output: Path) ->
     arm = next((arm for arm in manifest.arms if arm.id == arm_id), None)
     if task is None or arm is None:
         raise ManifestError("unknown task or arm")
-    if task.split != "development":
+    if task.split == "sealed":
         raise ManifestError(
-            "sealed execution requires an isolated agent runtime; this adapter is development-only"
+            "sealed execution requires an isolated agent runtime; "
+            "this adapter supports only learning and development tasks"
         )
     output = output.absolute()
     if output.is_symlink():
