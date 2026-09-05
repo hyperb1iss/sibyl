@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from inspect import signature
 from types import SimpleNamespace
@@ -1451,3 +1452,54 @@ async def test_refresh_tokens_returns_503_when_auth_storage_errors(
 
     assert response.status_code == 503
     assert json.loads(response.body)["detail"] == "Authentication storage temporarily unavailable"
+
+
+@pytest.mark.asyncio
+async def test_replay_identity_is_stable_across_sessions_and_roles(monkeypatch) -> None:
+    instance = str(uuid4())
+    monkeypatch.setattr(auth_routes, "get_server_instance_id", AsyncMock(return_value=instance))
+    ctx = _ctx()
+    first = await auth_routes.replay_identity(ctx=ctx)
+    second = await auth_routes.replay_identity(ctx=replace(ctx, org_role=OrganizationRole.OWNER))
+    assert first == second
+    assert first["server_instance_id"] == instance
+    assert first["user_id"] == str(ctx.user.id)
+    assert first["organization_id"] == str(ctx.organization.id)
+    assert first["credential"]["kind"] == "session"
+
+
+@pytest.mark.asyncio
+async def test_replay_identity_preserves_api_key_restrictions(monkeypatch) -> None:
+    monkeypatch.setattr(auth_routes, "get_server_instance_id", AsyncMock(return_value=str(uuid4())))
+    ctx = _ctx()
+    key_ctx = replace(
+        ctx,
+        api_key_id="key-1",
+        scopes=frozenset({"api:write", "api:read"}),
+        api_key_project_ids=frozenset({"project-b", "project-a"}),
+        api_key_memory_space_ids=frozenset(),
+        api_key_memory_scope_keys=frozenset({"scope-a"}),
+    )
+    key = await auth_routes.replay_identity(ctx=key_ctx)
+    session = await auth_routes.replay_identity(ctx=ctx)
+    assert key != session
+    assert key["credential"] == {
+        "kind": "api_key",
+        "api_key_id": "key-1",
+        "scopes": ["api:read", "api:write"],
+        "project_ids": ["project-a", "project-b"],
+        "memory_space_ids": [],
+        "memory_scope_keys": ["scope-a"],
+    }
+    assert await auth_routes.replay_identity(ctx=replace(key_ctx, api_key_id="key-2")) != key
+    assert await auth_routes.replay_identity(ctx=replace(key_ctx, api_key_project_ids=None)) != key
+
+
+@pytest.mark.asyncio
+async def test_replay_identity_requires_organization(monkeypatch) -> None:
+    lookup = AsyncMock()
+    monkeypatch.setattr(auth_routes, "get_server_instance_id", lookup)
+    with pytest.raises(HTTPException) as exc:
+        await auth_routes.replay_identity(ctx=_ctx(include_org=False))
+    assert exc.value.status_code == 403
+    lookup.assert_not_called()

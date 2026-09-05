@@ -152,6 +152,17 @@ def conflict(message: str | None = None) -> HTTPException:
     return HTTPException(status_code=409, detail=message or CONFLICT_ERROR)
 
 
+def entity_locked() -> HTTPException:
+    """Report transient write contention separately from semantic conflicts."""
+    return HTTPException(
+        status_code=409,
+        detail={
+            "error": "entity_locked",
+            "message": "The resource is being modified by another request. Retry the request.",
+        },
+    )
+
+
 def unauthorized(message: str | None = None) -> HTTPException:
     """Create a 401 exception for auth failures.
 

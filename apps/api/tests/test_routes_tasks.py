@@ -767,3 +767,36 @@ class TestNotesRoute:
         assert response.count == 0
         manager.get.assert_not_awaited()
         manager.get_notes_for_task.assert_awaited_once_with("task-123", limit=50)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raises", [False, True])
+async def test_task_update_lock_contention_has_retryable_code(raises) -> None:
+    from contextlib import asynccontextmanager
+
+    from fastapi import HTTPException
+
+    from sibyl.api.errors import http_exception_payload
+    from sibyl.locks import LockAcquisitionError
+
+    @asynccontextmanager
+    async def unavailable(*_args, **_kwargs):
+        if raises:
+            raise LockAcquisitionError("task-1", "org-1")
+        yield None
+
+    with (
+        patch("sibyl.api.routes.tasks._verify_task_access", AsyncMock()),
+        patch("sibyl.api.routes.tasks.entity_lock", unavailable),
+        pytest.raises(HTTPException) as exc,
+    ):
+        await update_task(
+            task_id="task-1",
+            request=UpdateTaskRequest(title="Renamed"),
+            sync=True,
+            org=SimpleNamespace(id="org-1"),
+            user=SimpleNamespace(id="user-1"),
+            auth=SimpleNamespace(),
+        )
+    assert exc.value.status_code == 409
+    assert http_exception_payload(exc.value, "request-1")["error"] == "entity_locked"

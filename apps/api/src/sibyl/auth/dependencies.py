@@ -17,6 +17,7 @@ from sibyl.persistence.auth_runtime import (
     InvalidAuthClaimsError,
     UserNotFoundError,
     authenticate_api_key,
+    get_server_instance_id,
     get_user_by_id,
     resolve_auth_context,
     validate_access_session,
@@ -157,6 +158,7 @@ async def get_current_user(
     cached_ctx = getattr(request.state, "auth_context", None)
     cached_user = getattr(cached_ctx, "user", None)
     if getattr(cached_user, "id", None) == user_id:
+        await _validate_replay_server_instance(request)
         return cast("AuthUser", cached_user)
 
     if cached_ctx is not None:
@@ -174,6 +176,7 @@ async def get_current_user(
         ) from e
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    await _validate_replay_server_instance(request)
     return user
 
 
@@ -208,6 +211,24 @@ def require_org_role(*allowed: OrganizationRole):
     return _check_role
 
 
+async def _validate_replay_server_instance(request: Request) -> None:
+    expected = request.headers.get("X-Sibyl-Server-Instance")
+    if expected is None or request.method.upper() in _SAFE_HTTP_METHODS:
+        return
+    if getattr(request.state, "replay_server_instance_validated", False):
+        return
+    if expected != await get_server_instance_id():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "replay_identity_mismatch",
+                "message": "The server data instance changed. The write was not applied.",
+                "remediation": "Verify the destination before recovering this pending write.",
+            },
+        )
+    request.state.replay_server_instance_validated = True
+
+
 async def build_auth_context(
     request: Request,
     session=None,
@@ -220,6 +241,7 @@ async def build_auth_context(
     if session is None:
         cached = getattr(request.state, "auth_context", None)
         if cached is not None:
+            await _validate_replay_server_instance(request)
             return cached
 
     claims = await resolve_claims(request)
@@ -238,6 +260,7 @@ async def build_auth_context(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
         ) from e
+    await _validate_replay_server_instance(request)
     organization = getattr(ctx, "organization", None)
     set_llm_budget_context(
         user_id=str(ctx.user.id),

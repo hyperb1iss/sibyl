@@ -5,6 +5,7 @@ import random
 import sys
 import time
 from collections import deque
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -13,20 +14,26 @@ from typing import Any, Self, cast
 import httpx
 
 from sibyl_cli.auth_store import (
+    cache_pending_replay_identity,
     credential_scope,
     get_access_token,
     is_access_token_expired,
     normalize_api_url,
     read_server_credentials,
 )
+from sibyl_cli.pending_identity import normalize_replay_identity, pending_identity_matches
 from sibyl_cli.pending_writes import (
     PendingMetric,
+    bind_pending_write_identity,
     create_pending_write,
     delete_pending_write,
     increment_attempts,
     is_corrupt_pending_write,
     list_pending_writes,
     pending_replay_lock,
+    pending_write_resource,
+    read_pending_write,
+    record_pending_failure,
     record_pending_metric,
 )
 
@@ -41,7 +48,8 @@ AUTO_REPLAY_GRACE_SECONDS = 30.0
 AUTO_REPLAY_BACKOFF_BASE_SECONDS = 2.0
 AUTO_REPLAY_BACKOFF_MAX_SECONDS = 300.0
 PENDING_WRITE_REMEDIATION = (
-    "Run 'sibyl auth login'; buffered writes retry after the next successful API request."
+    "Sign in to the same server, user, and organization, then run 'sibyl pending-writes flush'. "
+    "Use 'sibyl pending-writes list' to inspect writes needing attention or legacy ownership."
 )
 INIT_REMEDIATION = "Run 'sibyl init' for local mode or 'sibyl init --remote <url>'."
 
@@ -363,19 +371,6 @@ def _requires_initialized_context(method: str, path: str) -> bool:
     return not path.startswith("/auth/")
 
 
-# Discarding a buffered write destroys the only copy of its payload: the server
-# stores a request hash, never the body. So the queue only drops a write when
-# the status proves the server rejected the payload itself and no retry could
-# ever land it. Everything else stays buffered, including 409 - a stranded
-# idempotency reservation reports 409 for a write that may already have applied,
-# and the client cannot tell the two apart.
-UNAPPLIED_WRITE_STATUS_CODES = {400, 422}
-
-
-def _should_keep_pending_write(status_code: int) -> bool:
-    return status_code not in UNAPPLIED_WRITE_STATUS_CODES
-
-
 def _resolve_pending_write(write_id: str | None, outcome: PendingMetric | None) -> None:
     """Drop a buffered write from the queue and record why it left.
 
@@ -481,36 +476,109 @@ class ClientTransportMixin:
             await self._client.aclose()
             self._client = None
 
+    async def _ensure_pending_identity(self) -> dict[str, Any] | None:
+        """Verify the destination before using a cached owner to send a mutation."""
+        if self._identity_checked and self._identity_token == self.auth_token:
+            return self._pending_identity
+        if not self.auth_token:
+            return None
+        try:
+            data = await self._request("GET", "/auth/replay-identity", _replay_pending=False)
+        except SibylClientError as exc:
+            if exc.status_code != 404:
+                raise
+            # Older servers only support replay within the original credential
+            # lineage. Never treat a cached durable owner as freshly verified.
+            self._pending_identity = None
+        else:
+            identity = normalize_replay_identity(data)
+            if identity is None:
+                raise SibylClientError(
+                    "Server returned an invalid pending-write identity; no mutation was sent.",
+                    error_code="replay_identity_invalid",
+                )
+            self._pending_identity = identity
+            if self._uses_stored_auth:
+                cache_pending_replay_identity(
+                    self.base_url,
+                    self.auth_token,
+                    identity,
+                    credential_scope=self.credential_scope,
+                )
+        self._identity_checked = True
+        self._identity_token = self.auth_token
+        return self._pending_identity
+
+    def _record_pending_failure(self, write_id: str | None, exc: SibylClientError) -> None:
+        if write_id is None:
+            return
+        status = exc.status_code
+        if exc.error_code == "pending_dependency":
+            category = "dependency"
+        elif status == 401 or exc.error_code == "token_refresh_failed":
+            category = "authentication"
+        elif status == 409 and exc.error_code in {"idempotency_in_progress", "entity_locked"}:
+            category = "server"
+        elif status == 409:
+            category = "conflict"
+        elif status is not None and 400 <= status < 500 and status not in {408, 429}:
+            category = "rejected"
+        elif status is not None:
+            category = "server"
+        else:
+            category = "transport"
+        with suppress(FileNotFoundError):
+            record_pending_failure(
+                write_id, category=category, status_code=status, error_code=exc.error_code
+            )
+
     async def _maybe_replay_pending_writes(self, *, ignore_backoff: bool = False) -> None:
         """Replay a bounded batch after this client proves the API is healthy."""
         try:
-            if not list_pending_writes():
+            if not any(
+                item.get("base_url") == self.base_url
+                and not is_corrupt_pending_write(item)
+                and (
+                    item.get("replay_identity") is not None
+                    or (
+                        self._replay_scope is not None
+                        and item.get("replay_scope") == self._replay_scope
+                    )
+                )
+                for item in list_pending_writes()
+            ):
                 return
             with pending_replay_lock() as acquired:
                 if not acquired:
                     return
+                identity = await self._ensure_pending_identity()
                 matching = [
                     item
                     for item in list_pending_writes()
                     if not is_corrupt_pending_write(item)
                     and str(item.get("base_url")) == self.base_url
-                    and item.get("replay_scope") == self._replay_scope
-                    and self._replay_scope is not None
+                    and pending_identity_matches(item, identity, self._replay_scope)
                     and not (
                         str(item.get("method") or "").upper() == "POST"
                         and _is_read_like_post(str(item.get("path") or ""))
                     )
                 ]
                 matching.sort(key=lambda item: str(item.get("created_at") or ""))
-                batch: list[dict[str, Any]] = []
+                blocked: set[str] = set()
+                attempted = 0
                 for item in matching:
-                    if not ignore_backoff and not _ready_for_auto_replay(item):
-                        break
-                    batch.append(item)
-                    if len(batch) == AUTO_REPLAY_LIMIT:
-                        break
-                for item in batch:
+                    resource = pending_write_resource(item)
+                    if (
+                        "*" in blocked
+                        or resource in blocked
+                        or (resource == "*" and blocked)
+                        or item.get("status") == "attention"
+                        or (not ignore_backoff and not _ready_for_auto_replay(item))
+                    ):
+                        blocked.add(resource)
+                        continue
                     write_id = str(item["id"])
+                    attempted += 1
                     try:
                         current = increment_attempts(write_id)
                         await self._request(
@@ -524,9 +592,12 @@ class ClientTransportMixin:
                         )
                         record_pending_metric("replayed")
                     except SibylClientError as exc:
-                        if exc.status_code not in UNAPPLIED_WRITE_STATUS_CODES:
+                        blocked.add(resource)
+                        if exc.status_code == 401 or exc.error_code == "token_refresh_failed":
                             break
                     except (FileNotFoundError, OSError, ValueError):
+                        blocked.add(resource)
+                    if attempted == AUTO_REPLAY_LIMIT:
                         break
         except Exception:
             return
@@ -551,6 +622,7 @@ class ClientTransportMixin:
         _pending_write_id: str | None = None,
         _pending_write_created: bool = False,
         _idempotency_key: str | None = None,
+        _replay_pending: bool = True,
     ) -> dict[str, Any]:
         """Make an HTTP request to the API.
 
@@ -585,6 +657,11 @@ class ClientTransportMixin:
         pending_write_created = _pending_write_created
         idempotency_key = _idempotency_key
         if _buffer_pending and pending_write_id is None and _should_buffer_request(method, path):
+            identity_failure: SibylClientError | None = None
+            try:
+                await self._ensure_pending_identity()
+            except SibylClientError as exc:
+                identity_failure = exc
             pending = create_pending_write(
                 method=method,
                 path=path,
@@ -592,10 +669,53 @@ class ClientTransportMixin:
                 json_payload=json,
                 params=params,
                 replay_scope=self._replay_scope,
+                replay_identity=self._pending_identity,
             )
             pending_write_id = str(pending["id"])
             pending_write_created = True
             idempotency_key = str(pending["idempotency_key"])
+            if identity_failure is not None:
+                self._record_pending_failure(pending_write_id, identity_failure)
+                identity_failure.remediation = PENDING_WRITE_REMEDIATION
+                raise identity_failure
+
+        if pending_write_id is not None:
+            try:
+                identity = await self._ensure_pending_identity()
+                pending = read_pending_write(pending_write_id)
+                if not pending_identity_matches(pending, identity, self._replay_scope):
+                    raise SibylClientError(
+                        "Buffered write belongs to a different or unverified identity; "
+                        "no mutation was sent.",
+                        status_code=403,
+                        error_code="replay_identity_mismatch",
+                    )
+                if identity is not None and pending.get("replay_identity") is None:
+                    bind_pending_write_identity(
+                        pending_write_id, identity, replay_scope=self._replay_scope
+                    )
+                resource = pending_write_resource(pending)
+                order = (str(pending.get("created_at", "")), pending_write_id)
+                for earlier in list_pending_writes():
+                    if (
+                        is_corrupt_pending_write(earlier)
+                        or earlier.get("base_url") != self.base_url
+                        or not pending_identity_matches(earlier, identity, self._replay_scope)
+                        or (str(earlier.get("created_at", "")), str(earlier["id"])) >= order
+                    ):
+                        continue
+                    predecessor = pending_write_resource(earlier)
+                    if resource == "*" or predecessor == "*" or resource == predecessor:
+                        raise SibylClientError(
+                            "An earlier related write is unresolved; this write remains "
+                            "buffered and no mutation was sent. Inspect pending-writes list.",
+                            status_code=409,
+                            error_code="pending_dependency",
+                        )
+            except SibylClientError as exc:
+                self._record_pending_failure(pending_write_id, exc)
+                exc.remediation = PENDING_WRITE_REMEDIATION
+                raise
 
         refresh_failure: str | None = None
 
@@ -610,20 +730,24 @@ class ClientTransportMixin:
         ):
             refreshed, refresh_failure = await self._refresh_token()
             if not refreshed:
-                raise SibylClientError(
+                exc = SibylClientError(
                     "Stored access token is expired and automatic token refresh failed.",
                     status_code=_refresh_failure_status_code(refresh_failure),
                     detail=refresh_failure,
                     error_code="token_refresh_failed",
                     remediation=_refresh_failure_remediation(pending_write_id=pending_write_id),
                 )
+                self._record_pending_failure(pending_write_id, exc)
+                raise exc
 
         client = await self._get_client()
         breaker_key = _failure_key(self.base_url)
         await _maybe_wait_for_circuit_breaker(breaker_key)
 
         try:
-            headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
+            headers = {"Idempotency-Key": idempotency_key} if idempotency_key else {}
+            if pending_write_id and self._pending_identity:
+                headers["X-Sibyl-Server-Instance"] = self._pending_identity["server_instance_id"]
             response = await client.request(
                 method=method,
                 url=path,
@@ -647,12 +771,11 @@ class ClientTransportMixin:
                         _pending_write_id=pending_write_id,
                         _pending_write_created=pending_write_created,
                         _idempotency_key=idempotency_key,
+                        _replay_pending=_replay_pending,
                     )
 
             # Handle error responses
             if response.status_code >= 400:
-                if not _should_keep_pending_write(response.status_code):
-                    _resolve_pending_write(pending_write_id, "dropped")
                 try:
                     payload = _parse_error_payload(response.json())
                 except Exception:
@@ -673,8 +796,9 @@ class ClientTransportMixin:
                     if not payload.remediation:
                         payload.remediation = "Access denied. Check org and project permissions."
 
-                _record_failure(breaker_key)
-                raise SibylClientError(
+                if not (path == "/auth/replay-identity" and response.status_code == 404):
+                    _record_failure(breaker_key)
+                exc = SibylClientError(
                     f"API error: {payload.error or detail}: {detail}",
                     status_code=response.status_code,
                     detail=detail,
@@ -683,6 +807,8 @@ class ClientTransportMixin:
                     remediation=payload.remediation,
                     details=payload.details,
                 )
+                self._record_pending_failure(pending_write_id, exc)
+                raise exc
 
             applied_outcome = "completed" if pending_write_created else None
 
@@ -690,29 +816,50 @@ class ClientTransportMixin:
             if response.status_code == 204:
                 _resolve_pending_write(pending_write_id, applied_outcome)
                 _record_success(breaker_key)
-                if pending_write_id is None or pending_write_created:
+                if _replay_pending and (pending_write_id is None or pending_write_created):
                     await self._maybe_replay_pending_writes()
                 return {}
 
-            data = response.json()
+            try:
+                data = response.json()
+            except ValueError as cause:
+                exc = SibylClientError(
+                    "Server response could not be decoded; the write outcome is unconfirmed.",
+                    status_code=502,
+                    error_code="response_unconfirmed",
+                )
+                self._record_pending_failure(pending_write_id, exc)
+                raise exc from cause
             _resolve_pending_write(pending_write_id, applied_outcome)
             _record_success(breaker_key)
-            if pending_write_id is None or pending_write_created:
+            if _replay_pending and (pending_write_id is None or pending_write_created):
                 await self._maybe_replay_pending_writes()
             return data
 
         except httpx.ConnectError as e:
             _record_failure(breaker_key)
-            raise SibylClientError(
+            exc = SibylClientError(
                 f"Cannot connect to Sibyl API at {self.base_url}. Is the server running?",
                 detail=str(e),
-            ) from e
+            )
+            self._record_pending_failure(pending_write_id, exc)
+            raise exc from e
         except httpx.TimeoutException as e:
             _record_failure(breaker_key)
-            raise SibylClientError(
+            exc = SibylClientError(
                 f"Request timed out after {self.timeout}s",
                 detail=str(e),
-            ) from e
+            )
+            self._record_pending_failure(pending_write_id, exc)
+            raise exc from e
+        except httpx.RequestError as e:
+            _record_failure(breaker_key)
+            exc = SibylClientError(
+                "Connection interrupted; the write outcome is unconfirmed.",
+                error_code="response_unconfirmed",
+            )
+            self._record_pending_failure(pending_write_id, exc)
+            raise exc from e
 
     async def get(
         self,

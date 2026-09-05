@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 from pathlib import Path
+from uuid import UUID
 
 import jwt
 import pytest
@@ -15,10 +17,12 @@ from sibyl_core.backends.surreal.auth_schema import (
     AUTH_INVITATION_TOKEN_MIGRATION_DEFINITIONS,
     AUTH_PERMISSION_MIGRATION_DEFINITIONS,
     AUTH_PROJECT_SLUG_MIGRATION_DEFINITIONS,
+    AUTH_REPLAY_IDENTITY_MIGRATION_DEFINITIONS,
     AUTH_SCHEMA_CURRENT_VERSION,
     AUTH_SCHEMA_DEFINITIONS,
     AUTH_SCHEMA_MIGRATIONS,
     AUTH_TABLES,
+    _execute_auth_schema_query,
     bootstrap_auth_schema,
 )
 from sibyl_core.backends.surreal.content_schema import (
@@ -188,7 +192,13 @@ def test_runtime_schemafull_tables_pair_define_with_alter() -> None:
     SCHEMALESS on a first application write, so without the ALTER such a table never
     becomes SCHEMAFULL and its FLEXIBLE fields fail forever.
     """
-    schema = "\n".join((AUTH_SCHEMA_DEFINITIONS, CONTENT_SCHEMA_DEFINITIONS))
+    schema = "\n".join(
+        (
+            AUTH_SCHEMA_DEFINITIONS,
+            AUTH_REPLAY_IDENTITY_MIGRATION_DEFINITIONS,
+            CONTENT_SCHEMA_DEFINITIONS,
+        )
+    )
     content_tables = tuple(
         table
         for table in CONTENT_TABLES
@@ -260,9 +270,7 @@ def test_auth_table_permissions_are_versioned() -> None:
 
     assert "auth_table_permissions" in [migration.name for migration in AUTH_SCHEMA_MIGRATIONS]
     for table in AUTH_TABLES:
-        assert f"ALTER TABLE IF EXISTS {table} PERMISSIONS" in (
-            AUTH_PERMISSION_MIGRATION_DEFINITIONS
-        )
+        assert f"ALTER TABLE IF EXISTS {table} PERMISSIONS" in migration_sql
     assert "WHERE organization_id = $token.org" in AUTH_PERMISSION_MIGRATION_DEFINITIONS
     assert "OR organization_id = $auth.organization_id" in (AUTH_PERMISSION_MIGRATION_DEFINITIONS)
     assert "WHERE uuid = $token.org" in AUTH_PERMISSION_MIGRATION_DEFINITIONS
@@ -1742,3 +1750,28 @@ async def test_schemafull_repair_restores_relation_metadata_on_auto_created_edge
     )
     assert "SCHEMAFULL" in after["tables"]["derived_from"]
     assert rows == [{"uuid": "e1"}]
+
+
+@pytest.mark.asyncio
+async def test_auth_replay_identity_survives_bootstrap_and_distinguishes_database() -> None:
+    db = AsyncSurreal("memory://")
+    try:
+        await db.use("identity_test", "first")
+        await db.query(AUTH_REPLAY_IDENTITY_MIGRATION_DEFINITIONS)
+        first = await db.query("SELECT instance_id FROM server_identity:singleton;")
+        assert UUID(first[0]["instance_id"])
+        await db.query(AUTH_REPLAY_IDENTITY_MIGRATION_DEFINITIONS)
+        assert await db.query("SELECT instance_id FROM server_identity:singleton;") == first
+        # Competing startup initializers must never replace an existing identity.
+        insert = split_statements(AUTH_REPLAY_IDENTITY_MIGRATION_DEFINITIONS)[-1]
+        await asyncio.gather(*(_execute_auth_schema_query(db.query, insert) for _ in range(8)))
+        assert await db.query("SELECT instance_id FROM server_identity:singleton;") == first
+        await db.use("identity_test", "replacement")
+        statements = split_statements(AUTH_REPLAY_IDENTITY_MIGRATION_DEFINITIONS)
+        for statement in statements[:-1]:
+            await db.query(statement)
+        await asyncio.gather(*(_execute_auth_schema_query(db.query, insert) for _ in range(8)))
+        replacement = await db.query("SELECT instance_id FROM server_identity:singleton;")
+        assert replacement != first
+    finally:
+        await db.close()

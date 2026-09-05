@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from sibyl.api.decorators import handle_workflow_errors
+from sibyl.api.errors import entity_locked
 from sibyl.api.event_types import WSEvent
 from sibyl.api.idempotency import (
     mutation_receipt,
@@ -884,10 +885,7 @@ async def update_task(
     try:
         async with entity_lock(group_id, task_id, blocking=True) as lock_token:
             if not lock_token:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Task is being updated by another process. Please retry.",
-                )
+                raise entity_locked()
 
             runtime = await get_task_graph_runtime(group_id)
 
@@ -970,10 +968,7 @@ async def update_task(
             return response
 
     except LockAcquisitionError as e:
-        raise HTTPException(
-            status_code=409,
-            detail="Task is locked by another process. Please retry.",
-        ) from e
+        raise entity_locked() from e
     except HTTPException:
         raise
     except RevisionConflictError as e:

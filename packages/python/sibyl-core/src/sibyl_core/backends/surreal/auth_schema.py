@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from sibyl_core.auth import OrganizationRole, ProjectRole, ProjectVisibility
 from sibyl_core.backends.surreal.schema_helpers import is_missing_table_error, split_statements
@@ -13,6 +14,7 @@ from sibyl_core.backends.surreal.schema_invariants import (
 from sibyl_core.backends.surreal.schema_version import (
     SCHEMA_VERSION_TABLE,
     SchemaMigration,
+    SurrealExecute,
     apply_schema_migrations,
     ensure_schema_version_table,
     get_schema_version,
@@ -45,9 +47,10 @@ EXTENDED_AUTH_TABLES = (
     "memory_spaces",
     "memory_space_members",
     "llm_usage_buckets",
+    "server_identity",
 )
 AUTH_TABLES = (*CORE_AUTH_TABLES, *EXTENDED_AUTH_TABLES)
-AUTH_SCHEMA_CURRENT_VERSION = 6
+AUTH_SCHEMA_CURRENT_VERSION = 7
 AUTH_SCHEMA_NAME = "auth"
 _AUTH_ORGANIZATION_ROLE_VALUES = tuple(role.value for role in OrganizationRole)
 _AUTH_PROJECT_ROLE_VALUES = tuple(role.value for role in ProjectRole)
@@ -644,6 +647,17 @@ AUTH_SCHEMAFULL_REPAIR_DEFINITIONS = "\n".join(
     f"ALTER TABLE IF EXISTS {table} SCHEMAFULL;" for table in AUTH_TABLES
 )
 
+AUTH_REPLAY_IDENTITY_MIGRATION_DEFINITIONS = """
+DEFINE TABLE IF NOT EXISTS server_identity SCHEMAFULL;
+ALTER TABLE IF EXISTS server_identity SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS instance_id ON server_identity TYPE string;
+ALTER TABLE IF EXISTS server_identity PERMISSIONS FOR select, create, update, delete NONE;
+INSERT IGNORE INTO server_identity {
+    id: server_identity:singleton,
+    instance_id: <string>rand::uuid()
+};
+"""
+
 AUTH_SCHEMA_MIGRATIONS = (
     SchemaMigration(
         version=1,
@@ -675,6 +689,11 @@ AUTH_SCHEMA_MIGRATIONS = (
         name="auth_schemafull_repair",
         statements=tuple(split_statements(AUTH_SCHEMAFULL_REPAIR_DEFINITIONS)),
     ),
+    SchemaMigration(
+        version=7,
+        name="auth_replay_identity",
+        statements=tuple(split_statements(AUTH_REPLAY_IDENTITY_MIGRATION_DEFINITIONS)),
+    ),
 )
 
 
@@ -685,14 +704,42 @@ def auth_schema_invariant_plan() -> SchemaInvariantPlan:
     )
 
 
+async def _execute_auth_schema_query(
+    execute_query: SurrealExecute, statement: str, **params: object
+) -> object:
+    """Accept a competing singleton initializer only after confirming its commit."""
+    from sibyl_core.backends.surreal.records import normalize_records
+
+    try:
+        return await execute_query(statement, **params)
+    except Exception as exc:
+        singleton_insert = split_statements(AUTH_REPLAY_IDENTITY_MIGRATION_DEFINITIONS)[-1]
+        conflict = str(exc).lower()
+        if statement != singleton_insert or not (
+            "transaction conflict" in conflict or "read or write conflict" in conflict
+        ):
+            raise
+        rows = normalize_records(
+            await execute_query("SELECT instance_id FROM server_identity:singleton;")
+        )
+        if not rows or not isinstance(rows[0].get("instance_id"), str):
+            raise
+        UUID(str(rows[0]["instance_id"]))
+        return rows
+
+
 async def bootstrap_auth_schema(client: SurrealAuthClient, *, reset: bool = False) -> None:
     if reset:
         for table in (*AUTH_TABLES, SCHEMA_VERSION_TABLE):
             await client.execute_query(f"REMOVE TABLE IF EXISTS {table};")
 
     await _assert_auth_migrations_safe(client)
+
+    async def execute_query(statement: str, **params: object) -> object:
+        return await _execute_auth_schema_query(client.execute_query, statement, **params)
+
     await apply_schema_migrations(
-        client.execute_query,
+        execute_query,
         AUTH_SCHEMA_MIGRATIONS,
         name=AUTH_SCHEMA_NAME,
         scope="auth_schema_migration",

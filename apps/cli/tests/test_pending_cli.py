@@ -5,13 +5,28 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from typer.testing import CliRunner
 
 from sibyl_cli import pending, pending_writes
-from sibyl_cli.client import SibylClientError
+from sibyl_cli.client import SibylClient, SibylClientError
 
 TEST_REPLAY_SCOPE = "token-sha256:test"
+TEST_IDENTITY = {
+    "version": 1,
+    "server_instance_id": "11111111-1111-1111-1111-111111111111",
+    "user_id": "22222222-2222-2222-2222-222222222222",
+    "organization_id": "33333333-3333-3333-3333-333333333333",
+    "credential": {
+        "kind": "session",
+        "api_key_id": None,
+        "scopes": [],
+        "project_ids": None,
+        "memory_space_ids": None,
+        "memory_scope_keys": None,
+    },
+}
 
 
 def _create_pending(path: str = "/memory/raw") -> dict[str, Any]:
@@ -101,6 +116,9 @@ def test_pending_writes_flush_replays_valid_entries_but_keeps_corrupt_ones(
             self.context_name = context_name
             self._replay_scope = TEST_REPLAY_SCOPE
 
+        async def _ensure_pending_identity(self) -> dict[str, Any]:
+            return TEST_IDENTITY
+
         async def __aenter__(self) -> FakeClient:
             return self
 
@@ -124,7 +142,7 @@ def test_pending_writes_flush_replays_valid_entries_but_keeps_corrupt_ones(
     assert len(remaining) == 1
     assert remaining[0]["status"] == "corrupt"
     assert corrupt_path.exists()
-    assert "1 replayed, 1 failed" in result.stdout
+    assert "1 replayed, 1 unresolved" in result.stdout
 
 
 @pytest.mark.parametrize(("field", "value"), [("json", []), ("params", {"nested": {}})])
@@ -229,13 +247,16 @@ def test_pending_writes_claim_binds_and_retries_legacy_entries(
             self.base_url = "http://testserver/api"
             self._replay_scope = TEST_REPLAY_SCOPE
 
+        async def _ensure_pending_identity(self) -> dict[str, Any]:
+            return TEST_IDENTITY
+
         async def __aenter__(self) -> FakeClient:
             return self
 
         async def __aexit__(self, *_args: object) -> None:
             return None
 
-        async def get(self, path: str) -> dict[str, Any]:
+        async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
             assert path == "/auth/me"
             return {
                 "user": {"email": "bliss@example.test"},
@@ -284,13 +305,16 @@ def test_pending_writes_claim_fails_when_replay_lock_is_busy(
             self.base_url = "http://testserver/api"
             self._replay_scope = TEST_REPLAY_SCOPE
 
+        async def _ensure_pending_identity(self) -> dict[str, Any]:
+            return TEST_IDENTITY
+
         async def __aenter__(self) -> FakeClient:
             return self
 
         async def __aexit__(self, *_args: object) -> None:
             return None
 
-        async def get(self, path: str) -> dict[str, Any]:
+        async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
             assert path == "/auth/me"
             return {
                 "user": {"email": "bliss@example.test"},
@@ -338,13 +362,16 @@ def test_pending_writes_claim_reports_a_concurrent_queue_change(
             self.base_url = "http://testserver/api"
             self._replay_scope = TEST_REPLAY_SCOPE
 
+        async def _ensure_pending_identity(self) -> dict[str, Any]:
+            return TEST_IDENTITY
+
         async def __aenter__(self) -> FakeClient:
             return self
 
         async def __aexit__(self, *_args: object) -> None:
             return None
 
-        async def get(self, path: str) -> dict[str, Any]:
+        async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
             assert path == "/auth/me"
             return {
                 "user": {"email": "bliss@example.test"},
@@ -354,7 +381,7 @@ def test_pending_writes_claim_reports_a_concurrent_queue_change(
         async def _maybe_replay_pending_writes(self, *, ignore_backoff: bool = False) -> None:
             raise AssertionError("an unclaimed write reached replay")
 
-    def fail_claim(_write_id: str, _replay_scope: str) -> dict[str, Any]:
+    def fail_claim(_write_id: str, _replay_scope: str, **kwargs: Any) -> dict[str, Any]:
         raise claim_error
 
     monkeypatch.setattr(pending, "SibylClient", FakeClient)
@@ -389,6 +416,9 @@ def test_pending_writes_flush_refuses_an_unclaimed_legacy_entry(
             self.base_url = base_url
             self.context_name = context_name
 
+        async def _ensure_pending_identity(self) -> dict[str, Any]:
+            return TEST_IDENTITY
+
         async def __aenter__(self) -> FakeClient:
             return self
 
@@ -403,7 +433,7 @@ def test_pending_writes_flush_refuses_an_unclaimed_legacy_entry(
     result = CliRunner().invoke(pending.app, ["flush"])
 
     assert result.exit_code == 1
-    assert "run sibyl pending-writes claim first" in result.stdout
+    assert "no verified matching owner is signed in" in result.stdout
     assert pending_writes.pending_write_count() == 1
 
 
@@ -420,6 +450,9 @@ def test_pending_writes_flush_replays_and_deletes(
             self.base_url = base_url
             self.context_name = context_name
             self._replay_scope = TEST_REPLAY_SCOPE
+
+        async def _ensure_pending_identity(self) -> dict[str, Any]:
+            return TEST_IDENTITY
 
         async def __aenter__(self) -> FakeClient:
             return self
@@ -459,6 +492,9 @@ def test_pending_writes_flush_skips_read_like_replays(
             self.base_url = base_url
             self.context_name = context_name
             self._replay_scope = TEST_REPLAY_SCOPE
+
+        async def _ensure_pending_identity(self) -> dict[str, Any]:
+            return TEST_IDENTITY
 
         async def __aenter__(self) -> FakeClient:
             return self
@@ -500,6 +536,9 @@ def test_pending_writes_flush_reuses_client_per_base_url(
             self._replay_scope = TEST_REPLAY_SCOPE
             instances.append(self)
 
+        async def _ensure_pending_identity(self) -> dict[str, Any]:
+            return TEST_IDENTITY
+
         async def __aenter__(self) -> FakeClient:
             return self
 
@@ -520,7 +559,7 @@ def test_pending_writes_flush_reuses_client_per_base_url(
     assert sorted(calls) == ["/memory/raw", "/tasks"]
 
 
-def test_pending_writes_flush_stops_after_auth_refresh_failure(
+def test_pending_writes_flush_retains_writes_after_auth_refresh_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -534,6 +573,9 @@ def test_pending_writes_flush_stops_after_auth_refresh_failure(
             self.base_url = base_url
             self.context_name = context_name
             self._replay_scope = TEST_REPLAY_SCOPE
+
+        async def _ensure_pending_identity(self) -> dict[str, Any]:
+            return TEST_IDENTITY
 
         async def __aenter__(self) -> FakeClient:
             return self
@@ -555,10 +597,9 @@ def test_pending_writes_flush_stops_after_auth_refresh_failure(
     result = CliRunner().invoke(pending.app, ["flush"])
 
     assert result.exit_code == 1
-    assert len(calls) == 1
-    assert calls[0] in {"/memory/raw", "/tasks"}
+    assert sorted(calls) == ["/memory/raw", "/tasks"]
     assert len(pending_writes.list_pending_writes()) == 2
-    assert "Stopping flush" in result.stdout
+    assert "2 unresolved; payloads remain local" in result.stdout
 
 
 def test_pending_writes_flush_failure_summary_names_both_classes(
@@ -574,6 +615,9 @@ def test_pending_writes_flush_failure_summary_names_both_classes(
             self.base_url = base_url
             self.context_name = context_name
             self._replay_scope = TEST_REPLAY_SCOPE
+
+        async def _ensure_pending_identity(self) -> dict[str, Any]:
+            return TEST_IDENTITY
 
         async def __aenter__(self) -> FakeClient:
             return self
@@ -599,9 +643,9 @@ def test_pending_writes_flush_failure_summary_names_both_classes(
     remaining = pending_writes.list_pending_writes()
     assert len(remaining) == 1
     assert remaining[0]["path"] == "/tasks"
-    assert "1 replayed, 1 failed" in result.stdout
-    assert "safe to flush again" in result.stdout
-    assert "flush again shortly" in result.stdout
+    assert "1 replayed, 1 unresolved" in result.stdout
+    assert "safe to flush again" not in result.stdout
+    assert "payloads remain local" in result.stdout
 
 
 def test_pending_writes_discard_exits_nonzero_when_an_id_matches_nothing(
@@ -671,3 +715,163 @@ def test_pending_writes_discard_reports_what_it_removed_on_a_partial_match(
     assert result.exit_code == 1
     assert "Discarded 1 pending write" in result.stdout
     assert "No pending write matched 1" in result.stdout
+
+
+def _mock_authenticated_client(monkeypatch: pytest.MonkeyPatch, calls: list[httpx.Request]) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if request.url.path == "/api/auth/replay-identity":
+            return httpx.Response(200, json=TEST_IDENTITY)
+        if request.url.path == "/api/auth/me":
+            return httpx.Response(
+                200,
+                json={
+                    "user": {"email": "bliss@example.test"},
+                    "organization": {"slug": "silkcircuit"},
+                },
+            )
+        return httpx.Response(200, json={"mutation_receipt": {"applied": True}})
+
+    def factory(**kwargs: Any) -> SibylClient:
+        kwargs.pop("context_name", None)
+        client = SibylClient(
+            base_url=kwargs.get("base_url", "http://testserver/api"), auth_token="synthetic"
+        )
+        client._client = httpx.AsyncClient(
+            base_url=client.base_url,
+            transport=httpx.MockTransport(handler),
+            headers=client._default_headers(),
+        )
+        return client
+
+    monkeypatch.setattr(pending, "SibylClient", factory)
+    monkeypatch.setattr("sibyl_cli.config_store.resolve_context_name", lambda: None)
+
+
+def test_unverified_adoption_requires_explicit_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    item = _create_pending()
+    result = CliRunner().invoke(pending.app, ["claim", "--unverified", "--yes"])
+    assert result.exit_code == 1
+    assert "explicit write IDs" in result.stdout
+    assert pending_writes.read_pending_write(item["id"])["replay_scope"] == TEST_REPLAY_SCOPE
+
+
+def test_explicit_unverified_adoption_preserves_key_and_replays_only_selected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    selected = _create_pending()
+    untouched = _create_pending()
+    calls: list[httpx.Request] = []
+    _mock_authenticated_client(monkeypatch, calls)
+    result = CliRunner().invoke(pending.app, ["claim", selected["id"], "--unverified", "--yes"])
+    assert result.exit_code == 0, result.stdout
+    assert "Original ownership cannot be verified" in result.stdout
+    mutations = [request for request in calls if request.method == "POST"]
+    assert len(mutations) == 1
+    assert mutations[0].headers["Idempotency-Key"] == selected["idempotency_key"]
+    assert [item["id"] for item in pending_writes.list_pending_writes()] == [untouched["id"]]
+
+
+def test_unverified_adoption_never_reassigns_verified_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    foreign = {**TEST_IDENTITY, "user_id": "44444444-4444-4444-4444-444444444444"}
+    item = pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url="http://testserver/api",
+        json_payload={"raw_content": "keep"},
+        params=None,
+        replay_identity=foreign,
+    )
+    calls: list[httpx.Request] = []
+    _mock_authenticated_client(monkeypatch, calls)
+    CliRunner().invoke(pending.app, ["claim", item["id"], "--unverified", "--yes"])
+    assert not calls
+    assert pending_writes.read_pending_write(item["id"])["replay_identity"] == foreign
+
+
+def test_retry_reenables_attention_and_preserves_original_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    item = pending_writes.create_pending_write(
+        method="POST",
+        path="/memory/raw",
+        base_url="http://testserver/api",
+        json_payload={"raw_content": "keep"},
+        params=None,
+        replay_identity=TEST_IDENTITY,
+    )
+    pending_writes.record_pending_failure(item["id"], category="conflict", status_code=409)
+    calls: list[httpx.Request] = []
+    _mock_authenticated_client(monkeypatch, calls)
+    result = CliRunner().invoke(pending.app, ["retry", item["id"]])
+    assert result.exit_code == 0, result.stdout
+    mutations = [request for request in calls if request.method == "POST"]
+    assert len(mutations) == 1
+    assert mutations[0].headers["Idempotency-Key"] == item["idempotency_key"]
+    assert pending_writes.list_pending_writes() == []
+
+
+def test_selected_flush_cannot_bypass_earlier_related_attention(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    earlier = pending_writes.create_pending_write(
+        method="PATCH",
+        path="/tasks/123",
+        base_url="http://testserver/api",
+        json_payload={"name": "first"},
+        params=None,
+        replay_identity=TEST_IDENTITY,
+    )
+    later = pending_writes.create_pending_write(
+        method="POST",
+        path="/tasks/123/complete",
+        base_url="http://testserver/api",
+        json_payload={},
+        params=None,
+        replay_identity=TEST_IDENTITY,
+    )
+    pending_writes.record_pending_failure(earlier["id"], category="rejected", status_code=404)
+    calls: list[httpx.Request] = []
+    _mock_authenticated_client(monkeypatch, calls)
+    result = CliRunner().invoke(pending.app, ["flush", later["id"]])
+    assert result.exit_code == 1, result.stdout
+    assert all(request.method == "GET" for request in calls)
+    assert pending_writes.read_pending_write(later["id"])["attempts"] == 0
+
+
+def test_unverified_adoption_requires_server_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    item = _create_pending()
+    original = pending_writes.resolve_pending_write_path(item["id"]).read_bytes()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        if request.url.path == "/api/auth/replay-identity":
+            return httpx.Response(404, json={"detail": "Not found"})
+        return httpx.Response(200, json={"user": {"email": "bliss@example.test"}})
+
+    def factory(**kwargs: Any) -> SibylClient:
+        client = SibylClient(base_url="http://testserver/api", auth_token="synthetic")
+        client._client = httpx.AsyncClient(
+            base_url=client.base_url, transport=httpx.MockTransport(handler)
+        )
+        return client
+
+    monkeypatch.setattr(pending, "SibylClient", factory)
+    monkeypatch.setattr("sibyl_cli.config_store.resolve_context_name", lambda: None)
+    result = CliRunner().invoke(pending.app, ["claim", item["id"], "--unverified", "--yes"])
+    assert result.exit_code == 1
+    assert "Upgrade the server" in result.stdout
+    assert pending_writes.resolve_pending_write_path(item["id"]).read_bytes() == original

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from contextlib import AsyncExitStack
 from typing import Annotated, Any
 
@@ -28,6 +29,7 @@ from sibyl_cli.common import (
     success,
     warn,
 )
+from sibyl_cli.pending_identity import normalize_replay_identity, pending_identity_matches
 from sibyl_cli.pending_writes import (
     claim_pending_write_replay_scope,
     delete_pending_write,
@@ -37,9 +39,11 @@ from sibyl_cli.pending_writes import (
     list_pending_writes,
     pending_replay_lock,
     pending_write_label,
+    pending_write_resource,
     pending_writes_dir,
     read_pending_write,
     record_pending_metric,
+    retry_pending_write,
 )
 
 app = typer.Typer(help="Inspect and replay locally buffered writes")
@@ -63,7 +67,24 @@ def _summary(item: dict[str, Any]) -> dict[str, Any]:
         "kind": kind,
         "attempts": item.get("attempts", 0),
         "base_url": item.get("base_url"),
+        "status": item.get("status", "pending"),
+        "ownership": "verified" if item.get("replay_identity") else "legacy",
+        "last_failure": item.get("last_failure"),
     }
+
+
+def _state_label(item: dict[str, Any]) -> str:
+    failure = item.get("last_failure")
+    reason = failure.get("category") if isinstance(failure, dict) else None
+    status_code = failure.get("status_code") if isinstance(failure, dict) else None
+    state = str(item.get("status", "pending"))
+    if item.get("ownership") == "legacy":
+        state += " / legacy ownership"
+    if reason:
+        state += f" / {reason}"
+    if status_code:
+        state += f" ({status_code})"
+    return state
 
 
 def _selected_writes(write_ids: list[str]) -> list[dict[str, Any]]:
@@ -120,10 +141,6 @@ def _context_name_for_base_url(
     return None
 
 
-def _should_abort_flush(exc: SibylClientError) -> bool:
-    return exc.error_code == "token_refresh_failed" or exc.status_code in {401, 429}
-
-
 def _legacy_claim_candidate(item: dict[str, Any]) -> bool:
     scope = item.get("replay_scope")
     return scope is None or str(scope).startswith("context:")
@@ -149,6 +166,7 @@ def list_writes(
     table.add_column("Kind")
     table.add_column("Title")
     table.add_column("Attempts", justify="right")
+    table.add_column("State / reason")
     for item in summaries:
         if item.get("status") == "corrupt":
             table.add_row(
@@ -158,6 +176,7 @@ def list_writes(
                 "repair",
                 str(item["error"]),
                 "-",
+                "corrupt",
             )
             continue
         table.add_row(
@@ -167,6 +186,7 @@ def list_writes(
             str(item["kind"]),
             str(item["title"]),
             str(item["attempts"]),
+            _state_label(item),
         )
     console.print(table)
 
@@ -229,9 +249,18 @@ def claim_writes(
         bool,
         typer.Option("--yes", "-y", help="Approve the displayed user and organization."),
     ] = False,
+    unverified: Annotated[
+        bool,
+        typer.Option(
+            "--unverified", help="Adopt explicitly named legacy writes from an older login."
+        ),
+    ] = False,
 ) -> None:
     """Claim ambiguous legacy writes, then retry them automatically."""
     mark_pending_writes_reported()
+    if unverified and not write_ids:
+        error("Use explicit write IDs when adopting writes with unknown historical ownership.")
+        raise typer.Exit(code=1)
     try:
         selected = _selected_writes(write_ids or [])
     except (FileNotFoundError, ValueError) as exc:
@@ -242,7 +271,8 @@ def claim_writes(
         for item in selected
         if not is_corrupt_pending_write(item)
         and not _is_buffered_read_like(item)
-        and _legacy_claim_candidate(item)
+        and item.get("replay_identity") is None
+        and (_legacy_claim_candidate(item) or unverified)
     ]
     if not candidates:
         success("No ambiguous legacy writes matched")
@@ -268,10 +298,14 @@ def claim_writes(
                 raise typer.Exit(code=1)
 
             try:
-                identity = await client.get("/auth/me")
+                replay_identity = await client._ensure_pending_identity()
+                identity = await client._request("GET", "/auth/me", _replay_pending=False)
             except SibylClientError as exc:
                 error(exc.detail or str(exc))
                 raise typer.Exit(code=1) from exc
+            if replay_identity is None:
+                error("Upgrade the server to verify write ownership before claiming legacy writes.")
+                raise typer.Exit(code=1)
             user = identity.get("user") if isinstance(identity.get("user"), dict) else {}
             organization = (
                 identity.get("organization")
@@ -289,6 +323,15 @@ def claim_writes(
                 f"Claim {len(matching)} legacy write"
                 f"{'s' if len(matching) != 1 else ''} for {user_label} in {org_label}."
             )
+            if unverified:
+                warn(
+                    "Original ownership cannot be verified. Proceed only if these writes belong "
+                    "to this account and organization."
+                )
+            for item in matching:
+                warn(
+                    f"{str(item['id'])[:12]} {item['method']} {item['path']} at {item['base_url']}"
+                )
             if not yes and not typer.confirm("Continue?"):
                 raise typer.Abort()
 
@@ -304,6 +347,8 @@ def claim_writes(
                         claim_pending_write_replay_scope(
                             write_id,
                             client._replay_scope,
+                            replay_identity=replay_identity,
+                            adopt_unverified=unverified,
                         )
                     except (FileNotFoundError, ValueError) as exc:
                         claim_failures.append((write_id, str(exc)))
@@ -342,6 +387,24 @@ def claim_writes(
                 raise typer.Exit(code=1)
 
     run_claim()
+
+
+@app.command("retry")
+def retry_writes(
+    write_ids: Annotated[list[str], typer.Argument(help="Exact write IDs or prefixes to retry")],
+) -> None:
+    """Re-enable selected writes after resolving their reported failure."""
+    with pending_replay_lock() as acquired:
+        if not acquired:
+            error("Another pending-write replay is already running.")
+            raise typer.Exit(code=1)
+        for write_id in write_ids:
+            try:
+                retry_pending_write(write_id)
+            except (FileNotFoundError, ValueError) as exc:
+                error(str(exc))
+                raise typer.Exit(code=1) from exc
+    flush_writes(write_ids)
 
 
 @app.command("flush")
@@ -389,50 +452,70 @@ def flush_writes(
 
     @run_async
     async def run_flush() -> None:
+        from sibyl_cli import config_store
+
         failures = len(corrupt)
-        replay_failures = 0
         replayed = 0
-        contended = 0
+        blocked: dict[str, set[str]] = {}
+        selected_ids = {str(item["id"]) for item in replayable}
+        all_writes = [item for item in list_pending_writes() if not is_corrupt_pending_write(item)]
         async with AsyncExitStack() as stack:
-            clients: dict[tuple[str, str | None, str | None], SibylClient] = {}
-            for item in replayable:
+            clients: dict[tuple[str, str | None], SibylClient] = {}
+            for item in sorted(
+                all_writes, key=lambda row: (str(row.get("created_at", "")), str(row["id"]))
+            ):
                 write_id = str(item["id"])
+                base_url = normalize_api_url(str(item["base_url"]))
+                replay_scope = item.get("replay_scope")
+                owner = normalize_replay_identity(item.get("replay_identity"))
+                lane = json.dumps([base_url, owner or replay_scope], sort_keys=True)
+                blocked_resources = blocked.setdefault(lane, set())
+                resource = pending_write_resource(item)
+                if write_id not in selected_ids:
+                    if not _is_buffered_read_like(item):
+                        blocked_resources.add(resource)
+                    continue
+                if (
+                    "*" in blocked_resources
+                    or resource in blocked_resources
+                    or (resource == "*" and blocked_resources)
+                    or item.get("status") == "attention"
+                ):
+                    blocked_resources.add(resource)
+                    failures += 1
+                    warn(f"Skipped {write_id[:12]}: needs attention or an earlier related write.")
+                    continue
+                names = [_context_name_for_base_url(base_url, replay_scope)]
+                if owner:
+                    names.extend(
+                        ctx.name
+                        for ctx in config_store.list_contexts()
+                        if normalize_api_url(f"{ctx.server_url}/api") == base_url
+                    )
+                selected_client = None
+                for context_name in dict.fromkeys(names):
+                    key = (base_url, context_name)
+                    client = clients.get(key)
+                    if client is None:
+                        client = await stack.enter_async_context(
+                            SibylClient(base_url=base_url, context_name=context_name)
+                        )
+                        clients[key] = client
+                    try:
+                        identity = await client._ensure_pending_identity()
+                    except SibylClientError:
+                        continue
+                    if pending_identity_matches(item, identity, client._replay_scope):
+                        selected_client = client
+                        break
+                if selected_client is None:
+                    failures += 1
+                    blocked_resources.add(resource)
+                    error(f"Skipped {write_id[:12]}: no verified matching owner is signed in.")
+                    continue
                 try:
                     current = increment_attempts(write_id)
-                except FileNotFoundError:
-                    continue
-                base_url = str(current["base_url"])
-                replay_scope = current.get("replay_scope")
-                context_name = _context_name_for_base_url(base_url, replay_scope)
-                client_key = (
-                    normalize_api_url(base_url),
-                    context_name,
-                    str(replay_scope) if replay_scope else None,
-                )
-                client = clients.get(client_key)
-                if client is None:
-                    client = await stack.enter_async_context(
-                        SibylClient(base_url=base_url, context_name=context_name)
-                    )
-                    clients[client_key] = client
-                if not replay_scope:
-                    failures += 1
-                    replay_failures += 1
-                    error(
-                        f"Failed {write_id[:12]}: legacy write has no credential owner; "
-                        "run sibyl pending-writes claim first"
-                    )
-                    continue
-                if client._replay_scope != replay_scope:
-                    failures += 1
-                    replay_failures += 1
-                    error(
-                        f"Failed {write_id[:12]}: no configured credential scope matches "
-                        "the buffered write"
-                    )
-                    continue
-                try:
-                    await client._request(
+                    await selected_client._request(
                         str(current["method"]),
                         str(current["path"]),
                         json=current.get("json"),
@@ -444,34 +527,18 @@ def flush_writes(
                     record_pending_metric("replayed")
                     replayed += 1
                     success(f"Flushed {write_id[:12]}")
+                except FileNotFoundError:
+                    continue
                 except SibylClientError as exc:
                     failures += 1
-                    replay_failures += 1
+                    blocked_resources.add(resource)
                     error(f"Failed {write_id[:12]}: {exc.detail or exc}")
-                    if exc.status_code == 409:
-                        contended += 1
-                    if _should_abort_flush(exc):
-                        error("Stopping flush; remaining writes are still buffered.")
-                        break
-        if failures:
-            warn(f"{replayed} replayed, {failures} failed; all failed entries stay buffered.")
-            if replay_failures:
+            if failures:
                 warn(
-                    f"{replay_failures} replay failure"
-                    f"{'s are' if replay_failures != 1 else ' is'} safe to flush again."
+                    f"{replayed} replayed, {failures} unresolved; payloads remain local. "
+                    "Inspect pending-writes list for ownership and failure reasons."
                 )
-            if corrupt:
-                warn(
-                    f"{len(corrupt)} corrupt queue entr"
-                    f"{'ies' if len(corrupt) != 1 else 'y'} cannot replay until repaired "
-                    "or explicitly discarded."
-                )
-            if contended:
-                warn(
-                    f"{contended} hit an identical request still executing on the "
-                    "server; those clear on their own, flush again shortly."
-                )
-            raise typer.Exit(code=1)
+                raise typer.Exit(code=1)
 
     with pending_replay_lock() as acquired:
         if not acquired:

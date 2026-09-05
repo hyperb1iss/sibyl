@@ -216,9 +216,9 @@ def hint(message: str) -> None:
 def pending_writes_summary(count: int) -> str:
     plural = "s" if count != 1 else ""
     return (
-        f"{count} write{plural} buffered locally and not saved on the server. "
-        "Sibyl retries replayable writes after the next successful API request; "
-        "run 'sibyl pending-writes list' if the count stops falling."
+        f"{count} write{plural} buffered locally without a confirmed server outcome. "
+        "Writes with a verified owner retry automatically; "
+        "run 'sibyl pending-writes list' for failures and ownership requiring attention."
     )
 
 

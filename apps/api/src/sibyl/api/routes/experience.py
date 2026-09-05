@@ -5,6 +5,7 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from sibyl.api.errors import entity_locked
 from sibyl.api.schemas import (
     OperationalExperienceCaptureRequest,
     OperationalExperienceCaptureResponse,
@@ -73,10 +74,7 @@ async def capture_operational_experience(
     try:
         async with entity_lock(group_id, manifest_id, blocking=True) as lock_token:
             if not lock_token:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Operational experience is being modified; retry the request",
-                )
+                raise entity_locked()
             runtime = await get_experience_graph_runtime(group_id)
             try:
                 existing_manifest = await runtime.entity_manager.get(manifest_id)
@@ -186,10 +184,7 @@ async def capture_operational_experience(
                         error=str(exc),
                     )
     except LockAcquisitionError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Operational experience is locked; retry the request",
-        ) from exc
+        raise entity_locked() from exc
 
     return OperationalExperienceCaptureResponse(
         source_id=experience.source_id,

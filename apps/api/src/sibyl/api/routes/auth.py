@@ -45,6 +45,7 @@ from sibyl.persistence.auth_runtime import (
     deny_device_authorization,
     exchange_device_code,
     get_device_request_by_user_code,
+    get_server_instance_id,
     get_user_by_id,
     list_api_keys_for_user,
     log_audit_event,
@@ -1774,6 +1775,31 @@ async def revoke_api_key(
         request=request,
     )
     return {"success": True, "id": str(api_key_id)}
+
+
+@router.get("/replay-identity")
+async def replay_identity(ctx: AuthContext = Depends(get_auth_context)):
+    """Identify a durable write owner without exposing session credentials."""
+    if ctx.organization is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No organization context")
+
+    def optional_sorted(values: frozenset[str] | None) -> list[str] | None:
+        return sorted(values) if values is not None else None
+
+    return {
+        "version": 1,
+        "server_instance_id": await get_server_instance_id(),
+        "user_id": str(ctx.user.id),
+        "organization_id": str(ctx.organization.id),
+        "credential": {
+            "kind": "api_key" if ctx.api_key_id else "session",
+            "api_key_id": ctx.api_key_id,
+            "scopes": sorted(ctx.scopes),
+            "project_ids": optional_sorted(ctx.api_key_project_ids),
+            "memory_space_ids": optional_sorted(ctx.api_key_memory_space_ids),
+            "memory_scope_keys": optional_sorted(ctx.api_key_memory_scope_keys),
+        },
+    }
 
 
 @router.get("/me")

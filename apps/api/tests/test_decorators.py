@@ -107,3 +107,18 @@ class TestHandleWorkflowErrors:
 
         assert start_task.__name__ == "start_task"
         assert start_task.__doc__ == "Start working on a task."
+
+
+@pytest.mark.asyncio
+async def test_workflow_lock_contention_has_retryable_error_code() -> None:
+    from sibyl.api.errors import http_exception_payload
+    from sibyl.coordination.locks import LockAcquisitionError
+
+    @handle_workflow_errors("update_task")
+    async def update(task_id: str):
+        raise LockAcquisitionError(task_id, "org-1")
+
+    with pytest.raises(HTTPException) as exc:
+        await update(task_id="task-1")
+    assert exc.value.status_code == 409
+    assert http_exception_payload(exc.value, "request-1")["error"] == "entity_locked"

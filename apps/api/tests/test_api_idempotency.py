@@ -204,3 +204,32 @@ async def test_pending_takeover_rejects_a_different_payload() -> None:
 
     assert mismatch.value.status_code == 409
     assert "different request" in str(mismatch.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_busy_idempotency_lock_exposes_retryable_error_code() -> None:
+    from contextlib import asynccontextmanager
+
+    from sibyl.locks import LockAcquisitionError
+
+    @asynccontextmanager
+    async def busy_lock(**_kwargs):
+        raise LockAcquisitionError("request", "org")
+        yield
+
+    @serialize_idempotent_request
+    async def mutate(*, http_request, org, ctx):
+        pytest.fail("Busy lock must not execute the handler")
+
+    request = SimpleNamespace(
+        headers={"Idempotency-Key": "same-request"},
+        method="POST",
+        url=SimpleNamespace(path="/memory/raw"),
+    )
+    with (
+        patch("sibyl.api.idempotency.idempotency_lock", busy_lock),
+        pytest.raises(HTTPException) as caught,
+    ):
+        await mutate(http_request=request, org=SimpleNamespace(id=uuid4()), ctx=None)
+    assert caught.value.status_code == 409
+    assert caught.value.detail["error"] == "idempotency_in_progress"
