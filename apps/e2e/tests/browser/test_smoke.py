@@ -100,7 +100,7 @@ class TestFrontendBrowserContracts:
             "search seed",
         )
 
-        authenticated_page.goto("/search", wait_until="networkidle")
+        authenticated_page.goto("/search", wait_until="domcontentloaded")
         assert_path(authenticated_page, "/search")
         search_form = authenticated_page.get_by_role("main").locator("form").first
         search_form.get_by_label("Search", exact=True).fill(query)
@@ -133,7 +133,7 @@ class TestFrontendBrowserContracts:
         authenticated_page.get_by_role("button", name="Create Task", exact=True).click()
 
         expect(authenticated_page.get_by_text("Task created", exact=True)).to_be_visible()
-        authenticated_page.reload(wait_until="networkidle")
+        authenticated_page.reload(wait_until="domcontentloaded")
         assert_path(authenticated_page, "/tasks")
         task_heading = authenticated_page.get_by_role(
             "heading",
