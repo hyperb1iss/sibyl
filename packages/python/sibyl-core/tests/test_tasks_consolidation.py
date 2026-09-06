@@ -291,6 +291,21 @@ async def test_model_abstention_is_retained(group, model):
     assert len(model[1]) == 1
 
 
+async def test_provider_prompt_omits_budget_identifiers_but_receipt_keeps_identity(
+    group, procedure, model
+):
+    result = await propose(group, procedure, model)
+    header = json.loads(result.prompt.splitlines()[1])
+    assert "organization_id" not in header
+    assert "owner_principal_id" not in header
+    assert group.organization_id not in result.prompt
+    assert group.owner_principal_id not in result.prompt
+    retained = result.candidate.metadata[c.METADATA_KEY]["group"]
+    assert retained["organization_id"] == group.organization_id
+    assert retained["owner_principal_id"] == group.owner_principal_id
+    assert c.validate_candidate_content_agreement(result.candidate, group=result.group) == []
+
+
 async def test_proposal_preserves_usage_bytes_sources_and_native_steps(group, procedure, model):
     result = await propose(group, procedure, model)
     candidate = result.candidate

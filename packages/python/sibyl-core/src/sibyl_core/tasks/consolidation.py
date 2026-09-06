@@ -202,7 +202,14 @@ def _freeze(group: ConsolidationGroup) -> ConsolidationGroup:
 
 
 def _prompt(group: ConsolidationGroup) -> str:
-    header = group.model_dump(mode="json", exclude={"episodes": {"__all__": {"artifact"}}})
+    header = group.model_dump(
+        mode="json",
+        exclude={
+            "organization_id": True,
+            "owner_principal_id": True,
+            "episodes": {"__all__": {"artifact"}},
+        },
+    )
     lines = ["Declared contrast group:", _canonical(header).decode(), "Evidence byte ranges:"]
     for episode in group.episodes:
         offset = 0
