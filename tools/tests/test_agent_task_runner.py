@@ -13,6 +13,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 import pytest
+from benchmarks.agent_tasks import runner
 from benchmarks.agent_tasks.manifest import (
     Arm,
     Manifest,
@@ -1063,3 +1064,39 @@ def test_absent_controller_credential_preserves_legacy_manifest_hash(experiment)
     original = Manifest.model_validate(experiment[0]).model_dump(mode="json")
     experiment[0]["controller_api_key_env"] = None
     assert Manifest.model_validate(experiment[0]).model_dump(mode="json") == original
+
+
+def test_timeout_allows_cleanup_without_becoming_a_task_outcome(experiment):
+    manifest, _, output = experiment
+    manifest["controller_timeout_seconds"] = 0.5
+    replace_program(
+        experiment,
+        "controller",
+        (
+            "import json,time\nfrom pathlib import Path\n"
+            "try:\n time.sleep(30)\n"
+            "except KeyboardInterrupt:\n Path('cleanup.txt').write_text('finished')\n"
+            "print(json.dumps({'synthetic':True,'input_tokens':0,'output_tokens':0,'tool_calls':0,'cost_usd':0.0}))\n"
+        ),
+    )
+    receipt = execute(experiment)
+    assert receipt["status"] == "controller_timeout"
+    assert receipt["controller"]["exited_during_termination_grace"] is True
+    assert (output / "controller-workspace/cleanup.txt").read_text() == "finished"
+    assert "checker" not in receipt
+    assert receipt["usage"]["complete"] is True
+
+
+def test_timeout_still_kills_a_controller_that_ignores_interrupt(experiment, monkeypatch):
+    monkeypatch.setattr(runner, "TERMINATION_GRACE_SECONDS", 0.1)
+    experiment[0]["controller_timeout_seconds"] = 0.5
+    replace_program(
+        experiment,
+        "controller",
+        ("import signal,time\nsignal.signal(signal.SIGINT,signal.SIG_IGN)\ntime.sleep(30)\n"),
+    )
+    receipt = execute(experiment)
+    assert receipt["status"] == "controller_timeout"
+    assert receipt["controller"]["exited_during_termination_grace"] is False
+    assert receipt["controller"]["returncode"] == -signal.SIGKILL
+    assert receipt["controller"]["process_group_quiescent"] is True

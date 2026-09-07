@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,7 @@ from benchmarks.agent_tasks.manifest import (
 from pydantic import Field
 
 PROCESS_TABLE_COLUMNS = 2
+TERMINATION_GRACE_SECONDS = 5.0
 
 
 class UnsafeSnapshotError(ValueError):
@@ -187,6 +189,7 @@ def _execute(
     request_path = output / f"{role}-request.json"
     _write_json(request_path, request)
     timed_out = False
+    graceful_exit = None
     with (
         request_path.open("rb") as stdin,
         (output / f"{role}-stdout.txt").open("xb") as stdout,
@@ -205,6 +208,13 @@ def _execute(
             process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGINT)
+            try:
+                process.wait(timeout=TERMINATION_GRACE_SECONDS)
+                graceful_exit = True
+            except subprocess.TimeoutExpired:
+                graceful_exit = False
         finally:
             # The parent may exit before its children. Stop the owned group
             # before taking the artifact snapshot on either success or failure.
@@ -214,6 +224,8 @@ def _execute(
         "process_group_quiescent": _group_quiescent(process.pid),
         "returncode": process.returncode,
         "timed_out": timed_out,
+        "termination_grace_seconds": TERMINATION_GRACE_SECONDS if timed_out else None,
+        "exited_during_termination_grace": graceful_exit,
         "elapsed_seconds": time.monotonic() - started,
         "stdout_sha256": digest((output / f"{role}-stdout.txt").read_bytes()),
         "stderr_sha256": digest((output / f"{role}-stderr.txt").read_bytes()),
