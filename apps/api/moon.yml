@@ -2,6 +2,8 @@
 $schema: https://moonrepo.dev/schemas/project.json
 
 language: python
+dependsOn:
+  - core
 layer: application
 toolchains:
   default: system

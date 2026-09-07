@@ -1,0 +1,8 @@
+inheritedBy:
+  language: python
+
+implicitInputs:
+  - project://^?filter=src/**/*
+  - project://^?filter=pyproject.toml
+  - /pyproject.toml
+  - /uv.lock
