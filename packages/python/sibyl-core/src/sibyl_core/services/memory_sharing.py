@@ -35,6 +35,7 @@ from sibyl_core.services.memory_promotion import (
     _source_scope_denial,
 )
 from sibyl_core.services.memory_reflection import (
+    _load_promotion_inputs,
     _promotion_write_denied,
     persist_reflection_candidate,
 )
@@ -532,26 +533,44 @@ async def _resolve_raw_memory_share_plan(
             raw_source_ids=raw_source_ids,
         )
 
-    input_memories = [memory]
-    ownership_denial = _principal_denial(
+    input_memories, sources_complete = await _load_promotion_inputs(
+        memory, organization_id=organization_id
+    )
+    source_denial = _principal_denial(
         input_memories,
         candidate_id=memory.id,
         principal_id=principal_id,
         raw_source_ids=raw_source_ids,
     )
-    if ownership_denial is not None:
-        return ownership_denial
-    source_scope_denial = _source_scope_denial(
-        input_memories,
-        candidate_id=memory.id,
-        principal_id=principal_id,
-        raw_source_ids=raw_source_ids,
-        accessible_projects=accessible_projects,
-        accessible_teams=accessible_teams,
-        accessible_delegations=accessible_delegations,
-    )
-    if source_scope_denial is not None:
-        return source_scope_denial
+    if source_denial is None:
+        source_denial = _source_scope_denial(
+            input_memories,
+            candidate_id=memory.id,
+            principal_id=principal_id,
+            raw_source_ids=raw_source_ids,
+            accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
+        )
+    if source_denial is not None:
+        return _promotion_denied(
+            candidate_id=memory.id,
+            reason="source_not_recallable",
+            review_state=memory.review_state,
+            memory_scope=memory.memory_scope,
+            scope_key=memory.scope_key,
+            raw_source_ids=raw_source_ids,
+        )
+
+    if not sources_complete or any(not raw_memory_recallable(source) for source in input_memories):
+        return _promotion_denied(
+            candidate_id=memory.id,
+            reason="source_not_recallable",
+            review_state=memory.review_state,
+            memory_scope=memory.memory_scope,
+            scope_key=memory.scope_key,
+            raw_source_ids=raw_source_ids,
+        )
 
     target_scope = _coerce_promotion_scope(promote_to_scope)
     if target_scope is None:
@@ -618,6 +637,7 @@ async def _apply_share_plan(
         memory_scope=plan.target_scope,
         scope_key=plan.target_scope_key,
         link_source_entity=False,
+        source_memories=plan.input_memories,
     )
     if not result.response.success or result.metadata.get("promotion_state") == "partial":
         return _promotion_write_denied(plan=plan, result=result)
