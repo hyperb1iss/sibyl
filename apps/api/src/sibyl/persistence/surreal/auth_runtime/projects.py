@@ -1176,9 +1176,7 @@ async def resolve_org_role(*, org_id: str, user_id: str | None) -> str | None:
         return _role_value(records[0].get("role")) if records else None
 
 
-async def list_accessible_project_graph_ids(ctx) -> set[str]:
-    if ctx.organization is None:
-        return set()
+async def _load_project_access_records(ctx) -> tuple[list[SurrealRecord], SurrealRecord]:
     async with _auth_client_scope() as client:
         org_id = str(ctx.organization.id)
         org_role = _role_value(ctx.org_role)
@@ -1228,54 +1226,123 @@ async def list_accessible_project_graph_ids(ctx) -> set[str]:
             )
             payload = _record_payload(raw_payload)
             project_records = _normalize_records(payload.get("projects"))
-        if not project_records:
-            return set()
-        if org_role in _ORG_ADMIN_ROLE_VALUES:
-            accessible = {
-                str(record["graph_project_id"])
-                for record in project_records
-                if str(record.get("graph_project_id") or "").strip()
-            }
-            api_key_allowed = getattr(ctx, "api_key_project_ids", None)
-            if api_key_allowed is not None:
-                return accessible & {str(project_id) for project_id in api_key_allowed}
-            return accessible
-        accessible: set[str] = set()
-        org_visible = {
-            str(record["uuid"]): str(record["graph_project_id"])
-            for record in project_records
-            if record.get("visibility") == ProjectVisibility.ORG.value
-            and str(record.get("graph_project_id") or "").strip()
-        }
-        accessible.update(org_visible.values())
-        direct_memberships = _normalize_records(payload.get("direct_memberships"))
-        direct_project_ids = {
-            str(record["project_id"])
-            for record in direct_memberships
-            if str(record.get("project_id") or "").strip()
-        }
-        accessible.update(
+        return project_records, payload
+
+
+def _project_ids_for_role(
+    ctx,
+    project_records: list[SurrealRecord],
+    payload: SurrealRecord,
+    required_role: ProjectRole,
+) -> set[str]:
+    org_role = _role_value(ctx.org_role)
+    if not project_records:
+        return set()
+    if org_role in _ORG_ADMIN_ROLE_VALUES:
+        accessible = {
             str(record["graph_project_id"])
             for record in project_records
-            if str(record.get("uuid")) in direct_project_ids
-            and str(record.get("graph_project_id") or "").strip()
-        )
-        team_projects = _normalize_records(payload.get("team_projects"))
-        granted_project_ids = {
-            str(record["project_id"])
-            for record in team_projects
-            if str(record.get("project_id") or "").strip()
+            if str(record.get("graph_project_id") or "").strip()
         }
-        accessible.update(
-            str(record["graph_project_id"])
-            for record in project_records
-            if str(record.get("uuid")) in granted_project_ids
-            and str(record.get("graph_project_id") or "").strip()
-        )
         api_key_allowed = getattr(ctx, "api_key_project_ids", None)
         if api_key_allowed is not None:
             return accessible & {str(project_id) for project_id in api_key_allowed}
         return accessible
+    if required_role is not ProjectRole.VIEWER:
+        direct_by_project = {
+            str(record.get("project_id")): record
+            for record in _normalize_records(payload.get("direct_memberships"))
+        }
+        teams_by_project: dict[str, list[SurrealRecord]] = {}
+        for record in _normalize_records(payload.get("team_projects")):
+            teams_by_project.setdefault(str(record.get("project_id")), []).append(record)
+        writable: set[str] = set()
+        for project in project_records:
+            project_id = str(project.get("uuid"))
+            graph_id = str(project.get("graph_project_id") or "").strip()
+            role = _effective_project_role_from_records(
+                ctx=ctx,
+                project=project,
+                direct_record=direct_by_project.get(project_id),
+                team_project_records=teams_by_project.get(project_id, []),
+            )
+            if (
+                graph_id
+                and role is not None
+                and (_PROJECT_ROLE_LEVELS[role] >= _PROJECT_ROLE_LEVELS[required_role])
+            ):
+                writable.add(graph_id)
+        api_key_allowed = getattr(ctx, "api_key_project_ids", None)
+        if api_key_allowed is not None:
+            return writable & {str(project_id) for project_id in api_key_allowed}
+        return writable
+    accessible: set[str] = set()
+    org_visible = {
+        str(record["uuid"]): str(record["graph_project_id"])
+        for record in project_records
+        if record.get("visibility") == ProjectVisibility.ORG.value
+        and str(record.get("graph_project_id") or "").strip()
+    }
+    accessible.update(org_visible.values())
+    direct_memberships = _normalize_records(payload.get("direct_memberships"))
+    direct_project_ids = {
+        str(record["project_id"])
+        for record in direct_memberships
+        if str(record.get("project_id") or "").strip()
+    }
+    accessible.update(
+        str(record["graph_project_id"])
+        for record in project_records
+        if str(record.get("uuid")) in direct_project_ids
+        and str(record.get("graph_project_id") or "").strip()
+    )
+    team_projects = _normalize_records(payload.get("team_projects"))
+    granted_project_ids = {
+        str(record["project_id"])
+        for record in team_projects
+        if str(record.get("project_id") or "").strip()
+    }
+    accessible.update(
+        str(record["graph_project_id"])
+        for record in project_records
+        if str(record.get("uuid")) in granted_project_ids
+        and str(record.get("graph_project_id") or "").strip()
+    )
+    api_key_allowed = getattr(ctx, "api_key_project_ids", None)
+    if api_key_allowed is not None:
+        return accessible & {str(project_id) for project_id in api_key_allowed}
+    return accessible
+
+
+async def list_accessible_project_graph_ids(
+    ctx, *, required_role: ProjectRole = ProjectRole.VIEWER
+) -> set[str]:
+    if ctx.organization is None:
+        return set()
+    records, payload = await _load_project_access_records(ctx)
+    return _project_ids_for_role(ctx, records, payload, required_role)
+
+
+async def resolve_project_graph_grants(
+    *, user_id: str, org_id: str, scopes=None, api_key_project_ids=None
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Resolve read and write grants from one request-time authorization snapshot."""
+    try:
+        ctx = await _resolve_auth_context_from_claims(
+            {"sub": user_id, "org": org_id, "scopes": list(scopes or [])}
+        )
+    except Exception:
+        return frozenset(), frozenset()
+    if ctx.organization is None:
+        return frozenset(), frozenset()
+    records, payload = await _load_project_access_records(ctx)
+    readable = _project_ids_for_role(ctx, records, payload, ProjectRole.VIEWER)
+    writable = _project_ids_for_role(ctx, records, payload, ProjectRole.CONTRIBUTOR)
+    if api_key_project_ids is not None:
+        allowed = {str(project_id) for project_id in api_key_project_ids}
+        readable &= allowed
+        writable &= allowed
+    return frozenset(readable), frozenset(writable)
 
 
 async def list_accessible_delegated_scope_keys(ctx) -> set[str]:
@@ -1388,6 +1455,7 @@ async def resolve_accessible_project_graph_ids(
     org_id: str,
     scopes=None,
     api_key_project_ids=None,
+    required_role: ProjectRole = ProjectRole.VIEWER,
 ) -> set[str] | None:
     try:
         auth_ctx = await _resolve_auth_context_from_claims(
@@ -1397,7 +1465,7 @@ async def resolve_accessible_project_graph_ids(
         return set()
     if auth_ctx.organization is None:
         return set()
-    user_accessible = await list_accessible_project_graph_ids(auth_ctx)
+    user_accessible = await list_accessible_project_graph_ids(auth_ctx, required_role=required_role)
     if api_key_project_ids is not None:
         api_key_allowed = {str(project_id) for project_id in api_key_project_ids}
         if user_accessible is None:

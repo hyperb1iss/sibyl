@@ -133,19 +133,18 @@ async def _synthesis_mcp_draft(
     resolved_scope_key = scope_key
     policy_reason: str | None = None
     if remember:
-        write_accessible_projects = accessible_projects
         if memory_scope == "project":
             resolved_scope_key = resolved_scope_key or project
-            write_accessible_projects = await mcp_context.resolve_project_scope(
+            await mcp_context.resolve_project_scope(
                 ctx,
                 resolved_scope_key,
                 require_project_when_restricted=True,
             )
-        decision = mcp_policy.authorize_memory_write_request(
+        decision = await mcp_policy.authorize_memory_request(
             ctx=ctx,
+            write=True,
             memory_scope=memory_scope,
             scope_key=resolved_scope_key,
-            accessible_projects=write_accessible_projects,
             surface="mcp_synthesis",
         )
         policy_reason = decision.reason
