@@ -109,3 +109,40 @@ async def test_writable_projects_without_principal_never_resolves_grants(monkeyp
     monkeypatch.setattr(context, "resolve_project_graph_grants", resolver)
     assert await context.get_writable_projects(McpContext(org_id="org")) == set()
     resolver.assert_not_awaited()
+
+
+@pytest.mark.parametrize("action", ["estimate", "suggest", "prioritize", "detect_cycles"])
+@pytest.mark.parametrize("is_api_key", [False, True])
+async def test_keyed_analysis_requires_write_before_reserving_or_reading(
+    monkeypatch, action, is_api_key
+):
+    ctx = McpContext(
+        org_id="org-test",
+        user_id="user-test",
+        scopes=["mcp", "api:read"],
+        org_role="member" if is_api_key else "viewer",
+        is_api_key=is_api_key,
+    )
+    monkeypatch.setattr(context, "get_context", AsyncMock(return_value=ctx))
+    require_context = AsyncMock(wraps=context.require_context)
+    monkeypatch.setattr(context, "require_context", require_context)
+    projects = AsyncMock()
+    reserve = AsyncMock()
+    manage = AsyncMock()
+    lock = AsyncMock()
+    monkeypatch.setattr(context, "get_accessible_projects", projects)
+    monkeypatch.setattr(management, "reserve_idempotency_record", reserve)
+    monkeypatch.setattr("sibyl_core.tools.manage.manage", manage)
+    monkeypatch.setattr("sibyl.mcp_tools.idempotency.idempotency_lock", lock)
+    reason = "missing the scope required" if is_api_key else "organization_write_forbidden"
+    with pytest.raises(ValueError, match=reason):
+        await management._manage_mcp_action(
+            action=action,
+            entity_id="project-a",
+            data={"idempotency_key": " request-one "},
+        )
+    require_context.assert_awaited_once_with(write=True)
+    projects.assert_not_awaited()
+    reserve.assert_not_awaited()
+    manage.assert_not_awaited()
+    lock.assert_not_called()
