@@ -113,6 +113,9 @@ class Manifest(FrozenModel):
     dependency_lock: Artifact
     seed: int = Field(ge=0)
     controller: Program
+    controller_api_key_env: Literal["OPENROUTER_API_KEY"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     controller_model: str = Field(min_length=1)
     controller_tools: list[str]
     controller_budget: ControllerBudget
