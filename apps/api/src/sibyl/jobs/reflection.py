@@ -427,7 +427,7 @@ async def _mark_source_reflected(
         "reflection_dream_candidate_count": len(pack.candidates),
         "reflection_dream_persisted_count": pack.persisted_count,
     }
-    await save_raw_memory(replace(source, metadata=metadata))
+    await save_raw_memory(replace(source, metadata=metadata), expected_revision=source.revision)
     return result
 
 
@@ -453,7 +453,7 @@ async def _mark_source_processed(
         "reflection_dream_run_id": run_id,
         "reflection_dream_skip_reason": reason,
     }
-    await save_raw_memory(replace(source, metadata=metadata))
+    await save_raw_memory(replace(source, metadata=metadata), expected_revision=source.revision)
     return result
 
 
@@ -475,7 +475,10 @@ async def _archive_dream_exception_candidate(
         "autonomy_recommended_action": "route_to_review",
         "reflection_dream_run_id": run_id,
     }
-    return await save_raw_memory(replace(candidate, review_state="archived", metadata=metadata))
+    return await save_raw_memory(
+        replace(candidate, review_state="archived", metadata=metadata),
+        expected_revision=candidate.revision,
+    )
 
 
 async def _accessible_projects_for_source(
