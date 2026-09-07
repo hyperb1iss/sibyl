@@ -57,6 +57,7 @@ class ControllerResult(FrozenModel):
     tool_calls: int | None = Field(default=None, ge=0)
     model: str | None = None
     synthetic: bool
+    trace_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 class CheckerResult(FrozenModel):
@@ -166,6 +167,7 @@ def _execute(
     output: Path,
     role: str,
     timeout: float,
+    api_key: str | None = None,
 ) -> dict[str, Any]:
     if digest(program.read_bytes()) != program_sha256:
         raise ManifestError("staged program differs from the frozen manifest")
@@ -176,6 +178,10 @@ def _execute(
         "HOME": str(output / f"{role}-home"),
         "TMPDIR": str(output / f"{role}-tmp"),
     }
+    if api_key is not None:
+        if role != "controller":
+            raise ValueError("provider credentials belong only to the controller")
+        environment["OPENROUTER_API_KEY"] = api_key
     Path(environment["HOME"]).mkdir()
     Path(environment["TMPDIR"]).mkdir()
     request_path = output / f"{role}-request.json"
@@ -222,13 +228,51 @@ def _read_protocol[Model: FrozenModel](output: Path, role: str, schema: type[Mod
         raise ProtocolError(role, str(exc)) from exc
 
 
-def _controller_usage(output: Path) -> dict[str, Any]:
-    result = _read_protocol(output, "controller", ControllerResult)
+def _controller_usage(result: ControllerResult) -> dict[str, Any]:
     complete = all(
         value is not None
         for value in (result.input_tokens, result.output_tokens, result.tool_calls, result.cost_usd)
     )
-    return {**result.model_dump(), "complete": complete, "provenance": "controller_reported"}
+    return {
+        **result.model_dump(exclude={"trace_sha256"}),
+        "complete": complete,
+        "provenance": "controller_reported",
+    }
+
+
+def _retain_controller_evidence(output: Path, receipt: dict[str, Any], manifest: Manifest) -> None:
+    """Retain partial traces before interpreting a terminal controller result.
+
+    The runner binds these bytes; it does not authenticate the reported actions,
+    usage, or completeness. Learning admission checks the trace protocol later.
+    """
+    trace = output / "controller-home" / "trace.jsonl"
+    trace_hash = None
+    if trace.is_symlink() or trace.parent.is_symlink():
+        raise ProtocolError("controller", "trace path must not be a symlink")
+    if trace.exists():
+        if not trace.is_file():
+            raise ProtocolError("controller", "trace must be a regular file")
+        data = trace.read_bytes()
+        _put(output / "controller-trace.jsonl", data, 292)
+        trace_hash = digest(data)
+        receipt["controller_trace"] = {
+            "sha256": trace_hash,
+            "bytes": len(data),
+            "provenance": "controller_reported_not_authenticated",
+            "declared_complete": False,
+        }
+    result = _read_protocol(output, "controller", ControllerResult)
+    receipt["usage"] = _controller_usage(result)
+    receipt["budget_status"] = _budget_status(receipt["usage"], manifest.controller_budget)
+    if result.model not in (None, manifest.controller_model):
+        raise ProtocolError("controller", "controller reported a different model")
+    if not result.synthetic and result.trace_sha256 is None:
+        raise ProtocolError("controller", "a real controller must declare its retained trace hash")
+    if result.trace_sha256 is not None:
+        if trace_hash != result.trace_sha256 or receipt["controller_trace"]["bytes"] == 0:
+            raise ProtocolError("controller", "retained trace does not match the declared hash")
+        receipt["controller_trace"]["declared_complete"] = True
 
 
 def _checked_snapshot(output: Path, workspace: Path) -> str:
@@ -333,10 +377,6 @@ def _process_failure(process: dict[str, Any], role: str) -> str | None:
 
 
 def _check_task(manifest: Manifest, task: Task, output: Path, receipt: dict[str, Any]) -> None:
-    receipt["usage"] = _controller_usage(output)
-    if receipt["usage"]["model"] not in (None, manifest.controller_model):
-        raise ProtocolError("controller", "controller reported a different model than the manifest")
-    receipt["budget_status"] = _budget_status(receipt["usage"], manifest.controller_budget)
     checker = _execute(
         program=output / "inputs" / task.checker.script.path,
         program_sha256=task.checker.script.sha256,
@@ -369,6 +409,7 @@ def _perform_attempt(
     inputs: dict[str, bytes],
     output: Path,
     receipt: dict[str, Any],
+    api_key: str | None,
 ) -> None:
     _write_json(output / "manifest.json", manifest.model_dump(mode="json"))
     retained_paths = {
@@ -418,18 +459,27 @@ def _perform_attempt(
         output=output,
         role="controller",
         timeout=manifest.controller_timeout_seconds,
+        api_key=api_key,
     )
     receipt["controller"] = controller
     _write_json(output / "receipt.json", receipt)
     if not controller["process_group_quiescent"]:
         receipt["status"] = "controller_cleanup_failed"
         return
+    evidence_error = None
+    try:
+        _retain_controller_evidence(output, receipt, manifest)
+    except ProtocolError as exc:
+        evidence_error = exc
+        receipt["controller_evidence_error"] = str(exc)
     final_hash = _checked_snapshot(output, workspace)
     receipt["controller_final_snapshot_sha256"] = final_hash
     receipt["checker_input_snapshot_sha256"] = final_hash
     if failure := _process_failure(controller, "controller"):
         receipt["status"] = failure
         return
+    if evidence_error is not None:
+        raise evidence_error
     _check_task(manifest, task, output, receipt)
 
 
@@ -447,6 +497,11 @@ def run_task(manifest_path: Path, *, task_id: str, arm_id: str, output: Path) ->
             "sealed execution requires an isolated agent runtime; "
             "this adapter supports only learning and development tasks"
         )
+    api_key = None
+    if manifest.controller_api_key_env is not None:
+        api_key = os.environ.get(manifest.controller_api_key_env)
+        if not api_key or any(character in api_key for character in "\r\n\x00"):
+            raise ManifestError("declared controller API credential is missing or invalid")
     output = output.absolute()
     if output.is_symlink():
         raise ManifestError("attempt output must not be a symlink")
@@ -457,7 +512,7 @@ def run_task(manifest_path: Path, *, task_id: str, arm_id: str, output: Path) ->
     receipt = _receipt(manifest, task, arm, inputs)
     _write_json(output / "receipt.json", receipt)
     try:
-        _perform_attempt(manifest, task, arm, inputs, output, receipt)
+        _perform_attempt(manifest, task, arm, inputs, output, receipt, api_key)
     except (ProtocolError, UnsafeSnapshotError) as exc:
         receipt["status"] = exc.status if isinstance(exc, ProtocolError) else "unsafe_snapshot"
         receipt["error"] = f"{type(exc).__name__}: {exc}"

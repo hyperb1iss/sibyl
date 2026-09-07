@@ -34,6 +34,7 @@ from sibyl_core.models.context import (
 from sibyl_core.tools.context_rendering import render_context_pack
 
 CONTROLLER_FAILURE = 7
+REPORTED_INPUT_TOKENS = 2
 
 FIXTURES = Path(__file__).parent / "fixtures" / "agent_tasks"
 
@@ -921,3 +922,144 @@ def test_learning_task_can_coexist_with_separate_heldout_task(experiment):
     with pytest.raises(ManifestError, match="sealed execution requires an isolated agent runtime"):
         run_task(freeze(), task_id="sealed-task", arm_id="memory", output=refused)
     assert not refused.exists()
+
+
+def replace_program(experiment, role, source):
+    manifest, freeze, _ = experiment
+    program = manifest["controller"] if role == "controller" else manifest["tasks"][0]["checker"]
+    path = freeze().parent / program["script"]["path"]
+    path.write_text(source)
+    program["script"]["sha256"] = digest(source.encode())
+
+
+def traced_controller(*, exit_code=0, declared_hash=True, bad_hash=False, api_key=False):
+    return (
+        "import hashlib,json,os,sys\nfrom pathlib import Path\n"
+        "request=json.load(sys.stdin)\n"
+        + (
+            f"assert hashlib.sha256(os.environ['OPENROUTER_API_KEY'].encode()).hexdigest()=={digest(b'fixture-provider-secret')!r}\n"
+            if api_key
+            else ""
+        )
+        + "trace=(json.dumps({'kind':'terminal','reason':'fixture','attempt_id':request['attempt_id']})+'\\n').encode()\n"
+        "(Path.home()/'trace.jsonl').write_bytes(trace)\n"
+        "Path('answer.txt').write_text(request['memory_pack'])\n"
+        "result={'synthetic':False,'model':request['controller_model'],'input_tokens':2,'output_tokens':1,'tool_calls':1,'cost_usd':0.0}\n"
+        + (
+            "result['trace_sha256']="
+            + ("'f'*64" if bad_hash else "hashlib.sha256(trace).hexdigest()")
+            + "\n"
+            if declared_hash
+            else ""
+        )
+        + f"print(json.dumps(result))\nsys.exit({exit_code})\n"
+    )
+
+
+def test_declared_provider_key_reaches_only_controller(experiment, monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "fixture-provider-secret")
+    experiment[0]["controller_api_key_env"] = "OPENROUTER_API_KEY"
+    replace_program(experiment, "controller", traced_controller(api_key=True))
+    checker = (FIXTURES / "checker.py").read_text()
+    replace_program(
+        experiment,
+        "checker",
+        "import os\nassert 'OPENROUTER_API_KEY' not in os.environ\n" + checker,
+    )
+    receipt = execute(experiment)
+    assert receipt["success"]
+    assert receipt["controller_trace"]["declared_complete"]
+    assert receipt["usage"]["provenance"] == "controller_reported"
+    for path in experiment[2].rglob("*"):
+        if path.is_file():
+            assert b"fixture-provider-secret" not in path.read_bytes()
+    inventory = json.loads((experiment[2] / "final-snapshot.json").read_text())
+    assert all("trace" not in entry["path"] for entry in inventory)
+
+
+def test_undeclared_provider_key_is_withheld(experiment, monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "fixture-provider-secret")
+    replace_program(
+        experiment,
+        "controller",
+        "import os\nassert 'OPENROUTER_API_KEY' not in os.environ\n"
+        + (FIXTURES / "controller.py").read_text(),
+    )
+    assert execute(experiment)["success"]
+
+
+def test_missing_provider_key_fails_before_output(experiment, monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    experiment[0]["controller_api_key_env"] = "OPENROUTER_API_KEY"
+    with pytest.raises(ManifestError, match="credential is missing"):
+        execute(experiment)
+    assert not experiment[2].exists()
+
+
+@pytest.mark.parametrize("name", ["PATH", "HOME", "LD_PRELOAD", "ARBITRARY_KEY"])
+def test_controller_credential_cannot_override_process_environment(experiment, name):
+    experiment[0]["controller_api_key_env"] = name
+    with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
+        execute(experiment)
+    assert not experiment[2].exists()
+
+
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_usage_and_trace_survive_controller_outcome(experiment, exit_code):
+    replace_program(experiment, "controller", traced_controller(exit_code=exit_code))
+    receipt = execute(experiment)
+    assert receipt["status"] == ("passed" if exit_code == 0 else "controller_failed")
+    assert receipt["usage"]["input_tokens"] == REPORTED_INPUT_TOKENS
+    assert receipt["usage"]["complete"] is True
+    trace = (experiment[2] / "controller-trace.jsonl").read_bytes()
+    assert receipt["controller_trace"]["sha256"] == digest(trace)
+    assert receipt["controller_trace"]["provenance"] == "controller_reported_not_authenticated"
+    if exit_code:
+        assert "checker" not in receipt
+        assert receipt["success"] is False
+
+
+@pytest.mark.parametrize("bad_hash", [False, True])
+def test_real_controller_requires_matching_trace_hash(experiment, bad_hash):
+    replace_program(
+        experiment, "controller", traced_controller(declared_hash=bad_hash, bad_hash=bad_hash)
+    )
+    receipt = execute(experiment)
+    assert receipt["status"] == "controller_protocol_invalid"
+    assert receipt["success"] is False
+    assert "checker" not in receipt
+    assert receipt["usage"]["input_tokens"] == REPORTED_INPUT_TOKENS
+    assert (experiment[2] / "controller-trace.jsonl").exists()
+
+
+def test_partial_trace_survives_missing_controller_result(experiment):
+    source = traced_controller().split("result=")[0] + "sys.exit(7)\n"
+    replace_program(experiment, "controller", source)
+    receipt = execute(experiment)
+    assert receipt["status"] == "controller_failed"
+    assert receipt["controller_trace"]["declared_complete"] is False
+    assert receipt["usage"]["cost_usd"] is None
+    assert "controller_evidence_error" in receipt
+    assert (experiment[2] / "controller-trace.jsonl").exists()
+
+
+@pytest.mark.parametrize("kind", ["symlink", "directory", "empty"])
+def test_invalid_trace_never_qualifies_as_retained_evidence(experiment, kind):
+    source = traced_controller()
+    create = "(Path.home()/'trace.jsonl').write_bytes(trace)"
+    replacement = {
+        "symlink": "(Path.home()/'trace.jsonl').symlink_to(Path.cwd()/'answer.txt')",
+        "directory": "(Path.home()/'trace.jsonl').mkdir()",
+        "empty": "(Path.home()/'trace.jsonl').write_bytes(b'')",
+    }[kind]
+    replace_program(experiment, "controller", source.replace(create, replacement))
+    receipt = execute(experiment)
+    assert receipt["status"] == "controller_protocol_invalid"
+    assert "checker" not in receipt
+    assert not receipt.get("controller_trace", {}).get("declared_complete", False)
+
+
+def test_absent_controller_credential_preserves_legacy_manifest_hash(experiment):
+    original = Manifest.model_validate(experiment[0]).model_dump(mode="json")
+    experiment[0]["controller_api_key_env"] = None
+    assert Manifest.model_validate(experiment[0]).model_dump(mode="json") == original
