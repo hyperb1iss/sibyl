@@ -1156,6 +1156,8 @@ def main(argv: list[str] | None = None, stdin: Any = None) -> int:
         controller = Controller(options, request, _provider_key(), trace)
     except ControllerError as exc:
         return _emit(trace, exc.reason, exc.detail, Usage().report(), None)
+    except Exception as exc:
+        return _emit(trace, "operational_error", type(exc).__name__, Usage().report(), None)
     reason, detail = "stop", ""
     try:
         controller.run()

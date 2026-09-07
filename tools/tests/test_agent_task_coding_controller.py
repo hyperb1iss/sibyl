@@ -1737,3 +1737,25 @@ def test_failure_while_parsing_a_served_response_invalidates_prior_totals(
     assert result["cost_usd"] is None
     assert result["tool_calls"] == 1
     assert harness.payloads("model_response")[-1]["raw"] is None
+
+
+def test_unexpected_constructor_failure_emits_a_redacted_terminal_result(
+    harness, monkeypatch, capsys
+):
+    provider = Provider()
+    provider.install(monkeypatch)
+    Docker().install(monkeypatch)
+
+    def fail_constructor(*args, **kwargs):
+        raise OSError(f"unavailable workspace: {KEY}")
+
+    monkeypatch.setattr(controller, "Controller", fail_constructor)
+    assert harness.run() == controller.EXIT_CODES["operational_error"]
+    result = result_of(capsys)
+    assert result["model"] is None
+    assert result["input_tokens"] == 0
+    assert result["cost_usd"] == 0
+    assert harness.payload("terminal")["detail"] == "OSError"
+    assert KEY not in harness.trace_path.read_text()
+    assert KEY not in json.dumps(result)
+    assert not provider.requests
