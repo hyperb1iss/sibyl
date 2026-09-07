@@ -2,6 +2,8 @@ $schema: https://moonrepo.dev/schemas/project.json
 toolchains:
   default: system
 language: python
+dependsOn:
+  - core
 env:
   PYTEST_ADDOPTS: "${PYTEST_ADDOPTS} -p sibyl_core.pytest_isolation"
 tasks:
