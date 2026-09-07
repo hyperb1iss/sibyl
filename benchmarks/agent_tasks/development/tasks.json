@@ -1,0 +1,330 @@
+[
+  {
+    "id": "dev-config-presence",
+    "family_id": "dev-configuration-presence",
+    "split": "development",
+    "prompt": {
+      "path": "tasks/config-presence/prompt.md",
+      "sha256": "3942988f09b7765d495dc8c422feb2896a9cbbbabaf415803925c8f30898c18c"
+    },
+    "workspace": [
+      {
+        "artifact": {
+          "path": "tasks/config-presence/workspace/README.md",
+          "sha256": "6b6fb89251014a9ce7dd1be875ea568c48d80fd89439bec9164ddb1a0eb344ae"
+        },
+        "destination": "README.md"
+      },
+      {
+        "artifact": {
+          "path": "tasks/config-presence/workspace/app.py",
+          "sha256": "e00c9d8c2077d7a479e11fff196087ad88b0544590c6c5ea90579a625375cf5d"
+        },
+        "destination": "app.py"
+      },
+      {
+        "artifact": {
+          "path": "tasks/config-presence/workspace/tests/test_public.py",
+          "sha256": "3296c93c29588ff8ff801417ba9cecf484184509fdeb840dde415fdbc1c58b2e"
+        },
+        "destination": "tests/test_public.py"
+      }
+    ],
+    "checker": {
+      "script": {
+        "path": "checker.py",
+        "sha256": "b3842ee6de30acf60e2a0c00a54dfcbd91aa29ffe2b2035b6341b052c6849e44"
+      },
+      "args": [
+        "config-presence"
+      ]
+    }
+  },
+  {
+    "id": "dev-patch-clear",
+    "family_id": "dev-configuration-presence",
+    "split": "development",
+    "prompt": {
+      "path": "tasks/patch-clear/prompt.md",
+      "sha256": "d392e05d22f887711f45bfab372d7742edd191296af963cb7e1ee4d946908c95"
+    },
+    "workspace": [
+      {
+        "artifact": {
+          "path": "tasks/patch-clear/workspace/README.md",
+          "sha256": "68b410ef8e5bac9dfd442b49d4fa0ffe2199eeef299ff4c4acd8e69b10e2d0b2"
+        },
+        "destination": "README.md"
+      },
+      {
+        "artifact": {
+          "path": "tasks/patch-clear/workspace/app.py",
+          "sha256": "6e6a1e89ffd1a61254e19a01b0a481f93896c1eaf85596483551b7197144ffe9"
+        },
+        "destination": "app.py"
+      },
+      {
+        "artifact": {
+          "path": "tasks/patch-clear/workspace/tests/test_public.py",
+          "sha256": "47d12dd4a4d056bbb48cd50abfc68e76d2cedc01516626e9336cb8dda9d13325"
+        },
+        "destination": "tests/test_public.py"
+      }
+    ],
+    "checker": {
+      "script": {
+        "path": "checker.py",
+        "sha256": "b3842ee6de30acf60e2a0c00a54dfcbd91aa29ffe2b2035b6341b052c6849e44"
+      },
+      "args": [
+        "patch-clear"
+      ]
+    }
+  },
+  {
+    "id": "dev-cursor-zero",
+    "family_id": "dev-pagination-termination",
+    "split": "development",
+    "prompt": {
+      "path": "tasks/cursor-zero/prompt.md",
+      "sha256": "d6a6b3f104f980314d9ec9a5a7ef9466dfae338c8b1d73e4b741c2f8c2cc646f"
+    },
+    "workspace": [
+      {
+        "artifact": {
+          "path": "tasks/cursor-zero/workspace/README.md",
+          "sha256": "4eb0d16c7807b3316d78a816a9c8dd665c0d71470034f8fc7d84ff31bf87e506"
+        },
+        "destination": "README.md"
+      },
+      {
+        "artifact": {
+          "path": "tasks/cursor-zero/workspace/app.py",
+          "sha256": "90f5ef25f3669b0196534fcb0824a3194b5437f85137fae462c32d7990b8d040"
+        },
+        "destination": "app.py"
+      },
+      {
+        "artifact": {
+          "path": "tasks/cursor-zero/workspace/tests/test_public.py",
+          "sha256": "1eb9683500f326f4d77a3bc034539b86087bb983a3ff920f7caa55ec74aa0d52"
+        },
+        "destination": "tests/test_public.py"
+      }
+    ],
+    "checker": {
+      "script": {
+        "path": "checker.py",
+        "sha256": "b3842ee6de30acf60e2a0c00a54dfcbd91aa29ffe2b2035b6341b052c6849e44"
+      },
+      "args": [
+        "cursor-zero"
+      ]
+    }
+  },
+  {
+    "id": "dev-offset-filtered",
+    "family_id": "dev-pagination-termination",
+    "split": "development",
+    "prompt": {
+      "path": "tasks/offset-filtered/prompt.md",
+      "sha256": "b89222903ad9451b4f2e5a9ef413890ce77ef7d48387d0f24a8526f8d328bab1"
+    },
+    "workspace": [
+      {
+        "artifact": {
+          "path": "tasks/offset-filtered/workspace/README.md",
+          "sha256": "223bfa4cdfba464cc81ab3980c55cf9011507adc09f0d3e58807f7e86f4b5d53"
+        },
+        "destination": "README.md"
+      },
+      {
+        "artifact": {
+          "path": "tasks/offset-filtered/workspace/app.py",
+          "sha256": "3074cd48b02f7e1b560726b3e43f28b26262eb412d31739356d9ef40bdd46873"
+        },
+        "destination": "app.py"
+      },
+      {
+        "artifact": {
+          "path": "tasks/offset-filtered/workspace/tests/test_public.py",
+          "sha256": "0d7e42c08f5536477b6948ceea0065314ecfbba1fb12c7e1a04265dc0a581fca"
+        },
+        "destination": "tests/test_public.py"
+      }
+    ],
+    "checker": {
+      "script": {
+        "path": "checker.py",
+        "sha256": "b3842ee6de30acf60e2a0c00a54dfcbd91aa29ffe2b2035b6341b052c6849e44"
+      },
+      "args": [
+        "offset-filtered"
+      ]
+    }
+  },
+  {
+    "id": "dev-window-overlap",
+    "family_id": "dev-interval-boundaries",
+    "split": "development",
+    "prompt": {
+      "path": "tasks/window-overlap/prompt.md",
+      "sha256": "b718e49844cd3b40fd93a18a1e3e71db747bab626ac3dae993813d48a41764a8"
+    },
+    "workspace": [
+      {
+        "artifact": {
+          "path": "tasks/window-overlap/workspace/README.md",
+          "sha256": "1aab1cc443f6335ab193bdfc1c654a3e9900fe05efeb529254dfbbed137318f8"
+        },
+        "destination": "README.md"
+      },
+      {
+        "artifact": {
+          "path": "tasks/window-overlap/workspace/app.py",
+          "sha256": "15b05a007ef830d142522401d4e1ccb11b0a93baaac8dd02409c14188e778f60"
+        },
+        "destination": "app.py"
+      },
+      {
+        "artifact": {
+          "path": "tasks/window-overlap/workspace/tests/test_public.py",
+          "sha256": "37acdb0901f701131d8550445cc5e623f94ee1bc17ccdc5b7b82d614e49676a8"
+        },
+        "destination": "tests/test_public.py"
+      }
+    ],
+    "checker": {
+      "script": {
+        "path": "checker.py",
+        "sha256": "b3842ee6de30acf60e2a0c00a54dfcbd91aa29ffe2b2035b6341b052c6849e44"
+      },
+      "args": [
+        "window-overlap"
+      ]
+    }
+  },
+  {
+    "id": "dev-date-entitlement",
+    "family_id": "dev-interval-boundaries",
+    "split": "development",
+    "prompt": {
+      "path": "tasks/date-entitlement/prompt.md",
+      "sha256": "b89a76767d8b68e16d3a4ddba06ea77139253c71042a77e92c77263144213855"
+    },
+    "workspace": [
+      {
+        "artifact": {
+          "path": "tasks/date-entitlement/workspace/README.md",
+          "sha256": "aad3e24a74bf30930f1ac3796af7b53389352c087097b6e6e57f9dc7d27e382c"
+        },
+        "destination": "README.md"
+      },
+      {
+        "artifact": {
+          "path": "tasks/date-entitlement/workspace/app.py",
+          "sha256": "60320f34fb52e55f370f4522717ef0c1a3321446f67d3e1cc395835cd67f2b3c"
+        },
+        "destination": "app.py"
+      },
+      {
+        "artifact": {
+          "path": "tasks/date-entitlement/workspace/tests/test_public.py",
+          "sha256": "e35a8d728b9c7e16498152a4caac6235762ba262d2ec91d09a22b20bb796549e"
+        },
+        "destination": "tests/test_public.py"
+      }
+    ],
+    "checker": {
+      "script": {
+        "path": "checker.py",
+        "sha256": "b3842ee6de30acf60e2a0c00a54dfcbd91aa29ffe2b2035b6341b052c6849e44"
+      },
+      "args": [
+        "date-entitlement"
+      ]
+    }
+  },
+  {
+    "id": "dev-versioned-events",
+    "family_id": "dev-state-folding",
+    "split": "development",
+    "prompt": {
+      "path": "tasks/versioned-events/prompt.md",
+      "sha256": "2e6329e30cf20149027032b89682f08c1315b7b55f117def82b1484c62c4d2cd"
+    },
+    "workspace": [
+      {
+        "artifact": {
+          "path": "tasks/versioned-events/workspace/README.md",
+          "sha256": "3c57f60dc42f45d93779bae6e6a634da52d63b4f52a1f6885d98c97dcfc8b7cd"
+        },
+        "destination": "README.md"
+      },
+      {
+        "artifact": {
+          "path": "tasks/versioned-events/workspace/app.py",
+          "sha256": "a95c00f58f53e1eca27bd74d8f806429a397bdc1c085739333b344b3f1faf35e"
+        },
+        "destination": "app.py"
+      },
+      {
+        "artifact": {
+          "path": "tasks/versioned-events/workspace/tests/test_public.py",
+          "sha256": "f4ef66fbc990e31ccf31a1be0460cd6708cc756652463aef1c5c66ded53fa33a"
+        },
+        "destination": "tests/test_public.py"
+      }
+    ],
+    "checker": {
+      "script": {
+        "path": "checker.py",
+        "sha256": "b3842ee6de30acf60e2a0c00a54dfcbd91aa29ffe2b2035b6341b052c6849e44"
+      },
+      "args": [
+        "versioned-events"
+      ]
+    }
+  },
+  {
+    "id": "dev-ordered-deltas",
+    "family_id": "dev-state-folding",
+    "split": "development",
+    "prompt": {
+      "path": "tasks/ordered-deltas/prompt.md",
+      "sha256": "24c62b96610eb91a3af9759130a9239d7a4c147bde28e3e71b1f70c15a6635a0"
+    },
+    "workspace": [
+      {
+        "artifact": {
+          "path": "tasks/ordered-deltas/workspace/README.md",
+          "sha256": "0ef74e99b6513c78626801d45f6b2a84fec9f29cc55d74be6aad479d7b9a4d93"
+        },
+        "destination": "README.md"
+      },
+      {
+        "artifact": {
+          "path": "tasks/ordered-deltas/workspace/app.py",
+          "sha256": "1005c04c17bae7cbf94ef2225f681170e6b0ba831bf89402f7fe3d526b2932d9"
+        },
+        "destination": "app.py"
+      },
+      {
+        "artifact": {
+          "path": "tasks/ordered-deltas/workspace/tests/test_public.py",
+          "sha256": "9a6d7f80658d18b764e6ea835502738130b67cde4526b2ca8265a17a9bfe711c"
+        },
+        "destination": "tests/test_public.py"
+      }
+    ],
+    "checker": {
+      "script": {
+        "path": "checker.py",
+        "sha256": "b3842ee6de30acf60e2a0c00a54dfcbd91aa29ffe2b2035b6341b052c6849e44"
+      },
+      "args": [
+        "ordered-deltas"
+      ]
+    }
+  }
+]
