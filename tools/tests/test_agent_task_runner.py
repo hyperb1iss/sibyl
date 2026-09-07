@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -14,6 +15,7 @@ from pathlib import Path
 
 import pytest
 from benchmarks.agent_tasks import runner
+from benchmarks.agent_tasks.coding_controller import inventory
 from benchmarks.agent_tasks.manifest import (
     Arm,
     Manifest,
@@ -1100,3 +1102,23 @@ def test_timeout_still_kills_a_controller_that_ignores_interrupt(experiment, mon
     assert receipt["controller"]["exited_during_termination_grace"] is False
     assert receipt["controller"]["returncode"] == -signal.SIGKILL
     assert receipt["controller"]["process_group_quiescent"] is True
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux directory setgid inheritance")
+def test_fresh_workspace_does_not_inherit_shared_parent_setgid(experiment):
+    manifest, _freeze, output = experiment
+    output.parent.chmod(stat.S_IMODE(output.parent.stat().st_mode) | stat.S_ISGID)
+    manifest["tasks"][0]["workspace"].append(
+        {
+            "artifact": manifest["tasks"][0]["workspace"][0]["artifact"],
+            "destination": "tests/nested.txt",
+        }
+    )
+    receipt = execute(experiment)
+    assert receipt["success"]
+    assert output.stat().st_mode & stat.S_ISGID
+    workspace = output / "controller-workspace"
+    assert not workspace.stat().st_mode & stat.S_ISGID
+    assert not (workspace / "tests").stat().st_mode & stat.S_ISGID
+    assert (workspace / "tests/nested.txt").read_text() == "0"
+    assert inventory(workspace)[0]
