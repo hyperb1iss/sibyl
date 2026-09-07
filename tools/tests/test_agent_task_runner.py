@@ -535,13 +535,19 @@ def test_empty_control_and_memory_arm_share_frozen_comparison(experiment):
     assert not (output.with_name("control") / "inputs/memory.txt").exists()
 
 
-def native_payload(source_revision=7):
+def native_payload(source_revision=7, *, schema_version="sibyl-context-render-v2", procedure=False):
     """Small Unicode rendering with actual core receipt generation."""
     item = ContextItem(
         id="source-record",
-        type="note",
+        type="procedure" if procedure else "note",
         name="Café 💜",
-        content="A verified observation. " * 30,
+        content=(
+            "## Preconditions\n```python\nif ready:\n    apply()\n```\n"
+            + "Step with check 💜\n" * 90
+            + "## Abstain when\nUnsupported version.\n"
+        )
+        if procedure
+        else "A verified observation. " * 30,
         score=1.0,
         facet=ContextFacet.DECISIONS,
         reason="source",
@@ -556,7 +562,12 @@ def native_payload(source_revision=7):
         sections=[ContextSection(ContextFacet.DECISIONS, "Decisions", [item])],
         total_items=1,
     )
-    rendered = render_context_pack(pack, max_content_chars=80)
+    rendered = render_context_pack(
+        pack,
+        max_content_chars=80,
+        schema_version=schema_version,
+        token_budget=4000 if procedure else None,
+    )
     return {
         **asdict(pack),
         "markdown": rendered.markdown,
@@ -586,9 +597,13 @@ def bind_native_payload(experiment, payload, *, memory=None):
 
 
 @pytest.mark.parametrize("split", ["learning", "development"])
-def test_native_binding_automatically_retains_input_outside_controller_workspace(experiment, split):
+@pytest.mark.parametrize("version", ["v1", "v2"])
+@pytest.mark.parametrize("procedure", [False, True])
+def test_native_binding_automatically_retains_input_outside_controller_workspace(
+    experiment, split, version, procedure
+):
     experiment[0]["tasks"][0]["split"] = split
-    payload = native_payload()
+    payload = native_payload(schema_version=f"sibyl-context-render-{version}", procedure=procedure)
     arm = bind_native_payload(experiment, payload)
     receipt = execute(experiment)
     output = experiment[2]
@@ -599,9 +614,9 @@ def test_native_binding_automatically_retains_input_outside_controller_workspace
         receipt["pack_id"] == request["memory_pack_sha256"] == digest(payload["markdown"].encode())
     )
     assert receipt["memory_provenance"] == {
-        "status": "native_render_v1",
+        "status": f"native_render_{version}",
         "native_payload_sha256": arm["native_render_payload"]["sha256"],
-        "render_schema_version": "sibyl-context-render-v1",
+        "render_schema_version": f"sibyl-context-render-{version}",
     }
     assert receipt["memory_provenance"]["native_payload_sha256"] != request["memory_pack_sha256"]
     assert "native_render_payload" not in request

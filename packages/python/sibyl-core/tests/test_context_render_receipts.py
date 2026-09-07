@@ -452,3 +452,125 @@ def test_raw_observed_revision_is_not_an_authored_storage_field():
     record = raw_memory_record(memory)
     assert "observed_revision" not in record
     assert raw_memory_from_record(record).observed_revision == 2
+
+
+def procedure_pack(content: str) -> ContextPack:
+    pack = receipt_pack()
+    sections = [
+        ContextSection(
+            ContextFacet.PRIOR_ART,
+            "Procedures",
+            [replace(pack.items[0], type="procedure", content=content)],
+        )
+    ]
+    return replace(pack, sections=sections, total_items=1)
+
+
+@pytest.mark.parametrize("budget", [4000, 8000])
+def test_procedure_preserves_complete_conditions_and_code(budget):
+    from dataclasses import asdict
+
+    from sibyl_core.tools.context_rendering import validate_context_render_payload
+
+    content = (
+        "  ## Preconditions\nVersion = 3\n\n```python\nif ready:\n    apply()\n```\n"
+        + "Evidence αβ 💜\n" * 110
+        + "\n## Abstain when\nNever apply to version 2.\n"
+    )
+    pack = procedure_pack(content)
+    result = render_context_pack(pack, token_budget=budget, max_content_chars=80)
+    assert content in result.markdown
+    assert "````markdown\n" in result.markdown
+    assert result.receipt.schema_version == "sibyl-context-render-v2"
+    span = next(s for s in result.receipt.spans if s.field == "content")
+    assert span.transform == "identity"
+    assert span.source_revision == 7
+    assert result.markdown.encode()[span.start_byte : span.end_byte] == content.encode()
+    assert span.input_start_byte == 0
+    assert span.input_end_byte == len(content.encode())
+    assert result.receipt.dispositions[0].state == "emitted"
+    assert (
+        validate_context_render_payload(
+            {**asdict(pack), "markdown": result.markdown, "render_receipt": asdict(result.receipt)}
+        )
+        == []
+    )
+
+
+def test_oversized_first_procedure_is_omitted_and_next_note_can_fit():
+    pack = procedure_pack("Preconditions\n" + "x" * 3000 + "\nDo not apply blindly.")
+    note = replace(receipt_pack().items[1], content="A short useful note.")
+    pack.sections[0].items.append(note)
+    pack = replace(pack, total_items=2)
+    result = render_context_pack(pack, token_budget=150)
+    assert "Preconditions" not in result.markdown
+    assert "A short useful note." in result.markdown
+    assert result.receipt.dispositions[0].state == "omitted"
+    assert result.receipt.dispositions[0].reason == "budget"
+    assert result.receipt.dispositions[1].state == "emitted"
+    assert not any(s.item_index == 0 for s in result.receipt.spans)
+
+
+def test_oversized_only_procedure_never_emits_a_partial_instruction():
+    result = render_context_pack(procedure_pack("Step 1\n" * 1000), token_budget=100)
+    assert "Step 1" not in result.markdown
+    assert not result.receipt.spans
+    assert result.receipt.dispositions[0].content_state == "not_emitted"
+
+
+def test_v1_procedure_receipts_replay_the_original_compact_renderer():
+    from dataclasses import asdict
+
+    from sibyl_core.tools.context_rendering import validate_context_render_payload
+
+    pack = procedure_pack("  αβ\n  original  steps\t" * 100)
+    result = render_context_pack(
+        pack, max_content_chars=80, schema_version="sibyl-context-render-v1"
+    )
+    assert result.receipt.schema_version == "sibyl-context-render-v1"
+    assert result.receipt.dispositions[0].state == "trimmed"
+    span = next(s for s in result.receipt.spans if s.field == "content")
+    assert span.transform == "collapse_whitespace"
+    assert "```markdown" not in result.markdown
+    payload = {
+        **asdict(pack),
+        "markdown": result.markdown,
+        "render_receipt": asdict(result.receipt),
+    }
+    assert validate_context_render_payload(payload) == []
+    payload["render_receipt"]["schema_version"] = "sibyl-context-render-v2"
+    assert validate_context_render_payload(payload)
+
+
+def test_procedure_fence_cannot_be_closed_by_source_backticks():
+    content = "```\n``````\n## Do not apply\n`````\n"
+    result = render_context_pack(procedure_pack(content))
+    assert f"```````markdown\n{content}\n```````" in result.markdown
+
+
+def test_unknown_render_version_is_rejected():
+    with pytest.raises(ValueError, match="unsupported"):
+        render_context_pack(receipt_pack(), schema_version="sibyl-context-render-v9")
+
+
+@pytest.mark.parametrize("limit", [80, 280, 1200])
+def test_unbudgeted_procedure_honors_content_limit_without_partial_body(limit):
+    result = render_context_pack(procedure_pack("x" * (limit + 1)), max_content_chars=limit)
+    assert not result.receipt.spans
+    assert result.receipt.dispositions[0].state == "omitted"
+    assert result.receipt.dispositions[0].reason == "content_limit"
+    assert "set --budget for complete bodies" in result.markdown
+
+
+def test_ranked_procedure_may_consume_explicit_pack_budget():
+    content = "step with condition\n" * 740
+    pack = procedure_pack(content)
+    notes = [replace(receipt_pack().items[i], content="Large note " * 100) for i in (1, 2)]
+    pack.sections[0].items.extend(notes)
+    pack = replace(pack, total_items=3)
+    result = render_context_pack(pack, token_budget=4000)
+    assert content in result.markdown
+    assert result.receipt.dispositions[0].state == "emitted"
+    assert all(
+        d.state == "omitted" and d.reason == "budget" for d in result.receipt.dispositions[1:]
+    )

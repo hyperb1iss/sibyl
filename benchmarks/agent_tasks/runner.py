@@ -252,11 +252,16 @@ def _checked_snapshot(output: Path, workspace: Path) -> str:
     return identity(inventory)
 
 
-def _receipt(manifest: Manifest, task: Task, arm: Arm) -> dict[str, Any]:
+def _receipt(manifest: Manifest, task: Task, arm: Arm, inputs: dict[str, bytes]) -> dict[str, Any]:
     native_payload = arm.native_render_payload
+    render_schema = (
+        strict_json(inputs[native_payload.path])["render_receipt"]["schema_version"]
+        if native_payload
+        else None
+    )
     provenance_status = "none" if arm.memory_pack.sha256 == digest(b"") else "unattributed"
     if native_payload is not None:
-        provenance_status = "native_render_v1"
+        provenance_status = render_schema.replace("sibyl-context-", "native_").replace("-", "_")
     return {
         "schema_version": "sibyl-agent-task-receipt-v1",
         "purpose": "trusted_development",
@@ -281,7 +286,7 @@ def _receipt(manifest: Manifest, task: Task, arm: Arm) -> dict[str, Any]:
         "memory_provenance": {
             "status": provenance_status,
             "native_payload_sha256": native_payload.sha256 if native_payload else None,
-            "render_schema_version": "sibyl-context-render-v1" if native_payload else None,
+            "render_schema_version": render_schema,
         },
         "runtime": runtime_identity(),
         "runner_source_sha256": {
@@ -449,7 +454,7 @@ def run_task(manifest_path: Path, *, task_id: str, arm_id: str, output: Path) ->
     if output.is_relative_to(manifest_path.parent.resolve()):
         raise ManifestError("attempt output must be outside the frozen input directory")
     output.mkdir(parents=False, exist_ok=False)
-    receipt = _receipt(manifest, task, arm)
+    receipt = _receipt(manifest, task, arm, inputs)
     _write_json(output / "receipt.json", receipt)
     try:
         _perform_attempt(manifest, task, arm, inputs, output, receipt)

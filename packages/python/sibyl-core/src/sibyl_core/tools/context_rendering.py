@@ -164,6 +164,7 @@ class _RenderedItem:
     lines: list[str]
     related: list[ContextRelatedItem]
     content_state: str
+    content_prefix: str | None = None
 
 
 def _render_item(
@@ -172,6 +173,7 @@ def _render_item(
     pack_project: str | None,
     max_content_chars: int,
     include_related: bool,
+    atomic_procedures: bool,
 ) -> _RenderedItem:
     status = _compact_metadata_value(item.metadata.get("status"))
     if item.type and status:
@@ -188,9 +190,20 @@ def _render_item(
     )
     quality_label = f" _{quality}_" if quality else ""
     lines = [f"- **{item.name}**{type_label} `{item.id}`{quality_label}"]
-    content, content_state = _render_content(item, max_content_chars)
-    if content is not None:
-        lines.append(f"  - Memory: {content}")
+    content_prefix = None
+    if atomic_procedures and item.type == "procedure" and item.content.strip():
+        # A procedure's conditions and indentation are part of its meaning.
+        # A longer fence keeps embedded Markdown fences inside this one block.
+        fence = "`" * max(
+            3, 1 + max((len(m[0]) for m in re.finditer(r"`+", item.content)), default=0)
+        )
+        content_prefix = f"  - Memory:\n\n{fence}markdown\n"
+        lines.append(f"{content_prefix}{item.content}\n{fence}")
+        content_state = "emitted"
+    else:
+        content, content_state = _render_content(item, max_content_chars)
+        if content is not None:
+            lines.append(f"  - Memory: {content}")
     related = (
         [
             candidate
@@ -205,7 +218,7 @@ def _render_item(
             f"{candidate.relationship} {candidate.name} ({candidate.type})" for candidate in related
         )
         lines.append(f"  - Related: {labels}")
-    return _RenderedItem(lines, related, content_state)
+    return _RenderedItem(lines, related, content_state, content_prefix)
 
 
 def _text_digest(text: str) -> str:
@@ -287,7 +300,9 @@ def _item_render_spans(
             start_byte=start,
             end_byte=start + len(block.encode()),
             input_sha256=_text_digest(snapshot),
-            transform="markdown_item_v1",
+            transform="markdown_item_v2"
+            if rendered_item.content_prefix is not None
+            else "markdown_item_v1",
         )
     ]
     name_start = start + len(b"- **")
@@ -303,7 +318,21 @@ def _item_render_spans(
             input_end_byte=len(item.name.encode()),
         )
     )
-    if len(lines) > 1 and lines[1].startswith("  - Memory: "):
+    if rendered_item.content_prefix is not None:
+        body_start = start + len((lines[0] + "\n" + rendered_item.content_prefix).encode())
+        spans.append(
+            ContextRenderSpan(
+                **common,
+                field="content",
+                start_byte=body_start,
+                end_byte=body_start + len(item.content.encode()),
+                input_sha256=_text_digest(item.content),
+                transform="identity",
+                input_start_byte=0,
+                input_end_byte=len(item.content.encode()),
+            )
+        )
+    elif len(lines) > 1 and lines[1].startswith("  - Memory: "):
         rendered = lines[1].removeprefix("  - Memory: ")
         visible = rendered[:-3] if rendered_item.content_state == "truncated" else rendered
         source_end = _compact_source_end(item.content, visible)
@@ -363,6 +392,7 @@ def render_context_pack(
     include_related: bool = True,
     token_budget: int | None = None,
     request_id: str | None = None,
+    schema_version: str = "sibyl-context-render-v2",
 ) -> RenderedContextPack:
     """Render a context pack as compact Markdown for agent injection.
 
@@ -371,11 +401,17 @@ def render_context_pack(
     depth both scale toward it: more of the pack's items render, and each is
     allowed more of its content, up to the hard ceilings. The per-block guard
     below is what keeps the result inside the budget, and it always emits at
-    least one item so a tight budget degrades to a minimal brief rather than an
-    empty pack. Without a budget the count defaults bind exactly as they always
-    have, because there is nothing to size against.
+    least one ordinary item. Procedures render verbatim and indivisibly in v2;
+    an over-budget procedure is omitted even when it is the first item. Without
+    a budget, count and per-item content limits still apply; oversized procedures
+    are omitted. Within an explicit budget, a high-ranked procedure may consume
+    the remaining pack allowance. Fences are standalone Markdown blocks so their
+    source bytes, including indentation, remain unchanged.
     """
 
+    if schema_version not in ("sibyl-context-render-v1", "sibyl-context-render-v2"):
+        raise ValueError("unsupported render receipt schema version")
+    atomic_procedures = schema_version == "sibyl-context-render-v2"
     options = ContextRenderOptions(
         max_items, items_per_section, max_content_chars, include_related, token_budget
     )
@@ -429,6 +465,8 @@ def render_context_pack(
     remaining = max_items
     emitted_items = 0
     trimmed = False
+    omitted_procedure = False
+    omitted_content = False
     for section in _sections_for_markdown(pack.sections, intent=pack.intent):
         if remaining <= 0 or trimmed:
             break
@@ -448,10 +486,32 @@ def render_context_pack(
                 pack_project=pack.project,
                 max_content_chars=max_content_chars,
                 include_related=include_related,
+                atomic_procedures=atomic_procedures,
             )
             item_lines = rendered_item.lines
             block = [*section_lines, *item_lines] if not section_emitted else item_lines
             block_chars = sum(len(line) + 1 for line in block)
+            index = section_offset + position
+            if (
+                rendered_item.content_prefix is not None
+                and char_budget is None
+                and len(item.content) > max_content_chars
+            ):
+                dispositions[index] = ContextRenderDisposition(
+                    index, item.id, "omitted", "content_limit", "not_emitted"
+                )
+                omitted_content = True
+                continue
+            if (
+                char_budget is not None
+                and rendered_item.content_prefix is not None
+                and used + block_chars > char_budget
+            ):
+                dispositions[index] = ContextRenderDisposition(
+                    index, item.id, "omitted", "budget", "not_emitted"
+                )
+                omitted_procedure = True
+                continue
             if char_budget is not None and emitted_items > 0 and used + block_chars > char_budget:
                 trimmed = True
                 break
@@ -482,8 +542,12 @@ def render_context_pack(
             emitted_items += 1
             remaining -= 1
 
-    if trimmed:
+    if trimmed or omitted_procedure:
         lines.extend(["", f"_Trimmed to ~{token_budget} tokens; raise --budget for more._"])
+    elif omitted_content:
+        lines.extend(
+            ["", "_Procedures omitted by content limit; set --budget for complete bodies._"]
+        )
     elif pack.usage_hint:
         lines.extend(["", f"_Hint: {pack.usage_hint}_"])
 
@@ -498,7 +562,7 @@ def render_context_pack(
     return RenderedContextPack(
         markdown=markdown,
         receipt=ContextRenderReceipt(
-            schema_version="sibyl-context-render-v1",
+            schema_version=schema_version,
             markdown_sha256=_text_digest(markdown),
             markdown_bytes=len(markdown.encode()),
             selected_items=len(pack.items),
@@ -519,7 +583,7 @@ def context_pack_to_markdown(
     include_related: bool = True,
     token_budget: int | None = None,
 ) -> str:
-    """Return the unchanged Markdown representation of a context pack."""
+    """Return Markdown with complete procedure bodies when they fit the budget."""
     return render_context_pack(
         pack,
         max_items=max_items,
@@ -542,7 +606,8 @@ def validate_context_render_payload(payload: Mapping[str, Any]) -> list[str]:
         return []
     if not isinstance(receipt, dict):
         return ["render_receipt must be an object"]
-    if receipt.get("schema_version") != "sibyl-context-render-v1":
+    schema_version = receipt.get("schema_version")
+    if schema_version not in ("sibyl-context-render-v1", "sibyl-context-render-v2"):
         return ["unsupported render_receipt schema_version"]
     try:
         pack = TypeAdapter(ContextPack).validate_json(
@@ -559,6 +624,7 @@ def validate_context_render_payload(payload: Mapping[str, Any]) -> list[str]:
         pack,
         **asdict(parsed.options),
         request_id=parsed.request_id,
+        schema_version=parsed.schema_version,
     )
     failures = []
     if payload.get("markdown") != expected.markdown:
