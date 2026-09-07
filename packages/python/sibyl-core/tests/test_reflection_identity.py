@@ -1103,3 +1103,135 @@ async def test_disappearance_after_publication_revision_conflict_is_controlled(
             organization_id=runtime.client.group_id,
             principal_id="user_a",
         )
+
+
+@pytest.mark.parametrize("boundary", ["insert", "relationships", "finalize"])
+@pytest.mark.parametrize("action", ["delete", "revise"])
+@pytest.mark.parametrize("mode", ["raw", "review"])
+async def test_source_change_during_share_cannot_publish_live_evidence(
+    runtime: GraphRuntime,
+    content_store: None,
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+    mode: str,
+    boundary: str,
+) -> None:
+    monkeypatch.setattr(
+        "sibyl_core.services.memory_lifecycle.get_surreal_graph_runtime",
+        AsyncMock(return_value=runtime),
+    )
+    source = await remember_raw_memory(
+        organization_id=runtime.client.group_id,
+        principal_id="user_a",
+        source_id="changed-during-share",
+        title="Original evidence",
+        raw_content="Keep the original policy.",
+        embedding_provider=None,
+    )
+    shared = source
+    if mode == "review":
+        shared = await remember_reflection_candidate_review(
+            organization_id=runtime.client.group_id,
+            principal_id="user_a",
+            candidate=candidate(),
+            raw_source_ids=[source.id],
+        )
+    manager, method = {
+        "insert": (runtime.entity_manager, "create_direct_if_absent"),
+        "relationships": (runtime.relationship_manager, "create_bulk"),
+        "finalize": (runtime.entity_manager, "update"),
+    }[boundary]
+    write = getattr(manager, method)
+    corrected = False
+
+    async def correcting_write(*args, **kwargs):
+        nonlocal corrected
+        if corrected:
+            return await write(*args, **kwargs)
+        corrected = True
+        correction = await apply_memory_correction(
+            organization_id=runtime.client.group_id,
+            source_id=source.id,
+            principal_id="user_a",
+            action=action,
+            revised_content="Use the revised policy." if action == "revise" else None,
+            accessible_projects={"project_a"},
+        )
+        assert correction.applied
+        return await write(*args, **kwargs)
+
+    monkeypatch.setattr(manager, method, correcting_write)
+    result = await share_memory(
+        source_ids=[shared.id],
+        organization_id=runtime.client.group_id,
+        principal_id="user_a",
+        accessible_projects={"project_a"},
+        target_scope="project",
+        target_scope_key="project_a",
+    )
+    assert len(result.promotions) == 1
+    publication = result.promotions[0]
+    assert not publication.success and publication.reason == "retired"
+    assert publication.promoted_id
+    row = await runtime.entity_manager.get(publication.promoted_id)
+    assert not graph_metadata_recallable(row.metadata)
+
+
+@pytest.mark.parametrize(
+    "support", ["present", "missing", "foreign_org", "foreign_owner", "foreign_project"]
+)
+async def test_sharing_review_requires_available_authorized_support(
+    runtime: GraphRuntime, content_store: None, support: str
+) -> None:
+    source = await remember_raw_memory(
+        organization_id="foreign-org" if support == "foreign_org" else runtime.client.group_id,
+        principal_id="user_b" if support == "foreign_owner" else "user_a",
+        source_id="share-support",
+        memory_scope="project" if support == "foreign_project" else "private",
+        scope_key="project_b"
+        if support == "foreign_project"
+        else "user_b"
+        if support == "foreign_owner"
+        else "user_a",
+        title="Supporting evidence",
+        raw_content="A private source must remain private.",
+        embedding_provider=None,
+    )
+    review = await remember_reflection_candidate_review(
+        organization_id=runtime.client.group_id,
+        principal_id="user_a",
+        candidate=candidate(),
+        scope_key="user_a",
+        raw_source_ids=["missing-source" if support == "missing" else source.id],
+    )
+    result = await share_memory(
+        source_ids=[review.id],
+        organization_id=runtime.client.group_id,
+        principal_id="user_a",
+        accessible_projects={"project_a"},
+        target_scope="project",
+        target_scope_key="project_a",
+    )
+    assert len(result.promotions) == 1
+    publication = result.promotions[0]
+    assert publication.raw_source_ids == [review.id]
+    if support == "present":
+        assert publication.success
+        row = await runtime.entity_manager.get(publication.promoted_id)
+        assert graph_metadata_recallable(row.metadata)
+        assert row.metadata["raw_source_ids"] == [review.id]
+    else:
+        assert not publication.success
+        assert publication.promoted_id is None
+        assert publication.reason == "source_not_recallable"
+        assert publication.memory_scope == review.memory_scope
+        assert publication.scope_key == review.scope_key
+        assert source.id not in json.dumps(publication.metadata)
+        assert "project_b" not in json.dumps(publication.metadata)
+        assert "user_b" not in json.dumps(publication.metadata)
+        assert (
+            await runtime.client.execute_query(
+                "SELECT VALUE uuid FROM entity WHERE entity_type != 'project';"
+            )
+            == []
+        )

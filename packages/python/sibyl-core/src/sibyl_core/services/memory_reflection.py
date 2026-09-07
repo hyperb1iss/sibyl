@@ -91,6 +91,24 @@ async def _load_raw_sources(
     return memories
 
 
+async def _load_promotion_inputs(
+    memory: RawMemory, *, organization_id: str
+) -> tuple[list[RawMemory], bool]:
+    """Resolve every declared retained capture for promotion and sharing."""
+    source_ids = _raw_source_ids(memory)
+    sources = await _load_raw_sources(organization_id=organization_id, raw_source_ids=source_ids)
+    required = set(source_ids)
+    loaded = {source.id for source in sources}
+    if memory.source_id in required and re.fullmatch(
+        r"reflection:input:[0-9a-f]{16}", memory.source_id
+    ):
+        # Unretained input anchors have no stored source or revision. Present
+        # rows still participate in authorization and lifecycle checks.
+        required.remove(memory.source_id)
+        loaded.discard(memory.source_id)
+    return [memory, *sources], required == loaded
+
+
 async def persist_reflection_source(
     *,
     title: str,
@@ -311,6 +329,8 @@ async def persist_reflection_candidate(
         if current is None:
             raise RuntimeError("reflection evidence disappeared during publication") from None
         verify_reflection_identity(entity, current)
+        if not await _verify_promotion_sources(runtime, source_memories, entity_id=current.id):
+            return _retired_reflection_result(current.id)
         if not graph_metadata_recallable(current.metadata):
             return _retired_reflection_result(current.id)
         current_publication = current.metadata.get("reflection_publication", {})
@@ -327,6 +347,8 @@ async def persist_reflection_candidate(
         raise
     if updated is None:
         raise RuntimeError("reflection evidence disappeared during publication")
+    if not await _verify_promotion_sources(runtime, source_memories, entity_id=stored.id):
+        return _retired_reflection_result(stored.id)
     return _reflection_publication_result(
         stored.id,
         candidate.title,
@@ -691,11 +713,6 @@ async def _apply_promotion_plan(
     )
     if not result.response.success or result.metadata.get("promotion_state") == "partial":
         return _promotion_write_denied(plan=plan, result=result)
-    runtime = await get_surreal_graph_runtime(organization_id)
-    if not await _verify_promotion_sources(
-        runtime, plan.input_memories, entity_id=result.response.id
-    ):
-        return _promotion_write_denied(plan=plan, result=_retired_reflection_result(prospective.id))
     return await _mark_promotion_plan_promoted(
         plan=plan,
         result=result,
@@ -971,23 +988,10 @@ async def _resolve_reflection_promotion_plan(
             raw_source_ids=_raw_source_ids(candidate_memory),
         )
 
-    raw_source_ids = _raw_source_ids(candidate_memory)
-    source_memories = await _load_raw_sources(
-        organization_id=organization_id,
-        raw_source_ids=raw_source_ids,
+    raw_source_ids = _raw_source_ids(candidate_memory) or [candidate_memory.id]
+    input_memories, sources_complete = await _load_promotion_inputs(
+        candidate_memory, organization_id=organization_id
     )
-    required_source_ids = set(raw_source_ids)
-    loaded_source_ids = {source.id for source in source_memories}
-    if candidate_memory.source_id in required_source_ids and re.fullmatch(
-        r"reflection:input:[0-9a-f]{16}", candidate_memory.source_id
-    ):
-        # Explicit unretained input anchors carry no stored source or revision.
-        # Present rows still participate in the authorization/lifecycle checks below.
-        required_source_ids.remove(candidate_memory.source_id)
-        loaded_source_ids.discard(candidate_memory.source_id)
-    sources_complete = required_source_ids == loaded_source_ids
-    raw_source_ids = raw_source_ids or [candidate_memory.id]
-    input_memories = [candidate_memory, *source_memories]
 
     ownership_denial = _principal_denial(
         input_memories,
