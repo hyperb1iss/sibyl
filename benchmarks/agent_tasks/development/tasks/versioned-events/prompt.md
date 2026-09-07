@@ -1,0 +1,3 @@
+Out-of-order full-state updates resurrect deleted cache entries. Fix materialize(events) in app.py. Each event has key, integer version, deleted, and value. Select the highest version for each key; equal versions use the last event in input order. A winning deleted event removes the key regardless of its value. Lower-version events must not undo that tombstone. False and None are valid live values. Return a dictionary without changing the input events. These events are full replacements, not deltas.
+
+Edit app.py. Run `python -m unittest discover -s tests -v` from the repository root. Python 3.13 and the standard library are sufficient; no installation or network access is needed.

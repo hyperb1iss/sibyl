@@ -1043,18 +1043,20 @@ tasks:
       cache: false
 
   agent-task-test:
-    command: uv run pytest tools/tests/test_agent_task_runner.py tools/tests/test_agent_task_coding_controller.py -v
+    command: uv run pytest tools/tests/test_agent_task_runner.py tools/tests/test_agent_task_coding_controller.py tools/tests/test_agent_task_development_corpus.py -v
     inputs:
       - packages/python/sibyl-core/src/**/*.py
       - benchmarks/agent_tasks/**/*.py
       - tools/tests/test_agent_task_runner.py
       - tools/tests/test_agent_task_coding_controller.py
+      - tools/tests/test_agent_task_development_corpus.py
+      - benchmarks/agent_tasks/development/**/*
       - tools/tests/fixtures/agent_tasks/**/*.py
 
   bench-gate-test:
     command:
       uv run pytest tools/tests/test_agent_task_runner.py tools/tests/test_agent_task_coding_controller.py
-      tools/tests/test_evidence_bundle.py
+      tools/tests/test_agent_task_development_corpus.py tools/tests/test_evidence_bundle.py
       tools/tests/test_benchmark_git_provenance.py tools/tests/test_bench_gate.py
       tools/tests/test_compare_eval_reports.py tools/tests/test_context_pack_eval_script.py
       tools/tests/test_longmemeval_agentic_traversal.py
@@ -1091,6 +1093,7 @@ tasks:
     inputs:
       - packages/python/sibyl-core/src/**/*.py
       - benchmarks/agent_tasks/**/*.py
+      - benchmarks/agent_tasks/development/**/*
       - tools/**/*.py
       - docker-compose.yml
       - .github/workflows/eval.yml
