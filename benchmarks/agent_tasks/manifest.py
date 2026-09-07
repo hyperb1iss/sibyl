@@ -237,8 +237,11 @@ def validate_native_render_binding(arm: Arm, inputs: dict[str, bytes]) -> None:
     if not isinstance(payload, dict):
         raise ManifestError("native render payload must be a full JSON object")
     receipt = payload.get("render_receipt")
-    if not isinstance(receipt, dict) or receipt.get("schema_version") != "sibyl-context-render-v1":
-        raise ManifestError("native render claim requires a sibyl-context-render-v1 receipt")
+    if not isinstance(receipt, dict) or receipt.get("schema_version") not in (
+        "sibyl-context-render-v1",
+        "sibyl-context-render-v2",
+    ):
+        raise ManifestError("native render claim requires a supported native render receipt")
     markdown = payload.get("markdown")
     if not isinstance(markdown, str):
         raise ManifestError("native render payload requires Markdown text")
