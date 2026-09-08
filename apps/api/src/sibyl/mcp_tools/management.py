@@ -16,13 +16,18 @@ from sibyl.api.idempotency import (
     idempotency_request_hash,
     reserve_idempotency_record,
 )
+from sibyl.auth.authorization import ProjectAuthorizationError
 from sibyl.mcp_tools import serialization
 from sibyl.persistence.auth_runtime import (
     log_memory_audit_event,
     resolve_accessible_team_scope_keys,
+    resolve_auth_context,
+    verify_entity_project_access,
 )
 from sibyl.persistence.content_common import ApiIdempotencyRecord
+from sibyl.services.memory_correction_disclosure import filter_correction_disclosure
 from sibyl.services.work_item_workflow import WorkItemAction
+from sibyl_core.auth import ProjectRole
 from sibyl_core.auth.memory_policy import MemoryPolicyAction, MemoryPolicyDecision
 from sibyl_core.services.surreal_content import (
     MemoryScope,
@@ -72,6 +77,24 @@ async def _mcp_entity_write_target(
     return _project_id_for_policy(entity), dict(metadata) if isinstance(metadata, dict) else {}
 
 
+async def _require_correction_project_write(ctx: mcp_context.McpContext, project_id: str) -> None:
+    """Resolve the real project role before treating visibility as write authority."""
+    if ctx.api_key_project_ids is not None and project_id not in ctx.api_key_project_ids:
+        raise ValueError("project_write_not_allowed")
+    auth_ctx = await resolve_auth_context(
+        claims={"sub": ctx.user_id, "org": ctx.org_id, "scopes": list(ctx.scopes or [])}
+    )
+    try:
+        await verify_entity_project_access(
+            ctx=auth_ctx,
+            entity_project_id=project_id,
+            required_role=ProjectRole.CONTRIBUTOR,
+            require_existing_project=True,
+        )
+    except ProjectAuthorizationError as exc:
+        raise ValueError("project_write_not_allowed") from exc
+
+
 async def _authorize_mcp_manage_action(
     *,
     ctx: mcp_context.McpContext,
@@ -97,6 +120,8 @@ async def _authorize_mcp_manage_action(
             return None
         if memory.memory_scope is MemoryScope.PRIVATE and memory.principal_id != ctx.user_id:
             raise ValueError("principal_mismatch")
+        if memory.memory_scope is MemoryScope.PROJECT and memory.scope_key:
+            await _require_correction_project_write(ctx, memory.scope_key)
         accessible_teams = (
             await resolve_accessible_team_scope_keys(
                 user_id=ctx.user_id,
@@ -445,6 +470,7 @@ async def _manage_memory_correction(
             if policy_decision is not None and policy_decision.policy_context is not None
             else None
         ),
+        writable_projects=await mcp_context.get_writable_projects(ctx),
         replacement_source_id=(
             str(data["replacement_source_id"]) if data.get("replacement_source_id") else None
         ),
@@ -455,6 +481,7 @@ async def _manage_memory_correction(
             str(data["revised_content"]) if data.get("revised_content") is not None else None
         ),
         expected_revision=expected_revision,
+        allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
     )
     revision = result.updated_memory.revision if result.updated_memory else None
     affected_records = (
@@ -595,6 +622,20 @@ async def _manage_mcp_action(
                     receipt = response_data.get("mutation_receipt")
                     if isinstance(receipt, dict):
                         response_data["mutation_receipt"] = {**receipt, "replayed": True}
+                if normalized_action == "correct_memory" and isinstance(raw_response_data, dict):
+                    replayed["data"] = await filter_correction_disclosure(
+                        raw_response_data,
+                        organization_id=ctx.org_id,
+                        principal_id=ctx.user_id,
+                        accessible_projects=accessible_projects,
+                        accessible_teams=(
+                            set(policy_decision.policy_context.accessible_teams or ())
+                            if policy_decision is not None
+                            and policy_decision.policy_context is not None
+                            else None
+                        ),
+                        allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
+                    )
                 return replayed
         else:
             idempotency_claim = record

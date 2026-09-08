@@ -79,6 +79,7 @@ async def preview_reflection_promotion(
         domain=request.domain,
         project=request.project,
         accessible_projects=accessible_projects,
+        writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
     )
     await memory_auth.log_memory_audit(
         action="memory.reflect.promote.preview",
@@ -139,6 +140,7 @@ async def preview_memory_promotion(
         domain=request.domain,
         project=request.project,
         accessible_projects=accessible_projects,
+        writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
     )
     if result.reason == "not_reflection_candidate":
         await memory_auth.authorize_raw_promotion_api_key_scopes(
@@ -158,6 +160,7 @@ async def preview_memory_promotion(
             domain=request.domain,
             project=request.project,
             accessible_projects=accessible_projects,
+            writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
         )
     await memory_auth.log_memory_audit(
         action="memory.promote.preview",
@@ -219,6 +222,7 @@ async def promote_reflection_candidate(
             project=request.project,
             related_to=request.related_to,
             accessible_projects=accessible_projects,
+            writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
         )
         await memory_auth.log_memory_audit(
             action="memory.reflect.promote",
@@ -295,6 +299,7 @@ async def promote_memory(
             project=request.project,
             related_to=request.related_to,
             accessible_projects=accessible_projects,
+            writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
         )
         if result.reason == "not_reflection_candidate":
             await memory_auth.authorize_raw_promotion_api_key_scopes(
@@ -315,6 +320,7 @@ async def promote_memory(
                 project=request.project,
                 related_to=request.related_to,
                 accessible_projects=accessible_projects,
+                writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
             )
         await memory_auth.log_memory_audit(
             action="memory.promote",

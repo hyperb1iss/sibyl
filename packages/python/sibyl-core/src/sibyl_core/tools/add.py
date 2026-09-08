@@ -47,9 +47,9 @@ from sibyl_core.models.tasks import (
     TaskStatus,
 )
 from sibyl_core.projection import project_entity_passages, project_memory_entity
+from sibyl_core.projection.reconcile import prewrite_capture_stamp, reconcile_with_capture
 from sibyl_core.runtime_ports import get_queue_port
 from sibyl_core.services.graph import get_surreal_graph_runtime
-from sibyl_core.services.memory import projected_row_lifecycle_stamp
 from sibyl_core.tools.helpers import (
     MAX_CONTENT_LENGTH,
     MAX_TITLE_LENGTH,
@@ -229,7 +229,7 @@ async def _create_entity_record(
     # entity that carries no capture provenance, which is every entity this
     # path creates that no correction can ever name.
     if organization_id:
-        stamp = await projected_row_lifecycle_stamp(
+        stamp, _verified = await prewrite_capture_stamp(
             organization_id=organization_id,
             metadata=entity.metadata,
         )
@@ -240,9 +240,19 @@ async def _create_entity_record(
     create_direct = getattr(entity_manager, "create_direct", None)
     if inspect.iscoroutinefunction(create_direct):
         if _accepts_keyword(create_direct, "generate_embedding"):
-            return await create_direct(entity, generate_embedding=generate_embeddings)
-        return await create_direct(entity)
-    return await entity_manager.create(entity)
+            created_id = await create_direct(entity, generate_embedding=generate_embeddings)
+        else:
+            created_id = await create_direct(entity)
+    else:
+        created_id = await entity_manager.create(entity)
+    if organization_id:
+        await reconcile_with_capture(
+            entity_manager,
+            organization_id=organization_id,
+            metadata=entity.metadata,
+            row_ids=[created_id],
+        )
+    return created_id
 
 
 async def _create_relationships_bulk(

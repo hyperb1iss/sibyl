@@ -3737,11 +3737,11 @@ class TestAddTool:
         class RecordingEntityManager:
             async def create(self, entity: Any, **_kwargs: Any) -> Any:
                 written.update(entity.metadata)
-                return entity
+                return entity.id
 
             async def upsert(self, entity: Any, **_kwargs: Any) -> Any:
                 written.update(entity.metadata)
-                return entity
+                return entity.id
 
             async def get(self, _entity_id: str) -> None:
                 return None

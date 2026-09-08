@@ -259,9 +259,18 @@ async def test_reflect_memory_can_persist_review_queue(
 ) -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
 
-    async def fake_remember_source(**kwargs: Any) -> SimpleNamespace:
+    async def fake_remember_source(**kwargs: Any) -> RawMemory:
         calls.append(("source", kwargs))
-        return SimpleNamespace(id="raw-source-1", title=kwargs["title"])
+        return RawMemory(
+            id="raw-source-1",
+            organization_id=kwargs["organization_id"],
+            principal_id=kwargs["principal_id"],
+            source_id=kwargs["source_id"],
+            title=kwargs["title"],
+            raw_content=kwargs["raw_content"],
+            memory_scope=kwargs["memory_scope"],
+            scope_key=kwargs["scope_key"],
+        )
 
     async def fake_candidate_review(**kwargs: Any) -> RawMemory:
         calls.append(("candidate", kwargs))

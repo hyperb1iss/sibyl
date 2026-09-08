@@ -11,9 +11,16 @@ from typing import Any
 import structlog
 
 from sibyl_core.errors import EntityNotFoundError, RevisionConflictError
-from sibyl_core.memory_pipeline.lifecycle import graph_lifecycle_stamp, graph_metadata_recallable
+from sibyl_core.memory_pipeline.lifecycle import RECONCILE_PENDING_KEY, graph_metadata_recallable
+from sibyl_core.memory_pipeline.source_lifecycle import (
+    SOURCE_BINDINGS_KEY,
+    UNKNOWN_SOURCE_REVISION,
+    source_revision_bindings,
+)
 from sibyl_core.models.entities import EntityType, Relationship
 from sibyl_core.models.reflection import ReflectionCandidate
+from sibyl_core.projection.pending import pending_patch
+from sibyl_core.projection.reconcile import reconcile_with_capture
 from sibyl_core.services.graph import get_surreal_graph_runtime
 from sibyl_core.services.memory_autonomy import reflection_autonomy_candidate_metadata
 from sibyl_core.services.memory_contract import (
@@ -24,7 +31,11 @@ from sibyl_core.services.memory_contract import (
     _ReflectionPromotionPlan,
     _RelationshipWriteReceipt,
 )
-from sibyl_core.services.memory_identity import verify_reflection_identity
+from sibyl_core.services.memory_identity import (
+    IDENTITY_KEY,
+    reflection_entity_id,
+    verify_reflection_identity,
+)
 from sibyl_core.services.memory_lifecycle import (
     _apply_candidate_temporal_invalidations,
     _candidate_temporal_invalidation_targets,
@@ -44,6 +55,10 @@ from sibyl_core.services.memory_policy import (
     _resolve_memory_scope,
     _resolve_scope_key,
     _with_authorized_supersedes,
+    raw_memory_source_fingerprint,
+)
+from sibyl_core.services.memory_policy import (
+    raw_memory_source_signature as _promotion_source_signature,
 )
 from sibyl_core.services.memory_promotion import (
     _broadest_scope,
@@ -119,11 +134,16 @@ async def persist_reflection_source(
     project: str | None = None,
     related_to: Sequence[str] | None = None,
     accessible_projects: Iterable[str] | None = None,
+    writable_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
     memory_scope: MemoryScope | str | None = None,
     scope_key: str | None = None,
 ) -> ReflectionWriteResult:
+    accessible_projects = (
+        frozenset(accessible_projects) if accessible_projects is not None else None
+    )
+    writable_projects = frozenset(writable_projects) if writable_projects is not None else None
     candidate = ReflectionCandidate(
         kind=EntityType.SESSION.value,
         title=title,
@@ -142,6 +162,7 @@ async def persist_reflection_source(
         source_id=None,
         related_to=related_to,
         accessible_projects=accessible_projects,
+        writable_projects=writable_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
         memory_scope=memory_scope,
@@ -159,20 +180,28 @@ async def persist_reflection_candidate(
     source_id: str | None = None,
     related_to: Sequence[str] | None = None,
     accessible_projects: Iterable[str] | None = None,
+    writable_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
     memory_scope: MemoryScope | str | None = None,
     scope_key: str | None = None,
     link_source_entity: bool = True,
     source_memories: Sequence[RawMemory] = (),
+    reserved_entity_id: str | None = None,
 ) -> ReflectionWriteResult:
+    writable_projects = frozenset(writable_projects) if writable_projects is not None else None
+    accessible_projects = (
+        frozenset(accessible_projects) if accessible_projects is not None else None
+    )
     scope = _resolve_memory_scope(memory_scope, project)
     resolved_scope_key = _resolve_scope_key(scope, scope_key, project)
     policy_decisions = _authorize_reflection_write(
         principal_id=principal_id,
         memory_scope=scope,
         scope_key=resolved_scope_key,
-        accessible_projects=accessible_projects,
+        accessible_projects=writable_projects
+        if writable_projects is not None
+        else accessible_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
     )
@@ -193,7 +222,7 @@ async def persist_reflection_candidate(
     superseded_ids = await _authorized_superseded_entity_ids(
         runtime=runtime,
         principal_id=principal_id,
-        accessible_projects=accessible_projects,
+        writable_projects=writable_projects,
         candidate=candidate,
     )
     entity = _entity_from_candidate(
@@ -206,6 +235,8 @@ async def persist_reflection_candidate(
         memory_scope=scope,
         scope_key=resolved_scope_key,
         policy_metadata=policy_metadata,
+        source_memories=source_memories or (),
+        reserved_entity_id=reserved_entity_id,
     )
     entity = entity.model_copy(
         update={
@@ -225,6 +256,23 @@ async def persist_reflection_candidate(
     # Resolved before the row lands. A store that fails here fails the whole
     # promotion rather than persisting a memory and then reporting a complete
     # write that requested no edges at all.
+    legacy_reservation = (
+        reserved_entity_id is not None and entity.metadata[IDENTITY_KEY]["version"] == 2
+    )
+    if source_memories:
+        bindings = source_revision_bindings(source_memories)
+        if legacy_reservation:
+            # A v2 reservation proves its output, not the source epochs it read.
+            bindings = dict.fromkeys(bindings, UNKNOWN_SOURCE_REVISION)
+            for memory in source_memories:
+                entity.metadata.update(
+                    pending_patch(
+                        entity.metadata,
+                        {RECONCILE_PENDING_KEY: True},
+                        authority=f"capture:{memory.id}",
+                    )
+                )
+        entity.metadata[SOURCE_BINDINGS_KEY] = bindings
     linkable_related_to = await _linkable_related_targets(
         runtime=runtime,
         related_to=related_to,
@@ -264,6 +312,16 @@ async def persist_reflection_candidate(
         return _retired_reflection_result(entity.id)
     stored, created = await runtime.entity_manager.create_direct_if_absent(entity)
     verify_reflection_identity(entity, stored)
+    if legacy_reservation:
+        for memory in source_memories:
+            await reconcile_with_capture(
+                runtime.entity_manager,
+                organization_id=organization_id,
+                metadata={"raw_memory_id": memory.id},
+                row_ids=[stored.id],
+            )
+        stored = await runtime.entity_manager.get(stored.id)
+        verify_reflection_identity(entity, stored)
     if not await _verify_promotion_sources(runtime, source_memories, entity_id=stored.id):
         return _retired_reflection_result(stored.id)
     if not graph_metadata_recallable(stored.metadata):
@@ -289,7 +347,7 @@ async def persist_reflection_candidate(
         runtime=runtime,
         organization_id=organization_id,
         principal_id=principal_id,
-        accessible_projects=accessible_projects,
+        writable_projects=writable_projects,
         candidate=candidate,
         replacement_entity_id=created_id,
         replacement_source_ids=source_ids,
@@ -456,9 +514,14 @@ async def promote_reflection_candidate_review(
     project: str | None = None,
     related_to: Sequence[str] | None = None,
     accessible_projects: Iterable[str] | None = None,
+    writable_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
 ) -> ReflectionPromotionResult:
+    accessible_projects = (
+        frozenset(accessible_projects) if accessible_projects is not None else None
+    )
+    writable_projects = frozenset(writable_projects) if writable_projects is not None else None
     plan = await _resolve_reflection_promotion_plan(
         candidate_id=candidate_id,
         organization_id=organization_id,
@@ -481,6 +544,7 @@ async def promote_reflection_candidate_review(
         domain=domain,
         related_to=related_to,
         accessible_projects=accessible_projects,
+        writable_projects=writable_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
         native_source_id=plan.raw_source_ids[0] if plan.raw_source_ids else None,
@@ -500,9 +564,14 @@ async def promote_raw_memory(
     project: str | None = None,
     related_to: Sequence[str] | None = None,
     accessible_projects: Iterable[str] | None = None,
+    writable_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
 ) -> ReflectionPromotionResult:
+    accessible_projects = (
+        frozenset(accessible_projects) if accessible_projects is not None else None
+    )
+    writable_projects = frozenset(writable_projects) if writable_projects is not None else None
     plan = await _resolve_raw_memory_promotion_plan(
         raw_memory_id=raw_memory_id,
         organization_id=organization_id,
@@ -525,6 +594,7 @@ async def promote_raw_memory(
         domain=domain,
         related_to=related_to,
         accessible_projects=accessible_projects,
+        writable_projects=writable_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
         native_source_id=plan.candidate_memory.id,
@@ -543,9 +613,14 @@ async def preview_reflection_candidate_promotion(
     domain: str | None = None,
     project: str | None = None,
     accessible_projects: Iterable[str] | None = None,
+    writable_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
 ) -> ReflectionPromotionPreview:
+    accessible_projects = (
+        frozenset(accessible_projects) if accessible_projects is not None else None
+    )
+    writable_projects = frozenset(writable_projects) if writable_projects is not None else None
     plan = await _resolve_reflection_promotion_plan(
         candidate_id=candidate_id,
         organization_id=organization_id,
@@ -565,7 +640,9 @@ async def preview_reflection_candidate_promotion(
         principal_id=principal_id,
         memory_scope=plan.target_scope,
         scope_key=plan.target_scope_key,
-        accessible_projects=accessible_projects,
+        accessible_projects=writable_projects
+        if writable_projects is not None
+        else accessible_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
     )
@@ -600,9 +677,14 @@ async def preview_raw_memory_promotion(
     domain: str | None = None,
     project: str | None = None,
     accessible_projects: Iterable[str] | None = None,
+    writable_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
 ) -> ReflectionPromotionPreview:
+    accessible_projects = (
+        frozenset(accessible_projects) if accessible_projects is not None else None
+    )
+    writable_projects = frozenset(writable_projects) if writable_projects is not None else None
     plan = await _resolve_raw_memory_promotion_plan(
         raw_memory_id=raw_memory_id,
         organization_id=organization_id,
@@ -622,7 +704,9 @@ async def preview_raw_memory_promotion(
         principal_id=principal_id,
         memory_scope=plan.target_scope,
         scope_key=plan.target_scope_key,
-        accessible_projects=accessible_projects,
+        accessible_projects=writable_projects
+        if writable_projects is not None
+        else accessible_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
     )
@@ -655,17 +739,24 @@ async def _apply_promotion_plan(
     domain: str | None,
     related_to: Sequence[str] | None,
     accessible_projects: Iterable[str] | None,
+    writable_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None,
     accessible_delegations: Iterable[str] | None,
     native_source_id: str | None,
     lifecycle_source_id: str,
     lifecycle_reason: str,
 ) -> ReflectionPromotionResult:
+    accessible_projects = (
+        frozenset(accessible_projects) if accessible_projects is not None else None
+    )
+    writable_projects = frozenset(writable_projects) if writable_projects is not None else None
     policy_decisions = _authorize_reflection_write(
         principal_id=principal_id,
         memory_scope=plan.target_scope,
         scope_key=plan.target_scope_key,
-        accessible_projects=accessible_projects,
+        accessible_projects=writable_projects
+        if writable_projects is not None
+        else accessible_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
     )
@@ -690,8 +781,15 @@ async def _apply_promotion_plan(
         memory_scope=plan.target_scope,
         scope_key=_resolve_scope_key(plan.target_scope, plan.target_scope_key, plan.target_project),
         policy_metadata=policy_metadata,
+        source_memories=plan.input_memories,
     )
-    reservation = await _reserve_promotion(plan, prospective.id)
+    reservation = await _reserve_promotion(
+        plan,
+        prospective.id,
+        legacy_entity_id=reflection_entity_id(
+            prospective.model_copy(update={"name": plan.promotion_candidate.title}), version=2
+        ),
+    )
     if isinstance(reservation, ReflectionPromotionResult):
         return reservation
     plan = reservation
@@ -704,12 +802,14 @@ async def _apply_promotion_plan(
         source_id=native_source_id,
         related_to=related_to,
         accessible_projects=accessible_projects,
+        writable_projects=writable_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
         memory_scope=plan.target_scope,
         scope_key=plan.target_scope_key,
         link_source_entity=False,
         source_memories=plan.input_memories,
+        reserved_entity_id=_metadata_str(plan.candidate_memory.metadata, "promoted_entity_id"),
     )
     if not result.response.success or result.metadata.get("promotion_state") == "partial":
         return _promotion_write_denied(plan=plan, result=result)
@@ -721,22 +821,6 @@ async def _apply_promotion_plan(
     )
 
 
-def _promotion_source_signature(memory: RawMemory) -> tuple[object, ...]:
-    return (
-        memory.organization_id,
-        memory.principal_id,
-        memory.memory_scope,
-        memory.scope_key,
-        memory.source_id,
-        memory.title,
-        memory.raw_content,
-        memory.entity_type,
-        memory.metadata.get("domain"),
-        memory.metadata.get("category"),
-        tuple(sorted(source_id for source_id in _raw_source_ids(memory) if source_id != memory.id)),
-    )
-
-
 async def _verify_promotion_sources(
     runtime: Any,
     memories: Sequence[RawMemory],
@@ -744,33 +828,45 @@ async def _verify_promotion_sources(
     entity_id: str | None = None,
 ) -> bool:
     """Close correction's read-before-insert gap without restoring retired rows."""
+    verified = True
     for expected in memories:
-        current = await get_raw_memory(
-            organization_id=expected.organization_id, memory_id=expected.id
-        )
-        stamp: dict[str, object] = {}
-        if current is None:
-            stamp = {"excluded_from_recall": True, "lifecycle_state": "deleted"}
-        elif not raw_memory_recallable(current):
-            stamp = graph_lifecycle_stamp(current)
-        elif _promotion_source_signature(current) != _promotion_source_signature(expected):
-            stamp = {"excluded_from_recall": True, "lifecycle_state": "contested"}
-        if stamp:
-            if entity_id is not None:
-                await runtime.entity_manager.update(entity_id, {"metadata": stamp})
-            return False
-    return True
+        signature = raw_memory_source_fingerprint(expected)
+        try:
+            current = await get_raw_memory(
+                organization_id=expected.organization_id, memory_id=expected.id
+            )
+        except Exception as exc:
+            log.warning("promotion_source_read_failed", error_type=type(exc).__name__)
+            current = None
+        if (
+            current is not None
+            and raw_memory_recallable(current)
+            and _promotion_source_signature(current) == _promotion_source_signature(expected)
+        ):
+            continue
+        if entity_id is not None:
+            await reconcile_with_capture(
+                runtime.entity_manager,
+                organization_id=expected.organization_id,
+                metadata={"raw_memory_id": expected.id},
+                row_ids=[entity_id],
+                expected_signature=signature,
+            )
+        verified = False
+    return verified
 
 
 async def _reserve_promotion(
     plan: _ReflectionPromotionPlan,
     entity_id: str,
+    *,
+    legacy_entity_id: str | None = None,
 ) -> _ReflectionPromotionPlan | ReflectionPromotionResult:
     """Reserve correction's existing pointer before publishing any graph row."""
     memory = plan.candidate_memory
     recorded_id = _metadata_str(memory.metadata, "promoted_entity_id")
     if recorded_id or memory.review_state == _PROMOTED_REVIEW_STATE:
-        if recorded_id != entity_id:
+        if not recorded_id or (recorded_id != entity_id and recorded_id != legacy_entity_id):
             return _promotion_denied(
                 candidate_id=memory.id,
                 reason="candidate_already_promoted",
@@ -803,10 +899,11 @@ async def _reserve_promotion(
                 scope_key=plan.target_scope_key,
                 raw_source_ids=plan.raw_source_ids,
             )
-        if _metadata_str(
-            current.metadata, "promoted_entity_id"
-        ) != entity_id or _promotion_source_signature(current) != _promotion_source_signature(
-            memory
+        recorded_id = _metadata_str(current.metadata, "promoted_entity_id")
+        if (
+            not recorded_id
+            or (recorded_id != entity_id and recorded_id != legacy_entity_id)
+            or _promotion_source_signature(current) != _promotion_source_signature(memory)
         ):
             return _promotion_denied(
                 candidate_id=memory.id,
@@ -1012,6 +1109,18 @@ async def _resolve_reflection_promotion_plan(
     )
     if source_scope_denial is not None:
         return source_scope_denial
+
+    if candidate_memory.metadata.get("source_validation_pending"):
+        from sibyl_core.services.memory_source_validation import reconcile_raw_source_lifecycle
+
+        candidate_memory = await reconcile_raw_source_lifecycle(
+            candidate_memory,
+            principal_id=str(principal_id),
+            accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
+        )
+        input_memories[0] = candidate_memory
 
     if not sources_complete or any(not raw_memory_recallable(memory) for memory in input_memories):
         return _promotion_denied(

@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from sibyl_core.backends.surreal.records import normalize_records, raise_on_error
+from sibyl_core.backends.surreal.schema import render_surreal_compatible_sql
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.models.tasks import EpicStatus, TaskStatus
 from sibyl_core.services.graph_entity_store import (
@@ -311,6 +312,7 @@ async def _apply_records(
     # that meant the removed migration marker came straight back on the next read.
     await heal_entity_metadata_snapshots(client, records, group_id=group_id)
     query = f"BEGIN TRANSACTION;\n{_ENTITY_BULK_UPSERT_QUERY}\nCOMMIT TRANSACTION;"
+    query = render_surreal_compatible_sql(query, url=client._url)
     result = await client.execute_query_raw(query, rows=records)
     direction = "reverse" if reverse else "forward"
     raise_on_error(result, query=f"collapse_epics:{direction}:{group_id}")

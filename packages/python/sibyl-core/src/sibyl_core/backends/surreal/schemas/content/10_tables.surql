@@ -152,6 +152,8 @@ DEFINE FIELD IF NOT EXISTS created_at ON raw_captures TYPE datetime DEFAULT time
 
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_uuid ON raw_captures FIELDS uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_org ON raw_captures FIELDS organization_id;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_source_validation ON raw_captures
+    FIELDS organization_id, metadata.source_validation_pending, uuid;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_source ON raw_captures FIELDS source_id;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_source_lookup ON raw_captures
     FIELDS source_id, organization_id, memory_scope, scope_key;

@@ -17,7 +17,13 @@ from sibyl_core.auth.memory_policy import (
 from sibyl_core.embeddings.providers import configured_embedding_provider
 from sibyl_core.memory_pipeline.lifecycle import (
     GRAPH_RECALL_EXCLUSION_KEYS,
+    RECONCILE_PENDING_KEY,
     graph_metadata_recallable,
+)
+from sibyl_core.memory_pipeline.source_lifecycle import (
+    CORRECTION_BLOCKERS_KEY,
+    SOURCE_VALIDATION_PENDING_KEY,
+    public_memory_metadata,
 )
 from sibyl_core.models.context import (
     ContextFacet,
@@ -616,6 +622,9 @@ async def _default_related_items_batch(
 
 
 _ITEM_METADATA_KEYS = (
+    CORRECTION_BLOCKERS_KEY,
+    SOURCE_VALIDATION_PENDING_KEY,
+    RECONCILE_PENDING_KEY,
     "status",
     "priority",
     "complexity",
@@ -1162,6 +1171,9 @@ def _sections_from_response(
 
 
 _LIFECYCLE_ADMISSION_KEYS = (
+    CORRECTION_BLOCKERS_KEY,
+    SOURCE_VALIDATION_PENDING_KEY,
+    RECONCILE_PENDING_KEY,
     "lifecycle_state",
     "lifecycle_flags",
     "review_state",
@@ -1567,7 +1579,13 @@ async def compile_context(
 
 
 def context_pack_to_dict(pack: ContextPack) -> dict[str, Any]:
-    return asdict(pack)
+    payload = asdict(pack)
+    for section in payload["sections"]:
+        for item in section["items"]:
+            item["metadata"] = public_memory_metadata(item["metadata"])
+            for related in item["related"]:
+                related["metadata"] = public_memory_metadata(related["metadata"])
+    return payload
 
 
 __all__ = [

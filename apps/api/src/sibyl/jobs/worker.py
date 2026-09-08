@@ -37,6 +37,7 @@ from sibyl.jobs.entities import (
     update_entity,
     update_task,
 )
+from sibyl.jobs.lifecycle_repair import repair_lifecycle_all_orgs
 from sibyl.jobs.memory_extraction import extract_memory_entities
 from sibyl.jobs.operational_distillation import distill_operational_experience_notes
 from sibyl.jobs.privacy import purge_due_deleted_personal_memories
@@ -229,6 +230,13 @@ def get_schedule_specs() -> list[ScheduleSpec]:
 
     schedule_specs.append(
         ScheduleSpec(
+            name="repair_lifecycle_all_orgs",
+            function=repair_lifecycle_all_orgs,
+            schedule_label="* * * * *",
+        )
+    )
+    schedule_specs.append(
+        ScheduleSpec(
             name="consolidate_all_orgs",
             function=consolidate_all_orgs,
             schedule_label="0 3 * * *",
@@ -313,6 +321,7 @@ class WorkerSettings:
         poll_raw_capture_changefeed,
         poll_all_raw_capture_changefeeds,
         # Consolidation jobs
+        repair_lifecycle_all_orgs,
         consolidate_org,
         consolidate_all_orgs,
         priority_decay,

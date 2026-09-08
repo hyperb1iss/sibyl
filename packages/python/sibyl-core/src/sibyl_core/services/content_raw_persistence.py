@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import asyncio
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
 from typing import cast
 from uuid import uuid4
 
-from sibyl_core.auth.memory_policy import EVAL_ADMISSION_METADATA_KEY
+from sibyl_core.auth.memory_policy import MEMORY_PROVENANCE_METADATA_KEYS
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.embeddings.providers import (
     EmbeddingProvider,
@@ -16,6 +17,12 @@ from sibyl_core.embeddings.providers import (
 from sibyl_core.errors import RevisionConflictError
 from sibyl_core.memory_pipeline.quality import (
     normalize_memory_quality_metadata,
+)
+from sibyl_core.memory_pipeline.source_lifecycle import (
+    SOURCE_BINDINGS_KEY,
+    SOURCE_VALIDATION_PENDING_KEY,
+    declared_source_ids,
+    source_revision_bindings,
 )
 from sibyl_core.models.memory_scope import MemoryScope
 from sibyl_core.models.reflection import (
@@ -138,7 +145,12 @@ def _raw_memory_from_write(write: RawMemoryWrite, *, captured_at: datetime) -> R
     normalized_scope = models.coerce_memory_scope(write.memory_scope)
     models.validate_raw_memory_scope(normalized_scope, write.scope_key)
     metadata = normalize_memory_quality_metadata(write.metadata or {})
-    metadata.pop(EVAL_ADMISSION_METADATA_KEY, None)
+    for key in MEMORY_PROVENANCE_METADATA_KEYS:
+        metadata.pop(key, None)
+    sources = declared_source_ids(metadata)
+    if sources:
+        metadata["raw_source_ids"] = list(sources)
+        metadata[SOURCE_VALIDATION_PENDING_KEY] = True
     return RawMemory(
         id=str(uuid4()),
         organization_id=write.organization_id,
@@ -165,7 +177,11 @@ async def _raw_memory_with_embedding(
     memory: RawMemory,
     embedding_provider: EmbeddingProvider | None,
 ) -> RawMemory:
-    if embedding_provider is None or memory.embedding is not None:
+    if (
+        embedding_provider is None
+        or memory.embedding is not None
+        or not models.raw_memory_recallable(memory)
+    ):
         return memory
     embeddings = await embedding_provider.embed_texts(
         [
@@ -194,10 +210,16 @@ async def _raw_memories_with_embeddings(
 ) -> list[RawMemory]:
     if embedding_provider is None:
         return list(memories)
-    pending = [memory for memory in memories if memory.embedding is None]
+    pending = [
+        memory
+        for memory in memories
+        if memory.embedding is None and models.raw_memory_recallable(memory)
+    ]
     if not pending:
         return list(memories)
 
+    if not pending:
+        return list(memories)
     embeddings = await embedding_provider.embed_texts(
         [
             models.raw_memory_embedding_text(
@@ -322,7 +344,23 @@ async def remember_raw_memory(
     capture_surface: str | None = None,
     entity_type: str = "raw_memory",
     embedding_provider: EmbeddingProvider | object | None = _RAW_MEMORY_EMBEDDING_AUTO,
+    source_memories: Sequence[RawMemory] = (),
+    accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
 ) -> RawMemory:
+    from sibyl_core.services.memory_source_validation import (
+        SOURCE_VALIDATION_CONTEXT_KEY,
+        SourceReadAuthority,
+    )
+
+    accessible_projects = tuple(accessible_projects or ())
+    accessible_teams = tuple(accessible_teams or ())
+    accessible_delegations = tuple(accessible_delegations or ())
+    allowed_memory_scope_keys = (
+        None if allowed_memory_scope_keys is None else frozenset(allowed_memory_scope_keys)
+    )
     memory = _raw_memory_from_write(
         RawMemoryWrite(
             organization_id=organization_id,
@@ -340,6 +378,22 @@ async def remember_raw_memory(
         ),
         captured_at=models.utcnow(),
     )
+    if source_memories:
+        memory.metadata[SOURCE_BINDINGS_KEY] = source_revision_bindings(source_memories)
+        memory.metadata["raw_source_ids"] = list(
+            dict.fromkeys(
+                [*declared_source_ids(memory.metadata), *(source.id for source in source_memories)]
+            )
+        )
+        memory.metadata[SOURCE_VALIDATION_PENDING_KEY] = True
+    if memory.metadata.get(SOURCE_VALIDATION_PENDING_KEY):
+        memory.metadata[SOURCE_VALIDATION_CONTEXT_KEY] = SourceReadAuthority(
+            principal_id=principal_id,
+            projects=frozenset(accessible_projects),
+            teams=frozenset(accessible_teams),
+            delegations=frozenset(accessible_delegations),
+            scope_keys=allowed_memory_scope_keys,
+        ).ceiling_metadata()
     provider = (
         models.configured_raw_memory_embedding_provider()
         if embedding_provider is _RAW_MEMORY_EMBEDDING_AUTO
@@ -353,18 +407,57 @@ async def remember_raw_memory(
             uuid=memory.id,
             record=models.raw_memory_record(memory),
         )
-    return models.raw_memory_from_record(record)
+    stored = models.raw_memory_from_record(record)
+    if stored.metadata.get(SOURCE_VALIDATION_PENDING_KEY):
+        from sibyl_core.services.memory_source_validation import reconcile_raw_source_lifecycle
+
+        stored = await reconcile_raw_source_lifecycle(
+            stored,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+            embedding_provider=provider,
+        )
+    return stored
 
 
 async def remember_raw_memories(
     writes: Sequence[RawMemoryWrite],
     *,
     embedding_provider: EmbeddingProvider | object | None = _RAW_MEMORY_EMBEDDING_AUTO,
+    accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
 ) -> list[RawMemory]:
+    from sibyl_core.services.memory_source_validation import (
+        SOURCE_VALIDATION_CONTEXT_KEY,
+        SourceReadAuthority,
+    )
+
     if not writes:
         return []
+    accessible_projects = None if accessible_projects is None else tuple(accessible_projects)
+    accessible_teams = None if accessible_teams is None else tuple(accessible_teams)
+    accessible_delegations = (
+        None if accessible_delegations is None else tuple(accessible_delegations)
+    )
+    allowed_memory_scope_keys = (
+        None if allowed_memory_scope_keys is None else frozenset(allowed_memory_scope_keys)
+    )
     now = models.utcnow()
     memories = [_raw_memory_from_write(write, captured_at=now) for write in writes]
+    for memory in memories:
+        if memory.metadata.get(SOURCE_VALIDATION_PENDING_KEY):
+            memory.metadata[SOURCE_VALIDATION_CONTEXT_KEY] = SourceReadAuthority(
+                principal_id=memory.principal_id,
+                projects=frozenset(accessible_projects or ()),
+                teams=frozenset(accessible_teams or ()),
+                delegations=frozenset(accessible_delegations or ()),
+                scope_keys=allowed_memory_scope_keys,
+            ).ceiling_metadata()
     provider = (
         models.configured_raw_memory_embedding_provider()
         if embedding_provider is _RAW_MEMORY_EMBEDDING_AUTO
@@ -377,7 +470,32 @@ async def remember_raw_memories(
             [models.raw_memory_record(memory) for memory in memories],
         )
     ordered_records = _order_raw_memory_records_by_input(memories, records)
-    return [models.raw_memory_from_record(record) for record in ordered_records]
+    stored = [models.raw_memory_from_record(record) for record in ordered_records]
+    if any(memory.metadata.get(SOURCE_VALIDATION_PENDING_KEY) for memory in stored):
+        from sibyl_core.services.memory_source_validation import reconcile_raw_source_lifecycle
+
+        pending = [
+            (index, memory)
+            for index, memory in enumerate(stored)
+            if memory.metadata.get(SOURCE_VALIDATION_PENDING_KEY)
+        ]
+        checked = await asyncio.gather(
+            *(
+                reconcile_raw_source_lifecycle(
+                    memory,
+                    principal_id=memory.principal_id,
+                    accessible_projects=accessible_projects,
+                    accessible_teams=accessible_teams,
+                    accessible_delegations=accessible_delegations,
+                    allowed_memory_scope_keys=allowed_memory_scope_keys,
+                    embedding_provider=provider,
+                )
+                for _, memory in pending
+            )
+        )
+        for (index, _), memory in zip(pending, checked, strict=True):
+            stored[index] = memory
+    return stored
 
 
 async def remember_reflection_candidate_review(
@@ -392,6 +510,11 @@ async def remember_reflection_candidate_review(
     suggested_memory_scope: MemoryScope | str | None = None,
     suggested_scope_key: str | None = None,
     extraction_prompt_metadata: dict[str, object] | None = None,
+    source_memories: Sequence[RawMemory] = (),
+    accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
 ) -> RawMemory:
     normalized_scope = models.coerce_memory_scope(memory_scope)
     suggested_scope = (
@@ -437,6 +560,11 @@ async def remember_reflection_candidate_review(
         provenance={"raw_source_ids": source_ids},
         capture_surface="reflection_candidate",
         entity_type=candidate.kind,
+        source_memories=source_memories,
+        accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
 
 

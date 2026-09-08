@@ -370,3 +370,60 @@ async def test_handbook_route_is_stable_across_identical_requests() -> None:
 
     assert first.run_id == second.run_id
     assert first.markdown == second.markdown
+
+
+@pytest.mark.parametrize("surface", ["plan", "draft", "remember"])
+async def test_synthesis_keeps_source_clocks_out_of_responses_and_saved_json(surface):
+    packs = []
+
+    async def context_with_clock(**kwargs):
+        pack = await _fake_context_pack(**kwargs)
+        pack.items[0].metadata.update(
+            {
+                "correction_blockers": {"private-root-clock": {"revision": 9, "blocking": False}},
+                "source_bindings": {"declared-source": 2},
+                "authored": {"correction_blockers": "literal documentation"},
+            }
+        )
+        packs.append(pack)
+        return pack
+
+    remember = AsyncMock(return_value=SimpleNamespace(id="saved", source_id="saved-source"))
+    with (
+        patch(
+            "sibyl.api.routes.synthesis.list_accessible_project_graph_ids",
+            AsyncMock(return_value=["project-sibyl"]),
+        ),
+        patch("sibyl_core.services.synthesis.default_search", _fake_search),
+        patch("sibyl_core.services.synthesis.default_related_sources", _empty_related),
+        patch("sibyl_core.services.synthesis.default_context_pack", context_with_clock),
+        patch("sibyl_core.services.synthesis.default_remember_artifact", remember),
+    ):
+        if surface == "plan":
+            response = await plan_synthesis_route(
+                SynthesisPlanRequest(goal="Write a sourced roadmap"), org=_org(), ctx=_ctx()
+            )
+        else:
+            response = await draft_synthesis_route(
+                SynthesisDraftRequest(
+                    goal="Write a sourced roadmap",
+                    output_format=SynthesisArtifactFormat.JSON,
+                    remember=surface == "remember",
+                ),
+                org=_org(),
+                ctx=_ctx(),
+            )
+    assert "private-root-clock" not in response.model_dump_json()
+    for pack in response.source_packs:
+        for source in pack.sources:
+            assert "correction_blockers" not in source.metadata
+            assert "source_bindings" not in source.metadata
+            assert source.metadata["authored"] == {"correction_blockers": "literal documentation"}
+    assert packs
+    assert all("correction_blockers" in pack.items[0].metadata for pack in packs)
+    if surface == "remember":
+        remember.assert_awaited_once()
+        assert "private-root-clock" not in remember.await_args.kwargs["raw_content"]
+        assert '"declared-source"' not in remember.await_args.kwargs["raw_content"]
+    else:
+        remember.assert_not_awaited()

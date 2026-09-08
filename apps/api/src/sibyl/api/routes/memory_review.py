@@ -192,6 +192,7 @@ async def _auto_review_reflection_candidate(
         domain=request.domain,
         project=request.project,
         accessible_projects=accessible_projects,
+        writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
     )
     confidence_threshold = (
         request.confidence_threshold
@@ -215,6 +216,7 @@ async def _auto_review_reflection_candidate(
             project=request.project,
             related_to=request.related_to,
             accessible_projects=accessible_projects,
+            writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
         )
 
     audit_action = (

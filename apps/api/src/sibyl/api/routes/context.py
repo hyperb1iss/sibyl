@@ -695,6 +695,11 @@ async def reflect_context(
             organization_id=str(org.id),
             principal_id=getattr(ctx, "user_id", None),
             accessible_projects=accessible_projects,
+            writable_projects=(
+                await list_accessible_project_graph_ids(ctx, required_role=ProjectRole.CONTRIBUTOR)
+                if request.persist
+                else set()
+            ),
             memory_scope="project" if request.project else "private",
             scope_key=request.project,
             persist=request.persist,

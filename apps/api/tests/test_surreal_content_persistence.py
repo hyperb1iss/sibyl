@@ -1367,6 +1367,9 @@ async def test_content_schema_migration_normalizes_legacy_enum_values() -> None:
                 "entity_type": "episode",
                 "memory_scope": "PRIVATE",
                 "review_state": "PENDING",
+                "metadata": {"raw_source_ids": ["legacy-source"], "custom": {"kept": True}},
+                "provenance": {"origin": "legacy-import"},
+                "tags": ["retained"],
             },
         )
 
@@ -1391,6 +1394,17 @@ async def test_content_schema_migration_normalizes_legacy_enum_values() -> None:
         )
         assert source_rows[0]["source_type"] == SourceType.LOCAL.value
         assert source_rows[0]["crawl_status"] == "pending"
+        assert capture_rows[0]["uuid"] == capture_id
+        assert capture_rows[0]["organization_id"] == organization_id
+        assert capture_rows[0]["title"] == "Legacy raw capture"
+        assert capture_rows[0]["raw_content"] == "remember me"
+        assert capture_rows[0]["entity_type"] == "episode"
+        assert capture_rows[0]["metadata"] == {
+            "raw_source_ids": ["legacy-source"],
+            "custom": {"kept": True},
+        }
+        assert capture_rows[0]["provenance"] == {"origin": "legacy-import"}
+        assert capture_rows[0]["tags"] == ["retained"]
         assert capture_rows[0]["memory_scope"] == "private"
         assert capture_rows[0]["review_state"] == "pending"
         assert capture_rows[0]["retrieval_count"] == 0
