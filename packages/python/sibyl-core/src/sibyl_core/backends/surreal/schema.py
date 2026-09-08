@@ -1140,6 +1140,8 @@ def render_surreal_compatible_sql(sql: str, *, url: str) -> str:
         rendered = (
             rendered.replace("type::is::string", "type::is_string")
             .replace("type::is::object", "type::is_object")
+            .replace("type::is::array", "type::is_array")
+            .replace("type::is::int", "type::is_int")
             .replace("type::is::number", "type::is_number")
             .replace("type::is::datetime", "type::is_datetime")
             .replace("string::is::datetime", "string::is_datetime")

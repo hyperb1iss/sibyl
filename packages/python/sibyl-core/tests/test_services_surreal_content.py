@@ -1596,7 +1596,7 @@ class TestSurrealContentHelpers:
         assert memory.principal_id == "user-bliss"
         assert memory.memory_scope is MemoryScope.PRIVATE
         assert memory.provenance == {"message_id": "msg-1"}
-        saved_record = fake_client.calls[0][1]["record"]
+        saved_record = fake_client.calls[0][1]["rows"][0]
         assert saved_record["source_id"] == "source-email-1"
         assert saved_record["principal_id"] == "user-bliss"
         assert saved_record["memory_scope"] == "private"
@@ -1799,7 +1799,7 @@ class TestSurrealContentHelpers:
                 embedding_provider=provider,
             )
 
-        saved_record = fake_client.calls[0][1]["record"]
+        saved_record = fake_client.calls[0][1]["rows"][0]
         assert provider.input_kinds == ["document"]
         assert provider.texts == [
             "Title: Architecture note\n\nSurreal stores raw memory before extraction."
@@ -1987,7 +1987,7 @@ class TestSurrealContentHelpers:
                 raw_content="Surreal stores raw memory before extraction.",
             )
 
-        saved_record = fake_client.calls[0][1]["record"]
+        saved_record = fake_client.calls[0][1]["rows"][0]
         assert provider.input_kinds == ["document"]
         assert saved_record["embedding"] == embedding
 
@@ -2053,7 +2053,8 @@ class TestSurrealContentHelpers:
         assert provider.input_kinds == ["document"]
         assert provider.texts == ["Title: First\n\nfirst body", "Title: Second\n\nsecond body"]
         query, params = fake_client.calls[0]
-        assert "INSERT INTO raw_captures $rows" in query
+        assert "BEGIN TRANSACTION" in query
+        assert "INSERT INTO raw_captures" in query
         assert len(params["rows"]) == 2
         assert [row["source_id"] for row in params["rows"]] == [
             "source-email-1",
@@ -2187,7 +2188,7 @@ class TestSurrealContentHelpers:
                 extraction_prompt_metadata={"extractor": "test"},
             )
 
-        saved_record = fake_client.calls[0][1]["record"]
+        saved_record = fake_client.calls[0][1]["rows"][0]
         assert memory.entity_type == "decision"
         assert memory.capture_surface == "reflection_candidate"
         assert memory.review_state == "pending"

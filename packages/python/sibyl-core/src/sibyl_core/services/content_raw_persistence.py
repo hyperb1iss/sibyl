@@ -31,7 +31,15 @@ from sibyl_core.services.content_models import RawMemory, RawMemoryWrite
 _RAW_MEMORY_EMBEDDING_AUTO = object()
 
 _RAW_MEMORY_BULK_UPSERT_QUERY = """
-INSERT INTO raw_captures $rows ON DUPLICATE KEY UPDATE
+BEGIN TRANSACTION;
+LET $ids = $rows.map(|$row| $row.uuid);
+LET $organizations = object::from_entries($rows.map(|$row| [$row.uuid, $row.organization_id]));
+LET $foreign = (SELECT VALUE uuid FROM raw_captures WHERE uuid IN $ids
+    AND organization_id != $organizations[uuid]);
+IF array::len($foreign) > 0 {
+    THROW 'raw capture organization cannot change';
+};
+LET $saved = (INSERT INTO raw_captures $rows ON DUPLICATE KEY UPDATE
     uuid = $input.uuid,
     organization_id = $input.organization_id,
     source_id = $input.source_id,
@@ -65,7 +73,9 @@ INSERT INTO raw_captures $rows ON DUPLICATE KEY UPDATE
     retrieval_count = $input.retrieval_count ?? retrieval_count ?? 0,
     citation_count = $input.citation_count ?? citation_count ?? 0,
     misled_count = $input.misled_count ?? misled_count ?? 0,
-    created_at = $input.created_at;
+    created_at = $input.created_at RETURN AFTER);
+COMMIT TRANSACTION;
+RETURN $saved;
 """
 
 _RAW_PROMOTION_VISIBLE_SCOPES = (
@@ -80,14 +90,19 @@ async def replace_raw_memory_records_bulk(
 ) -> list[models.SurrealRecord]:
     if not records:
         return []
+    identities = [record.get("uuid") for record in records]
+    if any(not isinstance(value, str) or not value for value in identities):
+        raise ValueError("raw capture batch requires non-empty UUID strings")
+    if len(set(identities)) != len(identities):
+        raise ValueError("raw capture batch requires distinct UUIDs")
     for record in records:
         if record.get("organization_id") is None:
             uuid = record.get("uuid") or "<unknown>"
             raise RuntimeError(f"raw_captures record {uuid} requires organization_id")
-    rows = await content_client.select_many(
+    rows = await content_client.select_many_raw(
         client,
         _RAW_MEMORY_BULK_UPSERT_QUERY,
-        rows=list(records),
+        rows=[{**record, "revision": 1} for record in records],
     )
     if len(rows) != len(records):
         raise RuntimeError(
@@ -680,14 +695,17 @@ async def save_raw_memory(
                 client,
                 """
                     BEGIN TRANSACTION;
-                    LET $updated = (
-                        UPDATE raw_captures MERGE $record
+                    LET $current = (SELECT revision FROM raw_captures
+                        WHERE organization_id = $organization_id AND uuid = $uuid LIMIT 1)[0];
+                    LET $next = object::from_entries(array::concat(
+                        object::entries($record), [['revision', $current.revision + 1]]));
+                    LET $saved = (
+                        UPDATE raw_captures MERGE $next
                         WHERE organization_id = $organization_id
                             AND uuid = $uuid
                             AND ($expected_revision = NONE OR revision = $expected_revision)
                         RETURN AFTER
                     );
-                    LET $saved = (UPDATE $updated SET revision += 1 RETURN AFTER);
                     IF $supersession != NONE AND array::len($saved) > 0 {
                         LET $replacement = (
                             SELECT id, source_id FROM raw_captures

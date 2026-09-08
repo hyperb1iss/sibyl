@@ -869,6 +869,10 @@ async def _replace_record(
     if organization_id is None:
         msg = f"{table} record {uuid} requires organization_id"
         raise RuntimeError(msg)
+    if table == "raw_captures":
+        from sibyl_core.services.content_raw_persistence import replace_raw_memory_records_bulk
+
+        return (await replace_raw_memory_records_bulk(client, [record]))[0]
     created = await _select_many(
         client,
         _UPSERT_RECORD[table],
@@ -1848,13 +1852,29 @@ async def update_raw_capture_review_state(
             metadata.pop("archived_at", None)
             metadata.pop("deferred_at", None)
 
-        rows = await _select_many(
+        rows = await _select_many_raw(
             client,
-            "UPDATE raw_captures SET metadata = $metadata, review_state = $review_state "
-            "WHERE uuid = $capture_id AND organization_id = $organization_id;",
+            "BEGIN TRANSACTION; "
+            "LET $current = (SELECT * FROM raw_captures WHERE uuid = $capture_id "
+            "AND organization_id = $organization_id LIMIT 1)[0]; "
+            "LET $saved = (UPDATE raw_captures MERGE {"
+            "metadata: object::from_entries(array::concat(object::entries($current.metadata), "
+            "object::entries($review_patch))), "
+            "review_state: $review_state, revision: $current.revision + 1} "
+            "WHERE uuid = $capture_id AND organization_id = $organization_id RETURN AFTER); "
+            "COMMIT TRANSACTION; RETURN $saved;",
             capture_id=str(capture_id),
             organization_id=str(organization_id),
-            metadata=metadata,
+            review_patch={
+                key: metadata.get(key)
+                for key in (
+                    "review_state",
+                    "reviewed_at",
+                    "archived_at",
+                    "deferred_at",
+                    "promoted_at",
+                )
+            },
             review_state=review_state,
         )
     return _raw_capture_from_record(rows[0]) if rows else None
