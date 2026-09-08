@@ -201,18 +201,29 @@ def sign_outcome(
     return _canonical(signed.model_dump(mode="json"))
 
 
-def verify_outcome(
+def admission_identity(assignment: TaskAssignment) -> str:
+    """Stable replay identity independent of issuer key rotation."""
+    return _digest(
+        _canonical(
+            {
+                "domain": "sibyl-eval-admission-v1",
+                "organization_id": assignment.organization_id,
+                "experiment_id": assignment.experiment_id,
+                "attempt_id": assignment.attempt_id,
+            }
+        )
+    )
+
+
+def verify_outcome_receipt(
     receipt_bytes: bytes,
     *,
     trusted_public_key: Ed25519PublicKey,
     trusted_issuer_id: str,
     expected_assignment: TaskAssignment,
     expected_controller_policy_sha256: str,
-    outcome_bytes: bytes,
-    transcript_bytes: bytes,
-    episode_bytes: bytes,
-) -> VerifiedOutcome:
-    """Verify against caller-owned trust; no key or assignment is adopted from evidence."""
+) -> EvalOutcome:
+    """Authenticate a retained receipt; referenced artifact bytes remain unchecked."""
     try:
         signed = SignedOutcome.model_validate(_json(receipt_bytes))
         signature = base64.b64decode(signed.signature, validate=True)
@@ -230,21 +241,39 @@ def verify_outcome(
         raise ReceiptError("outcome differs from the registered assignment")
     if expected_assignment.controller_policy_sha256 != expected_controller_policy_sha256:
         raise ReceiptError("assignment controller policy is not approved")
+    for field in ("checker_sha256", "oracle_sha256", "evaluator_sha256", "runtime_sha256", "image"):
+        if getattr(payload, field) != getattr(expected_assignment, field):
+            raise ReceiptError("signed outcome differs from registered execution policy")
+    if payload.success != (payload.status == "passed"):
+        raise ReceiptError("signed outcome status and success disagree")
+    return payload
+
+
+def verify_outcome(
+    receipt_bytes: bytes,
+    *,
+    trusted_public_key: Ed25519PublicKey,
+    trusted_issuer_id: str,
+    expected_assignment: TaskAssignment,
+    expected_controller_policy_sha256: str,
+    outcome_bytes: bytes,
+    transcript_bytes: bytes,
+    episode_bytes: bytes,
+) -> VerifiedOutcome:
+    """Verify against caller-owned trust; no key or assignment is adopted from evidence."""
+    payload = verify_outcome_receipt(
+        receipt_bytes,
+        trusted_public_key=trusted_public_key,
+        trusted_issuer_id=trusted_issuer_id,
+        expected_assignment=expected_assignment,
+        expected_controller_policy_sha256=expected_controller_policy_sha256,
+    )
     expected_fields = _result_fields(outcome_bytes, expected_assignment) | _evidence_digests(
         outcome_bytes, transcript_bytes, episode_bytes
     )
     if any(getattr(payload, field) != value for field, value in expected_fields.items()):
         raise ReceiptError("supplied evidence differs from the signed outcome")
-    admission_id = _digest(
-        _canonical(
-            {
-                "domain": "sibyl-eval-admission-v1",
-                "organization_id": expected_assignment.organization_id,
-                "experiment_id": expected_assignment.experiment_id,
-                "attempt_id": expected_assignment.attempt_id,
-            }
-        )
-    )
+    admission_id = admission_identity(expected_assignment)
     return VerifiedOutcome(
         payload,
         _digest(receipt_bytes),
