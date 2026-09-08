@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import Protocol
+from contextlib import AbstractAsyncContextManager
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from sibyl_core.backends.surreal.schema_version import SurrealExecute
 
 type QueryParams = dict[str, object]
 
@@ -35,6 +39,8 @@ class SchemaDriver(Protocol):
 
     @property
     def group_id(self) -> str: ...
+
+    def schema_lease_executor(self) -> AbstractAsyncContextManager[SurrealExecute]: ...
 
     async def execute_query(self, query: str, **params: object) -> object: ...
 
