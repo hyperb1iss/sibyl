@@ -653,6 +653,7 @@ async def test_graph_runtime_can_skip_schema_preparation(
 
 
 class _TransientEntityWriteClient:
+    _url = "memory://"
     group_id = "org-retry"
 
     def __init__(self) -> None:
