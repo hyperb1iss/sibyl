@@ -7,10 +7,14 @@ from .configuration import configuration
 from .indexing import indexing
 from .interval_capacity import interval_capacity
 from .model import Family
+from .outer_join import outer_join
 from .path_routing import path_routing
 from .reservations import reservations
 from .sessions import sessions
 from .stream_framing import stream_framing
+from .three_valued_logic import three_valued_logic
+from .weighted_lru import weighted_lru
+from .worker_matching import worker_matching
 
 
 def families(seed: int) -> list[Family]:
@@ -25,4 +29,8 @@ def families(seed: int) -> list[Family]:
         stream_framing(seed),
         path_routing(seed),
         interval_capacity(seed),
+        worker_matching(seed),
+        weighted_lru(seed),
+        outer_join(seed),
+        three_valued_logic(seed),
     ]
