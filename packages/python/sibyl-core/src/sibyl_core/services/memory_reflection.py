@@ -952,6 +952,20 @@ async def _reserve_promotion(
                 },
             ),
             expected_revision=memory.revision,
+            **(
+                {"publication_operation_id": str(memory.metadata[EVAL_CONSOLIDATION_METADATA_KEY])}
+                if memory.metadata.get(EVAL_CONSOLIDATION_METADATA_KEY)
+                else {}
+            ),
+        )
+    except SourceObservationConflictError:
+        return _promotion_denied(
+            candidate_id=memory.id,
+            reason="original_admission_changed",
+            review_state=memory.review_state,
+            memory_scope=memory.memory_scope,
+            scope_key=memory.scope_key,
+            raw_source_ids=plan.raw_source_ids,
         )
     except RevisionConflictError:
         current = await get_raw_memory(organization_id=memory.organization_id, memory_id=memory.id)

@@ -96,6 +96,9 @@ class FakeClient:
         merged = dict(params or {})
         merged.update(kwargs)
         self.calls.append((query, merged))
+        if "LET $publications =" in query:
+            # Ordinary capture fixtures have no admitted publication rows.
+            return _query_result([{"publications": [], "captures": [], "attempts": []}])
         response = self._responses.pop(0)
         if isinstance(response, BaseException):
             raise response
@@ -107,6 +110,9 @@ class FakeClient:
         merged = dict(params or {})
         merged.update(kwargs)
         self.calls.append((query, merged))
+        if "LET $publications =" in query:
+            # Ordinary capture fixtures have no admitted publication rows.
+            return _query_result([{"publications": [], "captures": [], "attempts": []}])
         response = self._responses.pop(0)
         if isinstance(response, BaseException):
             raise response
@@ -2593,9 +2599,9 @@ class TestSurrealContentHelpers:
 
         assert [memory.id for memory in memories] == ["memory-vector", "memory-lexical"]
         assert memories[1].snippet == "<mark>SurrealDB</mark> appears in the exact text."
-        assert "search::rrf($lists, $limit, $k)" in fake_client.calls[2][0]
-        fulltext_query, _fulltext_params = fake_client.calls[0]
-        vector_query, vector_params = fake_client.calls[1]
+        assert "search::rrf($lists, $limit, $k)" in _recall_source_calls(fake_client)[2][0]
+        fulltext_query, _fulltext_params = _recall_source_calls(fake_client)[0]
+        vector_query, vector_params = _recall_source_calls(fake_client)[1]
         assert "SELECT * FROM raw_captures" not in fulltext_query
         assert "SELECT *, math::max" not in fulltext_query
         assert "id AS record_id, uuid" in fulltext_query
@@ -2678,7 +2684,7 @@ class TestSurrealContentHelpers:
                 limit=2,
             )
 
-        assert len(fake_client.calls) == 2
+        assert len(_recall_source_calls(fake_client)) == 2
         assert [memory.id for memory in memories] == ["memory-lexical"]
         assert fake_log.warnings == [
             (
@@ -2691,7 +2697,7 @@ class TestSurrealContentHelpers:
                 },
             )
         ]
-        vector_query, _vector_params = fake_client.calls[1]
+        vector_query, _vector_params = _recall_source_calls(fake_client)[1]
         assert "embedding <|8, 40|> $query_embedding" in vector_query
 
     @pytest.mark.asyncio
@@ -2795,7 +2801,7 @@ class TestSurrealContentHelpers:
             "raw_recall_failure_count": 1,
             "raw_recall_failures": [{"source": "raw_vector", "error_type": "RuntimeError"}],
         }
-        assert len(fake_client.calls) == 2
+        assert len(_recall_source_calls(fake_client)) == 2
 
     @pytest.mark.asyncio
     async def test_recall_raw_memory_falls_back_when_query_embedding_fails(self) -> None:
@@ -2852,7 +2858,7 @@ class TestSurrealContentHelpers:
             )
 
         assert [memory.id for memory in memories] == ["memory-lexical"]
-        assert len(fake_client.calls) == 1
+        assert len(_recall_source_calls(fake_client)) == 1
         assert fake_log.warnings == [
             (
                 "raw_memory_query_embedding_failed",
@@ -2865,7 +2871,7 @@ class TestSurrealContentHelpers:
                 },
             )
         ]
-        fulltext_query, fulltext_params = fake_client.calls[0]
+        fulltext_query, fulltext_params = _recall_source_calls(fake_client)[0]
         assert "title @0@ $ft_term0" in fulltext_query
         assert "raw_content @" in fulltext_query
         assert fulltext_params["ft_term0"] == "surrealdb"
@@ -2919,7 +2925,7 @@ class TestSurrealContentHelpers:
             )
 
         assert [memory.id for memory in memories] == ["memory-lexical"]
-        assert len(fake_client.calls) == 1
+        assert len(_recall_source_calls(fake_client)) == 1
         assert fake_log.warnings == [
             (
                 "raw_memory_query_embedding_failed",
@@ -3248,3 +3254,8 @@ class TestGetRawMemoryByDedupeKey:
 @asynccontextmanager
 async def _yield_client(fake_client: FakeClient):
     yield fake_client
+
+
+def _recall_source_calls(client):
+    """Source and fusion queries, excluding the independent publication check."""
+    return [(query, params) for query, params in client.calls if "LET $publications =" not in query]

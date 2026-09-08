@@ -19,6 +19,7 @@ from sibyl_core.tools.context import (
     context_pack_to_dict,
 )
 from sibyl_core.tools.responses import SearchResult
+from tests.test_reflection_identity import content_store as content_store
 
 
 def test_source_clock_visibility_preserves_authored_metadata() -> None:
@@ -39,7 +40,9 @@ def test_source_clock_visibility_preserves_authored_metadata() -> None:
     assert metadata == before
 
 
-def test_source_clock_visibility_filters_context_only_after_lifecycle_gate() -> None:
+async def test_source_clock_visibility_filters_context_only_after_lifecycle_gate(
+    content_store,
+) -> None:
     metadata = {
         "correction_blockers": {"foreign-root": {"revision": 17, "blocking": False}},
         "source_bindings": {"known-source": 2},
@@ -76,8 +79,13 @@ def test_source_clock_visibility_filters_context_only_after_lifecycle_gate() -> 
         audit=True,
     )
     assert blocked.metadata["correction_blockers"] == blocked_metadata["correction_blockers"]
-    sections = _drop_retired_items(
-        [ContextSection(facet=ContextFacet.PRIOR_ART, title="Prior art", items=[blocked, admitted])]
+    sections = await _drop_retired_items(
+        [
+            ContextSection(
+                facet=ContextFacet.PRIOR_ART, title="Prior art", items=[blocked, admitted]
+            )
+        ],
+        "org",
     )
     pack = ContextPack(
         goal="Use memory",
@@ -103,7 +111,9 @@ def test_source_clock_visibility_filters_context_only_after_lifecycle_gate() -> 
 
 @pytest.mark.parametrize("lane", ["active", "lean", "audit"])
 @pytest.mark.parametrize("state", ["clear", "blocked", "pending", "reconcile_pending"])
-def test_source_clock_visibility_keeps_admission_state_until_final_output(lane, state):
+async def test_source_clock_visibility_keeps_admission_state_until_final_output(
+    lane, state, content_store
+):
     from types import SimpleNamespace
 
     from sibyl_core.tools.context import _item_from_active_entity
@@ -137,8 +147,8 @@ def test_source_clock_visibility_keeps_admission_state_until_final_output(lane, 
             ContextFacet.ACTIVE_WORK,
             audit=lane == "audit",
         )
-    sections = _drop_retired_items(
-        [ContextSection(facet=ContextFacet.ACTIVE_WORK, title="Active work", items=[item])]
+    sections = await _drop_retired_items(
+        [ContextSection(facet=ContextFacet.ACTIVE_WORK, title="Active work", items=[item])], "org"
     )
     admitted = [entry for section in sections for entry in section.items]
     assert [entry.id for entry in admitted] == (["task"] if state == "clear" else [])

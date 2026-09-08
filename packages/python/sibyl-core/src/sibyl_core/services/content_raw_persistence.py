@@ -806,10 +806,11 @@ async def save_raw_memory(
     expected_revision: int | None = None,
     superseded_by_memory_id: str | None = None,
     source_observations: Sequence[RawMemory] = (),
+    publication_operation_id: str | None = None,
 ) -> RawMemory:
     if expected_revision is not None and expected_revision < 1:
         raise ValueError("expected_revision must be at least 1")
-    if source_observations and expected_revision is None:
+    if (source_observations or publication_operation_id) and expected_revision is None:
         raise ValueError("source-observed publication requires a revision fence")
     if any(source.organization_id != memory.organization_id for source in source_observations):
         raise ValueError("source observations must belong to the publication organization")
@@ -891,6 +892,16 @@ async def save_raw_memory(
                                 AND ($expected_revision = NONE OR revision = $expected_revision)
                             RETURN AFTER
                         );
+                        IF $publication_operation_id != NONE AND array::len($saved) > 0 {
+                            LET $ledger = (SELECT * FROM eval_consolidations WHERE uuid = $publication_operation_id
+                                AND organization_id = $organization_id LIMIT 1)[0];
+                            IF $ledger.promoted_entity_id != NONE
+                                AND $ledger.promoted_entity_id != $record.metadata.promoted_entity_id {
+                                THROW 'publication_source_observation_changed';
+                            };
+                            UPDATE eval_consolidations SET promoted_entity_id = $record.metadata.promoted_entity_id
+                                WHERE uuid = $publication_operation_id AND organization_id = $organization_id;
+                        };
                         IF $supersession != NONE AND array::len($saved) > 0 {
                             LET $replacement = (
                                 SELECT id, source_id FROM raw_captures
@@ -927,9 +938,12 @@ async def save_raw_memory(
                         };
                     """.replace("__PUBLICATION_ADMISSION_GUARD__", PUBLICATION_ADMISSION_GUARD),
                     organization_id=memory.organization_id,
-                    publication_operation_id=memory.metadata.get(EVAL_CONSOLIDATION_METADATA_KEY)
-                    if source_observations
-                    else None,
+                    publication_operation_id=publication_operation_id
+                    or (
+                        memory.metadata.get(EVAL_CONSOLIDATION_METADATA_KEY)
+                        if source_observations
+                        else None
+                    ),
                     publication_principal_id=memory.principal_id,
                     uuid=memory.id,
                     expected_revision=expected_revision,
