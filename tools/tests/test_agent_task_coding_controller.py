@@ -400,12 +400,12 @@ def test_the_prompt_and_the_memory_pack_stay_separate_and_exact(harness, monkeyp
     assert harness.run() == 0
 
     messages = provider.messages(0)
-    assert [message["role"] for message in messages] == ["system", "user", "user"]
-    assert messages[1]["content"] == PROMPT
-    assert messages[2]["content"] == MEMORY
+    assert [message["role"] for message in messages] == ["system", "system", "user", "user"]
+    assert messages[2]["content"] == PROMPT
+    assert messages[3]["content"] == MEMORY
     # Neither text is folded into the other, and memory is not the authority.
     assert MEMORY not in messages[0]["content"]
-    assert MEMORY not in messages[1]["content"]
+    assert MEMORY not in messages[2]["content"]
     assert PROMPT not in messages[0]["content"]
     assert "instruction authority" in messages[0]["content"]
     system_digest = hashlib.sha256(messages[0]["content"].encode()).hexdigest()
@@ -444,7 +444,7 @@ def test_an_empty_memory_control_sends_no_memory_message(harness, monkeypatch, c
     code = harness.run(memory_pack="", memory_pack_sha256=EMPTY_DIGEST, pack_id=EMPTY_DIGEST)
 
     assert code == 0
-    assert [message["role"] for message in provider.messages(0)] == ["system", "user"]
+    assert [message["role"] for message in provider.messages(0)] == ["system", "system", "user"]
     assert harness.payload("start")["memory_pack_message_included"] is False
 
 
@@ -1832,3 +1832,76 @@ def test_public_container_runtime_streams_only_supplied_json(monkeypatch, tmp_pa
     assert outcome["carried_back"] is False
     assert [argv[1] for argv, _ in calls] == ["run", "inspect", "stop", "rm"]
     assert all("input" not in kwargs for _, kwargs in calls[1:])
+
+
+def test_budget_context_tracks_remaining_allowance_without_accumulating_messages(
+    harness, monkeypatch, capsys
+):
+    provider = Provider(
+        calls_tool("echo 42 > answer.txt", reported=usage(prompt=100, output=10, cost=0.1)),
+        replies(reported=usage(prompt=100, output=10, cost=0.1)),
+    )
+    provider.install(monkeypatch)
+    Docker(container(edit_answer)).install(monkeypatch)
+    assert harness.run() == 0
+    for index, expected in enumerate(
+        [
+            BUDGET,
+            {"input_tokens": 3900, "output_tokens": 590, "tool_calls": 2, "cost_usd": 0.4},
+        ]
+    ):
+        messages = provider.messages(index)
+        context = messages[1]["content"]
+        state = json.loads(context.split(": ", 1)[1].split("\n", 1)[0])
+        assert state == {"declared": BUDGET, "remaining": expected}
+        assert [message for message in messages if message["role"] == "system"] == messages[:2]
+        assert messages[2]["content"] == PROMPT
+        assert messages[3]["content"] == MEMORY
+
+
+@pytest.mark.parametrize("asks_extra_tool", [False, True])
+def test_twenty_tools_allow_final_response_but_never_a_twenty_first_execution(
+    harness, monkeypatch, capsys, asks_extra_tool
+):
+    allowance = 20
+    reported = usage(prompt=1, output=1, cost=0.0)
+    ending = (
+        calls_tool("extra", reported=reported) if asks_extra_tool else replies(reported=reported)
+    )
+    provider = Provider(
+        *[calls_tool("true", identifier=f"call-{i}", reported=reported) for i in range(allowance)],
+        ending,
+    )
+    provider.install(monkeypatch)
+    docker = Docker(*[container() for _ in range(allowance)])
+    docker.install(monkeypatch)
+    result = harness.run(controller_budget={**BUDGET, "tool_calls": allowance})
+    assert result == (controller.EXIT_CODES["budget"] if asks_extra_tool else 0)
+    assert result_of(capsys)["tool_calls"] == allowance
+    assert len(harness.payloads("tool_result")) == allowance
+    assert len(provider.requests) == allowance + 1
+    assert all(provider.body(i)["tool_choice"] == "auto" for i in range(allowance))
+    assert provider.body(allowance)["tool_choice"] == "none"
+    assert '"tool_calls": 0' in provider.messages(allowance)[1]["content"]
+    assert docker.commands().count("run") == allowance
+
+
+@pytest.mark.parametrize(
+    ("reported", "expected"),
+    [
+        (usage(prompt=1, output=1, cost=0.0), 0),
+        (usage(prompt=1, output=601, cost=0.0), controller.EXIT_CODES["budget"]),
+        (usage(prompt=1, output=1, cost=0.6), controller.EXIT_CODES["budget"]),
+    ],
+)
+def test_zero_tool_finalization_still_enforces_reported_limits(
+    harness, monkeypatch, capsys, reported, expected
+):
+    provider = Provider(replies(reported=reported))
+    provider.install(monkeypatch)
+    docker = Docker()
+    docker.install(monkeypatch)
+    assert harness.run(controller_budget={**BUDGET, "tool_calls": 0}) == expected
+    assert provider.body(0)["tool_choice"] == "none"
+    assert docker.calls == []
+    assert result_of(capsys)["tool_calls"] == 0
