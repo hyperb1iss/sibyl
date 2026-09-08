@@ -438,6 +438,8 @@ def _perform_attempt(
         _put(output / "inputs" / name, inputs[name], 292)
     workspace = output / "controller-workspace"
     workspace.mkdir()
+    # Shared parents can propagate setgid into otherwise ordinary task folders.
+    workspace.chmod(stat.S_IMODE(workspace.stat().st_mode) & ~stat.S_ISGID)
     for item in task.workspace:
         _put(workspace / item.destination, inputs[item.artifact.path], item.mode)
     initial, _ = snapshot(workspace)
