@@ -32,7 +32,6 @@ from sibyl_core.tasks.eval_receipts import (
 )
 
 _JOIN = """
-BEGIN TRANSACTION;
 RETURN {
     attempts: (SELECT * FROM eval_attempts
         WHERE organization_id = $organization_id AND experiment_id = $experiment_id
@@ -42,7 +41,6 @@ RETURN {
             WHERE organization_id = $organization_id AND experiment_id = $experiment_id
             AND attempt_id IN $attempt_ids))
 };
-COMMIT TRANSACTION;
 """
 
 
