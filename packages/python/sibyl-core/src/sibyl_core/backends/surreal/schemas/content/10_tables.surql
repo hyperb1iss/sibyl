@@ -401,3 +401,23 @@ DEFINE INDEX IF NOT EXISTS idx_backups_uuid ON backups FIELDS uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_backups_org ON backups FIELDS organization_id;
 DEFINE INDEX IF NOT EXISTS idx_backups_backup_id ON backups FIELDS backup_id UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_backups_status ON backups FIELDS status;
+
+DEFINE TABLE IF NOT EXISTS eval_attempts SCHEMAFULL PERMISSIONS NONE;
+ALTER TABLE IF EXISTS eval_attempts SCHEMAFULL PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS uuid ON eval_attempts TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON eval_attempts TYPE string;
+DEFINE FIELD IF NOT EXISTS experiment_id ON eval_attempts TYPE string;
+DEFINE FIELD IF NOT EXISTS attempt_id ON eval_attempts TYPE string;
+DEFINE FIELD IF NOT EXISTS assignment_sha256 ON eval_attempts TYPE string;
+DEFINE FIELD IF NOT EXISTS assignment_json ON eval_attempts TYPE string;
+DEFINE FIELD IF NOT EXISTS receipt_sha256 ON eval_attempts TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS receipt_base64 ON eval_attempts TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS outcome_sha256 ON eval_attempts TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS transcript_sha256 ON eval_attempts TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS episode_sha256 ON eval_attempts TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS capture_id ON eval_attempts TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created_at ON eval_attempts TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS admitted_at ON eval_attempts TYPE option<datetime>;
+DEFINE INDEX IF NOT EXISTS idx_eval_attempts_uuid ON eval_attempts FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_eval_attempts_identity ON eval_attempts
+    FIELDS organization_id, experiment_id, attempt_id UNIQUE;
