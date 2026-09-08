@@ -402,8 +402,9 @@ DEFINE INDEX IF NOT EXISTS idx_backups_org ON backups FIELDS organization_id;
 DEFINE INDEX IF NOT EXISTS idx_backups_backup_id ON backups FIELDS backup_id UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_backups_status ON backups FIELDS status;
 
-DEFINE TABLE IF NOT EXISTS eval_attempts SCHEMAFULL PERMISSIONS NONE;
-ALTER TABLE IF EXISTS eval_attempts SCHEMAFULL PERMISSIONS NONE;
+DEFINE TABLE IF NOT EXISTS eval_attempts SCHEMAFULL;
+ALTER TABLE IF EXISTS eval_attempts SCHEMAFULL;
+ALTER TABLE IF EXISTS eval_attempts PERMISSIONS NONE;
 DEFINE FIELD IF NOT EXISTS uuid ON eval_attempts TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON eval_attempts TYPE string;
 DEFINE FIELD IF NOT EXISTS experiment_id ON eval_attempts TYPE string;
