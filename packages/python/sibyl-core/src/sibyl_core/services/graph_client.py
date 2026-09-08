@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, cast
+from weakref import WeakValueDictionary
 
 from sibyl_core.backends.surreal.dedicated_client import DedicatedSurrealClient, _is_embedded_url
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM, bootstrap_schema
@@ -48,7 +49,7 @@ class SurrealGraphClient(DedicatedSurrealClient):
 
 
 _prepared_groups: set[str] = set()
-_prepare_lock = asyncio.Lock()
+_prepare_locks: WeakValueDictionary[tuple[str, str], asyncio.Lock] = WeakValueDictionary()
 _client_lock = asyncio.Lock()
 _clients: OrderedDict[str, SurrealGraphClient] = OrderedDict()
 
@@ -179,10 +180,13 @@ async def close_graph_clients() -> None:
 
 
 async def prepare_graph_schema(client: SurrealGraphClient) -> None:
+    """Prepare once per org, coordinating embedded DDL across its shared store."""
     group_id = client.group_id
     if group_id in _prepared_groups:
         return
-    async with _prepare_lock:
+    scope = ("store", client._url) if _is_embedded_url(client._url) else ("org", group_id)
+    lock = _prepare_locks.setdefault(scope, asyncio.Lock())
+    async with lock:
         if group_id in _prepared_groups:
             return
         await bootstrap_schema(cast("Any", client))
