@@ -857,12 +857,13 @@ async def save_raw_memory(
                     "organization_id": memory.organization_id,
                     "created_at": models.utcnow(),
                 }
+            # One atomic statement preserves the actual guard error instead
+            # of an earlier statement's transaction-aborted sentinel.
             try:
                 rows = await content_client.select_many_raw(
                     client,
                     """
-                        BEGIN TRANSACTION;
-                        LET $validated_sources = {
+                        RETURN {
                         __PUBLICATION_ADMISSION_GUARD__
                         FOR $source IN $source_observations {
                             LET $observed = (SELECT * FROM raw_captures
@@ -878,8 +879,6 @@ async def save_raw_memory(
                                 OR $observed.metadata != $source.metadata {
                                 THROW 'publication_source_observation_changed';
                             };
-                        };
-                        RETURN true;
                         };
                         LET $current = (SELECT revision FROM raw_captures
                             WHERE organization_id = $organization_id AND uuid = $uuid LIMIT 1)[0];
@@ -924,8 +923,8 @@ async def save_raw_memory(
                                 };
                             };
                         };
-                        COMMIT TRANSACTION;
                         RETURN $saved;
+                        };
                     """.replace("__PUBLICATION_ADMISSION_GUARD__", PUBLICATION_ADMISSION_GUARD),
                     organization_id=memory.organization_id,
                     publication_operation_id=memory.metadata.get(EVAL_CONSOLIDATION_METADATA_KEY)

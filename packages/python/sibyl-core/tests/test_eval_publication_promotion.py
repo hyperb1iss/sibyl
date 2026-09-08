@@ -209,7 +209,10 @@ async def test_original_admission_survives_candidate_review_boundary(
         if at_finalization:
 
             async def changed(sql, **params):
-                if params.get("publication_operation_id") and "BEGIN TRANSACTION" in sql:
+                if (
+                    params.get("publication_operation_id")
+                    and "FOR $source IN $source_observations" in sql
+                ):
                     await execute(query, source_id=source_id)
                     mutations.append(True)
                 return await raw_execute(sql, **params)
