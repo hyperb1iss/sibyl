@@ -98,19 +98,27 @@ def test_runtime_composition_requires_transfer_and_binds_inputs(tmp_path):
     )
     lock = tmp_path / "uv.lock"
     lock.write_text("fixture dependency lock")
-    kwargs = {
-        "experiment_id": "corpus-test",
-        "model": "qwen/qwen3-coder-next",
-        "budget": ControllerBudget(
-            input_tokens=10000, output_tokens=1000, tool_calls=10, cost_usd=0.1
-        ),
-        "dependency_lock": lock,
-    }
+    budget = ControllerBudget(input_tokens=10000, output_tokens=1000, tool_calls=10, cost_usd=0.1)
     output = tmp_path / "run"
     with pytest.raises(ManifestError, match="shared mechanism"):
-        compose(catalog, output, **kwargs)
+        compose(
+            catalog,
+            output,
+            experiment_id="corpus-test",
+            model="qwen/qwen3-coder-next",
+            budget=budget,
+            dependency_lock=lock,
+        )
     assert not output.exists()
-    manifest_path = compose(catalog, output, allow_mechanism_transfer=True, **kwargs)
+    manifest_path = compose(
+        catalog,
+        output,
+        allow_mechanism_transfer=True,
+        experiment_id="corpus-test",
+        model="qwen/qwen3-coder-next",
+        budget=budget,
+        dependency_lock=lock,
+    )
     manifest, inputs = load_manifest(manifest_path)
     assert manifest.purpose == "trusted_development"
     assert manifest.experiences == []
@@ -121,9 +129,25 @@ def test_runtime_composition_requires_transfer_and_binds_inputs(tmp_path):
     assert receipt["shared_mechanism_clusters"] == ["newest-revision-active-projection"]
     assert receipt["sealed"] is False
     with pytest.raises(FileExistsError):
-        compose(catalog, output, allow_mechanism_transfer=True, **kwargs)
+        compose(
+            catalog,
+            output,
+            allow_mechanism_transfer=True,
+            experiment_id="corpus-test",
+            model="qwen/qwen3-coder-next",
+            budget=budget,
+            dependency_lock=lock,
+        )
     altered = json.loads(catalog.read_bytes())
     altered["tasks"][0]["split"] = "sealed"
     catalog.write_text(json.dumps(altered))
     with pytest.raises(ManifestError, match="learning/development"):
-        compose(catalog, tmp_path / "sealed", allow_mechanism_transfer=True, **kwargs)
+        compose(
+            catalog,
+            tmp_path / "sealed",
+            allow_mechanism_transfer=True,
+            experiment_id="corpus-test",
+            model="qwen/qwen3-coder-next",
+            budget=budget,
+            dependency_lock=lock,
+        )
