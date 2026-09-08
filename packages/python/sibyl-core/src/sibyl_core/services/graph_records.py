@@ -157,11 +157,22 @@ def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
     if record_id and record_id != entity_id and metadata.get("record_id") is None:
         metadata["record_id"] = record_id
     metadata = normalize_memory_quality_metadata(metadata)
+    name = _first_text(normalized_row.get("name"), normalized_row.get("title"), entity_id)
+    identity = metadata.get("reflection_identity")
+    stored_name = normalized_row.get("name")
+    if (
+        isinstance(identity, Mapping)
+        and identity.get("version") == 2
+        and isinstance(stored_name, str)
+    ):
+        # A v2 identity can bind an empty title. Preserve the actual stored
+        # value so identity verification cannot confuse it with an ID fallback.
+        name = stored_name.strip()
 
     entity = Entity(
         id=entity_id,
         entity_type=_entity_type_from_row(normalized_row, attributes=attributes),
-        name=_first_text(normalized_row.get("name"), normalized_row.get("title"), entity_id),
+        name=name,
         description=_first_text(
             normalized_row.get("description"),
             normalized_row.get("summary"),

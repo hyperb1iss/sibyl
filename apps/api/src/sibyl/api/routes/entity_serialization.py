@@ -19,6 +19,7 @@ from sibyl_core.auth.memory_policy import (
     stamp_memory_scope_metadata,
 )
 from sibyl_core.memory_pipeline.retrieval_keys import normalize_retrieval_keys
+from sibyl_core.memory_pipeline.source_lifecycle import public_memory_metadata
 from sibyl_core.memory_pipeline.structure import strip_structure_metadata
 from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.tools.helpers import _generate_id
@@ -87,7 +88,7 @@ def serialize_raw_capture_summary(capture: RawCaptureRecord) -> RawCaptureSummar
         title=capture.title,
         entity_type=capture.entity_type,
         tags=list(capture.tags or []),
-        metadata=dict(capture.metadata or {}),
+        metadata=public_memory_metadata(capture.metadata),
         capture_surface=capture.capture_surface,
         review_state=_raw_capture_review_state(capture),
         created_by_user_id=str(capture.created_by_user_id) if capture.created_by_user_id else None,

@@ -26,6 +26,7 @@ from sibyl_core.services.reflection import (
 from sibyl_core.services.surreal_content import (
     MemoryScope,
     RawMemory,
+    get_raw_memory,
     list_raw_memories_for_scope,
     raw_memory_recallable,
 )
@@ -52,6 +53,7 @@ async def reflect_memory(
     organization_id: str | None = None,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    writable_projects: set[str] | None = None,
     memory_scope: str | MemoryScope | None = None,
     scope_key: str | None = None,
     suggested_memory_scope: str | MemoryScope | None = None,
@@ -75,6 +77,16 @@ async def reflect_memory(
     if persist and persist_review and principal_id is None:
         msg = "principal_id is required when persist_review=True"
         raise ValueError(msg)
+
+    source_memory: RawMemory | None = None
+    if persist and persist_review and existing_source_id is not None:
+        source_memory = await _reflection_source_snapshot(
+            organization_id=str(organization_id),
+            principal_id=str(principal_id),
+            source_id=existing_source_id,
+            content=content,
+            accessible_projects=accessible_projects,
+        )
 
     limit = max(1, min(limit, 25))
     resolved_scope = _resolve_reflection_scope(memory_scope, project)
@@ -114,7 +126,9 @@ async def reflect_memory(
             principal_id=principal_id,
             memory_scope=resolved_scope,
             scope_key=resolved_scope_key,
-            accessible_projects=accessible_projects,
+            accessible_projects=writable_projects
+            if writable_projects is not None
+            else accessible_projects,
         )
         persist_policy_metadata = _reflect_policy_metadata(persist_decisions)
         if any(not decision.allowed for decision in persist_decisions):
@@ -143,7 +157,7 @@ async def reflect_memory(
     source_id: str | None = existing_source_id
     if persist and persist_source and source_id is None:
         if persist_review:
-            source = await _persist_reflection_source_review(
+            source, source_memory = await _persist_reflection_source_review(
                 title=source_title,
                 content=content,
                 organization_id=str(organization_id),
@@ -166,6 +180,7 @@ async def reflect_memory(
                 project=project,
                 related_to=related_to,
                 accessible_projects=accessible_projects,
+                writable_projects=writable_projects,
                 memory_scope=memory_scope,
                 scope_key=scope_key,
             )
@@ -260,6 +275,8 @@ async def reflect_memory(
                 principal_id=str(principal_id),
                 raw_source_ids=raw_source_ids,
                 source_id=source_id,
+                source_memories=[source_memory] if source_memory is not None else [],
+                accessible_projects=accessible_projects,
                 memory_scope=resolved_scope,
                 scope_key=resolved_scope_key,
                 suggested_memory_scope=resolved_suggested_scope,
@@ -284,6 +301,7 @@ async def reflect_memory(
             source_id=source_id,
             related_to=related_to,
             accessible_projects=accessible_projects,
+            writable_projects=writable_projects,
             memory_scope=memory_scope,
             scope_key=scope_key,
         )
@@ -456,7 +474,32 @@ async def _load_reflection_decision_memories(
     return [memory for memory in memories if raw_memory_recallable(memory)]
 
 
-async def _persist_reflection_source_review(**kwargs: Any) -> AddResponse:
+async def _reflection_source_snapshot(
+    *,
+    organization_id: str,
+    principal_id: str,
+    source_id: str,
+    content: str,
+    accessible_projects: set[str] | None,
+) -> RawMemory:
+    from sibyl_core.services.memory_policy import _authorize_share_source_read
+
+    source = await get_raw_memory(organization_id=organization_id, memory_id=source_id)
+    if (
+        source is None
+        or not _authorize_share_source_read(
+            memory=source,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+        ).allowed
+        or not raw_memory_recallable(source)
+        or source.raw_content.strip() != content
+    ):
+        raise ValueError("Reflection source is unavailable or changed")
+    return source
+
+
+async def _persist_reflection_source_review(**kwargs: Any) -> tuple[AddResponse, RawMemory]:
     from sibyl_core.services.surreal_content import remember_raw_memory
 
     policy_metadata = dict(kwargs.get("policy_metadata") or {})
@@ -486,11 +529,14 @@ async def _persist_reflection_source_review(**kwargs: Any) -> AddResponse:
         capture_surface="reflection_source",
         entity_type="session",
     )
-    return AddResponse(
-        success=True,
-        id=memory.id,
-        message=f"Stored reflection source for review: {memory.title}",
-        timestamp=datetime.now(UTC),
+    return (
+        AddResponse(
+            success=True,
+            id=memory.id,
+            message=f"Stored reflection source for review: {memory.title}",
+            timestamp=datetime.now(UTC),
+        ),
+        memory,
     )
 
 

@@ -9,8 +9,20 @@ from typing import Any
 
 import structlog
 
-from sibyl_core.auth.memory_policy import memory_metadata_read_allowed, memory_row_project_id
-from sibyl_core.memory_pipeline.lifecycle import graph_lifecycle_stamp
+from sibyl_core.auth.memory_policy import (
+    memory_metadata_read_allowed,
+    memory_row_project_id,
+    private_scope_granted_for,
+)
+from sibyl_core.memory_pipeline.lifecycle import (
+    RECONCILE_PENDING_KEY,
+    graph_lifecycle_stamp,
+    graph_metadata_recallable,
+)
+from sibyl_core.memory_pipeline.source_lifecycle import (
+    SOURCE_BINDINGS_KEY,
+    SOURCE_VALIDATION_PENDING_KEY,
+)
 from sibyl_core.models.entities import Relationship, RelationshipType
 from sibyl_core.models.reflection import (
     ReflectionCandidate,
@@ -18,9 +30,9 @@ from sibyl_core.models.reflection import (
     claim_records_from_metadata,
     reflection_findings_from_metadata,
 )
-from sibyl_core.projection.reconcile import RECONCILE_PENDING_KEY
 from sibyl_core.services.graph import get_surreal_graph_runtime, normalize_records
 from sibyl_core.services.memory_contract import MemoryCorrectionPreview
+from sibyl_core.services.memory_lineage import CorrectionPropagation, propagate_source_correction
 from sibyl_core.services.memory_policy import (
     _candidate_source_ids,
     _correction_derived_ids,
@@ -29,6 +41,8 @@ from sibyl_core.services.memory_policy import (
     _metadata_str_values,
     _promoted_entity_write_allowed,
     _raw_memory_write_allowed,
+    raw_memory_source_fingerprint,
+    suppression_target_visible,
 )
 from sibyl_core.services.surreal_content import (
     RawMemory,
@@ -62,6 +76,7 @@ async def projected_row_lifecycle_stamp(
     *,
     organization_id: str,
     metadata: Mapping[str, Any] | None,
+    expected_signature: str | None = None,
 ) -> dict[str, Any]:
     """Read the current verdict for the capture a row is about to be projected from.
 
@@ -76,8 +91,9 @@ async def projected_row_lifecycle_stamp(
     recall path consults this, because the stamp it returns is exactly what
     the recall gate already reads off the row.
 
-    Empty whenever the capture is unknown, unreadable, or still recallable, so
-    the caller can merge it unconditionally.
+    A declared capture that is absent remains pending. Unbound graph rows have
+    no capture authority to check; an unavailable store raises for the caller's
+    reconciliation retry path.
     """
 
     fields = metadata if isinstance(metadata, Mapping) else {}
@@ -111,11 +127,25 @@ async def projected_row_lifecycle_stamp(
         )
         raise
     if memory is None:
-        # An absent capture is not an unreadable one. Nothing was stamped on a
-        # row that does not exist, so there is no verdict to inherit.
-        return {}
-    stamp = graph_lifecycle_stamp(memory)
-    if stamp:
+        # Absence cannot certify the source lifecycle. Use the same pending
+        # marker as an unavailable read so recovery can clear its owned check.
+        return {RECONCILE_PENDING_KEY: True}
+    # A source revision is stale only relative to the text this row used.
+    stamp = graph_lifecycle_stamp(
+        replace(
+            memory,
+            metadata={
+                **memory.metadata,
+                SOURCE_BINDINGS_KEY: fields.get(SOURCE_BINDINGS_KEY, {}),
+            },
+        )
+    )
+    if (
+        expected_signature is not None
+        and raw_memory_source_fingerprint(memory) != expected_signature
+    ):
+        stamp[SOURCE_VALIDATION_PENDING_KEY] = True
+    if not graph_metadata_recallable(stamp):
         log.info(
             "projected_row_born_retired",
             raw_memory_id=memory.id,
@@ -151,11 +181,12 @@ class _CorrectionGraphTargets:
     authorized: list[str]
     refused: list[str]
     projections: list[str] = field(default_factory=list)
+    direct: list[str] = field(default_factory=list)
     truncated: bool = False
 
     @property
     def stampable(self) -> list[str]:
-        return [*self.authorized, *self.projections]
+        return [*self.direct, *self.projections]
 
 
 async def _correction_graph_entity_ids(
@@ -165,6 +196,8 @@ async def _correction_graph_entity_ids(
     memory: RawMemory,
     principal_id: str | None,
     accessible_projects: Iterable[str] | None,
+    writable_projects: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
 ) -> _CorrectionGraphTargets:
     """Find the graph rows projected from this capture.
 
@@ -216,19 +249,24 @@ async def _correction_graph_entity_ids(
     (`_authorized_superseded_entity_ids`).
     """
 
-    rows = normalize_records(
-        await runtime.client.execute_query(
-            """
-            SELECT uuid FROM entity
-            WHERE group_id = $group_id
-              AND attributes.raw_memory_id = $raw_memory_id
-            LIMIT $limit;
-            """,
-            group_id=str(organization_id),
-            raw_memory_id=memory.id,
-            limit=_GRAPH_CORRECTION_LOOKUP_LIMIT,
+    rows: list[dict[str, Any]] = []
+    cursor = ""
+    while True:
+        batch = normalize_records(
+            await runtime.client.execute_query(
+                "SELECT uuid FROM entity WHERE group_id = $group_id "
+                "AND attributes.raw_memory_id = $raw_memory_id AND uuid > $cursor "
+                "ORDER BY uuid LIMIT $limit;",
+                group_id=str(organization_id),
+                raw_memory_id=memory.id,
+                cursor=cursor,
+                limit=_GRAPH_CORRECTION_LOOKUP_LIMIT,
+            )
         )
-    )
+        rows.extend(batch)
+        if len(batch) < _GRAPH_CORRECTION_LOOKUP_LIMIT:
+            break
+        cursor = str(batch[-1]["uuid"])
     projected_ids = [uuid for row in rows if (uuid := str(row.get("uuid") or ""))]
     declared = [
         entity_id
@@ -269,7 +307,14 @@ async def _correction_graph_entity_ids(
             allowed = _promoted_entity_write_allowed(
                 entity=target,
                 principal_id=principal_id,
+                writable_projects=tuple(writable_projects or ()),
+            )
+        if allowed and allowed_memory_scope_keys is not None:
+            allowed = suppression_target_visible(
+                target,
+                principal_id=principal_id,
                 accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=allowed_memory_scope_keys,
             )
         if allowed:
             authorized.append(entity_id)
@@ -285,13 +330,14 @@ async def _correction_graph_entity_ids(
         runtime,
         organization_id=organization_id,
         memory=memory,
-        parent_ids=authorized,
+        parent_ids=projected,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
     )
     known = set(authorized)
     return _CorrectionGraphTargets(
         authorized=authorized,
+        direct=projected,
         refused=refused,
         projections=[
             entity_id for entity_id in dict.fromkeys(projections) if entity_id not in known
@@ -308,6 +354,7 @@ async def _readable_correction_targets(
     principal_id: str | None,
     accessible_projects: Iterable[str] | None,
     log_event: str,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
 ) -> list[str]:
     """Keep the rows a correction found that this principal can still read.
 
@@ -330,9 +377,16 @@ async def _readable_correction_targets(
         if not memory_metadata_read_allowed(
             row_metadata,
             principal_id=principal_id,
-            private_scope_granted=principal_id is not None,
+            private_scope_granted=private_scope_granted_for(
+                allowed_memory_scope_keys, principal_id=principal_id
+            ),
             accessible_projects=accessible_projects,
-            row_project_id=memory_row_project_id(row_metadata),
+            row_project_id=memory_row_project_id(
+                row_metadata,
+                entity_type=str(getattr(row, "entity_type", "") or ""),
+                entity_id=str(getattr(row, "id", "") or ""),
+            ),
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         ):
             log.warning(log_event, source_id=source_id, entity_id=entity_id)
             continue
@@ -442,36 +496,6 @@ async def _correction_projected_row_ids(
     return readable, truncated
 
 
-def _correction_graph_metadata(
-    preview: MemoryCorrectionPreview,
-    *,
-    replacement_source_id: str | None,
-    duplicate_of_source_id: str | None,
-) -> dict[str, Any]:
-    """Build the verdict the graph row carries from here on.
-
-    Every marker is written on every correction, including the cleared form a
-    restore needs. A patch that only ever adds keys cannot undo itself, and
-    the graph merge has no way to remove one.
-    """
-
-    restoring = preview.action == "restore"
-    excluded = bool(preview.recall_impact.get("excluded_from_recall")) and not restoring
-    return {
-        "lifecycle_state": preview.target_lifecycle_state,
-        "lifecycle_flags": list(preview.target_lifecycle_flags),
-        "lifecycle_action": preview.action,
-        "excluded_from_recall": excluded,
-        "superseded_by_source_id": "" if restoring else (replacement_source_id or ""),
-        "duplicate_of_source_id": "" if restoring else (duplicate_of_source_id or ""),
-        # A correction is somebody reading the verdict and writing it down, so
-        # a marker saying nobody could read one is answered by this write.
-        # `None` removes the key on the graph's merge patch rather than
-        # leaving it present and falsy.
-        RECONCILE_PENDING_KEY: None,
-    }
-
-
 async def _project_correction_to_graph(
     *,
     organization_id: str,
@@ -481,7 +505,11 @@ async def _project_correction_to_graph(
     accessible_projects: Iterable[str] | None,
     replacement_source_id: str | None,
     duplicate_of_source_id: str | None,
-) -> tuple[list[str], list[str], bool]:
+    writable_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
+) -> tuple[list[str], list[str], bool, CorrectionPropagation]:
     """Carry a correction across to the rows retrieval actually ranks.
 
     Correction used to stop at `raw_captures`. The projected entity kept its
@@ -492,6 +520,9 @@ async def _project_correction_to_graph(
     reports failure after mutating the substrate.
     """
 
+    runtime = None
+    targets = _CorrectionGraphTargets(authorized=[], refused=[])
+    graph_discovery_complete = True
     try:
         runtime = await get_surreal_graph_runtime(str(organization_id))
         targets = await _correction_graph_entity_ids(
@@ -500,6 +531,8 @@ async def _project_correction_to_graph(
             memory=memory,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            writable_projects=writable_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
     except Exception as exc:
         log.warning(
@@ -507,52 +540,44 @@ async def _project_correction_to_graph(
             source_id=memory.id,
             error_type=type(exc).__name__,
         )
-        return [], [], False
-    entity_ids = targets.stampable
-
-    updates = _correction_graph_metadata(
-        preview,
-        replacement_source_id=replacement_source_id,
-        duplicate_of_source_id=duplicate_of_source_id,
+        graph_discovery_complete = False
+    propagation = await propagate_source_correction(
+        runtime,
+        memory=memory,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+        projected_entity_ids=targets.stampable,
+        declared_entity_ids=[value for value in targets.authorized if value not in targets.direct],
     )
-    applied: list[str] = []
-    for entity_id in entity_ids:
-        try:
-            updated = await runtime.entity_manager.update(entity_id, {"metadata": updates})
-        except Exception as exc:
-            log.warning(
-                "memory_correction_graph_update_failed",
-                source_id=memory.id,
-                entity_id=entity_id,
-                error_type=type(exc).__name__,
-            )
-            continue
-        # A miss is expected rather than exceptional. `_correction_derived_ids`
-        # reports everything derived from the capture, relationship ids
-        # included, and only the rows that were really stamped may reach the
-        # mutation receipt or become an endpoint for the supersession edge.
-        if updated is not None:
-            applied.append(entity_id)
+    propagation.complete = propagation.complete and graph_discovery_complete
+    applied = propagation.stamped_entity_ids
 
-    if preview.action == "restore" and applied:
-        await _unlink_graph_supersession(
+    if applied:
+        cleaned = await _unlink_graph_supersession(
             runtime,
             organization_id=organization_id,
             source_id=memory.id,
             restored_entity_ids=applied,
         )
-    projected_ids = set(targets.projections)
-    superseded_memories = [entity_id for entity_id in applied if entity_id not in projected_ids]
-    if preview.action == "supersede" and replacement_source_id and superseded_memories:
-        await _link_graph_supersession(
-            runtime,
-            organization_id=organization_id,
-            principal_id=principal_id,
-            accessible_projects=accessible_projects,
-            replacement_source_id=replacement_source_id,
-            superseded_entity_ids=superseded_memories,
-        )
-    return applied, list(targets.refused), targets.truncated
+        propagation.complete = propagation.complete and cleaned
+    disclosed = await _readable_correction_targets(
+        runtime,
+        entity_ids=list(dict.fromkeys([*applied, *propagation.entity_ids])),
+        source_id=memory.id,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+        log_event="memory_correction_receipt_unreadable",
+    )
+    return (
+        disclosed,
+        list(targets.refused),
+        targets.truncated,
+        propagation,
+    )
 
 
 async def _unlink_graph_supersession(
@@ -561,7 +586,7 @@ async def _unlink_graph_supersession(
     organization_id: str,
     source_id: str,
     restored_entity_ids: Sequence[str],
-) -> None:
+) -> bool:
     """Remove the supersession edges a correction minted, so restore can undo.
 
     Clearing the lifecycle stamp is not enough on its own. The admission gate
@@ -573,7 +598,7 @@ async def _unlink_graph_supersession(
     """
 
     if not restored_entity_ids:
-        return
+        return True
     try:
         await runtime.client.execute_query(
             """
@@ -581,11 +606,14 @@ async def _unlink_graph_supersession(
             WHERE group_id = $group_id
               AND name = $predicate
               AND target_id IN $target_ids
+              AND (attributes.correction_root_id = $correction_root_id
+                   OR attributes.correction_root_id IS NONE)
               AND attributes.native_write_path = $write_path;
             """,
             group_id=str(organization_id),
             predicate=RelationshipType.SUPERSEDES.value,
             target_ids=list(restored_entity_ids),
+            correction_root_id=source_id,
             write_path=_CORRECTION_NATIVE_WRITE_PATH,
         )
     except Exception as exc:
@@ -594,73 +622,8 @@ async def _unlink_graph_supersession(
             source_id=source_id,
             error_type=type(exc).__name__,
         )
-
-
-async def _link_graph_supersession(
-    runtime: Any,
-    *,
-    organization_id: str,
-    principal_id: str | None,
-    accessible_projects: Iterable[str] | None,
-    replacement_source_id: str,
-    superseded_entity_ids: Sequence[str],
-) -> None:
-    """Record the replacement as a real edge, in the direction retrieval reads.
-
-    Source is the surviving row and target is the retired one, matching the
-    promotion write path, which is what lets the retrieval gate recognize a
-    row as superseded from a single inbound-edge lookup.
-    """
-
-    try:
-        replacement = await get_raw_memory_by_source_id(
-            organization_id=str(organization_id),
-            source_id=replacement_source_id,
-        )
-        if replacement is None:
-            return
-        replacement_targets = await _correction_graph_entity_ids(
-            runtime,
-            organization_id=organization_id,
-            memory=replacement,
-            principal_id=principal_id,
-            accessible_projects=accessible_projects,
-        )
-        replacement_entity_ids = replacement_targets.authorized
-    except Exception as exc:
-        log.warning(
-            "memory_correction_replacement_lookup_failed",
-            source_id=replacement_source_id,
-            error_type=type(exc).__name__,
-        )
-        return
-
-    now = datetime.now(UTC).isoformat()
-    for replacement_entity_id in replacement_entity_ids:
-        for superseded_entity_id in superseded_entity_ids:
-            if replacement_entity_id == superseded_entity_id:
-                continue
-            try:
-                await runtime.relationship_manager.create(
-                    _relationship(
-                        replacement_entity_id,
-                        superseded_entity_id,
-                        RelationshipType.SUPERSEDES,
-                        metadata={
-                            "native_write_path": _CORRECTION_NATIVE_WRITE_PATH,
-                            "replacement_reason": "memory_correction_supersede",
-                            "replacement_source_id": replacement_source_id,
-                            "created_by": principal_id,
-                            "valid_from": now,
-                        },
-                    )
-                )
-            except Exception as exc:
-                log.warning(
-                    "memory_correction_supersedes_edge_failed",
-                    entity_id=superseded_entity_id,
-                    error_type=type(exc).__name__,
-                )
+        return False
+    return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -790,7 +753,7 @@ async def _invalidate_promoted_entity_targets(
     runtime: Any,
     entity_ids: Sequence[str],
     principal_id: str | None,
-    accessible_projects: Iterable[str] | None,
+    writable_projects: Iterable[str] | None,
     invalid_at: datetime,
     reason: str,
     replacement_entity_id: str,
@@ -806,7 +769,7 @@ async def _invalidate_promoted_entity_targets(
         if not _promoted_entity_write_allowed(
             entity=target,
             principal_id=principal_id,
-            accessible_projects=accessible_projects,
+            writable_projects=writable_projects,
         ):
             continue
         metadata = _temporal_invalidation_metadata(
@@ -826,7 +789,7 @@ async def _apply_candidate_temporal_invalidations(
     runtime: Any,
     organization_id: str,
     principal_id: str | None,
-    accessible_projects: Iterable[str] | None,
+    writable_projects: Iterable[str] | None,
     candidate: ReflectionCandidate,
     replacement_entity_id: str,
     replacement_source_ids: Sequence[str],
@@ -850,7 +813,7 @@ async def _apply_candidate_temporal_invalidations(
                 if _raw_memory_write_allowed(
                     memory=candidate,
                     principal_id=principal_id,
-                    accessible_projects=accessible_projects,
+                    accessible_projects=writable_projects,
                 )
             ),
             None,
@@ -874,7 +837,7 @@ async def _apply_candidate_temporal_invalidations(
                     runtime=runtime,
                     entity_ids=[promoted_entity_id],
                     principal_id=principal_id,
-                    accessible_projects=accessible_projects,
+                    writable_projects=writable_projects,
                     invalid_at=invalid_at,
                     reason=target.reason,
                     replacement_entity_id=replacement_entity_id,
@@ -887,7 +850,7 @@ async def _apply_candidate_temporal_invalidations(
             runtime=runtime,
             entity_ids=authorized_entity_ids,
             principal_id=principal_id,
-            accessible_projects=accessible_projects,
+            writable_projects=writable_projects,
             invalid_at=invalid_at,
             reason="supersession",
             replacement_entity_id=replacement_entity_id,

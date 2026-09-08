@@ -14,6 +14,7 @@ from sibyl.persistence.auth_runtime import (
     log_memory_audit_event,
     resolve_accessible_project_graph_ids,
 )
+from sibyl_core.auth import ProjectRole
 from sibyl_core.models.reflection import ReflectionPack
 from sibyl_core.services.memory import (
     ReflectionPromotionResult,
@@ -239,6 +240,11 @@ async def _reflect_dream_source(
         organization_id=group_id,
         principal_id=source.principal_id,
         accessible_projects=accessible_projects,
+        writable_projects=await _resolve_accessible_projects(
+            group_id=group_id,
+            principal_id=source.principal_id,
+            required_role=ProjectRole.CONTRIBUTOR,
+        ),
         memory_scope=source.memory_scope,
         scope_key=source.scope_key,
         suggested_memory_scope=_metadata_str(source.metadata, "suggested_memory_scope"),
@@ -328,6 +334,11 @@ async def _drain_dream_candidate(
         domain=_metadata_str(candidate.metadata, "domain"),
         project=project,
         accessible_projects=accessible_projects,
+        writable_projects=await _resolve_accessible_projects(
+            group_id=group_id,
+            principal_id=candidate.principal_id,
+            required_role=ProjectRole.CONTRIBUTOR,
+        ),
     )
     policy = ReflectionAutonomyPolicy(
         confidence_threshold=confidence_threshold
@@ -351,6 +362,11 @@ async def _drain_dream_candidate(
             project=project,
             related_to=_metadata_str_list(candidate.metadata.get("related_to")),
             accessible_projects=accessible_projects,
+            writable_projects=await _resolve_accessible_projects(
+                group_id=group_id,
+                principal_id=candidate.principal_id,
+                required_role=ProjectRole.CONTRIBUTOR,
+            ),
         )
 
     archived = False
@@ -507,6 +523,7 @@ async def _resolve_accessible_projects(
     *,
     group_id: str,
     principal_id: str | None,
+    required_role: ProjectRole = ProjectRole.VIEWER,
 ) -> set[str]:
     if not principal_id:
         return set()
@@ -514,6 +531,7 @@ async def _resolve_accessible_projects(
         project_ids = await resolve_accessible_project_graph_ids(
             user_id=principal_id,
             org_id=group_id,
+            required_role=required_role,
         )
     except Exception as exc:
         log.warning(

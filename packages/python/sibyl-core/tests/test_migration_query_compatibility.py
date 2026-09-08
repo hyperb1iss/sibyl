@@ -1,4 +1,4 @@
-"""Content migration predicates match the target backend."""
+"""Migration transactions render the canonical upsert for the target backend."""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -6,6 +6,35 @@ from unittest.mock import AsyncMock
 import pytest
 
 from sibyl_core.backends.surreal import content_schema
+from sibyl_core.migrate import collapse_epics, scope_backfill
+from sibyl_core.models.entities import Entity, EntityType
+
+
+@pytest.mark.parametrize("module", [collapse_epics, scope_backfill])
+@pytest.mark.parametrize(
+    ("url", "expected", "absent"),
+    [
+        ("memory://", "type::is::object", "type::is_object"),
+        ("ws://127.0.0.1:33333/rpc", "type::is_object", "type::is::object"),
+    ],
+)
+async def test_migration_transaction_renders_backend_predicates(
+    module, url, expected, absent, monkeypatch
+):
+    client = SimpleNamespace(_url=url, execute_query_raw=AsyncMock(return_value=[]))
+    monkeypatch.setattr(module, "heal_entity_metadata_snapshots", AsyncMock())
+    if module is collapse_epics:
+        records = [{"uuid": "migration-row"}]
+        await module._apply_records(client, records, group_id="test-org", reverse=False)
+    else:
+        entity = Entity(id="migration-row", name="row", entity_type=EntityType.EPISODE)
+        await module._apply(client, [entity], group_id="test-org", operation="forward")
+    query = client.execute_query_raw.await_args.args[0]
+    assert expected in query
+    assert absent not in query
+    assert query.startswith("BEGIN TRANSACTION;")
+    assert query.endswith("COMMIT TRANSACTION;")
+    assert client.execute_query_raw.await_args.kwargs["rows"][0]["uuid"] == "migration-row"
 
 
 @pytest.mark.parametrize("url", ["memory://", "ws://127.0.0.1:33333/rpc"])

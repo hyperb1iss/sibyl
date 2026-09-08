@@ -5,6 +5,14 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Protocol
 
+from sibyl_core.memory_pipeline.source_lifecycle import (
+    CORRECTION_BLOCKERS_KEY,
+    SOURCE_BINDINGS_KEY,
+    SOURCE_VALIDATION_PENDING_KEY,
+    correction_blocked,
+    correction_event,
+    merge_source_correction,
+)
 from sibyl_core.models.reflection import MemoryLifecycleState, memory_lifecycle_from_metadata
 
 RECALL_EXCLUDED_REVIEW_STATES = frozenset(
@@ -35,6 +43,9 @@ class MemoryLifecycleView(Protocol):
     def source_id(self) -> str: ...
 
     @property
+    def revision(self) -> int: ...
+
+    @property
     def review_state(self) -> str: ...
 
     @property
@@ -59,8 +70,12 @@ def memory_lifecycle_state(
     return _normalized_state(lifecycle.state)
 
 
-def raw_memory_lifecycle_recallable(memory: MemoryLifecycleView) -> bool:
+def raw_memory_lifecycle_recallable(
+    memory: MemoryLifecycleView, *, include_source_corrections: bool = True
+) -> bool:
     metadata = dict(memory.metadata)
+    if include_source_corrections and correction_blocked(metadata):
+        return False
     review_state = _normalized_state(memory.review_state)
     lifecycle = memory_lifecycle_from_metadata(
         metadata,
@@ -86,50 +101,32 @@ def raw_memory_lifecycle_recallable(memory: MemoryLifecycleView) -> bool:
 
 
 def graph_lifecycle_stamp(memory: MemoryLifecycleView) -> dict[str, object]:
-    """The verdict a graph row projected from this capture has to be born with.
+    """Inherit source verdicts without turning them into the graph row's own flags.
 
-    Projection is asynchronous: `remember` writes the capture, queues the graph
-    write, and returns an id the caller can correct immediately. The worker
-    then builds the row from the payload it was handed, which was serialized
-    before the correction existed, so a row created after a correction is
-    created recallable and nothing later reconciles it. The capture is the
-    authority (it is the row the correction actually mutated), and this is the
-    verdict a reader of that row must inherit.
-
-    Empty for a capture that is still recallable, so a caller can merge the
-    result unconditionally.
-
-    `excluded_from_recall` carries the exclusion on its own rather than
-    depending on the state name, because a capture can fall out of recall on a
-    review state or a bare replacement marker while its lifecycle state still
-    reads active.
+    Source clocks preserve independent exclusions and let a later restore clear
+    only its own inherited verdict. Unknown content bindings remain conservative
+    after revision; reading a current verdict does not prove which text was used.
     """
-
-    if raw_memory_lifecycle_recallable(memory):
-        return {}
     metadata = dict(memory.metadata)
-    lifecycle = memory_lifecycle_from_metadata(
-        metadata,
-        source_id=memory.source_id or memory.id,
-        review_state=memory.review_state,
+    inherited: dict[str, object] = {
+        key: metadata[key]
+        for key in (CORRECTION_BLOCKERS_KEY, SOURCE_BINDINGS_KEY, SOURCE_VALIDATION_PENDING_KEY)
+        if key in metadata
+    }
+    return merge_source_correction(
+        inherited,
+        correction_event(
+            memory,
+            blocking=not raw_memory_lifecycle_recallable(memory, include_source_corrections=False),
+        ),
     )
-    state = _normalized_state(lifecycle.state)
-    stamp: dict[str, object] = {"excluded_from_recall": True}
-    if state and state != MemoryLifecycleState.ACTIVE.value:
-        stamp["lifecycle_state"] = state
-    flags = [_normalized_state(flag) for flag in lifecycle.flags]
-    if flags:
-        stamp["lifecycle_flags"] = flags
-    replacement = lifecycle.replacement_source_id or metadata.get("superseded_by_source_id")
-    if replacement:
-        stamp["superseded_by_source_id"] = str(replacement)
-    duplicate = lifecycle.duplicate_of_source_id or metadata.get("duplicate_of_source_id")
-    if duplicate:
-        stamp["duplicate_of_source_id"] = str(duplicate)
-    return stamp
+
+
+RECONCILE_PENDING_KEY = "lifecycle_reconciliation_pending"
 
 
 GRAPH_RECALL_EXCLUSION_KEYS = (
+    RECONCILE_PENDING_KEY,
     "excluded_from_recall",
     "superseded_by_source_id",
     "superseded_by_raw_memory_id",
@@ -167,6 +164,8 @@ def graph_metadata_recallable(metadata: Mapping[str, object] | None) -> bool:
 
     if not metadata:
         return True
+    if correction_blocked(metadata):
+        return False
     state = _normalized_state(metadata.get("lifecycle_state"))
     if _normalized_state(metadata.get("review_state")) in RECALL_EXCLUDED_REVIEW_STATES:
         return False

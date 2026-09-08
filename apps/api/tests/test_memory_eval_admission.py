@@ -122,6 +122,8 @@ async def eval_api(monkeypatch):
                 role=role,
                 policy=policy,
                 body=body,
+                key=key,
+                evidence=evidence,
                 path=path,
             )
         finally:
@@ -229,3 +231,87 @@ async def test_archive_restore_preserves_consumed_attempt(eval_api, monkeypatch,
     finally:
         await restored_close()
         await original_close()
+
+
+@pytest.mark.parametrize(
+    "change", [None, "owner", "role", "arm", "deleted", "duplicate", "all_passed", "blank"]
+)
+async def test_http_consolidation_reads_admitted_sources(eval_api, monkeypatch, change):
+    from sibyl_core.tasks import consolidation
+
+    api = eval_api
+    assert (await _register(api)).status_code == 200
+    assert (await api.client.post(api.path, json=api.body)).status_code == 200
+    second = api.assignment.model_copy(update={"attempt_id": uuid4().hex})
+    assert (
+        await api.client.post(
+            "/memory/eval/assignments",
+            json={"issuer_id": "oracle", "assignment": second.model_dump(mode="json")},
+        )
+    ).status_code == 200
+    outcome = json.loads(api.evidence["outcome_bytes"]) | {
+        "attempt_id": second.attempt_id,
+        "status": "task_failed",
+        "passed": False,
+    }
+    if change == "all_passed":
+        outcome.update(status="passed", passed=True)
+    evidence = api.evidence | {
+        "outcome_bytes": json.dumps(outcome).encode(),
+        "episode_bytes": b"The output differed from the expected result.",
+    }
+    signed = sign_outcome(assignment=second, issuer_id="oracle", private_key=api.key, **evidence)
+    body = {"issuer_id": "oracle", "receipt_base64": base64.b64encode(signed).decode()}
+    body.update(
+        {
+            name.replace("_bytes", "_base64"): base64.b64encode(value).decode()
+            for name, value in evidence.items()
+        }
+    )
+    path = f"/memory/eval/experiments/experiment/attempts/{second.attempt_id}/admit"
+    assert (await api.client.post(path, json=body)).status_code == 200
+    request = {
+        "issuer_id": "oracle",
+        "experiment_revision": "1",
+        "arm_id": "raw",
+        "through_checkpoint": 0,
+        "attempt_ids": [api.assignment.attempt_id, second.attempt_id],
+        "group_id": "contrast",
+        "mechanism": "compare output",
+    }
+    calls = []
+
+    async def extract(_self, prompt):
+        calls.append(prompt)
+        return SimpleNamespace(
+            output=consolidation.ProcedureProposal(
+                abstention_reason="Insufficient transferable evidence"
+            ),
+            usage=SimpleNamespace(model_dump=lambda **_: {}),
+        )
+
+    monkeypatch.setattr(consolidation.Extractor, "extract_with_usage", extract)
+    if change == "owner":
+        api.ctx.user_id = "other"
+    elif change == "role":
+        api.role.value = OrganizationRole.MEMBER
+    elif change == "arm":
+        request["arm_id"] = "other"
+    elif change == "deleted":
+        await api.store.execute_query("DELETE raw_captures;")
+    elif change == "duplicate":
+        request["attempt_ids"] = [api.assignment.attempt_id] * 2
+    elif change == "blank":
+        request["mechanism"] = "   "
+    response = await api.client.post(
+        "/memory/eval/experiments/experiment/consolidate", json=request
+    )
+    expected = 200 if change is None else 403 if change in {"owner", "role"} else 409
+    if change == "blank":
+        expected = 422
+    assert response.status_code == expected, response.text
+    assert len(calls) == (1 if change is None else 0)
+    if change is None:
+        assert response.json()["candidate"] is None
+        assert response.json()["source_join"] == "authenticated_admission_ledger"
+        assert "sibyl-signed-eval-outcome-v1" in calls[0]

@@ -67,6 +67,7 @@ from sibyl_core.services.usage import (
 
 
 class _EmbeddingWriteClient:
+    _url = "memory://"
     group_id = "org-native"
 
     def __init__(self) -> None:
@@ -668,6 +669,7 @@ class _TransientEntityWriteClient:
 
 
 class _LegacyUpdatedAtEntityWriteClient:
+    _url = "memory://"
     group_id = "org-legacy-updated-at"
 
     def __init__(self) -> None:

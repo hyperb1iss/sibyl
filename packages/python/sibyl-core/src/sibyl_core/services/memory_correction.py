@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sibyl_core.auth.memory_policy import MemoryPolicyDecision
+from sibyl_core.errors import RevisionConflictError
 from sibyl_core.models.reflection import (
     MemoryLifecycle,
     MemoryLifecycleFlag,
@@ -18,6 +19,7 @@ from sibyl_core.models.reflection import (
     with_memory_lifecycle_metadata,
     with_reflection_finding_metadata,
 )
+from sibyl_core.services import memory_lifecycle
 from sibyl_core.services.memory_contract import MemoryCorrectionPreview, MemoryCorrectionResult
 from sibyl_core.services.memory_lifecycle import _project_correction_to_graph
 from sibyl_core.services.memory_policy import (
@@ -154,6 +156,7 @@ async def _validate_correction_reference(
     accessible_projects: Iterable[str] | None,
     accessible_teams: Iterable[str] | None,
     accessible_delegations: Iterable[str] | None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
 ) -> tuple[RawMemory | None, str | None]:
     reference = await _load_correction_memory(
         organization_id=organization_id,
@@ -169,6 +172,7 @@ async def _validate_correction_reference(
         accessible_projects=accessible_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
     if not read_decision.allowed:
         return None, f"{reference_kind}_source_not_found"
@@ -198,6 +202,32 @@ def _correction_impact(
     return recall, synthesis
 
 
+async def _visible_correction_derived_ids(
+    *,
+    organization_id: str,
+    source_id: str,
+    entity_ids: Sequence[str],
+    principal_id: str | None,
+    accessible_projects: Iterable[str] | None,
+    allowed_memory_scope_keys: Iterable[str] | None,
+) -> list[str]:
+    if not entity_ids:
+        return []
+    try:
+        runtime = await memory_lifecycle.get_surreal_graph_runtime(organization_id)
+    except Exception:
+        return []
+    return await memory_lifecycle._readable_correction_targets(
+        runtime,
+        entity_ids=entity_ids,
+        source_id=source_id,
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+        log_event="memory_correction_reference_unreadable",
+    )
+
+
 async def preview_memory_correction(
     *,
     organization_id: str,
@@ -206,12 +236,58 @@ async def preview_memory_correction(
     action: str,
     reason: str | None = None,
     accessible_projects: Iterable[str] | None = None,
+    writable_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
     replacement_source_id: str | None = None,
     duplicate_of_source_id: str | None = None,
     revised_content: str | None = None,
 ) -> MemoryCorrectionPreview:
+    memory = await _load_correction_memory(organization_id=organization_id, source_id=source_id)
+    return await _preview_loaded_memory_correction(
+        memory=memory,
+        organization_id=organization_id,
+        source_id=source_id,
+        principal_id=principal_id,
+        action=action,
+        reason=reason,
+        accessible_projects=accessible_projects,
+        writable_projects=writable_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+        replacement_source_id=replacement_source_id,
+        duplicate_of_source_id=duplicate_of_source_id,
+        revised_content=revised_content,
+    )
+
+
+async def _preview_loaded_memory_correction(
+    *,
+    memory: RawMemory | None,
+    organization_id: str,
+    source_id: str,
+    principal_id: str | None,
+    action: str,
+    reason: str | None = None,
+    accessible_projects: Iterable[str] | None = None,
+    writable_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
+    replacement_source_id: str | None = None,
+    duplicate_of_source_id: str | None = None,
+    revised_content: str | None = None,
+) -> MemoryCorrectionPreview:
+    accessible_projects = None if accessible_projects is None else tuple(accessible_projects)
+    accessible_teams = None if accessible_teams is None else tuple(accessible_teams)
+    accessible_delegations = (
+        None if accessible_delegations is None else tuple(accessible_delegations)
+    )
+    allowed_memory_scope_keys = (
+        None if allowed_memory_scope_keys is None else frozenset(allowed_memory_scope_keys)
+    )
     requested_action = action.strip().lower()
     normalized_action = _CORRECTION_ACTION_ALIASES.get(requested_action, requested_action)
     if normalized_action not in _CORRECTION_ACTIONS:
@@ -221,10 +297,6 @@ async def preview_memory_correction(
             reason="invalid_correction_action",
         )
 
-    memory = await _load_correction_memory(
-        organization_id=organization_id,
-        source_id=source_id,
-    )
     if memory is None:
         return _correction_preview_denied(
             source_id=source_id,
@@ -247,7 +319,9 @@ async def preview_memory_correction(
     write_decision = _authorize_correction_source_write(
         memory=memory,
         principal_id=principal_id,
-        accessible_projects=accessible_projects,
+        accessible_projects=(
+            accessible_projects if writable_projects is None else tuple(writable_projects)
+        ),
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
     )
@@ -265,6 +339,25 @@ async def preview_memory_correction(
                 "requested_source_id": source_id,
             },
         )
+
+    if allowed_memory_scope_keys is not None:
+        read_decision = _authorize_share_source_read(
+            memory=memory,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+        )
+        if not read_decision.allowed:
+            return _correction_preview_denied(
+                source_id=memory.id,
+                action=normalized_action,
+                reason=read_decision.reason,
+                target_lifecycle_state=target_lifecycle_state,
+                target_lifecycle_flags=target_lifecycle_flags,
+                policy_decisions=(write_decision, read_decision),
+            )
 
     requirement_reason = _correction_requirement_reason(
         action=normalized_action,
@@ -300,6 +393,7 @@ async def preview_memory_correction(
             accessible_projects=accessible_projects,
             accessible_teams=accessible_teams,
             accessible_delegations=accessible_delegations,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
         if reference_reason:
             return _correction_preview_denied(
@@ -327,6 +421,7 @@ async def preview_memory_correction(
             accessible_projects=accessible_projects,
             accessible_teams=accessible_teams,
             accessible_delegations=accessible_delegations,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
         if reference_reason:
             return _correction_preview_denied(
@@ -349,7 +444,14 @@ async def preview_memory_correction(
         target_lifecycle_state,
         target_lifecycle_flags,
     )
-    affected_derived_ids = _correction_derived_ids(memory)
+    affected_derived_ids = await _visible_correction_derived_ids(
+        organization_id=organization_id,
+        source_id=memory.id,
+        entity_ids=_correction_derived_ids(memory),
+        principal_id=principal_id,
+        accessible_projects=accessible_projects,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
+    )
     metadata = {
         "duplicate_of_source_id": canonical_duplicate_of_source_id,
         "policy_allowed": True,
@@ -504,22 +606,37 @@ async def apply_memory_correction(
     action: str,
     reason: str | None = None,
     accessible_projects: Iterable[str] | None = None,
+    writable_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
     replacement_source_id: str | None = None,
     duplicate_of_source_id: str | None = None,
     revised_content: str | None = None,
     expected_revision: int | None = None,
 ) -> MemoryCorrectionResult:
-    preview = await preview_memory_correction(
+    accessible_projects = None if accessible_projects is None else tuple(accessible_projects)
+    writable_projects = None if writable_projects is None else tuple(writable_projects)
+    accessible_teams = None if accessible_teams is None else tuple(accessible_teams)
+    accessible_delegations = (
+        None if accessible_delegations is None else tuple(accessible_delegations)
+    )
+    allowed_memory_scope_keys = (
+        None if allowed_memory_scope_keys is None else frozenset(allowed_memory_scope_keys)
+    )
+    memory = await _load_correction_memory(organization_id=organization_id, source_id=source_id)
+    preview = await _preview_loaded_memory_correction(
+        memory=memory,
         organization_id=organization_id,
         source_id=source_id,
         principal_id=principal_id,
         action=action,
         reason=reason,
         accessible_projects=accessible_projects,
+        writable_projects=writable_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
         replacement_source_id=replacement_source_id,
         duplicate_of_source_id=duplicate_of_source_id,
         revised_content=revised_content,
@@ -527,7 +644,6 @@ async def apply_memory_correction(
     if not preview.allowed:
         return MemoryCorrectionResult(applied=False, preview=preview)
 
-    memory = await _load_correction_memory(organization_id=organization_id, source_id=source_id)
     if memory is None:
         denied = _correction_preview_denied(
             source_id=source_id,
@@ -537,6 +653,17 @@ async def apply_memory_correction(
             target_lifecycle_flags=preview.target_lifecycle_flags,
         )
         return MemoryCorrectionResult(applied=False, preview=denied)
+    if memory.observed_revision is None:
+        denied = _correction_preview_denied(
+            source_id=memory.id,
+            action=preview.action,
+            reason="memory_source_revision_unavailable",
+            target_lifecycle_state=preview.target_lifecycle_state,
+            target_lifecycle_flags=preview.target_lifecycle_flags,
+        )
+        return MemoryCorrectionResult(applied=False, preview=denied)
+    if expected_revision is not None and expected_revision != memory.observed_revision:
+        raise RevisionConflictError(memory.id, expected_revision, memory.observed_revision)
     preview_metadata = preview.metadata or {}
     canonical_replacement_source_id = (
         _metadata_str(preview_metadata, "replacement_source_id") or replacement_source_id
@@ -570,9 +697,7 @@ async def apply_memory_correction(
             principal_id=principal_id,
         ),
     )
-    save_kwargs: dict[str, Any] = {}
-    if expected_revision is not None:
-        save_kwargs["expected_revision"] = expected_revision
+    save_kwargs: dict[str, Any] = {"expected_revision": memory.observed_revision}
     if preview.action == "supersede" and canonical_replacement_source_id is not None:
         save_kwargs["superseded_by_memory_id"] = canonical_replacement_source_id
     saved = await save_raw_memory(updated, **save_kwargs)
@@ -580,20 +705,34 @@ async def apply_memory_correction(
         affected_entity_ids,
         refused_entity_ids,
         projection_walk_truncated,
+        propagation,
     ) = await _project_correction_to_graph(
         organization_id=organization_id,
         memory=saved,
         preview=preview,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
+        writable_projects=writable_projects,
         replacement_source_id=canonical_replacement_source_id,
         duplicate_of_source_id=canonical_duplicate_of_source_id,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
     return MemoryCorrectionResult(
         applied=True,
         preview=preview,
         updated_memory=saved,
         affected_entity_ids=affected_entity_ids,
-        refused_entity_ids=refused_entity_ids,
+        refused_entity_ids=await _visible_correction_derived_ids(
+            organization_id=organization_id,
+            source_id=memory.id,
+            entity_ids=refused_entity_ids,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+        ),
         projection_walk_truncated=projection_walk_truncated,
+        affected_raw_memory_ids=propagation.raw_memory_ids,
+        propagation_complete=propagation.complete and not refused_entity_ids,
     )

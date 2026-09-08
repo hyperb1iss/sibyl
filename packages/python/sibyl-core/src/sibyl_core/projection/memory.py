@@ -18,6 +18,7 @@ from sibyl_core.projection.inheritance import (
     LIFECYCLE_METADATA_KEYS,
     parent_lifecycle_as_stored,
 )
+from sibyl_core.projection.pending import PENDING_KEYS, inherited_pending, pending_patch
 from sibyl_core.projection.reconcile import reconcile_with_parent
 from sibyl_core.retrieval.dedup import DedupConfig, EntityDeduplicator
 from sibyl_core.retrieval.fact_frames import FactFrame, extract_evidence_fact_frames
@@ -776,7 +777,10 @@ def _add_projection_candidates(
             now=now,
             source=source,
         )
-        projected_by_id.setdefault(entity.id, entity)
+        shared = projected_by_id.setdefault(entity.id, entity)
+        shared.metadata.update(
+            pending_patch(shared.metadata, entity.metadata, authority=f"parent:{source.id}")
+        )
         projected_links.append(
             ProjectedEntitySourceLink(
                 entity_id=entity.id,
@@ -1230,11 +1234,14 @@ def _inherited_scope_metadata(source: Entity) -> dict[str, object]:
     would.
     """
     metadata = dict(source.metadata or {})
-    return {
+    inherited = {
         key: metadata[key]
         for key in (*_SCOPE_METADATA_KEYS, *LIFECYCLE_METADATA_KEYS)
-        if key in metadata and metadata[key] is not None
+        if key not in PENDING_KEYS and key in metadata and metadata[key] is not None
     }
+    inherited.update(inherited_pending(metadata, f"parent:{source.id}"))
+    inherited["lifecycle_reconciliation_pending"] = {f"parent:{source.id}": True}
+    return inherited
 
 
 def _projection_allowed(source: Entity) -> bool:

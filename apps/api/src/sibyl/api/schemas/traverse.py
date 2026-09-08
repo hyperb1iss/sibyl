@@ -13,8 +13,9 @@ the bound it actually applied.
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
+from sibyl_core.memory_pipeline.source_lifecycle import public_memory_metadata
 from sibyl_core.tools.traverse import (
     DEFAULT_EXPAND_LIMIT,
     DEFAULT_NEIGHBOR_CONTENT_MAX_CHARS,
@@ -78,6 +79,11 @@ class ExpandNeighborsRequest(BaseModel):
 
 class NeighborEntityResponse(BaseModel):
     """One entity reached by a bounded traversal step."""
+
+    @field_validator("metadata")
+    @classmethod
+    def filter_source_clocks(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return public_memory_metadata(value)
 
     id: str
     type: str

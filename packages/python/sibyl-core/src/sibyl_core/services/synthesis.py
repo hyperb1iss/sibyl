@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import asdict, replace
 from typing import Any
 
+from sibyl_core.memory_pipeline.source_lifecycle import public_memory_metadata
 from sibyl_core.models.context import ContextIntent, ContextLayer, ContextPack
 from sibyl_core.models.synthesis import (
     SynthesisArtifact,
@@ -683,7 +684,7 @@ async def materialize_synthesis_section_packs(
             }
             if not redacted:
                 source_metadata = {
-                    **metadata,
+                    **public_memory_metadata(metadata),
                     **source_metadata,
                 }
             sources.append(

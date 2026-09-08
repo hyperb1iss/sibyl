@@ -435,7 +435,9 @@ async def test_remember_mcp_memory_scopes_project_metadata(monkeypatch) -> None:
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
     add = AsyncMock(return_value={"success": True, "id": "decision_123"})
     remember_raw = AsyncMock(
-        return_value=SimpleNamespace(id="raw_123", source_id="mcp:remember:decision")
+        return_value=SimpleNamespace(
+            id="raw_123", source_id="mcp:remember:decision", revision=1, metadata={}
+        )
     )
 
     with (
@@ -516,6 +518,7 @@ async def test_remember_mcp_memory_scopes_project_metadata(monkeypatch) -> None:
             "memory_scope": "project",
             "scope_key": "project-a",
             "principal_id": ctx.user_id,
+            "source_bindings": {"raw_123": 1},
             "raw_memory_id": "raw_123",
             "raw_source_id": "mcp:remember:decision",
         },
@@ -524,6 +527,7 @@ async def test_remember_mcp_memory_scopes_project_metadata(monkeypatch) -> None:
         # argument the row reaches the graph naming no capture, and a later
         # correction on this memory can neither find it nor retire it.
         capture_provenance={
+            "source_bindings": {"raw_123": 1},
             "raw_memory_id": "raw_123",
             "raw_source_id": "mcp:remember:decision",
         },
@@ -557,6 +561,7 @@ async def test_remember_mcp_memory_replays_idempotent_receipt(monkeypatch) -> No
             id="raw_123",
             source_id="mcp:remember:decision",
             revision=3,
+            metadata={},
         )
     )
     get_idempotency = AsyncMock(return_value=None)
@@ -1140,7 +1145,10 @@ async def test_manage_mcp_complete_task_routes_through_workflow_service(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_manage_memory_correction_returns_audited_receipt() -> None:
+async def test_manage_memory_correction_returns_audited_receipt(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "sibyl.mcp_tools.context.get_writable_projects", AsyncMock(return_value=set())
+    )
     ctx = McpContext(org_id="org-1", user_id="user-1", scopes=["mcp"])
     memory = SimpleNamespace(
         id="raw-1",
@@ -1203,10 +1211,12 @@ async def test_manage_memory_correction_returns_audited_receipt() -> None:
         reason="Incorrect",
         accessible_projects={"project-a"},
         accessible_teams=None,
+        writable_projects=set(),
         replacement_source_id=None,
         duplicate_of_source_id=None,
         revised_content=None,
         expected_revision=1,
+        allowed_memory_scope_keys=None,
     )
     audit.assert_awaited_once()
     assert audit.await_args.kwargs["action"] == "memory.correction.mark_wrong"
@@ -1423,7 +1433,9 @@ async def test_remember_mcp_memory_links_single_active_project_task(monkeypatch)
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
     add = AsyncMock(return_value={"success": True, "id": "decision_123"})
     remember_raw = AsyncMock(
-        return_value=SimpleNamespace(id="raw_123", source_id="mcp:remember:decision")
+        return_value=SimpleNamespace(
+            id="raw_123", source_id="mcp:remember:decision", revision=1, metadata={}
+        )
     )
     explore = AsyncMock(return_value=SimpleNamespace(entities=[SimpleNamespace(id="task_active")]))
 
@@ -2215,3 +2227,66 @@ async def test_manage_dispatch_does_not_mutate_a_foreign_private_target(monkeypa
     transitions.clear()
     assert await _dispatch(_target(None, None), bob) == "executed"
     assert transitions == ["complete_task"]
+
+
+@pytest.mark.asyncio
+async def test_remember_mcp_resolves_source_access_beyond_the_target_project(monkeypatch) -> None:
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-a"})
+    )
+    grants = [api_key_memory_scope_key("project", "project-a")]
+    ctx = McpContext(
+        org_id=str(uuid4()),
+        user_id=str(uuid4()),
+        scopes=["mcp"],
+        api_key_memory_scope_keys=grants,
+    )
+    remember = AsyncMock(
+        return_value=SimpleNamespace(
+            id="raw_123",
+            source_id="mcp:remember:decision",
+            revision=3,
+            metadata={
+                "raw_source_ids": ["source-capture"],
+                "source_bindings": {"source-capture": 2},
+            },
+        )
+    )
+    with (
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects",
+            AsyncMock(return_value={"project-a", "source-project"}),
+        ),
+        patch(
+            "sibyl.mcp_tools.memory.resolve_accessible_team_scope_keys",
+            AsyncMock(return_value={"source-team"}),
+        ) as teams,
+        patch(
+            "sibyl_core.tools.core.add", AsyncMock(return_value={"success": True, "id": "row"})
+        ) as add,
+        patch("sibyl_core.services.surreal_content.remember_raw_memory", remember),
+        patch(
+            "sibyl_core.tools.core.explore", AsyncMock(return_value=SimpleNamespace(entities=[]))
+        ),
+        patch("sibyl.mcp_tools.policy.validate_relationship_targets_for_caller", AsyncMock()),
+    ):
+        await _remember_mcp_memory(
+            title="Derived memory",
+            content="A note citing another project.",
+            kind="decision",
+            domain="sibyl",
+            project="project-a",
+            tags=None,
+            related_to=None,
+            metadata={"raw_source_ids": ["source-capture"]},
+        )
+    assert remember.await_args.kwargs["accessible_projects"] == {"project-a", "source-project"}
+    assert remember.await_args.kwargs["accessible_teams"] == {"source-team"}
+    assert remember.await_args.kwargs["allowed_memory_scope_keys"] == grants
+    teams.assert_awaited_once_with(user_id=ctx.user_id, org_id=ctx.org_id, scopes=ctx.scopes)
+
+    assert add.await_args.kwargs["capture_provenance"]["source_bindings"] == {
+        "raw_123": 3,
+        "source-capture": 2,
+    }

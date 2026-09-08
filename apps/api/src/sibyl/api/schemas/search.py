@@ -3,7 +3,9 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from sibyl_core.memory_pipeline.source_lifecycle import public_memory_metadata
 
 
 class SearchRequest(BaseModel):
@@ -110,6 +112,11 @@ class SearchRequest(BaseModel):
 
 class SearchResult(BaseModel):
     """Single search result - unified across graph entities and documents."""
+
+    @field_validator("metadata")
+    @classmethod
+    def filter_source_clocks(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return public_memory_metadata(value)
 
     id: str = Field(..., description="Entity or chunk ID")
     type: str = Field(..., description="Entity type (pattern, rule, episode, etc.) or 'document'")

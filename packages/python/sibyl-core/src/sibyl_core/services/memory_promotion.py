@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
@@ -15,6 +17,7 @@ from sibyl_core.models.relations import declared_relation_targets
 from sibyl_core.services.memory_contract import ReflectionPromotionResult
 from sibyl_core.services.memory_identity import (
     IDENTITY_KEY,
+    SOURCE_SNAPSHOT_KEY,
     reflection_entity_id,
     reflection_identity,
 )
@@ -24,6 +27,7 @@ from sibyl_core.services.memory_policy import (
     _metadata_float,
     _metadata_str,
     _promotion_denied,
+    raw_memory_source_fingerprint,
     suppression_target_visible,
 )
 from sibyl_core.services.surreal_content import (
@@ -267,6 +271,8 @@ def _entity_from_candidate(
     memory_scope: MemoryScope,
     scope_key: str | None,
     policy_metadata: Mapping[str, Any],
+    source_memories: Sequence[RawMemory] = (),
+    reserved_entity_id: str | None = None,
 ) -> Entity:
     entity_type = _entity_type(candidate.kind)
     source_ids = sorted(_candidate_source_ids(candidate, source_id))
@@ -313,10 +319,18 @@ def _entity_from_candidate(
     if primary_source_id:
         metadata["reflection_source_id"] = primary_source_id
 
+    if source_memories:
+        snapshots = sorted(
+            {(memory.id, raw_memory_source_fingerprint(memory)) for memory in source_memories}
+        )
+        metadata[SOURCE_SNAPSHOT_KEY] = hashlib.sha256(
+            json.dumps(snapshots, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
     entity = Entity(
         id="reflection_pending",
         entity_type=entity_type,
-        name=candidate.title,
+        name=candidate.title.strip() or "Untitled memory",
         description=candidate.content[:500],
         content=candidate.content,
         organization_id=organization_id,
@@ -325,6 +339,13 @@ def _entity_from_candidate(
         source_file=primary_source_id,
     )
     entity.id = reflection_entity_id(entity)
+    if reserved_entity_id is not None and reserved_entity_id != entity.id:
+        legacy = entity.model_copy(update={"name": candidate.title})
+        if reserved_entity_id != reflection_entity_id(legacy, version=2):
+            raise ValueError("reserved reflection identity does not match the candidate")
+        entity = legacy
+        entity.metadata.pop(SOURCE_SNAPSHOT_KEY, None)
+        entity.id = reflection_entity_id(entity)
     entity.metadata[IDENTITY_KEY] = reflection_identity(entity)
     return entity
 

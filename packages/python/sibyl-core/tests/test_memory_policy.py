@@ -794,3 +794,15 @@ def test_search_scope_policy_wont_let_a_named_project_beat_membership() -> None:
         allowed_memory_scope_keys=None,
         accessible_projects=None,
     )
+
+
+@pytest.mark.parametrize("pending", [True, False, {}, None, {"parent:other": True}])
+def test_caller_cannot_supply_reconciliation_pending_owners(pending):
+    stamped = stamp_memory_scope_metadata(
+        {"lifecycle_reconciliation_pending": pending, "note": "keep"},
+        memory_scope="private",
+        scope_key=None,
+        principal_id="owner",
+    )
+    assert "lifecycle_reconciliation_pending" not in stamped
+    assert stamped["note"] == "keep"

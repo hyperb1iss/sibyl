@@ -59,6 +59,25 @@ class DeclaredTaskOutcome(FrozenModel):
         return self
 
 
+class AdmittedTaskOutcome(FrozenModel):
+    """A signed outcome reference; only a server ledger join establishes admission."""
+
+    receipt_schema_version: Literal["sibyl-signed-eval-outcome-v1"]
+    task_id: Text
+    attempt_id: Text
+    status: Literal["passed", "task_failed"]
+    success: bool
+    snapshot_sha256: SHA256
+    receipt_sha256: SHA256
+    admission_id: SHA256
+
+    @model_validator(mode="after")
+    def consistent_outcome(self) -> Self:
+        if self.success != (self.status == "passed"):
+            raise ValueError("task status and success disagree")
+        return self
+
+
 class StoredSourceRef(FrozenModel):
     source_id: Text
     observed_revision: int = Field(ge=1)
@@ -79,7 +98,7 @@ class ConsolidationEpisode(FrozenModel):
     artifact_sha256: SHA256
     environment: dict[Text, Text] = Field(min_length=1)
     stored_sources: tuple[StoredSourceRef, ...] = Field(min_length=1)
-    outcome: DeclaredTaskOutcome
+    outcome: DeclaredTaskOutcome | AdmittedTaskOutcome
 
     @model_validator(mode="after")
     def frozen_evidence(self) -> Self:

@@ -49,6 +49,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from sibyl_core.backends.surreal.records import normalize_records, raise_on_error
+from sibyl_core.backends.surreal.schema import render_surreal_compatible_sql
 from sibyl_core.models.memory_scope import MemoryScope
 from sibyl_core.services.graph_entity_store import (
     _ENTITY_BULK_UPSERT_QUERY,
@@ -587,6 +588,7 @@ async def _apply(
     # that meant the removal was undone by the snapshot the moment it was read.
     await heal_entity_metadata_snapshots(client, records, group_id=group_id)
     query = f"BEGIN TRANSACTION;\n{_ENTITY_BULK_UPSERT_QUERY}\nCOMMIT TRANSACTION;"
+    query = render_surreal_compatible_sql(query, url=client._url)
     result = await client.execute_query_raw(query, rows=records)
     raise_on_error(result, query=f"scope_backfill:{operation}:{group_id}")
 
