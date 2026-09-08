@@ -211,7 +211,7 @@ def test_timeout_terminates_child_before_snapshot(experiment):
     manifest["controller"]["args"] = ["child"]
     manifest["controller_timeout_seconds"] = 0.2
     receipt = execute(experiment)
-    assert receipt["status"] == "controller_timeout"
+    assert receipt["status"] == "controller_timeout", json.dumps(receipt, indent=2, sort_keys=True)
     time.sleep(1.0)
     assert not (output / "controller-workspace/late-child.txt").exists()
     assert not (output / "checker-workspace/late-child.txt").exists()

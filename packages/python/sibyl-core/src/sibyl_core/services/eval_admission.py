@@ -53,7 +53,6 @@ def _attempt_key(organization_id: str, experiment_id: str, attempt_id: str) -> s
 
 
 _REGISTER = """
-BEGIN TRANSACTION;
 RETURN {
 LET $existing = (SELECT * FROM eval_attempts WHERE uuid = $uuid LIMIT 1)[0];
 IF $existing != NONE {
@@ -66,11 +65,9 @@ IF $existing != NONE {
 };
 RETURN (SELECT * FROM eval_attempts WHERE uuid = $uuid AND organization_id = $organization_id);
 };
-COMMIT TRANSACTION;
 """
 
 _ADMIT = """
-BEGIN TRANSACTION;
 RETURN {
 LET $attempt = (SELECT * FROM eval_attempts
     WHERE uuid = $uuid AND organization_id = $organization_id LIMIT 1)[0];
@@ -101,7 +98,6 @@ IF $memory = NONE OR $memory.deleted_at != NONE
 };
 RETURN $memory;
 };
-COMMIT TRANSACTION;
 """
 
 
@@ -110,8 +106,8 @@ async def _transaction(
     query: str,
     **params: object,
 ) -> list[SurrealRecord]:
-    # The single RETURN block retains the checked client's first-result contract.
-    # Its atomic conflict replay validates every statement before returning.
+    # A RETURN block is one implicit transaction and one result on every transport.
+    # The checked client validates that result and replays atomic write conflicts.
     result = await client.execute_query(query, **params)
     return content_client.normalize_records(result)
 
