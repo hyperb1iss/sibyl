@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 from dataclasses import dataclass
@@ -80,14 +81,48 @@ async def load_admitted_consolidation_group(
     if type(through_checkpoint) is not int or through_checkpoint < 0:
         raise ReceiptError("checkpoint must be a nonnegative integer")
     async with content_client.surreal_content_client() as client:
-        rows = content_client.normalize_records(
-            await client.execute_query(
-                _JOIN,
-                organization_id=organization_id,
-                experiment_id=experiment_id,
-                attempt_ids=list(attempt_ids),
-            )
+        snapshot = await client.execute_query(
+            _JOIN,
+            organization_id=organization_id,
+            experiment_id=experiment_id,
+            attempt_ids=list(attempt_ids),
         )
+    return await asyncio.to_thread(
+        _validate_admitted_snapshot,
+        snapshot,
+        organization_id=organization_id,
+        principal_id=principal_id,
+        experiment_id=experiment_id,
+        experiment_revision=experiment_revision,
+        arm_id=arm_id,
+        through_checkpoint=through_checkpoint,
+        attempt_ids=attempt_ids,
+        group_id=group_id,
+        mechanism=mechanism,
+        trusted_issuer_id=trusted_issuer_id,
+        trusted_public_key=trusted_public_key,
+        expected_controller_policy_sha256=expected_controller_policy_sha256,
+    )
+
+
+def _validate_admitted_snapshot(
+    snapshot: object,
+    *,
+    organization_id: str,
+    principal_id: str,
+    experiment_id: str,
+    experiment_revision: str,
+    arm_id: str,
+    through_checkpoint: int,
+    attempt_ids: tuple[str, ...],
+    group_id: str,
+    mechanism: str,
+    trusted_issuer_id: str,
+    trusted_public_key: Ed25519PublicKey,
+    expected_controller_policy_sha256: str,
+) -> ConsolidationGroup:
+    """Validate an owned database snapshot without occupying the request event loop."""
+    rows = content_client.normalize_records(snapshot)
     if len(rows) != 1:
         raise ReceiptError("admission source join did not return one snapshot")
     joined = rows[0]

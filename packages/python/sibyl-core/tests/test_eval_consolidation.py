@@ -1,6 +1,8 @@
 """Admitted outcomes use real stored sources, never caller-declared revisions."""
 
+import asyncio
 import json
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -149,3 +151,33 @@ async def test_offline_proposal_uses_signed_sources_and_rechecks_revision(
     monkeypatch.setattr(c.Extractor, "extract_with_usage", changed_extract)
     with pytest.raises(ReceiptError, match="changed during consolidation"):
         await eval_consolidation.propose_admitted_procedure(**params)
+
+
+async def test_signature_verification_keeps_request_event_loop_responsive(
+    admitted_pair, monkeypatch
+):
+    params, _ = admitted_pair
+    started = threading.Event()
+    release = threading.Event()
+    request_thread = threading.get_ident()
+    original = eval_consolidation.verify_outcome_receipt
+
+    def verify(*args, **kwargs):
+        assert threading.get_ident() != request_thread
+        started.set()
+        assert release.wait(timeout=5), "request loop did not release validation"
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(eval_consolidation, "verify_outcome_receipt", verify)
+    task = asyncio.create_task(eval_consolidation.load_admitted_consolidation_group(**params))
+    try:
+        assert await asyncio.wait_for(asyncio.to_thread(started.wait, 5), timeout=5)
+        assert not task.done()
+        # This callback must run while signature verification is still occupied.
+        progressed = asyncio.Event()
+        asyncio.get_running_loop().call_soon(progressed.set)
+        await asyncio.wait_for(progressed.wait(), timeout=5)
+    finally:
+        release.set()
+    group = await task
+    assert len(group.episodes) == 2
