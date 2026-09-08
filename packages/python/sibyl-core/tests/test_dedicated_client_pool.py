@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import sys
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -34,19 +32,19 @@ def _install_overlap_surreal(monkeypatch, tracker: _ConcurrencyTracker) -> list[
             self.namespace = namespace
             self.database = database
 
-        async def query(self, query: str, params: object | None = None) -> list[dict[str, str]]:
+        async def query_raw(self, query: str, params: object | None = None) -> dict[str, object]:
             tracker.in_flight += 1
             tracker.peak = max(tracker.peak, tracker.in_flight)
             try:
                 await tracker.release.wait()
-                return [{"ok": "yes"}]
+                return {"result": [{"status": "OK", "result": [{"ok": "yes"}]}]}
             finally:
                 tracker.in_flight -= 1
 
         async def close(self) -> None:
             self.closed = True
 
-    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
     return clients
 
 
@@ -88,7 +86,7 @@ def _install_live_surreal(monkeypatch) -> list[Any]:
         async def close(self) -> None:
             self.closed = True
 
-    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
     return clients
 
 
@@ -324,13 +322,13 @@ async def test_ping_drops_transient_failed_connection(monkeypatch) -> None:
         async def use(self, _namespace: str, _database: str) -> None:
             return None
 
-        async def query(self, _query: str, _params: object | None = None) -> object:
+        async def query_raw(self, _query: str, _params: object | None = None) -> object:
             raise TimeoutError("timed out during opening handshake")
 
         async def close(self) -> None:
             self.closed = True
 
-    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
 
     client = DedicatedSurrealClient(
         url="ws://localhost:8000/rpc",
@@ -364,16 +362,16 @@ async def test_execute_query_retries_server_declared_transaction_conflicts(monke
         async def use(self, _namespace: str, _database: str) -> None:
             return None
 
-        async def query(self, query: str, _params: object | None = None) -> object:
+        async def query_raw(self, query: str, _params: object | None = None) -> object:
             nonlocal calls
             if query == "RETURN true;":
-                return True
+                return {"result": [{"status": "OK", "result": True}]}
             calls += 1
             if calls == 1:
                 raise RuntimeError(
                     "Transaction conflict: Resource busy. This transaction can be retried"
                 )
-            return [{"ok": True}]
+            return {"result": [{"status": "OK", "result": [{"ok": True}]}]}
 
         async def close(self) -> None:
             return None
@@ -381,7 +379,7 @@ async def test_execute_query_retries_server_declared_transaction_conflicts(monke
     async def fake_sleep(seconds: float) -> None:
         sleeps.append(seconds)
 
-    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
     monkeypatch.setattr(dedicated_client_module.random, "uniform", lambda _low, high: high)
     monkeypatch.setattr(dedicated_client_module.asyncio, "sleep", fake_sleep)
     client = DedicatedSurrealClient(
@@ -414,17 +412,17 @@ async def test_execute_query_does_not_retry_unmarked_transaction_conflicts(monke
         async def use(self, _namespace: str, _database: str) -> None:
             return None
 
-        async def query(self, query: str, _params: object | None = None) -> object:
+        async def query_raw(self, query: str, _params: object | None = None) -> object:
             nonlocal calls
             if query == "RETURN true;":
-                return True
+                return {"result": [{"status": "OK", "result": True}]}
             calls += 1
             raise RuntimeError("Transaction conflict: retry safety is unknown")
 
         async def close(self) -> None:
             return None
 
-    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
     client = DedicatedSurrealClient(
         url="ws://localhost:8000/rpc",
         username="root",

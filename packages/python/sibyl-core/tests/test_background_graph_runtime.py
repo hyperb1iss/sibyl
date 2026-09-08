@@ -35,6 +35,9 @@ async def test_background_pool_saturation_preserves_interactive_capacity(monkeyp
                 await release.wait()
             return [query]
 
+        async def query_raw(self, query, params=None):
+            return {"result": [{"status": "OK", "result": await self.query(query, params)}]}
+
         async def close(self):
             await asyncio.sleep(0)
             self.closed = True

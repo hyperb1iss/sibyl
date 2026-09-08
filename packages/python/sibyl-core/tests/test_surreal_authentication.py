@@ -35,7 +35,7 @@ def fake_surreal(monkeypatch) -> list[tuple[str, object]]:
 
         async def query_raw(self, query: str, params: object | None = None) -> dict[str, Any]:
             calls.append(("query_raw", (query, params)))
-            return {"result": []}
+            return {"result": [{"status": "OK", "result": []}]}
 
         async def close(self) -> None:
             calls.append(("close", None))
@@ -154,6 +154,9 @@ async def test_surreal_dedicated_client_pools_connections_for_concurrent_queries
             await asyncio.sleep(0)
             return [{"query_count": self.query_count}]
 
+        async def query_raw(self, query, params=None):
+            return {"result": [{"status": "OK", "result": await self.query(query, params)}]}
+
         async def close(self) -> None:
             self.closed = True
 
@@ -232,6 +235,9 @@ async def test_surreal_dedicated_clients_retry_closed_read_socket(
                 raise ConnectionClosedError("sent 1011 keepalive ping timeout")
             return [{"ok": "yes"}]
 
+        async def query_raw(self, query, params=None):
+            return {"result": [{"status": "OK", "result": await self.query(query, params)}]}
+
         async def close(self) -> None:
             self.closed = True
 
@@ -309,6 +315,9 @@ async def test_surreal_dedicated_client_drops_query_id_keyerror_on_write(monkeyp
             if query == "RETURN true;":
                 return []
             raise KeyError("c87ffcce-66d3-4c07-aa06-7e40f3a9e67f")
+
+        async def query_raw(self, query, params=None):
+            return {"result": [{"status": "OK", "result": await self.query(query, params)}]}
 
         async def close(self) -> None:
             self.closed = True
@@ -482,6 +491,9 @@ async def test_surreal_content_client_preflights_stale_write_socket(monkeypatch)
                 raise ConnectionClosedError("sent 1011 keepalive ping timeout")
             return [{"ok": "yes"}]
 
+        async def query_raw(self, query, params=None):
+            return {"result": [{"status": "OK", "result": await self.query(query, params)}]}
+
         async def close(self) -> None:
             self.closed = True
 
@@ -532,6 +544,9 @@ async def test_surreal_content_client_does_not_retry_closed_write(monkeypatch) -
                 return []
             raise ConnectionClosedError("sent 1011 keepalive ping timeout")
 
+        async def query_raw(self, query, params=None):
+            return {"result": [{"status": "OK", "result": await self.query(query, params)}]}
+
         async def close(self) -> None:
             self.closed = True
 
@@ -567,6 +582,9 @@ async def test_surreal_content_client_emits_query_telemetry(monkeypatch) -> None
 
         async def query(self, query: str, params: object | None = None) -> list[Any]:
             return []
+
+        async def query_raw(self, query, params=None):
+            return {"result": [{"status": "OK", "result": await self.query(query, params)}]}
 
         async def close(self) -> None:
             return None

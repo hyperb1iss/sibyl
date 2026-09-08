@@ -14,6 +14,8 @@ _WRITE_QUERY_TOKENS = {
     "CREATE",
     "DEFINE",
     "DELETE",
+    # Stored functions can write even when invoked through SELECT or RETURN.
+    "FN",
     "IMPORT",
     "INSERT",
     "REBUILD",
