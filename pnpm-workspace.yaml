@@ -34,7 +34,7 @@ minimumReleaseAgeExclude:
 
 overrides:
   postcss: ^8.5.18
-  sharp: 0.35.3
+  sharp: 0.35.4
 
 # Skip minimumReleaseAge re-verification of the committed lockfile. The
 # 24h cooldown still applies during fresh resolution (and lockfile diffs
