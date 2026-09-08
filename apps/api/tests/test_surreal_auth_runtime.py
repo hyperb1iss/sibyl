@@ -3333,9 +3333,10 @@ async def test_server_instance_id_fails_closed_if_missing_or_invalid(monkeypatch
         await auth_common.get_server_instance_id()
 
 
-@pytest.mark.parametrize("binding", [None, {"direct-editor", "team-viewer"}])
-async def test_project_contributor_listing_uses_effective_roles_and_key_binding(
-    monkeypatch, binding
+@pytest.mark.parametrize("binding", [None, {"direct-editor", "team-viewer"}, {"owned"}])
+@pytest.mark.parametrize("required_role", ["viewer", "contributor"])
+async def test_project_listing_uses_effective_roles_and_key_binding(
+    monkeypatch, binding, required_role
 ):
     from sibyl_core.auth import ProjectRole
 
@@ -3384,9 +3385,11 @@ async def test_project_contributor_listing_uses_effective_roles_and_key_binding(
         surreal_auth_runtime, "_auth_client_scope", lambda: _StaticAuthClientScope(client)
     )
     actual = await surreal_auth_runtime.list_accessible_project_graph_ids(
-        ctx, required_role=ProjectRole.CONTRIBUTOR
+        ctx, required_role=ProjectRole[required_role.upper()]
     )
     expected = {"direct-editor", "team-editor", "owned", "org-editor"}
+    if required_role == "viewer":
+        expected.update({"direct-viewer", "team-viewer", "org-viewer"})
     assert actual == (expected if binding is None else expected & binding)
     assert len(client.calls) == 1
 
@@ -3437,3 +3440,28 @@ async def test_project_read_write_snapshot_resolves_auth_and_rows_once(monkeypat
     assert writable == ({"read", "write"} if org_role == "admin" else {"write"})
     resolve.assert_awaited_once()
     assert len(client.calls) == 1
+
+
+@pytest.mark.parametrize("grant_kind", ["visibility", "direct", "team"])
+@pytest.mark.parametrize("missing_role", [None, ""])
+def test_legacy_project_grant_without_role_remains_read_only(grant_kind, missing_role):
+    from sibyl.persistence.surreal.auth_runtime import projects as project_runtime
+    from sibyl_core.auth import ProjectRole
+
+    ctx = SimpleNamespace(
+        user=SimpleNamespace(id=uuid4()), org_role="member", api_key_project_ids=None
+    )
+    project = {
+        "uuid": "legacy",
+        "graph_project_id": "legacy",
+        "visibility": "org" if grant_kind == "visibility" else "private",
+        "default_role": missing_role,
+    }
+    membership = {"project_id": "legacy", "role": missing_role}
+    payload = {
+        "direct_memberships": [membership] if grant_kind == "direct" else [],
+        "team_projects": [membership] if grant_kind == "team" else [],
+    }
+    for required_role in ProjectRole:
+        granted = project_runtime._project_ids_for_role(ctx, [project], payload, required_role)
+        assert granted == ({"legacy"} if required_role is ProjectRole.VIEWER else set())

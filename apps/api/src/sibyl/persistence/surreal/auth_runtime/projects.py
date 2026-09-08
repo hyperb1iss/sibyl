@@ -1248,66 +1248,29 @@ def _project_ids_for_role(
         if api_key_allowed is not None:
             return accessible & {str(project_id) for project_id in api_key_allowed}
         return accessible
-    if required_role is not ProjectRole.VIEWER:
-        direct_by_project = {
-            str(record.get("project_id")): record
-            for record in _normalize_records(payload.get("direct_memberships"))
-        }
-        teams_by_project: dict[str, list[SurrealRecord]] = {}
-        for record in _normalize_records(payload.get("team_projects")):
-            teams_by_project.setdefault(str(record.get("project_id")), []).append(record)
-        writable: set[str] = set()
-        for project in project_records:
-            project_id = str(project.get("uuid"))
-            graph_id = str(project.get("graph_project_id") or "").strip()
-            role = _effective_project_role_from_records(
-                ctx=ctx,
-                project=project,
-                direct_record=direct_by_project.get(project_id),
-                team_project_records=teams_by_project.get(project_id, []),
-            )
-            if (
-                graph_id
-                and role is not None
-                and (_PROJECT_ROLE_LEVELS[role] >= _PROJECT_ROLE_LEVELS[required_role])
-            ):
-                writable.add(graph_id)
-        api_key_allowed = getattr(ctx, "api_key_project_ids", None)
-        if api_key_allowed is not None:
-            return writable & {str(project_id) for project_id in api_key_allowed}
-        return writable
+    direct_by_project = {
+        str(record.get("project_id")): record
+        for record in _normalize_records(payload.get("direct_memberships"))
+    }
+    teams_by_project: dict[str, list[SurrealRecord]] = {}
+    for record in _normalize_records(payload.get("team_projects")):
+        teams_by_project.setdefault(str(record.get("project_id")), []).append(record)
     accessible: set[str] = set()
-    org_visible = {
-        str(record["uuid"]): str(record["graph_project_id"])
-        for record in project_records
-        if record.get("visibility") == ProjectVisibility.ORG.value
-        and str(record.get("graph_project_id") or "").strip()
-    }
-    accessible.update(org_visible.values())
-    direct_memberships = _normalize_records(payload.get("direct_memberships"))
-    direct_project_ids = {
-        str(record["project_id"])
-        for record in direct_memberships
-        if str(record.get("project_id") or "").strip()
-    }
-    accessible.update(
-        str(record["graph_project_id"])
-        for record in project_records
-        if str(record.get("uuid")) in direct_project_ids
-        and str(record.get("graph_project_id") or "").strip()
-    )
-    team_projects = _normalize_records(payload.get("team_projects"))
-    granted_project_ids = {
-        str(record["project_id"])
-        for record in team_projects
-        if str(record.get("project_id") or "").strip()
-    }
-    accessible.update(
-        str(record["graph_project_id"])
-        for record in project_records
-        if str(record.get("uuid")) in granted_project_ids
-        and str(record.get("graph_project_id") or "").strip()
-    )
+    for project in project_records:
+        project_id = str(project.get("uuid"))
+        graph_id = str(project.get("graph_project_id") or "").strip()
+        role = _effective_project_role_from_records(
+            ctx=ctx,
+            project=project,
+            direct_record=direct_by_project.get(project_id),
+            team_project_records=teams_by_project.get(project_id, []),
+        )
+        if (
+            graph_id
+            and role is not None
+            and (_PROJECT_ROLE_LEVELS[role] >= _PROJECT_ROLE_LEVELS[required_role])
+        ):
+            accessible.add(graph_id)
     api_key_allowed = getattr(ctx, "api_key_project_ids", None)
     if api_key_allowed is not None:
         return accessible & {str(project_id) for project_id in api_key_allowed}
@@ -1599,15 +1562,22 @@ def _effective_project_role_from_records(
     if _coerce_optional_uuid(project.get("owner_user_id")) == ctx.user.id:
         return ProjectRole.OWNER
     roles: list[ProjectRole] = []
-    direct_role = _coerce_project_role(direct_record.get("role")) if direct_record else None
+    # A legacy grant without a role confers read access, never write access.
+    direct_role = (
+        _coerce_project_role(direct_record.get("role") or ProjectRole.VIEWER.value)
+        if direct_record
+        else None
+    )
     if direct_role is not None:
         roles.append(direct_role)
     for team_project in team_project_records:
-        team_role = _coerce_project_role(team_project.get("role"))
+        team_role = _coerce_project_role(team_project.get("role") or ProjectRole.VIEWER.value)
         if team_role is not None:
             roles.append(team_role)
     if project.get("visibility") == ProjectVisibility.ORG.value:
-        visibility_role = _coerce_project_role(project.get("default_role"))
+        visibility_role = _coerce_project_role(
+            project.get("default_role") or ProjectRole.VIEWER.value
+        )
         if visibility_role is not None:
             roles.append(visibility_role)
     if not roles:
