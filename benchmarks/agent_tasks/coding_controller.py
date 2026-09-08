@@ -889,7 +889,7 @@ class Controller:
 
     # -- budget -----------------------------------------------------------
 
-    def _remaining(self, name: str) -> int | None:
+    def _remaining(self, name: str) -> int | float | None:
         used = getattr(self.usage, name)
         return None if used is None else self._budget[name] - used
 
@@ -920,12 +920,27 @@ class Controller:
 
     # -- provider ---------------------------------------------------------
 
+    def _budget_message(self) -> dict[str, str]:
+        state = {
+            "declared": self._budget,
+            "remaining": {name: self._remaining(name) for name in BUDGET_FIELDS},
+        }
+        instruction = (
+            "Controller budget before this request (reported usage, cumulative limits): "
+            + json.dumps(state, sort_keys=True, allow_nan=False)
+            + "\nPlan tool use within the remaining allowance and reserve output for your final "
+            "response. Each invocation, including a refused invocation, consumes one tool call. "
+            "When no tool calls remain, give a final response describing completed work and "
+            "any unresolved problems. Do not claim unperformed verification."
+        )
+        return {"role": "system", "content": instruction}
+
     def _body(self, messages: list[dict[str, Any]], max_tokens: int) -> dict[str, Any]:
         return {
             "model": self.request["controller_model"],
-            "messages": messages,
+            "messages": [messages[0], self._budget_message(), *messages[1:]],
             "tools": [SHELL_TOOL],
-            "tool_choice": "auto",
+            "tool_choice": "none" if self._remaining("tool_calls") == 0 else "auto",
             "seed": self.request["seed"],
             "max_tokens": max_tokens,
             "stream": False,
