@@ -6,7 +6,7 @@ DEFINE FIELD OVERWRITE legacy_content_checkpoint ON raw_captures TYPE option<obj
         THROW 'correction_history must be an array';
     };
     LET $legacy = $history.filter(|$entry| type::is::object($entry)
-        AND string::lowercase(string::trim($entry.action ?? '')) = 'revise'
+        AND string::lowercase(string::trim(type::string($entry.action ?? ''))) = 'revise'
         AND $entry.prior_revision = NONE);
     LET $clock = revision ?? 1;
     IF $before != NONE AND $before.entries = $legacy {
