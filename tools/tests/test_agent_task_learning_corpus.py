@@ -56,7 +56,7 @@ def test_freeze_binds_existing_oracle_and_excludes_repairs(tmp_path):
         freeze(root, seed=0, image="sha256:" + "a" * 64, docker="/usr/bin/docker").read_bytes()
     )
     tasks = [Task.model_validate(item) for item in catalog["tasks"]]
-    assert Counter(task.split for task in tasks) == {"learning": 12, "development": 2}
+    assert Counter(task.split for task in tasks) == {"learning": 16, "development": 2}
     assert catalog["experiences"] == []
     for task in tasks:
         assert isinstance(task.checker, JsonOracleChecker)
@@ -77,7 +77,7 @@ def test_freeze_binds_existing_oracle_and_excludes_repairs(tmp_path):
 
 def test_cross_split_lineage_report():
     audit = lineage_audit(families(0))
-    assert len(audit["pairs"]) == 12 * 2
+    assert len(audit["pairs"]) == 16 * 2
     assert not any(pair["shared_lineage"] for pair in audit["pairs"])
     assert all(pair["files"] for pair in audit["pairs"])
     assert audit["experience_count"] == 0
