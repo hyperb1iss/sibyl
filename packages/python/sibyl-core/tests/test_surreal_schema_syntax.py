@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import UUID
 
@@ -58,6 +59,7 @@ from sibyl_core.backends.surreal.schema import (
     CURRENT_SCHEMA_MAINTENANCE_DEFINITIONS,
     DEAD_GRAPH_OBJECT_REMOVAL_DEFINITIONS,
     EDGE_DEFINITIONS,
+    EMBEDDING_DIM,
     ENTITY_ACTOR_ATTRIBUTION_DEFINITIONS,
     ENTITY_MISLED_USAGE_SIGNAL_DEFINITIONS,
     ENTITY_REQUIRED_FIELD_REPAIR_DEFINITIONS,
@@ -106,9 +108,29 @@ class _RecordingSchemaClient:
         self._url = ""
         self.group_id = "org_123"
 
+    @asynccontextmanager
+    async def schema_lease_executor(self):
+        yield self.execute_query
+
     async def execute_query(self, statement: str, **params: object) -> object:
         self.calls.append(statement)
         stripped = statement.strip()
+        # Syntax fixtures inspect the mutation body; database ownership is
+        # exercised separately against embedded and server stores.
+        if stripped.startswith("BEGIN TRANSACTION;") and "$sibyl_schema_owned" in stripped:
+            stripped = stripped.split("}; ", 1)[1].rsplit("\n;\nCOMMIT TRANSACTION;", 1)[0].strip()
+        if "$sibyl_schema_claimed" in stripped:
+            return None
+        if stripped.startswith("SELECT owner FROM schema_lease:graph") and "owner" in params:
+            return [{"owner": params["owner"]}]
+        if stripped.startswith("UPDATE schema_lease:graph") and "RETURN AFTER" in stripped:
+            return [{"owner": params["sibyl_schema_owner"]}]
+        if stripped.startswith("SELECT owner FROM schema_lease:graph"):
+            return []
+        if stripped.startswith("SELECT embedding_dimension FROM schema_version"):
+            return [{"embedding_dimension": EMBEDDING_DIM}]
+        if stripped.startswith("INFO FOR TABLE entity"):
+            return {"indexes": {}}
         if stripped.startswith("SELECT version FROM schema_version"):
             return [{"version": self.schema_version}]
         if stripped.startswith("SELECT count() AS count FROM "):
@@ -130,6 +152,10 @@ class _RecordingSchemaClient:
                 self.missing_tables.discard(table)
             if stripped.startswith(f"DEFINE TABLE OVERWRITE {table}"):
                 self.missing_tables.discard(table)
+        if statement.startswith("SELECT id, uuid FROM entity"):
+            return []
+        if statement.startswith("INFO FOR INDEX idx_entity_lifecycle_repair_key"):
+            return [{"building": {"status": "ready"}}]
         if self.duplicate_index_name and self.duplicate_index_name in statement:
             raise RuntimeError(
                 f"Database index `{self.duplicate_index_name}` already contains 'dirty-row'"

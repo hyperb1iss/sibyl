@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import Awaitable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from time import monotonic
 from typing import TYPE_CHECKING, Protocol, cast
@@ -14,7 +14,7 @@ from sibyl_core.backends.surreal.schema_helpers import execute_schema_statement,
 if TYPE_CHECKING:
     from sibyl_core.backends.surreal.schema_ownership import SchemaOwnership
 
-GRAPH_SCHEMA_CURRENT_VERSION = 20
+GRAPH_SCHEMA_CURRENT_VERSION = 23
 GRAPH_SCHEMA_NAME = "graph"
 SCHEMA_VERSION_TABLE = "schema_version"
 
@@ -24,6 +24,7 @@ ALTER TABLE IF EXISTS schema_version SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS name ON schema_version TYPE string;
 DEFINE FIELD IF NOT EXISTS version ON schema_version TYPE int;
 DEFINE FIELD IF NOT EXISTS embedding_dimension ON schema_version TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS embedding_rebuild_dimension ON schema_version TYPE option<int>;
 DEFINE FIELD IF NOT EXISTS migrations ON schema_version TYPE array<object> DEFAULT [];
 DEFINE FIELD IF NOT EXISTS migrations.*.version ON schema_version TYPE int;
 DEFINE FIELD IF NOT EXISTS migrations.*.name ON schema_version TYPE string;
@@ -44,6 +45,7 @@ class SchemaMigration:
     version: int
     name: str
     statements: tuple[str, ...] = ()
+    action: Callable[[SurrealExecute], Awaitable[None]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +120,8 @@ async def record_schema_version(
             name = $name,
             version = $version,
             embedding_dimension = $embedding_dimension ?? embedding_dimension,
+            embedding_rebuild_dimension = IF $embedding_dimension IS NOT NONE
+                THEN NONE ELSE embedding_rebuild_dimension END,
             migrations = $migrations,
             created_at = created_at ?? time::now(),
             updated_at = time::now();
@@ -145,6 +149,13 @@ async def get_schema_embedding_dimension(
     return int(raw_dimension) if isinstance(raw_dimension, int | float | str) else None
 
 
+async def get_schema_embedding_rebuild_dimension(execute_query: SurrealExecute) -> int | None:
+    result = await execute_query("SELECT embedding_rebuild_dimension FROM schema_version:graph;")
+    first = _first_record(result)
+    dimension = first.get("embedding_rebuild_dimension") if first is not None else None
+    return int(dimension) if isinstance(dimension, int | float | str) else None
+
+
 async def apply_schema_migrations(
     execute_query: SurrealExecute,
     migrations: Sequence[SchemaMigration],
@@ -152,9 +163,11 @@ async def apply_schema_migrations(
     name: str = GRAPH_SCHEMA_NAME,
     group_id: str | None = None,
     scope: str = "schema_migration",
+    ownership: SchemaOwnership | None = None,
 ) -> list[SchemaMigration]:
+    mutate = ownership.mutate if ownership is not None else execute_query
     await ensure_schema_version_table(
-        execute_query,
+        mutate,
         group_id=group_id,
         scope=f"{scope}_version",
     )
@@ -166,17 +179,19 @@ async def apply_schema_migrations(
             continue
         for statement in migration.statements:
             await execute_schema_statement(
-                execute_query,
+                mutate,
                 statement,
                 scope=scope,
                 group_id=group_id,
             )
+        if migration.action is not None:
+            await migration.action(execute_query)
         applied.append(migration)
         migration_history = [
             item for item in sorted_migrations if item.version <= migration.version
         ]
         await record_schema_version(
-            execute_query,
+            mutate,
             version=migration.version,
             migrations=migration_history,
             name=name,
