@@ -50,6 +50,10 @@ class RevisionConflictError(SibylError):
         )
 
 
+class SourceObservationConflictError(SibylError):
+    """A source observation changed before a derived publication committed."""
+
+
 class ValidationError(SibylError):
     """Raised when input validation fails."""
 

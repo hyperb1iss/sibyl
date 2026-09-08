@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import replace
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -13,16 +14,26 @@ from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
 from sibyl.config import EvalIssuerSettings, settings
 from sibyl_core.auth import AuthOrganization, OrganizationRole
-from sibyl_core.auth.memory_policy import MemoryPolicyAction
+from sibyl_core.auth.memory_policy import EVAL_CONSOLIDATION_METADATA_KEY, MemoryPolicyAction
+from sibyl_core.memory_pipeline.source_lifecycle import public_memory_metadata
 from sibyl_core.models.memory_scope import MemoryScope
 from sibyl_core.models.reflection import ReflectionCandidate
+from sibyl_core.services.content_models import raw_memory_recallable
 from sibyl_core.services.eval_admission import (
     EvalAdmissionConflict,
     admit_eval_outcome,
     get_registered_eval_assignment,
     register_eval_assignment,
 )
-from sibyl_core.services.eval_consolidation import propose_admitted_procedure
+from sibyl_core.services.eval_publication import (
+    ConsolidationConflict,
+    ConsolidationOperation,
+    consolidate_admitted_procedure,
+    consolidation_extractor_configuration,
+)
+from sibyl_core.services.eval_publication_guards import verify_publication_admissions
+from sibyl_core.services.memory_source_validation import reconcile_raw_source_lifecycle
+from sibyl_core.tasks.consolidation import METADATA_KEY
 from sibyl_core.tasks.eval_receipts import ReceiptError, TaskAssignment
 
 
@@ -194,6 +205,9 @@ class EvalConsolidationRequest(BaseModel):
 
 
 class EvalConsolidationResponse(BaseModel):
+    operation_id: str
+    status: str
+    memory_id: str | None
     candidate: ReflectionCandidate | None
     abstention_reason: str | None
     build_receipt: dict[str, object]
@@ -224,29 +238,73 @@ async def consolidate_admitted_attempts(
         request=http_request,
     )
     issuer = _trusted_issuer(body.issuer_id, assignment)
+    model, extractor_revision = await consolidation_extractor_configuration()
     try:
-        result = await propose_admitted_procedure(
+        operation = ConsolidationOperation(
             organization_id=organization_id,
             principal_id=assignment.owner_principal_id,
             experiment_id=experiment_id,
             experiment_revision=body.experiment_revision,
             arm_id=body.arm_id,
-            through_checkpoint=body.through_checkpoint,
+            checkpoint=body.through_checkpoint,
             attempt_ids=tuple(body.attempt_ids),
             group_id=body.group_id,
             mechanism=body.mechanism,
+            controller_policy_sha256=issuer.controller_policy_sha256,
+            extractor_revision=extractor_revision,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        result = await consolidate_admitted_procedure(
+            operation,
             trusted_issuer_id=issuer.issuer_id,
             trusted_public_key=Ed25519PublicKey.from_public_bytes(
                 base64.b64decode(issuer.public_key_base64, validate=True)
             ),
-            expected_controller_policy_sha256=issuer.controller_policy_sha256,
+            model_override=model,
         )
-    except ReceiptError as exc:
+    except (ReceiptError, ConsolidationConflict) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    memory = result.memory
+    candidate = None
+    receipt = {}
+    if memory is not None:
+        memory = await reconcile_raw_source_lifecycle(
+            memory,
+            principal_id=assignment.owner_principal_id,
+        )
+        # A review response may show its own pending draft, but cannot waive
+        # lifecycle exclusions or changes to the original admitted evidence.
+        review_metadata = dict(memory.metadata)
+        review_metadata.pop(EVAL_CONSOLIDATION_METADATA_KEY, None)
+        if not raw_memory_recallable(
+            replace(memory, metadata=review_metadata)
+        ) or not await verify_publication_admissions(memory):
+            raise HTTPException(
+                status_code=409, detail="Stored consolidation sources are unavailable"
+            )
+        candidate = ReflectionCandidate(
+            kind=memory.entity_type,
+            title=memory.title,
+            content=memory.raw_content,
+            reason=str(memory.metadata.get("reflection_reason") or "Stored consolidation proposal"),
+            confidence=float(memory.metadata.get("confidence") or 0),
+            tags=list(memory.tags),
+            metadata=public_memory_metadata(memory.metadata),
+            review_state=memory.review_state,
+        )
+        payload = memory.metadata.get(METADATA_KEY)
+        if not isinstance(payload, dict) or not isinstance(payload.get("build_receipt"), dict):
+            raise HTTPException(status_code=409, detail="Stored consolidation receipt is invalid")
+        receipt = payload["build_receipt"]
     return EvalConsolidationResponse(
-        candidate=result.proposal.candidate,
-        abstention_reason=result.proposal.proposal.abstention_reason,
-        build_receipt=result.proposal.receipt,
-        source_join=result.source_join,
-        source_freshness=result.source_freshness,
+        operation_id=result.operation_id,
+        status=result.status,
+        memory_id=memory.id if memory else None,
+        candidate=candidate,
+        abstention_reason="insufficient_support" if result.status == "abstained" else None,
+        build_receipt=receipt,
+        source_join="authenticated_admission_ledger",
+        source_freshness="checked_at_persistence; current_lifecycle_required_for_publication",
     )

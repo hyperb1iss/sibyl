@@ -9,6 +9,9 @@ from dataclasses import dataclass, replace
 from typing import Any, Literal
 from uuid import NAMESPACE_URL, uuid5
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+from sibyl_core.ai.llm.config import LLMSurface, resolve_llm_config
 from sibyl_core.auth.memory_policy import (
     EVAL_ADMISSION_METADATA_KEY,
     EVAL_CONSOLIDATION_METADATA_KEY,
@@ -27,6 +30,8 @@ from sibyl_core.services.memory_source_validation import (
     SourceReadAuthority,
 )
 from sibyl_core.tasks.consolidation import (
+    SCHEMA_VERSION,
+    SYSTEM_PROMPT,
     AdmittedTaskOutcome,
     ConsolidationResult,
     validate_candidate_content_agreement,
@@ -375,6 +380,34 @@ async def store_consolidation(
         "organization_id": operation.organization_id,
         "principal_id": operation.principal_id,
         "request_sha256": operation.request_sha256,
+        "admission_bindings": [
+            {
+                **{
+                    key: source[key]
+                    for key in (
+                        "attempt_id",
+                        "capture_id",
+                        "revision",
+                        "receipt_sha256",
+                        "episode_sha256",
+                        "assignment_sha256",
+                        "outcome_sha256",
+                        "transcript_sha256",
+                        "admission_stamp",
+                    )
+                },
+                "experiment_id": operation.experiment_id,
+                "assignment_artifact_sha256": hashlib.sha256(
+                    source["assignment_json"].encode()
+                ).hexdigest(),
+                "receipt_artifact_sha256": hashlib.sha256(
+                    source["receipt_base64"].encode()
+                ).hexdigest(),
+            }
+            for source in sources
+        ]
+        if candidate
+        else [],
         "candidate_id": candidate_id,
         "result_kind": "candidate" if candidate else "abstained",
     }
@@ -400,3 +433,61 @@ async def store_consolidation(
     if len(rows) != 1:
         raise ConsolidationConflict("consolidation did not return its stored result")
     return _decode(operation, rows[0])
+
+
+async def consolidation_extractor_configuration() -> tuple[str, str]:
+    """Identify the effective extraction policy without including credentials."""
+    config = await resolve_llm_config(LLMSurface.MEMORY)
+    revision = _digest(
+        {
+            "protocol": SCHEMA_VERSION,
+            "system_prompt": SYSTEM_PROMPT,
+            "provider": config.provider.value,
+            "model": config.model.value,
+            "temperature": config.temperature.value,
+            "max_input_chars": 40_000,
+            "max_output_tokens": 2_048,
+        }
+    )
+    return config.model.value, revision
+
+
+async def consolidate_admitted_procedure(
+    operation: ConsolidationOperation,
+    *,
+    trusted_issuer_id: str,
+    trusted_public_key: Ed25519PublicKey,
+    model_override: str,
+) -> StoredConsolidation:
+    """Resolve a durable result or build once from the authorized admitted cohort."""
+    from sibyl_core.services.eval_consolidation import propose_admitted_procedure
+
+    stored = await get_stored_consolidation(operation)
+    if stored is not None:
+        return stored
+    if await consolidation_extractor_configuration() != (
+        model_override,
+        operation.extractor_revision,
+    ):
+        raise ConsolidationConflict("extraction configuration changed")
+    result = await propose_admitted_procedure(
+        organization_id=operation.organization_id,
+        principal_id=operation.principal_id,
+        experiment_id=operation.experiment_id,
+        experiment_revision=operation.experiment_revision,
+        arm_id=operation.arm_id,
+        through_checkpoint=operation.checkpoint,
+        attempt_ids=operation.attempt_ids,
+        group_id=operation.group_id,
+        mechanism=operation.mechanism,
+        trusted_issuer_id=trusted_issuer_id,
+        trusted_public_key=trusted_public_key,
+        expected_controller_policy_sha256=operation.controller_policy_sha256,
+        model_override=model_override,
+    )
+    if await consolidation_extractor_configuration() != (
+        model_override,
+        operation.extractor_revision,
+    ):
+        raise ConsolidationConflict("extraction configuration changed during consolidation")
+    return await store_consolidation(operation, result.proposal)
