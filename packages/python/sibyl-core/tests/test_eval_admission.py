@@ -282,15 +282,13 @@ async def test_checked_client_replays_transaction_conflicts(
 
         async def conflict_once(connection, query, **kwargs):
             nonlocal attempts
-            if query.lstrip().startswith("BEGIN TRANSACTION"):
+            if query == (
+                eval_admission._REGISTER if operation == "register" else eval_admission._ADMIT
+            ):
                 attempts += 1
                 if attempts == 1:
                     return {
                         "result": [
-                            {
-                                "status": "ERR",
-                                "result": "The query was not executed due to a failed transaction",
-                            },
                             {
                                 "status": "ERR",
                                 "result": "Cannot COMMIT: Transaction conflict: Write conflict, retry the transaction. This transaction can be retried",
