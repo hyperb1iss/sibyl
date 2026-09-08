@@ -436,3 +436,50 @@ async def test_execute_query_does_not_retry_unmarked_transaction_conflicts(monke
         await client.execute_query("UPDATE entity SET updated_at = time::now();")
 
     assert calls == 1
+
+
+async def test_schema_renewal_has_capacity_when_graph_pool_is_occupied(monkeypatch):
+    tracker = _ConcurrencyTracker()
+    clients = _install_overlap_surreal(monkeypatch, tracker)
+    client = DedicatedSurrealClient(
+        url="ws://localhost:8000/rpc",
+        username="qualification",
+        password="synthetic",
+        namespace="org_renewal",
+        database="graph",
+        pool_size=1,
+    )
+    try:
+        async with client.schema_lease_executor() as execute_lease:
+            work = asyncio.create_task(client.execute_query("RETURN 'long mutation';"))
+            renewal = asyncio.create_task(execute_lease("RETURN 'renewal';"))
+            try:
+                for _ in range(200):
+                    if tracker.in_flight == 2:
+                        break
+                    await asyncio.sleep(0.005)
+                assert tracker.in_flight == 2
+                assert all(c.namespace == "org_renewal" and c.database == "graph" for c in clients)
+            finally:
+                tracker.release.set()
+                await asyncio.gather(work, renewal)
+        assert sum(c.closed for c in clients) == 1
+        await client.execute_query("RETURN 'graph still usable';")
+    finally:
+        tracker.release.set()
+        await client.close()
+    assert all(c.closed for c in clients)
+
+
+async def test_embedded_schema_renewal_preserves_the_original_store(monkeypatch):
+    tracker = _ConcurrencyTracker()
+    tracker.release.set()
+    clients = _install_overlap_surreal(monkeypatch, tracker)
+    client = DedicatedSurrealClient(url="memory://", namespace="org_embedded", database="graph")
+    try:
+        async with client.schema_lease_executor() as execute_lease:
+            await execute_lease("RETURN 'renewal';")
+        await client.execute_query("RETURN 'same store';")
+        assert len(clients) == 1 and not clients[0].closed
+    finally:
+        await client.close()

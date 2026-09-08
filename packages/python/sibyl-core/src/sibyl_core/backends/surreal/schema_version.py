@@ -7,9 +7,12 @@ import re
 from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass
 from time import monotonic
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from sibyl_core.backends.surreal.schema_helpers import execute_schema_statement, split_statements
+
+if TYPE_CHECKING:
+    from sibyl_core.backends.surreal.schema_ownership import SchemaOwnership
 
 GRAPH_SCHEMA_CURRENT_VERSION = 20
 GRAPH_SCHEMA_NAME = "graph"
@@ -56,6 +59,14 @@ class IndexBuildStatus:
     initial: int | None = None
     pending: int | None = None
     updated: int | None = None
+
+
+class IndexBuildStalledError(TimeoutError):
+    """An index has shown no build progress within its observation window."""
+
+
+class IndexBuildFailedError(RuntimeError):
+    """The server explicitly reported a failed index build."""
 
 
 async def ensure_schema_version_table(
@@ -215,20 +226,54 @@ async def wait_for_index_ready(
     table: str,
     timeout_seconds: float = 300.0,
     poll_interval_seconds: float = 1.0,
+    require_status: bool = False,
+    ownership: SchemaOwnership | None = None,
+    track_progress: bool = False,
 ) -> IndexBuildStatus | None:
+    """Wait for readiness, optionally measuring timeout since observed progress.
+
+    Initial rows scanned, updates applied, and pending work consumed establish
+    progress independently; none is a completion fraction. Stage transitions
+    also renew the observation window. A growing pending queue alone does not.
+    """
     deadline = monotonic() + timeout_seconds
     last_status: IndexBuildStatus | None = None
     while monotonic() < deadline:
+        if ownership is not None:
+            await ownership.heartbeat()
         status = await get_index_build_status(execute_query, name=name, table=table)
+        if status is None and require_status:
+            raise RuntimeError(f"index {name} on {table} returned no build status")
         if status is None or status.status in {"ready", "built"}:
             return status
         if status.status == "error":
             msg = f"index {name} on {table} failed to build"
-            raise RuntimeError(msg)
+            raise IndexBuildFailedError(msg)
+        if track_progress and _index_build_progressed(last_status, status):
+            deadline = monotonic() + timeout_seconds
         last_status = status
-        await asyncio.sleep(poll_interval_seconds)
+        sleep_seconds = poll_interval_seconds
+        if ownership is not None:
+            sleep_seconds = min(sleep_seconds, ownership.lease_seconds / 3)
+        await asyncio.sleep(sleep_seconds)
     msg = f"timed out waiting for index {name} on {table}: {last_status}"
+    if track_progress:
+        raise IndexBuildStalledError(msg)
     raise TimeoutError(msg)
+
+
+def _index_build_progressed(previous: IndexBuildStatus | None, current: IndexBuildStatus) -> bool:
+    if previous is None or current.status != previous.status:
+        return True
+    for field in ("initial", "updated"):
+        before, after = getattr(previous, field), getattr(current, field)
+        if after is not None and (before is None or after > before):
+            return True
+    return (
+        previous.pending is not None
+        and current.pending is not None
+        and current.pending < previous.pending
+    )
 
 
 def _with_concurrently(definition: str) -> str:

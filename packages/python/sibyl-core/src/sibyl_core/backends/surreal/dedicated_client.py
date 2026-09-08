@@ -9,7 +9,7 @@ import random
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from sibyl_core.backends.surreal.connection import (
     _can_retry_query,
@@ -23,6 +23,9 @@ from sibyl_core.backends.surreal.observability import (
     query_start,
 )
 from sibyl_core.backends.surreal.protocols import QueryParams, SurrealClient
+
+if TYPE_CHECKING:
+    from sibyl_core.backends.surreal.schema_version import SurrealExecute
 
 logger = logging.getLogger(__name__)
 _MAX_CLOSED_CONNECTION_RETRIES = 2
@@ -244,6 +247,27 @@ class DedicatedSurrealClient:
             namespace=self._namespace,
             database=self._database,
         )
+
+    @asynccontextmanager
+    async def schema_lease_executor(self) -> AsyncIterator[SurrealExecute]:
+        """Reserve renewal capacity without competing with graph query sockets."""
+        if _is_embedded_url(self._url):
+            yield self.execute_query
+            return
+        control = DedicatedSurrealClient(
+            url=self._url,
+            username=self._username,
+            password=self._password,
+            token=self._token,
+            namespace=self._namespace,
+            database=self._database,
+            client_kind=self._client_kind,
+            pool_size=1,
+        )
+        try:
+            yield control.execute_query
+        finally:
+            await control.close()
 
     async def connect(self) -> SurrealClient:
         connection = await self._available.get()
