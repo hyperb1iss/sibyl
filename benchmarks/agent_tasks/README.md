@@ -171,3 +171,76 @@ remain refused. Separate oracle ownership, admitted controller/runtime policy,
 authenticated outcomes, and split-aware learning admission remain required for
 sealed evaluation. The private artifact and result files share the trusted host
 user's storage. Their hashes do not authenticate the worker or prove learning.
+
+## Collect authenticated learning episodes
+
+The trusted learning harness registers an immutable assignment before running the
+installed coding controller. The JSON oracle checks the final candidate, then the
+harness signs the retained outcome, transcript, and deterministic episode. Sibyl
+admits the episode into one private raw capture and returns its ID and current
+revision. A failed HTTP response can be retried without another model call.
+
+The host operator and controller implementation are trusted. The controller keeps
+its existing Docker access; the harness provides no hostile-controller isolation
+or sealed grading. All collection receipts retain `sealed_isolation: false`.
+A signed episode establishes issuer authenticity and evidence binding. Collection
+alone establishes no consolidation or held-out learning improvement.
+
+Use a frozen manifest with a `learning` task and a `sibyl-json-cli-oracle-v1`
+checker. The controller artifact must exactly match the installed
+`coding_controller.py`, with `shell` as its only tool and
+`OPENROUTER_API_KEY` as its explicit provider credential. Declare the controller's
+image, Docker executable, Docker socket, tool timeout, and memory allowance in its
+arguments. Its image and Docker endpoint must match the checker; the controller
+and checker may have different time and memory allowances.
+
+First inspect the policy:
+
+```bash
+moon run :agent-learning-run -- policy --manifest /path/to/frozen/manifest.json
+```
+
+Authorize the resulting policy digest and experiment revision in the server's
+`eval_issuers` configuration, together with the issuer's Ed25519 public key and
+organization. The API credential must belong to the destination owner, have an
+owner or admin organization role, and permit private memory writes. Keep the API
+credential in `SIBYL_EVAL_API_TOKEN`; the provider credential remains in
+`OPENROUTER_API_KEY`. Neither credential is printed or copied into the candidate
+container. The signing key is a private regular file containing 32 raw Ed25519
+private-key bytes (mode `0600`), loaded only after controller execution completes.
+
+```bash
+moon run :agent-learning-run -- run \
+  --manifest /path/to/frozen/manifest.json \
+  --task learning-task --arm raw \
+  --organization ORGANIZATION_ID --owner OWNER_PRINCIPAL_ID \
+  --issuer learning-oracle --checkpoint 0 \
+  --policy-sha256 APPROVED_POLICY_DIGEST \
+  --signing-key /private/path/learning-oracle.key \
+  --api-url https://sibyl.example/api/ \
+  --output /path/to/attempts/learning-task-001
+```
+
+The output directory must be new and outside the input directory. The harness
+freezes only the selected task, arm, and referenced experiences, preserving the
+original experiment revision in its assignment. Operational failures, incomplete
+traces, mismatched artifacts, and budget violations cannot reach signing.
+Task failures remain learning outcomes with their original status.
+
+The durable `admission-bundle.json` contains the exact signed request and is
+written before the admission HTTP call. If that request fails or its response is
+lost, resend it:
+
+```bash
+moon run :agent-learning-run -- admit \
+  --api-url https://sibyl.example/api/ \
+  --output /path/to/attempts/learning-task-001
+```
+
+Admission retries use no signing key and never rerun the controller. Sibyl checks
+the signature and permanent assignment on every request; deleted or changed
+captures cannot be recreated through retry. Keep the complete output directory
+for replay. A directory without an admission bundle cannot resume execution;
+retain its partial evidence and use a fresh output directory for a new attempt.
+Consolidation must load the admitted source and its current revision from Sibyl,
+then recheck source eligibility before storing or promoting a proposal.
