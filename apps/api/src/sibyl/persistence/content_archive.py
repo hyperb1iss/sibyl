@@ -85,6 +85,15 @@ _CONTENT_ARCHIVE_TABLE_SPECS = (
         create_sql="CREATE raw_captures CONTENT $record;",
     ),
     ContentArchiveTableSpec(
+        name="eval_attempts",
+        source_identity_field="id",
+        target_identity_field="uuid",
+        select_sql="SELECT * FROM eval_attempts ORDER BY id ASC;",
+        delete_by_identity_sql="DELETE FROM eval_attempts WHERE uuid = $identity;",
+        delete_all_sql="DELETE FROM eval_attempts;",
+        create_sql="CREATE eval_attempts CONTENT $record;",
+    ),
+    ContentArchiveTableSpec(
         name="api_idempotency_records",
         source_identity_field="id",
         target_identity_field="uuid",
