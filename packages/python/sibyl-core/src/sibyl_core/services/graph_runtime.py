@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -13,6 +14,7 @@ from sibyl_core.embeddings.providers import (
 from sibyl_core.models.entities import EntityType
 from sibyl_core.services.graph_client import (
     SurrealGraphClient,
+    background_graph_client,
     get_surreal_graph_client,
     prepare_graph_schema,
     validate_native_embedding_dimensions,
@@ -76,6 +78,18 @@ async def get_surreal_graph_runtime(
             embedding_provider=embedding_provider,
         ),
     )
+
+
+@asynccontextmanager
+async def background_graph_runtime(group_id: str) -> AsyncIterator[GraphRuntime]:
+    """Bind background managers to their own network pool for this operation."""
+    async with background_graph_client(group_id) as background:
+        await prepare_graph_schema(background)
+        yield GraphRuntime(
+            client=background,
+            entity_manager=EntityManager(background, group_id=group_id),
+            relationship_manager=RelationshipManager(background, group_id=group_id),
+        )
 
 
 async def get_graph_client(group_id: str = "default") -> SurrealGraphClient:
@@ -146,6 +160,7 @@ async def execute_graph_query(
 
 __all__ = [
     "GraphRuntime",
+    "background_graph_runtime",
     "count_entities_by_type",
     "execute_graph_query",
     "get_graph_client",
