@@ -211,3 +211,65 @@ async def test_review_candidate_stays_excluded_after_source_validation(proposal)
     )
     ordinary = replace(checked, metadata={})
     assert raw_memory_recallable(ordinary)
+
+
+@pytest.mark.parametrize("field", ["receipt_sha256", "assignment_sha256", "admission_id"])
+@pytest.mark.parametrize("during_transaction", [False, True])
+async def test_original_admission_stamp_is_immutable(
+    proposal, monkeypatch, field, during_transaction
+):
+    op, result = proposal
+    query = "UPDATE raw_captures SET metadata.eval_admission." + field + " = 'changed';"
+    async with content_client.surreal_content_client() as client:
+        original = client.execute_query
+        if during_transaction:
+
+            async def changed(sql, **params):
+                if sql == p._STORE:
+                    await original(query)
+                return await original(sql, **params)
+
+            monkeypatch.setattr(client, "execute_query", changed)
+        else:
+            await original(query)
+        with pytest.raises(p.ConsolidationConflict):
+            await p.store_consolidation(op, result)
+    assert await rows("eval_consolidations") == []
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "assignment_json = '{}'",
+        "assignment_sha256 = 'changed'",
+        "receipt_base64 = 'Y2hhbmdlZA=='",
+        "receipt_sha256 = 'changed'",
+        "outcome_sha256 = 'changed'",
+        "transcript_sha256 = 'changed'",
+        "episode_sha256 = 'changed'",
+        "capture_id = 'changed'",
+        "admitted_at = NONE",
+    ],
+)
+@pytest.mark.parametrize("during_transaction", [False, True])
+async def test_original_admission_ledger_is_immutable(
+    proposal, monkeypatch, mutation, during_transaction
+):
+    op, result = proposal
+    query = "UPDATE eval_attempts SET " + mutation + ";"
+    async with content_client.surreal_content_client() as client:
+        original = client.execute_query
+        if during_transaction:
+
+            async def changed(sql, **params):
+                if sql == p._STORE:
+                    await original(query)
+                return await original(sql, **params)
+
+            monkeypatch.setattr(client, "execute_query", changed)
+        else:
+            await original(query)
+        with pytest.raises(p.ConsolidationConflict):
+            await p.store_consolidation(op, result)
+    assert await rows("eval_consolidations") == []
+    assert len(await rows("raw_captures")) == 2

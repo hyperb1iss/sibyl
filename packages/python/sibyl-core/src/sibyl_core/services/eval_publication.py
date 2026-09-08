@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from dataclasses import dataclass, replace
 from typing import Any, Literal
 from uuid import NAMESPACE_URL, uuid5
 
-from sibyl_core.auth.memory_policy import EVAL_CONSOLIDATION_METADATA_KEY
+from sibyl_core.auth.memory_policy import (
+    EVAL_ADMISSION_METADATA_KEY,
+    EVAL_CONSOLIDATION_METADATA_KEY,
+)
 from sibyl_core.memory_pipeline.source_lifecycle import (
     SOURCE_BINDINGS_KEY,
     SOURCE_VALIDATION_PENDING_KEY,
@@ -27,6 +31,7 @@ from sibyl_core.tasks.consolidation import (
     ConsolidationResult,
     validate_candidate_content_agreement,
 )
+from sibyl_core.tasks.eval_receipts import TaskAssignment, assignment_digest
 
 CONSOLIDATION_METADATA_KEY = EVAL_CONSOLIDATION_METADATA_KEY
 
@@ -131,6 +136,12 @@ IF $existing != NONE {
         IF $attempt = NONE OR $attempt.capture_id != $source.capture_id
             OR $attempt.receipt_sha256 != $source.receipt_sha256
             OR $attempt.episode_sha256 != $source.episode_sha256
+            OR $attempt.assignment_sha256 != $source.assignment_sha256
+            OR $attempt.assignment_json != $source.assignment_json
+            OR $attempt.receipt_base64 != $source.receipt_base64
+            OR $attempt.outcome_sha256 != $source.outcome_sha256
+            OR $attempt.transcript_sha256 != $source.transcript_sha256
+            OR $attempt.admitted_at = NONE
             OR $memory = NONE OR $memory.deleted_at != NONE
             OR $memory.principal_id != $principal_id OR $memory.memory_scope != 'private'
             OR $memory.metadata != $source.metadata
@@ -138,7 +149,7 @@ IF $existing != NONE {
             OR $memory.source_id != $source.source_id
             OR $memory.revision != $source.revision
             OR crypto::sha256($memory.raw_content) != $source.episode_sha256
-            OR $memory.metadata.eval_admission.admission_id != $source.admission_id {
+            OR $memory.metadata.eval_admission != $source.admission_stamp {
             THROW 'consolidation conflict: original admitted source changed';
         };
     };
@@ -238,6 +249,14 @@ async def store_consolidation(
                 "receipt_sha256": episode.outcome.receipt_sha256,
                 "episode_sha256": episode.artifact_sha256,
                 "admission_id": episode.outcome.admission_id,
+                "assignment_sha256": episode.outcome.assignment_sha256,
+                "outcome_sha256": episode.outcome.outcome_sha256,
+                "transcript_sha256": episode.outcome.transcript_sha256,
+                "admission_stamp": {
+                    "admission_id": episode.outcome.admission_id,
+                    "assignment_sha256": episode.outcome.assignment_sha256,
+                    "receipt_sha256": episode.outcome.receipt_sha256,
+                },
             }
         )
     # Preserve extraction observations, while binding every current lifecycle
@@ -250,12 +269,64 @@ async def store_consolidation(
             organization_id=operation.organization_id,
             ids=list(bindings),
         )
+        attempts = await content_client.select_many(
+            client,
+            "SELECT * FROM eval_attempts WHERE organization_id = $organization_id "
+            "AND experiment_id = $experiment_id AND attempt_id IN $attempt_ids;",
+            organization_id=operation.organization_id,
+            experiment_id=operation.experiment_id,
+            attempt_ids=list(operation.attempt_ids),
+        )
+    admitted = {str(row["attempt_id"]): row for row in attempts}
     current = {str(record["uuid"]): record for record in records}
     for source in sources:
         record = current.get(source["capture_id"])
         if record is None:
             raise ConsolidationConflict("original admitted source changed")
+        ledger = admitted.get(source["attempt_id"])
+        if ledger is None:
+            raise ConsolidationConflict("original admitted ledger changed")
+        try:
+            assignment_json = ledger["assignment_json"]
+            receipt_base64 = ledger["receipt_base64"]
+            if not isinstance(assignment_json, str) or not isinstance(receipt_base64, str):
+                raise ValueError("stored admission artifacts must be strings")
+            assignment = TaskAssignment.model_validate_json(assignment_json)
+            receipt = base64.b64decode(receipt_base64, validate=True)
+        except (KeyError, ValueError, TypeError) as exc:
+            raise ConsolidationConflict("original admitted ledger changed") from exc
+        if (
+            assignment_digest(assignment) != source["assignment_sha256"]
+            or hashlib.sha256(receipt).hexdigest() != source["receipt_sha256"]
+            or any(
+                ledger.get(key) != source[key]
+                for key in (
+                    "assignment_sha256",
+                    "receipt_sha256",
+                    "outcome_sha256",
+                    "transcript_sha256",
+                    "episode_sha256",
+                    "capture_id",
+                    "attempt_id",
+                )
+            )
+            or ledger.get("admitted_at") is None
+            or assignment.owner_principal_id != operation.principal_id
+            or assignment.organization_id != operation.organization_id
+            or assignment.experiment_id != operation.experiment_id
+            or assignment.experiment_revision != operation.experiment_revision
+            or assignment.arm_id != operation.arm_id
+            or assignment.checkpoint > operation.checkpoint
+            or assignment.controller_policy_sha256 != operation.controller_policy_sha256
+            or assignment.split != "learning"
+        ):
+            raise ConsolidationConflict("original admitted ledger changed")
+        source.update(
+            assignment_json=ledger["assignment_json"], receipt_base64=ledger["receipt_base64"]
+        )
         memory = content_models.raw_memory_from_record(record)
+        if memory.metadata.get(EVAL_ADMISSION_METADATA_KEY) != source["admission_stamp"]:
+            raise ConsolidationConflict("original admission stamp changed")
         if memory.revision != source["revision"] or not content_models.raw_memory_recallable(
             memory
         ):
