@@ -7,6 +7,7 @@ access. Receipts explicitly make no sealed-isolation or learning-benefit claim.
 from __future__ import annotations
 
 import os
+import re
 import signal
 import stat
 import subprocess
@@ -524,8 +525,12 @@ def _perform_attempt(
     _check_task(manifest, task, output, receipt)
 
 
-def run_task(manifest_path: Path, *, task_id: str, arm_id: str, output: Path) -> dict[str, Any]:
+def run_task(
+    manifest_path: Path, *, task_id: str, arm_id: str, output: Path, attempt_id: str | None = None
+) -> dict[str, Any]:
     """Validate first; create one exclusive attempt with durable partial receipts."""
+    if attempt_id is not None and re.fullmatch(r"[0-9a-f]{32}", attempt_id) is None:
+        raise ManifestError("attempt_id must be 32 lowercase hexadecimal characters")
     if os.name != "posix":
         raise ManifestError("the trusted development adapter requires POSIX process groups")
     manifest, inputs = load_manifest(manifest_path)
@@ -551,6 +556,8 @@ def run_task(manifest_path: Path, *, task_id: str, arm_id: str, output: Path) ->
         raise ManifestError("attempt output must be outside the frozen input directory")
     output.mkdir(parents=False, exist_ok=False)
     receipt = _receipt(manifest, task, arm, inputs)
+    if attempt_id is not None:
+        receipt["attempt_id"] = attempt_id
     _write_json(output / "receipt.json", receipt)
     try:
         _perform_attempt(manifest, task, arm, inputs, output, receipt, api_key)
