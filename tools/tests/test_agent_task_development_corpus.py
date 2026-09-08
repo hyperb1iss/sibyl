@@ -13,6 +13,7 @@ import pytest
 from benchmarks.agent_tasks.manifest import (
     FIXED_ENVIRONMENT,
     Manifest,
+    Program,
     Task,
     digest,
     identity,
@@ -106,6 +107,7 @@ def artifact(root: Path, name: str, content: bytes) -> dict:
 def frozen_manifest(root: Path) -> Path:
     root.mkdir()
     for task in TASKS:
+        assert isinstance(task.checker, Program)
         for item in [
             task.prompt,
             task.checker.script,
@@ -170,6 +172,7 @@ def public_result(workspace: Path) -> subprocess.CompletedProcess:
 
 
 def independent_result(root: Path, workspace: Path, task: Task) -> CheckerResult:
+    assert isinstance(task.checker, Program)
     root.mkdir()
     process = _execute(
         program=CORPUS / task.checker.script.path,
@@ -193,6 +196,7 @@ def test_development_corpus_declares_eight_exposed_tasks_in_four_families():
     assert set(Counter(task.family_id for task in TASKS).values()) == {2}
     assert {task.split for task in TASKS} == {"development"}
     for task in TASKS:
+        assert isinstance(task.checker, Program)
         assert task.id.startswith("dev-")
         assert task.family_id.startswith("dev-")
         assert task.checker.script.path not in {entry.artifact.path for entry in task.workspace}

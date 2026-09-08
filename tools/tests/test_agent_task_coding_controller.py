@@ -16,6 +16,7 @@ import json
 import os
 import stat
 import subprocess
+import sys
 import urllib.error
 import urllib.request
 import urllib.response
@@ -1759,3 +1760,75 @@ def test_unexpected_constructor_failure_emits_a_redacted_terminal_result(
     assert KEY not in harness.trace_path.read_text()
     assert KEY not in json.dumps(result)
     assert not provider.requests
+
+
+def test_copied_controller_remains_standalone_in_isolated_python(tmp_path):
+    copied = tmp_path / "coding_controller.py"
+    copied.write_bytes(Path(controller.__file__).read_bytes())
+    home = tmp_path / "home"
+    home.mkdir()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    completed = subprocess.run(  # noqa: S603
+        [sys.executable, "-I", str(copied), "--unknown-offline-argument"],
+        cwd=workspace,
+        env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        input=b"{}",
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    assert completed.returncode == controller.EXIT_CODES["invalid_request"]
+    result = json.loads(completed.stdout)
+    assert result["synthetic"] is False
+    assert result["trace_sha256"]
+    assert "ModuleNotFoundError" not in completed.stderr.decode()
+
+
+def test_shell_controller_delegates_to_public_container_runtime(monkeypatch, tmp_path):
+
+    calls = []
+    expected = {"status": "ok", "returncode": 0}
+
+    def execute(options, **kwargs):
+        calls.append((options, kwargs))
+        return expected
+
+    monkeypatch.setattr(controller, "execute_container", execute)
+    owner = controller.Controller.__new__(controller.Controller)
+    owner.options = controller.Options("sha256:" + "a" * 64, 1.0, 256, "/docker", "0:0", None)
+    owner.environment = {"PATH": "/bin"}
+    assert controller.Controller._invoke(owner, "owned", ["docker"], tmp_path) is expected
+    assert calls == [
+        (owner.options, {"name": "owned", "argv": ["docker"], "environment": owner.environment})
+    ]
+
+
+def test_public_container_runtime_streams_only_supplied_json(monkeypatch, tmp_path):
+    calls = []
+    options = controller.Options("sha256:" + "a" * 64, 2.0, 256, "/docker", "0:0", None)
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if argv[1] == "run":
+            assert kwargs["input"] == b'{"value":21}\n'
+            return subprocess.CompletedProcess(argv, 0, b"42\n", b"")
+        if argv[1] == "inspect":
+            return subprocess.CompletedProcess(
+                argv, 0, b'{"Status":"exited","ExitCode":0,"Error":"","OOMKilled":false}', b""
+            )
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    monkeypatch.setattr(controller.subprocess, "run", run)
+    argv = controller.container_argv(
+        options, "owned-json", tmp_path, ["python", "app.py"], read_only=True, stdin=True
+    )
+    outcome = controller.execute_container(
+        options, name="owned-json", argv=argv, environment={}, stdin=b'{"value":21}\n'
+    )
+    assert outcome["status"] == "ok"
+    assert outcome["stdout_base64"] == base64.b64encode(b"42\n").decode()
+    assert outcome["cleanup"]["terminated"] is True
+    assert outcome["carried_back"] is False
+    assert [argv[1] for argv, _ in calls] == ["run", "inspect", "stop", "rm"]
+    assert all("input" not in kwargs for _, kwargs in calls[1:])

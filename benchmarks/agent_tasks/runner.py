@@ -24,10 +24,12 @@ from benchmarks.agent_tasks.manifest import (
     Arm,
     ControllerBudget,
     FrozenModel,
+    JsonOracleChecker,
     Manifest,
     ManifestError,
     Task,
     canonical_bytes,
+    checker_artifacts,
     digest,
     identity,
     load_manifest,
@@ -389,6 +391,31 @@ def _process_failure(process: dict[str, Any], role: str) -> str | None:
 
 
 def _check_task(manifest: Manifest, task: Task, output: Path, receipt: dict[str, Any]) -> None:
+    if isinstance(task.checker, JsonOracleChecker):
+        from benchmarks.agent_tasks.json_oracle import evaluate_json_oracle  # noqa: PLC0415
+
+        result = evaluate_json_oracle(
+            task.checker,
+            inputs={
+                item.path: (output / "inputs" / item.path).read_bytes()
+                for item in checker_artifacts(task.checker)
+            },
+            workspace=output / "checker-workspace",
+            snapshot_sha256=receipt["checker_input_snapshot_sha256"],
+            attempt_id=receipt["attempt_id"],
+            timeout_seconds=manifest.checker_timeout_seconds,
+        )
+        _write_json(output / "oracle-outcome.json", result)
+        receipt["checker"] = {
+            "kind": task.checker.schema_version,
+            "outcome_sha256": identity(result),
+        }
+        receipt["outcome"] = result
+        receipt["status"] = result["status"]
+        receipt["success"] = result["passed"] and receipt["budget_status"] != "exceeded"
+        if receipt["budget_status"] == "exceeded":
+            receipt["status"] = "controller_budget_exceeded"
+        return
     checker = _execute(
         program=output / "inputs" / task.checker.script.path,
         program_sha256=task.checker.script.sha256,
@@ -428,7 +455,7 @@ def _perform_attempt(
         manifest.dependency_lock.path,
         manifest.controller.script.path,
         task.prompt.path,
-        task.checker.script.path,
+        *(item.path for item in checker_artifacts(task.checker)),
         arm.memory_pack.path,
         *(item.artifact.path for item in task.workspace),
     }
