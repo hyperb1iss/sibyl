@@ -9,7 +9,7 @@ import pytest
 from benchmarks.agent_tasks.corpus import freeze, lineage_audit
 from benchmarks.agent_tasks.corpus_families import families
 from benchmarks.agent_tasks.corpus_manifest import compose
-from benchmarks.agent_tasks.json_oracle import validate_oracle_inputs
+from benchmarks.agent_tasks.json_oracle import canonical_bytes, validate_oracle_inputs
 from benchmarks.agent_tasks.manifest import (
     ControllerBudget,
     JsonOracleChecker,
@@ -20,9 +20,10 @@ from benchmarks.agent_tasks.manifest import (
 )
 
 
+@pytest.mark.parametrize("transport", ["authored", "frozen"])
 @pytest.mark.parametrize("seed", [0, 7])
 @pytest.mark.parametrize("family_index", range(len(families(0))))
-def test_repair_discrimination(tmp_path, seed, family_index):
+def test_repair_discrimination(tmp_path, seed, family_index, transport):
     family = families(seed)[family_index]
 
     def results(repairs, cases):
@@ -33,7 +34,11 @@ def test_repair_discrimination(tmp_path, seed, family_index):
             result = subprocess.run(
                 [sys.executable, "-B", "app.py"],
                 cwd=tmp_path,
-                input=json.dumps(case["input"]),
+                input=(
+                    canonical_bytes(case["input"]).decode() + "\n"
+                    if transport == "frozen"
+                    else json.dumps(case["input"])
+                ),
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -56,7 +61,7 @@ def test_freeze_binds_existing_oracle_and_excludes_repairs(tmp_path):
         freeze(root, seed=0, image="sha256:" + "a" * 64, docker="/usr/bin/docker").read_bytes()
     )
     tasks = [Task.model_validate(item) for item in catalog["tasks"]]
-    assert Counter(task.split for task in tasks) == {"learning": 16, "development": 2}
+    assert Counter(task.split for task in tasks) == {"learning": 20, "development": 2}
     assert catalog["experiences"] == []
     for task in tasks:
         assert isinstance(task.checker, JsonOracleChecker)
@@ -77,7 +82,7 @@ def test_freeze_binds_existing_oracle_and_excludes_repairs(tmp_path):
 
 def test_cross_split_lineage_report():
     audit = lineage_audit(families(0))
-    assert len(audit["pairs"]) == 16 * 2
+    assert len(audit["pairs"]) == 20 * 2
     assert not any(pair["shared_lineage"] for pair in audit["pairs"])
     assert all(pair["files"] for pair in audit["pairs"])
     assert audit["experience_count"] == 0
