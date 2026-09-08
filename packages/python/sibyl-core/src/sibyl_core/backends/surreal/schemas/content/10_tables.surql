@@ -162,6 +162,7 @@ DEFINE INDEX IF NOT EXISTS idx_raw_captures_project ON raw_captures FIELDS organ
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_review ON raw_captures FIELDS organization_id, review_state;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_purge_after ON raw_captures FIELDS purge_after;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_entity_id ON raw_captures FIELDS entity_id;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_source_lineage ON raw_captures FIELDS metadata.raw_source_ids.*;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_org_dedupe ON raw_captures FIELDS organization_id, metadata.dedupe_key;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_dedupe_lookup ON raw_captures
     FIELDS metadata.dedupe_key, organization_id, memory_scope, scope_key;

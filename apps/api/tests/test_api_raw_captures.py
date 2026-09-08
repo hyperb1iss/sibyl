@@ -319,10 +319,12 @@ async def test_archive_raw_capture_stamps_the_raw_memory_it_projects() -> None:
             entity_content="paste mid-pipeline swallows stray stdin",
             entity_type="error_pattern",
             tags=[],
-            metadata={"capture_mode": "remember", "raw_memory_id": "raw-1"},
+            metadata={"capture_mode": "remember"},
+            source_capture_id="raw-1",
         )
 
     assert len(saved) == 1
+    assert "raw_memory_id" not in saved[0].metadata
     mark.assert_awaited_once_with(
         None,
         organization_id=org_id,

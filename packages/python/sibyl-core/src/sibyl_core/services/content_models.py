@@ -138,6 +138,7 @@ class RawMemory:
     score: float = 0.0
     snippet: str | None = None
 
+    legacy_content_checkpoint: dict[str, object] | None = field(default=None, repr=False)
     observed_revision: int | None = field(default=None, repr=False, compare=False)
 
 
@@ -626,6 +627,7 @@ def raw_memory_from_record(record: Mapping[str, object]) -> RawMemory:
         capture_surface=coerce_optional_str(record.get("capture_surface")),
         created_by_user_id=coerce_optional_str(record.get("created_by_user_id")),
         revision=max(coerce_int(record.get("revision")), 1),
+        legacy_content_checkpoint=coerce_dict(record.get("legacy_content_checkpoint")) or None,
         observed_revision=observed_revision
         if type(observed_revision) is int and observed_revision > 0
         else None,
@@ -692,6 +694,7 @@ def raw_memory_record(memory: RawMemory) -> SurrealRecord:
         "capture_surface": memory.capture_surface,
         "created_by_user_id": memory.created_by_user_id or memory.principal_id,
         "revision": memory.revision,
+        "legacy_content_checkpoint": memory.legacy_content_checkpoint,
         "captured_at": memory.captured_at,
         "deleted_at": memory.deleted_at,
         "purge_after": memory.purge_after,
