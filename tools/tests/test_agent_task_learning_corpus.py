@@ -21,7 +21,7 @@ from benchmarks.agent_tasks.manifest import (
 
 
 @pytest.mark.parametrize("seed", [0, 7])
-@pytest.mark.parametrize("family_index", range(6))
+@pytest.mark.parametrize("family_index", range(len(families(0))))
 def test_repair_discrimination(tmp_path, seed, family_index):
     family = families(seed)[family_index]
 
@@ -56,7 +56,7 @@ def test_freeze_binds_existing_oracle_and_excludes_repairs(tmp_path):
         freeze(root, seed=0, image="sha256:" + "a" * 64, docker="/usr/bin/docker").read_bytes()
     )
     tasks = [Task.model_validate(item) for item in catalog["tasks"]]
-    assert Counter(task.split for task in tasks) == {"learning": 4, "development": 2}
+    assert Counter(task.split for task in tasks) == {"learning": 8, "development": 2}
     assert catalog["experiences"] == []
     for task in tasks:
         assert isinstance(task.checker, JsonOracleChecker)
@@ -77,7 +77,7 @@ def test_freeze_binds_existing_oracle_and_excludes_repairs(tmp_path):
 
 def test_cross_split_lineage_report():
     audit = lineage_audit(families(0))
-    assert len(audit["pairs"]) == 4 * 2
+    assert len(audit["pairs"]) == 8 * 2
     assert not any(pair["shared_lineage"] for pair in audit["pairs"])
     assert all(pair["files"] for pair in audit["pairs"])
     assert audit["experience_count"] == 0

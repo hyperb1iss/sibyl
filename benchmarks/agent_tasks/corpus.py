@@ -185,7 +185,7 @@ def freeze(
         "limitations": [
             "authored fixtures, not collected episodes",
             "trusted development only",
-            "six families do not satisfy the twenty-family release gate",
+            "authored fixtures do not satisfy the twenty-family experience release gate",
         ],
     }
     write("lineage-audit.json", canonical_bytes(lineage_audit(items)))
