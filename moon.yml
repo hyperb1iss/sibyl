@@ -1035,6 +1035,14 @@ tasks:
     options:
       cache: false
 
+  agent-learning-run:
+    command: uv run python -m benchmarks.agent_tasks.learning_run
+    inputs:
+      - benchmarks/agent_tasks/**/*.py
+      - packages/python/sibyl-core/src/sibyl_core/tasks/eval_receipts.py
+    options:
+      cache: false
+
   agent-task-run:
     command: uv run python -m benchmarks.agent_tasks
     inputs:
@@ -1043,10 +1051,12 @@ tasks:
       cache: false
 
   agent-task-test:
-    command: uv run pytest tools/tests/test_agent_task_runner.py tools/tests/test_agent_task_coding_controller.py tools/tests/test_agent_task_development_corpus.py -v
+    command: uv run pytest tools/tests/test_agent_task_learning_run.py tools/tests/test_agent_task_runner.py tools/tests/test_agent_task_coding_controller.py tools/tests/test_agent_task_development_corpus.py -v
     inputs:
+      - apps/api/src/**/*.py
       - packages/python/sibyl-core/src/**/*.py
       - benchmarks/agent_tasks/**/*.py
+      - tools/tests/test_agent_task_learning_run.py
       - tools/tests/test_agent_task_runner.py
       - tools/tests/test_agent_task_coding_controller.py
       - tools/tests/test_agent_task_development_corpus.py
@@ -1055,7 +1065,7 @@ tasks:
 
   bench-gate-test:
     command:
-      uv run pytest tools/tests/test_agent_task_runner.py tools/tests/test_agent_task_coding_controller.py
+      uv run pytest tools/tests/test_agent_task_learning_run.py tools/tests/test_agent_task_runner.py tools/tests/test_agent_task_coding_controller.py
       tools/tests/test_agent_task_development_corpus.py tools/tests/test_evidence_bundle.py
       tools/tests/test_benchmark_git_provenance.py tools/tests/test_bench_gate.py
       tools/tests/test_compare_eval_reports.py tools/tests/test_context_pack_eval_script.py
