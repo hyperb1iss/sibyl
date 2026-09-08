@@ -107,11 +107,11 @@ async def _remember_mcp_memory(
     build_memory_structure(content.strip(), spans=spans, atomic=atomic, probes=probes)
 
     memory_scope = "project" if project else "private"
-    write_decision = mcp_policy.authorize_memory_write_request(
+    write_decision = await mcp_policy.authorize_memory_request(
         ctx=ctx,
+        write=True,
         memory_scope=memory_scope,
         scope_key=project,
-        accessible_projects=accessible_projects,
         surface="mcp_remember",
     )
     resolved_links = await mcp_policy.resolve_capture_links(
@@ -307,11 +307,11 @@ async def _reflect_mcp_memory(
     memory_scope = "project" if project else "private"
     scope_key = project
     if persist:
-        mcp_policy.authorize_memory_write_request(
+        await mcp_policy.authorize_memory_request(
             ctx=ctx,
+            write=True,
             memory_scope=memory_scope,
             scope_key=scope_key,
-            accessible_projects=accessible_projects,
             surface="mcp_reflect",
         )
         await mcp_policy.validate_relationship_targets_for_caller(
@@ -419,11 +419,11 @@ async def _add_mcp_entity(
     )
     memory_scope = "project" if project else "private"
     scope_key = project
-    write_decision = mcp_policy.authorize_memory_write_request(
+    write_decision = await mcp_policy.authorize_memory_request(
         ctx=ctx,
+        write=True,
         memory_scope=memory_scope,
         scope_key=scope_key,
-        accessible_projects=accessible_projects,
         surface="mcp_add",
     )
     await mcp_policy.validate_relationship_targets_for_caller(

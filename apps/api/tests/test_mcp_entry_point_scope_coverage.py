@@ -69,7 +69,7 @@ STORE_BOUNDARIES: tuple[tuple[str, str], ...] = (
 READ_SCAFFOLDING: tuple[tuple[str, str, Any], ...] = (
     ("sibyl.mcp_tools.context", "get_accessible_projects", {"project-a"}),
     ("sibyl.mcp_tools.observability", "has_owner_membership", True),
-    ("sibyl.mcp_tools.context", "resolve_accessible_project_graph_ids", {"project-a"}),
+    ("sibyl.mcp_tools.context", "resolve_project_graph_grants", ({"project-a"}, {"project-a"})),
 )
 
 TOOL_ARGUMENTS: dict[str, dict[str, Any]] = {

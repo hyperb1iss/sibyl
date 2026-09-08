@@ -77,8 +77,9 @@ async def _authorize_mcp_manage_action(
     ctx: mcp_context.McpContext,
     action: str,
     entity_id: str | None,
-    accessible_projects: set[str] | None,
 ) -> MemoryPolicyDecision | None:
+    from sibyl_core.tools.manage import ANALYSIS_ACTIONS
+
     normalized_action = action.lower().strip()
     if normalized_action == "correct_memory":
         if not entity_id:
@@ -96,9 +97,6 @@ async def _authorize_mcp_manage_action(
             return None
         if memory.memory_scope is MemoryScope.PRIVATE and memory.principal_id != ctx.user_id:
             raise ValueError("principal_mismatch")
-        policy_projects = accessible_projects
-        if policy_projects is None and memory.scope_key:
-            policy_projects = {memory.scope_key}
         accessible_teams = (
             await resolve_accessible_team_scope_keys(
                 user_id=ctx.user_id,
@@ -108,11 +106,11 @@ async def _authorize_mcp_manage_action(
             if memory.memory_scope is MemoryScope.TEAM and ctx.user_id
             else None
         )
-        return mcp_policy.authorize_memory_write_request(
+        return await mcp_policy.authorize_memory_request(
             ctx=ctx,
+            write=normalized_action not in ANALYSIS_ACTIONS,
             memory_scope=memory.memory_scope.value,
             scope_key=memory.scope_key,
-            accessible_projects=policy_projects,
             surface="mcp_manage_correct_memory",
             accessible_teams=accessible_teams,
         )
@@ -136,30 +134,31 @@ async def _authorize_mcp_manage_action(
             )
             if not owner or not ctx.user_id or owner != str(ctx.user_id):
                 return MemoryPolicyDecision(
-                    action=MemoryPolicyAction.WRITE,
+                    action=(
+                        MemoryPolicyAction.READ
+                        if normalized_action in ANALYSIS_ACTIONS
+                        else MemoryPolicyAction.WRITE
+                    ),
                     allowed=False,
                     reason="private_target_not_owned",
                     memory_scope=MemoryScope.PRIVATE,
                     scope_key=owner or None,
                 )
-            return mcp_policy.authorize_memory_write_request(
+            return await mcp_policy.authorize_memory_request(
                 ctx=ctx,
+                write=normalized_action not in ANALYSIS_ACTIONS,
                 memory_scope=MemoryScope.PRIVATE.value,
                 scope_key=None,
-                accessible_projects=accessible_projects,
                 surface="mcp_manage",
             )
     else:
         return None
 
-    policy_projects = (
-        {project_id} if accessible_projects is None and project_id else accessible_projects
-    )
-    return mcp_policy.authorize_memory_write_request(
+    return await mcp_policy.authorize_memory_request(
         ctx=ctx,
+        write=normalized_action not in ANALYSIS_ACTIONS,
         memory_scope="project",
         scope_key=project_id,
-        accessible_projects=policy_projects,
         surface="mcp_manage",
     )
 
@@ -521,15 +520,14 @@ async def _manage_mcp_action(
     entity_id: str | None,
     data: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    from sibyl_core.tools.manage import manage
+    from sibyl_core.tools.manage import ANALYSIS_ACTIONS, manage
 
-    ctx = await mcp_context.require_context(write=True)
+    ctx = await mcp_context.require_context(write=action.lower().strip() not in ANALYSIS_ACTIONS)
     accessible_projects = await mcp_context.get_accessible_projects(ctx)
     policy_decision = await _authorize_mcp_manage_action(
         ctx=ctx,
         action=action,
         entity_id=entity_id,
-        accessible_projects=accessible_projects,
     )
     # A denied decision has to stop the call, not annotate it. This ran before
     # the idempotency reservation deliberately: a refused action must not
@@ -665,10 +663,10 @@ def register_management_tools(mcp: MCPServer) -> None:
         entity_id: str | None = None,
         data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Manage operations that modify state in the knowledge graph.
+        """Manage workflows and inspect project work.
 
-        The manage() tool handles all state-changing operations including task
-        and epic workflow, source operations, and analysis.
+        The manage() tool handles task and epic workflow, source operations,
+        and read-only analysis.
 
         Task Workflow Actions:
             - start_task: Begin work on a task (sets status to 'doing')
