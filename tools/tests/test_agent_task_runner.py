@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import signal
@@ -14,14 +15,18 @@ from dataclasses import asdict
 from pathlib import Path
 
 import pytest
-from benchmarks.agent_tasks import runner
+from benchmarks.agent_tasks import coding_controller, json_oracle, runner
+from benchmarks.agent_tasks import coding_controller as runtime
 from benchmarks.agent_tasks.coding_controller import inventory
+from benchmarks.agent_tasks.json_oracle import evaluate_json_oracle
 from benchmarks.agent_tasks.manifest import (
     Arm,
+    JsonOracleChecker,
     Manifest,
     ManifestError,
     digest,
     identity,
+    load_manifest,
     runtime_identity,
     validate_native_render_binding,
 )
@@ -1122,3 +1127,186 @@ def test_fresh_workspace_does_not_inherit_shared_parent_setgid(experiment):
     assert not (workspace / "tests").stat().st_mode & stat.S_ISGID
     assert (workspace / "tests/nested.txt").read_text() == "0"
     assert inventory(workspace)[0]
+
+
+@pytest.fixture
+def json_oracle_experiment(experiment):
+
+    manifest, freeze, output = experiment
+    root = freeze().parent
+
+    def artifact(name, data):
+        (root / name).write_bytes(data)
+        return {"path": name, "sha256": digest(data)}
+
+    manifest["tasks"][0]["checker"] = {
+        "schema_version": "sibyl-json-cli-oracle-v1",
+        "oracle": artifact(
+            "oracle.json",
+            json.dumps(
+                {
+                    "schema_version": "sibyl-json-cli-cases-v1",
+                    "cases": [{"id": "one", "input": {"value": 21}, "expected": 42}],
+                }
+            ).encode(),
+        ),
+        "runtime": artifact("runtime.py", Path(coding_controller.__file__).read_bytes()),
+        "evaluator": artifact("oracle.py", Path(json_oracle.__file__).read_bytes()),
+        "argv": ["python", "app.py"],
+        "image": "sha256:" + "a" * 64,
+        "docker": "/usr/bin/docker",
+        "docker_host": "unix:///run/devbox-docker/docker.sock",
+        "timeout_seconds": 1.0,
+        "memory_mb": 256,
+    }
+    return manifest, freeze, output
+
+
+@pytest.mark.parametrize(
+    ("stdout", "exit_code", "execution_status", "expected_status"),
+    [
+        (b"42\n", 0, "ok", "passed"),
+        (b"41\n", 0, "ok", "task_failed"),
+        (b"true\n", 0, "ok", "task_failed"),
+        (b"42.0\n", 0, "ok", "task_failed"),
+        (b"42 trailing", 0, "ok", "candidate_protocol_invalid"),
+        (b'{"x": 1, "x": 2}', 0, "ok", "candidate_protocol_invalid"),
+        (b"NaN", 0, "ok", "candidate_protocol_invalid"),
+        (b"1e999", 0, "ok", "candidate_protocol_invalid"),
+        (b"deep-json", 0, "ok", "candidate_protocol_invalid"),
+        (b"42\n", 3, "ok", "candidate_failed"),
+        (b"", None, "timeout", "candidate_timeout"),
+        (b"", None, "operational", "oracle_runtime_error"),
+    ],
+)
+def test_json_oracle_judges_output_outside_candidate(
+    json_oracle_experiment, monkeypatch, stdout, exit_code, execution_status, expected_status
+):
+
+    if stdout == b"deep-json":
+        depth = 100_000
+        stdout = b"[" * depth + b"0" + b"]" * depth
+    calls = []
+    monkeypatch.setattr(runtime, "_container_user", lambda *_: "0:0")
+
+    def execute_container(options, **kwargs):
+        calls.append(kwargs)
+        assert kwargs["stdin"] == b'{"value":21}\n'
+        argv = kwargs["argv"]
+        assert argv[argv.index("--entrypoint") + 1 :] == ["python", "sha256:" + "a" * 64, "app.py"]
+        assert "--interactive" in argv
+        mount = argv[argv.index("--mount") + 1]
+        assert mount.endswith("/checker-workspace,dst=/workspace,readonly")
+        assert "oracle.json" not in " ".join(argv)
+        assert "OPENROUTER_API_KEY" not in kwargs["environment"]
+        return {
+            "status": execution_status,
+            "returncode": exit_code,
+            "stdout_base64": base64.b64encode(stdout).decode(),
+            "cleanup": {"terminated": True},
+        }
+
+    monkeypatch.setattr(runtime, "execute_container", execute_container)
+    receipt = execute(json_oracle_experiment)
+    assert receipt["status"] == expected_status
+    assert receipt["success"] is (expected_status == "passed")
+    assert receipt["sealed_isolation"] is False
+    assert receipt["outcome"]["authentication"] == "none"
+    assert receipt["outcome"]["snapshot_sha256"] == receipt["controller_final_snapshot_sha256"]
+    assert receipt["outcome"]["attempt_id"] == receipt["attempt_id"]
+    checker = json_oracle_experiment[0]["tasks"][0]["checker"]
+    for field in ("oracle", "runtime", "evaluator"):
+        assert receipt["outcome"][f"{field}_sha256"] == checker[field]["sha256"]
+    assert len(calls) == 1
+    assert len(receipt["outcome"]["cases"]) == 1
+    retained = receipt["outcome"]["cases"][0]["execution"]
+    assert base64.b64decode(retained["stdout_base64"]) == stdout
+    saved = json.loads((json_oracle_experiment[2] / "receipt.json").read_bytes())
+    assert saved["status"] == expected_status
+    outcome = json.loads((json_oracle_experiment[2] / "oracle-outcome.json").read_bytes())
+    assert outcome["cases"][0]["execution"] == retained
+
+
+@pytest.mark.parametrize("field", ["runtime", "evaluator"])
+def test_json_oracle_requires_installed_frozen_runtime(json_oracle_experiment, field):
+    manifest, freeze, output = json_oracle_experiment
+    artifact = manifest["tasks"][0]["checker"][field]
+    changed = b"# another implementation\n"
+    (freeze().parent / artifact["path"]).write_bytes(changed)
+    artifact["sha256"] = digest(changed)
+    with pytest.raises(ManifestError, match="runtime differs"):
+        execute(json_oracle_experiment)
+    assert not output.exists()
+
+
+def test_json_oracle_still_rejects_sealed_tasks(json_oracle_experiment):
+    manifest, _, output = json_oracle_experiment
+    manifest["tasks"][0]["split"] = "sealed"
+    with pytest.raises(ManifestError, match="sealed execution"):
+        execute(json_oracle_experiment)
+    assert not output.exists()
+
+
+def test_json_oracle_does_not_execute_changed_snapshot(json_oracle_experiment, monkeypatch):
+
+    _, freeze, output = json_oracle_experiment
+    manifest, inputs = load_manifest(freeze())
+    assert isinstance(manifest.tasks[0].checker, JsonOracleChecker)
+    output.mkdir()
+    (output / "app.py").write_text("unexecuted candidate")
+    calls = []
+    monkeypatch.setattr(runtime, "execute_container", lambda *args, **kwargs: calls.append(kwargs))
+    outcome = evaluate_json_oracle(
+        manifest.tasks[0].checker,
+        inputs=inputs,
+        workspace=output,
+        snapshot_sha256="0" * 64,
+        attempt_id="fixture",
+        timeout_seconds=1.0,
+    )
+    assert outcome["status"] == "oracle_runtime_error"
+    assert calls == []
+
+
+def test_json_oracle_cannot_be_declared_as_candidate_workspace(json_oracle_experiment):
+    manifest, _, output = json_oracle_experiment
+    task = manifest["tasks"][0]
+    task["workspace"].append({"artifact": task["checker"]["oracle"], "destination": "oracle.json"})
+    with pytest.raises(ManifestError, match="private oracle overlaps"):
+        execute(json_oracle_experiment)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("field", ["input", "expected"])
+@pytest.mark.parametrize("value", [b"1e999", b"deep-json"])
+def test_json_oracle_rejects_unrepresentable_cases_before_attempt(
+    json_oracle_experiment, field, value
+):
+    if value == b"deep-json":
+        depth = 100_000
+        value = b"[" * depth + b"0" + b"]" * depth
+    manifest, freeze, output = json_oracle_experiment
+    artifact = manifest["tasks"][0]["checker"]["oracle"]
+    path = freeze().parent / artifact["path"]
+    case = {"id": "one", "input": None, "expected": None}
+    case[field] = "PLACEHOLDER"
+    encoded = json.dumps({"schema_version": "sibyl-json-cli-cases-v1", "cases": [case]}).encode()
+    encoded = encoded.replace(b'"PLACEHOLDER"', value)
+    path.write_bytes(encoded)
+    artifact["sha256"] = digest(encoded)
+    with pytest.raises(ManifestError, match="unrepresentable JSON"):
+        execute(json_oracle_experiment)
+    assert not output.exists()
+
+
+def test_json_oracle_verdict_does_not_depend_on_manifest_json_helpers(monkeypatch):
+    from benchmarks.agent_tasks import manifest as manifest_module  # noqa: PLC0415
+
+    def unavailable(*args, **kwargs):
+        raise AssertionError("unbound manifest helper influenced the oracle")
+
+    for name in ("strict_json", "canonical_bytes", "identity", "digest"):
+        monkeypatch.setattr(manifest_module, name, unavailable)
+    result = {"status": "ok", "returncode": 0, "stdout_base64": base64.b64encode(b"42").decode()}
+    assert json_oracle._case_status(result, json_oracle.canonical_bytes(42)) == "passed"
+    assert json_oracle.identity({"value": 42})
