@@ -15,6 +15,7 @@ from sibyl.api.schemas import (
 )
 from sibyl.persistence.content_common import RawCaptureRecord
 from sibyl_core.auth.memory_policy import (
+    MEMORY_PROVENANCE_METADATA_KEYS,
     stamp_memory_scope_metadata,
 )
 from sibyl_core.memory_pipeline.retrieval_keys import normalize_retrieval_keys
@@ -27,7 +28,7 @@ log = structlog.get_logger()
 BULK_UNSUPPORTED_TYPES = frozenset(
     {EntityType.DOCUMENT, EntityType.EPIC, EntityType.PROJECT, EntityType.TASK}
 )
-_RAW_CAPTURE_METADATA_DENYLIST = frozenset(
+_RAW_CAPTURE_METADATA_DENYLIST = MEMORY_PROVENANCE_METADATA_KEYS | frozenset(
     {
         "principal_id",
         "memory_scope",
@@ -43,7 +44,7 @@ _RAW_CAPTURE_REVIEW_STATES = frozenset({"pending", "deferred", "promoted", "arch
 
 
 def sanitize_raw_capture_metadata(metadata: dict[str, object]) -> dict[str, object]:
-    """Drop caller-controlled fields that map to authoritative capture columns."""
+    """Keep capture ownership and evidence provenance under server control."""
     return {
         key: value for key, value in metadata.items() if key not in _RAW_CAPTURE_METADATA_DENYLIST
     }

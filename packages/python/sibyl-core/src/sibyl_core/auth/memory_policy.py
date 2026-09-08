@@ -38,6 +38,12 @@ MEMORY_PROVENANCE_METADATA_KEYS = frozenset(
     {
         "raw_memory_id",
         "raw_source_id",
+        "correction_blockers",
+        "correction_history",
+        "source_bindings",
+        "source_snapshot_sha256",
+        "source_validation_pending",
+        "lifecycle_reconciliation_pending",
     }
 )
 

@@ -31,8 +31,10 @@ def _session() -> MagicMock:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("source_capture_id", [None, "raw-1"])
 async def test_quick_capture_creates_raw_archive_record(
     monkeypatch: pytest.MonkeyPatch,
+    source_capture_id: str | None,
 ) -> None:
     from sibyl.config import settings
 
@@ -53,6 +55,9 @@ async def test_quick_capture_creates_raw_archive_record(
             "capture_mode": "quick",
             "capture_surface": "dashboard",
             "source": "notes",
+            "raw_memory_id": source_capture_id,
+            "correction_history": [],
+            "source_bindings": {},
         },
     )
 
@@ -63,11 +68,16 @@ async def test_quick_capture_creates_raw_archive_record(
 
     content_session = _session()
     save_capture = AsyncMock(side_effect=lambda _session, *, capture: capture)
+    mark_projected = AsyncMock(return_value=True)
 
     with (
         patch("sibyl_core.tools.core.add", AsyncMock(return_value=add_result)),
         patch("sibyl.api.routes.entity_mutations.broadcast_event", AsyncMock()),
         patch("sibyl.api.routes.entity_captures.save_raw_capture_record", save_capture),
+        patch(
+            "sibyl.api.routes.entity_captures.content_runtime.mark_raw_capture_projected",
+            mark_projected,
+        ),
     ):
         resp = await create_entity(
             request=_request(),
@@ -100,6 +110,16 @@ async def test_quick_capture_creates_raw_archive_record(
     }
     assert archive.capture_surface == "dashboard"
     assert archive.created_by_user_id == ctx.user.id
+    if source_capture_id is None:
+        mark_projected.assert_not_awaited()
+    else:
+        mark_projected.assert_awaited_once_with(
+            content_session,
+            organization_id=org.id,
+            raw_capture_id=source_capture_id,
+            projected_capture_id=archive.id,
+            principal_id=str(ctx.user.id),
+        )
 
 
 @pytest.mark.asyncio
