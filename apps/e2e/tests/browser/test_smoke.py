@@ -105,7 +105,7 @@ class TestFrontendBrowserContracts:
         search_form = authenticated_page.get_by_role("main").locator("form").first
         search_form.get_by_label("Search", exact=True).fill(query)
         search_form.get_by_role("button", name="Search", exact=True).click()
-        authenticated_page.wait_for_url(re.compile(r"/search\?q="))
+        expect(authenticated_page).to_have_url(re.compile(r"/search\?q="), timeout=30_000)
         assert_path(authenticated_page, "/search")
 
         result_titles = authenticated_page.get_by_role("heading", name=title, exact=True)
@@ -143,6 +143,6 @@ class TestFrontendBrowserContracts:
         )
         expect(task_heading).to_be_visible(timeout=20_000)
         task_heading.click()
-        authenticated_page.wait_for_url(re.compile(r"/tasks/[^/?#]+$"))
+        expect(authenticated_page).to_have_url(re.compile(r"/tasks/[^/?#]+$"), timeout=30_000)
         assert urlparse(authenticated_page.url).path.startswith("/tasks/")
         expect(authenticated_page.get_by_role("heading", name=test_task_title, exact=True)).to_be_visible()
