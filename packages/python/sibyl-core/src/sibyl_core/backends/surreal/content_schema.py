@@ -53,6 +53,7 @@ CONTENT_TABLES = (
     "crawled_documents",
     "document_chunks",
     "raw_captures",
+    "eval_attempts",
     "memory_usage_events",
     "api_idempotency_records",
     "source_imports",
@@ -62,7 +63,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 27
+CONTENT_SCHEMA_CURRENT_VERSION = 28
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -104,6 +105,30 @@ CONTENT_LEGACY_CONTENT_CHECKPOINT_DEFINITIONS = (
     _SCHEMA_DIR / "35_legacy_content_checkpoint.surql"
 ).read_text(encoding="utf-8")
 CONTENT_SCHEMA_DEFINITIONS = _load_schema_file("10_tables.surql")
+
+
+CONTENT_EVAL_ATTEMPTS_MIGRATION_DEFINITIONS = """
+DEFINE TABLE IF NOT EXISTS eval_attempts SCHEMAFULL;
+ALTER TABLE IF EXISTS eval_attempts SCHEMAFULL;
+ALTER TABLE IF EXISTS eval_attempts PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS uuid ON eval_attempts TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON eval_attempts TYPE string;
+DEFINE FIELD IF NOT EXISTS experiment_id ON eval_attempts TYPE string;
+DEFINE FIELD IF NOT EXISTS attempt_id ON eval_attempts TYPE string;
+DEFINE FIELD IF NOT EXISTS assignment_sha256 ON eval_attempts TYPE string;
+DEFINE FIELD IF NOT EXISTS assignment_json ON eval_attempts TYPE string;
+DEFINE FIELD IF NOT EXISTS receipt_sha256 ON eval_attempts TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS receipt_base64 ON eval_attempts TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS outcome_sha256 ON eval_attempts TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS transcript_sha256 ON eval_attempts TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS episode_sha256 ON eval_attempts TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS capture_id ON eval_attempts TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created_at ON eval_attempts TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS admitted_at ON eval_attempts TYPE option<datetime>;
+DEFINE INDEX IF NOT EXISTS idx_eval_attempts_uuid ON eval_attempts FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_eval_attempts_identity ON eval_attempts
+    FIELDS organization_id, experiment_id, attempt_id UNIQUE;
+"""
 
 
 CONTENT_SOURCE_URL_SCOPE_MIGRATION_DEFINITIONS = """
@@ -184,6 +209,7 @@ DEFINE FIELD OVERWRITE status ON backups TYPE string DEFAULT 'pending'
 """
 
 CONTENT_PERMISSION_MIGRATION_DEFINITIONS = """
+ALTER TABLE IF EXISTS eval_attempts PERMISSIONS NONE;
 ALTER TABLE IF EXISTS crawl_sources PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 ALTER TABLE IF EXISTS crawled_documents PERMISSIONS
@@ -863,6 +889,11 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
                     CONTENT_LEGACY_CONTENT_CHECKPOINT_BACKFILL,
                 )
             ),
+        ),
+        SchemaMigration(
+            version=28,
+            name="content_eval_attempts",
+            statements=tuple(split_statements(CONTENT_EVAL_ATTEMPTS_MIGRATION_DEFINITIONS)),
         ),
     )
 

@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import cast
 from uuid import uuid4
 
+from sibyl_core.auth.memory_policy import EVAL_ADMISSION_METADATA_KEY
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.embeddings.providers import (
     EmbeddingProvider,
@@ -137,6 +138,7 @@ def _raw_memory_from_write(write: RawMemoryWrite, *, captured_at: datetime) -> R
     normalized_scope = models.coerce_memory_scope(write.memory_scope)
     models.validate_raw_memory_scope(normalized_scope, write.scope_key)
     metadata = normalize_memory_quality_metadata(write.metadata or {})
+    metadata.pop(EVAL_ADMISSION_METADATA_KEY, None)
     return RawMemory(
         id=str(uuid4()),
         organization_id=write.organization_id,
