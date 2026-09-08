@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import sys
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -43,11 +41,8 @@ def fake_surreal(monkeypatch) -> list[tuple[str, object]]:
     class FakeRecordID:
         pass
 
-    monkeypatch.setitem(
-        sys.modules,
-        "surrealdb",
-        SimpleNamespace(AsyncSurreal=FakeAsyncSurreal, RecordID=FakeRecordID),
-    )
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
+    monkeypatch.setattr("surrealdb.RecordID", FakeRecordID)
     return calls
 
 
@@ -160,7 +155,7 @@ async def test_surreal_dedicated_client_pools_connections_for_concurrent_queries
         async def close(self) -> None:
             self.closed = True
 
-    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
     client = SurrealAuthClient(
         url="ws://localhost:8000/rpc",
         username="root",
@@ -241,7 +236,7 @@ async def test_surreal_dedicated_clients_retry_closed_read_socket(
         async def close(self) -> None:
             self.closed = True
 
-    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
 
     result = await client.execute_query("SELECT * FROM system_settings;")
 
@@ -280,7 +275,7 @@ async def test_surreal_content_client_retries_closed_raw_let_read(monkeypatch) -
         async def close(self) -> None:
             self.closed = True
 
-    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
     client = SurrealContentClient(
         url="ws://localhost:8000/rpc",
         username="root",
@@ -322,7 +317,7 @@ async def test_surreal_dedicated_client_drops_query_id_keyerror_on_write(monkeyp
         async def close(self) -> None:
             self.closed = True
 
-    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
     client = SurrealAuthClient(
         url="ws://localhost:8000/rpc",
         username="root",
@@ -363,7 +358,7 @@ async def test_surreal_content_client_retries_closed_socket_during_connect(monke
         async def close(self) -> None:
             self.closed = True
 
-    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
     client = SurrealContentClient(
         url="ws://localhost:8000/rpc",
         username="root",
@@ -403,7 +398,7 @@ async def test_surreal_content_client_retries_opening_handshake_timeout(monkeypa
         async def close(self) -> None:
             self.closed = True
 
-    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
     client = SurrealContentClient(
         url="ws://localhost:8000/rpc",
         username="root",
@@ -447,7 +442,7 @@ async def test_surreal_content_client_allows_two_closed_raw_read_retries(monkeyp
         async def close(self) -> None:
             self.closed = True
 
-    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
     client = SurrealContentClient(
         url="ws://localhost:8000/rpc",
         username="root",
@@ -497,7 +492,7 @@ async def test_surreal_content_client_preflights_stale_write_socket(monkeypatch)
         async def close(self) -> None:
             self.closed = True
 
-    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
     client = SurrealContentClient(
         url="ws://localhost:8000/rpc",
         username="root",
@@ -550,7 +545,7 @@ async def test_surreal_content_client_does_not_retry_closed_write(monkeypatch) -
         async def close(self) -> None:
             self.closed = True
 
-    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
     client = SurrealContentClient(
         url="ws://localhost:8000/rpc",
         username="root",
@@ -592,7 +587,7 @@ async def test_surreal_content_client_emits_query_telemetry(monkeypatch) -> None
     def fake_log_query(query: str, **fields: Any) -> None:
         telemetry.append({"query": query, **fields})
 
-    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=FakeAsyncSurreal))
+    monkeypatch.setattr("surrealdb.AsyncSurreal", FakeAsyncSurreal)
     monkeypatch.setattr(
         "sibyl_core.backends.surreal.dedicated_client.query_start",
         lambda: 10.0,

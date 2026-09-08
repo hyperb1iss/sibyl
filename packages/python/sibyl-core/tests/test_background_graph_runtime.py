@@ -1,7 +1,6 @@
 """Background network capacity does not borrow interactive graph sockets."""
 
 import asyncio
-import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -42,7 +41,7 @@ async def test_background_pool_saturation_preserves_interactive_capacity(monkeyp
             await asyncio.sleep(0)
             self.closed = True
 
-    monkeypatch.setitem(sys.modules, "surrealdb", SimpleNamespace(AsyncSurreal=Socket))
+    monkeypatch.setattr("surrealdb.AsyncSurreal", Socket)
     foreground = SurrealGraphClient(
         group_id="Org-A",
         url="ws://test.invalid/rpc",
