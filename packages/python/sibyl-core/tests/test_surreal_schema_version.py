@@ -155,3 +155,31 @@ async def test_concurrent_index_helpers_reject_unsafe_identifiers() -> None:
 
     with pytest.raises(ValueError, match="invalid SurrealDB identifier"):
         await rebuild_index_concurrently(fake.execute_query, definition)
+
+
+async def test_migration_action_failure_does_not_advance_version():
+    fake = _FakeSurreal(version=21)
+    attempts = []
+
+    async def backfill(execute_query):
+        attempts.append(True)
+        assert fake.version == 21
+        if len(attempts) == 1:
+            raise RuntimeError("interrupted backfill")
+        await execute_query("RETURN true;")
+
+    migration = SchemaMigration(version=23, name="backfill", action=backfill)
+    with pytest.raises(RuntimeError, match="interrupted backfill"):
+        await apply_schema_migrations(fake.execute_query, [migration])
+    assert fake.version == 21
+    await apply_schema_migrations(fake.execute_query, [migration])
+    assert fake.version == 23
+    assert len(attempts) == 2
+
+
+async def test_index_ready_requires_status_when_requested():
+    async def execute_query(statement, **params):
+        return [{}]
+
+    with pytest.raises(RuntimeError, match="returned no build status"):
+        await wait_for_index_ready(execute_query, name="idx", table="entity", require_status=True)

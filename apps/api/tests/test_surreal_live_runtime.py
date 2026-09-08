@@ -1006,3 +1006,86 @@ async def test_live_auth_replay_identity_migration_preserves_data_lineage() -> N
         await client.close()
         await replacement.close()
         await _drop_surreal_namespace(namespace)
+
+
+@pytest.mark.parametrize("operation", ["read", "mutation", "takeover"])
+async def test_live_surreal_schema_renewal_and_takeover(monkeypatch, operation):
+    import asyncio
+
+    from sibyl_core.backends.surreal import schema
+    from sibyl_core.backends.surreal.schema_ownership import (
+        SchemaOwnershipLost,
+        try_acquire_schema_ownership,
+    )
+
+    group_id = str(uuid4())
+    clients = [
+        SurrealGraphClient(
+            group_id=group_id,
+            url=_live_surreal_url(),
+            username=_surreal_username(),
+            password=_surreal_password(),
+            pool_size=1,
+        )
+        for _ in range(2)
+    ]
+    client, observer = clients
+    successor = None
+
+    async def short_claim(execute, **kwargs):
+        return await try_acquire_schema_ownership(execute, lease_seconds=1, **kwargs)
+
+    async def stopped_renewal(ownership):
+        await asyncio.Event().wait()
+
+    try:
+        await prepare_graph_schema(client)
+        await client.execute_query("DEFINE TABLE schema_renewal_probe SCHEMALESS;")
+        monkeypatch.setattr(schema, "try_acquire_schema_ownership", short_claim)
+        if operation == "takeover":
+            monkeypatch.setattr(schema, "_renew_schema_ownership", stopped_renewal)
+        async with schema._graph_schema_ownership(client) as ownership:
+            work = asyncio.create_task(
+                ownership.read("SLEEP 3s; RETURN 1;")
+                if operation == "read"
+                else ownership.mutate("SLEEP 3s; CREATE schema_renewal_probe:body SET value = 1;")
+            )
+            try:
+                await asyncio.sleep(1.3)
+                assert not work.done()
+                successor = await try_acquire_schema_ownership(
+                    observer.execute_query, initialize=False
+                )
+                assert not work.done(), "the contender must claim while the body is in flight"
+                if operation == "takeover":
+                    assert successor is not None
+                    with pytest.raises(SchemaOwnershipLost):
+                        await work
+                    assert await observer.execute_query("SELECT * FROM schema_renewal_probe;") == []
+                else:
+                    assert successor is None
+                    await work
+                    assert await observer.execute_query(
+                        "SELECT VALUE deadline > time::now() FROM schema_lease:graph;"
+                    ) == [True]
+                    if operation == "mutation":
+                        assert await observer.execute_query(
+                            "SELECT VALUE value FROM schema_renewal_probe:body;"
+                        ) == [1]
+            finally:
+                if not work.done():
+                    work.cancel()
+                await asyncio.gather(work, return_exceptions=True)
+        if successor is None:
+            successor = await try_acquire_schema_ownership(observer.execute_query, initialize=False)
+        assert successor is not None
+        await successor.mutate("CREATE schema_renewal_probe:successor SET value = 2;")
+        assert await observer.execute_query(
+            "SELECT VALUE value FROM schema_renewal_probe:successor;"
+        ) == [2]
+    finally:
+        if successor is not None:
+            await successor.release()
+        await asyncio.gather(*(connection.close() for connection in clients))
+        with suppress(Exception):
+            await _drop_surreal_namespace(client.namespace)
