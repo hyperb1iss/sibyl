@@ -142,3 +142,44 @@ async def test_checkpoint_stale_review_preserves_concurrent_history(checkpoint_c
     assert stored["metadata"]["correction_history"] == history
     assert stored["review_state"] == "promoted"
     assert stored["legacy_content_checkpoint"]["observed_revision"] == 2
+
+
+@pytest.mark.parametrize("state", ["pending", "deferred", "archived", "promoted"])
+async def test_checkpoint_review_removes_inapplicable_timestamps(checkpoint_client, state):
+    org = uuid4()
+    history = [{"action": "revise"}]
+    capture = await api_content.save_raw_capture_record(
+        None,
+        capture=RawCaptureRecord(
+            organization_id=org,
+            principal_id="owner",
+            title="Review transitions",
+            raw_content="Evidence",
+            entity_type="raw_memory",
+            metadata={
+                "archived_at": "old-archive",
+                "deferred_at": "old-defer",
+                "promoted_at": "old-promotion",
+                "correction_history": history,
+                "authored": {"keep": True},
+            },
+        ),
+    )
+    await api_content.update_raw_capture_review_state(
+        None, organization_id=org, capture_id=capture.id, review_state=state
+    )
+    stored = (
+        await api_content._select_many(
+            checkpoint_client,
+            "SELECT * FROM raw_captures WHERE uuid = $uuid;",
+            uuid=str(capture.id),
+        )
+    )[0]
+    timestamps = {
+        key for key in stored["metadata"] if key in {"archived_at", "deferred_at", "promoted_at"}
+    }
+    assert timestamps == (set() if state == "pending" else {f"{state}_at"})
+    assert stored["metadata"]["correction_history"] == history
+    assert stored["metadata"]["authored"] == {"keep": True}
+    assert stored["legacy_content_checkpoint"]["observed_revision"] == 1
+    assert stored["revision"] == 2

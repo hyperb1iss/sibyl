@@ -287,3 +287,61 @@ async def test_legacy_checkpoint_stale_history_and_tenant_collision_are_atomic(c
         )
     assert stored == second
     assert absent == []
+
+
+async def test_legacy_checkpoint_nonstring_actions_survive_upgrade_and_writes(content_store):
+    from sibyl_core.backends.surreal.content_schema import (
+        CONTENT_LEGACY_CONTENT_CHECKPOINT_BACKFILL,
+        CONTENT_LEGACY_CONTENT_CHECKPOINT_DEFINITIONS,
+    )
+
+    history = [{"action": value} for value in (5, False, {}, [], None)] + [{"action": " ReViSe "}]
+    async with content_client.surreal_content_client() as client:
+        await client.execute_query("REMOVE FIELD legacy_content_checkpoint ON raw_captures;")
+        await client.execute_query(
+            "CREATE raw_captures CONTENT $record;",
+            record={
+                "uuid": "mixed-history",
+                "organization_id": "checkpoint",
+                "revision": 7,
+                "metadata": {"correction_history": history},
+            },
+        )
+        before = (
+            await content_client.select_many(
+                client, "SELECT metadata FROM raw_captures WHERE uuid = 'mixed-history';"
+            )
+        )[0]
+        await client.execute_query(CONTENT_LEGACY_CONTENT_CHECKPOINT_DEFINITIONS)
+        await client.execute_query(CONTENT_LEGACY_CONTENT_CHECKPOINT_BACKFILL)
+        stored = (
+            await content_client.select_many(
+                client, "SELECT * FROM raw_captures WHERE uuid = 'mixed-history';"
+            )
+        )[0]
+        assert stored["legacy_content_checkpoint"] == {
+            "entries": [history[-1]],
+            "observed_revision": 7,
+        }
+        assert stored["metadata"]["correction_history"] == before["metadata"]["correction_history"]
+        await client.execute_query(
+            "CREATE raw_captures CONTENT $record;",
+            record={
+                "uuid": "mixed-import",
+                "organization_id": "checkpoint",
+                "revision": 9,
+                "metadata": {"correction_history": history},
+            },
+        )
+        imported = (
+            await content_client.select_many(
+                client, "SELECT * FROM raw_captures WHERE uuid = 'mixed-import';"
+            )
+        )[0]
+        assert imported["legacy_content_checkpoint"] == {
+            "entries": [history[-1]],
+            "observed_revision": 9,
+        }
+        assert (
+            imported["metadata"]["correction_history"] == before["metadata"]["correction_history"]
+        )

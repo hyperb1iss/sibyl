@@ -696,12 +696,12 @@ LET $checkpoint_rows = (SELECT id, revision, metadata FROM raw_captures
              WHERE legacy_content_checkpoint = NONE
              AND array::len((metadata.correction_history ?? []).filter(|$entry|
                  type::is::object($entry)
-                 AND string::lowercase(string::trim($entry.action ?? '')) = 'revise'
+                 AND string::lowercase(string::trim(type::string($entry.action ?? ''))) = 'revise'
                  AND $entry.prior_revision = NONE)) > 0);
 FOR $row IN $checkpoint_rows {
     LET $history = $row.metadata.correction_history ?? [];
     LET $legacy = $history.filter(|$entry| type::is::object($entry)
-        AND string::lowercase(string::trim($entry.action ?? '')) = 'revise'
+        AND string::lowercase(string::trim(type::string($entry.action ?? ''))) = 'revise'
         AND $entry.prior_revision = NONE);
     LET $capture_id = $row.id;
     UPDATE $capture_id MERGE {
