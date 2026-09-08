@@ -108,8 +108,9 @@ CONTENT_SCHEMA_DEFINITIONS = _load_schema_file("10_tables.surql")
 
 
 CONTENT_EVAL_ATTEMPTS_MIGRATION_DEFINITIONS = """
-DEFINE TABLE IF NOT EXISTS eval_attempts SCHEMAFULL PERMISSIONS NONE;
-ALTER TABLE IF EXISTS eval_attempts SCHEMAFULL PERMISSIONS NONE;
+DEFINE TABLE IF NOT EXISTS eval_attempts SCHEMAFULL;
+ALTER TABLE IF EXISTS eval_attempts SCHEMAFULL;
+ALTER TABLE IF EXISTS eval_attempts PERMISSIONS NONE;
 DEFINE FIELD IF NOT EXISTS uuid ON eval_attempts TYPE string;
 DEFINE FIELD IF NOT EXISTS organization_id ON eval_attempts TYPE string;
 DEFINE FIELD IF NOT EXISTS experiment_id ON eval_attempts TYPE string;
@@ -208,6 +209,7 @@ DEFINE FIELD OVERWRITE status ON backups TYPE string DEFAULT 'pending'
 """
 
 CONTENT_PERMISSION_MIGRATION_DEFINITIONS = """
+ALTER TABLE IF EXISTS eval_attempts PERMISSIONS NONE;
 ALTER TABLE IF EXISTS crawl_sources PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
 ALTER TABLE IF EXISTS crawled_documents PERMISSIONS
