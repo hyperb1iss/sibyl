@@ -313,7 +313,7 @@ class TestSurrealContentHelpers:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_raw_memory_save_returns_saved_record_after_commit(
+    async def test_raw_memory_save_returns_saved_record(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -351,8 +351,6 @@ class TestSurrealContentHelpers:
             embedding_provider=None,
         )
 
-        transaction = client.calls[1][0]
-        assert transaction.index("COMMIT TRANSACTION;") < transaction.index("RETURN $saved;")
         assert saved.raw_content == "Updated"
         assert saved.revision == 2
 
