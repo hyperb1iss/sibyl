@@ -1,0 +1,331 @@
+"""Durable, private review candidates from authenticated consolidation results."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import dataclass, replace
+from typing import Any, Literal
+from uuid import NAMESPACE_URL, uuid5
+
+from sibyl_core.auth.memory_policy import EVAL_CONSOLIDATION_METADATA_KEY
+from sibyl_core.memory_pipeline.source_lifecycle import (
+    SOURCE_BINDINGS_KEY,
+    SOURCE_VALIDATION_PENDING_KEY,
+)
+from sibyl_core.services import content_client, content_models
+from sibyl_core.services.content_raw_persistence import (
+    _raw_memory_from_write,
+    reflection_candidate_metadata,
+)
+from sibyl_core.services.memory_source_validation import (
+    SOURCE_VALIDATION_CONTEXT_KEY,
+    SourceReadAuthority,
+)
+from sibyl_core.tasks.consolidation import (
+    AdmittedTaskOutcome,
+    ConsolidationResult,
+    validate_candidate_content_agreement,
+)
+
+CONSOLIDATION_METADATA_KEY = EVAL_CONSOLIDATION_METADATA_KEY
+
+
+class ConsolidationConflict(ValueError):
+    """An operation identity was reused or its original source observation changed."""
+
+
+def _digest(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    ).hexdigest()
+
+
+@dataclass(frozen=True)
+class ConsolidationOperation:
+    organization_id: str
+    principal_id: str
+    experiment_id: str
+    experiment_revision: str
+    arm_id: str
+    checkpoint: int
+    group_id: str
+    attempt_ids: tuple[str, ...]
+    mechanism: str
+    controller_policy_sha256: str
+    extractor_revision: str
+
+    def __post_init__(self) -> None:
+        if (
+            any(
+                not value.strip()
+                for value in (
+                    self.organization_id,
+                    self.principal_id,
+                    self.experiment_id,
+                    self.experiment_revision,
+                    self.arm_id,
+                    self.group_id,
+                    self.mechanism,
+                    self.controller_policy_sha256,
+                    self.extractor_revision,
+                )
+            )
+            or self.checkpoint < 0
+        ):
+            raise ValueError("explicit consolidation identity and policy are required")
+        if len(self.attempt_ids) < 2 or len(set(self.attempt_ids)) != len(self.attempt_ids):
+            raise ValueError("distinct consolidation attempts are required")
+
+    @property
+    def key(self) -> str:
+        return _digest(
+            [
+                "sibyl-consolidation-v1",
+                self.organization_id,
+                self.principal_id,
+                self.experiment_id,
+                self.experiment_revision,
+                self.arm_id,
+                self.checkpoint,
+                self.group_id,
+            ]
+        )
+
+    @property
+    def request_sha256(self) -> str:
+        return _digest(
+            [
+                self.key,
+                sorted(self.attempt_ids),
+                self.mechanism,
+                self.controller_policy_sha256,
+                self.extractor_revision,
+            ]
+        )
+
+
+@dataclass(frozen=True)
+class StoredConsolidation:
+    operation_id: str
+    status: Literal["candidate", "abstained", "gone"]
+    memory: content_models.RawMemory | None
+
+
+# One RETURN statement is an implicit atomic transaction on both SDK transports.
+_STORE = """
+RETURN {
+LET $existing = (SELECT * FROM eval_consolidations
+    WHERE uuid = $operation_id AND organization_id = $organization_id LIMIT 1)[0];
+IF $existing != NONE {
+    IF $existing.principal_id != $principal_id
+        OR $existing.request_sha256 != $request_sha256 {
+        THROW 'consolidation conflict: immutable request differs';
+    };
+} ELSE {
+    FOR $source IN $sources {
+        LET $attempt = (SELECT * FROM eval_attempts WHERE organization_id = $organization_id
+            AND experiment_id = $experiment_id AND attempt_id = $source.attempt_id LIMIT 1)[0];
+        LET $memory = (SELECT * FROM raw_captures WHERE organization_id = $organization_id
+            AND uuid = $source.capture_id LIMIT 1)[0];
+        IF $attempt = NONE OR $attempt.capture_id != $source.capture_id
+            OR $attempt.receipt_sha256 != $source.receipt_sha256
+            OR $attempt.episode_sha256 != $source.episode_sha256
+            OR $memory = NONE OR $memory.deleted_at != NONE
+            OR $memory.principal_id != $principal_id OR $memory.memory_scope != 'private'
+            OR $memory.metadata != $source.metadata
+            OR $memory.review_state != $source.review_state
+            OR $memory.source_id != $source.source_id
+            OR $memory.revision != $source.revision
+            OR crypto::sha256($memory.raw_content) != $source.episode_sha256
+            OR $memory.metadata.eval_admission.admission_id != $source.admission_id {
+            THROW 'consolidation conflict: original admitted source changed';
+        };
+    };
+    IF $candidate != NONE { CREATE raw_captures CONTENT $candidate; };
+    CREATE eval_consolidations CONTENT $ledger;
+};
+LET $stored = (SELECT * FROM eval_consolidations
+    WHERE uuid = $operation_id AND organization_id = $organization_id LIMIT 1)[0];
+LET $memory = (SELECT * FROM raw_captures WHERE organization_id = $organization_id
+    AND uuid = $stored.candidate_id LIMIT 1)[0];
+RETURN { ledger: $stored, memory: $memory };
+};
+"""
+
+
+def _decode(operation: ConsolidationOperation, row: dict) -> StoredConsolidation:
+    ledger = row["ledger"]
+    if (
+        ledger["principal_id"] != operation.principal_id
+        or ledger["request_sha256"] != operation.request_sha256
+    ):
+        raise ConsolidationConflict("immutable consolidation request differs")
+    if ledger["result_kind"] == "abstained":
+        return StoredConsolidation(operation.key, "abstained", None)
+    record = row.get("memory")
+    memory = content_models.raw_memory_from_record(record) if record else None
+    if memory is None or memory.deleted_at is not None:
+        return StoredConsolidation(operation.key, "gone", None)
+    if (
+        memory.principal_id != operation.principal_id
+        or memory.memory_scope != "private"
+        or memory.metadata.get(CONSOLIDATION_METADATA_KEY) != operation.key
+    ):
+        raise ConsolidationConflict("stored consolidation candidate was replaced")
+    return StoredConsolidation(operation.key, "candidate", memory)
+
+
+async def get_stored_consolidation(operation: ConsolidationOperation) -> StoredConsolidation | None:
+    """Resolve replay before extraction; a purged candidate remains permanently gone."""
+    async with content_client.surreal_content_client() as client:
+        rows = content_client.normalize_records(
+            await client.execute_query(
+                """
+RETURN {
+LET $ledger = (SELECT * FROM eval_consolidations
+    WHERE uuid = $operation_id AND organization_id = $organization_id LIMIT 1)[0];
+RETURN { ledger: $ledger, memory: (SELECT * FROM raw_captures
+    WHERE organization_id = $organization_id AND uuid = $ledger.candidate_id LIMIT 1)[0] };
+};
+""",
+                operation_id=operation.key,
+                organization_id=operation.organization_id,
+            )
+        )
+    if len(rows) != 1:
+        raise ConsolidationConflict("consolidation lookup returned no snapshot")
+    return _decode(operation, rows[0]) if rows[0].get("ledger") else None
+
+
+async def store_consolidation(
+    operation: ConsolidationOperation,
+    result: ConsolidationResult,
+) -> StoredConsolidation:
+    """Persist a server-verified proposal under its original source observations.
+
+    The caller authenticates and revalidates the admitted group before invoking
+    this writer. The transaction closes the last read-to-write revision gap.
+    """
+    existing = await get_stored_consolidation(operation)
+    if existing is not None:
+        return existing
+    group = result.group
+    if result.candidate is not None and validate_candidate_content_agreement(
+        result.candidate, group=group
+    ):
+        raise ConsolidationConflict("candidate no longer agrees with its evidence")
+    if (
+        group.organization_id != operation.organization_id
+        or group.owner_principal_id != operation.principal_id
+        or group.group_id != operation.group_id
+        or group.mechanism != operation.mechanism
+        or {e.session_id for e in group.episodes} != set(operation.attempt_ids)
+    ):
+        raise ConsolidationConflict("proposal is outside the operation cohort")
+    sources: list[dict[str, Any]] = []
+    bindings = {}
+    for episode in group.episodes:
+        if not isinstance(episode.outcome, AdmittedTaskOutcome) or len(episode.stored_sources) != 1:
+            raise ConsolidationConflict("only joined admitted episodes may be persisted")
+        source = episode.stored_sources[0]
+        bindings[source.source_id] = source.observed_revision
+        sources.append(
+            {
+                "attempt_id": episode.session_id,
+                "capture_id": source.source_id,
+                "revision": source.observed_revision,
+                "receipt_sha256": episode.outcome.receipt_sha256,
+                "episode_sha256": episode.artifact_sha256,
+                "admission_id": episode.outcome.admission_id,
+            }
+        )
+    # Preserve extraction observations, while binding every current lifecycle
+    # field checked here into the final transaction. Direct authorized record
+    # writes need not have used the normal revision-incrementing helpers.
+    async with content_client.surreal_content_client() as client:
+        records = await content_client.select_many(
+            client,
+            "SELECT * FROM raw_captures WHERE organization_id = $organization_id AND uuid IN $ids;",
+            organization_id=operation.organization_id,
+            ids=list(bindings),
+        )
+    current = {str(record["uuid"]): record for record in records}
+    for source in sources:
+        record = current.get(source["capture_id"])
+        if record is None:
+            raise ConsolidationConflict("original admitted source changed")
+        memory = content_models.raw_memory_from_record(record)
+        if memory.revision != source["revision"] or not content_models.raw_memory_recallable(
+            memory
+        ):
+            raise ConsolidationConflict("original admitted source changed")
+        source.update(
+            metadata=record.get("metadata", {}),
+            review_state=record.get("review_state"),
+            source_id=record.get("source_id"),
+        )
+    candidate = None
+    candidate_id = None
+    if result.candidate is not None:
+        candidate_id = str(uuid5(NAMESPACE_URL, "sibyl-consolidation:" + operation.key))
+        proposal = result.candidate
+        metadata = reflection_candidate_metadata(
+            candidate=proposal, raw_source_ids=tuple(bindings), memory_scope="private"
+        )
+        memory = _raw_memory_from_write(
+            content_models.RawMemoryWrite(
+                organization_id=operation.organization_id,
+                principal_id=operation.principal_id,
+                source_id="consolidation:" + operation.key,
+                raw_content=proposal.content,
+                title=proposal.title,
+                memory_scope="private",
+                tags=proposal.tags,
+                metadata=metadata,
+                capture_surface="reflection_candidate",
+                entity_type=proposal.kind,
+            ),
+            captured_at=content_models.utcnow(),
+        )
+        memory.metadata.update(
+            {
+                CONSOLIDATION_METADATA_KEY: operation.key,
+                SOURCE_BINDINGS_KEY: bindings,
+                SOURCE_VALIDATION_PENDING_KEY: True,
+                SOURCE_VALIDATION_CONTEXT_KEY: SourceReadAuthority(
+                    operation.principal_id
+                ).ceiling_metadata(),
+            }
+        )
+        candidate = content_models.raw_memory_record(replace(memory, id=candidate_id))
+    ledger = {
+        "uuid": operation.key,
+        "organization_id": operation.organization_id,
+        "principal_id": operation.principal_id,
+        "request_sha256": operation.request_sha256,
+        "candidate_id": candidate_id,
+        "result_kind": "candidate" if candidate else "abstained",
+    }
+    async with content_client.surreal_content_client() as client:
+        try:
+            rows = content_client.normalize_records(
+                await client.execute_query(
+                    _STORE,
+                    operation_id=operation.key,
+                    organization_id=operation.organization_id,
+                    principal_id=operation.principal_id,
+                    experiment_id=operation.experiment_id,
+                    request_sha256=operation.request_sha256,
+                    sources=sources,
+                    candidate=candidate,
+                    ledger=ledger,
+                )
+            )
+        except Exception as exc:
+            if "consolidation conflict:" in str(exc):
+                raise ConsolidationConflict(str(exc)) from exc
+            raise
+    if len(rows) != 1:
+        raise ConsolidationConflict("consolidation did not return its stored result")
+    return _decode(operation, rows[0])

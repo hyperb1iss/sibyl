@@ -424,3 +424,15 @@ DEFINE FIELD IF NOT EXISTS admitted_at ON eval_attempts TYPE option<datetime>;
 DEFINE INDEX IF NOT EXISTS idx_eval_attempts_uuid ON eval_attempts FIELDS uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_eval_attempts_identity ON eval_attempts
     FIELDS organization_id, experiment_id, attempt_id UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS eval_consolidations SCHEMAFULL;
+ALTER TABLE IF EXISTS eval_consolidations SCHEMAFULL;
+ALTER TABLE IF EXISTS eval_consolidations PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS uuid ON eval_consolidations TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON eval_consolidations TYPE string;
+DEFINE FIELD IF NOT EXISTS principal_id ON eval_consolidations TYPE string;
+DEFINE FIELD IF NOT EXISTS request_sha256 ON eval_consolidations TYPE string;
+DEFINE FIELD IF NOT EXISTS candidate_id ON eval_consolidations TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS result_kind ON eval_consolidations TYPE string ASSERT $value IN ['candidate', 'abstained'];
+DEFINE FIELD IF NOT EXISTS created_at ON eval_consolidations TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_eval_consolidations_uuid ON eval_consolidations FIELDS uuid UNIQUE;

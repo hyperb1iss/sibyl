@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Protocol
 
+from sibyl_core.auth.memory_policy import EVAL_CONSOLIDATION_METADATA_KEY
 from sibyl_core.memory_pipeline.source_lifecycle import (
     CORRECTION_BLOCKERS_KEY,
     SOURCE_BINDINGS_KEY,
@@ -74,6 +75,11 @@ def raw_memory_lifecycle_recallable(
     memory: MemoryLifecycleView, *, include_source_corrections: bool = True
 ) -> bool:
     metadata = dict(memory.metadata)
+    if (
+        metadata.get(EVAL_CONSOLIDATION_METADATA_KEY)
+        and _normalized_state(memory.review_state) != "promoted"
+    ):
+        return False
     if include_source_corrections and correction_blocked(metadata):
         return False
     review_state = _normalized_state(memory.review_state)
@@ -165,6 +171,11 @@ def graph_metadata_recallable(metadata: Mapping[str, object] | None) -> bool:
     if not metadata:
         return True
     if correction_blocked(metadata):
+        return False
+    if (
+        metadata.get(EVAL_CONSOLIDATION_METADATA_KEY)
+        and _normalized_state(metadata.get("review_state")) != "promoted"
+    ):
         return False
     state = _normalized_state(metadata.get("lifecycle_state"))
     if _normalized_state(metadata.get("review_state")) in RECALL_EXCLUDED_REVIEW_STATES:

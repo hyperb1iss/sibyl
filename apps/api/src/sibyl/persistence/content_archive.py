@@ -94,6 +94,15 @@ _CONTENT_ARCHIVE_TABLE_SPECS = (
         create_sql="CREATE eval_attempts CONTENT $record;",
     ),
     ContentArchiveTableSpec(
+        name="eval_consolidations",
+        source_identity_field="id",
+        target_identity_field="uuid",
+        select_sql="SELECT * FROM eval_consolidations ORDER BY id ASC;",
+        delete_by_identity_sql="DELETE FROM eval_consolidations WHERE uuid = $identity;",
+        delete_all_sql="DELETE FROM eval_consolidations;",
+        create_sql="CREATE eval_consolidations CONTENT $record;",
+    ),
+    ContentArchiveTableSpec(
         name="api_idempotency_records",
         source_identity_field="id",
         target_identity_field="uuid",

@@ -35,10 +35,12 @@ MEMORY_OWNER_METADATA_KEYS = frozenset(
 # them from the completed raw write after this strip runs
 # (`memory_pipeline/capture.py`), so no legitimate writer supplies them.
 EVAL_ADMISSION_METADATA_KEY = "eval_admission"
+EVAL_CONSOLIDATION_METADATA_KEY = "eval_consolidation"
 
 MEMORY_PROVENANCE_METADATA_KEYS = frozenset(
     {
         EVAL_ADMISSION_METADATA_KEY,
+        EVAL_CONSOLIDATION_METADATA_KEY,
         "raw_memory_id",
         "raw_source_id",
         "correction_blockers",

@@ -54,6 +54,7 @@ CONTENT_TABLES = (
     "document_chunks",
     "raw_captures",
     "eval_attempts",
+    "eval_consolidations",
     "memory_usage_events",
     "api_idempotency_records",
     "source_imports",
@@ -63,7 +64,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 29
+CONTENT_SCHEMA_CURRENT_VERSION = 30
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -105,6 +106,21 @@ CONTENT_LEGACY_CONTENT_CHECKPOINT_DEFINITIONS = (
     _SCHEMA_DIR / "35_legacy_content_checkpoint.surql"
 ).read_text(encoding="utf-8")
 CONTENT_SCHEMA_DEFINITIONS = _load_schema_file("10_tables.surql")
+
+
+CONTENT_EVAL_CONSOLIDATIONS_MIGRATION_DEFINITIONS = """
+DEFINE TABLE IF NOT EXISTS eval_consolidations SCHEMAFULL;
+ALTER TABLE IF EXISTS eval_consolidations SCHEMAFULL;
+ALTER TABLE IF EXISTS eval_consolidations PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS uuid ON eval_consolidations TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON eval_consolidations TYPE string;
+DEFINE FIELD IF NOT EXISTS principal_id ON eval_consolidations TYPE string;
+DEFINE FIELD IF NOT EXISTS request_sha256 ON eval_consolidations TYPE string;
+DEFINE FIELD IF NOT EXISTS candidate_id ON eval_consolidations TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS result_kind ON eval_consolidations TYPE string ASSERT $value IN ['candidate', 'abstained'];
+DEFINE FIELD IF NOT EXISTS created_at ON eval_consolidations TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_eval_consolidations_uuid ON eval_consolidations FIELDS uuid UNIQUE;
+"""
 
 
 CONTENT_EVAL_ATTEMPTS_MIGRATION_DEFINITIONS = """
@@ -209,6 +225,7 @@ DEFINE FIELD OVERWRITE status ON backups TYPE string DEFAULT 'pending'
 """
 
 CONTENT_PERMISSION_MIGRATION_DEFINITIONS = """
+ALTER TABLE IF EXISTS eval_consolidations PERMISSIONS NONE;
 ALTER TABLE IF EXISTS eval_attempts PERMISSIONS NONE;
 ALTER TABLE IF EXISTS crawl_sources PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
@@ -902,6 +919,11 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
                 "DEFINE INDEX IF NOT EXISTS idx_raw_captures_source_validation "
                 "ON raw_captures FIELDS organization_id, metadata.source_validation_pending, uuid",
             ),
+        ),
+        SchemaMigration(
+            version=30,
+            name="content_eval_consolidations",
+            statements=tuple(split_statements(CONTENT_EVAL_CONSOLIDATIONS_MIGRATION_DEFINITIONS)),
         ),
     )
 

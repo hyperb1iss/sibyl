@@ -498,24 +498,17 @@ async def remember_raw_memories(
     return stored
 
 
-async def remember_reflection_candidate_review(
+def reflection_candidate_metadata(
     *,
-    organization_id: str,
-    principal_id: str,
     candidate: ReflectionCandidate,
-    raw_source_ids: list[str],
+    raw_source_ids: Sequence[str],
+    memory_scope: MemoryScope | str,
     source_id: str | None = None,
-    memory_scope: MemoryScope | str = MemoryScope.PRIVATE,
-    scope_key: str | None = None,
     suggested_memory_scope: MemoryScope | str | None = None,
     suggested_scope_key: str | None = None,
     extraction_prompt_metadata: dict[str, object] | None = None,
-    source_memories: Sequence[RawMemory] = (),
-    accessible_projects: Iterable[str] | None = None,
-    accessible_teams: Iterable[str] | None = None,
-    accessible_delegations: Iterable[str] | None = None,
-    allowed_memory_scope_keys: Iterable[str] | None = None,
-) -> RawMemory:
+) -> dict[str, object]:
+    """Build review metadata for both ordinary and atomic candidate persistence."""
     normalized_scope = models.coerce_memory_scope(memory_scope)
     suggested_scope = (
         models.coerce_memory_scope(suggested_memory_scope)
@@ -546,6 +539,39 @@ async def remember_reflection_candidate_review(
             action="capture",
             reason="reflection_candidate_pending",
         ),
+    )
+    return metadata
+
+
+async def remember_reflection_candidate_review(
+    *,
+    organization_id: str,
+    principal_id: str,
+    candidate: ReflectionCandidate,
+    raw_source_ids: list[str],
+    source_id: str | None = None,
+    memory_scope: MemoryScope | str = MemoryScope.PRIVATE,
+    scope_key: str | None = None,
+    suggested_memory_scope: MemoryScope | str | None = None,
+    suggested_scope_key: str | None = None,
+    extraction_prompt_metadata: dict[str, object] | None = None,
+    source_memories: Sequence[RawMemory] = (),
+    accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
+) -> RawMemory:
+    normalized_scope = models.coerce_memory_scope(memory_scope)
+    source_ids = list(dict.fromkeys(raw_source_ids))
+    resolved_source_id = source_id or (source_ids[0] if source_ids else "reflection:manual")
+    metadata = reflection_candidate_metadata(
+        candidate=candidate,
+        raw_source_ids=source_ids,
+        memory_scope=normalized_scope,
+        source_id=resolved_source_id,
+        suggested_memory_scope=suggested_memory_scope,
+        suggested_scope_key=suggested_scope_key,
+        extraction_prompt_metadata=extraction_prompt_metadata,
     )
     return await remember_raw_memory(
         organization_id=organization_id,
