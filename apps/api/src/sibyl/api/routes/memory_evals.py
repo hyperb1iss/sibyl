@@ -6,7 +6,7 @@ import base64
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from sibyl.api.routes import memory_auth
 from sibyl.auth.context import AuthContext
@@ -15,12 +15,14 @@ from sibyl.config import EvalIssuerSettings, settings
 from sibyl_core.auth import AuthOrganization, OrganizationRole
 from sibyl_core.auth.memory_policy import MemoryPolicyAction
 from sibyl_core.models.memory_scope import MemoryScope
+from sibyl_core.models.reflection import ReflectionCandidate
 from sibyl_core.services.eval_admission import (
     EvalAdmissionConflict,
     admit_eval_outcome,
     get_registered_eval_assignment,
     register_eval_assignment,
 )
+from sibyl_core.services.eval_consolidation import propose_admitted_procedure
 from sibyl_core.tasks.eval_receipts import ReceiptError, TaskAssignment
 
 
@@ -169,4 +171,82 @@ async def admit_assignment_outcome(
         revision=result.memory.revision,
         admission_id=result.admission_id,
         receipt_sha256=result.receipt_sha256,
+    )
+
+
+class EvalConsolidationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    issuer_id: str
+    experiment_revision: str
+    arm_id: str
+    through_checkpoint: int = Field(ge=0)
+    attempt_ids: list[str] = Field(min_length=2)
+    group_id: str = Field(min_length=1)
+    mechanism: str = Field(min_length=1)
+
+    @field_validator("group_id", "mechanism")
+    @classmethod
+    def require_nonblank_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Consolidation text must not be blank")
+        return value
+
+
+class EvalConsolidationResponse(BaseModel):
+    candidate: ReflectionCandidate | None
+    abstention_reason: str | None
+    build_receipt: dict[str, object]
+    source_join: str
+    source_freshness: str
+
+
+@router.post("/experiments/{experiment_id}/consolidate", response_model=EvalConsolidationResponse)
+async def consolidate_admitted_attempts(
+    experiment_id: str,
+    body: EvalConsolidationRequest,
+    http_request: Request,
+    org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+) -> EvalConsolidationResponse:
+    organization_id = str(org.id)
+    assignment = await get_registered_eval_assignment(
+        organization_id=organization_id,
+        experiment_id=experiment_id,
+        attempt_id=body.attempt_ids[0],
+    )
+    if assignment is None:
+        raise HTTPException(status_code=404, detail="Eval assignment not found")
+    await _authorize_owner(
+        ctx=ctx,
+        organization_id=organization_id,
+        owner_principal_id=assignment.owner_principal_id,
+        request=http_request,
+    )
+    issuer = _trusted_issuer(body.issuer_id, assignment)
+    try:
+        result = await propose_admitted_procedure(
+            organization_id=organization_id,
+            principal_id=assignment.owner_principal_id,
+            experiment_id=experiment_id,
+            experiment_revision=body.experiment_revision,
+            arm_id=body.arm_id,
+            through_checkpoint=body.through_checkpoint,
+            attempt_ids=tuple(body.attempt_ids),
+            group_id=body.group_id,
+            mechanism=body.mechanism,
+            trusted_issuer_id=issuer.issuer_id,
+            trusted_public_key=Ed25519PublicKey.from_public_bytes(
+                base64.b64decode(issuer.public_key_base64, validate=True)
+            ),
+            expected_controller_policy_sha256=issuer.controller_policy_sha256,
+        )
+    except ReceiptError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return EvalConsolidationResponse(
+        candidate=result.proposal.candidate,
+        abstention_reason=result.proposal.proposal.abstention_reason,
+        build_receipt=result.proposal.receipt,
+        source_join=result.source_join,
+        source_freshness=result.source_freshness,
     )
