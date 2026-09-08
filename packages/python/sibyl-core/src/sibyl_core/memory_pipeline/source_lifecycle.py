@@ -45,7 +45,13 @@ def public_memory_metadata(metadata: Mapping[str, object] | None) -> dict[str, o
     public = {
         key: value
         for key, value in (metadata or {}).items()
-        if key not in {CORRECTION_BLOCKERS_KEY, SOURCE_BINDINGS_KEY, "source_snapshot_sha256"}
+        if key
+        not in {
+            CORRECTION_BLOCKERS_KEY,
+            SOURCE_BINDINGS_KEY,
+            "source_snapshot_sha256",
+            "source_validation_context",
+        }
     }
     identity = public.get("reflection_identity")
     if isinstance(identity, Mapping):

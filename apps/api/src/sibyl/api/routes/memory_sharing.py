@@ -86,6 +86,7 @@ async def preview_memory_share_route(
         target_scope_key=request.target_scope_key,
         recipient_organization_id=request.recipient_organization_id,
         accessible_projects=accessible_projects,
+        writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
         accessible_teams=accessible_teams,
     )
     await memory_auth.log_memory_audit(
@@ -158,6 +159,7 @@ async def share_memory_route(
         recipient_organization_id=request.recipient_organization_id,
         project=project_id,
         accessible_projects=accessible_projects,
+        writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
         accessible_teams=accessible_teams,
     )
     promoted_ids = [

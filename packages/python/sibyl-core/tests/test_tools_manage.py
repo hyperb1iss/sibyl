@@ -1356,6 +1356,7 @@ class TestSourceActions:
                     "idempotency_key": "correct-1",
                 },
                 organization_id="org-1",
+                principal_id="user-1",
             )
 
         assert response.success is True
@@ -1375,6 +1376,8 @@ class TestSourceActions:
             action="mark_wrong",
             reason="Incorrect",
             accessible_projects=None,
+            writable_projects=set(),
+            allowed_memory_scope_keys=None,
             accessible_teams=None,
             accessible_delegations=None,
             replacement_source_id=None,

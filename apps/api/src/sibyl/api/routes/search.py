@@ -42,6 +42,7 @@ from sibyl_core.embeddings.providers import (
     capture_embedding_usage,
     configured_embedding_provider,
 )
+from sibyl_core.memory_pipeline.source_lifecycle import public_memory_metadata
 from sibyl_core.observability import elapsed_ms, telemetry_registry
 
 log = structlog.get_logger()
@@ -338,9 +339,12 @@ async def explore(
         entities_list = []
         for entity in result.entities:
             if hasattr(entity, "__dataclass_fields__"):
-                entities_list.append(asdict(entity))
+                payload = asdict(entity)
             else:
-                entities_list.append(entity)
+                payload = dict(entity)
+            if isinstance(payload.get("metadata"), dict):
+                payload["metadata"] = public_memory_metadata(payload["metadata"])
+            entities_list.append(payload)
 
         response = ExploreResponse(
             mode=result.mode,

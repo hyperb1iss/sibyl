@@ -12,6 +12,7 @@ from sibyl_core.auth.memory_policy import (
     MemoryPolicyDecision,
     authorize_memory_read,
 )
+from sibyl_core.memory_pipeline.lifecycle import raw_memory_lifecycle_recallable
 from sibyl_core.models.reflection import ReflectionCandidate
 from sibyl_core.services.memory_contract import (
     MemoryAccessPreview,
@@ -70,9 +71,14 @@ async def preview_memory_share(
     target_scope_key: str | None = None,
     recipient_organization_id: str | None = None,
     accessible_projects: Iterable[str] | None = None,
+    writable_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
 ) -> MemorySharePreview:
+    accessible_projects = (
+        frozenset(accessible_projects) if accessible_projects is not None else None
+    )
+    writable_projects = frozenset(writable_projects or ())
     requested_source_ids = [str(source_id) for source_id in source_ids]
     normalized_target = _coerce_promotion_scope(target_scope)
     target_decision = _authorize_share_target(
@@ -81,7 +87,7 @@ async def preview_memory_share(
         target_scope_key=target_scope_key,
         recipient_organization_id=recipient_organization_id,
         organization_id=organization_id,
-        accessible_projects=accessible_projects,
+        accessible_projects=writable_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
     )
@@ -208,9 +214,14 @@ async def share_memory(
     project: str | None = None,
     related_to: Sequence[str] | None = None,
     accessible_projects: Iterable[str] | None = None,
+    writable_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
 ) -> MemoryShareResult:
+    accessible_projects = (
+        frozenset(accessible_projects) if accessible_projects is not None else None
+    )
+    writable_projects = frozenset(writable_projects or ())
     preview = await preview_memory_share(
         source_ids=source_ids,
         organization_id=organization_id,
@@ -219,6 +230,7 @@ async def share_memory(
         target_scope_key=target_scope_key,
         recipient_organization_id=recipient_organization_id,
         accessible_projects=accessible_projects,
+        writable_projects=writable_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
     )
@@ -262,6 +274,7 @@ async def share_memory(
                 domain=domain,
                 related_to=related_to,
                 accessible_projects=accessible_projects,
+                writable_projects=writable_projects,
                 accessible_teams=accessible_teams,
                 accessible_delegations=accessible_delegations,
             )
@@ -526,7 +539,9 @@ async def _resolve_raw_memory_share_plan(
     if not raw_memory_recallable(memory):
         return _promotion_denied(
             candidate_id=memory.id,
-            reason="raw_memory_not_recallable",
+            reason="source_not_recallable"
+            if raw_memory_lifecycle_recallable(memory, include_source_corrections=False)
+            else "raw_memory_not_recallable",
             review_state=memory.review_state,
             memory_scope=memory.memory_scope,
             scope_key=memory.scope_key,
@@ -620,9 +635,14 @@ async def _apply_share_plan(
     domain: str | None,
     related_to: Sequence[str] | None,
     accessible_projects: Iterable[str] | None,
+    writable_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None,
     accessible_delegations: Iterable[str] | None,
 ) -> ReflectionPromotionResult:
+    accessible_projects = (
+        frozenset(accessible_projects) if accessible_projects is not None else None
+    )
+    writable_projects = frozenset(writable_projects or ())
     result = await persist_reflection_candidate(
         candidate=plan.promotion_candidate,
         organization_id=organization_id,
@@ -632,6 +652,7 @@ async def _apply_share_plan(
         source_id=plan.candidate_memory.id,
         related_to=related_to,
         accessible_projects=accessible_projects,
+        writable_projects=writable_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
         memory_scope=plan.target_scope,

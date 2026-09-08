@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import Literal
 
 from sibyl_core.models.entities import Entity
 
 IDENTITY_KEY = "reflection_identity"
+SOURCE_SNAPSHOT_KEY = "source_snapshot_sha256"
 
 
-def reflection_identity(entity: Entity) -> dict[str, object]:
+def reflection_identity(
+    entity: Entity, *, version: Literal[2, 3] | None = None
+) -> dict[str, object]:
     """Bind full evidence to its authoritative ownership and provenance.
 
     Title whitespace follows graph read normalization; content is byte-exact. Extraction
@@ -18,6 +22,7 @@ def reflection_identity(entity: Entity) -> dict[str, object]:
     Legacy title-derived IDs remain readable and are never rewritten here.
     """
     metadata = entity.metadata
+    version = version or (3 if metadata.get(SOURCE_SNAPSHOT_KEY) else 2)
     source_ids = {
         str(value)
         for key in ("raw_source_ids", "source_ids")
@@ -27,7 +32,8 @@ def reflection_identity(entity: Entity) -> dict[str, object]:
     if entity.source_file:
         source_ids.add(entity.source_file)
     identity = {
-        "version": 2,
+        "version": version,
+        SOURCE_SNAPSHOT_KEY: metadata.get(SOURCE_SNAPSHOT_KEY) if version == 3 else None,
         "purpose": "source" if metadata.get("reflection_source") is True else "candidate",
         "kind": entity.entity_type.value,
         "title": entity.name.strip(),
@@ -49,10 +55,11 @@ def reflection_identity(entity: Entity) -> dict[str, object]:
     return {key: value for key, value in identity.items() if value is not None}
 
 
-def reflection_entity_id(entity: Entity) -> str:
-    payload = json.dumps(reflection_identity(entity), sort_keys=True, separators=(",", ":"))
+def reflection_entity_id(entity: Entity, *, version: Literal[2, 3] | None = None) -> str:
+    identity = reflection_identity(entity, version=version)
+    payload = json.dumps(identity, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-    return f"{entity.entity_type.value}_v2_{digest}"
+    return f"{entity.entity_type.value}_v{identity['version']}_{digest}"
 
 
 def verify_reflection_identity(expected: Entity, stored: Entity) -> None:

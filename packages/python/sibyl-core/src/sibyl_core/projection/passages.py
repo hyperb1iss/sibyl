@@ -34,6 +34,7 @@ from sibyl_core.projection.inheritance import (
     LIFECYCLE_METADATA_KEYS,
     parent_lifecycle_as_stored,
 )
+from sibyl_core.projection.pending import PENDING_KEYS, inherited_pending
 from sibyl_core.projection.reconcile import reconcile_with_parent
 from sibyl_core.projection.slicing import HARD_MAX, Slice, render_slice, slice_prose
 from sibyl_core.tools.helpers import _generate_id
@@ -822,11 +823,14 @@ def _inherited_scope_metadata(source: Entity) -> dict[str, object]:
     the retirement never named.
     """
     metadata = dict(source.metadata or {})
-    return {
+    inherited = {
         key: metadata[key]
         for key in (*_SCOPE_METADATA_KEYS, *LIFECYCLE_METADATA_KEYS)
-        if key in metadata and metadata[key] is not None
+        if key not in PENDING_KEYS and key in metadata and metadata[key] is not None
     }
+    inherited.update(inherited_pending(metadata, f"parent:{source.id}"))
+    inherited["lifecycle_reconciliation_pending"] = {f"parent:{source.id}": True}
+    return inherited
 
 
 __all__ = [

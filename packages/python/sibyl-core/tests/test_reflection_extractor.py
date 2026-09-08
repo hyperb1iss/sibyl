@@ -77,13 +77,16 @@ async def test_reflect_memory_persists_claim_receipts_with_source_grounding(
     monkeypatch.setattr("sibyl_core.tools.reflect._persist_reflection_source", native_write)
     monkeypatch.setattr("sibyl_core.tools.reflect._persist_reflection_candidate", native_write)
 
-    async def fake_source_review(**kwargs: Any) -> AddResponse:
+    async def fake_source_review(**kwargs: Any) -> tuple[AddResponse, RawMemory]:
         calls.append(("source", kwargs))
-        return AddResponse(
-            success=True,
-            id="raw-source-1",
-            message="stored",
-            timestamp=datetime.now(UTC),
+        return (
+            AddResponse(
+                success=True,
+                id="raw-source-1",
+                message="stored",
+                timestamp=datetime.now(UTC),
+            ),
+            _raw_memory("raw-source-1", kwargs["content"]),
         )
 
     async def fake_candidate_review(**kwargs: Any) -> RawMemory:
@@ -158,13 +161,16 @@ async def test_reflect_memory_marks_duplicate_candidates_before_review_persisten
         "Observed reflection quality gate is now a named release check.",
     )
 
-    async def fake_source_review(**kwargs: Any) -> AddResponse:
+    async def fake_source_review(**kwargs: Any) -> tuple[AddResponse, RawMemory]:
         calls.append(("source", kwargs))
-        return AddResponse(
-            success=True,
-            id="raw-source-1",
-            message="stored",
-            timestamp=datetime.now(UTC),
+        return (
+            AddResponse(
+                success=True,
+                id="raw-source-1",
+                message="stored",
+                timestamp=datetime.now(UTC),
+            ),
+            _raw_memory("raw-source-1", kwargs["content"]),
         )
 
     async def fake_candidate_review(**kwargs: Any) -> RawMemory:
@@ -250,6 +256,17 @@ async def test_reflect_memory_uses_existing_source_id_without_rewriting_source(
         AsyncMock(return_value=[]),
     )
 
+    source = RawMemory(
+        id="raw-existing-source",
+        organization_id="org_123",
+        source_id="raw-existing-source",
+        principal_id="user_123",
+        memory_scope=MemoryScope.PRIVATE,
+        raw_content="Observed reflection dream cycles reuse raw sources.",
+        revision=7,
+    )
+    monkeypatch.setattr("sibyl_core.tools.reflect.get_raw_memory", AsyncMock(return_value=source))
+
     pack = await reflect_memory(
         "Observed reflection dream cycles reuse raw sources.",
         source_title="Existing raw source",
@@ -268,6 +285,8 @@ async def test_reflect_memory_uses_existing_source_id_without_rewriting_source(
     assert pack.candidates[0].raw_source_ids == ["raw-existing-source"]
     assert candidate_calls[0]["source_id"] == "raw-existing-source"
     assert candidate_calls[0]["raw_source_ids"] == ["raw-existing-source"]
+
+    assert candidate_calls[0]["source_memories"] == [source]
 
 
 def test_reflection_lifecycle_decisions_mark_duplicate_candidates() -> None:

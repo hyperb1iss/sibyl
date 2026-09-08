@@ -138,6 +138,8 @@ class MemoryCorrectionResult:
     # capture may still be servable. Reported rather than logged alone, because
     # a caller told "applied" has no other way to learn the write was partial.
     projection_walk_truncated: bool = False
+    affected_raw_memory_ids: list[str] = field(default_factory=list)
+    propagation_complete: bool = True
 
 
 @dataclass(frozen=True, slots=True)

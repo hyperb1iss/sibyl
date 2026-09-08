@@ -39,6 +39,7 @@ from sibyl_core.auth import OrganizationRole
 from sibyl_core.auth.memory_policy import (
     MemoryPolicyDecision,
 )
+from sibyl_core.memory_pipeline.source_lifecycle import public_memory_metadata
 from sibyl_core.models.reflection import (
     claim_records_from_metadata,
     memory_lifecycle_from_metadata,
@@ -98,7 +99,7 @@ def raw_memory_response(
         title=memory.title,
         raw_content=memory.raw_content,
         tags=memory.tags,
-        metadata=memory.metadata,
+        metadata=public_memory_metadata(memory.metadata),
         provenance=memory.provenance,
         capture_surface=memory.capture_surface,
         captured_at=memory.captured_at,
@@ -159,7 +160,7 @@ def memory_space_response(
 
 
 def promotion_response(result: ReflectionPromotionResult) -> ReflectionPromotionResponse:
-    metadata = dict(result.metadata or {})
+    metadata = public_memory_metadata(result.metadata)
     return ReflectionPromotionResponse(
         success=result.success,
         candidate_id=result.candidate_id,
@@ -455,6 +456,10 @@ def correction_result_response(
     # `applied: true` with nothing else said would read as a complete one.
     recall_impact = dict(response.recall_impact)
     recall_impact["graph_entity_ids"] = list(result.affected_entity_ids)
+    recall_impact["derived_raw_memory_ids"] = list(result.affected_raw_memory_ids)
+    recall_impact["propagation_complete"] = result.propagation_complete
+    if not result.propagation_complete:
+        recall_impact["partially_applied"] = True
     if result.refused_entity_ids:
         recall_impact["refused_entity_ids"] = list(result.refused_entity_ids)
         recall_impact["partially_applied"] = True
@@ -758,7 +763,7 @@ def memory_source_inspect_response(
     audit_events: list[MemoryAuditEventResponse],
 ) -> MemorySourceInspectResponse:
     content_redacted = not policy_decision.allowed or _memory_lifecycle_redacts_content(memory)
-    metadata = dict(memory.metadata)
+    metadata = public_memory_metadata(memory.metadata)
     if content_redacted:
         metadata.pop("memory_lifecycle", None)
         metadata.pop("reflection_findings", None)

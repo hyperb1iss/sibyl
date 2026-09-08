@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, cast
 
@@ -16,6 +18,7 @@ from sibyl_core.auth.memory_policy import (
     authorize_memory_write,
     memory_metadata_read_allowed,
     memory_row_project_id,
+    memory_scope_policy_key,
     private_scope_granted_for,
 )
 from sibyl_core.errors import EntityNotFoundError
@@ -85,6 +88,13 @@ def _authorize_reflection_write(
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
 ) -> tuple[MemoryPolicyDecision, MemoryPolicyDecision]:
+    accessible_projects = (
+        frozenset(accessible_projects) if accessible_projects is not None else None
+    )
+    accessible_teams = frozenset(accessible_teams) if accessible_teams is not None else None
+    accessible_delegations = (
+        tuple(accessible_delegations) if accessible_delegations is not None else None
+    )
     reflect_decision = authorize_memory_reflect(
         principal_id=principal_id,
         memory_scope=memory_scope,
@@ -249,6 +259,7 @@ def _authorize_share_source_read(
     accessible_projects: Iterable[str] | None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
 ) -> MemoryPolicyDecision:
     if memory.memory_scope is MemoryScope.PRIVATE and memory.principal_id != principal_id:
         return MemoryPolicyDecision(
@@ -258,6 +269,16 @@ def _authorize_share_source_read(
             memory_scope=memory.memory_scope,
             scope_key=memory.scope_key,
         )
+    if allowed_memory_scope_keys is not None:
+        scope_key = principal_id if memory.memory_scope is MemoryScope.PRIVATE else memory.scope_key
+        if memory_scope_policy_key(memory.memory_scope, scope_key) not in allowed_memory_scope_keys:
+            return MemoryPolicyDecision(
+                action=MemoryPolicyAction.READ,
+                allowed=False,
+                reason="api_key_memory_space_denied",
+                memory_scope=memory.memory_scope,
+                scope_key=memory.scope_key,
+            )
     return authorize_memory_read(
         principal_id=principal_id,
         memory_scope=memory.memory_scope,
@@ -356,6 +377,47 @@ def _raw_source_ids(memory: RawMemory) -> list[str]:
     return list(dict.fromkeys(_metadata_str_list(memory.metadata, "raw_source_ids")))
 
 
+def _source_content_generation(memory: RawMemory) -> int:
+    """Count persisted revisions without using bookkeeping's mutable row revision.
+
+    Correction history is append-only. Its revise count also stays stable for
+    legacy entries without prior_revision, whose conservative lifecycle clock
+    cannot be used as an immutable identity.
+    """
+    history = memory.metadata.get("correction_history") or ()
+    if not isinstance(history, list | tuple):
+        raise ValueError("correction_history must be a list of correction entries")
+    return sum(
+        1
+        for entry in history
+        if isinstance(entry, Mapping) and str(entry.get("action") or "").strip().lower() == "revise"
+    )
+
+
+def raw_memory_source_signature(memory: RawMemory) -> tuple[object, ...]:
+    """The source fields whose observed values justify a promotion."""
+    return (
+        memory.organization_id,
+        memory.principal_id,
+        memory.memory_scope,
+        memory.scope_key,
+        memory.source_id,
+        memory.title,
+        memory.raw_content,
+        memory.entity_type,
+        _source_content_generation(memory),
+        memory.metadata.get("domain"),
+        memory.metadata.get("category"),
+        tuple(sorted(source_id for source_id in _raw_source_ids(memory) if source_id != memory.id)),
+    )
+
+
+def raw_memory_source_fingerprint(memory: RawMemory) -> str:
+    """Retain the expected source signature without persisting its private text."""
+    encoded = json.dumps(raw_memory_source_signature(memory), sort_keys=True).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _candidate_source_ids(
     candidate: ReflectionCandidate,
     source_id: str | None,
@@ -428,7 +490,7 @@ def _promoted_entity_write_allowed(
     *,
     entity: Any,
     principal_id: str | None,
-    accessible_projects: Iterable[str] | None,
+    writable_projects: Iterable[str] | None,
 ) -> bool:
     raw_metadata = getattr(entity, "metadata", {})
     metadata = raw_metadata if isinstance(raw_metadata, Mapping) else {}
@@ -449,7 +511,7 @@ def _promoted_entity_write_allowed(
         principal_id=principal_id,
         memory_scope=target_scope,
         scope_key=target_scope_key,
-        accessible_projects=accessible_projects,
+        accessible_projects=writable_projects,
     )
     return decision.allowed
 
@@ -526,7 +588,7 @@ async def _authorized_superseded_entity_ids(
     *,
     runtime: Any,
     principal_id: str | None,
-    accessible_projects: Iterable[str] | None,
+    writable_projects: Iterable[str] | None,
     candidate: ReflectionCandidate,
 ) -> list[str]:
     authorized_ids: list[str] = []
@@ -543,7 +605,7 @@ async def _authorized_superseded_entity_ids(
         if _promoted_entity_write_allowed(
             entity=target_entity,
             principal_id=principal_id,
-            accessible_projects=accessible_projects,
+            writable_projects=writable_projects,
         ):
             authorized_ids.append(entity_id)
     return authorized_ids

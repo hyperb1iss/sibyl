@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sibyl_core.backends.surreal.connection import _is_transient_connection_error
-from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
+from sibyl_core.backends.surreal.schema import EMBEDDING_DIM, render_surreal_compatible_sql
 from sibyl_core.embeddings.providers import entity_embedding_text
 from sibyl_core.memory_pipeline.retrieval_keys import coerce_retrieval_keys
 from sibyl_core.models.entities import Entity, EntityType
@@ -67,6 +67,23 @@ CLEAR_SENTINEL_VALUES = frozenset({CLEAR_MEMORY_SCOPE})
 # write path would hold the caller's own write open indefinitely.
 _MAX_SNAPSHOT_HEAL_ATTEMPTS = 5
 
+
+def _pending_upsert_entries(key: str) -> str:
+    """An insert may add pending owners; only a fenced update may clear them."""
+    return """
+        IF attributes.@key@ OR $input.attributes.@key@ {
+            [["@key@", object::from_entries(array::concat(
+                IF type::is::object(attributes.@key@) {
+                    object::entries(attributes.@key@)
+                } ELSE IF attributes.@key@ { [["unknown", true]] } ELSE { [] },
+                IF type::is::object($input.attributes.@key@) {
+                    object::entries($input.attributes.@key@)
+                } ELSE IF $input.attributes.@key@ { [["unknown", true]] } ELSE { [] }
+            ))]]
+        } ELSE { [] }
+    """.replace("@key@", key)
+
+
 _ENTITY_BULK_UPSERT_QUERY = f"""
 INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
     uuid = $input.uuid,
@@ -88,7 +105,9 @@ INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
     -- the slot and no later write puts it back.
     attributes = object::from_entries(array::concat(
         object::entries(attributes ?? {{}}),
-        object::entries($input.attributes)
+        object::entries($input.attributes),
+        {_pending_upsert_entries("lifecycle_reconciliation_pending")},
+        {_pending_upsert_entries("source_validation_pending")}
     )),
     attributes.memory_scope = IF $input.memory_scope = '{CLEAR_MEMORY_SCOPE}' {{ NONE }}
         ELSE {{ $input.memory_scope ?? memory_scope }},
@@ -553,7 +572,8 @@ async def _execute_replace_entities_bulk_query(
     client: SurrealGraphClient,
     records: Sequence[SurrealRecord],
 ) -> object:
-    return await client.execute_query(_ENTITY_BULK_UPSERT_QUERY, rows=list(records))
+    query = render_surreal_compatible_sql(_ENTITY_BULK_UPSERT_QUERY, url=client._url)
+    return await client.execute_query(query, rows=list(records))
 
 
 async def _execute_replace_entities_with_schema_retry(

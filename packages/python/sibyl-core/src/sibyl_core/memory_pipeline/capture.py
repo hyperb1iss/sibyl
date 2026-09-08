@@ -9,6 +9,7 @@ from typing import Any
 from sibyl_core.auth.memory_policy import stamp_memory_scope_metadata
 from sibyl_core.memory_pipeline.quality import normalize_memory_quality_metadata
 from sibyl_core.memory_pipeline.retrieval_keys import normalize_retrieval_keys
+from sibyl_core.memory_pipeline.source_lifecycle import SOURCE_BINDINGS_KEY
 from sibyl_core.memory_pipeline.structure import MemoryStructure, build_memory_structure
 
 
@@ -138,6 +139,9 @@ class MemoryCaptureService:
             graph_metadata["raw_memory_id"] = raw_memory_id
         if raw_source_id:
             graph_metadata["raw_source_id"] = raw_source_id
+        source_bindings = raw_memory.get(SOURCE_BINDINGS_KEY)
+        if isinstance(source_bindings, Mapping):
+            graph_metadata[SOURCE_BINDINGS_KEY] = dict(source_bindings)
         if raw_policy_reason:
             graph_metadata["raw_policy_reason"] = raw_policy_reason
 

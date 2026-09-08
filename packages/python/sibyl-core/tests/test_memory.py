@@ -62,6 +62,7 @@ def _raw_review_candidate(**overrides: object) -> RawMemory:
         "created_at": datetime(2026, 5, 12, 12, 0, 0, tzinfo=UTC),
     }
     values.update(overrides)
+    values.setdefault("observed_revision", values.get("revision", 1))
     return RawMemory(**values)
 
 
@@ -88,6 +89,7 @@ def _raw_import_memory(**overrides: object) -> RawMemory:
         "created_at": datetime(2026, 5, 12, 12, 0, 0, tzinfo=UTC),
     }
     values.update(overrides)
+    values.setdefault("observed_revision", values.get("revision", 1))
     return RawMemory(**values)
 
 
@@ -631,7 +633,7 @@ async def test_apply_memory_correction_marks_hidden_and_preserves_history(
         principal_id="user-1",
         metadata={"correction_history": [{"action": "mark_stale"}]},
     )
-    save_raw_memory = AsyncMock(side_effect=lambda updated: updated)
+    save_raw_memory = AsyncMock(side_effect=lambda updated, **_kwargs: updated)
     monkeypatch.setattr(correction_module, "get_raw_memory", AsyncMock(return_value=memory))
     monkeypatch.setattr(correction_module, "get_raw_memory_by_source_id", AsyncMock())
     monkeypatch.setattr(correction_module, "save_raw_memory", save_raw_memory)
@@ -666,6 +668,8 @@ async def test_apply_memory_correction_marks_hidden_and_preserves_history(
     assert result.updated_memory.metadata["correction_history"][0] == {"action": "mark_stale"}
     assert result.updated_memory.metadata["correction_history"][1]["action"] == "hide"
     save_raw_memory.assert_awaited_once()
+
+    assert save_raw_memory.await_args.kwargs["expected_revision"] == memory.revision
 
 
 @pytest.mark.asyncio
@@ -886,7 +890,7 @@ async def test_apply_memory_correction_restore_preserves_prior_review_state(
             "prior_review_state": "promoted",
         },
     )
-    save_raw_memory = AsyncMock(side_effect=lambda updated: updated)
+    save_raw_memory = AsyncMock(side_effect=lambda updated, **_kwargs: updated)
     monkeypatch.setattr(correction_module, "get_raw_memory", AsyncMock(return_value=memory))
     monkeypatch.setattr(correction_module, "get_raw_memory_by_source_id", AsyncMock())
     monkeypatch.setattr(correction_module, "save_raw_memory", save_raw_memory)
@@ -914,6 +918,8 @@ async def test_apply_memory_correction_restore_preserves_prior_review_state(
     assert lifecycle.flags == []
     assert lifecycle.action == "restore"
     assert findings[-1].action == "restore"
+
+    assert save_raw_memory.await_args.kwargs["expected_revision"] == memory.revision
 
 
 @pytest.mark.asyncio
@@ -1100,6 +1106,7 @@ async def test_share_memory_promotes_same_org_visible_sources_without_marking_so
         target_scope="project",
         target_scope_key="project_123",
         accessible_projects={"project_123"},
+        writable_projects={"project_123"},
     )
 
     assert result.applied is True

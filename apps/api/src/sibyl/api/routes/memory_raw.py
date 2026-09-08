@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -147,6 +148,17 @@ async def remember_raw(
             agent_id=request.agent_id,
             project_id=request.project_id,
         )
+        source_context: dict[str, Any] = {}
+        if metadata.get("raw_source_ids"):
+            projects, teams = await asyncio.gather(
+                memory_auth.list_accessible_project_graph_ids(ctx),
+                memory_auth.list_accessible_team_scope_keys(ctx),
+            )
+            source_context = {
+                "accessible_projects": projects,
+                "accessible_teams": teams,
+                "allowed_memory_scope_keys": ctx.api_key_memory_scope_keys,
+            }
         memory = await remember_raw_memory(
             organization_id=str(org.id),
             principal_id=principal_id,
@@ -159,6 +171,7 @@ async def remember_raw(
             metadata=metadata,
             provenance=request.provenance,
             capture_surface=capture_surface,
+            **source_context,
         )
         await memory_auth.log_memory_audit(
             action="memory.remember",

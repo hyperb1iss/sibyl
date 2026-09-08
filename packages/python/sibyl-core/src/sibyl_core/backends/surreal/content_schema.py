@@ -63,7 +63,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 28
+CONTENT_SCHEMA_CURRENT_VERSION = 29
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -894,6 +894,14 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=28,
             name="content_eval_attempts",
             statements=tuple(split_statements(CONTENT_EVAL_ATTEMPTS_MIGRATION_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=29,
+            name="content_raw_source_validation_index",
+            statements=(
+                "DEFINE INDEX IF NOT EXISTS idx_raw_captures_source_validation "
+                "ON raw_captures FIELDS organization_id, metadata.source_validation_pending, uuid",
+            ),
         ),
     )
 

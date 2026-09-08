@@ -258,8 +258,11 @@ async def test_a_row_projected_after_its_capture_was_corrected_is_born_retired(
 
     stored = await graph.entity_manager.get(result["entity_id"])
     assert stored is not None, "the row is still written; it is written retired"
-    assert stored.metadata.get("excluded_from_recall") is True
-    assert stored.metadata.get("lifecycle_state") == "contested"
+    assert stored.metadata["correction_blockers"][RAW_MEMORY_ID] == {
+        "revision": _corrected_capture().revision,
+        "blocking": True,
+    }
+    assert "excluded_from_recall" not in stored.metadata
 
     served = await _served_ids(graph, "fly hosting rollout body")
     assert parent_id not in served
@@ -342,8 +345,11 @@ async def test_a_correction_landing_inside_the_write_still_retires_the_row(
 
     stored = await graph.entity_manager.get(parent_id)
     assert stored is not None
-    assert stored.metadata.get("excluded_from_recall") is True
-    assert stored.metadata.get("lifecycle_state") == "contested"
+    assert stored.metadata["correction_blockers"][RAW_MEMORY_ID] == {
+        "revision": _corrected_capture().revision,
+        "blocking": True,
+    }
+    assert "excluded_from_recall" not in stored.metadata
 
     served = await _served_ids(graph, "fly hosting rollout body")
     assert parent_id not in served
