@@ -62,7 +62,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 25
+CONTENT_SCHEMA_CURRENT_VERSION = 27
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -100,7 +100,11 @@ def _load_schema_file(filename: str) -> str:
 
 
 CONTENT_ANALYZER_DEFINITIONS = _load_schema_file("01_analyzers.surql")
+CONTENT_LEGACY_CONTENT_CHECKPOINT_DEFINITIONS = (
+    _SCHEMA_DIR / "35_legacy_content_checkpoint.surql"
+).read_text(encoding="utf-8")
 CONTENT_SCHEMA_DEFINITIONS = _load_schema_file("10_tables.surql")
+
 
 CONTENT_SOURCE_URL_SCOPE_MIGRATION_DEFINITIONS = """
 REMOVE INDEX IF EXISTS idx_crawl_sources_url ON TABLE crawl_sources;
@@ -626,6 +630,67 @@ FOR $projection IN ($projections ?? []) {
 """.strip()
 
 
+# Index builds rewrite existing rows under the current schema. Legacy tables
+# may have become SCHEMAFULL before all raw-capture fields were declared; define
+# the complete capture shape before a rebuild can discard their stored values.
+CONTENT_SOURCE_LINEAGE_INDEX_MIGRATION_DEFINITIONS = f"""
+DEFINE FIELD IF NOT EXISTS uuid ON raw_captures TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON raw_captures TYPE string;
+DEFINE FIELD IF NOT EXISTS source_id ON raw_captures TYPE string DEFAULT '';
+DEFINE FIELD IF NOT EXISTS principal_id ON raw_captures TYPE string DEFAULT '';
+DEFINE FIELD IF NOT EXISTS memory_scope ON raw_captures TYPE string DEFAULT 'private';
+DEFINE FIELD IF NOT EXISTS scope_key ON raw_captures TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS agent_id ON raw_captures TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS project_id ON raw_captures TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS review_state ON raw_captures TYPE string DEFAULT 'pending';
+DEFINE FIELD IF NOT EXISTS entity_id ON raw_captures TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS title ON raw_captures TYPE string DEFAULT '';
+DEFINE FIELD IF NOT EXISTS raw_content ON raw_captures TYPE string DEFAULT '';
+DEFINE FIELD IF NOT EXISTS entity_type ON raw_captures TYPE string DEFAULT '';
+DEFINE FIELD IF NOT EXISTS tags ON raw_captures TYPE array<string> DEFAULT [];
+DEFINE FIELD IF NOT EXISTS embedding ON raw_captures TYPE option<array<float, {EMBEDDING_DIM}>>;
+DEFINE FIELD IF NOT EXISTS metadata ON raw_captures TYPE object FLEXIBLE DEFAULT {{}};
+DEFINE FIELD IF NOT EXISTS provenance ON raw_captures TYPE object FLEXIBLE DEFAULT {{}};
+DEFINE FIELD IF NOT EXISTS capture_surface ON raw_captures TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created_by_user_id ON raw_captures TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS revision ON raw_captures TYPE option<int> DEFAULT 1;
+DEFINE FIELD IF NOT EXISTS captured_at ON raw_captures TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS deleted_at ON raw_captures TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS purge_after ON raw_captures TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS last_recalled_at ON raw_captures TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS last_used_at ON raw_captures TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS retrieval_count ON raw_captures TYPE option<int> DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS citation_count ON raw_captures TYPE option<int> DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS misled_count ON raw_captures TYPE option<int> DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS created_at ON raw_captures TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_source_lineage ON raw_captures FIELDS metadata.raw_source_ids.*;
+"""
+
+
+CONTENT_LEGACY_CONTENT_CHECKPOINT_BACKFILL = """
+LET $checkpoint_rows = (SELECT id, revision, metadata FROM raw_captures
+             WHERE legacy_content_checkpoint = NONE
+             AND array::len((metadata.correction_history ?? []).filter(|$entry|
+                 type::is::object($entry)
+                 AND string::lowercase(string::trim(type::string($entry.action ?? ''))) = 'revise'
+                 AND $entry.prior_revision = NONE)) > 0);
+FOR $row IN $checkpoint_rows {
+    LET $history = $row.metadata.correction_history ?? [];
+    LET $legacy = $history.filter(|$entry| type::is::object($entry)
+        AND string::lowercase(string::trim(type::string($entry.action ?? ''))) = 'revise'
+        AND $entry.prior_revision = NONE);
+    LET $capture_id = $row.id;
+    UPDATE $capture_id MERGE {
+        revision: $row.revision + 1,
+        legacy_content_checkpoint: {
+            entries: $legacy,
+            observed_revision: IF array::len($legacy) > 0 { $row.revision } ELSE { 0 }
+        }
+    } WHERE revision = $row.revision AND legacy_content_checkpoint = NONE;
+};
+"""
+
+
 def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
     compatible_schema = render_fulltext_compatible_sql(
         CONTENT_SCHEMA_DEFINITIONS,
@@ -781,6 +846,22 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             name="content_source_import_revision",
             statements=tuple(
                 split_statements(CONTENT_SOURCE_IMPORT_REVISION_MIGRATION_DEFINITIONS)
+            ),
+        ),
+        SchemaMigration(
+            version=26,
+            name="content_source_lineage_index",
+            statements=tuple(split_statements(CONTENT_SOURCE_LINEAGE_INDEX_MIGRATION_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=27,
+            name="content_legacy_content_checkpoint",
+            statements=tuple(
+                render_surreal_compatible_sql(statement, url=url)
+                for statement in (
+                    CONTENT_LEGACY_CONTENT_CHECKPOINT_DEFINITIONS,
+                    CONTENT_LEGACY_CONTENT_CHECKPOINT_BACKFILL,
+                )
             ),
         ),
     )
