@@ -152,7 +152,9 @@ class _RecordingSchemaClient:
                 self.missing_tables.discard(table)
             if stripped.startswith(f"DEFINE TABLE OVERWRITE {table}"):
                 self.missing_tables.discard(table)
-        if statement.startswith("SELECT id, uuid FROM entity"):
+        if statement.startswith(
+            ("SELECT id, uuid FROM entity", "SELECT id, uuid FROM raw_captures")
+        ):
             return []
         if statement.startswith("INFO FOR INDEX idx_entity_lifecycle_repair_key"):
             return [{"building": {"status": "ready"}}]

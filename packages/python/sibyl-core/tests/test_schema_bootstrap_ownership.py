@@ -10,6 +10,7 @@ from sibyl_core.backends.surreal.schema_ownership import (
     SchemaOwnershipLost,
     try_acquire_schema_ownership,
 )
+from sibyl_core.backends.surreal.schema_version import GRAPH_SCHEMA_CURRENT_VERSION
 from tests.test_reflection_identity import runtime as runtime
 
 
@@ -52,7 +53,9 @@ async def test_lost_bootstrap_cannot_advance_version_and_successor_recovers(runt
     assert injected
     assert (await original("SELECT version FROM schema_version:graph;"))[0]["version"] == 22
     await schema.bootstrap_schema(runtime.client)
-    assert (await original("SELECT version FROM schema_version:graph;"))[0]["version"] == 23
+    assert (await original("SELECT version FROM schema_version:graph;"))[0][
+        "version"
+    ] == GRAPH_SCHEMA_CURRENT_VERSION
 
 
 async def test_reset_waits_for_live_owner_and_preserves_lease_table(runtime, monkeypatch):
@@ -79,7 +82,9 @@ async def test_reset_waits_for_live_owner_and_preserves_lease_table(runtime, mon
         await reset
         row = (await original("SELECT owner FROM schema_lease:graph;"))[0]
         assert row["owner"] != incumbent.owner
-        assert (await original("SELECT version FROM schema_version:graph;"))[0]["version"] == 23
+        assert (await original("SELECT version FROM schema_version:graph;"))[0][
+            "version"
+        ] == GRAPH_SCHEMA_CURRENT_VERSION
     finally:
         if not reset.done():
             reset.cancel()
@@ -203,4 +208,6 @@ async def test_embedded_migration_renews_all_owned_reads(runtime, monkeypatch, s
     monkeypatch.setattr(schema, "try_acquire_schema_ownership", short_claim)
     await schema.bootstrap_schema(runtime.client)
     assert delayed
-    assert await original("SELECT VALUE version FROM schema_version:graph;") == [23]
+    assert await original("SELECT VALUE version FROM schema_version:graph;") == [
+        GRAPH_SCHEMA_CURRENT_VERSION
+    ]

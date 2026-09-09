@@ -21,6 +21,12 @@ from sibyl_core.backends.surreal.schema_ownership import (
     SchemaOwnership,
     try_acquire_schema_ownership,
 )
+from sibyl_core.backends.surreal.schema_source_states import (
+    SOURCE_STATE_DEFINITIONS,
+    migrate_graph_source_states,
+    retire_source_states,
+    source_state_event,
+)
 from sibyl_core.backends.surreal.schema_version import (
     GRAPH_SCHEMA_CURRENT_VERSION,
     SCHEMA_VERSION_TABLE,
@@ -35,6 +41,7 @@ from sibyl_core.backends.surreal.schema_version import (
     record_schema_version,
 )
 from sibyl_core.config import core_config
+from sibyl_core.memory_pipeline.observations import SourceKind
 from sibyl_core.models.entities import EntityType
 
 if TYPE_CHECKING:
@@ -823,6 +830,15 @@ GRAPH_SCHEMA_MIGRATIONS = (
         statements=tuple(split_statements(LIFECYCLE_REPAIR_FIELDS)),
         action=migrate_lifecycle_repair,
     ),
+    SchemaMigration(
+        version=24,
+        name="graph_source_states",
+        statements=(
+            *split_statements(SOURCE_STATE_DEFINITIONS),
+            source_state_event(SourceKind.GRAPH_ENTITY),
+        ),
+        action=migrate_graph_source_states,
+    ),
 )
 
 
@@ -844,6 +860,8 @@ def _graph_schema_migrations(
                     ownership=ownership,
                 )
                 if migration.action is migrate_lifecycle_repair
+                else partial(migrate_graph_source_states, ownership=ownership)
+                if migration.action is migrate_graph_source_states
                 else migration.action
             ),
         )
@@ -1251,6 +1269,7 @@ async def _bootstrap_owned_schema(
 ) -> None:
     current_version = 0
     if reset:
+        await retire_source_states(ownership.mutate, kind=SourceKind.GRAPH_ENTITY)
         for table in (*GRAPH_EDGES, *GRAPH_TABLES, *REMOVED_GRAPH_EDGES, *REMOVED_GRAPH_TABLES):
             await ownership.mutate(f"REMOVE TABLE IF EXISTS {table};")
         await ownership.mutate(f"REMOVE TABLE IF EXISTS {SCHEMA_VERSION_TABLE};")

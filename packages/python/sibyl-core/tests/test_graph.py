@@ -3082,7 +3082,7 @@ async def test_graph_bootstrap_backfills_unversioned_legacy_required_fields() ->
         )
         assert rows == [
             {
-                "revision": 1,
+                "revision": 2,
                 "retrieval_count": 11,
                 "citation_count": 7,
                 "misled_count": 2,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,6 +16,12 @@ from sibyl_core.backends.surreal.schema_invariants import (
     SchemaInvariantPlan,
     expected_unique_indexes,
 )
+from sibyl_core.backends.surreal.schema_source_states import (
+    SOURCE_STATE_DEFINITIONS,
+    migrate_source_states,
+    retire_source_states,
+    source_state_event,
+)
 from sibyl_core.backends.surreal.schema_version import (
     SCHEMA_VERSION_TABLE,
     SchemaMigration,
@@ -23,6 +30,7 @@ from sibyl_core.backends.surreal.schema_version import (
     get_schema_version,
 )
 from sibyl_core.config import core_config
+from sibyl_core.memory_pipeline.observations import SourceKind
 from sibyl_core.models.memory_scope import MemoryScope
 from sibyl_core.models.sources import CrawlStatus, SourceType
 
@@ -64,7 +72,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 30
+CONTENT_SCHEMA_CURRENT_VERSION = 31
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -929,12 +937,21 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             name="content_eval_consolidations",
             statements=tuple(split_statements(CONTENT_EVAL_CONSOLIDATIONS_MIGRATION_DEFINITIONS)),
         ),
+        SchemaMigration(
+            version=31,
+            name="content_source_states",
+            statements=(
+                *split_statements(SOURCE_STATE_DEFINITIONS),
+                source_state_event(SourceKind.RAW_CAPTURE),
+            ),
+            action=partial(migrate_source_states, kind=SourceKind.RAW_CAPTURE),
+        ),
     )
 
 
 def content_schema_invariant_plan(*, url: str = "") -> SchemaInvariantPlan:
     return SchemaInvariantPlan(
-        schemafull_tables=CONTENT_TABLES,
+        schemafull_tables=(*CONTENT_TABLES, "source_states"),
         relation_tables=CONTENT_RELATION_TABLES,
         unique_indexes=expected_unique_indexes(_content_schema_migrations(url=url)),
     )
@@ -942,6 +959,7 @@ def content_schema_invariant_plan(*, url: str = "") -> SchemaInvariantPlan:
 
 async def bootstrap_content_schema(client: SurrealContentClient, *, reset: bool = False) -> None:
     if reset:
+        await retire_source_states(client.execute_query, kind=SourceKind.RAW_CAPTURE)
         for table in (*CONTENT_TABLES, SCHEMA_VERSION_TABLE):
             await client.execute_query(f"REMOVE TABLE IF EXISTS {table};")
 
