@@ -59,7 +59,7 @@ async def materialization_source():
                 id="artifact:context",
                 entity_type=EntityType.ARTIFACT,
                 name="Context artifact",
-                content="Only authorized source text enters the materialized pack.",
+                content="Authorized graph text enters the materialized pack.",
             )
         ],
     ):
@@ -179,7 +179,7 @@ async def test_plan_synthesis_route_scopes_to_accessible_projects() -> None:
     assert response.source_packs[0].source_ids == ["graph_entity:artifact:context"]
     assert (
         response.source_packs[0].sources[0].content_preview
-        == "Only authorized source text enters the materialized pack."
+        == "Authorized graph text enters the materialized pack."
     )
 
 
@@ -291,7 +291,7 @@ async def test_draft_synthesis_route_returns_verified_artifact() -> None:
     assert response.status == SynthesisRunStatus.VERIFIED
     assert response.artifact.format is SynthesisArtifactFormat.MARKDOWN
     assert response.artifact.verification.status.value == "pass"
-    assert "Only authorized source text" in response.artifact.markdown
+    assert "Authorized graph text" in response.artifact.markdown
     assert "[graph_entity:artifact:context]" in response.artifact.markdown
     assert response.artifact.json_payload["sections"][0]["source_ids"] == [
         "graph_entity:artifact:context"

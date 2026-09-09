@@ -97,49 +97,50 @@ async def unavailable_publication_ids(
     batch snapshots candidates and their original evidence; decoding and hashing
     run off the event loop.
     """
-    if not rows:
-        return set()
     unavailable: set[str] = set()
-    async with content_client.surreal_content_client() as client:
-        for batch in content_client.value_batches(sorted(rows)):
-            references = {row_id: _publication_references(row_id, rows[row_id]) for row_id in batch}
-            ids = sorted(set().union(*references.values()))
-            snapshots = content_client.normalize_records(
-                await client.execute_query(
-                    """
-                RETURN {
-                    LET $publications = (SELECT * FROM eval_consolidations
-                        WHERE organization_id = $organization_id
-                            AND (candidate_id IN $ids OR promoted_entity_id IN $ids));
-                    LET $bindings = array::flatten($publications.map(|$row| $row.admission_bindings));
-                    LET $capture_ids = array::distinct(array::concat(
-                        $publications.map(|$row| $row.candidate_id),
-                        $bindings.map(|$binding| $binding.capture_id)));
+    if rows:
+        async with content_client.surreal_content_client() as client:
+            for batch in content_client.value_batches(sorted(rows)):
+                references = {
+                    row_id: _publication_references(row_id, rows[row_id]) for row_id in batch
+                }
+                ids = sorted(set().union(*references.values()))
+                snapshots = content_client.normalize_records(
+                    await client.execute_query(
+                        """
                     RETURN {
-                        publications: $publications,
-                        captures: (SELECT * FROM raw_captures
-                            WHERE organization_id = $organization_id AND uuid IN $capture_ids),
-                        attempts: (SELECT * FROM eval_attempts
+                        LET $publications = (SELECT * FROM eval_consolidations
                             WHERE organization_id = $organization_id
-                                AND experiment_id IN $bindings.map(|$binding| $binding.experiment_id)
-                                AND attempt_id IN $bindings.map(|$binding| $binding.attempt_id))
+                                AND (candidate_id IN $ids OR promoted_entity_id IN $ids));
+                        LET $bindings = array::flatten($publications.map(|$row| $row.admission_bindings));
+                        LET $capture_ids = array::distinct(array::concat(
+                            $publications.map(|$row| $row.candidate_id),
+                            $bindings.map(|$binding| $binding.capture_id)));
+                        RETURN {
+                            publications: $publications,
+                            captures: (SELECT * FROM raw_captures
+                                WHERE organization_id = $organization_id AND uuid IN $capture_ids),
+                            attempts: (SELECT * FROM eval_attempts
+                                WHERE organization_id = $organization_id
+                                    AND experiment_id IN $bindings.map(|$binding| $binding.experiment_id)
+                                    AND attempt_id IN $bindings.map(|$binding| $binding.attempt_id))
+                        };
                     };
-                };
-                """,
-                    organization_id=organization_id,
-                    ids=ids,
+                    """,
+                        organization_id=organization_id,
+                        ids=ids,
+                    )
                 )
-            )
-            if len(snapshots) != 1:
-                raise RuntimeError("publication retrieval snapshot is unavailable")
-            unavailable.update(
-                await asyncio.to_thread(
-                    _unavailable_snapshot,
-                    snapshots[0],
-                    references,
-                    rows,
+                if len(snapshots) != 1:
+                    raise RuntimeError("publication retrieval snapshot is unavailable")
+                unavailable.update(
+                    await asyncio.to_thread(
+                        _unavailable_snapshot,
+                        snapshots[0],
+                        references,
+                        rows,
+                    )
                 )
-            )
     if raw_memories:
         from sibyl_core.services.memory_derivations import unavailable_raw_derivation_ids
 

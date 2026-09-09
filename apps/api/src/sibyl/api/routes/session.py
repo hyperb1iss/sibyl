@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
@@ -89,6 +90,7 @@ async def _append_raw_memories(
     principal_id: str | None,
     organization_role: OrganizationRole | str | None,
     selected_project_ids: list[str],
+    accessible_projects: Iterable[str],
     allowed_memory_scope_keys: frozenset[str] | None = None,
     limit: int,
 ) -> None:
@@ -114,7 +116,7 @@ async def _append_raw_memories(
                     query=query,
                     source_authority=SourceReadAuthority(
                         principal_id=principal_id,
-                        projects=frozenset(selected_project_ids),
+                        projects=frozenset(accessible_projects),
                         scope_keys=allowed_memory_scope_keys,
                     ),
                     memory_scope=memory_scope,
@@ -213,6 +215,7 @@ async def get_session_bundle(
                 principal_id=getattr(ctx, "user_id", None),
                 organization_role=getattr(ctx, "org_role", None),
                 selected_project_ids=selected_project_ids,
+                accessible_projects=accessible_projects,
                 allowed_memory_scope_keys=None
                 if api_key_memory_scope_keys is None
                 else frozenset(api_key_memory_scope_keys),

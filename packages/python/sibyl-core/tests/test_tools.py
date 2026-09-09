@@ -1375,6 +1375,7 @@ class TestSearchTool:
                 include_documents=False,
                 source_id="source-mail-1",
                 project="project_123",
+                accessible_projects={"project_123"},
                 participants=["nova@example.com"],
                 labels=["email"],
                 thread_id="thread-1",
@@ -1387,7 +1388,7 @@ class TestSearchTool:
         recall.assert_awaited_once_with(
             organization_id="org_123",
             principal_id="user-123",
-            source_authority=SourceReadAuthority("user-123"),
+            source_authority=SourceReadAuthority("user-123", projects=frozenset({"project_123"})),
             query="surrealdb",
             memory_scope="private",
             scope_key=None,

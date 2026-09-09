@@ -404,3 +404,34 @@ async def test_materialization_rejects_stale_ancestor_of_derived_raw(runtime, co
     )
     assert not run.source_packs[0].sources
     assert run.source_packs[0].hidden_count == 1
+
+
+async def test_materialization_rejects_nondurable_loader_contract(
+    runtime, content_store, monkeypatch
+):
+    from dataclasses import replace
+
+    from sibyl_core.services.source_observations import SourceUnavailableError
+
+    source = await remember_raw_memory(
+        organization_id=runtime.client.group_id,
+        principal_id="user_a",
+        source_id="source",
+        raw_content="Deployment requires blue approval.",
+        embedding_provider=None,
+    )
+
+    original_loader = load_authorized_source_snapshot
+
+    async def nondurable_loader(*args, **kwargs):
+        snapshot = await original_loader(*args, **kwargs)
+        return replace(snapshot, observation=replace(snapshot.observation, durable=False))
+
+    monkeypatch.setattr(
+        "tests.test_synthesis_source_observations.load_authorized_source_snapshot",
+        nondurable_loader,
+    )
+    with pytest.raises(SourceUnavailableError):
+        await materialized_synthesis(
+            runtime, source.id, "raw_memory", source.revision, source.raw_content
+        )

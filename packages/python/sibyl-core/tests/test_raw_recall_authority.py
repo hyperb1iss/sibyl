@@ -121,3 +121,24 @@ async def test_org_scope_and_removed_marker_cannot_bypass_protected_ancestry(
         memory_scope=MemoryScope.ORGANIZATION,
     )
     assert artifact.remembered_memory_id not in {memory.id for memory in recalled}
+
+
+async def test_empty_publication_rows_do_not_bypass_raw_gate(content_store):
+    from sibyl_core.services.eval_publication_guards import unavailable_publication_ids
+
+    org = str(uuid4())
+    memory = await remember_raw_memory(
+        organization_id=org,
+        principal_id="owner",
+        source_id="capture",
+        raw_content="Hidden telescope capture",
+        embedding_provider=None,
+    )
+    await apply_memory_correction(
+        organization_id=org, principal_id="owner", source_id=memory.id, action="hide"
+    )
+    assert await unavailable_publication_ids(
+        org, {}, raw_memories=[memory], source_authority=SourceReadAuthority("owner")
+    ) == {memory.id}
+    with pytest.raises(ValueError, match="source authority is required"):
+        await unavailable_publication_ids(org, {}, raw_memories=[memory])
