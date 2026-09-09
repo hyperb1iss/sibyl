@@ -31,13 +31,16 @@ from sibyl_core.services.memory_source_validation import (
     SourceReadAuthority,
 )
 from sibyl_core.tasks.consolidation import (
+    EVIDENCE_SYSTEM_PROMPT,
     SCHEMA_VERSION,
     SYSTEM_PROMPT,
     AdmittedTaskOutcome,
     ConsolidationResult,
     validate_candidate_content_agreement,
 )
+from sibyl_core.tasks.episode_evidence import PROJECTION_VERSION
 from sibyl_core.tasks.eval_receipts import TaskAssignment, assignment_digest
+from sibyl_core.tasks.procedure_evidence import EvidenceProposal
 
 CONSOLIDATION_METADATA_KEY = EVAL_CONSOLIDATION_METADATA_KEY
 
@@ -456,6 +459,9 @@ async def _extractor_policy() -> _ExtractorPolicy:
     revision = _digest(
         {
             "protocol": SCHEMA_VERSION,
+            "evidence_projection": PROJECTION_VERSION,
+            "projection_system_sha256": hashlib.sha256(EVIDENCE_SYSTEM_PROMPT.encode()).hexdigest(),
+            "projection_schema_sha256": _digest(EvidenceProposal.model_json_schema()),
             "system_prompt": SYSTEM_PROMPT,
             "provider": config.provider.value,
             "model": config.model.value,
