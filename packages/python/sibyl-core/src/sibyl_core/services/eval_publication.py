@@ -12,6 +12,7 @@ from uuid import NAMESPACE_URL, uuid5
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from sibyl_core.ai.llm.config import LLMSurface, resolve_llm_config
+from sibyl_core.ai.llm.extractor import extraction_schema
 from sibyl_core.ai.transport import transport_policy
 from sibyl_core.auth.memory_policy import (
     EVAL_ADMISSION_METADATA_KEY,
@@ -447,6 +448,8 @@ class _ExtractorPolicy:
     revision: str
     max_input_chars: int
     max_output_tokens: int
+    output_mode: Literal["tool", "native_strict"]
+    openrouter_provider: str | None
 
 
 async def _extractor_policy() -> _ExtractorPolicy:
@@ -471,11 +474,23 @@ async def _extractor_policy() -> _ExtractorPolicy:
             "max_input_chars": max_input_chars,
             "max_output_tokens": max_output_tokens,
             "output_retries": OUTPUT_RETRIES,
+            "output_mode": core_config.consolidation_output_mode,
+            "wire_schema_sha256": _digest(
+                extraction_schema(EvidenceProposal, core_config.consolidation_output_mode)
+            ),
+            "openrouter_provider": core_config.consolidation_openrouter_provider,
             "input_budget_unit": "system_user_declared_schema_characters",
             "transport": transport_policy(config.to_llm_config()),
         }
     )
-    return _ExtractorPolicy(config.model.value, revision, max_input_chars, max_output_tokens)
+    return _ExtractorPolicy(
+        config.model.value,
+        revision,
+        max_input_chars,
+        max_output_tokens,
+        core_config.consolidation_output_mode,
+        core_config.consolidation_openrouter_provider,
+    )
 
 
 async def consolidation_extractor_configuration() -> tuple[str, str]:
@@ -516,6 +531,8 @@ async def consolidate_admitted_procedure(
         model_override=model_override,
         max_input_chars=policy.max_input_chars,
         max_tokens=policy.max_output_tokens,
+        output_mode=policy.output_mode,
+        openrouter_provider=policy.openrouter_provider,
     )
     if await _extractor_policy() != policy:
         raise ConsolidationConflict("extraction configuration changed during consolidation")
