@@ -1096,6 +1096,7 @@ tasks:
       tools/tests/test_compare_eval_reports.py tools/tests/test_context_pack_eval_script.py
       tools/tests/test_longmemeval_agentic_traversal.py
       tools/tests/test_longmemeval_bench.py tools/tests/test_longmemeval_live.py
+      tools/tests/test_longmemeval_qa_accounting.py
       tools/tests/test_longmemeval_replay.py
       tools/tests/test_longmemeval_v2_probe.py tools/tests/test_longmemeval_v2_official.py
       tools/tests/test_longmemeval_v2_official_source.py
