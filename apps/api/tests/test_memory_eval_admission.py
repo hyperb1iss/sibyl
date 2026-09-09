@@ -250,6 +250,7 @@ async def test_archive_restore_preserves_consumed_attempt(eval_api, monkeypatch,
         "blank",
         "input_budget",
         "transport_failure",
+        "structural_rejection",
     ],
 )
 async def test_http_consolidation_reads_admitted_sources(eval_api, monkeypatch, change):
@@ -295,7 +296,12 @@ async def test_http_consolidation_reads_admitted_sources(eval_api, monkeypatch, 
         "mechanism": "compare output",
     }
     calls = []
-    candidate_changes = {"candidate", "source_deleted_replay", "stamp_changed_replay"}
+    candidate_changes = {
+        "candidate",
+        "source_deleted_replay",
+        "stamp_changed_replay",
+        "structural_rejection",
+    }
 
     async def extract(_self, prompt):
         calls.append(prompt)
@@ -311,6 +317,7 @@ async def test_http_consolidation_reads_admitted_sources(eval_api, monkeypatch, 
         )
 
     monkeypatch.setattr(consolidation.Extractor, "extract_with_usage", extract)
+    _configure_structural_rejection(monkeypatch, change)
     if change == "owner":
         api.ctx.user_id = "other"
     elif change == "role":
@@ -343,13 +350,12 @@ async def test_http_consolidation_reads_admitted_sources(eval_api, monkeypatch, 
         return
     assert response.status_code == expected, response.text
     assert len(calls) == (1 if change in {None, *candidate_changes} else 0)
-    if change is None:
-        assert response.json()["candidate"] is None
-        assert response.json()["source_join"] == "authenticated_admission_ledger"
-        assert "sibyl-signed-eval-outcome-v1" in calls[0]
 
+    _assert_outcome_receipt(change, response, calls)
     if change in {None, *candidate_changes}:
         await _assert_same_consolidation_replay(api, request, response, calls)
+    if change is None:
+        await _assert_legacy_receipt_unavailable(api, request, calls)
     if change in {"source_deleted_replay", "stamp_changed_replay"}:
         await _assert_unavailable_consolidation_replay(api, request, change)
     if change == "candidate":
@@ -469,4 +475,40 @@ async def _assert_same_consolidation_replay(api, request, response, calls):
     replay = await api.client.post("/memory/eval/experiments/experiment/consolidate", json=request)
     assert replay.status_code == 200
     assert replay.json() == response.json()
+    assert len(calls) == 1
+
+
+def _configure_structural_rejection(monkeypatch, change):
+    if change == "structural_rejection":
+
+        def reject(*_args):
+            raise ValueError("Missing failure support")
+
+        monkeypatch.setattr(consolidation, "_candidate", reject)
+
+
+def _assert_outcome_receipt(change, response, calls):
+    if change is None:
+        assert response.json()["candidate"] is None
+        assert response.json()["source_join"] == "authenticated_admission_ledger"
+        assert "sibyl-signed-eval-outcome-v1" in calls[0]
+        assert response.json()["receipt_status"] == "available"
+        assert response.json()["abstention_reason"] == "Insufficient transferable evidence"
+        assert response.json()["build_receipt"]["reason"] == "Insufficient transferable evidence"
+        assert response.json()["rejection_reason"] is None
+    elif change == "structural_rejection":
+        assert response.json()["status"] == "rejected"
+        assert response.json()["rejection_reason"] == "Missing failure support"
+        assert response.json()["abstention_reason"] is None
+        assert response.json()["build_receipt"]["status"] == "rejected"
+        assert response.json()["receipt_status"] == "available"
+
+
+async def _assert_legacy_receipt_unavailable(api, request, calls):
+    await api.store.execute_query("UPDATE eval_consolidations UNSET build_receipt_json;")
+    legacy = await api.client.post("/memory/eval/experiments/experiment/consolidate", json=request)
+    assert legacy.status_code == 200
+    assert legacy.json()["receipt_status"] == "unavailable"
+    assert legacy.json()["abstention_reason"] is None
+    assert legacy.json()["build_receipt"] == {}
     assert len(calls) == 1

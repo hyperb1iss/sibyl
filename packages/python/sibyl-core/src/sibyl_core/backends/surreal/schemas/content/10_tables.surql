@@ -433,6 +433,7 @@ DEFINE FIELD IF NOT EXISTS organization_id ON eval_consolidations TYPE string;
 DEFINE FIELD IF NOT EXISTS principal_id ON eval_consolidations TYPE string;
 DEFINE FIELD IF NOT EXISTS request_sha256 ON eval_consolidations TYPE string;
 DEFINE FIELD IF NOT EXISTS admission_bindings ON eval_consolidations TYPE array<object> FLEXIBLE DEFAULT [];
+DEFINE FIELD IF NOT EXISTS build_receipt_json ON eval_consolidations TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS candidate_id ON eval_consolidations TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS promoted_entity_id ON eval_consolidations TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS result_kind ON eval_consolidations TYPE string ASSERT $value IN ['candidate', 'abstained'];

@@ -77,7 +77,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 34
+CONTENT_SCHEMA_CURRENT_VERSION = 35
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -976,6 +976,14 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=34,
             name="content_source_integrity",
             action=partial(migrate_source_integrity, kind=SourceKind.RAW_CAPTURE),
+        ),
+        SchemaMigration(
+            version=35,
+            name="content_consolidation_receipts",
+            statements=(
+                "DEFINE FIELD IF NOT EXISTS build_receipt_json ON eval_consolidations "
+                "TYPE option<string>",
+            ),
         ),
     )
 

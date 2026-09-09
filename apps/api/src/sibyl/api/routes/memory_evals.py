@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 from dataclasses import replace
+from typing import Literal
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -212,6 +213,8 @@ class EvalConsolidationResponse(BaseModel):
     memory_id: str | None
     candidate: ReflectionCandidate | None
     abstention_reason: str | None
+    rejection_reason: str | None
+    receipt_status: Literal["available", "unavailable"]
     build_receipt: dict[str, object]
     source_join: str
     source_freshness: str
@@ -289,7 +292,7 @@ async def consolidate_admitted_attempts(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     memory = result.memory
     candidate = None
-    receipt = {}
+    receipt = result.build_receipt
     if memory is not None:
         memory = await reconcile_raw_source_lifecycle(
             memory,
@@ -318,14 +321,22 @@ async def consolidate_admitted_attempts(
         payload = memory.metadata.get(METADATA_KEY)
         if not isinstance(payload, dict) or not isinstance(payload.get("build_receipt"), dict):
             raise HTTPException(status_code=409, detail="Stored consolidation receipt is invalid")
-        receipt = payload["build_receipt"]
+        if receipt is None:
+            receipt = payload["build_receipt"]
     return EvalConsolidationResponse(
         operation_id=result.operation_id,
         status=result.status,
         memory_id=memory.id if memory else None,
         candidate=candidate,
-        abstention_reason="insufficient_support" if result.status == "abstained" else None,
-        build_receipt=receipt,
+        abstention_reason=receipt.get("reason")
+        if receipt and result.status == "abstained"
+        else None,
+        rejection_reason=receipt.get("reason") if receipt and result.status == "rejected" else None,
+        receipt_status="available" if receipt is not None else "unavailable",
+        build_receipt=receipt if receipt is not None else {},
         source_join="authenticated_admission_ledger",
-        source_freshness="checked_at_persistence; current_lifecycle_required_for_publication",
+        source_freshness=(
+            "checked_at_persistence; receipt_replay_is_historical; "
+            "current_lifecycle_required_for_publication"
+        ),
     )
