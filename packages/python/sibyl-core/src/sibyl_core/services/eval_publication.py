@@ -33,6 +33,7 @@ from sibyl_core.services.memory_source_validation import (
 )
 from sibyl_core.tasks.consolidation import (
     EVIDENCE_SYSTEM_PROMPT,
+    OUTPUT_RETRIES,
     SCHEMA_VERSION,
     SYSTEM_PROMPT,
     AdmittedTaskOutcome,
@@ -469,6 +470,7 @@ async def _extractor_policy() -> _ExtractorPolicy:
             "temperature": config.temperature.value,
             "max_input_chars": max_input_chars,
             "max_output_tokens": max_output_tokens,
+            "output_retries": OUTPUT_RETRIES,
             "input_budget_unit": "system_user_declared_schema_characters",
             "transport": transport_policy(config.to_llm_config()),
         }

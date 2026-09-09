@@ -31,6 +31,7 @@ from sibyl_core.tasks.episode_evidence import (
 from sibyl_core.tasks.procedure_evidence import EvidenceProposal, resolve_evidence_proposal
 
 SCHEMA_VERSION = "sibyl-conditional-procedure-v1"
+OUTPUT_RETRIES = 2
 METADATA_KEY = "conditional_procedure"
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 SHA256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -572,7 +573,7 @@ async def propose_conditional_procedure(
         surface=LLMSurface.MEMORY,
         system_prompt=evidence.system,
         model_override=model_override,
-        output_retries=0,
+        output_retries=OUTPUT_RETRIES,
         max_tokens=max_tokens,
     )
     with llm_budget_context(
@@ -622,7 +623,7 @@ def _finish_proposal(
         "input_chars": input_chars,
         "input_budget_unit": "system_user_declared_schema_characters",
         "max_output_tokens": max_tokens,
-        "output_retries": 0,
+        "output_retries": OUTPUT_RETRIES,
         "input_sha256": _digest(_canonical(group.model_dump(mode="json"))),
         "prompt_sha256": _digest(_canonical({"system": evidence.system, "user": prompt})),
         "schema_sha256": _digest(_canonical(evidence.output_type.model_json_schema())),

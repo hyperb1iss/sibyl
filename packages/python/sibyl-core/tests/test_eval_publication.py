@@ -304,3 +304,13 @@ async def test_frozen_input_and_output_budgets_reach_actual_proposal(proposal, m
     monkeypatch.setattr(p.core_config, "consolidation_max_input_chars", 120_000)
     environment["SIBYL_LLM_MEMORY_MAX_TOKENS"] = "3073"
     assert (await p.consolidation_extractor_configuration())[1] != revision
+
+
+async def test_output_validation_policy_changes_extractor_revision(monkeypatch):
+    from sibyl_core.ai.llm.config import EnvConfigSource
+
+    monkeypatch.setattr(p, "resolve_llm_config", EnvConfigSource({}).resolve)
+    assert p.OUTPUT_RETRIES == 2
+    current = await p.consolidation_extractor_configuration()
+    monkeypatch.setattr(p, "OUTPUT_RETRIES", 0)
+    assert await p.consolidation_extractor_configuration() != current
