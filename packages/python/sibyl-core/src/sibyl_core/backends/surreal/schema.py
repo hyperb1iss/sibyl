@@ -22,6 +22,10 @@ from sibyl_core.backends.surreal.schema_ownership import (
     SchemaOwnership,
     try_acquire_schema_ownership,
 )
+from sibyl_core.backends.surreal.schema_source_integrity import (
+    migrate_graph_source_integrity,
+    prepare_source_integrity_upgrade,
+)
 from sibyl_core.backends.surreal.schema_source_states import (
     SOURCE_STATE_DEFINITIONS,
     migrate_graph_source_states,
@@ -850,6 +854,9 @@ GRAPH_SCHEMA_MIGRATIONS = (
             ),
         ),
     ),
+    SchemaMigration(
+        version=26, name="graph_source_integrity", action=migrate_graph_source_integrity
+    ),
 )
 
 
@@ -873,6 +880,8 @@ def _graph_schema_migrations(
                 if migration.action is migrate_lifecycle_repair
                 else partial(migrate_graph_source_states, ownership=ownership)
                 if migration.action is migrate_graph_source_states
+                else partial(migrate_graph_source_integrity, ownership=ownership)
+                if migration.action is migrate_graph_source_integrity
                 else migration.action
             ),
         )
@@ -1278,6 +1287,7 @@ async def _bootstrap_owned_schema(
     reset: bool,
     force: bool,
 ) -> None:
+    await prepare_source_integrity_upgrade(ownership.read, ownership=ownership)
     current_version = 0
     if reset:
         await retire_source_states(ownership.mutate, kind=SourceKind.GRAPH_ENTITY)

@@ -122,10 +122,18 @@ async def replace_raw_memory_records_bulk(
         from sibyl_core.backends.surreal.schema_derivations import STORE_RAW_DERIVATIONS
 
         query = query.replace("COMMIT TRANSACTION;", STORE_RAW_DERIVATIONS + "COMMIT TRANSACTION;")
+    protected_targets = {derivation["target_id"] for derivation in derivations}
     rows = await content_client.select_many_raw(
         client,
         query,
-        rows=[{**record, "revision": 1} for record in records],
+        rows=[
+            {
+                **record,
+                "revision": 1,
+                **({"derivation_required": True} if record["uuid"] in protected_targets else {}),
+            }
+            for record in records
+        ],
         derivations=list(derivations),
     )
     if len(rows) != len(records):

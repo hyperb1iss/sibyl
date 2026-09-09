@@ -139,6 +139,7 @@ class RawMemory:
     snippet: str | None = None
 
     legacy_content_checkpoint: dict[str, object] | None = field(default=None, repr=False)
+    derivation_required: bool = field(default=False, repr=False, compare=False)
     observed_revision: int | None = field(default=None, repr=False, compare=False)
 
 
@@ -627,6 +628,7 @@ def raw_memory_from_record(record: Mapping[str, object]) -> RawMemory:
         capture_surface=coerce_optional_str(record.get("capture_surface")),
         created_by_user_id=coerce_optional_str(record.get("created_by_user_id")),
         revision=max(coerce_int(record.get("revision")), 1),
+        derivation_required=record.get("derivation_required") is True,
         legacy_content_checkpoint=coerce_dict(record.get("legacy_content_checkpoint")) or None,
         observed_revision=observed_revision
         if type(observed_revision) is int and observed_revision > 0

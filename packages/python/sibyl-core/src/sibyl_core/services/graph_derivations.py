@@ -29,7 +29,7 @@ def graph_target_digest(entity) -> str:
 
 async def graph_association_current(entity, association, *, ancestors=frozenset()) -> bool:
     if association is None:
-        return True
+        return not entity.derivation_required
     if association.get("active") is not True or association.get(
         "body_sha256"
     ) != graph_target_digest(entity):
@@ -114,8 +114,10 @@ async def unavailable_graph_derivation_ids(organization_id: str, ids: Sequence[s
         raise RuntimeError("graph derivation snapshot unavailable")
     targets = {row["uuid"]: entity_from_surreal_row(row) for row in target_rows}
 
-    async def current(association):
-        target_id = association["target_id"]
+    associations = {row["target_id"]: row for row in association_rows}
+
+    async def current(target_id):
+        association = associations.get(target_id)
         entity = targets.get(target_id)
         identity = SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, target_id)
         if entity is None or not await graph_association_current(
@@ -126,7 +128,9 @@ async def unavailable_graph_derivation_ids(organization_id: str, ids: Sequence[s
 
     return {
         value
-        for value in await asyncio.gather(*(current(row) for row in association_rows))
+        for value in await asyncio.gather(
+            *(current(target_id) for target_id in targets.keys() | associations.keys())
+        )
         if value is not None
     }
 

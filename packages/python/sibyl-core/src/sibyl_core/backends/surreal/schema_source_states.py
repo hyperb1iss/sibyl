@@ -113,7 +113,11 @@ def _raw_publication_evidence_changed() -> str:
 
 
 def source_state_event(
-    kind: SourceKind, *, retire_derivations: bool = False, publication_bookkeeping: bool = False
+    kind: SourceKind,
+    *,
+    retire_derivations: bool = False,
+    publication_bookkeeping: bool = False,
+    integrity: bool = False,
 ) -> str:
     """Generate only fixed, application-owned identifiers and field expressions.
 
@@ -138,6 +142,15 @@ def source_state_event(
         if retire_derivations
         else ""
     )
+    incarnation = (
+        "incarnation = $state.incarnation ?? type::string(rand::uuid())," if integrity else ""
+    )
+    marker_guard = (
+        "IF $event = 'UPDATE' AND $before.derivation_required = true "
+        "AND $after.derivation_required != true { THROW 'protected target cannot lose lineage'; };"
+        if integrity
+        else ""
+    )
     return f"""
 DEFINE EVENT IF NOT EXISTS maintain_source_state ON {table} WHEN true THEN {{
     LET $source = IF $event = 'DELETE' THEN $before ELSE $after END;
@@ -148,12 +161,14 @@ DEFINE EVENT IF NOT EXISTS maintain_source_state ON {table} WHEN true THEN {{
         OR $before.{organization_field} != $after.{organization_field}) {{
         THROW 'source identity is immutable';
     }};
+    {marker_guard}
     LET $org = type::string($source.{organization_field});
     LET $uuid = type::string($source.uuid);
     LET $key = type::record(string::concat('source_states:', crypto::sha256(type::string([$org, '{kind.value}', $uuid]))));
     LET $state = (SELECT * FROM $key)[0];
     LET $changed = $event != 'UPDATE' OR {changed};
     UPSERT $key SET organization_id = $org, source_kind = '{kind.value}', source_id = $uuid,
+        {incarnation}
         generation = ($state.generation ?? 0) + IF $state = NONE OR $changed
             OR ($state.deleted AND NOT ({deleted})) THEN 1 ELSE 0 END,
         revision = $source.revision ?? 0,

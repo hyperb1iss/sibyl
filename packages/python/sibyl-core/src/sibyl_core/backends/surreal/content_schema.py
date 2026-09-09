@@ -17,6 +17,10 @@ from sibyl_core.backends.surreal.schema_invariants import (
     SchemaInvariantPlan,
     expected_unique_indexes,
 )
+from sibyl_core.backends.surreal.schema_source_integrity import (
+    migrate_source_integrity,
+    prepare_source_integrity_upgrade,
+)
 from sibyl_core.backends.surreal.schema_source_states import (
     SOURCE_STATE_DEFINITIONS,
     migrate_source_states,
@@ -73,7 +77,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 33
+CONTENT_SCHEMA_CURRENT_VERSION = 34
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -968,6 +972,11 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
                 ).replace("DEFINE EVENT IF NOT EXISTS", "DEFINE EVENT OVERWRITE"),
             ),
         ),
+        SchemaMigration(
+            version=34,
+            name="content_source_integrity",
+            action=partial(migrate_source_integrity, kind=SourceKind.RAW_CAPTURE),
+        ),
     )
 
 
@@ -980,6 +989,7 @@ def content_schema_invariant_plan(*, url: str = "") -> SchemaInvariantPlan:
 
 
 async def bootstrap_content_schema(client: SurrealContentClient, *, reset: bool = False) -> None:
+    await prepare_source_integrity_upgrade(client.execute_query)
     if reset:
         await retire_source_states(client.execute_query, kind=SourceKind.RAW_CAPTURE)
         for table in (*CONTENT_TABLES, SCHEMA_VERSION_TABLE):
