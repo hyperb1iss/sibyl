@@ -131,6 +131,9 @@ class CoreConfig(BaseSettings):
         description="LLM model for entity extraction",
     )
 
+    consolidation_output_mode: Literal["tool", "native_strict"] = "tool"
+    consolidation_openrouter_provider: str | None = None
+
     consolidation_max_input_chars: int = Field(
         default=40_000,
         gt=0,

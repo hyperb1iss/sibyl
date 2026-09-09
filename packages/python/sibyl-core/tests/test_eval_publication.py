@@ -299,6 +299,8 @@ async def test_frozen_input_and_output_budgets_reach_actual_proposal(proposal, m
     assert stored.memory is not None
     assert calls[0]["max_input_chars"] == 120_000
     assert calls[0]["max_tokens"] == 3072
+    assert calls[0]["output_mode"] == p.core_config.consolidation_output_mode
+    assert calls[0]["openrouter_provider"] == p.core_config.consolidation_openrouter_provider
     monkeypatch.setattr(p.core_config, "consolidation_max_input_chars", 120_001)
     assert (await p.consolidation_extractor_configuration())[1] != revision
     monkeypatch.setattr(p.core_config, "consolidation_max_input_chars", 120_000)
@@ -314,3 +316,16 @@ async def test_output_validation_policy_changes_extractor_revision(monkeypatch):
     current = await p.consolidation_extractor_configuration()
     monkeypatch.setattr(p, "OUTPUT_RETRIES", 0)
     assert await p.consolidation_extractor_configuration() != current
+
+
+async def test_native_mode_and_endpoint_change_extractor_revision(monkeypatch):
+    from sibyl_core.ai.llm.config import EnvConfigSource
+
+    monkeypatch.setattr(p, "resolve_llm_config", EnvConfigSource({}).resolve)
+    original = await p.consolidation_extractor_configuration()
+    monkeypatch.setattr(p.core_config, "consolidation_output_mode", "native_strict")
+    native = await p.consolidation_extractor_configuration()
+    assert native != original
+    monkeypatch.setattr(p.core_config, "consolidation_openrouter_provider", "parasail/bf16")
+    routed = await p.consolidation_extractor_configuration()
+    assert routed not in (original, native)

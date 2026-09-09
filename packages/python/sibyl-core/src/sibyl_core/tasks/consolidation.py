@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 
 from sibyl_core.ai.llm import Extractor, LLMSurface
 from sibyl_core.ai.llm.budget import get_llm_budget_context, llm_budget_context
+from sibyl_core.ai.llm.extractor import OutputMode, extraction_schema
 from sibyl_core.models.entities import ProcedureStep
 from sibyl_core.models.memory_scope import MemoryScope
 from sibyl_core.models.reflection import ReflectionCandidate
@@ -540,6 +541,8 @@ async def propose_conditional_procedure(
     max_input_chars: int = 40_000,
     max_tokens: int = 2_048,
     model_override: str | None = None,
+    output_mode: OutputMode = "tool",
+    openrouter_provider: str | None = None,
 ) -> ConsolidationResult:
     """Make one extraction attempt and return a proposal, rejection, or abstention.
 
@@ -564,7 +567,7 @@ async def propose_conditional_procedure(
         raise ValueError("build budgets must be positive integers")
     evidence = await asyncio.to_thread(_extraction_input, group)
     prompt = evidence.prompt
-    schema = evidence.output_type.model_json_schema()
+    schema = extraction_schema(evidence.output_type, output_mode)
     input_chars = len(prompt) + len(evidence.system) + len(_canonical(schema).decode("utf-8"))
     if input_chars > max_input_chars:
         raise ConsolidationInputBudgetExceeded(input_chars, max_input_chars)
@@ -575,6 +578,8 @@ async def propose_conditional_procedure(
         model_override=model_override,
         output_retries=OUTPUT_RETRIES,
         max_tokens=max_tokens,
+        output_mode=output_mode,
+        openrouter_provider=openrouter_provider,
     )
     with llm_budget_context(
         user_id=group.owner_principal_id, organization_id=group.organization_id
@@ -596,6 +601,8 @@ async def propose_conditional_procedure(
         max_input_chars,
         input_chars,
         max_tokens,
+        output_mode,
+        openrouter_provider,
     )
 
 
@@ -608,6 +615,8 @@ def _finish_proposal(
     max_input_chars: int,
     input_chars: int,
     max_tokens: int,
+    output_mode: OutputMode = "tool",
+    openrouter_provider: str | None = None,
 ) -> ConsolidationResult:
     prompt = evidence.prompt
     receipt = {
@@ -624,6 +633,11 @@ def _finish_proposal(
         "input_budget_unit": "system_user_declared_schema_characters",
         "max_output_tokens": max_tokens,
         "output_retries": OUTPUT_RETRIES,
+        "output_mode": output_mode,
+        "openrouter_provider": openrouter_provider,
+        "wire_schema_sha256": _digest(
+            _canonical(extraction_schema(evidence.output_type, output_mode))
+        ),
         "input_sha256": _digest(_canonical(group.model_dump(mode="json"))),
         "prompt_sha256": _digest(_canonical({"system": evidence.system, "user": prompt})),
         "schema_sha256": _digest(_canonical(evidence.output_type.model_json_schema())),
