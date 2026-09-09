@@ -111,6 +111,47 @@ class TestMockEntityManager:
         assert updated.name == "Updated"
 
     @pytest.mark.asyncio
+    async def test_persisted_revision_fences_stale_metadata_writes(self) -> None:
+        from sibyl_core.errors import RevisionConflictError
+
+        manager = MockEntityManager()
+        entity = create_test_entity(metadata={"keep": "original"})
+        await manager.create(entity)
+        observed = await manager.get(entity.id)
+        assert observed.observed_revision == observed.revision
+        updated = await manager.update(
+            entity.id, {"metadata": {"new": True}}, expected_revision=observed.observed_revision
+        )
+        assert updated is not None
+        assert updated.revision == observed.revision + 1
+        assert updated.observed_revision == updated.revision
+        assert updated.metadata == {"keep": "original", "new": True}
+        with pytest.raises(RevisionConflictError):
+            await manager.update(
+                entity.id,
+                {"metadata": {"keep": "stale"}},
+                expected_revision=observed.observed_revision,
+            )
+        assert (await manager.get(entity.id)).metadata == updated.metadata
+        observed.metadata["keep"] = "changed outside the store"
+        assert (await manager.get(entity.id)).metadata["keep"] == "original"
+
+    @pytest.mark.asyncio
+    async def test_replacement_metadata_drops_old_nested_pending_keys(self) -> None:
+        manager = MockEntityManager()
+        entity = create_test_entity(metadata={"clock": {"old": 1}, "keep": True})
+        manager.add_entity(entity)
+        observed = await manager.get(entity.id)
+        updated = await manager.update(
+            entity.id,
+            {"metadata": {"clock": {"new": 2}}},
+            expected_revision=observed.observed_revision,
+            replace_metadata_keys=("clock",),
+        )
+        assert updated is not None
+        assert updated.metadata == {"clock": {"new": 2}, "keep": True}
+
+    @pytest.mark.asyncio
     async def test_delete_entity(self) -> None:
         """Delete should remove entity."""
         manager = MockEntityManager()
@@ -300,4 +341,5 @@ class TestMockToolsContextManager:
             ctx.entity_manager.add_entity(entity)
 
             retrieved = await ctx.entity_manager.get(entity.id)
-            assert retrieved == entity
+            assert retrieved.model_dump() == entity.model_dump()
+            assert retrieved.observed_revision == entity.revision

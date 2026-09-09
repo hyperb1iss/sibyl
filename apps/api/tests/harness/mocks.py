@@ -4,12 +4,27 @@ Provides mock versions of the graph client, EntityManager, and
 RelationshipManager so tools can be tested without a real SurrealDB connection.
 """
 
+from collections.abc import Sequence
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from sibyl_core.errors import RevisionConflictError
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
+
+
+def _merge_metadata(current: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    merged = deepcopy(current)
+    for key, value in patch.items():
+        if value is None:
+            merged.pop(key, None)
+        elif isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_metadata(merged[key], value)
+        else:
+            merged[key] = deepcopy(value)
+    return merged
 
 
 @dataclass
@@ -56,7 +71,9 @@ class MockEntityManager:
 
     def add_entity(self, entity: Entity) -> None:
         """Add an entity to the mock store."""
-        self._entities[entity.id] = entity
+        self._entities[entity.id] = entity.model_copy(
+            deep=True, update={"observed_revision": entity.revision}
+        )
 
     def set_search_results(self, results: list[tuple[Entity, float]]) -> None:
         """Set results for the next search call."""
@@ -66,7 +83,7 @@ class MockEntityManager:
         """Create entity and return ID."""
         entity_id = entity.id or f"entity-{uuid4().hex[:8]}"
         entity.id = entity_id
-        self._entities[entity_id] = entity
+        self.add_entity(entity)
         return entity_id
 
     async def create_direct(self, entity: Entity, *, generate_embedding: bool = True) -> str:
@@ -80,7 +97,7 @@ class MockEntityManager:
             from sibyl_core.errors import EntityNotFoundError
 
             raise EntityNotFoundError("Entity", entity_id)
-        return self._entities[entity_id]
+        return self._entities[entity_id].model_copy(deep=True)
 
     async def search(
         self,
@@ -98,19 +115,40 @@ class MockEntityManager:
 
         return results
 
-    async def update(self, entity_id: str, updates: dict[str, Any]) -> Entity | None:
-        """Update entity fields."""
+    async def update(
+        self,
+        entity_id: str,
+        updates: dict[str, Any],
+        *,
+        expected_revision: int | None = None,
+        replace_metadata_keys: Sequence[str] = (),
+    ) -> Entity | None:
+        """Apply a mutation with the same revision fence as the graph store."""
         if entity_id not in self._entities:
             return None
-
         entity = self._entities[entity_id]
+        if not updates:
+            return entity.model_copy(deep=True)
+        if expected_revision is not None and expected_revision < 1:
+            raise ValueError("expected_revision must be at least 1")
+        if expected_revision is not None and expected_revision != entity.revision:
+            raise RevisionConflictError(entity_id, expected_revision, entity.revision)
+        updated = entity.model_copy(deep=True)
         for key, value in updates.items():
-            if hasattr(entity, key):
-                setattr(entity, key, value)
-            elif entity.metadata is not None:
-                entity.metadata[key] = value
-
-        return entity
+            if key == "metadata":
+                updated.metadata = _merge_metadata(updated.metadata, value)
+                for replaced in replace_metadata_keys:
+                    if replaced in value and value[replaced] is not None:
+                        updated.metadata[replaced] = deepcopy(value[replaced])
+            elif hasattr(updated, key):
+                setattr(updated, key, deepcopy(value))
+            else:
+                updated.metadata[key] = deepcopy(value)
+        updated.revision = entity.revision + 1
+        updated.observed_revision = updated.revision
+        updated.updated_at = datetime.now(UTC)
+        self._entities[entity_id] = updated
+        return updated.model_copy(deep=True)
 
     async def delete(self, entity_id: str) -> bool:
         """Delete entity."""
