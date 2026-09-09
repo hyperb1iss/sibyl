@@ -22,6 +22,7 @@ from sibyl.config import EvalIssuerSettings
 from sibyl_core.auth import OrganizationRole
 from sibyl_core.backends.surreal import SurrealContentClient, bootstrap_content_schema
 from sibyl_core.services import content_client
+from sibyl_core.tasks import consolidation
 from sibyl_core.tasks.eval_receipts import TaskAssignment, sign_outcome
 
 
@@ -248,10 +249,10 @@ async def test_archive_restore_preserves_consumed_attempt(eval_api, monkeypatch,
         "all_passed",
         "blank",
         "input_budget",
+        "transport_failure",
     ],
 )
 async def test_http_consolidation_reads_admitted_sources(eval_api, monkeypatch, change):
-    from sibyl_core.tasks import consolidation
 
     api = eval_api
     assert (await _register(api)).status_code == 200
@@ -298,6 +299,8 @@ async def test_http_consolidation_reads_admitted_sources(eval_api, monkeypatch, 
 
     async def extract(_self, prompt):
         calls.append(prompt)
+        if change == "transport_failure":
+            _raise_transport_failure()
         if change in candidate_changes:
             return _candidate_extraction_result(prompt)
         return SimpleNamespace(
@@ -335,6 +338,9 @@ async def test_http_consolidation_reads_admitted_sources(eval_api, monkeypatch, 
     if change == "input_budget":
         expected = 413
         await _assert_consolidation_input_budget(api, response)
+    if change == "transport_failure":
+        await _assert_transport_failure(api, response)
+        return
     assert response.status_code == expected, response.text
     assert len(calls) == (1 if change in {None, *candidate_changes} else 0)
     if change is None:
@@ -343,12 +349,7 @@ async def test_http_consolidation_reads_admitted_sources(eval_api, monkeypatch, 
         assert "sibyl-signed-eval-outcome-v1" in calls[0]
 
     if change in {None, *candidate_changes}:
-        replay = await api.client.post(
-            "/memory/eval/experiments/experiment/consolidate", json=request
-        )
-        assert replay.status_code == 200
-        assert replay.json() == response.json()
-        assert len(calls) == 1
+        await _assert_same_consolidation_replay(api, request, response, calls)
     if change in {"source_deleted_replay", "stamp_changed_replay"}:
         await _assert_unavailable_consolidation_replay(api, request, change)
     if change == "candidate":
@@ -429,3 +430,43 @@ async def _assert_consolidation_input_budget(api, response):
         normalize_records(await api.store.execute_query("SELECT * FROM eval_consolidations;")) == []
     )
     assert len(normalize_records(await api.store.execute_query("SELECT * FROM raw_captures;"))) == 2
+
+
+def _raise_transport_failure():
+    from sibyl_core.ai.errors import LLMProviderError
+    from sibyl_core.ai.transport import FailedExtractionUsage, TransportAttempt
+
+    raise LLMProviderError(
+        "private provider error",
+        details={
+            "body": "private response",
+            "extraction_usage": FailedExtractionUsage(
+                transport_attempts=[
+                    TransportAttempt(status_code=500, request_id="req_1"),
+                    TransportAttempt(exception_type="ReadTimeout"),
+                ]
+            ).model_dump(mode="json"),
+        },
+    )
+
+
+async def _assert_transport_failure(api, response):
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert detail["code"] == "consolidation_extraction_failed"
+    assert len(detail["usage"]["transport_attempts"]) == 2
+    assert detail["usage"]["cost_usd"] is None
+    assert not detail["usage"]["usage_complete"]
+    assert "private" not in response.text
+    from sibyl_core.services.content_client import normalize_records
+
+    assert (
+        normalize_records(await api.store.execute_query("SELECT * FROM eval_consolidations;")) == []
+    )
+
+
+async def _assert_same_consolidation_replay(api, request, response, calls):
+    replay = await api.client.post("/memory/eval/experiments/experiment/consolidate", json=request)
+    assert replay.status_code == 200
+    assert replay.json() == response.json()
+    assert len(calls) == 1

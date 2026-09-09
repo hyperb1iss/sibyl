@@ -29,6 +29,7 @@ class LLMConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     max_tokens: int | None = Field(default=None, gt=0)
     timeout_seconds: float = Field(default=60.0, gt=0.0)
+    transport_max_retries: int = Field(default=2, ge=0, strict=True)
     api_key: SecretStr | None = None
 
 
@@ -47,6 +48,9 @@ class ResolvedLLMConfig(BaseModel):
     max_tokens: ConfigField[int | None]
     timeout_seconds: ConfigField[float]
     api_key: ConfigField[SecretStr | None]
+    transport_max_retries: ConfigField[int] = Field(
+        default_factory=lambda: ConfigField(value=2, source="default")
+    )
     cached_at: datetime | None = None
 
     def to_llm_config(self) -> LLMConfig:
@@ -57,6 +61,7 @@ class ResolvedLLMConfig(BaseModel):
             max_tokens=self.max_tokens.value,
             timeout_seconds=self.timeout_seconds.value,
             api_key=self.api_key.value,
+            transport_max_retries=self.transport_max_retries.value,
         )
 
 
@@ -84,7 +89,14 @@ class EnvConfigSource:
             max_tokens=self._resolve_int(surface, "MAX_TOKENS", default=None),
             timeout_seconds=self._resolve_float(surface, "TIMEOUT_SECONDS", default=60.0),
             api_key=self._resolve_api_key(provider.value),
+            transport_max_retries=self._resolve_transport_retries(surface),
         )
+
+    def _resolve_transport_retries(self, surface: LLMSurface) -> ConfigField[int]:
+        resolved = self._resolve_int(surface, "TRANSPORT_MAX_RETRIES", default=2)
+        if resolved.value is None or resolved.value < 0:
+            raise LLMConfigError("Transport retries must be a nonnegative integer")
+        return ConfigField[int].model_validate(resolved.model_dump())
 
     async def invalidate(self, surface: LLMSurface | None = None) -> None:
         return None

@@ -13,6 +13,8 @@ from sibyl.api.routes import memory_auth
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
 from sibyl.config import EvalIssuerSettings, settings
+from sibyl_core.ai.errors import LLMError
+from sibyl_core.ai.transport import FailedExtractionUsage
 from sibyl_core.auth import AuthOrganization, OrganizationRole
 from sibyl_core.auth.memory_policy import EVAL_CONSOLIDATION_METADATA_KEY, MemoryPolicyAction
 from sibyl_core.memory_pipeline.source_lifecycle import public_memory_metadata
@@ -264,6 +266,15 @@ async def consolidate_admitted_attempts(
             ),
             model_override=model,
         )
+    except LLMError as exc:
+        usage = FailedExtractionUsage.model_validate(exc.details.get("extraction_usage", {}))
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "consolidation_extraction_failed",
+                "usage": usage.model_dump(mode="json"),
+            },
+        ) from exc
     except ConsolidationInputBudgetExceeded as exc:
         raise HTTPException(
             status_code=413,

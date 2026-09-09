@@ -12,6 +12,7 @@ from uuid import NAMESPACE_URL, uuid5
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from sibyl_core.ai.llm.config import LLMSurface, resolve_llm_config
+from sibyl_core.ai.transport import transport_policy
 from sibyl_core.auth.memory_policy import (
     EVAL_ADMISSION_METADATA_KEY,
     EVAL_CONSOLIDATION_METADATA_KEY,
@@ -469,6 +470,7 @@ async def _extractor_policy() -> _ExtractorPolicy:
             "max_input_chars": max_input_chars,
             "max_output_tokens": max_output_tokens,
             "input_budget_unit": "system_user_declared_schema_characters",
+            "transport": transport_policy(config.to_llm_config()),
         }
     )
     return _ExtractorPolicy(config.model.value, revision, max_input_chars, max_output_tokens)

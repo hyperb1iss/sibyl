@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from typing import Literal
 
+from openai import AsyncOpenAI
 from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
@@ -16,6 +17,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from sibyl_core.ai.errors import LLMConfigError
 from sibyl_core.ai.llm.config import LLMConfig
 from sibyl_core.ai.registry import ModelKind, model_registry
+from sibyl_core.ai.transport import RecordingOpenAIClient
 
 
 def build_model(config: LLMConfig) -> Model:
@@ -38,7 +40,13 @@ def build_model(config: LLMConfig) -> Model:
         case "openai":
             return OpenAIResponsesModel(
                 provider_model_id,
-                provider=OpenAIProvider(api_key=api_key),
+                provider=OpenAIProvider(
+                    openai_client=AsyncOpenAI(
+                        api_key=api_key,
+                        max_retries=config.transport_max_retries,
+                        http_client=RecordingOpenAIClient(),
+                    )
+                ),
                 settings=OpenAIResponsesModelSettings(**_settings(config)),
             )
 
