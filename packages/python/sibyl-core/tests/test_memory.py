@@ -33,6 +33,52 @@ from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 from sibyl_core.tools.responses import AddResponse
 
 
+@pytest.fixture(autouse=True)
+def promotion_snapshots(monkeypatch):
+    """Adapt this module's mocked content rows to its mocked source ledger."""
+    from sibyl_core.memory_pipeline.observations import (
+        SourceIdentity,
+        SourceKind,
+        SourceObservation,
+        evidence_hash,
+    )
+    from sibyl_core.services.source_state_store import RawSourceSnapshot
+
+    async def snapshot(organization_id, memory_id, module=reflection_module):
+        memory = await module.get_raw_memory(organization_id=organization_id, memory_id=memory_id)
+        if memory is None:
+            return None
+        return RawSourceSnapshot(
+            memory,
+            SourceObservation(
+                SourceIdentity(organization_id, SourceKind.RAW_CAPTURE, memory.id),
+                1,
+                evidence_hash(memory.raw_content),
+                memory.revision,
+                True,
+            ),
+        )
+
+    monkeypatch.setattr(reflection_module, "load_promotion_source", snapshot)
+    monkeypatch.setattr(
+        sharing_module,
+        "load_promotion_source",
+        lambda org, memory_id: snapshot(org, memory_id, sharing_module),
+    )
+    from sibyl_core.services import memory_derivations
+    from sibyl_core.services.source_observations import SourceUnavailableError, observe_raw_capture
+
+    async def authorized_snapshot(source, authority, *, organization_id):
+        result = await snapshot(organization_id, source.id)
+        if result is None:
+            raise SourceUnavailableError()
+        observe_raw_capture(result.memory, authority)
+        return result
+
+    monkeypatch.setattr(memory_derivations, "load_authorized_source_snapshot", authorized_snapshot)
+    monkeypatch.setattr(memory_derivations, "load_raw_derivation", AsyncMock(return_value=None))
+
+
 def _raw_review_candidate(**overrides: object) -> RawMemory:
     values = {
         "id": "candidate-1",
@@ -1482,7 +1528,7 @@ async def test_persist_reflection_candidate_reports_partial_relationship_writes(
         )
 
     entity_manager = SimpleNamespace(
-        create_direct_if_absent=AsyncMock(side_effect=lambda entity: (entity, True)),
+        create_direct_if_absent=AsyncMock(side_effect=lambda entity, **kwargs: (entity, True)),
         update=AsyncMock(
             return_value=Entity(id="receipt", entity_type=EntityType.DECISION, name="Receipt")
         ),
@@ -1494,6 +1540,7 @@ async def test_persist_reflection_candidate_reports_partial_relationship_writes(
 
     relationship_manager = SimpleNamespace(create_bulk=AsyncMock(side_effect=create_relationships))
     runtime = SimpleNamespace(
+        client=SimpleNamespace(group_id="org-1"),
         entity_manager=entity_manager,
         relationship_manager=relationship_manager,
     )
@@ -1549,7 +1596,7 @@ async def test_promote_review_candidate_bounds_contradicted_source_for_as_of_rea
         def __init__(self) -> None:
             self.updated: list[tuple[str, dict[str, object]]] = []
 
-        async def create_direct_if_absent(self, entity):
+        async def create_direct_if_absent(self, entity, **kwargs):
             self.created_entity = entity
             return entity, True
 
@@ -1578,6 +1625,7 @@ async def test_promote_review_candidate_bounds_contradicted_source_for_as_of_rea
 
     entity_manager = FakeEntityManager()
     runtime = SimpleNamespace(
+        client=SimpleNamespace(group_id="org-1"),
         entity_manager=entity_manager,
         relationship_manager=SimpleNamespace(
             create_bulk=AsyncMock(return_value=(0, 0)),
@@ -1661,7 +1709,7 @@ async def test_promote_review_candidate_skips_other_private_principal_invalidati
         def __init__(self) -> None:
             self.updated: list[tuple[str, dict[str, object]]] = []
 
-        async def create_direct_if_absent(self, entity):
+        async def create_direct_if_absent(self, entity, **kwargs):
             self.created_entity = entity
             return entity, True
 
@@ -1685,6 +1733,7 @@ async def test_promote_review_candidate_skips_other_private_principal_invalidati
 
     entity_manager = FakeEntityManager()
     runtime = SimpleNamespace(
+        client=SimpleNamespace(group_id="org-1"),
         entity_manager=entity_manager,
         relationship_manager=SimpleNamespace(
             create_bulk=AsyncMock(return_value=(0, 0)),
@@ -1747,7 +1796,7 @@ async def test_promote_review_candidate_skips_foreign_private_superseded_entity(
             self.created_metadata: dict[str, object] | None = None
             self.updated: list[tuple[str, dict[str, object]]] = []
 
-        async def create_direct_if_absent(self, entity):
+        async def create_direct_if_absent(self, entity, **kwargs):
             self.created_metadata = entity.metadata
             self.created_entity = entity
             return entity, True
@@ -1777,6 +1826,7 @@ async def test_promote_review_candidate_skips_foreign_private_superseded_entity(
 
     entity_manager = FakeEntityManager()
     runtime = SimpleNamespace(
+        client=SimpleNamespace(group_id="org-1"),
         entity_manager=entity_manager,
         relationship_manager=SimpleNamespace(
             create_bulk=AsyncMock(return_value=(0, 0)),

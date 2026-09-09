@@ -87,7 +87,11 @@ async def validate_observations(
             return await raw_derivation_current(
                 snapshot.memory, authority, ancestors=ancestors | {observation.source}
             )
-        return True
+        from sibyl_core.services.graph_derivations import graph_derivation_current
+
+        return await graph_derivation_current(
+            snapshot.entity, ancestors=ancestors | {observation.source}
+        )
 
     return all(await asyncio.gather(*(current(observation) for observation in observations)))
 

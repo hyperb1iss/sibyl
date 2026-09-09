@@ -73,7 +73,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 32
+CONTENT_SCHEMA_CURRENT_VERSION = 33
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -955,6 +955,17 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
                 source_state_event(SourceKind.RAW_CAPTURE, retire_derivations=True).replace(
                     "DEFINE EVENT IF NOT EXISTS", "DEFINE EVENT OVERWRITE"
                 ),
+            ),
+        ),
+        SchemaMigration(
+            version=33,
+            name="content_source_publication_bookkeeping",
+            statements=(
+                source_state_event(
+                    SourceKind.RAW_CAPTURE,
+                    retire_derivations=True,
+                    publication_bookkeeping=True,
+                ).replace("DEFINE EVENT IF NOT EXISTS", "DEFINE EVENT OVERWRITE"),
             ),
         ),
     )

@@ -7,13 +7,14 @@ import json
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter
-from pydantic_ai import Agent
+from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.models import Model, ModelSettings
 from pydantic_ai.models.openai import OpenAIResponsesModel
+from pydantic_ai.profiles.openai import OpenAIJsonSchemaTransformer
 
 from sibyl_core.ai.clients import get_agent
 from sibyl_core.ai.errors import LLMError, classify_llm_exception
@@ -46,6 +47,16 @@ class ExtractionResult[T]:
     usage: ExtractionUsage
 
 
+OutputMode = Literal["tool", "native_strict"]
+
+
+def extraction_schema(output_type: Any, output_mode: OutputMode = "tool") -> dict[str, Any]:
+    schema = TypeAdapter(output_type).json_schema()
+    if output_mode == "native_strict":
+        return OpenAIJsonSchemaTransformer(schema, strict=True).walk()
+    return schema
+
+
 class Extractor[T]:
     def __init__(
         self,
@@ -57,7 +68,15 @@ class Extractor[T]:
         output_retries: int | None = 2,
         max_tokens: int | None = None,
         agent: Agent[Any, Any] | None = None,
+        output_mode: OutputMode = "tool",
+        openrouter_provider: str | None = None,
     ) -> None:
+        if output_mode not in ("tool", "native_strict"):
+            raise ValueError("unsupported extraction output mode")
+        if openrouter_provider is not None and not openrouter_provider.strip():
+            raise ValueError("provider endpoint must be nonempty")
+        self.output_mode = output_mode
+        self.openrouter_provider = openrouter_provider
         self.output_type = output_type
         self.surface = surface
         self.system_prompt = system_prompt
@@ -79,6 +98,15 @@ class Extractor[T]:
     ) -> ExtractionResult[T]:
         try:
             agent = await self._get_agent()
+            if self.output_mode == "native_strict" and not isinstance(
+                agent.model, OpenAIResponsesModel
+            ):
+                raise ValueError("native strict extraction requires OpenAI Responses")
+            if self.openrouter_provider is not None and (
+                not isinstance(agent.model, OpenAIResponsesModel)
+                or agent.model.client.base_url.host != "openrouter.ai"
+            ):
+                raise ValueError("OpenRouter routing requires the OpenRouter API origin")
             transport_retries = (
                 agent.model.client.max_retries
                 if isinstance(agent.model, OpenAIResponsesModel)
@@ -94,7 +122,7 @@ class Extractor[T]:
             )
             result = await agent.run(
                 prompt,
-                model_settings=_model_settings(self.max_tokens),
+                model_settings=self._model_settings(),
             )
             telemetry_registry().record_llm_call(
                 surface=self.surface.value,
@@ -139,7 +167,7 @@ class Extractor[T]:
         instructions = self.system_prompt or ()
         if isinstance(instructions, str):
             instructions = (instructions,)
-        schema = TypeAdapter(self.output_type).json_schema()
+        schema = extraction_schema(self.output_type, self.output_mode)
         return "\n".join((*instructions, prompt, json.dumps(schema, sort_keys=True)))
 
     async def extract_many(
@@ -162,13 +190,31 @@ class Extractor[T]:
     async def _get_agent(self) -> Agent[Any, Any]:
         if self._agent is not None:
             return self._agent
+        output_type: Any = self.output_type
         return await get_agent(
             self.surface,
-            output_type=self.output_type,
+            output_type=(
+                NativeOutput(output_type, strict=True)
+                if self.output_mode == "native_strict"
+                else self.output_type
+            ),
             system_prompt=self.system_prompt,
             model_override=self.model_override,
             output_retries=self.output_retries,
         )
+
+    def _model_settings(self) -> ModelSettings | None:
+        settings = _model_settings(self.max_tokens)
+        if self.openrouter_provider is not None:
+            settings = settings or ModelSettings()
+            settings["extra_body"] = {
+                "provider": {
+                    "only": [self.openrouter_provider],
+                    "require_parameters": True,
+                    "allow_fallbacks": False,
+                }
+            }
+        return settings
 
     def _classify(self, exc: Exception) -> LLMError:
         return classify_llm_exception(

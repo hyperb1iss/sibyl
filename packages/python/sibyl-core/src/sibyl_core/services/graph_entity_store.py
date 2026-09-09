@@ -218,11 +218,69 @@ async def _insert_entity_if_absent(
     entity: Entity,
     *,
     group_id: str,
+    derivation: Mapping[str, object] | None = None,
 ) -> tuple[SurrealRecord, bool]:
     """Arbitrate creation by physical record ID without rewriting a retry."""
     _enforce_entity_content_limit([entity])
     record = _entity_record(entity, group_id=group_id)
     record["id"] = entity.id
+    if derivation is not None:
+        from sibyl_core.services.graph_derivations import graph_target_digest
+        from sibyl_core.services.graph_records import entity_from_surreal_row
+
+        association = dict(derivation)
+        if (
+            association.get("organization_id") != group_id
+            or association.get("target_id") != entity.id
+            or association.get("target_kind") != "graph_entity"
+        ):
+            raise ValueError("derivation does not match graph target")
+        association["body_sha256"] = graph_target_digest(entity_from_surreal_row(record))
+        result = normalize_records(
+            await client.execute_query(
+                """RETURN {
+                LET $inserted = INSERT IGNORE INTO entity $rows;
+                IF array::len($inserted) > 0 {
+                    CREATE memory_derivations CONTENT $association;
+                    RETURN {row: $inserted[0], created: true};
+                };
+                LET $existing = (SELECT * FROM memory_derivations WHERE organization_id=$org
+                    AND target_kind='graph_entity' AND target_id=$uuid LIMIT 1)[0];
+                RETURN {row: (SELECT * FROM entity WHERE uuid=$uuid LIMIT 1)[0], created: false, association: $existing};
+            };""",
+                rows=[record],
+                association=association,
+                org=group_id,
+                uuid=entity.id,
+            )
+        )
+        stored = result[0].get("row") if len(result) == 1 else None
+        if not isinstance(stored, dict):
+            raise RuntimeError("graph derivation publication returned no target")
+        created = result[0]["created"] is True
+        if not created:
+            from sibyl_core.services.memory_derivations import observation_from_record
+
+            existing = result[0].get("association")
+            if not isinstance(existing, dict) or any(
+                existing.get(key) != association.get(key)
+                for key in ("active", "body_sha256", "principal_id", "authority_ceiling")
+            ):
+                raise ValueError("graph derivation replay mismatch")
+            saved_observations = existing.get("observations")
+            expected_observations = association.get("observations")
+            if (
+                not isinstance(saved_observations, list)
+                or not isinstance(expected_observations, list)
+                or len(saved_observations) != len(expected_observations)
+            ):
+                raise ValueError("graph derivation replay mismatch")
+            if any(
+                not observation_from_record(saved).same_evidence(observation_from_record(expected))
+                for saved, expected in zip(saved_observations, expected_observations, strict=True)
+            ):
+                raise ValueError("graph derivation replay mismatch")
+        return stored, created
     query = "INSERT IGNORE INTO entity $rows;"
     try:
         result = await client.execute_query(query, rows=[record])
@@ -250,12 +308,17 @@ async def _replace_entities_bulk(
     entities: Sequence[Entity],
     *,
     group_id: str,
+    projection_source=None,
 ) -> list[SurrealRecord]:
     _enforce_entity_content_limit(entities)
     records = [_entity_record(entity, group_id=group_id) for entity in entities]
     if not records:
         return []
     await heal_entity_metadata_snapshots(client, records, group_id=group_id)
+    if projection_source is not None:
+        return await _replace_projected_entities(
+            client, records, group_id=group_id, projection_source=projection_source
+        )
     try:
         result = await _execute_replace_entities_with_schema_retry(client, records)
     except Exception as exc:
@@ -834,3 +897,91 @@ def _entity_update_metadata_patch(updates: Mapping[str, Any]) -> dict[str, objec
 
 
 __all__ = ["CLEAR_MEMORY_SCOPE", "MAX_ENTITY_CONTENT_CHARS", "heal_entity_metadata_snapshots"]
+
+
+async def _replace_projected_entities(client, records, *, group_id, projection_source):
+    """Write passages and their protected parent observations in one transaction."""
+    from dataclasses import asdict
+
+    from sibyl_core.services.graph_derivations import graph_target_digest
+    from sibyl_core.services.graph_records import entity_from_surreal_row
+
+    snapshot, parent_association = projection_source
+    observation = snapshot.observation
+    if observation.source.organization_id != group_id or not observation.durable:
+        raise ValueError("projection source does not match organization")
+    associations = []
+    for record in records:
+        entity = entity_from_surreal_row(record)
+        if (
+            entity.entity_type is not EntityType.PASSAGE
+            or entity.metadata.get("source_entity_id") != observation.source.id
+        ):
+            raise ValueError("projection target does not match parent")
+        associations.append(
+            {
+                "organization_id": group_id,
+                "target_kind": "graph_entity",
+                "target_id": entity.id,
+                "body_sha256": graph_target_digest(entity),
+                "principal_id": parent_association["principal_id"],
+                "authority_ceiling": parent_association["authority_ceiling"],
+                "observations": [asdict(observation)],
+                "active": True,
+            }
+        )
+    upsert = (
+        render_surreal_compatible_sql(_ENTITY_BULK_UPSERT_QUERY, url=client._url)
+        .strip()
+        .rstrip(";")
+    )
+    query = (
+        """RETURN {
+        LET $parent = (SELECT * FROM entity WHERE group_id=$org AND uuid=$parent_id LIMIT 1)[0];
+        LET $state = (SELECT * FROM source_states WHERE organization_id=$org AND source_kind='graph_entity' AND source_id=$parent_id LIMIT 1)[0];
+        LET $parent_derivation = (SELECT * FROM memory_derivations WHERE organization_id=$org AND target_kind='graph_entity' AND target_id=$parent_id LIMIT 1)[0];
+        IF $parent = NONE OR $state = NONE OR $parent.revision != $revision
+            OR $state.revision != $revision OR $state.generation != $generation OR $state.deleted
+            OR $parent_derivation.active != true
+            OR $parent_derivation.body_sha256 != $parent_association.body_sha256
+            OR $parent_derivation.observations != $parent_association.observations
+            OR $parent_derivation.authority_ceiling != $parent_association.authority_ceiling {
+            THROW 'projection parent observation changed';
+        };
+        LET $previous_targets = SELECT uuid FROM entity WHERE group_id=$org AND uuid IN $ids;
+        LET $written = ("""
+        + upsert
+        + """);
+        FOR $association IN $associations {
+            LET $old = (SELECT * FROM memory_derivations WHERE organization_id=$org AND target_kind='graph_entity' AND target_id=$association.target_id LIMIT 1)[0];
+            IF $old != NONE AND (array::len($old.observations) != 1
+                OR $old.observations[0].source != $association.observations[0].source) {
+                THROW 'projection association belongs to another source';
+            };
+            LET $was_present = array::len($previous_targets[WHERE uuid=$association.target_id]) > 0;
+            IF $was_present AND ($old = NONE
+                OR $old.observations[0].generation != $association.observations[0].generation
+                OR $old.observations[0].content_sha256 != $association.observations[0].content_sha256
+                OR $old.active != true) {
+                UPDATE source_states SET generation += 1
+                    WHERE organization_id=$org AND source_kind='graph_entity' AND source_id=$association.target_id;
+            };
+            IF $old = NONE { CREATE memory_derivations CONTENT $association; }
+            ELSE { UPDATE $old.id CONTENT $association; };
+        };
+        RETURN $written;
+    };"""
+    )
+    return normalize_records(
+        await client.execute_query(
+            query,
+            rows=records,
+            ids=[record["uuid"] for record in records],
+            associations=associations,
+            org=group_id,
+            parent_id=observation.source.id,
+            revision=observation.revision,
+            generation=observation.generation,
+            parent_association=parent_association,
+        )
+    )
