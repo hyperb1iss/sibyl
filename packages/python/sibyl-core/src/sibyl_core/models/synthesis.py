@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from sibyl_core.memory_pipeline.observations import SourceObservation
+    from sibyl_core.services.memory_source_validation import SourceReadAuthority
 
 
 class SynthesisOutputType(StrEnum):
@@ -79,6 +83,7 @@ class SynthesisSourceReference:
     origin: str = "graph"
     relation: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    observation: SourceObservation | None = None
 
 
 @dataclass(frozen=True)
@@ -158,6 +163,7 @@ class SynthesisRun:
     outline: SynthesisOutline
     source_packs: list[SynthesisSourcePack]
     verification: SynthesisVerification
+    source_authority: SourceReadAuthority | None = None
 
 
 __all__ = [

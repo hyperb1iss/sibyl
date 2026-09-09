@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 from sibyl_core.auth.memory_policy import (
@@ -40,6 +40,9 @@ from sibyl_core.services import content_lineage as lineage
 from sibyl_core.services import content_models as models
 from sibyl_core.services.content_models import RawMemory, RawMemoryWrite
 from sibyl_core.services.eval_publication_guards import PUBLICATION_ADMISSION_GUARD
+
+if TYPE_CHECKING:
+    from sibyl_core.memory_pipeline.observations import SourceObservation
 
 _RAW_MEMORY_EMBEDDING_AUTO = object()
 
@@ -100,6 +103,8 @@ _RAW_PROMOTION_VISIBLE_SCOPES = (
 async def replace_raw_memory_records_bulk(
     client: SurrealContentClient,
     records: Sequence[models.SurrealRecord],
+    *,
+    derivations: Sequence[models.SurrealRecord] = (),
 ) -> list[models.SurrealRecord]:
     if not records:
         return []
@@ -112,10 +117,16 @@ async def replace_raw_memory_records_bulk(
         if record.get("organization_id") is None:
             uuid = record.get("uuid") or "<unknown>"
             raise RuntimeError(f"raw_captures record {uuid} requires organization_id")
+    query = _RAW_MEMORY_BULK_UPSERT_QUERY
+    if derivations:
+        from sibyl_core.backends.surreal.schema_derivations import STORE_RAW_DERIVATIONS
+
+        query = query.replace("COMMIT TRANSACTION;", STORE_RAW_DERIVATIONS + "COMMIT TRANSACTION;")
     rows = await content_client.select_many_raw(
         client,
-        _RAW_MEMORY_BULK_UPSERT_QUERY,
+        query,
         rows=[{**record, "revision": 1} for record in records],
+        derivations=list(derivations),
     )
     if len(rows) != len(records):
         raise RuntimeError(
@@ -350,6 +361,7 @@ async def remember_raw_memory(
     entity_type: str = "raw_memory",
     embedding_provider: EmbeddingProvider | object | None = _RAW_MEMORY_EMBEDDING_AUTO,
     source_memories: Sequence[RawMemory] = (),
+    source_observations: Sequence[SourceObservation] = (),
     accessible_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
@@ -391,6 +403,8 @@ async def remember_raw_memory(
             )
         )
         memory.metadata[SOURCE_VALIDATION_PENDING_KEY] = True
+    if source_observations:
+        memory.metadata[SOURCE_VALIDATION_PENDING_KEY] = True
     if memory.metadata.get(SOURCE_VALIDATION_PENDING_KEY):
         memory.metadata[SOURCE_VALIDATION_CONTEXT_KEY] = SourceReadAuthority(
             principal_id=principal_id,
@@ -406,12 +420,30 @@ async def remember_raw_memory(
     )
     memory = await _raw_memory_with_embedding(memory, provider)
     async with content_client.surreal_content_client() as client:
-        record = await content_client.replace_record(
-            client,
-            "raw_captures",
-            uuid=memory.id,
-            record=models.raw_memory_record(memory),
-        )
+        if source_observations:
+            from sibyl_core.services.memory_derivations import raw_derivation_record
+
+            authority = SourceReadAuthority(
+                principal_id=principal_id,
+                projects=frozenset(accessible_projects),
+                teams=frozenset(accessible_teams),
+                delegations=frozenset(accessible_delegations),
+                scope_keys=allowed_memory_scope_keys,
+            )
+            record = (
+                await replace_raw_memory_records_bulk(
+                    client,
+                    [models.raw_memory_record(memory)],
+                    derivations=[raw_derivation_record(memory, source_observations, authority)],
+                )
+            )[0]
+        else:
+            record = await content_client.replace_record(
+                client,
+                "raw_captures",
+                uuid=memory.id,
+                record=models.raw_memory_record(memory),
+            )
     stored = models.raw_memory_from_record(record)
     if stored.metadata.get(SOURCE_VALIDATION_PENDING_KEY):
         from sibyl_core.services.memory_source_validation import reconcile_raw_source_lifecycle

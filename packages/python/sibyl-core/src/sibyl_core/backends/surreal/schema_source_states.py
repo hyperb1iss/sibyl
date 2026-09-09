@@ -60,7 +60,7 @@ _RAW_EVIDENCE_FIELDS = (
 )
 
 
-def source_state_event(kind: SourceKind) -> str:
+def source_state_event(kind: SourceKind, *, retire_derivations: bool = False) -> str:
     """Generate only fixed, application-owned identifiers and field expressions.
 
     Comparing source fields avoids relying on database JSON formatting for the
@@ -72,6 +72,14 @@ def source_state_event(kind: SourceKind) -> str:
     deleted = "$event = 'DELETE'"
     if kind is SourceKind.RAW_CAPTURE:
         deleted += " OR $after.deleted_at != NONE"
+    retirement = (
+        f"""IF $event = 'DELETE' {{
+            UPDATE memory_derivations SET active = false
+                WHERE organization_id = $org AND target_kind = '{kind.value}' AND target_id = $uuid;
+        }};"""
+        if retire_derivations
+        else ""
+    )
     return f"""
 DEFINE EVENT IF NOT EXISTS maintain_source_state ON {table} WHEN true THEN {{
     LET $source = IF $event = 'DELETE' THEN $before ELSE $after END;
@@ -92,6 +100,7 @@ DEFINE EVENT IF NOT EXISTS maintain_source_state ON {table} WHEN true THEN {{
             OR ($state.deleted AND NOT ({deleted})) THEN 1 ELSE 0 END,
         revision = $source.revision ?? 0,
         deleted = {deleted};
+    {retirement}
 }};
 """
 
@@ -149,7 +158,14 @@ async def migrate_graph_source_states(
 
 async def retire_source_states(execute_query: SurrealExecute, *, kind: SourceKind) -> None:
     """Preserve high-water tombstones before an intentional source-table reset."""
+    from sibyl_core.backends.surreal.schema_derivations import DERIVATION_DEFINITIONS
+
     await execute_query(SOURCE_STATE_DEFINITIONS)
+    if kind is SourceKind.RAW_CAPTURE:
+        await execute_query(DERIVATION_DEFINITIONS)
+        await execute_query(
+            "UPDATE memory_derivations SET active=false WHERE target_kind=$kind;", kind=kind.value
+        )
     await execute_query(
         "UPDATE source_states SET generation += 1, deleted = true "
         "WHERE source_kind = $kind AND deleted = false RETURN NONE;",

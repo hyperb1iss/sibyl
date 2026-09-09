@@ -65,6 +65,7 @@ from sibyl_core.services.memory import (
     ReflectionPromotionPreview,
     ReflectionPromotionResult,
 )
+from sibyl_core.services.memory_source_validation import SourceReadAuthority
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory, RawMemoryRecallResult
 
 
@@ -720,7 +721,7 @@ async def test_remember_raw_denies_project_scope_without_contributor_role() -> N
 
 
 @pytest.mark.asyncio
-async def test_recall_raw_returns_scoped_memories() -> None:
+async def test_recall_raw_returns_scoped_memories(correction_memberships) -> None:
     org = _org()
     http_request = _http_request()
     with (
@@ -747,6 +748,7 @@ async def test_recall_raw_returns_scoped_memories() -> None:
     recall.assert_awaited_once_with(
         organization_id=str(org.id),
         principal_id="user-123",
+        source_authority=SourceReadAuthority("user-123"),
         query="raw memory",
         memory_scope="private",
         scope_key=None,
@@ -778,7 +780,7 @@ async def test_recall_raw_returns_scoped_memories() -> None:
 
 
 @pytest.mark.asyncio
-async def test_recall_raw_response_reports_degraded_sources() -> None:
+async def test_recall_raw_response_reports_degraded_sources(correction_memberships) -> None:
     org = _org()
     raw_memory = _memory(
         organization_id=str(org.id),
@@ -812,7 +814,7 @@ async def test_recall_raw_response_reports_degraded_sources() -> None:
 
 
 @pytest.mark.asyncio
-async def test_recall_raw_forwards_import_metadata_filters() -> None:
+async def test_recall_raw_forwards_import_metadata_filters(correction_memberships) -> None:
     org = _org()
     http_request = _http_request()
     occurred_after = datetime(2014, 1, 1, tzinfo=UTC)
@@ -843,6 +845,7 @@ async def test_recall_raw_forwards_import_metadata_filters() -> None:
     recall.assert_awaited_once_with(
         organization_id=str(org.id),
         principal_id="user-123",
+        source_authority=SourceReadAuthority("user-123"),
         query="surrealdb",
         memory_scope="private",
         scope_key=None,
@@ -891,7 +894,7 @@ async def test_recall_raw_rate_limits_concurrent_member_recall() -> None:
 
 
 @pytest.mark.asyncio
-async def test_recall_raw_diary_filters_agent_and_project() -> None:
+async def test_recall_raw_diary_filters_agent_and_project(correction_memberships) -> None:
     org = _org()
     ctx = _ctx()
     with (
@@ -921,6 +924,7 @@ async def test_recall_raw_diary_filters_agent_and_project() -> None:
     recall.assert_awaited_once_with(
         organization_id=str(org.id),
         principal_id="user-123",
+        source_authority=SourceReadAuthority("user-123"),
         query="implementation state",
         memory_scope="private",
         scope_key=None,
@@ -970,7 +974,7 @@ async def test_recall_raw_diary_requires_private_scope() -> None:
 
 
 @pytest.mark.asyncio
-async def test_recall_raw_uses_shared_policy_for_project_scope_read() -> None:
+async def test_recall_raw_uses_shared_policy_for_project_scope_read(correction_memberships) -> None:
     org = _org()
     ctx = _ctx()
     with (
@@ -1045,7 +1049,7 @@ async def test_recall_raw_denies_unverified_team_scope() -> None:
 
 
 @pytest.mark.asyncio
-async def test_recall_raw_uses_shared_policy_for_team_scope_read() -> None:
+async def test_recall_raw_uses_shared_policy_for_team_scope_read(correction_memberships) -> None:
     org = _org()
     ctx = _ctx()
     with (

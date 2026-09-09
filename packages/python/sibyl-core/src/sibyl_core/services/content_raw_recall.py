@@ -5,6 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sibyl_core.services.memory_source_validation import SourceReadAuthority
 
 import structlog
 
@@ -491,6 +495,7 @@ async def _recall_raw_memory_result(
     organization_id: str,
     principal_id: str,
     query: str,
+    source_authority: SourceReadAuthority | None = None,
     memory_scope: MemoryScope | str = MemoryScope.PRIVATE,
     scope_key: str | None = None,
     agent_id: str | None = None,
@@ -505,6 +510,8 @@ async def _recall_raw_memory_result(
     limit: int = 10,
     raise_on_source_failure: bool,
 ) -> RawMemoryRecallResult:
+    if source_authority is not None and source_authority.principal_id != principal_id:
+        raise ValueError("source authority principal does not match recall principal")
     normalized_query = query.strip()
     if not normalized_query or limit <= 0:
         return RawMemoryRecallResult(())
@@ -588,9 +595,22 @@ async def _recall_raw_memory_result(
                 )
             else:
                 source_results.append(CandidateSourceResult.success("raw_vector", vector_memories))
+        from sibyl_core.services.memory_source_validation import SourceReadAuthority
+
+        authority = source_authority or SourceReadAuthority(
+            principal_id=principal_id,
+            projects=frozenset([scope_key])
+            if normalized_scope is MemoryScope.PROJECT and scope_key
+            else frozenset(),
+            teams=frozenset([scope_key])
+            if normalized_scope is MemoryScope.TEAM and scope_key
+            else frozenset(),
+        )
         unavailable = await unavailable_publication_ids(
             organization_id,
             {memory.id: memory.metadata for memory in [*fulltext_memories, *vector_memories]},
+            raw_memories=[*fulltext_memories, *vector_memories],
+            source_authority=authority,
         )
 
         def current_publication(memory: RawMemory) -> bool:
@@ -630,7 +650,10 @@ async def _recall_raw_memory_result(
             lexical_memories = []
         else:
             unavailable = await unavailable_publication_ids(
-                organization_id, {memory.id: memory.metadata for memory in lexical_memories}
+                organization_id,
+                {memory.id: memory.metadata for memory in lexical_memories},
+                raw_memories=lexical_memories,
+                source_authority=authority,
             )
             lexical_memories = list(filter(current_publication, lexical_memories))
             source_results.append(CandidateSourceResult.success("raw_lexical", lexical_memories))
@@ -642,6 +665,7 @@ async def recall_raw_memory_with_sources(
     organization_id: str,
     principal_id: str,
     query: str,
+    source_authority: SourceReadAuthority | None = None,
     memory_scope: MemoryScope | str = MemoryScope.PRIVATE,
     scope_key: str | None = None,
     agent_id: str | None = None,
@@ -672,6 +696,7 @@ async def recall_raw_memory_with_sources(
         as_of=as_of,
         limit=limit,
         raise_on_source_failure=False,
+        source_authority=source_authority,
     )
 
 
@@ -680,6 +705,7 @@ async def recall_raw_memory(
     organization_id: str,
     principal_id: str,
     query: str,
+    source_authority: SourceReadAuthority | None = None,
     memory_scope: MemoryScope | str = MemoryScope.PRIVATE,
     scope_key: str | None = None,
     agent_id: str | None = None,
@@ -710,6 +736,7 @@ async def recall_raw_memory(
         as_of=as_of,
         limit=limit,
         raise_on_source_failure=True,
+        source_authority=source_authority,
     )
     return list(result.memories)
 

@@ -11,6 +11,7 @@ from sibyl_core.backends.surreal.schema import (
     render_fulltext_compatible_sql,
     render_surreal_compatible_sql,
 )
+from sibyl_core.backends.surreal.schema_derivations import DERIVATION_DEFINITIONS
 from sibyl_core.backends.surreal.schema_helpers import is_missing_table_error, split_statements
 from sibyl_core.backends.surreal.schema_invariants import (
     SchemaInvariantPlan,
@@ -72,7 +73,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 31
+CONTENT_SCHEMA_CURRENT_VERSION = 32
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -946,12 +947,22 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             ),
             action=partial(migrate_source_states, kind=SourceKind.RAW_CAPTURE),
         ),
+        SchemaMigration(
+            version=32,
+            name="content_observation_associations",
+            statements=(
+                *split_statements(DERIVATION_DEFINITIONS),
+                source_state_event(SourceKind.RAW_CAPTURE, retire_derivations=True).replace(
+                    "DEFINE EVENT IF NOT EXISTS", "DEFINE EVENT OVERWRITE"
+                ),
+            ),
+        ),
     )
 
 
 def content_schema_invariant_plan(*, url: str = "") -> SchemaInvariantPlan:
     return SchemaInvariantPlan(
-        schemafull_tables=(*CONTENT_TABLES, "source_states"),
+        schemafull_tables=(*CONTENT_TABLES, "source_states", "memory_derivations"),
         relation_tables=CONTENT_RELATION_TABLES,
         unique_indexes=expected_unique_indexes(_content_schema_migrations(url=url)),
     )

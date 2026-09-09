@@ -1,12 +1,17 @@
 """Original admission bindings checked at review and atomically at publication."""
 
+from __future__ import annotations
+
 import asyncio
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 from sibyl_core.auth.memory_policy import EVAL_CONSOLIDATION_METADATA_KEY
 from sibyl_core.services import content_client
 from sibyl_core.services.content_models import RawMemory
+
+if TYPE_CHECKING:
+    from sibyl_core.services.memory_source_validation import SourceReadAuthority
 
 # These hash-only observations live in the server-only consolidation ledger.
 # Fresh source metadata is never evidence of its own original admission.
@@ -79,7 +84,11 @@ async def verify_publication_admissions(memory: RawMemory) -> bool:
 
 
 async def unavailable_publication_ids(
-    organization_id: str, rows: Mapping[str, Mapping[str, object] | None]
+    organization_id: str,
+    rows: Mapping[str, Mapping[str, object] | None],
+    *,
+    raw_memories: Sequence[RawMemory] = (),
+    source_authority: SourceReadAuthority | None = None,
 ) -> set[str]:
     """Resolve stable row IDs against the protected ledger before retrieval.
 
@@ -88,49 +97,58 @@ async def unavailable_publication_ids(
     batch snapshots candidates and their original evidence; decoding and hashing
     run off the event loop.
     """
-    if not rows:
-        return set()
     unavailable: set[str] = set()
-    async with content_client.surreal_content_client() as client:
-        for batch in content_client.value_batches(sorted(rows)):
-            references = {row_id: _publication_references(row_id, rows[row_id]) for row_id in batch}
-            ids = sorted(set().union(*references.values()))
-            snapshots = content_client.normalize_records(
-                await client.execute_query(
-                    """
-                RETURN {
-                    LET $publications = (SELECT * FROM eval_consolidations
-                        WHERE organization_id = $organization_id
-                            AND (candidate_id IN $ids OR promoted_entity_id IN $ids));
-                    LET $bindings = array::flatten($publications.map(|$row| $row.admission_bindings));
-                    LET $capture_ids = array::distinct(array::concat(
-                        $publications.map(|$row| $row.candidate_id),
-                        $bindings.map(|$binding| $binding.capture_id)));
+    if rows:
+        async with content_client.surreal_content_client() as client:
+            for batch in content_client.value_batches(sorted(rows)):
+                references = {
+                    row_id: _publication_references(row_id, rows[row_id]) for row_id in batch
+                }
+                ids = sorted(set().union(*references.values()))
+                snapshots = content_client.normalize_records(
+                    await client.execute_query(
+                        """
                     RETURN {
-                        publications: $publications,
-                        captures: (SELECT * FROM raw_captures
-                            WHERE organization_id = $organization_id AND uuid IN $capture_ids),
-                        attempts: (SELECT * FROM eval_attempts
+                        LET $publications = (SELECT * FROM eval_consolidations
                             WHERE organization_id = $organization_id
-                                AND experiment_id IN $bindings.map(|$binding| $binding.experiment_id)
-                                AND attempt_id IN $bindings.map(|$binding| $binding.attempt_id))
+                                AND (candidate_id IN $ids OR promoted_entity_id IN $ids));
+                        LET $bindings = array::flatten($publications.map(|$row| $row.admission_bindings));
+                        LET $capture_ids = array::distinct(array::concat(
+                            $publications.map(|$row| $row.candidate_id),
+                            $bindings.map(|$binding| $binding.capture_id)));
+                        RETURN {
+                            publications: $publications,
+                            captures: (SELECT * FROM raw_captures
+                                WHERE organization_id = $organization_id AND uuid IN $capture_ids),
+                            attempts: (SELECT * FROM eval_attempts
+                                WHERE organization_id = $organization_id
+                                    AND experiment_id IN $bindings.map(|$binding| $binding.experiment_id)
+                                    AND attempt_id IN $bindings.map(|$binding| $binding.attempt_id))
+                        };
                     };
-                };
-                """,
-                    organization_id=organization_id,
-                    ids=ids,
+                    """,
+                        organization_id=organization_id,
+                        ids=ids,
+                    )
                 )
-            )
-            if len(snapshots) != 1:
-                raise RuntimeError("publication retrieval snapshot is unavailable")
-            unavailable.update(
-                await asyncio.to_thread(
-                    _unavailable_snapshot,
-                    snapshots[0],
-                    references,
-                    rows,
+                if len(snapshots) != 1:
+                    raise RuntimeError("publication retrieval snapshot is unavailable")
+                unavailable.update(
+                    await asyncio.to_thread(
+                        _unavailable_snapshot,
+                        snapshots[0],
+                        references,
+                        rows,
+                    )
                 )
-            )
+    if raw_memories:
+        from sibyl_core.services.memory_derivations import unavailable_raw_derivation_ids
+
+        if source_authority is None:
+            raise ValueError("source authority is required for raw derivation reads")
+        unavailable.update(
+            await unavailable_raw_derivation_ids(organization_id, raw_memories, source_authority)
+        )
     return unavailable
 
 
