@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from sibyl_core.tasks.episode_evidence import EvidenceCitation
+
+EVIDENCE_PROPOSAL_VERSION = "sibyl-evidence-proposal-v2"
 
 _Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
@@ -43,8 +45,20 @@ class EvidenceProcedure(_StrictModel):
 
 
 class EvidenceProposal(_StrictModel):
-    procedure: EvidenceProcedure | None = None
-    abstention_reason: _Text | None = None
+    procedure: EvidenceProcedure | None = Field(
+        default=None,
+        description="Return a supported procedure only when abstention_reason is null; otherwise null.",
+    )
+    abstention_reason: _Text | None = Field(
+        default=None,
+        description="Return a reason only when abstaining and procedure is null; otherwise null.",
+    )
+
+    @model_validator(mode="after")
+    def one_outcome(self) -> Self:
+        if (self.procedure is None) == (self.abstention_reason is None):
+            raise ValueError("return either a procedure or an abstention reason")
+        return self
 
 
 def resolve_evidence_proposal(

@@ -329,3 +329,12 @@ async def test_native_mode_and_endpoint_change_extractor_revision(monkeypatch):
     monkeypatch.setattr(p.core_config, "consolidation_openrouter_provider", "parasail/bf16")
     routed = await p.consolidation_extractor_configuration()
     assert routed not in (original, native)
+
+
+async def test_evidence_semantic_validation_changes_extractor_revision(monkeypatch):
+    from sibyl_core.ai.llm.config import EnvConfigSource
+
+    monkeypatch.setattr(p, "resolve_llm_config", EnvConfigSource({}).resolve)
+    current = await p.consolidation_extractor_configuration()
+    monkeypatch.setattr(p, "EVIDENCE_PROPOSAL_VERSION", "old-validation")
+    assert await p.consolidation_extractor_configuration() != current
