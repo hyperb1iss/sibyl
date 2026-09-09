@@ -7,8 +7,10 @@ import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, replace
 
+from sibyl_core.auth.memory_policy import memory_scope_policy_key
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind, SourceObservation
 from sibyl_core.services import content_client
+from sibyl_core.services.content_models import MemoryScope
 from sibyl_core.services.memory_source_validation import SourceReadAuthority
 from sibyl_core.services.observed_sources import load_authorized_source_snapshot
 from sibyl_core.services.source_observations import SourceUnavailableError
@@ -183,10 +185,29 @@ async def unavailable_raw_derivation_ids(
                 memory = targets.get(memory_id)
                 if memory is None or memory.raw_content != by_id[memory_id].raw_content:
                     return memory_id
-                try:
-                    observe_raw_capture(memory, authority)
-                except SourceUnavailableError:
-                    return memory_id
+                if memory.memory_scope is MemoryScope.ORGANIZATION:
+                    # Imported organization captures already passed the scoped
+                    # recall query. Promotion-source admission excludes this
+                    # legacy scope, so validate its current audience separately.
+                    candidate = by_id[memory_id]
+                    if (
+                        candidate.memory_scope is not MemoryScope.ORGANIZATION
+                        or memory.organization_id != candidate.organization_id
+                        or memory.scope_key != candidate.scope_key
+                        or memory.project_id != candidate.project_id
+                        or memory.agent_id != candidate.agent_id
+                        or (
+                            authority.scope_keys is not None
+                            and memory_scope_policy_key(memory.memory_scope, memory.scope_key)
+                            not in authority.scope_keys
+                        )
+                    ):
+                        return memory_id
+                else:
+                    try:
+                        observe_raw_capture(memory, authority)
+                    except SourceUnavailableError:
+                        return memory_id
                 if not raw_memory_lifecycle_recallable(memory):
                     return memory_id
                 # Ordinary authored captures require no source traversal.

@@ -142,7 +142,12 @@ async def _recall_raw_candidates(
                         if item.memory_scope is MemoryScope.DELEGATED and item.scope_key
                     ),
                     scope_keys=frozenset(
-                        memory_scope_policy_key(item.memory_scope, item.scope_key)
+                        memory_scope_policy_key(
+                            item.memory_scope,
+                            item.principal_id
+                            if item.memory_scope is MemoryScope.PRIVATE
+                            else item.scope_key,
+                        )
                         for item in plan.scopes
                     ),
                 ),
