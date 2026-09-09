@@ -26,14 +26,17 @@ from benchmarks.agent_tasks.manifest import (
 def test_repair_discrimination(tmp_path, seed, family_index, transport):
     family = families(seed)[family_index]
 
-    def results(repairs, cases):
+    def results(repairs, cases, variant):
+        workspace = tmp_path / variant
         for path, text in (family.workspace | repairs).items():
-            (tmp_path / path).write_text(text)
+            target = workspace / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text)
         outcomes = []
         for case in cases:
             result = subprocess.run(
                 [sys.executable, "-B", "app.py"],
-                cwd=tmp_path,
+                cwd=workspace,
                 input=(
                     canonical_bytes(case["input"]).decode() + "\n"
                     if transport == "frozen"
@@ -49,10 +52,12 @@ def test_repair_discrimination(tmp_path, seed, family_index, transport):
             )
         return outcomes
 
-    assert not all(results({}, family.public_cases + family.private_cases)), family.id
-    assert all(results(family.reference, family.public_cases + family.private_cases)), family.id
-    assert all(results(family.partial, family.public_cases)), family.id
-    assert not all(results(family.partial, family.private_cases)), family.id
+    assert not all(results({}, family.public_cases + family.private_cases, "baseline")), family.id
+    assert all(
+        results(family.reference, family.public_cases + family.private_cases, "reference")
+    ), family.id
+    assert all(results(family.partial, family.public_cases, "partial-public")), family.id
+    assert not all(results(family.partial, family.private_cases, "partial-private")), family.id
 
 
 def test_freeze_binds_existing_oracle_and_excludes_repairs(tmp_path):
@@ -95,6 +100,46 @@ def test_mechanism_dependency_survives_distinct_authored_lineages():
     assert not shared[0]["shared_lineage"]
     assert audit["independent_statistical_families"] is False
     assert audit["mechanism_cluster_count"] < audit["family_count"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        (None, []),
+        (None, None),
+        ("tasks", None),
+        ("tasks", {}),
+        ("seed", None),
+        ("seed", True),
+        ("seed", -1),
+        ("seed", "7"),
+        ("mechanism_clusters", None),
+        ("mechanism_clusters", []),
+    ],
+)
+def test_runtime_composition_rejects_malformed_catalog(tmp_path, field, value):
+    catalog = freeze(
+        tmp_path / "catalog", seed=7, image="sha256:" + "a" * 64, docker="/usr/bin/docker"
+    )
+    content = json.loads(catalog.read_bytes())
+    if field is None:
+        content = value
+    else:
+        content[field] = value
+    catalog.write_text(json.dumps(content))
+    output = tmp_path / "run"
+    with pytest.raises(ManifestError):
+        compose(
+            catalog,
+            output,
+            experiment_id="invalid-catalog",
+            model="qwen/qwen3-coder-next",
+            budget=ControllerBudget(
+                input_tokens=10000, output_tokens=1000, tool_calls=10, cost_usd=0.1
+            ),
+            dependency_lock=tmp_path / "unused.lock",
+        )
+    assert not output.exists()
 
 
 def test_runtime_composition_requires_transfer_and_binds_inputs(tmp_path):

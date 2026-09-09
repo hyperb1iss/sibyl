@@ -64,16 +64,25 @@ def compose(
         raise ManifestError("catalog must not be a symlink")
     catalog_bytes = catalog_path.read_bytes()
     catalog = strict_json(catalog_bytes)
+    if not isinstance(catalog, dict):
+        raise ManifestError("authored catalog must be an object")
     if catalog.get("schema_version") != "sibyl-authored-repair-catalog-v1":
         raise ManifestError("unsupported authored catalog")
     if catalog.get("experiences") != []:
         raise ManifestError("authored catalog cannot declare collected experiences")
+    if not isinstance(catalog.get("tasks"), list):
+        raise ManifestError("authored catalog tasks must be an array")
+    seed = catalog.get("seed")
+    if type(seed) is not int or seed < 0:
+        raise ManifestError("authored catalog seed must be a nonnegative integer")
     tasks = [Task.model_validate(item) for item in catalog["tasks"]]
     if not tasks or any(task.split == "sealed" for task in tasks):
         raise ManifestError("authored catalog supports learning/development tasks only")
     clusters = catalog.get("mechanism_clusters", {})
-    if set(clusters) != {task.family_id for task in tasks} or any(
-        not isinstance(value, str) or not value.strip() for value in clusters.values()
+    if (
+        not isinstance(clusters, dict)
+        or set(clusters) != {task.family_id for task in tasks}
+        or any(not isinstance(value, str) or not value.strip() for value in clusters.values())
     ):
         raise ManifestError("every family needs an explicit mechanism cluster")
     cluster_splits: dict[str, set[str]] = {}

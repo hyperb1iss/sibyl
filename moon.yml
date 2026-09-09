@@ -1055,6 +1055,8 @@ tasks:
     inputs:
       - benchmarks/agent_tasks/**/*.py
       - tools/tests/test_agent_task_learning_corpus.py
+      - tools/tests/conftest.py
+      - pyproject.toml
 
   agent-learning-run:
     command: uv run python -m benchmarks.agent_tasks.learning_run
