@@ -528,3 +528,42 @@ async def test_complete_input_budget_includes_schema_and_accepts_exact_boundary(
 async def test_build_receipt_records_output_validation_policy(group, procedure, model):
     result = await propose(group, procedure, model)
     assert result.receipt["output_retries"] == c.OUTPUT_RETRIES == 2
+
+
+async def test_native_build_counts_transformed_schema_and_records_policy(group, monkeypatch):
+    from types import SimpleNamespace
+
+    from sibyl_core.ai.llm.extractor import extraction_schema
+
+    calls = []
+
+    class NativeFixture:
+        def __init__(self, output_type, **kwargs):
+            calls.append(kwargs)
+
+        async def extract_with_usage(self, prompt):
+            return SimpleNamespace(
+                output=c.ProcedureProposal(abstention_reason="No supported procedure"),
+                usage=SimpleNamespace(model_dump=lambda **_: {}),
+            )
+
+    monkeypatch.setattr(c, "Extractor", NativeFixture)
+    schema = extraction_schema(c.ProcedureProposal, "native_strict")
+    actual = len(c.SYSTEM_PROMPT) + len(c._prompt(group)) + len(c._canonical(schema).decode())
+    with pytest.raises(c.ConsolidationInputBudgetExceeded):
+        await c.propose_conditional_procedure(
+            group, output_mode="native_strict", max_input_chars=actual - 1
+        )
+    assert calls == []
+    result = await c.propose_conditional_procedure(
+        group,
+        output_mode="native_strict",
+        openrouter_provider="parasail/bf16",
+        max_input_chars=actual,
+    )
+    assert calls[0]["output_mode"] == "native_strict"
+    assert calls[0]["openrouter_provider"] == "parasail/bf16"
+    assert result.receipt["wire_schema_sha256"] == c._digest(c._canonical(schema))
+    assert result.receipt["input_chars"] == actual
+    assert result.receipt["output_mode"] == "native_strict"
+    assert result.receipt["openrouter_provider"] == "parasail/bf16"

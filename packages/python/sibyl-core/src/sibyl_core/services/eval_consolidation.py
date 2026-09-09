@@ -6,6 +6,7 @@ import asyncio
 import base64
 import hashlib
 from dataclasses import dataclass
+from typing import Literal
 from uuid import NAMESPACE_URL, uuid5
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -255,6 +256,8 @@ async def propose_admitted_procedure(
     expected_controller_policy_sha256: str,
     max_input_chars: int = 40_000,
     max_tokens: int = 2_048,
+    output_mode: Literal["tool", "native_strict"] = "tool",
+    openrouter_provider: str | None = None,
     model_override: str | None = None,
 ) -> AdmittedConsolidationResult:
     """Authorize externally, join stored evidence, extract, then check the sources again."""
@@ -280,6 +283,8 @@ async def propose_admitted_procedure(
         group,
         max_input_chars=max_input_chars,
         max_tokens=max_tokens,
+        output_mode=output_mode,
+        openrouter_provider=openrouter_provider,
         model_override=model_override,
     )
     if await load() != group:
