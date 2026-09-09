@@ -33,7 +33,7 @@ from sibyl_core.services.eval_publication import (
 )
 from sibyl_core.services.eval_publication_guards import verify_publication_admissions
 from sibyl_core.services.memory_source_validation import reconcile_raw_source_lifecycle
-from sibyl_core.tasks.consolidation import METADATA_KEY
+from sibyl_core.tasks.consolidation import METADATA_KEY, ConsolidationInputBudgetExceeded
 from sibyl_core.tasks.eval_receipts import ReceiptError, TaskAssignment
 
 
@@ -264,6 +264,16 @@ async def consolidate_admitted_attempts(
             ),
             model_override=model,
         )
+    except ConsolidationInputBudgetExceeded as exc:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "consolidation_input_budget_exceeded",
+                "actual_chars": exc.actual_chars,
+                "max_input_chars": exc.max_input_chars,
+                "unit": "system_user_declared_schema_characters",
+            },
+        ) from exc
     except (ReceiptError, ConsolidationConflict) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     memory = result.memory

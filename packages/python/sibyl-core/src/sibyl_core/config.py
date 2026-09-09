@@ -131,6 +131,12 @@ class CoreConfig(BaseSettings):
         description="LLM model for entity extraction",
     )
 
+    consolidation_max_input_chars: int = Field(
+        default=40_000,
+        gt=0,
+        description="Complete consolidation system, user, and output-schema character budget",
+    )
+
     # Anthropic configuration
     anthropic_api_key: SecretStr = Field(
         default=SecretStr(""),

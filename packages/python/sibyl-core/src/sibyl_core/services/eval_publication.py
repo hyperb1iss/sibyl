@@ -16,6 +16,7 @@ from sibyl_core.auth.memory_policy import (
     EVAL_ADMISSION_METADATA_KEY,
     EVAL_CONSOLIDATION_METADATA_KEY,
 )
+from sibyl_core.config import core_config
 from sibyl_core.memory_pipeline.source_lifecycle import (
     SOURCE_BINDINGS_KEY,
     SOURCE_VALIDATION_PENDING_KEY,
@@ -435,9 +436,23 @@ async def store_consolidation(
     return _decode(operation, rows[0])
 
 
-async def consolidation_extractor_configuration() -> tuple[str, str]:
-    """Identify the effective extraction policy without including credentials."""
+@dataclass(frozen=True)
+class _ExtractorPolicy:
+    model: str
+    revision: str
+    max_input_chars: int
+    max_output_tokens: int
+
+
+async def _extractor_policy() -> _ExtractorPolicy:
+    """Resolve one extraction policy snapshot, including the actual build limits."""
     config = await resolve_llm_config(LLMSurface.MEMORY)
+    max_input_chars = core_config.consolidation_max_input_chars
+    max_output_tokens = config.max_tokens.value
+    if max_output_tokens is None:
+        max_output_tokens = 2_048
+    if any(type(value) is not int or value <= 0 for value in (max_input_chars, max_output_tokens)):
+        raise ValueError("consolidation build limits must be positive integers")
     revision = _digest(
         {
             "protocol": SCHEMA_VERSION,
@@ -445,11 +460,18 @@ async def consolidation_extractor_configuration() -> tuple[str, str]:
             "provider": config.provider.value,
             "model": config.model.value,
             "temperature": config.temperature.value,
-            "max_input_chars": 40_000,
-            "max_output_tokens": 2_048,
+            "max_input_chars": max_input_chars,
+            "max_output_tokens": max_output_tokens,
+            "input_budget_unit": "system_user_declared_schema_characters",
         }
     )
-    return config.model.value, revision
+    return _ExtractorPolicy(config.model.value, revision, max_input_chars, max_output_tokens)
+
+
+async def consolidation_extractor_configuration() -> tuple[str, str]:
+    """Identify the effective extraction policy without including credentials."""
+    policy = await _extractor_policy()
+    return policy.model, policy.revision
 
 
 async def consolidate_admitted_procedure(
@@ -465,10 +487,8 @@ async def consolidate_admitted_procedure(
     stored = await get_stored_consolidation(operation)
     if stored is not None:
         return stored
-    if await consolidation_extractor_configuration() != (
-        model_override,
-        operation.extractor_revision,
-    ):
+    policy = await _extractor_policy()
+    if (policy.model, policy.revision) != (model_override, operation.extractor_revision):
         raise ConsolidationConflict("extraction configuration changed")
     result = await propose_admitted_procedure(
         organization_id=operation.organization_id,
@@ -484,10 +504,9 @@ async def consolidate_admitted_procedure(
         trusted_public_key=trusted_public_key,
         expected_controller_policy_sha256=operation.controller_policy_sha256,
         model_override=model_override,
+        max_input_chars=policy.max_input_chars,
+        max_tokens=policy.max_output_tokens,
     )
-    if await consolidation_extractor_configuration() != (
-        model_override,
-        operation.extractor_revision,
-    ):
+    if await _extractor_policy() != policy:
         raise ConsolidationConflict("extraction configuration changed during consolidation")
     return await store_consolidation(operation, result.proposal)

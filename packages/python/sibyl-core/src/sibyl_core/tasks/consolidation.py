@@ -408,6 +408,18 @@ def validate_candidate_content_agreement(
     return [] if candidate == expected else ["candidate differs from the untouched proposal"]
 
 
+class ConsolidationInputBudgetExceeded(ValueError):
+    """Complete declared extraction input exceeds its frozen character budget."""
+
+    def __init__(self, actual_chars: int, max_input_chars: int) -> None:
+        self.actual_chars = actual_chars
+        self.max_input_chars = max_input_chars
+        super().__init__(
+            f"complete consolidation input has {actual_chars} characters; "
+            f"the configured limit is {max_input_chars} characters"
+        )
+
+
 async def propose_conditional_procedure(
     group: ConsolidationGroup,
     *,
@@ -437,9 +449,10 @@ async def propose_conditional_procedure(
     ):
         raise ValueError("build budgets must be positive integers")
     prompt = _prompt(group)
-    if len(prompt) + len(SYSTEM_PROMPT) > max_input_chars:
-        raise ValueError("complete evidence exceeds the declared input budget")
     schema = ProcedureProposal.model_json_schema()
+    input_chars = len(prompt) + len(SYSTEM_PROMPT) + len(_canonical(schema).decode("utf-8"))
+    if input_chars > max_input_chars:
+        raise ConsolidationInputBudgetExceeded(input_chars, max_input_chars)
     extractor = Extractor(
         ProcedureProposal,
         surface=LLMSurface.MEMORY,
@@ -463,6 +476,8 @@ async def propose_conditional_procedure(
         "transfer": "not_measured",
         "configured_model": model_override,
         "max_input_chars": max_input_chars,
+        "input_chars": input_chars,
+        "input_budget_unit": "system_user_declared_schema_characters",
         "max_output_tokens": max_tokens,
         "output_retries": 0,
         "input_sha256": _digest(_canonical(group.model_dump(mode="json"))),

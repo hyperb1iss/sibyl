@@ -247,6 +247,7 @@ async def test_archive_restore_preserves_consumed_attempt(eval_api, monkeypatch,
         "duplicate",
         "all_passed",
         "blank",
+        "input_budget",
     ],
 )
 async def test_http_consolidation_reads_admitted_sources(eval_api, monkeypatch, change):
@@ -319,6 +320,10 @@ async def test_http_consolidation_reads_admitted_sources(eval_api, monkeypatch, 
         request["attempt_ids"] = [api.assignment.attempt_id] * 2
     elif change == "blank":
         request["mechanism"] = "   "
+    elif change == "input_budget":
+        from sibyl_core.services.eval_publication import core_config
+
+        monkeypatch.setattr(core_config, "consolidation_max_input_chars", 10)
     response = await api.client.post(
         "/memory/eval/experiments/experiment/consolidate", json=request
     )
@@ -327,6 +332,9 @@ async def test_http_consolidation_reads_admitted_sources(eval_api, monkeypatch, 
     )
     if change == "blank":
         expected = 422
+    if change == "input_budget":
+        expected = 413
+        await _assert_consolidation_input_budget(api, response)
     assert response.status_code == expected, response.text
     assert len(calls) == (1 if change in {None, *candidate_changes} else 0)
     if change is None:
@@ -409,3 +417,15 @@ async def _assert_purged_consolidation_replay(api, request, response):
     assert gone.status_code == 200
     assert gone.json()["status"] == "gone"
     assert gone.json()["candidate"] is None
+
+
+async def _assert_consolidation_input_budget(api, response):
+    detail = response.json()["detail"]
+    assert detail["code"] == "consolidation_input_budget_exceeded"
+    assert detail["actual_chars"] > detail["max_input_chars"] == 10
+    from sibyl_core.services.content_client import normalize_records
+
+    assert (
+        normalize_records(await api.store.execute_query("SELECT * FROM eval_consolidations;")) == []
+    )
+    assert len(normalize_records(await api.store.execute_query("SELECT * FROM raw_captures;"))) == 2
