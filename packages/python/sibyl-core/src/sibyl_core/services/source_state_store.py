@@ -73,6 +73,8 @@ async def load_source_snapshot(
         or state["revision"] != row["revision"]
         or type(state.get("generation")) is not int
         or state["generation"] <= 0
+        or not isinstance(state.get("incarnation"), str)
+        or not state["incarnation"]
     ):
         return None
     if source.kind is SourceKind.GRAPH_ENTITY:
@@ -82,6 +84,7 @@ async def load_source_snapshot(
             SourceObservation(
                 source=source,
                 generation=state["generation"],
+                incarnation=state["incarnation"],
                 revision=state["revision"],
                 content_sha256=graph_evidence(entity),
                 durable=True,
@@ -93,6 +96,7 @@ async def load_source_snapshot(
         SourceObservation(
             source=source,
             generation=state["generation"],
+            incarnation=state["incarnation"],
             revision=state["revision"],
             content_sha256=evidence_hash({"version": 1, "raw_content": memory.raw_content}),
             durable=True,

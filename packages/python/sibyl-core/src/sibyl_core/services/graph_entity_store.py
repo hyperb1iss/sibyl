@@ -225,6 +225,7 @@ async def _insert_entity_if_absent(
     record = _entity_record(entity, group_id=group_id)
     record["id"] = entity.id
     if derivation is not None:
+        record["derivation_required"] = True
         from sibyl_core.services.graph_derivations import graph_target_digest
         from sibyl_core.services.graph_records import entity_from_surreal_row
 
@@ -903,6 +904,7 @@ async def _replace_projected_entities(client, records, *, group_id, projection_s
     """Write projections and their protected parent observations atomically."""
     from dataclasses import asdict
 
+    from sibyl_core.memory_pipeline.observations import legacy_source_incarnation
     from sibyl_core.services.graph_derivations import graph_target_digest
     from sibyl_core.services.graph_records import entity_from_surreal_row
 
@@ -943,6 +945,7 @@ async def _replace_projected_entities(client, records, *, group_id, projection_s
         LET $parent_derivation = (SELECT * FROM memory_derivations WHERE organization_id=$org AND target_kind='graph_entity' AND target_id=$parent_id LIMIT 1)[0];
         IF $parent = NONE OR $state = NONE OR $parent.revision != $revision
             OR $state.revision != $revision OR $state.generation != $generation OR $state.deleted
+            OR $state.incarnation != $incarnation
             OR $parent_derivation.active != true
             OR $parent_derivation.body_sha256 != $parent_association.body_sha256
             OR $parent_derivation.observations != $parent_association.observations
@@ -962,6 +965,8 @@ async def _replace_projected_entities(client, records, *, group_id, projection_s
             LET $was_present = array::len($previous_targets[WHERE uuid=$association.target_id]) > 0;
             IF $was_present AND ($old = NONE
                 OR $old.observations[0].generation != $association.observations[0].generation
+                OR ($old.observations[0].incarnation ?? $legacy_incarnation)
+                    != ($association.observations[0].incarnation ?? $legacy_incarnation)
                 OR $old.observations[0].content_sha256 != $association.observations[0].content_sha256
                 OR $old.active != true) {
                 UPDATE source_states SET generation += 1
@@ -976,13 +981,15 @@ async def _replace_projected_entities(client, records, *, group_id, projection_s
     return normalize_records(
         await client.execute_query(
             query,
-            rows=records,
+            rows=[{**record, "derivation_required": True} for record in records],
             ids=[record["uuid"] for record in records],
             associations=associations,
             org=group_id,
             parent_id=observation.source.id,
             revision=observation.revision,
             generation=observation.generation,
+            incarnation=observation.effective_incarnation,
+            legacy_incarnation=legacy_source_incarnation(observation.source),
             parent_association=parent_association,
         )
     )

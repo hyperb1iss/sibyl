@@ -30,6 +30,7 @@ def observation_from_record(value: object) -> SourceObservation:
             content_sha256=value["content_sha256"],
             revision=value["revision"],
             durable=value["durable"],
+            incarnation=value.get("incarnation"),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise SourceUnavailableError() from exc
@@ -107,7 +108,7 @@ async def _raw_association_current(
     memory, association, authority: SourceReadAuthority, *, ancestors: frozenset[SourceIdentity]
 ) -> bool:
     if association is None:
-        return memory.capture_surface != "synthesis_artifact"
+        return not memory.derivation_required and memory.capture_surface != "synthesis_artifact"
     if (
         association.get("active") is not True
         or association.get("body_sha256") != hashlib.sha256(memory.raw_content.encode()).hexdigest()
@@ -215,7 +216,11 @@ async def unavailable_raw_derivation_ids(
                 if not raw_memory_lifecycle_recallable(memory):
                     return memory_id
                 # Ordinary authored captures require no source traversal.
-                if memory_id not in associations and memory.capture_surface != "synthesis_artifact":
+                if (
+                    memory_id not in associations
+                    and not memory.derivation_required
+                    and memory.capture_surface != "synthesis_artifact"
+                ):
                     return None
                 if not await _raw_association_current(
                     memory, associations.get(memory_id), authority, ancestors=frozenset()

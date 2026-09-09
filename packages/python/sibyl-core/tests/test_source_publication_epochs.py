@@ -86,6 +86,7 @@ async def test_upgrade_preserves_existing_source_and_high_water(monkeypatch):
 
     from sibyl_core.backends.surreal import SurrealContentClient, bootstrap_content_schema
     from sibyl_core.backends.surreal.content_schema import (
+        CONTENT_SCHEMA_CURRENT_VERSION,
         CONTENT_SCHEMA_NAME,
         _content_schema_migrations,
     )
@@ -119,14 +120,34 @@ async def test_upgrade_preserves_existing_source_and_high_water(monkeypatch):
             metadata={"note": "unchanged"},
             embedding_provider=None,
         )
-        before = await source_snapshot(memory)
+        from sibyl_core.memory_pipeline.observations import SourceObservation, evidence_hash
+
+        before_row = (await client.execute_query("SELECT * FROM raw_captures;"))[0]
+        before_state = (await client.execute_query("SELECT * FROM source_states;"))[0]
+        before = SourceObservation(
+            source=SourceIdentity(memory.organization_id, SourceKind.RAW_CAPTURE, memory.id),
+            generation=before_state["generation"],
+            revision=before_state["revision"],
+            content_sha256=evidence_hash({"version": 1, "raw_content": memory.raw_content}),
+            durable=True,
+        )
+        assert await source_snapshot(memory) is None
         await bootstrap_content_schema(client)
-        assert await get_schema_version(client.execute_query, name=CONTENT_SCHEMA_NAME) == 33
+        assert (
+            await get_schema_version(client.execute_query, name=CONTENT_SCHEMA_NAME)
+            == CONTENT_SCHEMA_CURRENT_VERSION
+        )
         after = await source_snapshot(memory)
-        assert after == before
+        assert after.observation.same_evidence(before)
+        after_row = (await client.execute_query("SELECT * FROM raw_captures;"))[0]
+        assert after_row.pop("derivation_required", False) is False
+        assert after_row == before_row
+        after_state = (await client.execute_query("SELECT * FROM source_states;"))[0]
+        assert after_state.pop("incarnation") == before.effective_incarnation
+        assert after_state == before_state
         promoted = await save_raw_memory(
             replace(memory, review_state="promoted"), expected_revision=memory.revision
         )
-        assert (await source_snapshot(promoted)).observation.same_evidence(before.observation)
+        assert (await source_snapshot(promoted)).observation.same_evidence(before)
     finally:
         await client.close()

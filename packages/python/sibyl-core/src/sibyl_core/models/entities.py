@@ -137,6 +137,7 @@ class Entity(BaseModel):
         description="Last modifier identity (user id/email) when known",
     )
     revision: int = Field(default=1, ge=1, description="Monotonic mutation revision")
+    derivation_required: bool = Field(default=False, exclude=True)
     observed_revision: int | None = Field(
         default=None,
         exclude=True,

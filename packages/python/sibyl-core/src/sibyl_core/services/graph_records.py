@@ -42,6 +42,7 @@ _RELATED_ENTITY_PROJECTION_FIELDS = (
     ("created_at", "created_at"),
     ("updated_at", "updated_at"),
     ("revision", "revision"),
+    ("derivation_required", "derivation_required"),
     ("project_id", "project_id"),
     ("epic_id", "epic_id"),
     ("parent_task_id", "parent_task_id"),
@@ -208,6 +209,7 @@ def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
     )
     entity = _coerce_native_entity(entity)
     observed_revision = normalized_row.get("revision")
+    entity.derivation_required = normalized_row.get("derivation_required") is True
     entity.observed_revision = (
         observed_revision if type(observed_revision) is int and observed_revision > 0 else None
     )
