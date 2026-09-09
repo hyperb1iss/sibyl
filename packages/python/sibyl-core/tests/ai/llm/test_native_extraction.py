@@ -51,6 +51,11 @@ async def test_native_extraction_wire_feedback_and_routing(monkeypatch, recover,
                     },
                     "abstention_reason": None,
                 }
+        content = {
+            "outcome": {"kind": "procedure", "procedure": content["procedure"]}
+            if content["procedure"] is not None
+            else {"kind": "abstention", "reason": content["abstention_reason"]}
+        }
         return httpx2.Response(
             200,
             json={
@@ -96,8 +101,7 @@ async def test_native_extraction_wire_feedback_and_routing(monkeypatch, recover,
         )
         if recover:
             result = await extractor.extract_with_usage("Synthetic contrast")
-            assert (result.output.procedure is not None) == (output_kind == "procedure")
-            assert (result.output.abstention_reason is not None) == (output_kind == "abstention")
+            assert result.output.outcome.kind == output_kind
             assert result.usage.input_tokens == 20
             assert len(result.usage.transport_attempts) == 2
         else:
@@ -118,13 +122,14 @@ async def test_native_extraction_wire_feedback_and_routing(monkeypatch, recover,
     assert "model_type" in json.dumps(requests[1]["input"])
 
 
-def test_native_extraction_schema_keeps_nullable_abstention():
+def test_native_extraction_schema_has_exclusive_nested_outcomes():
     declared = extraction.extraction_schema(EvidenceProposal)
     strict = extraction.extraction_schema(EvidenceProposal, "native_strict")
-    assert not declared.get("required")
-    assert set(strict["required"]) == {"procedure", "abstention_reason"}
-    assert strict["properties"]["procedure"]["anyOf"][1] == {"type": "null"}
-    assert strict["properties"]["abstention_reason"]["anyOf"][1] == {"type": "null"}
+    assert declared["required"] == strict["required"] == ["outcome"]
+    assert strict["type"] == "object" and "anyOf" not in strict
+    assert len(strict["properties"]["outcome"]["anyOf"]) == 2
+    assert "discriminator" not in json.dumps(strict)
+    assert "oneOf" not in json.dumps(strict)
 
 
 async def test_native_extraction_agent_cache_separates_output_modes(monkeypatch):

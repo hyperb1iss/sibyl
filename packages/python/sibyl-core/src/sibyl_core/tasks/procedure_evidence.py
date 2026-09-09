@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from sibyl_core.tasks.episode_evidence import EvidenceCitation
 
-EVIDENCE_PROPOSAL_VERSION = "sibyl-evidence-proposal-v2"
+EVIDENCE_PROPOSAL_VERSION = "sibyl-evidence-proposal-v3"
 
 _Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
@@ -44,21 +44,20 @@ class EvidenceProcedure(_StrictModel):
     abstain_when: list[EvidenceAssertion] = Field(min_length=1)
 
 
-class EvidenceProposal(_StrictModel):
-    procedure: EvidenceProcedure | None = Field(
-        default=None,
-        description="Return a supported procedure only when abstention_reason is null; otherwise null.",
-    )
-    abstention_reason: _Text | None = Field(
-        default=None,
-        description="Return a reason only when abstaining and procedure is null; otherwise null.",
-    )
+class EvidenceProcedureOutcome(_StrictModel):
+    kind: Literal["procedure"]
+    procedure: EvidenceProcedure
 
-    @model_validator(mode="after")
-    def one_outcome(self) -> Self:
-        if (self.procedure is None) == (self.abstention_reason is None):
-            raise ValueError("return either a procedure or an abstention reason")
-        return self
+
+class EvidenceAbstentionOutcome(_StrictModel):
+    kind: Literal["abstention"]
+    reason: _Text
+
+
+class EvidenceProposal(_StrictModel):
+    # Literal tags make the branches exclusive without a provider-specific
+    # discriminator keyword or a root-level union in the native JSON schema.
+    outcome: EvidenceProcedureOutcome | EvidenceAbstentionOutcome
 
 
 def resolve_evidence_proposal(
@@ -85,4 +84,9 @@ def resolve_evidence_proposal(
             result["support"] = support
         return result
 
-    return resolve(proposal.model_dump(mode="json"))
+    if isinstance(proposal.outcome, EvidenceAbstentionOutcome):
+        return {"procedure": None, "abstention_reason": proposal.outcome.reason}
+    return {
+        "procedure": resolve(proposal.outcome.procedure.model_dump(mode="json")),
+        "abstention_reason": None,
+    }

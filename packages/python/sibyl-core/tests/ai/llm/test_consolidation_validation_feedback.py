@@ -28,7 +28,9 @@ async def test_validation_feedback_retains_attempts(monkeypatch, recover, transp
     monkeypatch.setattr(ModelResponse, "cost", lambda _: SimpleNamespace(total_price=0.01))
     requests = []
     responses = 0
-    malformed = json.dumps({"procedure": '{"goal": "unterminated}'})
+    malformed = json.dumps(
+        {"outcome": {"kind": "procedure", "procedure": '{"goal": "unterminated}'}}
+    )
 
     def respond(request):
         nonlocal responses
@@ -41,7 +43,9 @@ async def test_validation_feedback_retains_attempts(monkeypatch, recover, transp
             )
         responses += 1
         arguments = (
-            json.dumps({"abstention_reason": "Insufficient supported evidence"})
+            json.dumps(
+                {"outcome": {"kind": "abstention", "reason": "Insufficient supported evidence"}}
+            )
             if recover and responses > 1
             else malformed
         )
@@ -82,8 +86,8 @@ async def test_validation_feedback_retains_attempts(monkeypatch, recover, transp
         )
         if recover:
             result = await extractor.extract_with_usage("Contrast the supplied evidence")
-            assert result.output.procedure is None
-            assert result.output.abstention_reason == "Insufficient supported evidence"
+            assert result.output.outcome.kind == "abstention"
+            assert result.output.outcome.reason == "Insufficient supported evidence"
             assert result.usage.requests == 2
             assert result.usage.input_tokens == 20
             assert result.usage.output_tokens == 4
