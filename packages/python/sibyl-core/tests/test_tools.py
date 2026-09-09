@@ -3836,6 +3836,7 @@ class TestAddTool:
 
         mock_client = AsyncMock()
         mock_entity_manager = AsyncMock()
+        mock_entity_manager.load_projection_source = AsyncMock(return_value=None)
         mock_entity_manager.create_direct = AsyncMock(return_value="episode_123")
         mock_entity_manager.create = AsyncMock(return_value="episode_123")
 
@@ -3864,6 +3865,7 @@ class TestAddTool:
 
         mock_client = AsyncMock()
         mock_entity_manager = MagicMock()
+        mock_entity_manager.load_projection_source = AsyncMock(return_value=None)
         created_id = None
 
         async def capture_create(entity):
