@@ -40,6 +40,18 @@ async def runtime(monkeypatch):
     monkeypatch.setattr(
         memory_reflection, "get_surreal_graph_runtime", AsyncMock(return_value=runtime)
     )
+    monkeypatch.setattr(
+        "sibyl_core.services.graph_runtime.get_surreal_graph_runtime",
+        AsyncMock(return_value=runtime),
+    )
+    from sibyl_core.services.memory_source_validation import SourceReadAuthority
+
+    async def authority(_organization_id, principal_id):
+        return SourceReadAuthority(principal_id)
+
+    monkeypatch.setattr(
+        "sibyl_core.services.graph_derivations.get_source_authority_resolver", lambda: authority
+    )
     try:
         yield runtime
     finally:
@@ -51,6 +63,9 @@ async def test_designated_candidate_promotes_and_replays_without_early_recall(
 ):
     op, result = proposal
     stored = await p.store_consolidation(op, result)
+    from tests.test_source_publication_epochs import source_snapshot
+
+    before_admission = await source_snapshot(stored.memory)
     recall_params = dict(
         organization_id=op.organization_id,
         principal_id=op.principal_id,
@@ -62,9 +77,9 @@ async def test_designated_candidate_promotes_and_replays_without_early_recall(
     observed = []
     create = runtime.entity_manager.create_direct_if_absent
 
-    async def watched(entity):
+    async def watched(entity, **kwargs):
         observed.append(graph_metadata_recallable(entity.metadata))
-        return await create(entity)
+        return await create(entity, **kwargs)
 
     monkeypatch.setattr(runtime.entity_manager, "create_direct_if_absent", watched)
     first = await memory_reflection.promote_reflection_candidate_review(
@@ -77,6 +92,8 @@ async def test_designated_candidate_promotes_and_replays_without_early_recall(
     assert observed == [False]
     current = await get_raw_memory(organization_id=op.organization_id, memory_id=stored.memory.id)
     assert current.review_state == "promoted"
+    after_admission = await source_snapshot(current)
+    assert after_admission.observation.generation > before_admission.observation.generation
     assert content_models.raw_memory_recallable(current)
     assert current.id in {memory.id for memory in await recall_raw_memory(**recall_params)}
     assert graph_metadata_recallable((await runtime.entity_manager.get(first.promoted_id)).metadata)

@@ -733,6 +733,13 @@ async def materialize_synthesis_section_packs(
                     source_name = snapshot.memory.title or "Untitled raw memory"
                     source_content = snapshot.memory.raw_content
                 elif isinstance(snapshot, GraphSourceSnapshot):
+                    from sibyl_core.services.graph_derivations import graph_derivation_current
+
+                    if not await graph_derivation_current(
+                        snapshot.entity, ancestors=frozenset({identity})
+                    ):
+                        hidden_count += 1
+                        continue
                     source_name = snapshot.entity.name
                     source_content = snapshot.entity.content or snapshot.entity.description
             sources.append(

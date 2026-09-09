@@ -213,6 +213,7 @@ async def promote_reflection_candidate(
             http_request=http_request,
         )
         result = await promote_reflection_candidate_review(
+            allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
             candidate_id=request.candidate_id,
             organization_id=str(org.id),
             principal_id=principal_id,
@@ -290,6 +291,7 @@ async def promote_memory(
             http_request=http_request,
         )
         result = await promote_reflection_candidate_review(
+            allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
             candidate_id=request.candidate_id,
             organization_id=str(org.id),
             principal_id=principal_id,
@@ -311,6 +313,7 @@ async def promote_memory(
                 surface="memory_promote",
             )
             result = await promote_raw_memory(
+                allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
                 raw_memory_id=request.candidate_id,
                 organization_id=str(org.id),
                 principal_id=principal_id,

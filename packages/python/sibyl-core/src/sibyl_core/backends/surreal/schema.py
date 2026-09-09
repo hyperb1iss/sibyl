@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, cast
 
 import structlog
 
+from sibyl_core.backends.surreal.schema_derivations import DERIVATION_DEFINITIONS
 from sibyl_core.backends.surreal.schema_helpers import execute_schema_statement, split_statements
 from sibyl_core.backends.surreal.schema_index_recovery import ensure_owned_concurrent_index
 from sibyl_core.backends.surreal.schema_lifecycle_repair import (
@@ -838,6 +839,16 @@ GRAPH_SCHEMA_MIGRATIONS = (
             source_state_event(SourceKind.GRAPH_ENTITY),
         ),
         action=migrate_graph_source_states,
+    ),
+    SchemaMigration(
+        version=25,
+        name="graph_observation_associations",
+        statements=(
+            *split_statements(DERIVATION_DEFINITIONS),
+            source_state_event(SourceKind.GRAPH_ENTITY, retire_derivations=True).replace(
+                "DEFINE EVENT IF NOT EXISTS", "DEFINE EVENT OVERWRITE"
+            ),
+        ),
     ),
 )
 

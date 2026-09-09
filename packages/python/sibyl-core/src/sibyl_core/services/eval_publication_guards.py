@@ -149,6 +149,10 @@ async def unavailable_publication_ids(
         unavailable.update(
             await unavailable_raw_derivation_ids(organization_id, raw_memories, source_authority)
         )
+    else:
+        from sibyl_core.services.graph_derivations import unavailable_graph_derivation_ids
+
+        unavailable.update(await unavailable_graph_derivation_ids(organization_id, list(rows)))
     return unavailable
 
 
