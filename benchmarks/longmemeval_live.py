@@ -1028,6 +1028,10 @@ def _qa_config(
     timeout_seconds: float,
     context_arm: str = DEFAULT_QA_CONTEXT_ARM,
     max_context_tokens: int = DEFAULT_QA_CONTEXT_TOKENS,
+    reader_max_output_tokens: int | None = None,
+    judge_max_output_tokens: int | None = None,
+    output_retries: int = 1,
+    transport_max_retries: int = 2,
 ) -> LongMemEvalQAConfig:
     if mode not in LONGMEMEVAL_QA_MODES:
         msg = f"Unsupported LongMemEval QA mode: {mode}"
@@ -1062,6 +1066,10 @@ def _qa_config(
         max_context_sessions=max_context_sessions,
         max_session_chars=max_session_chars,
         timeout_seconds=timeout_seconds,
+        reader_max_output_tokens=reader_max_output_tokens,
+        judge_max_output_tokens=judge_max_output_tokens,
+        output_retries=output_retries,
+        transport_max_retries=transport_max_retries,
     )
 
 
@@ -1083,6 +1091,7 @@ async def _run_case(
     qa_config: LongMemEvalQAConfig,
     transport: httpx.AsyncBaseTransport | None = None,
     active_case: dict[str, Any] | None = None,
+    on_qa_stage: Callable[[int, dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     timings_ms: dict[str, float] = {}
@@ -1187,6 +1196,7 @@ async def _run_case(
         corpus_text_policy=corpus_text_policy,
         config=qa_config,
         native_markdown=native_pack["markdown"] if native_pack is not None else None,
+        on_stage=(lambda stage: on_qa_stage(case_index, stage)) if on_qa_stage else None,
     )
     if native_pack is not None:
         qa_result["native_context"] = native_pack
@@ -1258,6 +1268,7 @@ async def _run_cases(
     memory_extraction_timeout_seconds: float,
     qa_config: LongMemEvalQAConfig,
     on_progress: Callable[[list[dict[str, Any]]], Awaitable[None]] | None = None,
+    on_qa_stage: Callable[[int, dict[str, Any]], None] | None = None,
 ) -> list[dict[str, Any]]:
     worker_count = max(1, concurrency)
     queue: asyncio.Queue[tuple[int, dict[str, Any]]] = asyncio.Queue()
@@ -1303,6 +1314,7 @@ async def _run_cases(
                     qa_config=qa_config,
                     transport=transport,
                     active_case=active_cases[case_index],
+                    on_qa_stage=on_qa_stage,
                 )
             finally:
                 async with lock:
@@ -1522,6 +1534,30 @@ def _aggregate(results: list[dict[str, Any]], k_values: list[int]) -> tuple[dict
     overall["embedding_estimated_input_tokens"] = sum(
         float(result.get("embedding_estimated_input_tokens", 0.0)) for result in results
     )
+    qa_all = [result["qa"] for result in results if isinstance(result.get("qa"), dict)]
+    overall["qa_attempted_count"] = float(
+        sum(row.get("evaluated") is True or row.get("status") == "failed" for row in qa_all)
+    )
+    overall["qa_failed_count"] = float(sum(row.get("status") == "failed" for row in qa_all))
+    for role in ("reader", "judge"):
+        stages = [
+            stage
+            for row in qa_all
+            for stage in row.get("execution_stages", [])
+            if stage["stage"] == role
+        ]
+        overall[f"{role}_reported_input_tokens"] = sum(
+            stage.get("reported_input_tokens") or 0 for stage in stages
+        )
+        overall[f"{role}_reported_output_tokens"] = sum(
+            stage.get("reported_output_tokens") or 0 for stage in stages
+        )
+        overall[f"{role}_usage_unknown_stage_count"] = float(
+            sum(not stage.get("usage_complete", False) for stage in stages)
+        )
+        overall[f"{role}_physical_attempt_count"] = float(
+            sum(len(stage.get("transport_attempts", [])) for stage in stages)
+        )
     qa_results: list[dict[str, Any]] = [
         qa_result
         for result in results
@@ -1575,8 +1611,20 @@ def _aggregate(results: list[dict[str, Any]], k_values: list[int]) -> tuple[dict
 def _write_report(path: Path, report: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f"{path.name}.tmp")
-    tmp_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-    tmp_path.replace(path)
+    try:
+        with tmp_path.open("w", encoding="utf-8") as output:
+            os.chmod(tmp_path, 0o600)
+            json.dump(report, output, indent=2)
+            output.flush()
+            os.fsync(output.fileno())
+        tmp_path.replace(path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def _build_live_accounting(
@@ -1631,12 +1679,20 @@ def _build_live_accounting(
             "cost_basis": embedding_cost_basis,
         },
         "reader": {
+            "reported_input_tokens": overall.get("reader_reported_input_tokens", 0.0),
+            "reported_output_tokens": overall.get("reader_reported_output_tokens", 0.0),
+            "usage_unknown_stage_count": overall.get("reader_usage_unknown_stage_count", 0.0),
+            "physical_attempt_count": overall.get("reader_physical_attempt_count", 0.0),
             "estimated_input_tokens": overall.get("reader_estimated_input_tokens", 0.0),
             "estimated_output_tokens": overall.get("reader_estimated_output_tokens", 0.0),
             "estimated_cost_usd": reader_cost,
             "cost_basis": qa_cost_basis,
         },
         "judge": {
+            "reported_input_tokens": overall.get("judge_reported_input_tokens", 0.0),
+            "reported_output_tokens": overall.get("judge_reported_output_tokens", 0.0),
+            "usage_unknown_stage_count": overall.get("judge_usage_unknown_stage_count", 0.0),
+            "physical_attempt_count": overall.get("judge_physical_attempt_count", 0.0),
             "estimated_input_tokens": overall.get("judge_estimated_input_tokens", 0.0),
             "estimated_output_tokens": overall.get("judge_estimated_output_tokens", 0.0),
             "estimated_cost_usd": judge_cost,
@@ -1831,6 +1887,10 @@ async def run_benchmark(
     qa_max_context_sessions: int = DEFAULT_QA_MAX_CONTEXT_SESSIONS,
     qa_max_session_chars: int = DEFAULT_QA_MAX_SESSION_CHARS,
     qa_timeout_seconds: float = DEFAULT_QA_TIMEOUT_SECONDS,
+    qa_reader_max_output_tokens: int | None = None,
+    qa_judge_max_output_tokens: int | None = None,
+    qa_output_retries: int = 1,
+    qa_transport_max_retries: int = 2,
     qa_context_arm: str = DEFAULT_QA_CONTEXT_ARM,
     qa_max_context_tokens: int = DEFAULT_QA_CONTEXT_TOKENS,
     verify_sha256: bool = True,
@@ -1869,6 +1929,10 @@ async def run_benchmark(
         max_context_sessions=qa_max_context_sessions,
         max_session_chars=qa_max_session_chars,
         timeout_seconds=qa_timeout_seconds,
+        reader_max_output_tokens=qa_reader_max_output_tokens,
+        judge_max_output_tokens=qa_judge_max_output_tokens,
+        output_retries=qa_output_retries,
+        transport_max_retries=qa_transport_max_retries,
         context_arm=qa_context_arm,
         max_context_tokens=qa_max_context_tokens,
     )
@@ -1921,7 +1985,53 @@ async def run_benchmark(
     )
     print("============================================================\n", flush=True)
 
+    qa_receipts: dict[int, dict[str, Any]] = {}
+    receipt_directory = output_path.with_name(output_path.name + ".qa") if output_path else None
+
+    def retain_qa_stage(case_index: int, stage: dict[str, Any]) -> None:
+        receipt = qa_receipts.setdefault(
+            case_index,
+            {
+                "case_index": case_index,
+                "run_id": run_id,
+                "question_id": entries_by_case_index[case_index]["question_id"],
+                "dataset_sha256": dataset_sha,
+                "policy": qa_report_metadata(qa_config),
+                "stages": {},
+            },
+        )
+        receipt["stages"][stage["stage"]] = stage
+        if receipt_directory is not None:
+            _write_report(receipt_directory / f"{case_index}.json", receipt)
+
+    def receipt_references() -> dict[str, Any]:
+        return {
+            str(index): {
+                "path": str(receipt_directory / f"{index}.json") if receipt_directory else None,
+                "stages": {role: stage["status"] for role, stage in receipt["stages"].items()},
+            }
+            for index, _entry in selected_cases
+            for receipt in [qa_receipts.get(index, {"stages": {}})]
+        }
+
+    def receipt_summary() -> dict[str, int]:
+        return {
+            "attempted_cases": len(qa_receipts),
+            "failed_cases": sum(
+                any(stage["status"] == "failed" for stage in receipt["stages"].values())
+                for receipt in qa_receipts.values()
+            ),
+            "cancelled_cases": sum(
+                any(stage["status"] == "cancelled" for stage in receipt["stages"].values())
+                for receipt in qa_receipts.values()
+            ),
+        }
+
+    completed_results: list[dict[str, Any]] = []
+
     async def checkpoint(partial_results: list[dict[str, Any]]) -> None:
+        nonlocal completed_results
+        completed_results = partial_results
         if output_path is None:
             return
         report = _build_live_report(
@@ -1948,30 +2058,37 @@ async def run_benchmark(
             completion_status="partial",
             qa_config=qa_config,
         )
+        report["qa_stage_receipts"] = receipt_references()
+        report["qa_execution_summary"] = receipt_summary()
         _write_report(output_path, report)
 
     await checkpoint([])
 
-    case_results = await _run_cases(
-        selected_cases,
-        api_url=api_url,
-        run_id=run_id,
-        concurrency=concurrency,
-        k_values=k_values,
-        readiness_timeout_seconds=readiness_timeout_seconds,
-        timeout_seconds=timeout_seconds,
-        corpus_text_policy=corpus_text_policy,
-        transport=transport,
-        heartbeat_interval_seconds=heartbeat_interval_seconds,
-        stall_timeout_seconds=stall_timeout_seconds,
-        diagnostic_search_limit=diagnostic_search_limit,
-        wait_for_memory_projection=wait_for_memory_projection,
-        wait_for_memory_extraction=wait_for_memory_extraction,
-        memory_projection_timeout_seconds=memory_projection_timeout_seconds,
-        memory_extraction_timeout_seconds=memory_extraction_timeout_seconds,
-        qa_config=qa_config,
-        on_progress=checkpoint,
-    )
+    try:
+        case_results = await _run_cases(
+            selected_cases,
+            api_url=api_url,
+            run_id=run_id,
+            concurrency=concurrency,
+            k_values=k_values,
+            readiness_timeout_seconds=readiness_timeout_seconds,
+            timeout_seconds=timeout_seconds,
+            corpus_text_policy=corpus_text_policy,
+            transport=transport,
+            heartbeat_interval_seconds=heartbeat_interval_seconds,
+            stall_timeout_seconds=stall_timeout_seconds,
+            diagnostic_search_limit=diagnostic_search_limit,
+            wait_for_memory_projection=wait_for_memory_projection,
+            wait_for_memory_extraction=wait_for_memory_extraction,
+            memory_projection_timeout_seconds=memory_projection_timeout_seconds,
+            memory_extraction_timeout_seconds=memory_extraction_timeout_seconds,
+            qa_config=qa_config,
+            on_progress=checkpoint,
+            on_qa_stage=retain_qa_stage,
+        )
+    except (Exception, asyncio.CancelledError):
+        await checkpoint(completed_results)
+        raise
     elapsed = time.perf_counter() - started
     report = _build_live_report(
         dataset_path=dataset_path,
@@ -1997,6 +2114,8 @@ async def run_benchmark(
         completion_status="complete",
         qa_config=qa_config,
     )
+    report["qa_stage_receipts"] = receipt_references()
+    report["qa_execution_summary"] = receipt_summary()
     if output_path is not None:
         _write_report(output_path, report)
     overall = report["overall"]
@@ -2108,6 +2227,10 @@ def main() -> None:
     )
     parser.add_argument("--qa-max-session-chars", type=int, default=DEFAULT_QA_MAX_SESSION_CHARS)
     parser.add_argument("--qa-timeout", type=float, default=DEFAULT_QA_TIMEOUT_SECONDS)
+    parser.add_argument("--qa-reader-max-output-tokens", type=int, default=None)
+    parser.add_argument("--qa-judge-max-output-tokens", type=int, default=None)
+    parser.add_argument("--qa-output-retries", type=int, default=1)
+    parser.add_argument("--qa-transport-max-retries", type=int, default=2)
     parser.add_argument("--skip-sha256-check", action="store_true")
     args = parser.parse_args()
 
@@ -2151,6 +2274,10 @@ def main() -> None:
                 qa_max_context_sessions=args.qa_max_context_sessions,
                 qa_max_session_chars=args.qa_max_session_chars,
                 qa_timeout_seconds=args.qa_timeout,
+                qa_reader_max_output_tokens=args.qa_reader_max_output_tokens,
+                qa_judge_max_output_tokens=args.qa_judge_max_output_tokens,
+                qa_output_retries=args.qa_output_retries,
+                qa_transport_max_retries=args.qa_transport_max_retries,
                 verify_sha256=not args.skip_sha256_check,
                 output_path=out_path,
             )
