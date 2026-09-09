@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import time
+
+import structlog
+
 from sibyl_core.backends.surreal.schema_ownership import SchemaOwnership
 from sibyl_core.backends.surreal.schema_version import SurrealExecute
 from sibyl_core.memory_pipeline.observations import SourceKind
+
+log = structlog.get_logger()
 
 SOURCE_STATE_DEFINITIONS = """
 DEFINE TABLE IF NOT EXISTS source_states SCHEMAFULL PERMISSIONS NONE;
@@ -165,14 +171,19 @@ async def migrate_source_states(
 ) -> None:
     """Backfill in restartable pages after the source event has been installed.
 
-    An untracked source gets one bookkeeping revision bump to trigger its
-    event. Repeated pages skip existing generations. Concurrent new writes
-    maintain their own state.
+    Seed the small ledger directly without rewriting indexed source records.
+    Read each source inside the same transaction that creates its ledger. The
+    installed event uses the same record key, so concurrent source mutations
+    contend on that key rather than publishing an obsolete generation.
+    Repeated pages preserve existing generations and retained tombstones.
     """
     mutate = ownership.mutate if ownership is not None else execute_query
     table, organization_field = _SOURCE_TABLES[kind]
+    deleted = "$source.deleted_at != NONE" if kind is SourceKind.RAW_CAPTURE else "false"
     cursor = ""
+    checked = 0
     while True:
+        started = time.monotonic()
         rows = await execute_query(
             f"SELECT id, uuid FROM {table} WHERE uuid > $cursor ORDER BY uuid LIMIT $limit;",
             cursor=cursor,
@@ -185,12 +196,22 @@ async def migrate_source_states(
         await mutate(
             f"""RETURN {{
                 FOR $record IN $rows {{
-                    LET $source = (SELECT * FROM $record)[0];
-                    LET $state = (SELECT * FROM source_states
-                        WHERE organization_id = $source.{organization_field}
-                            AND source_kind = $kind AND source_id = $source.uuid LIMIT 1)[0];
-                    IF $source != NONE AND $state = NONE {{
-                        UPDATE $record SET revision = (revision ?? 0) + 1 RETURN NONE;
+                    LET $source = (SELECT uuid, {organization_field}, revision, deleted_at
+                        FROM $record)[0];
+                    IF $source != NONE {{
+                        IF $source.uuid = NONE OR $source.{organization_field} = NONE {{
+                            THROW 'source identity is required';
+                        }};
+                        LET $org = type::string($source.{organization_field});
+                        LET $uuid = type::string($source.uuid);
+                        LET $key = type::record(string::concat('source_states:',
+                            crypto::sha256(type::string([$org, $kind, $uuid]))));
+                        IF record::exists($key) = false {{
+                            CREATE $key SET organization_id = $org, source_kind = $kind,
+                                source_id = $uuid, generation = 1,
+                                revision = $source.revision ?? 0, deleted = {deleted}
+                                RETURN NONE;
+                        }};
                     }};
                 }};
                 RETURN NONE;
@@ -199,6 +220,14 @@ async def migrate_source_states(
             kind=kind.value,
         )
         cursor = str(rows[-1]["uuid"])
+        checked += len(rows)
+        log.info(
+            "source_state_backfill_page",
+            source_kind=kind.value,
+            rows_checked=checked,
+            page_rows=len(rows),
+            elapsed_ms=round((time.monotonic() - started) * 1000, 2),
+        )
 
 
 async def migrate_graph_source_states(

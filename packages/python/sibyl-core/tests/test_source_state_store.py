@@ -97,12 +97,14 @@ async def test_graph_epoch_backfill_is_restartable_and_preserves_high_water(
     await runtime.client.execute_query(
         "REMOVE EVENT maintain_source_state ON entity; DELETE source_states;"
     )
+    source_rows = await runtime.client.execute_query("SELECT * FROM entity ORDER BY uuid;")
     from sibyl_core.backends.surreal.schema import bootstrap_schema
 
     await runtime.client.execute_query("UPDATE schema_version SET version=23 WHERE name='graph';")
     await bootstrap_schema(runtime.client, force=True)
     first = await runtime.client.execute_query("SELECT * FROM source_states ORDER BY source_id;")
     assert len(first) == 3
+    assert await runtime.client.execute_query("SELECT * FROM entity ORDER BY uuid;") == source_rows
     await migrate_source_states(runtime.client.execute_query, kind=SourceKind.GRAPH_ENTITY)
     assert (
         await runtime.client.execute_query("SELECT * FROM source_states ORDER BY source_id;")
@@ -137,3 +139,41 @@ async def test_graph_epoch_reset_retires_retained_state(runtime: GraphRuntime) -
     )
     assert isinstance(recreated, GraphSourceSnapshot)
     assert recreated.observation.generation > original.observation.generation
+
+
+async def test_raw_epoch_backfill_preserves_source_rows_and_deletion_state() -> None:
+    from sibyl_core.backends.surreal import SurrealContentClient
+    from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
+    from sibyl_core.backends.surreal.schema_source_states import (
+        migrate_source_states,
+        source_state_event,
+    )
+
+    client = SurrealContentClient(url="memory://")
+    try:
+        await bootstrap_content_schema(client, reset=True)
+        await client.execute_query("REMOVE EVENT maintain_source_state ON raw_captures;")
+        await client.execute_query(
+            "CREATE raw_captures:live SET uuid='live', organization_id='org-backfill', "
+            "raw_content='Original evidence', revision=7; "
+            "CREATE raw_captures:deleted SET uuid='deleted', organization_id='org-backfill', "
+            "raw_content='Deleted evidence', revision=9, deleted_at=time::now();"
+        )
+        before = await client.execute_query("SELECT * FROM raw_captures ORDER BY uuid;")
+        await client.execute_query(source_state_event(SourceKind.RAW_CAPTURE))
+        await migrate_source_states(client.execute_query, kind=SourceKind.RAW_CAPTURE)
+        assert await client.execute_query("SELECT * FROM raw_captures ORDER BY uuid;") == before
+        states = await client.execute_query("SELECT * FROM source_states ORDER BY source_id;")
+        assert [(row["source_id"], row["revision"], row["deleted"]) for row in states] == [
+            ("deleted", 9, True),
+            ("live", 7, False),
+        ]
+        await migrate_source_states(client.execute_query, kind=SourceKind.RAW_CAPTURE)
+        assert (
+            await client.execute_query("SELECT * FROM source_states ORDER BY source_id;") == states
+        )
+        await client.execute_query("UPDATE raw_captures:live SET raw_content='Changed evidence';")
+        changed = await client.execute_query("SELECT * FROM source_states WHERE source_id='live';")
+        assert changed[0]["generation"] == 2
+    finally:
+        await client.close()
