@@ -126,7 +126,7 @@ def model(monkeypatch):
 
     async def local_agent(extractor):
         assert extractor.surface is LLMSurface.MEMORY
-        assert extractor.output_retries == 0
+        assert extractor.output_retries == c.OUTPUT_RETRIES == 2
         return Agent(
             FunctionModel(respond),
             output_type=c.ProcedureProposal,
@@ -523,3 +523,8 @@ async def test_complete_input_budget_includes_schema_and_accepts_exact_boundary(
     assert len(model[1]) == 1
     assert result.receipt["input_chars"] == actual
     assert result.receipt["max_input_chars"] == actual
+
+
+async def test_build_receipt_records_output_validation_policy(group, procedure, model):
+    result = await propose(group, procedure, model)
+    assert result.receipt["output_retries"] == c.OUTPUT_RETRIES == 2
