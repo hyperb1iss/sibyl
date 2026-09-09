@@ -29,7 +29,11 @@ from sibyl_core.tasks.episode_evidence import (
     encode_episode_views,
     project_episode,
 )
-from sibyl_core.tasks.procedure_evidence import EvidenceProposal, resolve_evidence_proposal
+from sibyl_core.tasks.procedure_evidence import (
+    EVIDENCE_PROPOSAL_VERSION,
+    EvidenceProposal,
+    resolve_evidence_proposal,
+)
 
 SCHEMA_VERSION = "sibyl-conditional-procedure-v1"
 OUTPUT_RETRIES = 2
@@ -621,6 +625,7 @@ def _finish_proposal(
     prompt = evidence.prompt
     receipt = {
         "schema_version": SCHEMA_VERSION,
+        "evidence_validation": EVIDENCE_PROPOSAL_VERSION,
         "outcome_join": "caller_declared",
         "budget_principal": "caller_declared_matching_active_context_when_present",
         "source_authorization": "caller_responsibility",

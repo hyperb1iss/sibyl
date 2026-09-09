@@ -105,6 +105,8 @@ class Extractor[T]:
             if self.openrouter_provider is not None and (
                 not isinstance(agent.model, OpenAIResponsesModel)
                 or agent.model.client.base_url.host != "openrouter.ai"
+                or agent.model.client.base_url.scheme != "https"
+                or agent.model.client.base_url.port not in (None, 443)
             ):
                 raise ValueError("OpenRouter routing requires the OpenRouter API origin")
             transport_retries = (

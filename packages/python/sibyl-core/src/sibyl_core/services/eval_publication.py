@@ -43,7 +43,7 @@ from sibyl_core.tasks.consolidation import (
 )
 from sibyl_core.tasks.episode_evidence import PROJECTION_VERSION
 from sibyl_core.tasks.eval_receipts import TaskAssignment, assignment_digest
-from sibyl_core.tasks.procedure_evidence import EvidenceProposal
+from sibyl_core.tasks.procedure_evidence import EVIDENCE_PROPOSAL_VERSION, EvidenceProposal
 
 CONSOLIDATION_METADATA_KEY = EVAL_CONSOLIDATION_METADATA_KEY
 
@@ -465,6 +465,7 @@ async def _extractor_policy() -> _ExtractorPolicy:
         {
             "protocol": SCHEMA_VERSION,
             "evidence_projection": PROJECTION_VERSION,
+            "evidence_validation": EVIDENCE_PROPOSAL_VERSION,
             "projection_system_sha256": hashlib.sha256(EVIDENCE_SYSTEM_PROMPT.encode()).hexdigest(),
             "projection_schema_sha256": _digest(EvidenceProposal.model_json_schema()),
             "system_prompt": SYSTEM_PROMPT,
