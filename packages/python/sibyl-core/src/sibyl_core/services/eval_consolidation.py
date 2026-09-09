@@ -219,6 +219,9 @@ def _validate_admitted_snapshot(
                     snapshot_sha256=outcome.snapshot_sha256,
                     receipt_sha256=receipt_digest,
                     admission_id=identity,
+                    assignment_sha256=assignment_digest(assignment),
+                    outcome_sha256=outcome.outcome_sha256,
+                    transcript_sha256=outcome.transcript_sha256,
                 ),
             )
         )

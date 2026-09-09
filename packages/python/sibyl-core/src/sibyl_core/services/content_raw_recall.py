@@ -24,6 +24,7 @@ from sibyl_core.services import content_client
 from sibyl_core.services import content_documents as documents
 from sibyl_core.services import content_models as models
 from sibyl_core.services.content_models import RawMemory, RawMemoryRecallResult
+from sibyl_core.services.eval_publication_guards import unavailable_publication_ids
 from sibyl_core.utils.resilience import with_timeout
 
 _REFLECTION_DREAM_EXCLUDED_CAPTURE_SURFACES = frozenset(
@@ -587,6 +588,20 @@ async def _recall_raw_memory_result(
                 )
             else:
                 source_results.append(CandidateSourceResult.success("raw_vector", vector_memories))
+        unavailable = await unavailable_publication_ids(
+            organization_id,
+            {memory.id: memory.metadata for memory in [*fulltext_memories, *vector_memories]},
+        )
+
+        def current_publication(memory: RawMemory) -> bool:
+            return memory.id not in unavailable
+
+        fulltext_memories = list(filter(current_publication, fulltext_memories))
+        vector_memories = list(filter(current_publication, vector_memories))
+        source_results = [
+            replace(source, candidates=tuple(filter(current_publication, source.candidates)))
+            for source in source_results
+        ]
         memories = await _fuse_raw_memory_results(
             client,
             [fulltext_memories, vector_memories],
@@ -614,6 +629,10 @@ async def _recall_raw_memory_result(
                 raise
             lexical_memories = []
         else:
+            unavailable = await unavailable_publication_ids(
+                organization_id, {memory.id: memory.metadata for memory in lexical_memories}
+            )
+            lexical_memories = list(filter(current_publication, lexical_memories))
             source_results.append(CandidateSourceResult.success("raw_lexical", lexical_memories))
         return RawMemoryRecallResult(tuple(lexical_memories), tuple(source_results))
 

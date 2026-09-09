@@ -70,6 +70,9 @@ class AdmittedTaskOutcome(FrozenModel):
     snapshot_sha256: SHA256
     receipt_sha256: SHA256
     admission_id: SHA256
+    assignment_sha256: SHA256
+    outcome_sha256: SHA256
+    transcript_sha256: SHA256
 
     @model_validator(mode="after")
     def consistent_outcome(self) -> Self:

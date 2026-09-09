@@ -10,9 +10,19 @@ from typing import Any
 
 import structlog
 
-from sibyl_core.errors import EntityNotFoundError, RevisionConflictError
-from sibyl_core.memory_pipeline.lifecycle import RECONCILE_PENDING_KEY, graph_metadata_recallable
+from sibyl_core.auth.memory_policy import EVAL_CONSOLIDATION_METADATA_KEY
+from sibyl_core.errors import (
+    EntityNotFoundError,
+    RevisionConflictError,
+    SourceObservationConflictError,
+)
+from sibyl_core.memory_pipeline.lifecycle import (
+    RECONCILE_PENDING_KEY,
+    graph_lifecycle_stamp,
+    graph_metadata_recallable,
+)
 from sibyl_core.memory_pipeline.source_lifecycle import (
+    CORRECTION_BLOCKERS_KEY,
     SOURCE_BINDINGS_KEY,
     UNKNOWN_SOURCE_REVISION,
     source_revision_bindings,
@@ -88,6 +98,28 @@ from sibyl_core.tools.responses import AddResponse
 log = structlog.get_logger()
 
 _PROMOTED_REVIEW_STATE = "promoted"
+
+
+def _publication_source_recallable(memory: RawMemory, candidate_id: str | None = None) -> bool:
+    if memory.id != candidate_id or not memory.metadata.get(EVAL_CONSOLIDATION_METADATA_KEY):
+        return raw_memory_recallable(memory)
+    metadata = dict(memory.metadata)
+    metadata.pop(EVAL_CONSOLIDATION_METADATA_KEY)
+    return raw_memory_recallable(replace(memory, metadata=metadata))
+
+
+def _publication_graph_recallable(metadata: dict[str, Any], candidate_id: str | None) -> bool:
+    if candidate_id is None:
+        return graph_metadata_recallable(metadata)
+    # Only the designated candidate's pending-publication blocker is waived
+    # inside this writer. The stored row remains excluded until finalization.
+    checked = dict(metadata)
+    blockers = checked.get(CORRECTION_BLOCKERS_KEY)
+    if isinstance(blockers, dict):
+        checked[CORRECTION_BLOCKERS_KEY] = {
+            key: value for key, value in blockers.items() if key != candidate_id
+        }
+    return graph_metadata_recallable(checked)
 
 
 async def _load_raw_sources(
@@ -188,6 +220,7 @@ async def persist_reflection_candidate(
     link_source_entity: bool = True,
     source_memories: Sequence[RawMemory] = (),
     reserved_entity_id: str | None = None,
+    publication_candidate_id: str | None = None,
 ) -> ReflectionWriteResult:
     writable_projects = frozenset(writable_projects) if writable_projects is not None else None
     accessible_projects = (
@@ -304,11 +337,24 @@ async def persist_reflection_candidate(
             if candidate.metadata.get(key) is not None
         },
     }
+    if publication_candidate_id is not None:
+        publication_candidate = next(
+            (memory for memory in source_memories if memory.id == publication_candidate_id), None
+        )
+        if publication_candidate is None or not publication_candidate.metadata.get(
+            EVAL_CONSOLIDATION_METADATA_KEY
+        ):
+            raise ValueError("publication candidate must be a retained consolidation input")
+        publication_stamp = graph_lifecycle_stamp(publication_candidate)
+        publication_stamp.pop(SOURCE_BINDINGS_KEY, None)
+        entity.metadata.update(publication_stamp)
     entity.metadata["reflection_publication"] = {
         "state": "pending",
         "request": publication_request,
     }
-    if not await _verify_promotion_sources(runtime, source_memories):
+    if not await _verify_promotion_sources(
+        runtime, source_memories, publication_candidate_id=publication_candidate_id
+    ):
         return _retired_reflection_result(entity.id)
     stored, created = await runtime.entity_manager.create_direct_if_absent(entity)
     verify_reflection_identity(entity, stored)
@@ -322,9 +368,14 @@ async def persist_reflection_candidate(
             )
         stored = await runtime.entity_manager.get(stored.id)
         verify_reflection_identity(entity, stored)
-    if not await _verify_promotion_sources(runtime, source_memories, entity_id=stored.id):
+    if not await _verify_promotion_sources(
+        runtime,
+        source_memories,
+        publication_candidate_id=publication_candidate_id,
+        entity_id=stored.id,
+    ):
         return _retired_reflection_result(stored.id)
-    if not graph_metadata_recallable(stored.metadata):
+    if not _publication_graph_recallable(stored.metadata, publication_candidate_id):
         return _retired_reflection_result(stored.id)
     prior_publication = stored.metadata.get("reflection_publication", {})
     if (
@@ -387,9 +438,14 @@ async def persist_reflection_candidate(
         if current is None:
             raise RuntimeError("reflection evidence disappeared during publication") from None
         verify_reflection_identity(entity, current)
-        if not await _verify_promotion_sources(runtime, source_memories, entity_id=current.id):
+        if not await _verify_promotion_sources(
+            runtime,
+            source_memories,
+            publication_candidate_id=publication_candidate_id,
+            entity_id=current.id,
+        ):
             return _retired_reflection_result(current.id)
-        if not graph_metadata_recallable(current.metadata):
+        if not _publication_graph_recallable(current.metadata, publication_candidate_id):
             return _retired_reflection_result(current.id)
         current_publication = current.metadata.get("reflection_publication", {})
         if (
@@ -405,7 +461,12 @@ async def persist_reflection_candidate(
         raise
     if updated is None:
         raise RuntimeError("reflection evidence disappeared during publication")
-    if not await _verify_promotion_sources(runtime, source_memories, entity_id=stored.id):
+    if not await _verify_promotion_sources(
+        runtime,
+        source_memories,
+        publication_candidate_id=publication_candidate_id,
+        entity_id=stored.id,
+    ):
         return _retired_reflection_result(stored.id)
     return _reflection_publication_result(
         stored.id,
@@ -810,6 +871,9 @@ async def _apply_promotion_plan(
         link_source_entity=False,
         source_memories=plan.input_memories,
         reserved_entity_id=_metadata_str(plan.candidate_memory.metadata, "promoted_entity_id"),
+        publication_candidate_id=plan.candidate_memory.id
+        if plan.candidate_memory.metadata.get(EVAL_CONSOLIDATION_METADATA_KEY)
+        else None,
     )
     if not result.response.success or result.metadata.get("promotion_state") == "partial":
         return _promotion_write_denied(plan=plan, result=result)
@@ -826,6 +890,7 @@ async def _verify_promotion_sources(
     memories: Sequence[RawMemory],
     *,
     entity_id: str | None = None,
+    publication_candidate_id: str | None = None,
 ) -> bool:
     """Close correction's read-before-insert gap without restoring retired rows."""
     verified = True
@@ -840,7 +905,7 @@ async def _verify_promotion_sources(
             current = None
         if (
             current is not None
-            and raw_memory_recallable(current)
+            and _publication_source_recallable(current, publication_candidate_id)
             and _promotion_source_signature(current) == _promotion_source_signature(expected)
         ):
             continue
@@ -887,10 +952,24 @@ async def _reserve_promotion(
                 },
             ),
             expected_revision=memory.revision,
+            **(
+                {"publication_operation_id": str(memory.metadata[EVAL_CONSOLIDATION_METADATA_KEY])}
+                if memory.metadata.get(EVAL_CONSOLIDATION_METADATA_KEY)
+                else {}
+            ),
+        )
+    except SourceObservationConflictError:
+        return _promotion_denied(
+            candidate_id=memory.id,
+            reason="original_admission_changed",
+            review_state=memory.review_state,
+            memory_scope=memory.memory_scope,
+            scope_key=memory.scope_key,
+            raw_source_ids=plan.raw_source_ids,
         )
     except RevisionConflictError:
         current = await get_raw_memory(organization_id=memory.organization_id, memory_id=memory.id)
-        if current is None or not raw_memory_recallable(current):
+        if current is None or not _publication_source_recallable(current, memory.id):
             return _promotion_denied(
                 candidate_id=memory.id,
                 reason="source_not_recallable",
@@ -971,6 +1050,15 @@ async def _mark_promotion_plan_promoted(
                     metadata=metadata,
                 ),
                 expected_revision=plan.candidate_memory.revision,
+                **(
+                    {"source_observations": plan.input_memories}
+                    if plan.candidate_memory.metadata.get(EVAL_CONSOLIDATION_METADATA_KEY)
+                    else {}
+                ),
+            )
+        except SourceObservationConflictError:
+            return _promotion_write_denied(
+                plan=plan, result=_retired_reflection_result(str(result.response.id))
             )
         except RevisionConflictError:
             current = await get_raw_memory(
@@ -996,6 +1084,19 @@ async def _mark_promotion_plan_promoted(
                         result=_retired_reflection_result(str(result.response.id)),
                     )
                 raise
+    if plan.candidate_memory.metadata.get(EVAL_CONSOLIDATION_METADATA_KEY):
+        runtime = await get_surreal_graph_runtime(plan.candidate_memory.organization_id)
+        reconciled = await reconcile_with_capture(
+            runtime.entity_manager,
+            organization_id=plan.candidate_memory.organization_id,
+            metadata={"raw_memory_id": plan.candidate_memory.id},
+            row_ids=[str(result.response.id)],
+        )
+        stored = await runtime.entity_manager.get(str(result.response.id))
+        if reconciled.unverified or not graph_metadata_recallable(stored.metadata):
+            return _promotion_write_denied(
+                plan=plan, result=_retired_reflection_result(str(result.response.id))
+            )
     return ReflectionPromotionResult(
         success=True,
         candidate_id=plan.candidate_memory.id,
@@ -1122,7 +1223,21 @@ async def _resolve_reflection_promotion_plan(
         )
         input_memories[0] = candidate_memory
 
-    if not sources_complete or any(not raw_memory_recallable(memory) for memory in input_memories):
+    from sibyl_core.services.eval_publication_guards import verify_publication_admissions
+
+    if not await verify_publication_admissions(candidate_memory):
+        return _promotion_denied(
+            candidate_id=candidate_memory.id,
+            reason="original_admission_changed",
+            review_state=candidate_memory.review_state,
+            memory_scope=candidate_memory.memory_scope,
+            scope_key=candidate_memory.scope_key,
+            raw_source_ids=raw_source_ids,
+        )
+
+    if not sources_complete or any(
+        not _publication_source_recallable(memory, candidate_memory.id) for memory in input_memories
+    ):
         return _promotion_denied(
             candidate_id=candidate_memory.id,
             reason="source_not_recallable",

@@ -9,13 +9,17 @@ from datetime import datetime
 from typing import cast
 from uuid import uuid4
 
-from sibyl_core.auth.memory_policy import MEMORY_PROVENANCE_METADATA_KEYS
+from sibyl_core.auth.memory_policy import (
+    EVAL_CONSOLIDATION_METADATA_KEY,
+    MEMORY_PROVENANCE_METADATA_KEYS,
+)
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.embeddings.providers import (
     EmbeddingProvider,
 )
-from sibyl_core.errors import RevisionConflictError
+from sibyl_core.errors import RevisionConflictError, SourceObservationConflictError
 from sibyl_core.memory_pipeline.quality import (
+    expand_memory_quality_storage_metadata,
     normalize_memory_quality_metadata,
 )
 from sibyl_core.memory_pipeline.source_lifecycle import (
@@ -35,6 +39,7 @@ from sibyl_core.services import content_client
 from sibyl_core.services import content_lineage as lineage
 from sibyl_core.services import content_models as models
 from sibyl_core.services.content_models import RawMemory, RawMemoryWrite
+from sibyl_core.services.eval_publication_guards import PUBLICATION_ADMISSION_GUARD
 
 _RAW_MEMORY_EMBEDDING_AUTO = object()
 
@@ -498,24 +503,17 @@ async def remember_raw_memories(
     return stored
 
 
-async def remember_reflection_candidate_review(
+def reflection_candidate_metadata(
     *,
-    organization_id: str,
-    principal_id: str,
     candidate: ReflectionCandidate,
-    raw_source_ids: list[str],
+    raw_source_ids: Sequence[str],
+    memory_scope: MemoryScope | str,
     source_id: str | None = None,
-    memory_scope: MemoryScope | str = MemoryScope.PRIVATE,
-    scope_key: str | None = None,
     suggested_memory_scope: MemoryScope | str | None = None,
     suggested_scope_key: str | None = None,
     extraction_prompt_metadata: dict[str, object] | None = None,
-    source_memories: Sequence[RawMemory] = (),
-    accessible_projects: Iterable[str] | None = None,
-    accessible_teams: Iterable[str] | None = None,
-    accessible_delegations: Iterable[str] | None = None,
-    allowed_memory_scope_keys: Iterable[str] | None = None,
-) -> RawMemory:
+) -> dict[str, object]:
+    """Build review metadata for both ordinary and atomic candidate persistence."""
     normalized_scope = models.coerce_memory_scope(memory_scope)
     suggested_scope = (
         models.coerce_memory_scope(suggested_memory_scope)
@@ -546,6 +544,39 @@ async def remember_reflection_candidate_review(
             action="capture",
             reason="reflection_candidate_pending",
         ),
+    )
+    return metadata
+
+
+async def remember_reflection_candidate_review(
+    *,
+    organization_id: str,
+    principal_id: str,
+    candidate: ReflectionCandidate,
+    raw_source_ids: list[str],
+    source_id: str | None = None,
+    memory_scope: MemoryScope | str = MemoryScope.PRIVATE,
+    scope_key: str | None = None,
+    suggested_memory_scope: MemoryScope | str | None = None,
+    suggested_scope_key: str | None = None,
+    extraction_prompt_metadata: dict[str, object] | None = None,
+    source_memories: Sequence[RawMemory] = (),
+    accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
+) -> RawMemory:
+    normalized_scope = models.coerce_memory_scope(memory_scope)
+    source_ids = list(dict.fromkeys(raw_source_ids))
+    resolved_source_id = source_id or (source_ids[0] if source_ids else "reflection:manual")
+    metadata = reflection_candidate_metadata(
+        candidate=candidate,
+        raw_source_ids=source_ids,
+        memory_scope=normalized_scope,
+        source_id=resolved_source_id,
+        suggested_memory_scope=suggested_memory_scope,
+        suggested_scope_key=suggested_scope_key,
+        extraction_prompt_metadata=extraction_prompt_metadata,
     )
     return await remember_raw_memory(
         organization_id=organization_id,
@@ -774,9 +805,15 @@ async def save_raw_memory(
     embedding_provider: EmbeddingProvider | object | None = _RAW_MEMORY_EMBEDDING_AUTO,
     expected_revision: int | None = None,
     superseded_by_memory_id: str | None = None,
+    source_observations: Sequence[RawMemory] = (),
+    publication_operation_id: str | None = None,
 ) -> RawMemory:
     if expected_revision is not None and expected_revision < 1:
         raise ValueError("expected_revision must be at least 1")
+    if (source_observations or publication_operation_id) and expected_revision is None:
+        raise ValueError("source-observed publication requires a revision fence")
+    if any(source.organization_id != memory.organization_id for source in source_observations):
+        raise ValueError("source observations must belong to the publication organization")
     async with content_client.surreal_content_client() as client:
         existing_record = await content_client.select_one(
             client,
@@ -821,62 +858,111 @@ async def save_raw_memory(
                     "organization_id": memory.organization_id,
                     "created_at": models.utcnow(),
                 }
-            rows = await content_client.select_many_raw(
-                client,
-                """
-                    BEGIN TRANSACTION;
-                    LET $current = (SELECT revision FROM raw_captures
-                        WHERE organization_id = $organization_id AND uuid = $uuid LIMIT 1)[0];
-                    LET $next = object::from_entries(array::concat(
-                        object::entries($record), [['revision', $current.revision + 1]]));
-                    LET $saved = (
-                        UPDATE raw_captures MERGE $next
-                        WHERE organization_id = $organization_id
-                            AND uuid = $uuid
-                            AND ($expected_revision = NONE OR revision = $expected_revision)
-                        RETURN AFTER
-                    );
-                    IF $supersession != NONE AND array::len($saved) > 0 {
-                        LET $replacement = (
-                            SELECT id, source_id FROM raw_captures
-                            WHERE organization_id = $organization_id
-                                AND uuid = $supersession.raw_memory_id
-                            LIMIT 1
-                        )[0];
-                        LET $superseded = (
-                            SELECT VALUE id FROM raw_captures
-                            WHERE organization_id = $organization_id
-                                AND uuid = $supersession.superseded_raw_memory_id
-                            LIMIT 1
-                        )[0];
-                        IF $replacement = NONE OR $superseded = NONE {
-                            THROW "supersession_reference_missing";
-                        };
-                        LET $replacement_id = $replacement.id;
-                        LET $edge = type::record($supersession.edge_ref);
-                        LET $existing_edge = (
-                            SELECT VALUE id FROM supersedes WHERE id = $edge LIMIT 1
-                        )[0];
-                        IF $existing_edge = NONE {
-                            RELATE $replacement_id->$edge->$superseded CONTENT {
-                                uuid: $supersession.uuid,
-                                organization_id: $organization_id,
-                                raw_memory_id: $supersession.raw_memory_id,
-                                superseded_raw_memory_id: $supersession.superseded_raw_memory_id,
-                                source_id: $replacement.source_id,
-                                created_at: $supersession.created_at
+            # One atomic statement preserves the actual guard error instead
+            # of an earlier statement's transaction-aborted sentinel.
+            try:
+                rows = await content_client.select_many_raw(
+                    client,
+                    """
+                        RETURN {
+                        __PUBLICATION_ADMISSION_GUARD__
+                        FOR $source IN $source_observations {
+                            LET $observed = (SELECT * FROM raw_captures
+                                WHERE organization_id = $organization_id AND uuid = $source.uuid LIMIT 1)[0];
+                            IF $observed = NONE OR $observed.deleted_at != NONE
+                                OR $observed.revision != $source.revision
+                                OR $observed.raw_content != $source.raw_content
+                                OR $observed.title != $source.title
+                                OR $observed.principal_id != $source.principal_id
+                                OR $observed.memory_scope != $source.memory_scope
+                                OR $observed.scope_key != $source.scope_key
+                                OR $observed.review_state != $source.review_state
+                                OR $observed.metadata != $source.metadata {
+                                THROW 'publication_source_observation_changed';
                             };
                         };
-                    };
-                    COMMIT TRANSACTION;
-                    RETURN $saved;
-                """,
-                organization_id=memory.organization_id,
-                uuid=memory.id,
-                expected_revision=expected_revision,
-                record=update_record,
-                supersession=supersession,
-            )
+                        LET $current = (SELECT revision FROM raw_captures
+                            WHERE organization_id = $organization_id AND uuid = $uuid LIMIT 1)[0];
+                        LET $next = object::from_entries(array::concat(
+                            object::entries($record), [['revision', $current.revision + 1]]));
+                        LET $saved = (
+                            UPDATE raw_captures MERGE $next
+                            WHERE organization_id = $organization_id
+                                AND uuid = $uuid
+                                AND ($expected_revision = NONE OR revision = $expected_revision)
+                            RETURN AFTER
+                        );
+                        IF $publication_operation_id != NONE AND array::len($saved) > 0 {
+                            LET $ledger = (SELECT * FROM eval_consolidations WHERE uuid = $publication_operation_id
+                                AND organization_id = $organization_id LIMIT 1)[0];
+                            IF $ledger.promoted_entity_id != NONE
+                                AND $ledger.promoted_entity_id != $record.metadata.promoted_entity_id {
+                                THROW 'publication_source_observation_changed';
+                            };
+                            UPDATE eval_consolidations SET promoted_entity_id = $record.metadata.promoted_entity_id
+                                WHERE uuid = $publication_operation_id AND organization_id = $organization_id;
+                        };
+                        IF $supersession != NONE AND array::len($saved) > 0 {
+                            LET $replacement = (
+                                SELECT id, source_id FROM raw_captures
+                                WHERE organization_id = $organization_id
+                                    AND uuid = $supersession.raw_memory_id
+                                LIMIT 1
+                            )[0];
+                            LET $superseded = (
+                                SELECT VALUE id FROM raw_captures
+                                WHERE organization_id = $organization_id
+                                    AND uuid = $supersession.superseded_raw_memory_id
+                                LIMIT 1
+                            )[0];
+                            IF $replacement = NONE OR $superseded = NONE {
+                                THROW "supersession_reference_missing";
+                            };
+                            LET $replacement_id = $replacement.id;
+                            LET $edge = type::record($supersession.edge_ref);
+                            LET $existing_edge = (
+                                SELECT VALUE id FROM supersedes WHERE id = $edge LIMIT 1
+                            )[0];
+                            IF $existing_edge = NONE {
+                                RELATE $replacement_id->$edge->$superseded CONTENT {
+                                    uuid: $supersession.uuid,
+                                    organization_id: $organization_id,
+                                    raw_memory_id: $supersession.raw_memory_id,
+                                    superseded_raw_memory_id: $supersession.superseded_raw_memory_id,
+                                    source_id: $replacement.source_id,
+                                    created_at: $supersession.created_at
+                                };
+                            };
+                        };
+                        RETURN $saved;
+                        };
+                    """.replace("__PUBLICATION_ADMISSION_GUARD__", PUBLICATION_ADMISSION_GUARD),
+                    organization_id=memory.organization_id,
+                    publication_operation_id=publication_operation_id
+                    or (
+                        memory.metadata.get(EVAL_CONSOLIDATION_METADATA_KEY)
+                        if source_observations
+                        else None
+                    ),
+                    publication_principal_id=memory.principal_id,
+                    uuid=memory.id,
+                    expected_revision=expected_revision,
+                    record=update_record,
+                    supersession=supersession,
+                    source_observations=[
+                        {
+                            **models.raw_memory_record(source),
+                            "metadata": expand_memory_quality_storage_metadata(source.metadata),
+                        }
+                        for source in source_observations
+                    ],
+                )
+            except Exception as exc:
+                if "publication_source_observation_changed" in str(exc):
+                    raise SourceObservationConflictError(
+                        "publication source changed before commit"
+                    ) from exc
+                raise
             if not rows and expected_revision is not None:
                 current = await content_client.select_one(
                     client,

@@ -9,6 +9,7 @@ from typing import Any
 import structlog
 
 from sibyl_core.auth.memory_policy import (
+    EVAL_CONSOLIDATION_METADATA_KEY,
     memory_metadata_read_allowed,
     memory_row_project_id,
     memory_scope_policy_key,
@@ -38,6 +39,9 @@ from sibyl_core.models.context import (
 from sibyl_core.models.reflection import memory_lifecycle_from_metadata
 from sibyl_core.retrieval._search_lifecycle import _superseded_candidate_uuids
 from sibyl_core.retrieval.search import build_context_retrieval_plan, context_search
+from sibyl_core.services.eval_publication_guards import (
+    unavailable_publication_ids,
+)
 from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
 from sibyl_core.services.surreal_content import (
     MemoryScope,
@@ -474,6 +478,13 @@ async def _default_related_items(
         uuids=candidate_ids,
     )
 
+    unavailable_publications = await unavailable_publication_ids(
+        organization_id,
+        {
+            str(entity.id): getattr(entity, "metadata", None)
+            for entity, _relationship in raw_results
+        },
+    )
     related: list[ContextRelatedItem] = []
     for entity, relationship in raw_results:
         if str(entity.id) in superseded:
@@ -494,7 +505,10 @@ async def _default_related_items(
         # section items of their own, so the admission filter never sees them.
         # A retired neighbour would otherwise reach the reader as the body of
         # somebody else's row.
-        if not graph_metadata_recallable(getattr(entity, "metadata", None)):
+        if (
+            not graph_metadata_recallable(getattr(entity, "metadata", None))
+            or str(entity.id) in unavailable_publications
+        ):
             continue
         related.append(
             ContextRelatedItem(
@@ -567,6 +581,14 @@ async def _default_related_items_batch(
         uuids=candidate_ids,
     )
 
+    unavailable_publications = await unavailable_publication_ids(
+        organization_id,
+        {
+            str(entity.id): getattr(entity, "metadata", None)
+            for results in raw_by_seed.values()
+            for entity, _relationship in results
+        },
+    )
     related_by_seed: dict[str, list[ContextRelatedItem]] = {}
     for seed_id, raw_results in raw_by_seed.items():
         related: list[ContextRelatedItem] = []
@@ -590,7 +612,10 @@ async def _default_related_items_batch(
             # sees them. `compile_context` picks this batch lane whenever the
             # default related function is in play, which makes it the lane
             # production actually reads through.
-            if not graph_metadata_recallable(getattr(entity, "metadata", None)):
+            if (
+                not graph_metadata_recallable(getattr(entity, "metadata", None))
+                or str(entity.id) in unavailable_publications
+            ):
                 continue
 
             source_id = str(getattr(relationship, "source_id", ""))
@@ -790,7 +815,9 @@ def _lineage_rank(item: ContextItem) -> tuple[int, float]:
     return (type_rank, -item.score)
 
 
-def _drop_retired_items(sections: list[ContextSection]) -> list[ContextSection]:
+async def _drop_retired_items(
+    sections: list[ContextSection], organization_id: str
+) -> list[ContextSection]:
     """Refuse admission to any row a correction retired.
 
     The native lane gates its own candidates, but a pack also admits rows the
@@ -800,9 +827,16 @@ def _drop_retired_items(sections: list[ContextSection]) -> list[ContextSection]:
     and shrinking the answer on its way out.
     """
 
+    unavailable = await unavailable_publication_ids(
+        organization_id, {item.id: item.metadata for section in sections for item in section.items}
+    )
     kept: list[ContextSection] = []
     for section in sections:
-        items = [item for item in section.items if graph_metadata_recallable(item.metadata)]
+        items = [
+            item
+            for item in section.items
+            if graph_metadata_recallable(item.metadata) and item.id not in unavailable
+        ]
         if items:
             kept.append(replace(section, items=items))
     return kept
@@ -1171,6 +1205,7 @@ def _sections_from_response(
 
 
 _LIFECYCLE_ADMISSION_KEYS = (
+    EVAL_CONSOLIDATION_METADATA_KEY,
     CORRECTION_BLOCKERS_KEY,
     SOURCE_VALIDATION_PENDING_KEY,
     RECONCILE_PENDING_KEY,
@@ -1509,11 +1544,11 @@ async def compile_context(
             )
         sections = _merge_active_work(sections, active_items, facets)
 
-    sections = _dedupe_lineage(_drop_retired_items(sections))
+    sections = _dedupe_lineage(await _drop_retired_items(sections, organization_id))
     sections = _dedupe_sections(sections, limit, per_facet_limit=per_facet_limit)
     if not sections and retrieval_failed:
         sections = _dedupe_sections(
-            _drop_retired_items(
+            await _drop_retired_items(
                 await _compile_fallback_sections(
                     query=query,
                     facets=facets,
@@ -1527,7 +1562,8 @@ async def compile_context(
                     allowed_memory_scope_keys=allowed_memory_scope_keys,
                     audit=audit,
                     include_documents=include_documents,
-                )
+                ),
+                organization_id,
             ),
             limit,
             per_facet_limit=per_facet_limit,
