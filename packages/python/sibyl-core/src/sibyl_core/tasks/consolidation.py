@@ -7,6 +7,7 @@ storage or delivery. This library performs no writes or source-store reads.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from copy import deepcopy
@@ -20,6 +21,14 @@ from sibyl_core.ai.llm.budget import get_llm_budget_context, llm_budget_context
 from sibyl_core.models.entities import ProcedureStep
 from sibyl_core.models.memory_scope import MemoryScope
 from sibyl_core.models.reflection import ReflectionCandidate
+from sibyl_core.tasks.episode_evidence import (
+    EPISODE_VERSION,
+    PROJECTION_VERSION,
+    EvidenceCitation,
+    encode_episode_views,
+    project_episode,
+)
+from sibyl_core.tasks.procedure_evidence import EvidenceProposal, resolve_evidence_proposal
 
 SCHEMA_VERSION = "sibyl-conditional-procedure-v1"
 METADATA_KEY = "conditional_procedure"
@@ -33,6 +42,17 @@ SYSTEM_PROMPT = (
     "and deductions as inferred. Failure does not by itself establish causation. "
     "Include applicability, step checks, failure modes and when to abstain. Return "
     "an abstention reason instead of inventing an unsupported procedure."
+)
+
+
+EVIDENCE_SYSTEM_PROMPT = SYSTEM_PROMPT.replace(
+    "exact UTF-8 byte ranges in an episode.",
+    "evidence_id values attached to visible source fields or events.",
+) + (
+    " The evidence dictionary shares exact repeated JSON values. Resolve $ref "
+    "objects by their index in values; $literal contains literal object key/value pairs. "
+    "The server resolves evidence IDs to immutable original byte ranges. "
+    "Unknown IDs are rejected. Audit-only transport fields are not evidence for assertions."
 )
 
 
@@ -250,8 +270,90 @@ def _prompt(group: ConsolidationGroup) -> str:
     return "\n".join(lines)
 
 
-def _spans(group: ConsolidationGroup, draft: DraftConditionalProcedure) -> list[dict[str, Any]]:
+@dataclass(frozen=True)
+class _ExtractionInput:
+    prompt: str
+    system: str
+    output_type: type[BaseModel]
+    citations: dict[str, EvidenceCitation]
+    projection_receipt: dict[str, Any] | None = None
+
+
+def _is_controller_episode(artifact: bytes) -> bool:
+    try:
+        value = json.loads(artifact)
+    except (ValueError, UnicodeError):
+        return False
+    return isinstance(value, dict) and value.get("schema_version") == EPISODE_VERSION
+
+
+def _extraction_input(group: ConsolidationGroup) -> _ExtractionInput:
+    if not all(_is_controller_episode(episode.artifact) for episode in group.episodes):
+        return _ExtractionInput(_prompt(group), SYSTEM_PROMPT, ProcedureProposal, {})
+    projections = [
+        project_episode(episode.episode_id, episode.artifact, prefix=f"s{index}")
+        for index, episode in enumerate(group.episodes)
+    ]
+    citations = {
+        key: value for projection in projections for key, value in projection.citations.items()
+    }
+    view = encode_episode_views(projections)
+    header = group.model_dump(
+        mode="json",
+        exclude={
+            "organization_id": True,
+            "owner_principal_id": True,
+            "episodes": {"__all__": {"artifact"}},
+        },
+    )
+    prompt = (
+        "Declared contrast group:\n"
+        + _canonical(header).decode()
+        + "\nEvidence view:\n"
+        + _canonical(view).decode()
+    )
+    receipt = {
+        "version": PROJECTION_VERSION,
+        "view_sha256": _digest(_canonical(view)),
+        "citations_sha256": _digest(
+            _canonical(
+                {
+                    key: {"episode_id": value.episode_id, "ranges": value.ranges}
+                    for key, value in citations.items()
+                }
+            )
+        ),
+        "coverage_sha256": _digest(
+            _canonical(
+                [
+                    {
+                        "episode_id": episode.episode_id,
+                        "artifact_sha256": episode.artifact_sha256,
+                        "coverage": projection.coverage,
+                    }
+                    for episode, projection in zip(group.episodes, projections, strict=True)
+                ]
+            )
+        ),
+    }
+    return _ExtractionInput(prompt, EVIDENCE_SYSTEM_PROMPT, EvidenceProposal, citations, receipt)
+
+
+def _spans(
+    group: ConsolidationGroup,
+    draft: DraftConditionalProcedure,
+    evidence: _ExtractionInput | None = None,
+) -> list[dict[str, Any]]:
     episodes = {e.episode_id: e for e in group.episodes}
+    visible = (
+        None
+        if evidence is None or evidence.projection_receipt is None
+        else {
+            (citation.episode_id, start, end)
+            for citation in evidence.citations.values()
+            for start, end in citation.ranges
+        }
+    )
     if [a.order for a in draft.actions] != list(range(1, len(draft.actions) + 1)):
         raise ValueError("action order must be contiguous from one")
     assertions = [
@@ -272,6 +374,11 @@ def _spans(group: ConsolidationGroup, draft: DraftConditionalProcedure) -> list[
                 raise ValueError("support refers to an episode outside the group")
             if not 0 <= ref.start_byte < ref.end_byte <= len(episode.artifact):
                 raise ValueError("support byte range is empty or out of bounds")
+            if (
+                visible is not None
+                and (ref.episode_id, ref.start_byte, ref.end_byte) not in visible
+            ):
+                raise ValueError("support lies outside visible projected evidence")
             content = episode.artifact[ref.start_byte : ref.end_byte]
             if not content.decode("utf-8").strip():
                 raise ValueError("support cannot contain only whitespace")
@@ -303,13 +410,16 @@ def _assertion_text(assertion: ConditionalAssertion) -> str:
 
 
 def _candidate(
-    group: ConsolidationGroup, draft: DraftConditionalProcedure, receipt: dict[str, Any]
+    group: ConsolidationGroup,
+    draft: DraftConditionalProcedure,
+    receipt: dict[str, Any],
+    evidence: _ExtractionInput | None = None,
 ) -> ReflectionCandidate:
     payload = {
         "schema_version": SCHEMA_VERSION,
         "group": group.model_dump(mode="json", exclude={"episodes": {"__all__": {"artifact"}}}),
         "procedure": draft.model_dump(mode="json"),
-        "spans": _spans(group, draft),
+        "spans": _spans(group, draft, evidence),
         "build_receipt": deepcopy(receipt),
     }
     title = f"Procedure: {draft.goal.statement}"
@@ -394,15 +504,18 @@ def validate_candidate_content_agreement(
         payload = candidate.metadata[METADATA_KEY]
         draft = DraftConditionalProcedure.model_validate(payload["procedure"])
         receipt = payload["build_receipt"]
+        evidence = _extraction_input(group)
+        if receipt.get("projection") != evidence.projection_receipt:
+            return ["build receipt projection differs from frozen evidence"]
         for key, value in {
             "input": group.model_dump(mode="json"),
-            "prompt": {"system": SYSTEM_PROMPT, "user": _prompt(group)},
-            "schema": ProcedureProposal.model_json_schema(),
+            "prompt": {"system": evidence.system, "user": evidence.prompt},
+            "schema": evidence.output_type.model_json_schema(),
             "output": ProcedureProposal(procedure=draft).model_dump(mode="json"),
         }.items():
             if receipt[f"{key}_sha256"] != _digest(_canonical(value)):
                 return [f"build receipt {key} hash differs from the frozen proposal"]
-        expected = _candidate(group, draft, receipt)
+        expected = _candidate(group, draft, receipt, evidence)
     except (ValueError, TypeError, KeyError) as exc:
         return [f"invalid proposal payload: {exc}"]
     return [] if candidate == expected else ["candidate differs from the untouched proposal"]
@@ -448,15 +561,16 @@ async def propose_conditional_procedure(
         or min(max_input_chars, max_tokens) <= 0
     ):
         raise ValueError("build budgets must be positive integers")
-    prompt = _prompt(group)
-    schema = ProcedureProposal.model_json_schema()
-    input_chars = len(prompt) + len(SYSTEM_PROMPT) + len(_canonical(schema).decode("utf-8"))
+    evidence = await asyncio.to_thread(_extraction_input, group)
+    prompt = evidence.prompt
+    schema = evidence.output_type.model_json_schema()
+    input_chars = len(prompt) + len(evidence.system) + len(_canonical(schema).decode("utf-8"))
     if input_chars > max_input_chars:
         raise ConsolidationInputBudgetExceeded(input_chars, max_input_chars)
     extractor = Extractor(
-        ProcedureProposal,
+        evidence.output_type,
         surface=LLMSurface.MEMORY,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=evidence.system,
         model_override=model_override,
         output_retries=0,
         max_tokens=max_tokens,
@@ -465,7 +579,36 @@ async def propose_conditional_procedure(
         user_id=group.owner_principal_id, organization_id=group.organization_id
     ):
         extraction = await extractor.extract_with_usage(prompt)
-    proposal = ProcedureProposal.model_validate(extraction.output.model_dump())
+    output = extraction.output.model_dump()
+    if evidence.projection_receipt is not None:
+        output = resolve_evidence_proposal(
+            EvidenceProposal.model_validate(output), evidence.citations
+        )
+    proposal = ProcedureProposal.model_validate(output)
+    return await asyncio.to_thread(
+        _finish_proposal,
+        group,
+        evidence,
+        proposal,
+        extraction.usage.model_dump(mode="json"),
+        model_override,
+        max_input_chars,
+        input_chars,
+        max_tokens,
+    )
+
+
+def _finish_proposal(
+    group: ConsolidationGroup,
+    evidence: _ExtractionInput,
+    proposal: ProcedureProposal,
+    usage: dict[str, Any],
+    model_override: str | None,
+    max_input_chars: int,
+    input_chars: int,
+    max_tokens: int,
+) -> ConsolidationResult:
+    prompt = evidence.prompt
     receipt = {
         "schema_version": SCHEMA_VERSION,
         "outcome_join": "caller_declared",
@@ -481,11 +624,13 @@ async def propose_conditional_procedure(
         "max_output_tokens": max_tokens,
         "output_retries": 0,
         "input_sha256": _digest(_canonical(group.model_dump(mode="json"))),
-        "prompt_sha256": _digest(_canonical({"system": SYSTEM_PROMPT, "user": prompt})),
-        "schema_sha256": _digest(_canonical(schema)),
+        "prompt_sha256": _digest(_canonical({"system": evidence.system, "user": prompt})),
+        "schema_sha256": _digest(_canonical(evidence.output_type.model_json_schema())),
         "output_sha256": _digest(_canonical(proposal.model_dump(mode="json"))),
-        "usage": extraction.usage.model_dump(mode="json"),
+        "usage": usage,
     }
+    if evidence.projection_receipt is not None:
+        receipt["projection"] = evidence.projection_receipt
     if proposal.procedure is None:
         receipt.update(
             status="abstained", structural="not_applicable", reason=proposal.abstention_reason
@@ -493,7 +638,7 @@ async def propose_conditional_procedure(
         return ConsolidationResult(group, receipt, None, proposal, prompt)
     receipt.update(status="proposed", structural="pass")
     try:
-        candidate = _candidate(group, proposal.procedure, receipt)
+        candidate = _candidate(group, proposal.procedure, receipt, evidence)
     except ValueError as exc:
         receipt.update(status="rejected", structural="fail", reason=str(exc))
         return ConsolidationResult(group, receipt, None, proposal, prompt)
