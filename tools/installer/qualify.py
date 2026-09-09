@@ -13,6 +13,7 @@ import subprocess
 import threading
 import urllib.request
 import zipfile
+from email.parser import Parser
 from functools import partial
 from pathlib import Path
 
@@ -40,6 +41,28 @@ def require_owned_container(inputs: Path, output: Path, run_id: str, role: str) 
         raise RuntimeError("owned read-only input mount required")
     if source.is_relative_to(results) or results.is_relative_to(source):
         raise RuntimeError("input and output mounts overlap")
+
+
+def wheel_release(wheels: list[Path]) -> str:
+    """Require one coherent release before serving any unpublished artifact."""
+    expected = {"sibyl-core", "sibyl-dev", "sibyld"}
+    releases = {}
+    for wheel in wheels:
+        with zipfile.ZipFile(wheel) as archive:
+            metadata = [name for name in archive.namelist() if name.endswith(".dist-info/METADATA")]
+            if len(metadata) != 1:
+                raise RuntimeError("wheel requires exactly one METADATA record")
+            record = Parser().parsestr(archive.read(metadata[0]).decode())
+        name = str(record.get("Name", "")).lower().replace("_", "-")
+        version = str(record.get("Version", "")).strip()
+        if name not in expected or name in releases or not version:
+            raise RuntimeError("unexpected, duplicate, or unversioned wheel metadata")
+        if wheel.name.split("-")[0].replace("_", "-") != name:
+            raise RuntimeError("wheel filename disagrees with metadata identity")
+        releases[name] = version
+    if set(releases) != expected or len(set(releases.values())) != 1:
+        raise RuntimeError("all three wheel releases must agree")
+    return releases["sibyl-core"]
 
 
 def prepare_index(inputs: Path, output: Path):
@@ -149,6 +172,8 @@ def main() -> None:
     }
     server = None
     try:
+        version = wheel_release(sorted((inputs / "wheels").glob("*.whl")))
+        receipt["artifact_version"] = version
         artifacts, server = prepare_index(inputs, output)
         env = {
             "HOME": str(home),
@@ -168,7 +193,7 @@ def main() -> None:
                     str(inputs / "install.sh"),
                     "--" + args.mode,
                     "--version",
-                    "1.3.2",
+                    version,
                     "--no-open",
                 ],
                 env=env,
