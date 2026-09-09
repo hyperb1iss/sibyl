@@ -26,9 +26,12 @@ def native_reflection_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespac
     """Keep the native orchestration real while recording its storage boundary."""
     entities: list[Entity] = []
     relationships = []
+    stored: dict[str, Entity] = {}
 
-    async def create_direct_if_absent(entity):
+    async def create_direct_if_absent(entity, **kwargs):
         entities.append(entity)
+        entity.observed_revision = entity.revision
+        stored[entity.id] = entity
         return entity, True
 
     async def update(entity_id, updates, **kwargs):
@@ -44,10 +47,12 @@ def native_reflection_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespac
         entity_manager=SimpleNamespace(
             create_direct_if_absent=AsyncMock(side_effect=create_direct_if_absent),
             update=AsyncMock(side_effect=update),
-            get=AsyncMock(return_value=None),
+            get=AsyncMock(side_effect=lambda entity_id: stored.get(entity_id)),
         ),
         relationship_manager=SimpleNamespace(create_bulk=AsyncMock(side_effect=create_bulk)),
+        client=SimpleNamespace(group_id="org_123", execute_query=AsyncMock(return_value=[])),
         entities=entities,
+        stored=stored,
         relationships=relationships,
     )
     monkeypatch.setattr(
@@ -56,6 +61,23 @@ def native_reflection_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespac
     )
     monkeypatch.setattr(
         "sibyl_core.tools.reflect._load_reflection_decision_memories", AsyncMock(return_value=[])
+    )
+    from sibyl_core.memory_pipeline.observations import SourceObservation
+    from sibyl_core.services.source_observations import GraphSourceSnapshot, graph_evidence
+
+    async def snapshot(source, **kwargs):
+        entity = stored.get(source.id)
+        if entity is None:
+            return None
+        return GraphSourceSnapshot(
+            entity.model_copy(update={"observed_revision": entity.revision}),
+            SourceObservation(source, 1, graph_evidence(entity), entity.revision, True),
+        )
+
+    monkeypatch.setattr("sibyl_core.services.observed_sources.load_source_snapshot", snapshot)
+    monkeypatch.setattr(
+        "sibyl_core.services.graph_runtime.get_surreal_graph_runtime",
+        AsyncMock(return_value=runtime),
     )
     return runtime
 
@@ -123,6 +145,20 @@ async def test_native_reflection_keeps_scope_and_provenance(
 
     content = "We decided to preserve source evidence before publishing decisions."
     project = "project_123" if scope == "project" else None
+    if existing_source_id is not None:
+        native_reflection_runtime.stored[existing_source_id] = Entity(
+            id=existing_source_id,
+            organization_id="org_123",
+            entity_type=EntityType.SESSION,
+            name="Existing source",
+            content=content,
+            metadata={
+                "memory_scope": scope,
+                "scope_key": project,
+                "principal_id": "user_123",
+                "project_id": project,
+            },
+        )
     pack = await reflect_memory(
         content,
         organization_id="org_123",
@@ -395,51 +431,15 @@ async def test_reflect_memory_review_persistence_denies_unverified_project(
 
 @pytest.mark.asyncio
 async def test_reflect_memory_native_write_uses_policy_and_direct_graph(
-    monkeypatch: pytest.MonkeyPatch,
+    native_reflection_runtime: SimpleNamespace,
 ) -> None:
-    created_entities = []
-    created_relationships = []
-
-    class FakeEntityManager:
-        async def create_direct_if_absent(self, entity):
-            created_entities.append(entity)
-            return entity, True
-
-        async def update(self, entity_id, updates, **kwargs):
-            entity = next(entity for entity in created_entities if entity.id == entity_id)
-            entity.metadata.update(updates["metadata"])
-            return entity
-
-        # Promotion links only targets it can resolve and the writer can see,
-        # so the declared link has to exist for the RELATED_TO edge to appear.
-        async def get(self, entity_id):
-            return Entity(
-                id=entity_id,
-                entity_type=EntityType.TASK,
-                name="Linked task",
-                description="",
-                content="",
-                metadata={"project_id": "project_123"},
-            )
-
-    class FakeRelationshipManager:
-        async def create_bulk(self, relationships):
-            created_relationships.extend(relationships)
-            return len(relationships), 0
-
-    async def fake_get_graph_runtime(_organization_id: str):
-        return type(
-            "Runtime",
-            (),
-            {
-                "entity_manager": FakeEntityManager(),
-                "relationship_manager": FakeRelationshipManager(),
-            },
-        )()
-
-    monkeypatch.setattr(
-        "sibyl_core.services.memory_reflection.get_surreal_graph_runtime",
-        fake_get_graph_runtime,
+    created_entities = native_reflection_runtime.entities
+    created_relationships = native_reflection_runtime.relationships
+    native_reflection_runtime.stored["task_123"] = Entity(
+        id="task_123",
+        entity_type=EntityType.TASK,
+        name="Linked task",
+        metadata={"project_id": "project_123"},
     )
 
     pack = await reflect_memory(

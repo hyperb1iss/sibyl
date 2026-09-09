@@ -58,6 +58,10 @@ async def runtime(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[GraphRuntime
             AsyncMock(return_value=runtime),
         )
         monkeypatch.setattr(
+            "sibyl_core.services.graph_runtime.get_surreal_graph_runtime",
+            AsyncMock(return_value=runtime),
+        )
+        monkeypatch.setattr(
             "sibyl_core.tools.reflect._load_reflection_decision_memories",
             AsyncMock(return_value=[]),
         )
@@ -963,9 +967,9 @@ async def test_source_correction_during_promotion_cannot_publish_live_evidence(
     else:
         insert = runtime.entity_manager.create_direct_if_absent
 
-        async def correcting_insert(entity):
+        async def correcting_insert(entity, **kwargs):
             await correct()
-            return await insert(entity)
+            return await insert(entity, **kwargs)
 
         monkeypatch.setattr(runtime.entity_manager, "create_direct_if_absent", correcting_insert)
     common = dict(

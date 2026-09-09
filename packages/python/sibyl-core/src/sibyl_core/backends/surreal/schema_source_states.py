@@ -60,7 +60,55 @@ _RAW_EVIDENCE_FIELDS = (
 )
 
 
-def source_state_event(kind: SourceKind, *, retire_derivations: bool = False) -> str:
+def _raw_publication_evidence_changed() -> str:
+    """Compare read-relevant lifecycle fields without promotion audit details."""
+    stable_states = "[NONE, 'pending', 'promoted', 'active']"
+
+    def state(expression: str) -> str:
+        return f"(IF {expression} IN {stable_states} THEN 'active' ELSE {expression} END)"
+
+    def review(prefix: str, field: str) -> str:
+        value = f"{prefix}.{field}"
+        return (
+            f"(IF {prefix}.metadata.eval_consolidation = NONE AND {value} IN "
+            f"[NONE, 'pending', 'promoted'] THEN 'ordinary' ELSE {value} END)"
+        )
+
+    fields = [
+        field
+        for field in _RAW_EVIDENCE_FIELDS
+        if field
+        not in {
+            "review_state",
+            "metadata.review_state",
+            "metadata.lifecycle_state",
+            "metadata.lifecycle_flags",
+            "metadata.memory_lifecycle",
+        }
+    ]
+    fields.extend(("principal_id", "memory_scope", "scope_key", "project_id", "agent_id"))
+    fields.extend(
+        f"metadata.{flag}{suffix}"
+        for flag in ("hidden", "redacted", "sensitive")
+        for suffix in ("", "_at")
+    )
+    comparisons = [f"$before.{field} != $after.{field}" for field in fields]
+    for field in ("review_state", "metadata.review_state"):
+        comparisons.append(f"{review('$before', field)} != {review('$after', field)}")
+    for field in ("metadata.lifecycle_state", "metadata.memory_lifecycle.state"):
+        comparisons.append(f"{state('$before.' + field)} != {state('$after.' + field)}")
+    for field in ("metadata.lifecycle_flags", "metadata.memory_lifecycle.flags"):
+        comparisons.append(f"($before.{field} ?? []) != ($after.{field} ?? [])")
+    for field in ("replacement_source_id", "duplicate_of_source_id"):
+        comparisons.append(
+            f"$before.metadata.memory_lifecycle.{field} != $after.metadata.memory_lifecycle.{field}"
+        )
+    return " OR ".join(comparisons)
+
+
+def source_state_event(
+    kind: SourceKind, *, retire_derivations: bool = False, publication_bookkeeping: bool = False
+) -> str:
     """Generate only fixed, application-owned identifiers and field expressions.
 
     Comparing source fields avoids relying on database JSON formatting for the
@@ -68,7 +116,11 @@ def source_state_event(kind: SourceKind, *, retire_derivations: bool = False) ->
     """
     table, organization_field = _SOURCE_TABLES[kind]
     fields = _GRAPH_EVIDENCE_FIELDS if kind is SourceKind.GRAPH_ENTITY else _RAW_EVIDENCE_FIELDS
-    changed = " OR ".join(f"$before.{field} != $after.{field}" for field in fields)
+    changed = (
+        _raw_publication_evidence_changed()
+        if kind is SourceKind.RAW_CAPTURE and publication_bookkeeping
+        else " OR ".join(f"$before.{field} != $after.{field}" for field in fields)
+    )
     deleted = "$event = 'DELETE'"
     if kind is SourceKind.RAW_CAPTURE:
         deleted += " OR $after.deleted_at != NONE"

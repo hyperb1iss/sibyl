@@ -344,6 +344,7 @@ async def _reflect_mcp_memory(
             accessible_projects=accessible_projects,
         )
     pack = await reflect_memory(
+        allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
         content=content,
         source_title=source_title,
         intent=intent,

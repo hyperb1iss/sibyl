@@ -348,6 +348,18 @@ async def project_entity_passages(
     """
     source_id = created_source_id or source.id
     stored_parent = await parent_lifecycle_as_stored(entity_manager, source, source_id=source_id)
+    projection_source = None
+    load_projection_source = getattr(entity_manager, "load_projection_source", None)
+    if callable(load_projection_source):
+        try:
+            projection_source = await load_projection_source(source_id)
+        except Exception as exc:
+            return PassageProjectionResult(
+                source_id=source_id, reason="source_unavailable", errors=(str(exc),)
+            )
+        if projection_source is not None:
+            stored_parent = projection_source[0].entity
+
     entities, relationships = plan_entity_passages(
         stored_parent,
         source_id=source_id,
@@ -360,12 +372,22 @@ async def project_entity_passages(
             reason="below_threshold" if not should_project_passages(source) else "single_slice",
         )
 
+    if projection_source is not None:
+        from sibyl_core.projection.pending import pending_patch
+
+        # The atomic parent observation protects this bracket before any child
+        # becomes visible. Preserve pending verdicts owned by other sources.
+        for entity in entities:
+            entity.metadata.update(
+                pending_patch(entity.metadata, {}, authority=f"parent:{source_id}")
+            )
     errors: list[str] = []
     try:
         created_passages = await _create_passages(
             entity_manager,
             entities,
             generate_embeddings=generate_embeddings,
+            projection_source=projection_source,
         )
     except Exception as exc:
         # A memory that stored fine must not fail because its passages did.
@@ -707,17 +729,28 @@ async def _create_passages(
     entities: Sequence[Entity],
     *,
     generate_embeddings: bool,
+    projection_source=None,
 ) -> tuple[Entity, ...]:
     create_direct_bulk = getattr(entity_manager, "create_direct_bulk", None)
     if callable(create_direct_bulk):
         created_ids = list(
-            await create_direct_bulk(list(entities), generate_embeddings=generate_embeddings)
+            await create_direct_bulk(
+                list(entities),
+                generate_embeddings=generate_embeddings,
+                **(
+                    {"projection_source": projection_source}
+                    if projection_source is not None
+                    else {}
+                ),
+            )
         )
         return tuple(
             entity.model_copy(update={"id": created_id})
             for entity, created_id in zip(entities, created_ids, strict=False)
         )
 
+    if projection_source is not None:
+        raise TypeError("protected passage projection requires atomic bulk storage")
     create_direct = getattr(entity_manager, "create_direct", None)
     if callable(create_direct):
         created: list[Entity] = []

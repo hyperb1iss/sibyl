@@ -686,6 +686,7 @@ async def reflect_context(
         )
 
         pack = await reflect_memory(
+            allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
             content=request.content,
             source_title=request.source_title,
             intent=request.intent.value,

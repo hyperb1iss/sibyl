@@ -129,17 +129,21 @@ async def test_v2_reservation_old_and_new_publishers_converge(
         await runtime.entity_manager.create_direct_if_absent(legacy)
     real_insert = runtime.entity_manager.create_direct_if_absent
 
-    async def checked_insert(entity):
+    async def checked_insert(entity, **kwargs):
         assert entity.id == legacy.id
         assert not graph_metadata_recallable(entity.metadata)
         assert all(value == 0 for value in entity.metadata["source_bindings"].values())
-        return await real_insert(entity)
+        assert "derivation" not in kwargs
+        return await real_insert(entity, **kwargs)
 
     monkeypatch.setattr(runtime.entity_manager, "create_direct_if_absent", checked_insert)
     result = await publish(args)
     monkeypatch.setattr(runtime.entity_manager, "create_direct_if_absent", real_insert)
     assert result.success
     assert result.promoted_id == legacy.id
+    assert not await runtime.client.execute_query(
+        "SELECT * FROM memory_derivations WHERE target_id=$id;", id=legacy.id
+    )
     stored, created = await runtime.entity_manager.create_direct_if_absent(legacy)
     assert not created
     verify_reflection_identity(legacy, stored)
