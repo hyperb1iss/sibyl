@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Any
 
 from benchmarks.agent_tasks import coding_controller
 from benchmarks.agent_tasks.manifest import (
@@ -43,6 +44,23 @@ def _task_inputs(root: Path, tasks: list[Task]) -> dict[str, bytes]:
     return inputs
 
 
+def _catalog_document(catalog_bytes: bytes) -> dict[str, Any]:
+    """Validate the catalog envelope before reading tasks or execution inputs."""
+    catalog = strict_json(catalog_bytes)
+    if not isinstance(catalog, dict):
+        raise ManifestError("authored catalog must be an object")
+    if catalog.get("schema_version") != "sibyl-authored-repair-catalog-v1":
+        raise ManifestError("unsupported authored catalog")
+    if catalog.get("experiences") != []:
+        raise ManifestError("authored catalog cannot declare collected experiences")
+    if not isinstance(catalog.get("tasks"), list):
+        raise ManifestError("authored catalog tasks must be an array")
+    seed = catalog.get("seed")
+    if type(seed) is not int or seed < 0:
+        raise ManifestError("authored catalog seed must be a nonnegative integer")
+    return catalog
+
+
 def compose(
     catalog_path: Path,
     output: Path,
@@ -63,18 +81,7 @@ def compose(
     if catalog_path.is_symlink():
         raise ManifestError("catalog must not be a symlink")
     catalog_bytes = catalog_path.read_bytes()
-    catalog = strict_json(catalog_bytes)
-    if not isinstance(catalog, dict):
-        raise ManifestError("authored catalog must be an object")
-    if catalog.get("schema_version") != "sibyl-authored-repair-catalog-v1":
-        raise ManifestError("unsupported authored catalog")
-    if catalog.get("experiences") != []:
-        raise ManifestError("authored catalog cannot declare collected experiences")
-    if not isinstance(catalog.get("tasks"), list):
-        raise ManifestError("authored catalog tasks must be an array")
-    seed = catalog.get("seed")
-    if type(seed) is not int or seed < 0:
-        raise ManifestError("authored catalog seed must be a nonnegative integer")
+    catalog = _catalog_document(catalog_bytes)
     tasks = [Task.model_validate(item) for item in catalog["tasks"]]
     if not tasks or any(task.split == "sealed" for task in tasks):
         raise ManifestError("authored catalog supports learning/development tasks only")
