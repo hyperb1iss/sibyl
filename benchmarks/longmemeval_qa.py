@@ -2,20 +2,27 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
 import os
 import re
 import time
-from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from decimal import Decimal
+from http import HTTPStatus
 from typing import Any, Literal
 
 import tiktoken
 from pydantic import BaseModel, Field, SecretStr
-from pydantic_ai import Agent
+from pydantic_ai import Agent, AgentRunResult, capture_run_messages
+from pydantic_ai.messages import ModelResponse
+from pydantic_ai.models import Model
 
 from sibyl_core.ai.llm.config import LLMConfig, LLMProviderName
 from sibyl_core.ai.providers import build_model, resolve_provider_model_id
+from sibyl_core.ai.transport import collect_transport_attempts, transport_policy
 from sibyl_core.config import settings
 from sibyl_core.evals.longmemeval import LongMemEvalCorpusDocument, build_longmemeval_corpus
 
@@ -92,8 +99,29 @@ class LongMemEvalQAConfig:
     timeout_seconds: float = DEFAULT_QA_TIMEOUT_SECONDS
     context_arm: LongMemEvalContextArm = DEFAULT_QA_CONTEXT_ARM
     max_context_tokens: int = DEFAULT_QA_CONTEXT_TOKENS
+    reader_max_output_tokens: int | None = None
+    judge_max_output_tokens: int | None = None
+    output_retries: int = 1
+    transport_max_retries: int = 2
+    resolved_reader_model: str = field(init=False)
+    resolved_judge_model: str = field(init=False)
 
     def __post_init__(self) -> None:
+        for role in ("reader", "judge"):
+            model = resolve_provider_model_id(
+                LLMConfig(
+                    provider=getattr(self, f"{role}_provider"), model=getattr(self, f"{role}_model")
+                )
+            )
+            object.__setattr__(self, f"resolved_{role}_model", model)
+        for maximum in (self.reader_max_output_tokens, self.judge_max_output_tokens):
+            if maximum is not None and (type(maximum) is not int or maximum <= 0):
+                raise ValueError("QA output limits must be positive integers or None")
+        if any(
+            type(count) is not int or count < 0
+            for count in (self.output_retries, self.transport_max_retries)
+        ):
+            raise ValueError("QA retry counts must be nonnegative")
         if self.mode == "fixture" and self.context_arm == "native-context-v1":
             raise ValueError("Native QA requires model mode; fixture scoring uses dataset sessions")
         if self.context_arm not in LONGMEMEVAL_CONTEXT_ARMS:
@@ -108,10 +136,14 @@ def qa_report_metadata(config: LongMemEvalQAConfig) -> dict[str, Any]:
         "mode": config.mode,
         "enabled": config.mode != "disabled",
         "reader_provider": config.reader_provider,
-        "reader_model": config.reader_model if config.mode != "disabled" else "not-applicable",
+        "reader_model": config.resolved_reader_model
+        if config.mode != "disabled"
+        else "not-applicable",
         "reader_prompt_id": QA_READER_PROMPT_ID if config.mode != "disabled" else "not-applicable",
         "judge_provider": config.judge_provider,
-        "judge_model": config.judge_model if config.mode != "disabled" else "not-applicable",
+        "judge_model": config.resolved_judge_model
+        if config.mode != "disabled"
+        else "not-applicable",
         "judge_prompt_id": QA_JUDGE_PROMPT_ID if config.mode != "disabled" else "not-applicable",
         "rubric_id": QA_RUBRIC_ID if config.mode != "disabled" else "not-applicable",
         "context_arm": config.context_arm,
@@ -123,7 +155,28 @@ def qa_report_metadata(config: LongMemEvalQAConfig) -> dict[str, Any]:
         "max_session_chars": config.max_session_chars,
         "timeout_seconds": config.timeout_seconds,
         "claim_boundary": _claim_boundary(config),
+        "execution_policy": {
+            "reader_model": config.resolved_reader_model,
+            "judge_model": config.resolved_judge_model,
+            "reader_max_output_tokens": config.reader_max_output_tokens,
+            "judge_max_output_tokens": config.judge_max_output_tokens,
+            "unspecified_output_limit": "provider_default",
+            "output_retries": config.output_retries,
+            "transport_max_retries": config.transport_max_retries,
+            "temperature": 0.0,
+            "reader_system_prompt_sha256": hashlib.sha256(
+                READER_SYSTEM_PROMPT.encode()
+            ).hexdigest(),
+            "judge_system_prompt_sha256": hashlib.sha256(JUDGE_SYSTEM_PROMPT.encode()).hexdigest(),
+            "judge_schema_sha256": hashlib.sha256(
+                json.dumps(LongMemEvalQAJudgment.model_json_schema(), sort_keys=True).encode()
+            ).hexdigest(),
+        },
     }
+
+
+class QAReceiptError(RuntimeError):
+    """Stop execution when a stage cannot be durably retained."""
 
 
 async def evaluate_longmemeval_case_qa(
@@ -133,6 +186,7 @@ async def evaluate_longmemeval_case_qa(
     corpus_text_policy: str,
     config: LongMemEvalQAConfig,
     native_markdown: str | None = None,
+    on_stage: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     if config.mode == "disabled":
         return _disabled_result(config)
@@ -187,14 +241,37 @@ async def evaluate_longmemeval_case_qa(
             reader_prompt=reader_prompt,
         )
     else:
-        result = await _model_result(
-            entry,
-            config=config,
-            context_sessions=context_sessions,
-            reference_answer=reference_answer,
-            answer_session_ids=answer_session_ids,
-            reader_prompt=reader_prompt,
-        )
+        stages: dict[str, dict[str, Any]] = {}
+
+        def retain_stage(receipt: dict[str, Any]) -> None:
+            stages[receipt["stage"]] = receipt
+            if on_stage is not None:
+                try:
+                    on_stage(receipt)
+                except Exception as error:
+                    raise QAReceiptError("QA stage receipt could not be persisted") from error
+
+        try:
+            result = await _model_result(
+                entry,
+                config=config,
+                context_sessions=context_sessions,
+                reference_answer=reference_answer,
+                answer_session_ids=answer_session_ids,
+                reader_prompt=reader_prompt,
+                on_stage=retain_stage,
+            )
+        except QAReceiptError:
+            raise
+        except Exception as error:
+            result = {
+                **qa_report_metadata(config),
+                "evaluated": False,
+                "status": "failed",
+                "exception_type": type(error).__name__,
+                "execution_stages": list(stages.values()),
+                "generated_answer": stages.get("reader", {}).get("output"),
+            }
 
     result["context_receipt"] = {
         "arm": config.context_arm,
@@ -280,18 +357,30 @@ async def _model_result(
     reference_answer: str,
     answer_session_ids: list[str],
     reader_prompt: str,
+    on_stage: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     reader_config = _llm_config(
         provider=config.reader_provider,
-        model=config.reader_model,
+        model=config.resolved_reader_model,
         config=config,
     )
     reader_agent = Agent(
         build_model(reader_config),
         output_type=str,
         instructions=READER_SYSTEM_PROMPT,
+        retries={"output": config.output_retries},
     )
-    reader_response = await reader_agent.run(reader_prompt)
+    stages = []
+    reader_response = await _run_qa_stage(
+        "reader",
+        reader_agent,
+        reader_prompt,
+        reader_config,
+        config.reader_max_output_tokens,
+        config.output_retries,
+        stages,
+        on_stage,
+    )
     generated_answer = str(reader_response.output).strip()
 
     judge_prompt = _judge_prompt(
@@ -302,21 +391,30 @@ async def _model_result(
     )
     judge_config = _llm_config(
         provider=config.judge_provider,
-        model=config.judge_model,
+        model=config.resolved_judge_model,
         config=config,
     )
     judge_agent = Agent(
         build_model(judge_config),
         output_type=LongMemEvalQAJudgment,
         instructions=JUDGE_SYSTEM_PROMPT,
+        retries={"output": config.output_retries},
     )
-    judge_response = await judge_agent.run(judge_prompt)
+    judge_response = await _run_qa_stage(
+        "judge",
+        judge_agent,
+        judge_prompt,
+        judge_config,
+        config.judge_max_output_tokens,
+        config.output_retries,
+        stages,
+        on_stage,
+    )
     judgment = judge_response.output
-    reader_model = resolve_provider_model_id(reader_config)
-    judge_model = resolve_provider_model_id(judge_config)
 
     return {
-        **qa_report_metadata(replace(config, reader_model=reader_model, judge_model=judge_model)),
+        **qa_report_metadata(config),
+        "execution_stages": stages,
         "evaluated": True,
         "correct": judgment.correct,
         "score": float(judgment.score),
@@ -330,6 +428,109 @@ async def _model_result(
         "judge_estimated_input_tokens": _estimate_tokens(judge_prompt),
         "judge_estimated_output_tokens": _estimate_tokens(judgment.model_dump_json()),
     }
+
+
+async def _run_qa_stage[OutputT](
+    role: Literal["reader", "judge"],
+    agent: Agent[None, OutputT],
+    prompt: str,
+    config: LLMConfig,
+    max_tokens: int | None,
+    output_retries: int,
+    stages: list[dict[str, Any]],
+    on_stage: Callable[[dict[str, Any]], None] | None,
+) -> AgentRunResult[OutputT]:
+    if not isinstance(agent.model, Model) or agent.model.model_name != config.model:
+        raise RuntimeError("QA model resolution changed after policy freeze")
+    receipt: dict[str, Any] = {
+        "stage": role,
+        "status": "started",
+        "model": config.model,
+        "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+        "max_output_tokens": max_tokens,
+        "output_retries": output_retries,
+        "transport_policy": transport_policy(config),
+        "system_prompt_sha256": hashlib.sha256(
+            (READER_SYSTEM_PROMPT if role == "reader" else JUDGE_SYSTEM_PROMPT).encode()
+        ).hexdigest(),
+        "output_schema_sha256": hashlib.sha256(
+            json.dumps(
+                {"type": "string"}
+                if role == "reader"
+                else LongMemEvalQAJudgment.model_json_schema(),
+                sort_keys=True,
+            ).encode()
+        ).hexdigest(),
+    }
+
+    stages.append(receipt)
+    if on_stage is not None:
+        on_stage(dict(receipt))
+    with collect_transport_attempts() as attempts, capture_run_messages() as messages:
+        try:
+            result = await agent.run(
+                prompt,
+                model_settings={"max_tokens": max_tokens} if max_tokens is not None else None,
+            )
+        except (Exception, asyncio.CancelledError) as error:
+            receipt.update(
+                status="cancelled" if isinstance(error, asyncio.CancelledError) else "failed",
+                exception_type=type(error).__name__,
+            )
+            raise
+        else:
+            receipt["status"] = "completed"
+            receipt["output"] = (
+                result.output.model_dump(mode="json")
+                if isinstance(result.output, BaseModel)
+                else result.output
+            )
+            return result
+        finally:
+            responses = [message for message in messages if isinstance(message, ModelResponse)]
+            successful = [
+                index
+                for index, attempt in enumerate(attempts)
+                if attempt.status_code is not None
+                and HTTPStatus.OK <= attempt.status_code < HTTPStatus.MULTIPLE_CHOICES
+            ]
+            if len(successful) == len(responses) and all(
+                response.usage.has_values() for response in responses
+            ):
+                for index in successful:
+                    attempts[index] = attempts[index].model_copy(update={"usage_known": True})
+            complete = (
+                bool(responses)
+                and bool(attempts)
+                and all(attempt.usage_known for attempt in attempts)
+            )
+            known_responses = [response for response in responses if response.usage.has_values()]
+            costs = [
+                response.usage.cost for response in responses if response.usage.cost is not None
+            ]
+            known_cost = sum(costs, Decimal(0)) if costs else None
+            receipt.update(
+                transport_attempts=[attempt.model_dump(mode="json") for attempt in attempts],
+                reported_input_tokens=sum(
+                    response.usage.input_tokens for response in known_responses
+                )
+                if known_responses
+                else None,
+                reported_output_tokens=sum(
+                    response.usage.output_tokens for response in known_responses
+                )
+                if known_responses
+                else None,
+                known_reported_cost_usd=str(known_cost) if known_cost is not None else None,
+                reported_cost_usd=str(known_cost)
+                if complete and len(costs) == len(responses)
+                else None,
+                usage_complete=complete,
+                response_count=len(responses),
+                response_models=[response.model_name for response in responses],
+            )
+            if on_stage is not None:
+                on_stage(dict(receipt))
 
 
 def _llm_config(
@@ -347,6 +548,7 @@ def _llm_config(
         model=model,
         temperature=0.0,
         timeout_seconds=config.timeout_seconds,
+        transport_max_retries=config.transport_max_retries,
         api_key=SecretStr(api_key),
     )
 
