@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -12,6 +13,7 @@ from typing import Any
 import structlog
 
 from sibyl_core.errors import EntityNotFoundError
+from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.models.memory_extraction import ExtractedMemoryEntity
 from sibyl_core.projection.inheritance import (
@@ -347,6 +349,7 @@ async def project_memory_entities(
     relationships: list[Relationship] = []
     extracted_count = 0
     skipped = 0
+    protected_sources: dict[str, Any] = {}
 
     for index, source in enumerate(sources):
         source_id = source_ids[index] if index < len(source_ids) else source.id
@@ -365,6 +368,16 @@ async def project_memory_entities(
             source.model_copy(update={"id": source_id}),
             source_id=source_id,
         )
+        projection_source = await _load_protected_projection_source(entity_manager, source_id)
+        if projection_source is not None:
+            if not _projection_source_matches_identity(projection_source, group_id, source_id):
+                return MemoryProjectionBatchResult(
+                    sources=len(sources),
+                    projection_state="partial",
+                    errors=("projection source identity does not match requested source",),
+                )
+            protected_sources[source_id] = projection_source
+            projected_source = projection_source[0].entity
         extracted = extract_projected_memory_entities(
             projected_source,
             max_entities=max_entities,
@@ -386,6 +399,7 @@ async def project_memory_entities(
                 source=projected_source,
                 source_id=source_id,
                 candidates=extracted,
+                protected_source=source_id in protected_sources,
                 projected_by_id=projected_by_id,
                 relationships=relationships,
             ),
@@ -411,6 +425,7 @@ async def project_memory_entities(
         projected_entity_links_by_source_id=projected_entity_links_by_source_id,
         relationships=relationships,
         generate_embeddings=generate_embeddings,
+        protected_sources=protected_sources,
     )
 
 
@@ -425,6 +440,7 @@ async def project_extracted_memory_entities(
     max_entities: int = DEFAULT_MAX_PROJECTED_ENTITIES,
     min_confidence: float = DEFAULT_MIN_CONFIDENCE,
     generate_embeddings: bool = True,
+    projection_sources: Mapping[str, Any] | None = None,
 ) -> MemoryProjectionBatchResult:
     now = datetime.now(UTC)
     source_ids = list(created_source_ids or [])
@@ -433,6 +449,7 @@ async def project_extracted_memory_entities(
     relationships: list[Relationship] = []
     extracted_count = 0
     skipped = 0
+    protected_sources: dict[str, Any] = {}
 
     for index, source in enumerate(sources):
         source_id = source_ids[index] if index < len(source_ids) else source.id
@@ -448,6 +465,19 @@ async def project_extracted_memory_entities(
             source.model_copy(update={"id": source_id}),
             source_id=source_id,
         )
+        projection_source = (projection_sources or {}).get(source_id)
+        if projection_source is None:
+            if await _load_protected_projection_source(entity_manager, source_id) is not None:
+                raise ValueError("protected extraction requires its pre-extraction observation")
+        else:
+            if not _projection_source_matches_identity(projection_source, group_id, source_id):
+                return MemoryProjectionBatchResult(
+                    sources=len(sources),
+                    projection_state="partial",
+                    errors=("projection source identity does not match requested source",),
+                )
+            protected_sources[source_id] = projection_source
+            projected_source = projection_source[0].entity
         extracted = _projected_from_extracted_entities(
             extractions_by_source_id.get(source_id, ()),
             source=projected_source,
@@ -464,6 +494,7 @@ async def project_extracted_memory_entities(
             source=projected_source,
             source_id=source_id,
             candidates=extracted,
+            protected_source=source_id in protected_sources,
             projected_by_id=projected_by_id,
             relationships=relationships,
         )
@@ -479,6 +510,87 @@ async def project_extracted_memory_entities(
         projected_entity_links_by_source_id=projected_entity_links_by_source_id,
         relationships=relationships,
         generate_embeddings=generate_embeddings,
+        protected_sources=protected_sources,
+    )
+
+
+def _projection_source_matches_identity(
+    projection_source: Any, group_id: str, source_id: str
+) -> bool:
+    snapshot, association = projection_source
+    return (
+        snapshot.observation.durable
+        and snapshot.observation.source
+        == SourceIdentity(group_id, SourceKind.GRAPH_ENTITY, source_id)
+        and snapshot.entity.id == source_id
+        and snapshot.entity.organization_id == group_id
+        and association.get("target_id") == source_id
+        and association.get("target_kind") == SourceKind.GRAPH_ENTITY.value
+        and association.get("organization_id") == group_id
+    )
+
+
+async def _load_protected_projection_source(entity_manager: Any, source_id: str) -> Any:
+    loader = getattr(entity_manager, "load_projection_source", None)
+    return await loader(source_id) if callable(loader) else None
+
+
+async def _write_projection_entities(
+    entity_manager: Any,
+    entities: list[Entity],
+    *,
+    protected_sources: Mapping[str, Any],
+    generate_embeddings: bool,
+) -> _ProjectedEntityWriteResult:
+    ordinary = []
+    protected: dict[str, list[Entity]] = {}
+    for entity in entities:
+        source_id = str(entity.metadata.get("source_entity_id") or "")
+        if source_id in protected_sources:
+            entity.metadata.update(
+                pending_patch(entity.metadata, {}, authority=f"parent:{source_id}")
+            )
+            protected.setdefault(source_id, []).append(entity)
+        else:
+            ordinary.append(entity)
+
+    async def write_protected(source_id: str, rows: list[Entity]) -> _ProjectedEntityWriteResult:
+        writer = getattr(entity_manager, "create_direct_bulk", None)
+        if not callable(writer):
+            raise ValueError("protected projection requires an atomic graph writer")
+        ids = list(
+            await writer(
+                rows,
+                generate_embeddings=generate_embeddings,
+                projection_source=protected_sources[source_id],
+            )
+        )
+        return _ProjectedEntityWriteResult(
+            created_ids=ids,
+            id_map={row.id: row.id for row in rows},
+            created_entities=tuple(rows),
+        )
+
+    async def write_ordinary() -> _ProjectedEntityWriteResult:
+        missing = await _missing_projected_entities(entity_manager, ordinary)
+        return await _create_projected_entities(
+            entity_manager, missing, generate_embeddings=generate_embeddings
+        )
+
+    completed = await asyncio.gather(
+        write_ordinary(),
+        *(write_protected(source_id, rows) for source_id, rows in protected.items()),
+        return_exceptions=True,
+    )
+    results: list[_ProjectedEntityWriteResult] = []
+    for result in completed:
+        if isinstance(result, BaseException):
+            raise result
+        results.append(result)
+    return _ProjectedEntityWriteResult(
+        created_ids=[entity_id for result in results for entity_id in result.created_ids],
+        id_map={key: value for result in results for key, value in result.id_map.items()},
+        created_entities=tuple(entity for result in results for entity in result.created_entities),
     )
 
 
@@ -493,6 +605,7 @@ async def _persist_projection_batch(
     projected_entity_links_by_source_id: Mapping[str, Sequence[ProjectedEntitySourceLink]],
     relationships: list[Relationship],
     generate_embeddings: bool,
+    protected_sources: Mapping[str, Any],
 ) -> MemoryProjectionBatchResult:
     if not projected_by_id:
         return MemoryProjectionBatchResult(sources=0, skipped=skipped)
@@ -500,12 +613,10 @@ async def _persist_projection_batch(
     errors: list[str] = []
     entity_writes: _ProjectedEntityWriteResult
     try:
-        entities_to_create = await _missing_projected_entities(
-            entity_manager, list(projected_by_id.values())
-        )
-        entity_writes = await _create_projected_entities(
+        entity_writes = await _write_projection_entities(
             entity_manager,
-            entities_to_create,
+            list(projected_by_id.values()),
+            protected_sources=protected_sources,
             generate_embeddings=generate_embeddings,
         )
     except Exception as exc:
@@ -725,6 +836,7 @@ async def _resolve_projected_entities(
                 "project_id",
                 "principal_id",
                 "agent_id",
+                "projection_evidence_source_id",
             ),
         ),
     )
@@ -766,6 +878,7 @@ def _add_projection_candidates(
     source: Entity,
     source_id: str,
     candidates: Sequence[ProjectedMemoryEntity],
+    protected_source: bool = False,
     projected_by_id: dict[str, Entity],
     relationships: list[Relationship],
 ) -> list[ProjectedEntitySourceLink]:
@@ -776,6 +889,7 @@ def _add_projection_candidates(
             group_id=group_id,
             now=now,
             source=source,
+            protected_source=protected_source,
         )
         shared = projected_by_id.setdefault(entity.id, entity)
         shared.metadata.update(
@@ -918,6 +1032,7 @@ def _projected_entity(
     group_id: str,
     now: datetime,
     source: Entity,
+    protected_source: bool = False,
 ) -> Entity:
     entity_id = _generate_id(
         candidate.entity_type.value,
@@ -925,6 +1040,7 @@ def _projected_entity(
         "memory_projection",
         group_id,
         _projection_identity_scope(source),
+        *([source.id] if protected_source else []),
     )
     content = (
         "\n".join(part for part in (candidate.description, candidate.context) if part)
@@ -941,6 +1057,8 @@ def _projected_entity(
         "source_entity_type": source.entity_type.value,
         **_inherited_scope_metadata(source),
     }
+    if protected_source:
+        metadata["projection_evidence_source_id"] = source.id
     if metadata.get("memory_scope") == "project" and metadata.get("scope_key"):
         metadata["project_id"] = metadata["scope_key"]
     return Entity(

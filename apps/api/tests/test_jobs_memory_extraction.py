@@ -526,3 +526,65 @@ def test_memory_extraction_telemetry_records_enqueue_and_run() -> None:
     assert any(
         metric["name"] == "sibyl_memory_extraction_runs_total" for metric in snapshot["metrics"]
     )
+
+
+async def test_queued_extraction_carries_pre_prompt_protected_snapshot(monkeypatch):
+    from sibyl_core.models.entities import Entity, EntityType
+
+    entity = Entity(
+        id="session-created",
+        entity_type=EntityType.SESSION,
+        name="Retained session",
+        content="Current SurrealDB evidence from the retained graph source.",
+    )
+    snapshot = (SimpleNamespace(entity=entity), {"active": True})
+    loader = AsyncMock(return_value=snapshot)
+    manager = SimpleNamespace(load_projection_source=loader)
+    runtime = SimpleNamespace(entity_manager=manager, relationship_manager=SimpleNamespace())
+    monkeypatch.setattr(
+        memory_extraction, "get_surreal_graph_runtime", AsyncMock(return_value=runtime)
+    )
+    captured = {}
+
+    async def projection(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            projected_entities=0,
+            relationships=0,
+            projection_state="complete",
+            projected_entity_ids_by_source_id={},
+            projected_entity_links_by_source_id={},
+            errors=[],
+        )
+
+    class Extractor(FakeExtractor):
+        async def extract_many(self, prompts, **kwargs):
+            assert entity.content in prompts[0]
+            assert "stale queued evidence" not in prompts[0]
+            loader.return_value = (
+                SimpleNamespace(
+                    entity=entity.model_copy(update={"content": "Changed during extraction."})
+                ),
+                {},
+            )
+            return await super().extract_many(prompts, **kwargs)
+
+    monkeypatch.setattr(memory_extraction, "memory_batch_entity_extractor", lambda **_: Extractor())
+    monkeypatch.setattr(memory_extraction, "project_extracted_memory_entities", projection)
+    result = await memory_extraction.extract_memory_entities(
+        {},
+        [
+            {
+                "id": "session-created",
+                "entity_type": "session",
+                "name": "Queued session",
+                "content": "stale queued evidence about database storage",
+            }
+        ],
+        "org-123",
+    )
+    assert not result["errors"]
+    assert not result["projection_errors"]
+    assert loader.await_count == 1
+    assert captured["projection_sources"][entity.id] is snapshot
+    assert captured["sources"][0].content == entity.content

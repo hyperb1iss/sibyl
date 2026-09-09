@@ -900,7 +900,7 @@ __all__ = ["CLEAR_MEMORY_SCOPE", "MAX_ENTITY_CONTENT_CHARS", "heal_entity_metada
 
 
 async def _replace_projected_entities(client, records, *, group_id, projection_source):
-    """Write passages and their protected parent observations in one transaction."""
+    """Write projections and their protected parent observations atomically."""
     from dataclasses import asdict
 
     from sibyl_core.services.graph_derivations import graph_target_digest
@@ -915,8 +915,9 @@ async def _replace_projected_entities(client, records, *, group_id, projection_s
         entity = entity_from_surreal_row(record)
         if (
             entity.entity_type is not EntityType.PASSAGE
-            or entity.metadata.get("source_entity_id") != observation.source.id
-        ):
+            and entity.metadata.get("category")
+            not in {"memory_projection", "memory_fact_projection"}
+        ) or (entity.metadata.get("source_entity_id") != observation.source.id):
             raise ValueError("projection target does not match parent")
         associations.append(
             {
