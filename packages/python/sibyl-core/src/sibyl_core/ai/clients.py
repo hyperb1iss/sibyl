@@ -115,6 +115,7 @@ def _config_fingerprint(config: LLMConfig) -> str:
             str(config.temperature),
             str(config.max_tokens),
             str(config.timeout_seconds),
+            str(config.transport_max_retries),
             api_key_hash or "",
         ]
     )

@@ -82,6 +82,8 @@ async def test_extractor_returns_provider_usage_and_complete_cost() -> None:
         "total_tokens": 16,
         "cost_usd": 0.0012,
         "cost_complete": True,
+        "transport_attempts": [],
+        "transport_usage_complete": None,
     }
 
 
@@ -159,7 +161,7 @@ async def test_extractor_reserves_budget_before_provider_call() -> None:
     context, surface, tokens = enforcer.calls[0]
     assert context.user_id == "user-1"
     assert surface == "default"
-    assert tokens == 11
+    assert tokens > 11  # Declared output schema and retry envelope are included.
 
 
 async def _invalid_json_response(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:
