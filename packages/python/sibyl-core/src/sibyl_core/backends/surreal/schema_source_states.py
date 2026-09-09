@@ -180,12 +180,14 @@ async def migrate_source_states(
     mutate = ownership.mutate if ownership is not None else execute_query
     table, organization_field = _SOURCE_TABLES[kind]
     deleted = "$source.deleted_at != NONE" if kind is SourceKind.RAW_CAPTURE else "false"
-    cursor = ""
+    cursor = None
     checked = 0
     while True:
         started = time.monotonic()
+        # Walk primary records so secondary-index scan boundaries cannot skip sources.
+        after = "WHERE id > $cursor" if cursor is not None else ""
         rows = await execute_query(
-            f"SELECT id, uuid FROM {table} WHERE uuid > $cursor ORDER BY uuid LIMIT $limit;",
+            f"SELECT id, uuid FROM {table} {after} ORDER BY id LIMIT $limit;",
             cursor=cursor,
             limit=512,
         )
@@ -219,7 +221,7 @@ async def migrate_source_states(
             rows=[r["id"] for r in rows],
             kind=kind.value,
         )
-        cursor = str(rows[-1]["uuid"])
+        cursor = rows[-1]["id"]
         checked += len(rows)
         log.info(
             "source_state_backfill_page",

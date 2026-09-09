@@ -177,3 +177,28 @@ async def test_raw_epoch_backfill_preserves_source_rows_and_deletion_state() -> 
         assert changed[0]["generation"] == 2
     finally:
         await client.close()
+
+
+async def test_graph_backfill_covers_multiple_index_pages(runtime: GraphRuntime) -> None:
+    from sibyl_core.backends.surreal.schema_source_states import (
+        migrate_source_states,
+        source_state_event,
+    )
+
+    client = runtime.client
+    base = (await client.execute_query("SELECT * FROM entity LIMIT 1;"))[0]
+    await client.execute_query(
+        "REMOVE EVENT maintain_source_state ON entity; DELETE source_states;"
+    )
+    rows = [
+        {**{key: value for key, value in base.items() if key != "id"}, "uuid": f"backfill-{i:05}"}
+        for i in range(1025)
+    ]
+    await client.execute_query("INSERT INTO entity $rows RETURN NONE;", rows=rows)
+    await client.execute_query(source_state_event(SourceKind.GRAPH_ENTITY))
+    before = await client.execute_query("SELECT * FROM entity ORDER BY id;")
+    await migrate_source_states(client.execute_query, kind=SourceKind.GRAPH_ENTITY)
+    states = await client.execute_query("SELECT * FROM source_states;")
+    assert len(states) == len(before) == 1027
+    assert {row["source_id"] for row in states} == {row["uuid"] for row in before}
+    assert await client.execute_query("SELECT * FROM entity ORDER BY id;") == before
