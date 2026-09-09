@@ -505,3 +505,21 @@ async def test_declared_cross_family_contrast_can_include_a_preventive_action(
     result = await propose(group, c.DraftConditionalProcedure.model_validate(draft), model)
     assert result.candidate is not None
     assert result.receipt["entailment"] == "pending"
+
+
+async def test_complete_input_budget_includes_schema_and_accepts_exact_boundary(group, model):
+    model[0]["proposal"] = c.ProcedureProposal(abstention_reason="No supported procedure")
+    actual = (
+        len(c.SYSTEM_PROMPT)
+        + len(c._prompt(group))
+        + len(c._canonical(c.ProcedureProposal.model_json_schema()).decode("utf-8"))
+    )
+    with pytest.raises(c.ConsolidationInputBudgetExceeded) as raised:
+        await c.propose_conditional_procedure(group, max_input_chars=actual - 1)
+    assert raised.value.actual_chars == actual
+    assert raised.value.max_input_chars == actual - 1
+    assert model[1] == []
+    result = await c.propose_conditional_procedure(group, max_input_chars=actual)
+    assert len(model[1]) == 1
+    assert result.receipt["input_chars"] == actual
+    assert result.receipt["max_input_chars"] == actual

@@ -273,3 +273,34 @@ async def test_original_admission_ledger_is_immutable(
             await p.store_consolidation(op, result)
     assert await rows("eval_consolidations") == []
     assert len(await rows("raw_captures")) == 2
+
+
+async def test_frozen_input_and_output_budgets_reach_actual_proposal(proposal, monkeypatch):
+    from sibyl_core.ai.llm.config import EnvConfigSource
+
+    op, result = proposal
+    environment = {"SIBYL_LLM_MEMORY_MODEL": "test-model", "SIBYL_LLM_MEMORY_MAX_TOKENS": "3072"}
+    monkeypatch.setattr(p, "resolve_llm_config", EnvConfigSource(environment).resolve)
+    monkeypatch.setattr(p.core_config, "consolidation_max_input_chars", 120_000)
+    model, revision = await p.consolidation_extractor_configuration()
+    calls = []
+
+    async def propose(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(proposal=result)
+
+    monkeypatch.setattr(eval_consolidation, "propose_admitted_procedure", propose)
+    stored = await p.consolidate_admitted_procedure(
+        replace(op, extractor_revision=revision),
+        trusted_issuer_id="oracle-1",
+        trusted_public_key=None,
+        model_override=model,
+    )
+    assert stored.memory is not None
+    assert calls[0]["max_input_chars"] == 120_000
+    assert calls[0]["max_tokens"] == 3072
+    monkeypatch.setattr(p.core_config, "consolidation_max_input_chars", 120_001)
+    assert (await p.consolidation_extractor_configuration())[1] != revision
+    monkeypatch.setattr(p.core_config, "consolidation_max_input_chars", 120_000)
+    environment["SIBYL_LLM_MEMORY_MAX_TOKENS"] = "3073"
+    assert (await p.consolidation_extractor_configuration())[1] != revision
