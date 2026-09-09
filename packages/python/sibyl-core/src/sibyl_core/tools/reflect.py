@@ -54,6 +54,7 @@ async def reflect_memory(
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
     writable_projects: set[str] | None = None,
+    allowed_memory_scope_keys: frozenset[str] | None = None,
     memory_scope: str | MemoryScope | None = None,
     scope_key: str | None = None,
     suggested_memory_scope: str | MemoryScope | None = None,
@@ -108,17 +109,24 @@ async def reflect_memory(
         limit=limit,
     )
     active_extractor = extractor or HeuristicReflectionExtractor()
-    candidates = await active_extractor.extract(
-        ReflectionExtractionRequest(
-            content=content,
-            source_title=source_title,
-            intent=intent,
-            domain=domain,
-            project=project,
-            limit=limit,
+
+    async def extract_candidates():
+        extracted = await active_extractor.extract(
+            ReflectionExtractionRequest(
+                content=content,
+                source_title=source_title,
+                intent=intent,
+                domain=domain,
+                project=project,
+                limit=limit,
+            )
         )
-    )
-    validate_reflection_candidates(candidates, require_source_ids=False)
+        validate_reflection_candidates(extracted, require_source_ids=False)
+        return extracted
+
+    candidates = await extract_candidates() if not persist or persist_review else None
+    source_observations = ()
+    source_authority = None
 
     persist_policy_metadata: dict[str, Any] = {}
     if persist:
@@ -132,6 +140,8 @@ async def reflect_memory(
         )
         persist_policy_metadata = _reflect_policy_metadata(persist_decisions)
         if any(not decision.allowed for decision in persist_decisions):
+            if candidates is None:
+                candidates = await extract_candidates()
             denied_candidates = [
                 ground_reflection_candidate(
                     replace(candidate, metadata={**candidate.metadata, **persist_policy_metadata}),
@@ -189,6 +199,8 @@ async def reflect_memory(
         else:
             # A requested source is an evidence prerequisite. Never publish a
             # candidate after its source was denied or retired.
+            if candidates is None:
+                candidates = await extract_candidates()
             return ReflectionPack(
                 source_title=source_title,
                 source_id=source.id,
@@ -217,6 +229,45 @@ async def reflect_memory(
                 total_candidates=len(candidates),
                 persisted_count=0,
             )
+
+    if persist and not persist_review and source_id is not None:
+        from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
+        from sibyl_core.services.memory_derivations import validate_observations
+        from sibyl_core.services.memory_source_validation import SourceReadAuthority
+        from sibyl_core.services.observed_sources import load_authorized_source_snapshot
+        from sibyl_core.services.source_observations import (
+            GraphSourceSnapshot,
+            SourceUnavailableError,
+        )
+
+        authority = SourceReadAuthority(
+            str(principal_id or ""),
+            projects=frozenset(accessible_projects or ()),
+            scope_keys=(
+                frozenset(allowed_memory_scope_keys)
+                if allowed_memory_scope_keys is not None
+                else None
+            ),
+        )
+        snapshot = await load_authorized_source_snapshot(
+            SourceIdentity(str(organization_id), SourceKind.GRAPH_ENTITY, source_id),
+            authority,
+            organization_id=str(organization_id),
+        )
+        if (
+            not isinstance(snapshot, GraphSourceSnapshot)
+            or not snapshot.observation.durable
+            or (snapshot.entity.content or snapshot.entity.description).strip() != content
+            or not await validate_observations(
+                [snapshot.observation], authority, organization_id=str(organization_id)
+            )
+        ):
+            raise SourceUnavailableError()
+        content = snapshot.entity.content or snapshot.entity.description
+        source_observations = (snapshot.observation,)
+        source_authority = authority
+    if candidates is None:
+        candidates = await extract_candidates()
 
     source_anchor_id = source_id
     if persist and source_anchor_id is None and not persist_source:
@@ -293,6 +344,8 @@ async def reflect_memory(
             )
             continue
         candidate_result = await _persist_reflection_candidate(
+            source_observations=source_observations,
+            source_authority=source_authority,
             candidate=replace(candidate, metadata=metadata),
             organization_id=str(organization_id),
             principal_id=principal_id,

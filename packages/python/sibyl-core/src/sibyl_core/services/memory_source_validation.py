@@ -50,12 +50,17 @@ type SourceAuthorityResolver = Callable[[str, str], Awaitable[SourceReadAuthorit
 
 
 def _saved_ceiling(memory: content_models.RawMemory) -> SourceReadAuthority | None:
-    value = memory.metadata.get(SOURCE_VALIDATION_CONTEXT_KEY)
+    return source_authority_ceiling(
+        memory.metadata.get(SOURCE_VALIDATION_CONTEXT_KEY), memory.principal_id
+    )
+
+
+def source_authority_ceiling(value: object, principal_id: str) -> SourceReadAuthority | None:
     if not isinstance(value, Mapping):
         return None
     if type(value.get("version")) is not int or value["version"] != 1:
         return None
-    if value.get("principal_id") != memory.principal_id or not memory.principal_id:
+    if value.get("principal_id") != principal_id or not principal_id:
         return None
     if type(value.get("scope_restricted")) is not bool:
         return None
@@ -66,7 +71,7 @@ def _saved_ceiling(memory: content_models.RawMemory) -> SourceReadAuthority | No
     if not value["scope_restricted"] and value["scope_keys"]:
         return None
     return SourceReadAuthority(
-        principal_id=memory.principal_id,
+        principal_id=principal_id,
         projects=frozenset(value["projects"]),
         teams=frozenset(value["teams"]),
         delegations=frozenset(value["delegations"]),

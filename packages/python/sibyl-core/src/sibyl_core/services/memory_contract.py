@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sibyl_core.auth.memory_policy import MemoryPolicyDecision
+from sibyl_core.memory_pipeline.observations import SourceObservation
 from sibyl_core.models.reflection import ReflectionCandidate
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 from sibyl_core.tools.responses import AddResponse
+
+if TYPE_CHECKING:
+    from sibyl_core.services.memory_source_validation import SourceReadAuthority
 
 
 class WriteMode(StrEnum):
@@ -151,3 +155,5 @@ class _ReflectionPromotionPlan:
     target_project: str | None
     raw_source_ids: list[str]
     input_memories: list[RawMemory]
+    source_observations: tuple[SourceObservation, ...] = ()
+    source_authority: SourceReadAuthority | None = None

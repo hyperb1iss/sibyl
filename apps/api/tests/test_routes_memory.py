@@ -2241,6 +2241,7 @@ async def test_preview_memory_share_returns_disabled_contract_and_audit() -> Non
     assert accessible.await_args_list[1].kwargs == {"required_role": ProjectRole.CONTRIBUTOR}
     accessible_teams.assert_awaited_once_with(ctx)
     preview.assert_awaited_once_with(
+        allowed_memory_scope_keys=None,
         source_ids=["memory-1"],
         organization_id=str(org.id),
         principal_id="user-123",
@@ -2404,6 +2405,7 @@ async def test_share_memory_applies_promotions_and_returns_audit_receipt() -> No
 
     accessible_teams.assert_awaited_once_with(ctx)
     share.assert_awaited_once_with(
+        allowed_memory_scope_keys=None,
         source_ids=["memory-1"],
         organization_id=str(org.id),
         principal_id="user-123",
@@ -2505,6 +2507,7 @@ async def test_share_memory_applies_team_promotions_with_membership_scope() -> N
 
     accessible_teams.assert_awaited_once_with(ctx)
     share.assert_awaited_once_with(
+        allowed_memory_scope_keys=None,
         source_ids=["memory-1"],
         organization_id=str(org.id),
         principal_id="user-123",
@@ -2999,6 +3002,7 @@ async def test_auto_review_reflection_candidate_promotes_safe_candidate() -> Non
         writable_projects={"project_123"},
     )
     promote.assert_awaited_once_with(
+        allowed_memory_scope_keys=None,
         candidate_id="candidate-1",
         organization_id=str(org.id),
         principal_id="user-123",
@@ -3417,6 +3421,7 @@ async def test_promote_reflection_candidate_verifies_project_target() -> None:
         require_existing_project=True,
     )
     promote.assert_awaited_once_with(
+        allowed_memory_scope_keys=None,
         candidate_id="candidate-1",
         organization_id=str(org.id),
         principal_id="user-123",
@@ -3516,6 +3521,7 @@ async def test_promote_memory_routes_imported_raw_memory() -> None:
 
     reflection_promote.assert_awaited_once()
     raw_promote.assert_awaited_once_with(
+        allowed_memory_scope_keys=None,
         raw_memory_id="raw-1",
         organization_id=str(org.id),
         principal_id="user-123",
