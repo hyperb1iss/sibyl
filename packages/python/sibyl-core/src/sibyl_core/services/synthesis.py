@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import asdict, replace
 from typing import Any
 
+from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
 from sibyl_core.memory_pipeline.source_lifecycle import public_memory_metadata
 from sibyl_core.models.context import ContextIntent, ContextLayer, ContextPack
 from sibyl_core.models.synthesis import (
@@ -27,12 +28,17 @@ from sibyl_core.models.synthesis import (
     SynthesisVerification,
     SynthesisVerificationStatus,
 )
+from sibyl_core.services.memory_source_validation import SourceReadAuthority
+from sibyl_core.services.observed_sources import SourceSnapshot
+from sibyl_core.services.source_observations import GraphSourceSnapshot, SourceUnavailableError
+from sibyl_core.services.source_state_store import RawSourceSnapshot
 from sibyl_core.tools.responses import ExploreResponse, SearchResponse, SearchResult
 
 SynthesisSearchFn = Callable[..., Awaitable[SearchResponse]]
 SynthesisRelatedFn = Callable[..., Awaitable[list[SynthesisSourceReference]]]
 SynthesisContextFn = Callable[..., Awaitable[ContextPack]]
 SynthesisRememberFn = Callable[..., Awaitable[Any]]
+SynthesisSourceLoader = Callable[..., Awaitable[SourceSnapshot]]
 
 SECTION_TEMPLATES: dict[SynthesisOutputType, list[tuple[str, str]]] = {
     SynthesisOutputType.DOCUMENTATION: [
@@ -586,6 +592,7 @@ async def materialize_synthesis_section_packs(
     allowed_memory_scope_keys: set[str] | None,
     accessible_projects: set[str] | None = None,
     context_fn: SynthesisContextFn = default_context_pack,
+    source_loader: SynthesisSourceLoader | None = None,
 ) -> SynthesisRun:
     """Populate section packs with policy-filtered context-pack sources."""
 
@@ -597,6 +604,13 @@ async def materialize_synthesis_section_packs(
         context_item_source_id,
     )
 
+    authority = SourceReadAuthority(
+        principal_id=principal_id or "",
+        projects=frozenset(accessible_projects or ()),
+        scope_keys=None
+        if allowed_memory_scope_keys is None
+        else frozenset(allowed_memory_scope_keys),
+    )
     requested_artifacts = _requested_artifact_identities(run.request)
     materialized_packs: list[SynthesisSourcePack] = []
     outline_sections: list[SynthesisOutlineSection] = []
@@ -670,6 +684,13 @@ async def materialize_synthesis_section_packs(
             )
             if redacted:
                 redaction_count += 1
+            kind = SourceKind.RAW_CAPTURE if item.type == "raw_memory" else SourceKind.GRAPH_ENTITY
+            canonical_id = (
+                item.id.removeprefix("raw_memory:") if kind is SourceKind.RAW_CAPTURE else item.id
+            )
+            identity = SourceIdentity(organization_id, kind, canonical_id)
+            if source_loader is not None:
+                source_id = f"{kind.value}:{canonical_id}"
             if source_id in seen_source_ids:
                 continue
             seen_source_ids.add(source_id)
@@ -687,12 +708,40 @@ async def materialize_synthesis_section_packs(
                     **public_memory_metadata(metadata),
                     **source_metadata,
                 }
+            observation = None
+            source_name = item.name
+            source_content = item.content
+            if source_loader is not None and not redacted:
+                try:
+                    snapshot = await source_loader(
+                        identity, authority, organization_id=organization_id
+                    )
+                except SourceUnavailableError:
+                    hidden_count += 1
+                    continue
+                observation = snapshot.observation
+                if observation.source != identity or not observation.durable:
+                    raise SourceUnavailableError()
+                if isinstance(snapshot, RawSourceSnapshot):
+                    from sibyl_core.services.memory_derivations import raw_derivation_current
+
+                    if not await raw_derivation_current(
+                        snapshot.memory, authority, ancestors=frozenset({identity})
+                    ):
+                        hidden_count += 1
+                        continue
+                    source_name = snapshot.memory.title or "Untitled raw memory"
+                    source_content = snapshot.memory.raw_content
+                elif isinstance(snapshot, GraphSourceSnapshot):
+                    source_name = snapshot.entity.name
+                    source_content = snapshot.entity.content or snapshot.entity.description
             sources.append(
                 SynthesisSourceReference(
                     id=source_id,
                     type=item.type,
-                    name=item.name,
-                    content_preview="" if redacted else _compact_text(item.content),
+                    name=source_name,
+                    content_preview="" if redacted else _compact_text(source_content),
+                    observation=observation,
                     score=item.score,
                     source=item.source,
                     origin="context_pack",
@@ -744,6 +793,7 @@ async def materialize_synthesis_section_packs(
         run,
         outline=replace(run.outline, sections=outline_sections),
         source_packs=materialized_packs,
+        source_authority=authority if source_loader is not None else None,
         verification=verification,
     )
 
@@ -995,6 +1045,20 @@ async def remember_synthesis_artifact(
 ) -> SynthesisArtifact:
     if not principal_id:
         raise ValueError("principal_id is required")
+    from sibyl_core.services.memory_derivations import validate_observations
+
+    authority = run.source_authority
+    sources = [source for pack in run.source_packs for source in pack.sources]
+    if (
+        authority is None
+        or authority.principal_id != principal_id
+        or not sources
+        or any(source.observation is None for source in sources)
+    ):
+        raise SourceUnavailableError()
+    observations = [source.observation for source in sources if source.observation is not None]
+    if not await validate_observations(observations, authority, organization_id=organization_id):
+        raise SourceUnavailableError()
     content = (
         artifact.markdown
         if artifact.format is SynthesisArtifactFormat.MARKDOWN
@@ -1033,6 +1097,11 @@ async def remember_synthesis_artifact(
         },
         capture_surface="synthesis_artifact",
         entity_type="artifact",
+        source_observations=observations,
+        accessible_projects=authority.projects,
+        accessible_teams=authority.teams,
+        accessible_delegations=authority.delegations,
+        allowed_memory_scope_keys=authority.scope_keys,
     )
     return replace(
         artifact,
@@ -1189,7 +1258,12 @@ async def plan_synthesis(
 
 
 def synthesis_run_to_dict(run: SynthesisRun) -> dict[str, Any]:
-    return asdict(run)
+    payload = asdict(run)
+    payload.pop("source_authority", None)
+    for pack in payload["source_packs"]:
+        for source in pack["sources"]:
+            source.pop("observation", None)
+    return payload
 
 
 def synthesis_artifact_to_dict(artifact: SynthesisArtifact) -> dict[str, Any]:

@@ -28,6 +28,7 @@ from sibyl_core.models.context import (
     ContextPack,
     ContextSection,
 )
+from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.models.synthesis import (
     SynthesisArtifactFormat,
     SynthesisOutputType,
@@ -35,6 +36,7 @@ from sibyl_core.models.synthesis import (
 )
 from sibyl_core.tools.responses import SearchResponse, SearchResult
 from tests.harness.auth import stub_auth_context
+from tests.harness.source_observations import observed_graph_sources
 
 
 def _org() -> SimpleNamespace:
@@ -46,6 +48,22 @@ def _ctx() -> AuthContext:
         user_id=UUID("00000000-0000-0000-0000-000000000123"),
         org_role=OrganizationRole.MEMBER,
     )
+
+
+@pytest.fixture(autouse=True)
+async def materialization_source():
+    async with observed_graph_sources(
+        str(_org().id),
+        [
+            Entity(
+                id="artifact:context",
+                entity_type=EntityType.ARTIFACT,
+                name="Context artifact",
+                content="Only authorized source text enters the materialized pack.",
+            )
+        ],
+    ):
+        yield
 
 
 def test_synthesis_plan_route_is_registered() -> None:
@@ -158,7 +176,7 @@ async def test_plan_synthesis_route_scopes_to_accessible_projects() -> None:
     assert response.status == SynthesisRunStatus.PLANNED
     assert response.outline.sections[0].title == "Current State"
     assert response.verification.gap_count == 0
-    assert response.source_packs[0].source_ids == ["source:context"]
+    assert response.source_packs[0].source_ids == ["graph_entity:artifact:context"]
     assert (
         response.source_packs[0].sources[0].content_preview
         == "Only authorized source text enters the materialized pack."
@@ -197,7 +215,9 @@ async def test_plan_synthesis_route_verifies_explicit_project() -> None:
 
     verify_project.assert_awaited_once()
     assert response.request.project == "project-sibyl"
-    assert response.source_packs[0].freshness == {"source:context": "2026-05-14T12:00:00Z"}
+    assert response.source_packs[0].freshness == {
+        "graph_entity:artifact:context": "2026-05-14T12:00:00Z"
+    }
 
 
 @pytest.mark.asyncio
@@ -272,8 +292,10 @@ async def test_draft_synthesis_route_returns_verified_artifact() -> None:
     assert response.artifact.format is SynthesisArtifactFormat.MARKDOWN
     assert response.artifact.verification.status.value == "pass"
     assert "Only authorized source text" in response.artifact.markdown
-    assert "[source:context]" in response.artifact.markdown
-    assert response.artifact.json_payload["sections"][0]["source_ids"] == ["source:context"]
+    assert "[graph_entity:artifact:context]" in response.artifact.markdown
+    assert response.artifact.json_payload["sections"][0]["source_ids"] == [
+        "graph_entity:artifact:context"
+    ]
 
 
 @pytest.mark.asyncio
@@ -321,7 +343,7 @@ async def test_draft_synthesis_route_can_remember_artifact() -> None:
     assert response.artifact.remembered_memory_id == "memory:artifact"
     assert response.artifact.remembered_source_id == remember_calls[0]["source_id"]
     assert remember_calls[0]["memory_scope"] == "private"
-    assert remember_calls[0]["metadata"]["source_ids"] == ["source:context"]
+    assert remember_calls[0]["metadata"]["source_ids"] == ["graph_entity:artifact:context"]
     assert '"source:context"' in remember_calls[0]["raw_content"]
 
 
@@ -344,10 +366,10 @@ async def test_handbook_route_composes_a_cited_body_for_one_project() -> None:
 
     verify_project.assert_awaited_once()
     assert response.project == "project-sibyl"
-    assert response.source_ids == ["source:context"]
+    assert response.source_ids == ["graph_entity:artifact:context"]
     # Run bookkeeping belongs in the response envelope, never in the file body.
     assert response.run_id not in response.markdown
-    assert "[source:context]" in response.markdown
+    assert "[graph_entity:artifact:context]" in response.markdown
 
 
 @pytest.mark.asyncio

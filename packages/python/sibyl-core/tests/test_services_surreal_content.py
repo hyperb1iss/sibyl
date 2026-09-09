@@ -89,6 +89,7 @@ class FakeClient:
         self._responses = list(responses)
         self.calls: list[tuple[str, dict[str, object]]] = []
         self.closed = 0
+        self._raw_records: dict[str, dict[str, object]] = {}
 
     async def execute_query(
         self, query: str, params: dict[str, object] | None = None, **kwargs: object
@@ -99,9 +100,23 @@ class FakeClient:
         if "LET $publications =" in query:
             # Ordinary capture fixtures have no admitted publication rows.
             return _query_result([{"publications": [], "captures": [], "attempts": []}])
+        if "associations: (SELECT * FROM memory_derivations" in query:
+            return _query_result(
+                [
+                    {
+                        "targets": [
+                            self._raw_records[key]
+                            for key in merged["ids"]
+                            if key in self._raw_records
+                        ],
+                        "associations": [],
+                    }
+                ]
+            )
         response = self._responses.pop(0)
         if isinstance(response, BaseException):
             raise response
+        self._observe_response(response)
         return response
 
     async def execute_query_raw(
@@ -116,7 +131,19 @@ class FakeClient:
         response = self._responses.pop(0)
         if isinstance(response, BaseException):
             raise response
+        self._observe_response(response)
         return response
+
+    def _observe_response(self, value: object) -> None:
+        if isinstance(value, list):
+            for item in value:
+                self._observe_response(item)
+        elif isinstance(value, dict):
+            if isinstance(value.get("uuid"), str) and "raw_content" in value:
+                self._raw_records[value["uuid"]] = {"revision": 1, **value}
+            else:
+                for item in value.values():
+                    self._observe_response(item)
 
     async def close(self) -> None:
         self.closed += 1
@@ -3258,4 +3285,9 @@ async def _yield_client(fake_client: FakeClient):
 
 def _recall_source_calls(client):
     """Source and fusion queries, excluding the independent publication check."""
-    return [(query, params) for query, params in client.calls if "LET $publications =" not in query]
+    return [
+        (query, params)
+        for query, params in client.calls
+        if "LET $publications =" not in query
+        and "associations: (SELECT * FROM memory_derivations" not in query
+    ]

@@ -495,6 +495,8 @@ class TestSynthesisOverMcpGrant:
         import sibyl.mcp_tools.context as mcp_context_module
         import sibyl.mcp_tools.synthesis as synthesis_module
         from sibyl.mcp_tools.context import McpContext
+        from sibyl_core.models.entities import Entity, EntityType
+        from tests.harness.source_observations import observed_graph_sources
 
         ctx = McpContext(
             org_id="00000000-0000-0000-0000-000000000111",
@@ -506,15 +508,27 @@ class TestSynthesisOverMcpGrant:
         async def _context(**_kwargs: Any):
             return self._pack()
 
-        with (
-            patch.object(mcp_context_module, "require_context", AsyncMock(return_value=ctx)),
-            patch.object(
-                mcp_context_module, "resolve_project_scope", AsyncMock(return_value=set())
-            ),
-            patch("sibyl_core.services.synthesis.default_context_pack", _context),
+        async with observed_graph_sources(
+            ctx.org_id,
+            [
+                Entity(
+                    id="decision_private",
+                    entity_type=EntityType.DECISION,
+                    name=SECRET_NAME,
+                    content=SECRET_TEXT,
+                    metadata={"memory_scope": "private", "principal_id": self.OWNER},
+                )
+            ],
         ):
-            plan = await synthesis_module._synthesis_mcp_plan(goal="ship", project=None)
-        return json.dumps(plan, default=str)
+            with (
+                patch.object(mcp_context_module, "require_context", AsyncMock(return_value=ctx)),
+                patch.object(
+                    mcp_context_module, "resolve_project_scope", AsyncMock(return_value=set())
+                ),
+                patch("sibyl_core.services.synthesis.default_context_pack", _context),
+            ):
+                plan = await synthesis_module._synthesis_mcp_plan(goal="ship", project=None)
+            return json.dumps(plan, default=str)
 
     @pytest.mark.asyncio
     async def test_project_only_key_renders_no_private_row(self) -> None:

@@ -1,12 +1,17 @@
 """Original admission bindings checked at review and atomically at publication."""
 
+from __future__ import annotations
+
 import asyncio
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 from sibyl_core.auth.memory_policy import EVAL_CONSOLIDATION_METADATA_KEY
 from sibyl_core.services import content_client
 from sibyl_core.services.content_models import RawMemory
+
+if TYPE_CHECKING:
+    from sibyl_core.services.memory_source_validation import SourceReadAuthority
 
 # These hash-only observations live in the server-only consolidation ledger.
 # Fresh source metadata is never evidence of its own original admission.
@@ -79,7 +84,11 @@ async def verify_publication_admissions(memory: RawMemory) -> bool:
 
 
 async def unavailable_publication_ids(
-    organization_id: str, rows: Mapping[str, Mapping[str, object] | None]
+    organization_id: str,
+    rows: Mapping[str, Mapping[str, object] | None],
+    *,
+    raw_memories: Sequence[RawMemory] = (),
+    source_authority: SourceReadAuthority | None = None,
 ) -> set[str]:
     """Resolve stable row IDs against the protected ledger before retrieval.
 
@@ -131,6 +140,14 @@ async def unavailable_publication_ids(
                     rows,
                 )
             )
+    if raw_memories:
+        from sibyl_core.services.memory_derivations import unavailable_raw_derivation_ids
+
+        if source_authority is None:
+            raise ValueError("source authority is required for raw derivation reads")
+        unavailable.update(
+            await unavailable_raw_derivation_ids(organization_id, raw_memories, source_authority)
+        )
     return unavailable
 
 

@@ -199,6 +199,18 @@ async def reconcile_raw_source_lifecycle(
                 )
                 next_frontier.update(_stored_source_ids(source) - seen)
             frontier = next_frontier
+        from sibyl_core.services.memory_derivations import raw_derivation_current
+
+        complete = complete and await raw_derivation_current(
+            memory,
+            SourceReadAuthority(
+                principal_id=principal_id,
+                projects=frozenset(projects or ()),
+                teams=frozenset(teams or ()),
+                delegations=frozenset(delegations or ()),
+                scope_keys=grants,
+            ),
+        )
         if complete:
             metadata[SOURCE_VALIDATION_PENDING_KEY] = False
         else:

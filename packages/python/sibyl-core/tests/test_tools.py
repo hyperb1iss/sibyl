@@ -26,6 +26,7 @@ from sibyl_core.models.context import (
     ContextSection,
 )
 from sibyl_core.models.entities import Entity, EntityType, RelationshipType
+from sibyl_core.services.memory_source_validation import SourceReadAuthority
 from sibyl_core.services.usage import (
     MemoryUsageItemKind,
     MemoryUsageSignal,
@@ -52,6 +53,9 @@ from sibyl_core.tools.responses import (
     SearchResponse,
     SearchResult,
 )
+from tests.test_reflection_identity import runtime as _synthesis_runtime
+
+synthesis_runtime = _synthesis_runtime
 
 # =============================================================================
 # Mock Fixtures and Helpers
@@ -1383,6 +1387,7 @@ class TestSearchTool:
         recall.assert_awaited_once_with(
             organization_id="org_123",
             principal_id="user-123",
+            source_authority=SourceReadAuthority("user-123"),
             query="surrealdb",
             memory_scope="private",
             scope_key=None,
@@ -4593,8 +4598,23 @@ async def _fake_synthesis_context(**kwargs: Any) -> ContextPack:
 
 
 @pytest.mark.asyncio
-async def test_synthesis_plan_tool_materializes_section_sources() -> None:
+async def test_synthesis_plan_tool_materializes_section_sources(
+    synthesis_runtime, monkeypatch
+) -> None:
     from sibyl_core.tools.synthesis import synthesis_plan
+
+    await synthesis_runtime.entity_manager.create_direct(
+        Entity(
+            id="task:synthesis",
+            entity_type=EntityType.TASK,
+            name="Build synthesis",
+            content="D4 exposes synthesis through CLI and MCP.",
+        )
+    )
+    monkeypatch.setattr(
+        "sibyl_core.services.graph_runtime.get_surreal_graph_runtime",
+        AsyncMock(return_value=synthesis_runtime),
+    )
 
     with (
         patch("sibyl_core.services.synthesis.default_search", _fake_synthesis_search),
@@ -4605,21 +4625,21 @@ async def test_synthesis_plan_tool_materializes_section_sources() -> None:
             goal="Write the roadmap",
             output_type="roadmap",
             project="project-sibyl",
-            organization_id="org-123",
+            organization_id=synthesis_runtime.client.group_id,
             principal_id="user-123",
             accessible_projects={"project-sibyl"},
             allowed_memory_scope_keys=None,
         )
 
     assert result["outline"]["sections"][0]["title"] == "Current State"
-    assert result["source_packs"][0]["source_ids"] == ["source:synthesis-task"]
+    assert result["source_packs"][0]["source_ids"] == ["graph_entity:task:synthesis"]
     assert result["source_packs"][0]["freshness"] == {
-        "source:synthesis-task": "2026-05-14T12:00:00Z"
+        "graph_entity:task:synthesis": "2026-05-14T12:00:00Z"
     }
 
 
 @pytest.mark.asyncio
-async def test_synthesis_draft_tool_can_remember_artifact() -> None:
+async def test_synthesis_draft_tool_can_remember_artifact(synthesis_runtime, monkeypatch) -> None:
     from sibyl_core.tools.synthesis import synthesis_draft
 
     remember_calls: list[dict[str, Any]] = []
@@ -4627,6 +4647,19 @@ async def test_synthesis_draft_tool_can_remember_artifact() -> None:
     async def fake_remember(**kwargs: Any) -> SimpleNamespace:
         remember_calls.append(kwargs)
         return SimpleNamespace(id="memory:artifact", source_id=kwargs["source_id"])
+
+    await synthesis_runtime.entity_manager.create_direct(
+        Entity(
+            id="task:synthesis",
+            entity_type=EntityType.TASK,
+            name="Build synthesis",
+            content="D4 exposes synthesis through CLI and MCP.",
+        )
+    )
+    monkeypatch.setattr(
+        "sibyl_core.services.graph_runtime.get_surreal_graph_runtime",
+        AsyncMock(return_value=synthesis_runtime),
+    )
 
     with (
         patch("sibyl_core.services.synthesis.default_search", _fake_synthesis_search),
@@ -4643,7 +4676,7 @@ async def test_synthesis_draft_tool_can_remember_artifact() -> None:
             project="project-sibyl",
             memory_scope="project",
             scope_key="project-sibyl",
-            organization_id="org-123",
+            organization_id=synthesis_runtime.client.group_id,
             principal_id="user-123",
             accessible_projects={"project-sibyl"},
             allowed_memory_scope_keys=None,
@@ -4654,7 +4687,7 @@ async def test_synthesis_draft_tool_can_remember_artifact() -> None:
     assert artifact["remembered_memory_id"] == "memory:artifact"
     assert artifact["remembered_source_id"] == remember_calls[0]["source_id"]
     assert remember_calls[0]["memory_scope"] == "project"
-    assert remember_calls[0]["metadata"]["source_ids"] == ["source:synthesis-task"]
+    assert remember_calls[0]["metadata"]["source_ids"] == ["graph_entity:task:synthesis"]
 
 
 @pytest.mark.asyncio

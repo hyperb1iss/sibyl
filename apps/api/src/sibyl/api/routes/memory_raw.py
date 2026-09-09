@@ -41,6 +41,7 @@ from sibyl_core.auth.memory_policy import (
     MemoryPolicyAction,
 )
 from sibyl_core.observability import elapsed_ms, telemetry_registry
+from sibyl_core.services.memory_source_validation import SourceReadAuthority
 from sibyl_core.services.surreal_content import (
     AGENT_DIARY_CAPTURE_SURFACE,
     RawMemoryRecallResult,
@@ -313,10 +314,30 @@ async def recall_raw(
                 recall_kwargs["occurred_before"] = request.occurred_before
             if request.as_of:
                 recall_kwargs["as_of"] = request.as_of
+            policy_context = read_decision.policy_context
+            source_projects = policy_context.accessible_projects if policy_context else None
+            source_teams = policy_context.accessible_teams if policy_context else None
+            if source_projects is None and source_teams is None:
+                source_projects, source_teams = await asyncio.gather(
+                    memory_auth.list_accessible_project_graph_ids(ctx),
+                    memory_auth.list_accessible_team_scope_keys(ctx),
+                )
+            elif source_projects is None:
+                source_projects = await memory_auth.list_accessible_project_graph_ids(ctx)
+            elif source_teams is None:
+                source_teams = await memory_auth.list_accessible_team_scope_keys(ctx)
             recall_result = await recall_raw_memory(
                 organization_id=str(org.id),
                 principal_id=principal_id,
                 query=request.query,
+                source_authority=SourceReadAuthority(
+                    principal_id=principal_id,
+                    projects=frozenset(source_projects or ()),
+                    teams=frozenset(source_teams or ()),
+                    scope_keys=None
+                    if ctx.api_key_memory_scope_keys is None
+                    else frozenset(ctx.api_key_memory_scope_keys),
+                ),
                 memory_scope=request.memory_scope,
                 scope_key=request.scope_key,
                 agent_id=request.agent_id,

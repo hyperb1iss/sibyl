@@ -18,6 +18,7 @@ from sibyl.services.recall_limits import (
     recall_concurrency_slot,
 )
 from sibyl_core.auth import AuthOrganization, OrganizationRole
+from sibyl_core.services.memory_source_validation import SourceReadAuthority
 from sibyl_core.services.surreal_content import recall_raw_memory
 from sibyl_core.session_bundle import (
     derive_query,
@@ -88,6 +89,7 @@ async def _append_raw_memories(
     principal_id: str | None,
     organization_role: OrganizationRole | str | None,
     selected_project_ids: list[str],
+    allowed_memory_scope_keys: frozenset[str] | None = None,
     limit: int,
 ) -> None:
     if not principal_id or limit <= 0:
@@ -110,6 +112,11 @@ async def _append_raw_memories(
                     organization_id=organization_id,
                     principal_id=principal_id,
                     query=query,
+                    source_authority=SourceReadAuthority(
+                        principal_id=principal_id,
+                        projects=frozenset(selected_project_ids),
+                        scope_keys=allowed_memory_scope_keys,
+                    ),
                     memory_scope=memory_scope,
                     scope_key=scope_key,
                     limit=remaining,
@@ -206,6 +213,9 @@ async def get_session_bundle(
                 principal_id=getattr(ctx, "user_id", None),
                 organization_role=getattr(ctx, "org_role", None),
                 selected_project_ids=selected_project_ids,
+                allowed_memory_scope_keys=None
+                if api_key_memory_scope_keys is None
+                else frozenset(api_key_memory_scope_keys),
                 limit=memory_limit,
             )
             single_project_id = selected_project_ids[0] if len(selected_project_ids) == 1 else None

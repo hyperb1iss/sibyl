@@ -12,6 +12,7 @@ from sibyl_core.models.synthesis import (
     SynthesisSectionRequest,
 )
 from sibyl_core.services import synthesis as synthesis_service
+from sibyl_core.services.observed_sources import load_authorized_source_snapshot
 
 
 def _coerce_required_sections(
@@ -101,6 +102,7 @@ async def _planned_materialized_run(
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
         context_fn=synthesis_service.default_context_pack,
+        source_loader=load_authorized_source_snapshot,
     )
 
 
