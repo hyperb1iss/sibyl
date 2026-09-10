@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from sibyl_core.backends.surreal.records import normalize_records
 from sibyl_core.backends.surreal.schema_version import SurrealExecute
 from sibyl_core.memory_pipeline.observations import SourceKind
-from sibyl_core.migrate.source_integrity import build_integrity_archive
+from sibyl_core.migrate.source_integrity import (
+    ArchiveDatetime,
+    build_integrity_archive,
+    native_archive_parameters,
+)
 
 
 def _source_table(kind: SourceKind) -> tuple[str, str]:
@@ -44,31 +49,78 @@ async def read_source_archive_snapshot(
         raise ValueError("graph companion inventory requires explicit organization scope")
     companion_sql = _graph_auxiliary_snapshot_sql() if include_graph_auxiliary else ""
     companion_field = ", graph_auxiliary: $graph_auxiliary" if include_graph_auxiliary else ""
+    snapshot_sql = f"""LET $rows = SELECT *, type::string(id) AS archive_record_key OMIT id
+        FROM {table} WHERE {row_scope} ORDER BY {org_field}, uuid;
+        LET $states = SELECT * OMIT id FROM source_states
+            WHERE {ledger_scope} AND source_kind=$kind ORDER BY organization_id, source_id;
+        LET $derivations = SELECT * OMIT id FROM memory_derivations
+            WHERE {ledger_scope} AND target_kind=$kind ORDER BY organization_id, target_id;
+        {companion_sql}
+        LET $snapshot = {{ source_rows: $rows, source_states: $states,
+            derivations: $derivations {companion_field} }};"""
     result = normalize_records(
         await execute_query(
-            f"""RETURN {{
-            LET $rows = SELECT *, type::string(id) AS archive_record_key OMIT id
-                FROM {table} WHERE {row_scope}
-                ORDER BY {org_field}, uuid;
-            LET $states = SELECT * OMIT id FROM source_states
-                WHERE {ledger_scope} AND source_kind=$kind
-                ORDER BY organization_id, source_id;
-            LET $derivations = SELECT * OMIT id FROM memory_derivations
-                WHERE {ledger_scope} AND target_kind=$kind
-                ORDER BY organization_id, target_id;
-            {companion_sql}
-            RETURN {{ source_rows: $rows, source_states: $states, derivations: $derivations {companion_field} }};
-        }};""",
+            f"RETURN {{ {snapshot_sql} RETURN {{snapshot: $snapshot, fingerprint: crypto::sha256(type::string($snapshot))}}; }};",
             organizations=organizations,
             kind=kind.value,
         )
     )
-    if len(result) != 1 or any(
-        not isinstance(result[0].get(key), list)
-        for key in ("source_rows", "source_states", "derivations")
+    if len(result) != 1:
+        raise ValueError("source archive snapshot returned an invalid shape")
+    snapshot = result[0].get("snapshot")
+    fingerprint = result[0].get("fingerprint")
+    if (
+        not isinstance(snapshot, dict)
+        or not isinstance(fingerprint, str)
+        or any(
+            not isinstance(snapshot.get(key), list)
+            for key in ("source_rows", "source_states", "derivations")
+        )
     ):
         raise ValueError("source archive snapshot returned an invalid shape")
-    return result[0]
+
+    # The SDK truncates native nanoseconds. Capture typed datetime text only
+    # after proving the second source-local read matches the original snapshot.
+    dates: list[tuple[Any, str | int, str]] = []
+
+    def collect(value: Any, path: str) -> None:
+        if isinstance(value, dict | list):
+            items = value.items() if isinstance(value, dict) else enumerate(value)
+            for key, item in items:
+                if isinstance(key, int):
+                    child = f"{path}[{key}]"
+                else:
+                    escaped = key.replace("\\", "\\\\").replace("`", "\\`")
+                    child = f"{path}.`{escaped}`" if path else f"`{escaped}`"
+                if isinstance(item, datetime):
+                    dates.append((value, key, child))
+                else:
+                    collect(item, child)
+
+    collect(snapshot, "")
+    if dates:
+        captured = normalize_records(
+            await execute_query(
+                f"""RETURN {{ {snapshot_sql}
+                IF crypto::sha256(type::string($snapshot)) != $fingerprint {{
+                    THROW 'archive source changed during datetime capture';
+                }};
+                RETURN SELECT array::map($paths, |$path| type::string(type::field($path))) AS datetimes
+                    FROM ONLY $snapshot;
+            }};""",
+                organizations=organizations,
+                kind=kind.value,
+                fingerprint=fingerprint,
+                paths=[path for _, _, path in dates],
+            )
+        )
+        texts = captured[0].get("datetimes") if len(captured) == 1 else None
+        if not isinstance(texts, list) or len(texts) != len(dates):
+            raise ValueError("source archive datetime capture returned an invalid shape")
+        for (parent, key, _), text in zip(dates, texts, strict=True):
+            parent[key] = ArchiveDatetime.parse(text)
+    snapshot["fingerprint"] = fingerprint
+    return snapshot
 
 
 async def export_source_integrity(
@@ -79,7 +131,13 @@ async def export_source_integrity(
     )
     if organizations is None:
         organizations = sorted({state["organization_id"] for state in snapshot["source_states"]})
-    return build_integrity_archive(kind=kind, organizations=organizations, **snapshot)
+    return build_integrity_archive(
+        kind=kind,
+        organizations=organizations,
+        source_rows=snapshot["source_rows"],
+        source_states=snapshot["source_states"],
+        derivations=snapshot["derivations"],
+    )
 
 
 async def restore_source_integrity(
@@ -238,7 +296,7 @@ async def restore_source_integrity(
             WHERE {ledger_scope} AND target_kind=$kind
             ORDER BY organization_id, target_id;
         {companion_sql}
-        IF {{ source_rows: $rows, source_states: $states, derivations: $associations {companion_field} }} != $expected {{
+        IF crypto::sha256(type::string({{ source_rows: $rows, source_states: $states, derivations: $associations {companion_field} }})) != $expected {{
             THROW 'archive destination changed before restore';
         }};
         {companion_cleanup}
@@ -269,9 +327,9 @@ async def restore_source_integrity(
         query,
         organizations=organizations,
         kind=kind.value,
-        expected=before,
+        expected=before["fingerprint"],
         deletes=deletes,
-        writes=writes,
+        writes=native_archive_parameters(writes),
         ledger_writes=ledger_writes,
         association_writes=association_writes,
     )

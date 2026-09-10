@@ -6,12 +6,61 @@ import hashlib
 import json
 import re
 from copy import deepcopy
-from datetime import datetime
-from typing import Any
+from datetime import UTC, datetime
+from typing import Any, SupportsIndex
 
 from sibyl_core.memory_pipeline.observations import SourceKind
 
 INTEGRITY_ARCHIVE_VERSION = 1
+
+
+class ArchiveDatetime(datetime):
+    """Keep native archive precision without changing evidence hash date formatting."""
+
+    native_text: str
+
+    @classmethod
+    def parse(cls, text: str) -> ArchiveDatetime:
+        parsed = datetime.fromisoformat(text)
+        value = cls(
+            parsed.year,
+            parsed.month,
+            parsed.day,
+            parsed.hour,
+            parsed.minute,
+            parsed.second,
+            parsed.microsecond,
+            tzinfo=parsed.tzinfo,
+            fold=parsed.fold,
+        )
+        value.native_text = text
+        return value
+
+    def __reduce_ex__(self, protocol: SupportsIndex, /):
+        return self.parse, (self.native_text,)
+
+
+def native_archive_parameters(value: Any) -> Any:
+    """Pass archive dates through the SDK's lossless native datetime encoder."""
+    from surrealdb.data.types.datetime import Datetime
+
+    if isinstance(value, ArchiveDatetime):
+        # The native CBOR datetime string requires UTC Z notation. Keep the
+        # fractional remainder that Python's microsecond datetime cannot hold.
+        fraction = re.match(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[.,](\d+)", value.native_text)
+        digits = fraction.group(1) if fraction else ""
+        if len(digits) > 9:
+            raise ValueError("archive datetime exceeds native nanosecond precision")
+        parsed = datetime.fromisoformat(value.native_text)
+        utc = parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+        nanoseconds = utc.microsecond * 1000 + int((digits[6:] + "000")[:3])
+        seconds = utc.replace(microsecond=0).isoformat(timespec="seconds").removesuffix("+00:00")
+        return Datetime(f"{seconds}.{nanoseconds:09d}Z")
+    if isinstance(value, dict):
+        return {key: native_archive_parameters(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [native_archive_parameters(item) for item in value]
+    return value
 
 
 def encode_record(record: dict[str, Any]) -> dict[str, Any]:
@@ -21,7 +70,7 @@ def encode_record(record: dict[str, Any]) -> dict[str, Any]:
     def encode(value: Any, path: list[str | int]) -> Any:
         if isinstance(value, datetime):
             datetimes.append(path)
-            return value.isoformat()
+            return value.native_text if isinstance(value, ArchiveDatetime) else value.isoformat()
         if isinstance(value, dict):
             if any(not isinstance(key, str) for key in value):
                 raise ValueError("archive record keys must be strings")
@@ -52,7 +101,7 @@ def decode_record(payload: object) -> dict[str, Any]:
         key = path[-1]
         if type(key) not in (str, int) or not isinstance(parent[key], str):
             raise ValueError("archive datetime path must identify a string")
-        parent[key] = datetime.fromisoformat(parent[key])
+        parent[key] = ArchiveDatetime.parse(parent[key])
     return record
 
 
