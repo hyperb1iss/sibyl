@@ -38,6 +38,7 @@ from sibyl_core.tasks.procedure_evidence import (
 SCHEMA_VERSION = "sibyl-conditional-procedure-v1"
 OUTPUT_RETRIES = 2
 METADATA_KEY = "conditional_procedure"
+RENDER_VERSION = "sibyl-conditional-procedure-render-v2"
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 SHA256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 RETROSPECTIVE_REQUEST = (
@@ -430,17 +431,25 @@ def _spans(
     return [spans[key] for key in sorted(spans)]
 
 
-def _assertion_text(assertion: ConditionalAssertion) -> str:
-    refs = ", ".join(f"{r.episode_id}:{r.start_byte}:{r.end_byte}" for r in assertion.support)
-    return f"{assertion.statement} ({assertion.label}; {refs})"
-
-
 def _candidate(
     group: ConsolidationGroup,
     draft: DraftConditionalProcedure,
     receipt: dict[str, Any],
     evidence: _ExtractionInput | None = None,
+    *,
+    render_version: str | None = RENDER_VERSION,
 ) -> ReflectionCandidate:
+    if render_version not in (None, RENDER_VERSION):
+        raise ValueError("unsupported conditional procedure rendering version")
+
+    def assertion_text(assertion: ConditionalAssertion, path: str) -> str:
+        if render_version is None:
+            refs = ", ".join(
+                f"{ref.episode_id}:{ref.start_byte}:{ref.end_byte}" for ref in assertion.support
+            )
+            return f"{assertion.statement} ({assertion.label}; {refs})"
+        return f"{assertion.statement} ({assertion.label}; evidence: {path})"
+
     payload = {
         "schema_version": SCHEMA_VERSION,
         "group": group.model_dump(mode="json", exclude={"episodes": {"__all__": {"artifact"}}}),
@@ -448,6 +457,8 @@ def _candidate(
         "spans": _spans(group, draft, evidence),
         "build_receipt": deepcopy(receipt),
     }
+    if render_version is not None:
+        payload["render_version"] = render_version
     title = f"Procedure: {draft.goal.statement}"
     lines = [
         f"# {title}",
@@ -456,21 +467,25 @@ def _candidate(
         "and transfer require separate checks.",
         "",
         "## Goal",
-        _assertion_text(draft.goal),
+        assertion_text(draft.goal, "/goal"),
     ]
-    for heading, assertions in (
-        ("Environment", draft.environment),
-        ("Preconditions", draft.preconditions),
-        ("Required tools", draft.required_tools),
+    for heading, field, assertions in (
+        ("Environment", "environment", draft.environment),
+        ("Preconditions", "preconditions", draft.preconditions),
+        ("Required tools", "required_tools", draft.required_tools),
     ):
-        lines.extend(["", f"## {heading}", *[f"- {_assertion_text(a)}" for a in assertions]])
+        lines.extend(["", f"## {heading}"])
+        lines.extend(
+            f"- {assertion_text(assertion, f'/{field}/{index}')}"
+            for index, assertion in enumerate(assertions)
+        )
     lines.extend(["", "## Actions"])
     steps = []
-    for action in draft.actions:
+    for index, action in enumerate(draft.actions):
         lines.extend(
             [
-                f"{action.order}. {_assertion_text(action.action)}",
-                f"   Check: {_assertion_text(action.success_criteria)}",
+                f"{action.order}. {assertion_text(action.action, f'/actions/{index}/action')}",
+                f"   Check: {assertion_text(action.success_criteria, f'/actions/{index}/success_criteria')}",
             ]
         )
         steps.append(
@@ -481,22 +496,40 @@ def _candidate(
                 success_criteria=action.success_criteria.statement,
             ).model_dump(mode="json")
         )
-    for heading, assertions in (
-        ("Expected result", [draft.expected_result]),
-        ("Failure modes", draft.failure_modes),
-        ("Abstain when", draft.abstain_when),
-    ):
-        lines.extend(["", f"## {heading}", *[f"- {_assertion_text(a)}" for a in assertions]])
     lines.extend(
-        [
-            "",
-            "## Evidence and build receipt",
-            "",
-            "```json",
-            json.dumps(payload, sort_keys=True, ensure_ascii=False, indent=2, allow_nan=False),
-            "```",
-        ]
+        ["", "## Expected result", f"- {assertion_text(draft.expected_result, '/expected_result')}"]
     )
+    for heading, field, assertions in (
+        ("Failure modes", "failure_modes", draft.failure_modes),
+        ("Abstain when", "abstain_when", draft.abstain_when),
+    ):
+        lines.extend(["", f"## {heading}"])
+        lines.extend(
+            f"- {assertion_text(assertion, f'/{field}/{index}')}"
+            for index, assertion in enumerate(assertions)
+        )
+    if render_version is None:
+        lines.extend(
+            [
+                "",
+                "## Evidence and build receipt",
+                "",
+                "```json",
+                json.dumps(payload, sort_keys=True, ensure_ascii=False, indent=2, allow_nan=False),
+                "```",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "",
+                "## Evidence",
+                "Evidence paths identify assertions in conditional_procedure.procedure metadata. "
+                "Complete source spans, outcomes, and the build receipt remain in "
+                "conditional_procedure metadata.",
+                f"Audit SHA-256: {_digest(_canonical(payload))}",
+            ]
+        )
     return ReflectionCandidate(
         kind="procedure",
         title=title,
@@ -517,6 +550,40 @@ def _candidate(
     )
 
 
+class _ReceiptAgreementError(ValueError):
+    """A retained receipt disagrees with the reconstructed source input."""
+
+
+def reconstruct_candidate_artifact(
+    group: ConsolidationGroup, payload: dict[str, Any]
+) -> ReflectionCandidate:
+    """Rebuild once from source bytes and check the retained receipt.
+
+    This validates artifact consistency, not source authorization or entailment.
+    Callers comparing a stored candidate must also compare the returned artifact.
+    """
+    group = _freeze(group)
+    draft = DraftConditionalProcedure.model_validate(payload["procedure"])
+    receipt = payload["build_receipt"]
+    evidence = _extraction_input(group)
+    if receipt.get("projection") != evidence.projection_receipt:
+        raise _ReceiptAgreementError("build receipt projection differs from frozen evidence")
+    for key, value in {
+        "input": group.model_dump(mode="json"),
+        "prompt": {"system": evidence.system, "user": evidence.prompt},
+        "schema": evidence.output_type.model_json_schema(),
+        "output": ProcedureProposal(procedure=draft).model_dump(mode="json"),
+    }.items():
+        if receipt[f"{key}_sha256"] != _digest(_canonical(value)):
+            raise _ReceiptAgreementError(
+                f"build receipt {key} hash differs from the frozen proposal"
+            )
+    render_version = payload.get("render_version")
+    if render_version != receipt.get("render_version"):
+        raise _ReceiptAgreementError("candidate rendering differs from the build receipt")
+    return _candidate(group, draft, receipt, evidence, render_version=render_version)
+
+
 def validate_candidate_content_agreement(
     candidate: ReflectionCandidate, *, group: ConsolidationGroup
 ) -> list[str]:
@@ -526,22 +593,9 @@ def validate_candidate_content_agreement(
     artifact consistency check, not source authorization or publication admission.
     """
     try:
-        group = _freeze(group)
-        payload = candidate.metadata[METADATA_KEY]
-        draft = DraftConditionalProcedure.model_validate(payload["procedure"])
-        receipt = payload["build_receipt"]
-        evidence = _extraction_input(group)
-        if receipt.get("projection") != evidence.projection_receipt:
-            return ["build receipt projection differs from frozen evidence"]
-        for key, value in {
-            "input": group.model_dump(mode="json"),
-            "prompt": {"system": evidence.system, "user": evidence.prompt},
-            "schema": evidence.output_type.model_json_schema(),
-            "output": ProcedureProposal(procedure=draft).model_dump(mode="json"),
-        }.items():
-            if receipt[f"{key}_sha256"] != _digest(_canonical(value)):
-                return [f"build receipt {key} hash differs from the frozen proposal"]
-        expected = _candidate(group, draft, receipt, evidence)
+        expected = reconstruct_candidate_artifact(group, candidate.metadata[METADATA_KEY])
+    except _ReceiptAgreementError as exc:
+        return [str(exc)]
     except (ValueError, TypeError, KeyError) as exc:
         return [f"invalid proposal payload: {exc}"]
     return [] if candidate == expected else ["candidate differs from the untouched proposal"]
@@ -648,6 +702,7 @@ def _finish_proposal(
     prompt = evidence.prompt
     receipt = {
         "schema_version": SCHEMA_VERSION,
+        "render_version": RENDER_VERSION,
         "evidence_validation": EVIDENCE_PROPOSAL_VERSION,
         "outcome_join": "caller_declared",
         "budget_principal": "caller_declared_matching_active_context_when_present",

@@ -992,6 +992,12 @@ async def _verify_promotion_sources(
         except Exception as exc:
             log.warning("promotion_source_read_failed", error_type=type(exc).__name__)
             current = None
+        if current is not None and current.id == publication_candidate_id:
+            from sibyl_core.services.eval_publication_guards import verify_publication_admissions
+
+            if not await verify_publication_admissions(current):
+                verified = False
+                continue
         if (
             current is not None
             and _publication_source_recallable(current, publication_candidate_id)

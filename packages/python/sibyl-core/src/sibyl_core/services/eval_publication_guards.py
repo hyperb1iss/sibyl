@@ -22,6 +22,8 @@ IF $publication_operation_id != NONE {
     IF $publication = NONE OR $publication.candidate_id != $uuid
         OR $publication.principal_id != $publication_principal_id
         OR $publication.result_kind != 'candidate'
+        OR $publication_build_receipt_json = NONE
+        OR $publication.build_receipt_json != $publication_build_receipt_json
         OR array::len($publication.admission_bindings ?? []) < 2 {
         THROW 'publication_source_observation_changed';
     };
@@ -67,20 +69,44 @@ async def verify_publication_admissions(memory: RawMemory) -> bool:
     operation_id = memory.metadata.get(EVAL_CONSOLIDATION_METADATA_KEY)
     if operation_id is None:
         return True
+    from sibyl_core.services.procedure_artifact import publication_build_receipt_json
+
     async with content_client.surreal_content_client() as client:
         try:
-            await client.execute_query(
-                "RETURN {" + PUBLICATION_ADMISSION_GUARD + "RETURN true; };",
-                publication_operation_id=operation_id,
-                publication_principal_id=memory.principal_id,
-                organization_id=memory.organization_id,
-                uuid=memory.id,
+            snapshots = content_client.normalize_records(
+                await client.execute_query(
+                    "RETURN {"
+                    + PUBLICATION_ADMISSION_GUARD
+                    + """
+                    LET $ledger = (SELECT * FROM eval_consolidations WHERE
+                        organization_id=$organization_id AND uuid=$publication_operation_id LIMIT 1)[0];
+                    RETURN {ledger:$ledger, captures:(SELECT * FROM raw_captures WHERE
+                        organization_id=$organization_id AND uuid IN
+                        $ledger.admission_bindings.map(|$binding| $binding.capture_id))};
+                    };""",
+                    publication_operation_id=operation_id,
+                    publication_build_receipt_json=publication_build_receipt_json(memory),
+                    publication_principal_id=memory.principal_id,
+                    organization_id=memory.organization_id,
+                    uuid=memory.id,
+                )
             )
         except Exception as exc:
             if "publication_source_observation_changed" in str(exc):
                 return False
             raise
-    return True
+    if len(snapshots) != 1:
+        return False
+    ledger = snapshots[0].get("ledger")
+    captures = snapshots[0].get("captures")
+    if not isinstance(ledger, dict) or not isinstance(captures, list):
+        return False
+    if not all(isinstance(row, dict) for row in captures):
+        return False
+    from sibyl_core.services.procedure_artifact import resolve_procedure_artifact
+
+    artifact = await asyncio.to_thread(resolve_procedure_artifact, memory, ledger, captures)
+    return artifact is not None
 
 
 async def unavailable_publication_ids(
@@ -244,7 +270,9 @@ def _publication_snapshot_recallable(publication, captures, attempts) -> bool:
             or _text_digest(admission.get("receipt_base64")) != binding["receipt_artifact_sha256"]
         ):
             return False
-    return True
+    from sibyl_core.services.procedure_artifact import resolve_procedure_artifact
+
+    return resolve_procedure_artifact(memory, publication, list(captures.values())) is not None
 
 
 def _text_digest(value: object) -> str | None:
