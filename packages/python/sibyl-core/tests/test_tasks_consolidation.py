@@ -539,9 +539,14 @@ async def test_native_build_counts_transformed_schema_and_records_policy(group, 
 
     class NativeFixture:
         def __init__(self, output_type, **kwargs):
-            calls.append(kwargs)
+            self.output_type = output_type
+            self.kwargs = kwargs
+
+        async def output_schema(self):
+            return extraction_schema(self.output_type, "native_strict")
 
         async def extract_with_usage(self, prompt):
+            calls.append(self.kwargs)
             return SimpleNamespace(
                 output=c.ProcedureProposal(abstention_reason="No supported procedure"),
                 usage=SimpleNamespace(model_dump=lambda **_: {}),

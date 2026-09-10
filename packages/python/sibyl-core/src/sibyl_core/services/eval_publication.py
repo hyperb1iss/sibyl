@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from sibyl_core.ai.llm.config import LLMSurface, resolve_llm_config
 from sibyl_core.ai.llm.extractor import extraction_schema
+from sibyl_core.ai.providers import resolved_model_profile
 from sibyl_core.ai.transport import transport_policy
 from sibyl_core.auth.memory_policy import (
     EVAL_ADMISSION_METADATA_KEY,
@@ -536,7 +537,11 @@ async def _extractor_policy() -> _ExtractorPolicy:
             "output_retries": OUTPUT_RETRIES,
             "output_mode": core_config.consolidation_output_mode,
             "wire_schema_sha256": _digest(
-                extraction_schema(EvidenceProposal, core_config.consolidation_output_mode)
+                extraction_schema(
+                    EvidenceProposal,
+                    core_config.consolidation_output_mode,
+                    profile=resolved_model_profile(config.to_llm_config()),
+                )
             ),
             "openrouter_provider": core_config.consolidation_openrouter_provider,
             "input_budget_unit": "system_user_declared_schema_characters",
