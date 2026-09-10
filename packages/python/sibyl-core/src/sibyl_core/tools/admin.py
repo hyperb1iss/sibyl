@@ -18,19 +18,7 @@ from sibyl_core.migrate.legacy_graph_archive import (
     episode_from_payload as _episode_from_payload,
 )
 from sibyl_core.migrate.legacy_graph_archive import (
-    mention_exists as _mention_exists,
-)
-from sibyl_core.migrate.legacy_graph_archive import (
     mention_from_payload as _mention_from_payload,
-)
-from sibyl_core.migrate.legacy_graph_archive import (
-    record_id as _record_id,
-)
-from sibyl_core.migrate.legacy_graph_archive import (
-    save_native_episode as _save_native_episode,
-)
-from sibyl_core.migrate.legacy_graph_archive import (
-    save_native_mention as _save_native_mention,
 )
 from sibyl_core.models.entities import (
     ConfigFile,
@@ -600,167 +588,93 @@ async def restore_backup(
     quarantined: list[dict[str, str]] = []
 
     try:
+        from dataclasses import asdict
+
+        from sibyl_core.memory_pipeline.observations import SourceKind
         from sibyl_core.migrate.archive import (
             normalize_mention_payloads,
             normalize_relationship_payloads,
         )
-        from sibyl_core.migrate.graph_companions import DATETIME_PATHS, relationship_from_archive
+        from sibyl_core.migrate.archive_lineage import seal_archive_lineage
+        from sibyl_core.migrate.graph_companion_restore import prepare_companion_restore
+        from sibyl_core.migrate.graph_companions import relationship_from_archive
+        from sibyl_core.migrate.legacy_source_archive import build_legacy_source_archive
+        from sibyl_core.services.graph_entity_store import _entity_record
+        from sibyl_core.services.source_archive_store import restore_source_integrity
 
-        # Reject malformed typed payloads before a clean restore can delete rows.
-        for payload in backup_data.relationships:
-            if DATETIME_PATHS in payload:
-                relationship_from_archive(payload)
-
-        runtime = await get_graph_runtime(organization_id)
-        relationship_manager = runtime.relationship_manager
-        driver = runtime.client
-
-        legacy_entities = backup_data.entities
+        # Validate the entire payload before any source or companion can change.
+        episodes = [
+            _episode_from_payload(row, organization_id=organization_id)
+            for row in backup_data.episodes
+        ]
+        relationships = [
+            relationship_from_archive(row)
+            for row in normalize_relationship_payloads(backup_data.relationships)
+        ]
+        mentions = [
+            _mention_from_payload(row, organization_id=organization_id)
+            for row in normalize_mention_payloads(backup_data.mentions)
+        ]
+        unavailable_ids: set[str] = set()
         if backup_data.version == "3.0":
-            from dataclasses import asdict
-
-            from sibyl_core.migrate.archive_lineage import seal_archive_lineage
-
             sealed, _, _ = seal_archive_lineage(asdict(backup_data), None)
             assert sealed is not None
             backup_data = BackupData(**sealed)
-            from sibyl_core.memory_pipeline.observations import SourceKind
-            from sibyl_core.services.source_archive_store import restore_source_integrity
-
-            restored = await restore_source_integrity(
-                driver.execute_query,
-                backup_data.source_integrity,
-                kind=SourceKind.GRAPH_ENTITY,
-                organizations=[organization_id],
-                skip_existing=skip_existing,
-                clean=clean,
-                clean_graph_auxiliary=clean,
-            )
-            entities_restored = len(restored["restored_source_ids"])
-            integrity_conflicts = restored["conflicts"]
+            integrity = backup_data.source_integrity
             quarantined = [
                 row for row in backup_data.lineage_validation if row.get("status") == "quarantined"
             ]
-            entities_skipped = backup_data.entity_count - entities_restored
-            legacy_entities = []
-        elif backup_data.source_integrity is not None:
-            raise ValueError("legacy graph payload cannot carry unrecognized integrity")
-        if legacy_entities or (clean and backup_data.version != "3.0"):
-            from sibyl_core.memory_pipeline.observations import SourceKind
-            from sibyl_core.migrate.legacy_source_archive import build_legacy_source_archive
-            from sibyl_core.services.graph_entity_store import _entity_record
-            from sibyl_core.services.source_archive_store import restore_source_integrity
-
+        else:
+            if backup_data.source_integrity is not None:
+                raise ValueError("legacy graph payload cannot carry unrecognized integrity")
             records = [
                 dict(_entity_record(_entity_from_backup_data(row), group_id=organization_id))
-                for row in legacy_entities
+                for row in backup_data.entities
             ]
-            legacy_integrity, unavailable_ids = build_legacy_source_archive(
+            integrity, unavailable_ids = build_legacy_source_archive(
                 records, kind=SourceKind.GRAPH_ENTITY, organizations=[organization_id]
             )
-            restored = await restore_source_integrity(
-                driver.execute_query,
-                legacy_integrity,
-                kind=SourceKind.GRAPH_ENTITY,
-                organizations=[organization_id],
-                skip_existing=skip_existing,
-                clean=clean,
-                clean_graph_auxiliary=clean,
-            )
-            restored_ids = restored["restored_source_ids"]
-            entities_restored = len(restored_ids)
-            entities_skipped = backup_data.entity_count - entities_restored
-            integrity_conflicts = restored["conflicts"]
-            quarantined = [
-                {
-                    "source_id": identity,
-                    "reason": "unverifiable_legacy_lineage",
-                    "repair": "reauthor_under_new_capture_identity",
-                }
-                for identity in restored_ids
-                if identity in unavailable_ids
-            ]
-
-        episodes_to_restore: list[Any] = []
-        for episode_data in backup_data.episodes:
-            try:
-                episode = _episode_from_payload(episode_data, organization_id=organization_id)
-                if skip_existing:
-                    existing = await _record_id(driver, "episode", episode.uuid)
-                    if existing:
-                        episodes_skipped += 1
-                        continue
-
-                episodes_to_restore.append(episode)
-            except Exception as e:
-                error_msg = f"Episode {episode_data.get('uuid', 'unknown')}: {e}"
-                errors.append(error_msg)
-                if len(errors) <= 10:
-                    log.warning("Episode restore failed", error=error_msg)
-
-        for episode in episodes_to_restore:
-            try:
-                await _save_native_episode(driver, episode)
-                episodes_restored += 1
-            except Exception as e:
-                error_msg = f"Episode {episode.uuid}: {e}"
-                errors.append(error_msg)
-                if len(errors) <= 10:
-                    log.warning("Episode restore failed", error=error_msg)
-
-        relationships_to_restore: list[Relationship] = []
-        for rel_data in normalize_relationship_payloads(backup_data.relationships):
-            try:
-                relationship = relationship_from_archive(rel_data)
-                relationships_to_restore.append(relationship)
-            except Exception as e:
-                error_msg = f"Relationship {rel_data.get('id', 'unknown')}: {e}"
-                errors.append(error_msg)
-                if len(errors) <= 10:
-                    log.warning("Relationship restore failed", error=error_msg)
-
-        create_bulk = getattr(relationship_manager, "create_bulk", None)
-        if relationships_to_restore and callable(create_bulk):
-            created_count, failed_count = await create_bulk(relationships_to_restore)
-            relationships_restored += created_count
-            if failed_count:
-                error_msg = f"Bulk relationship restore failed for {failed_count} relationships"
-                errors.append(error_msg)
-                log.warning("Bulk relationship restore reported failures", failed=failed_count)
-        else:
-            for relationship in relationships_to_restore:
-                try:
-                    await relationship_manager.create(relationship)
-                    relationships_restored += 1
-                except Exception as e:
-                    error_msg = f"Relationship {relationship.id}: {e}"
-                    errors.append(error_msg)
-                    if len(errors) <= 10:
-                        log.warning("Relationship restore failed", error=error_msg)
-
-        mentions_to_restore: list[Any] = []
-        for mention_data in normalize_mention_payloads(backup_data.mentions):
-            try:
-                mention = _mention_from_payload(mention_data, organization_id=organization_id)
-                if skip_existing and await _mention_exists(driver, mention.uuid):
-                    mentions_skipped += 1
-                    continue
-                mentions_to_restore.append(mention)
-            except Exception as e:
-                error_msg = f"Mention {mention_data.get('uuid', 'unknown')}: {e}"
-                errors.append(error_msg)
-                if len(errors) <= 10:
-                    log.warning("Mention restore failed", error=error_msg)
-
-        for mention in mentions_to_restore:
-            try:
-                await _save_native_mention(driver, mention)
-                mentions_restored += 1
-            except Exception as e:
-                error_msg = f"Mention {mention.uuid}: {e}"
-                errors.append(error_msg)
-                if len(errors) <= 10:
-                    log.warning("Mention restore failed", error=error_msg)
+        runtime = await get_graph_runtime(organization_id)
+        driver = runtime.client
+        companions = await prepare_companion_restore(
+            driver,
+            organization_id=organization_id,
+            episodes=episodes,
+            relationships=relationships,
+            mentions=mentions,
+            skip_existing=skip_existing,
+            clean=clean,
+        )
+        restored = await restore_source_integrity(
+            driver.execute_query,
+            integrity,
+            kind=SourceKind.GRAPH_ENTITY,
+            organizations=[organization_id],
+            skip_existing=skip_existing,
+            clean=clean,
+            clean_graph_auxiliary=clean,
+            auxiliary_preconditions=companions.preconditions,
+            auxiliary_statements=companions.statements,
+            auxiliary_parameters=companions.parameters,
+        )
+        restored_ids = restored["restored_source_ids"]
+        entities_restored = len(restored_ids)
+        entities_skipped = backup_data.entity_count - entities_restored
+        integrity_conflicts = restored["conflicts"]
+        quarantined.extend(
+            {
+                "source_id": identity,
+                "reason": "unverifiable_legacy_lineage",
+                "repair": "reauthor_under_new_capture_identity",
+            }
+            for identity in restored_ids
+            if identity in unavailable_ids
+        )
+        episodes_restored = companions.episodes_restored
+        episodes_skipped = companions.episodes_skipped
+        relationships_restored = companions.relationships_restored
+        mentions_restored = companions.mentions_restored
+        mentions_skipped = companions.mentions_skipped
 
         duration = time.time() - start_time
         log.info(

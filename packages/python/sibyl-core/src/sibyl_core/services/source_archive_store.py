@@ -150,6 +150,7 @@ async def restore_source_integrity(
     skip_existing: bool = True,
     global_scope: bool = False,
     clean_graph_auxiliary: bool = False,
+    auxiliary_preconditions: str = "",
     auxiliary_statements: str = "",
     auxiliary_parameters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -301,6 +302,7 @@ async def restore_source_integrity(
         IF crypto::sha256(type::string({{ source_rows: $rows, source_states: $states, derivations: $associations {companion_field} }})) != $expected {{
             THROW 'archive destination changed before restore';
         }};
+        {auxiliary_preconditions}
         {companion_cleanup}
         FOR $key IN $deletes {{ DELETE type::record($key); }};
         FOR $entry IN $writes {{

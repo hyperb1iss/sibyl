@@ -45,8 +45,7 @@ from sibyl_core.services.graph_records import (
     _relationship_from_row,
 )
 
-_RELATIONSHIP_BULK_UPSERT_QUERY = """
-BEGIN TRANSACTION;
+_RELATIONSHIP_BULK_UPSERT_STATEMENTS = """
 -- The planner never serves `uuid IN $list` from idx_relates_uuid (TableScan
 -- for every statement type, seconds per capture batch once the table is
 -- large), so the endpoint-move cleanup iterates the batch and addresses each
@@ -69,8 +68,10 @@ INSERT RELATION INTO relates_to $rows ON DUPLICATE KEY UPDATE
     expired_at = $input.expired_at,
     valid_at = $input.valid_at,
     invalid_at = $input.invalid_at;
-COMMIT TRANSACTION;
 """
+_RELATIONSHIP_BULK_UPSERT_QUERY = (
+    "BEGIN TRANSACTION;\n" + _RELATIONSHIP_BULK_UPSERT_STATEMENTS + "COMMIT TRANSACTION;"
+)
 
 
 class RelationshipManager:

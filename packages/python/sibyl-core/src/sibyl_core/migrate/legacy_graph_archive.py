@@ -150,9 +150,7 @@ async def mention_exists(client: Any, uuid: str) -> bool:
     return bool(rows)
 
 
-async def save_native_episode(client: Any, episode: BackupEpisodeNode) -> None:
-    await client.execute_query(
-        """
+_EPISODE_UPSERT_STATEMENTS = """
         UPSERT episode SET
             uuid = $uuid,
             name = $name,
@@ -165,17 +163,46 @@ async def save_native_episode(client: Any, episode: BackupEpisodeNode) -> None:
             valid_at = $valid_at,
             entity_edges = $entity_edges
         WHERE uuid = $uuid;
-        """,
-        uuid=episode.uuid,
-        name=episode.name,
-        source=episode.source.value,
-        source_description=episode.source_description,
-        content=episode.content,
-        labels=list(episode.labels),
-        group_id=episode.group_id,
-        created_at=native_archive_parameters(episode.created_at),
-        valid_at=native_archive_parameters(episode.valid_at),
-        entity_edges=list(episode.entity_edges),
+        """
+
+_MENTION_UPSERT_STATEMENTS = """
+        DELETE FROM mentions WHERE uuid = $uuid AND (in != $src OR out != $tgt);
+        LET $updated = (UPDATE mentions SET
+            in = $src,
+            out = $tgt,
+            uuid = $uuid,
+            group_id = $group_id,
+            created_at = $created_at
+        WHERE uuid = $uuid RETURN id);
+        IF array::len($updated) = 0 THEN
+            RELATE $src->$rel->$tgt SET
+                uuid = $uuid,
+                group_id = $group_id,
+                created_at = $created_at;
+        END;
+        """
+
+
+def episode_record(episode: BackupEpisodeNode) -> dict[str, Any]:
+    """Keep ordinary and archive episode writes on the same storage contract."""
+    return {
+        "uuid": episode.uuid,
+        "name": episode.name,
+        "source": episode.source.value,
+        "source_description": episode.source_description,
+        "content": episode.content,
+        "labels": list(episode.labels),
+        "group_id": episode.group_id,
+        "created_at": episode.created_at,
+        "valid_at": episode.valid_at,
+        "entity_edges": list(episode.entity_edges),
+    }
+
+
+async def save_native_episode(client: Any, episode: BackupEpisodeNode) -> None:
+    await client.execute_query(
+        _EPISODE_UPSERT_STATEMENTS,
+        **native_archive_parameters(episode_record(episode)),
     )
 
 
@@ -191,22 +218,7 @@ async def save_native_mention(client: Any, mention: BackupMentionEdge) -> None:
         raise ValueError(msg)
 
     await client.execute_query(
-        """
-        DELETE FROM mentions WHERE uuid = $uuid AND (in != $src OR out != $tgt);
-        LET $updated = (UPDATE mentions SET
-            in = $src,
-            out = $tgt,
-            uuid = $uuid,
-            group_id = $group_id,
-            created_at = $created_at
-        WHERE uuid = $uuid RETURN id);
-        IF array::len($updated) = 0 THEN
-            RELATE $src->$rel->$tgt SET
-                uuid = $uuid,
-                group_id = $group_id,
-                created_at = $created_at;
-        END;
-        """,
+        _MENTION_UPSERT_STATEMENTS,
         rel=RecordID("mentions", mention.uuid),
         src=source_record_id,
         tgt=target_record_id,

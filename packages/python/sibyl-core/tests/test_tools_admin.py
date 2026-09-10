@@ -49,6 +49,20 @@ def archive_restore(monkeypatch):
     return seam
 
 
+def empty_companion_client():
+    """Serialization-only tests expose an empty checked companion snapshot."""
+    return SimpleNamespace(
+        execute_query=AsyncMock(
+            return_value=[
+                {
+                    "rows": {"episode": [], "relates_to": [], "mentions": []},
+                    "fingerprint": "0" * 64,
+                }
+            ]
+        )
+    )
+
+
 def archived_entities(archive_restore):
     from sibyl_core.migrate.source_integrity import decode_record
     from sibyl_core.services.graph_records import entity_from_surreal_row
@@ -347,7 +361,7 @@ class TestRestoreBackup:
             "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
-                    client=SimpleNamespace(execute_query=AsyncMock()),
+                    client=empty_companion_client(),
                     entity_manager=entity_manager,
                     relationship_manager=relationship_manager,
                 )
@@ -365,7 +379,11 @@ class TestRestoreBackup:
         archive_restore.assert_awaited_once()
         entity_manager.create_direct_bulk.assert_not_awaited()
         entity_manager.create_direct.assert_not_awaited()
-        relationship_manager.create_bulk.assert_awaited_once()
+        relationship_manager.create_bulk.assert_not_awaited()
+        assert (
+            len(archive_restore.await_args.kwargs["auxiliary_parameters"]["archive_relationships"])
+            == 1
+        )
         relationship_manager.create.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -422,7 +440,7 @@ class TestRestoreBackup:
             "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
-                    client=SimpleNamespace(execute_query=AsyncMock()),
+                    client=empty_companion_client(),
                     entity_manager=entity_manager,
                     relationship_manager=relationship_manager,
                 )
@@ -514,7 +532,7 @@ class TestRestoreBackup:
             "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
-                    client=SimpleNamespace(execute_query=AsyncMock()),
+                    client=empty_companion_client(),
                     entity_manager=entity_manager,
                     relationship_manager=relationship_manager,
                 )
@@ -579,7 +597,7 @@ class TestRestoreBackup:
             "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
-                    client=SimpleNamespace(execute_query=AsyncMock()),
+                    client=empty_companion_client(),
                     entity_manager=entity_manager,
                     relationship_manager=relationship_manager,
                 )
@@ -641,7 +659,7 @@ class TestRestoreBackup:
             "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
-                    client=SimpleNamespace(execute_query=AsyncMock()),
+                    client=empty_companion_client(),
                     entity_manager=entity_manager,
                     relationship_manager=relationship_manager,
                 )
@@ -939,7 +957,7 @@ class TestRestoreBackup:
             "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
-                    client=SimpleNamespace(execute_query=AsyncMock()),
+                    client=empty_companion_client(),
                     entity_manager=entity_manager,
                     relationship_manager=relationship_manager,
                 )
@@ -953,13 +971,15 @@ class TestRestoreBackup:
 
         assert result.success is True
         restored_entities = archived_entities(archive_restore)
-        restored_relationships = relationship_manager.create_bulk.await_args.args[0]
+        restored_relationships = archive_restore.await_args.kwargs["auxiliary_parameters"][
+            "archive_relationships"
+        ]
         assert [entity.id for entity in restored_entities] == ["project-1", "task-1"]
         assert restored_entities[1].metadata["source_ids"] == ["source:task"]
-        assert restored_relationships[0].source_id == "task-1"
-        assert restored_relationships[0].target_id == "project-1"
-        assert restored_relationships[0].relationship_type is RelationshipType.BELONGS_TO
-        assert restored_relationships[0].metadata["source_ids"] == ["source:task"]
+        assert restored_relationships[0]["source_id"] == "task-1"
+        assert restored_relationships[0]["target_id"] == "project-1"
+        assert restored_relationships[0]["name"] == RelationshipType.BELONGS_TO.value
+        assert restored_relationships[0]["attributes"]["source_ids"] == ["source:task"]
 
 
 class TestBackfillDenormalizedFields:
