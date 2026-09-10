@@ -44,8 +44,8 @@ def _is_embedded_url(url: str) -> bool:
     return url.startswith(_EMBEDDED_URL_SCHEMES)
 
 
-def _checked_query_result(response: object) -> object:
-    """Validate every statement before returning the SDK's first-result shape."""
+def _checked_query_result(response: object, *, all_results: bool = False) -> object:
+    """Validate every statement before selecting the requested result shape."""
     from surrealdb.errors import SurrealError, parse_query_error, parse_rpc_error
 
     if not isinstance(response, dict):
@@ -84,6 +84,8 @@ def _checked_query_result(response: object) -> object:
             }:
                 raise parse_query_error(error)
         raise parse_query_error(errors[0])
+    if all_results:
+        return [statement["result"] for statement in statements]
     return statements[0]["result"]
 
 
@@ -276,12 +278,29 @@ class DedicatedSurrealClient:
         finally:
             self._available.put_nowait(connection)
 
+    @property
+    def pool_size(self) -> int:
+        """Return the existing query capacity, including embedded-mode clamping."""
+        return self._pool_size
+
     async def execute_query(self, query: str, **params: object) -> object:
         query_label = _pop_query_label(params)
         return await self._execute(
             query,
             params=params,
             raw=False,
+            query_label=query_label,
+            query_origin=_caller_origin(),
+        )
+
+    async def execute_query_batch(self, query: str, **params: object) -> object:
+        """Return every statement result after checking the complete response."""
+        query_label = _pop_query_label(params)
+        return await self._execute(
+            query,
+            params=params,
+            raw=False,
+            all_results=True,
             query_label=query_label,
             query_origin=_caller_origin(),
         )
@@ -361,6 +380,7 @@ class DedicatedSurrealClient:
         *,
         params: QueryParams,
         raw: bool,
+        all_results: bool = False,
         query_label: str | None,
         query_origin: str | None,
     ) -> object:
@@ -404,7 +424,7 @@ class DedicatedSurrealClient:
                         result = response
                     else:
                         transaction_retry_allowed = _can_replay_query(query, response)
-                        result = _checked_query_result(response)
+                        result = _checked_query_result(response, all_results=all_results)
                     break
                 except Exception as exc:
                     if transaction_retry_allowed and _is_retryable_transaction_conflict(exc):
