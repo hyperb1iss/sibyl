@@ -1406,3 +1406,17 @@ def test_content_restore_without_integrity_decisions_keeps_success_summary(capsy
     assert "Content writes applied: 4 rows across 2 tables" in output
     assert "quarantined" not in output
     assert "histories" not in output
+
+
+def test_restore_reports_source_visibility_and_audience_retention(capsys):
+    migrate_cli._report_restore_integrity(
+        integrity_conflicts=[
+            {"reason": "retained_source_revocation", "source_id": "private-source"},
+            {"reason": "retained_source_authority", "source_id": "private-source"},
+        ],
+        quarantined=[],
+    )
+    output = _strip_ansi(capsys.readouterr().out)
+    assert "retained source visibility restriction: 1" in output
+    assert "retained source audience: 1" in output
+    assert "private-source" not in output

@@ -792,6 +792,8 @@ def _report_restore_integrity(
     reasons = {
         "retained_tombstone": "retained deletion history",
         "retained_high_water": "retained source generation",
+        "retained_source_revocation": "retained source visibility restriction",
+        "retained_source_authority": "retained source audience",
         "existing_source_preserved": "existing source preserved",
         "incoming_lineage_not_adopted": "incoming lineage not adopted",
         "captured_dependency_mismatch": "source evidence changed",
