@@ -776,7 +776,9 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
             parameters[f"archive_record_{index}"] = record
             parameters[f"archive_identity_{index}"] = identity
             try:
-                statement = _auxiliary_restore_statement(spec, organization_id, record, legacy=legacy)
+                statement = _auxiliary_restore_statement(
+                    spec, organization_id, record, legacy=legacy
+                )
             except ValueError as exc:
                 if len(errors) < 50:
                     errors.append(f"{spec.name} invalid archive row ({type(exc).__name__})")
