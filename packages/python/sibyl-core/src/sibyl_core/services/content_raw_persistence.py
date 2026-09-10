@@ -864,6 +864,8 @@ async def save_raw_memory(
     source_observations: Sequence[RawMemory] = (),
     publication_operation_id: str | None = None,
 ) -> RawMemory:
+    from sibyl_core.services.procedure_artifact import publication_build_receipt_json
+
     if expected_revision is not None and expected_revision < 1:
         raise ValueError("expected_revision must be at least 1")
     if (source_observations or publication_operation_id) and expected_revision is None:
@@ -933,7 +935,8 @@ async def save_raw_memory(
                                 OR $observed.memory_scope != $source.memory_scope
                                 OR $observed.scope_key != $source.scope_key
                                 OR $observed.review_state != $source.review_state
-                                OR $observed.metadata != $source.metadata {
+                                OR ($observed.metadata != $source.metadata
+                                    AND $observed.metadata != $source.legacy_metadata) {
                                 THROW 'publication_source_observation_changed';
                             };
                         };
@@ -1001,6 +1004,11 @@ async def save_raw_memory(
                         else None
                     ),
                     publication_principal_id=memory.principal_id,
+                    publication_build_receipt_json=(
+                        publication_build_receipt_json(memory)
+                        if publication_operation_id or source_observations
+                        else None
+                    ),
                     uuid=memory.id,
                     expected_revision=expected_revision,
                     record=update_record,
@@ -1008,7 +1016,9 @@ async def save_raw_memory(
                     source_observations=[
                         {
                             **models.raw_memory_record(source),
-                            "metadata": expand_memory_quality_storage_metadata(source.metadata),
+                            "legacy_metadata": expand_memory_quality_storage_metadata(
+                                source.metadata
+                            ),
                         }
                         for source in source_observations
                     ],

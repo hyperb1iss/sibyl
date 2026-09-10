@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, cast
 
+from sibyl_core.memory_pipeline.audit import decode_audit_metadata, encode_audit_metadata
 from sibyl_core.memory_pipeline.quality import (
     expand_memory_quality_storage_metadata,
     normalize_memory_quality_metadata,
@@ -157,7 +158,7 @@ def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
     record_id = _row_record_id(normalized_row)
     if record_id and record_id != entity_id and metadata.get("record_id") is None:
         metadata["record_id"] = record_id
-    metadata = normalize_memory_quality_metadata(metadata)
+    metadata = normalize_memory_quality_metadata(decode_audit_metadata(metadata))
     name = _first_text(normalized_row.get("name"), normalized_row.get("title"), entity_id)
     identity = metadata.get("reflection_identity")
     stored_name = normalized_row.get("name")
@@ -538,7 +539,7 @@ def relationship_from_surreal_row(row: Mapping[str, object]) -> Relationship:
     record_id = _row_record_id(normalized_row)
     if record_id and record_id != relationship_id and metadata.get("record_id") is None:
         metadata["record_id"] = record_id
-    metadata = normalize_memory_quality_metadata(metadata)
+    metadata = normalize_memory_quality_metadata(decode_audit_metadata(metadata))
 
     return Relationship(
         id=relationship_id,
@@ -697,7 +698,7 @@ def _entity_metadata(entity: Entity) -> dict[str, object]:
     for key, value in model_dump.items():
         if value not in (None, "", [], {}):
             metadata[key] = _jsonable(value)
-    return expand_memory_quality_storage_metadata(metadata)
+    return encode_audit_metadata(expand_memory_quality_storage_metadata(metadata))
 
 
 def _jsonable(value: object) -> object:

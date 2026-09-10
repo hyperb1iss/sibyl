@@ -16,6 +16,7 @@ from sibyl_core.embeddings.providers import (
     EmbeddingProvider,
     create_embedding_provider,
 )
+from sibyl_core.memory_pipeline.audit import decode_audit_metadata, encode_audit_metadata
 from sibyl_core.memory_pipeline.lifecycle import raw_memory_lifecycle_recallable
 from sibyl_core.memory_pipeline.quality import (
     expand_memory_quality_storage_metadata,
@@ -602,7 +603,9 @@ def chunk_from_record(record: Mapping[str, object]) -> ContentChunk:
 
 def raw_memory_from_record(record: Mapping[str, object]) -> RawMemory:
     observed_revision = record.get("revision")
-    metadata = normalize_memory_quality_metadata(coerce_dict(record.get("metadata")))
+    metadata = normalize_memory_quality_metadata(
+        decode_audit_metadata(coerce_dict(record.get("metadata")))
+    )
     return RawMemory(
         id=coerce_str(record.get("uuid")),
         organization_id=coerce_str(record.get("organization_id")),
@@ -674,7 +677,7 @@ def source_record(source: ContentSource) -> SurrealRecord:
 
 
 def raw_memory_record(memory: RawMemory) -> SurrealRecord:
-    metadata = expand_memory_quality_storage_metadata(memory.metadata)
+    metadata = encode_audit_metadata(expand_memory_quality_storage_metadata(memory.metadata))
     record: SurrealRecord = {
         "uuid": memory.id,
         "organization_id": memory.organization_id,
