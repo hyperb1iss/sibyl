@@ -5,17 +5,20 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict
 from typing import Any
 from uuid import uuid4
 
 from pydantic import TypeAdapter
 
+from sibyl_core.ai.llm.extractor import ExtractionUsage
 from sibyl_core.ai.transport import FailedExtractionUsage, TransportAttempt
 from sibyl_core.services import content_client
 from sibyl_core.tasks._evidence_json import canonical
 from sibyl_core.tasks.memory_validation import MemoryValidationResult
 from sibyl_core.tasks.procedure_review import review_digest
+from sibyl_core.tasks.reflection_correction import ReflectionCorrectionResult
+
+ValidationStageResult = MemoryValidationResult | ReflectionCorrectionResult
 
 
 class ValidationExecutionUnavailable(ValueError):
@@ -138,19 +141,17 @@ class ValidationExecution:
         if len(rows) != 1:
             raise ValidationExecutionUnavailable("Dispatch outcome was not committed")
 
-    async def record_result(self, result: MemoryValidationResult) -> None:
-        value = asdict(result)
-        value["submission"] = (
-            result.submission.model_dump(mode="json") if result.submission else None
-        )
-        value["usage"] = result.usage.model_dump(mode="json")
+    async def record_result(self, result: ValidationStageResult) -> None:
+        value = TypeAdapter(ValidationStageResult).dump_python(result, mode="json")
         await self._finish("recorded", usage=value["usage"], result=canonical(value))
 
     async def record_failure(self, failure: BaseException) -> None:
         details = getattr(failure, "details", None) or failure.__dict__
-        usage = FailedExtractionUsage.model_validate(
-            details.get("extraction_usage") or {}
-        ).model_dump(mode="json")
+        reported = details.get("extraction_usage")
+        if isinstance(reported, ExtractionUsage):
+            usage = reported.model_dump(mode="json")
+        else:
+            usage = FailedExtractionUsage.model_validate(reported or {}).model_dump(mode="json")
         await self._finish(
             "cancelled" if isinstance(failure, asyncio.CancelledError) else "failed",
             usage=usage,
@@ -185,7 +186,7 @@ class ValidationExecution:
             raise ValidationExecutionUnavailable(
                 f"Validation has no available completed result: {row.get('state') if row else 'missing'}"
             )
-        TypeAdapter(MemoryValidationResult).validate_json(row["result_json"])
+        TypeAdapter(ValidationStageResult).validate_json(row["result_json"])
         return {"execution_id": self.id, **json.loads(row["result_json"])}
 
 
@@ -220,7 +221,7 @@ def validation_archive_guard(table: str, record: dict[str, Any]) -> str:
     if sorted(binding["source_id"] for binding in bindings) != sorted(record["source_ids"]):
         raise ValueError("Validation archive source set differs")
     if record.get("result_json") is not None:
-        TypeAdapter(MemoryValidationResult).validate_json(record["result_json"])
+        TypeAdapter(ValidationStageResult).validate_json(record["result_json"])
         if record.get("purged"):
             raise ValueError("Purged validation cannot retain readable output")
     clauses = []

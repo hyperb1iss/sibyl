@@ -641,6 +641,7 @@ async def _write_promotion_relationships(
 async def promote_reflection_candidate_review(
     *,
     candidate_id: str,
+    expected_candidate_revision: int | None = None,
     organization_id: str,
     principal_id: str | None,
     promote_to_scope: MemoryScope | str | None,
@@ -673,6 +674,19 @@ async def promote_reflection_candidate_review(
     )
     if isinstance(plan, ReflectionPromotionResult):
         return plan
+
+    if (
+        expected_candidate_revision is not None
+        and plan.candidate_memory.revision != expected_candidate_revision
+    ):
+        return _promotion_denied(
+            candidate_id=candidate_id,
+            reason="validated_candidate_changed",
+            review_state=plan.candidate_memory.review_state,
+            memory_scope=plan.target_scope,
+            scope_key=plan.target_scope_key,
+            raw_source_ids=plan.raw_source_ids,
+        )
 
     return await _apply_promotion_plan(
         plan=plan,

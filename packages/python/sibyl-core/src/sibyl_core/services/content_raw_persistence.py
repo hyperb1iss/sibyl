@@ -45,6 +45,7 @@ from sibyl_core.services.eval_publication_guards import PUBLICATION_ADMISSION_GU
 if TYPE_CHECKING:
     from sibyl_core.memory_pipeline.observations import SourceObservation
     from sibyl_core.services.dream_checkpoints import DreamCandidateWrite
+    from sibyl_core.services.validation_candidate import ValidationCandidateWrite
 
 _RAW_MEMORY_EMBEDDING_AUTO = object()
 
@@ -372,6 +373,7 @@ async def remember_raw_memory(
     embedding_provider: EmbeddingProvider | object | None = _RAW_MEMORY_EMBEDDING_AUTO,
     source_memories: Sequence[RawMemory] = (),
     dream_write: DreamCandidateWrite | None = None,
+    validation_write: ValidationCandidateWrite | None = None,
     source_observations: Sequence[SourceObservation] = (),
     accessible_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
@@ -406,6 +408,10 @@ async def remember_raw_memory(
         ),
         captured_at=models.utcnow(),
     )
+    if validation_write is not None:
+        if dream_write is not None or not source_observations:
+            raise ValueError("Corrected review requires observed original sources")
+        memory.id = validation_write.id
     if dream_write is not None:
         if source_observations or len(source_memories) != 1:
             raise ValueError("Dream review requires its single captured source")
@@ -437,7 +443,24 @@ async def remember_raw_memory(
     )
     memory = await _raw_memory_with_embedding(memory, provider)
     async with content_client.surreal_content_client() as client:
-        if dream_write is not None:
+        if validation_write is not None:
+            from sibyl_core.services.memory_derivations import raw_derivation_record
+            from sibyl_core.services.validation_candidate import insert_validation_candidate
+
+            authority = SourceReadAuthority(
+                principal_id=principal_id,
+                projects=frozenset(accessible_projects),
+                teams=frozenset(accessible_teams),
+                delegations=frozenset(accessible_delegations),
+                scope_keys=allowed_memory_scope_keys,
+            )
+            record = await insert_validation_candidate(
+                client,
+                models.raw_memory_record(memory),
+                validation_write,
+                raw_derivation_record(memory, source_observations, authority),
+            )
+        elif dream_write is not None:
             from sibyl_core.services.dream_checkpoints import insert_dream_candidate
 
             record = await insert_dream_candidate(
@@ -616,7 +639,9 @@ async def remember_reflection_candidate_review(
     suggested_scope_key: str | None = None,
     extraction_prompt_metadata: dict[str, object] | None = None,
     source_memories: Sequence[RawMemory] = (),
+    source_observations: Sequence[SourceObservation] = (),
     dream_write: DreamCandidateWrite | None = None,
+    validation_write: ValidationCandidateWrite | None = None,
     accessible_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
@@ -649,6 +674,8 @@ async def remember_reflection_candidate_review(
         entity_type=candidate.kind,
         source_memories=source_memories,
         dream_write=dream_write,
+        validation_write=validation_write,
+        source_observations=source_observations,
         accessible_projects=accessible_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
