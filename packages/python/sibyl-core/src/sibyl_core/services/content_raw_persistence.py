@@ -14,6 +14,7 @@ from sibyl_core.auth.memory_policy import (
     MEMORY_PROVENANCE_METADATA_KEYS,
 )
 from sibyl_core.backends.surreal import SurrealContentClient
+from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.embeddings.providers import (
     EmbeddingProvider,
 )
@@ -940,6 +941,14 @@ async def save_raw_memory(
                                 THROW 'publication_source_observation_changed';
                             };
                         };
+                        LET $observed_ids = array::distinct($source_observations.map(|$s| $s.uuid));
+                        LET $source_states_to_fence = (SELECT * FROM source_states
+                            WHERE organization_id=$organization_id AND source_kind='raw_capture'
+                                AND source_id IN $observed_ids);
+                        IF array::len($source_states_to_fence) != array::len($observed_ids) {
+                            THROW 'publication_source_observation_changed';
+                        };
+                        __SOURCE_STATE_WRITE_WITNESS__
                         LET $current = (SELECT revision FROM raw_captures
                             WHERE organization_id = $organization_id AND uuid = $uuid LIMIT 1)[0];
                         LET $next = object::from_entries(array::concat(
@@ -995,7 +1004,9 @@ async def save_raw_memory(
                         };
                         RETURN $saved;
                         };
-                    """.replace("__PUBLICATION_ADMISSION_GUARD__", PUBLICATION_ADMISSION_GUARD),
+                    """.replace(
+                        "__PUBLICATION_ADMISSION_GUARD__", PUBLICATION_ADMISSION_GUARD
+                    ).replace("__SOURCE_STATE_WRITE_WITNESS__", SOURCE_STATE_WRITE_WITNESS),
                     organization_id=memory.organization_id,
                     publication_operation_id=publication_operation_id
                     or (
