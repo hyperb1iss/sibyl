@@ -56,6 +56,13 @@ async def test_dream_archive_restart_does_not_repeat_extraction(dream_store, mon
         result = await content_archive.restore_content_archive_payload(archive, clean=clean)
         assert result.success, result.errors
         assert (
+            await destination.execute_query("SELECT * OMIT id FROM dream_source_checkpoints;")
+            == checkpoint
+        )
+        assert (
+            await destination.execute_query("SELECT * OMIT id FROM dream_source_cursors;") == cursor
+        )
+        assert (
             await destination.execute_query("SELECT uuid FROM raw_captures ORDER BY uuid;")
             == before
         )
