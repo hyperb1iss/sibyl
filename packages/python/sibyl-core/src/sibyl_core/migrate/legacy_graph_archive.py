@@ -8,6 +8,7 @@ from typing import Any
 
 from surrealdb import RecordID
 
+from sibyl_core.migrate.source_integrity import ArchiveDatetime, native_archive_parameters
 from sibyl_core.services.graph_common import normalize_graph_records as normalize_records
 
 ARCHIVE_GRAPH_TABLES = ("episode",)
@@ -44,6 +45,8 @@ class BackupMentionEdge:
 
 
 def serialize_backup_datetime(value: Any) -> str:
+    if isinstance(value, ArchiveDatetime):
+        return value.native_text
     if isinstance(value, datetime):
         return value.isoformat()
     return str(value or "")
@@ -53,7 +56,7 @@ def parse_backup_datetime(value: Any) -> datetime:
     if isinstance(value, datetime):
         return value
     if isinstance(value, str) and value:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return ArchiveDatetime.parse(value)
     raise ValueError(f"Invalid backup datetime: {value!r}")
 
 
@@ -106,6 +109,7 @@ def episode_from_payload(payload: dict[str, Any], *, organization_id: str) -> Ba
         source_description=str(payload.get("source_description") or ""),
         content=str(payload.get("content") or ""),
         entity_edges=list(payload.get("entity_edges") or []),
+        labels=string_list(payload.get("labels"), default=["Episodic"]),
         created_at=created_at,
         valid_at=valid_at,
     )
@@ -146,9 +150,7 @@ async def mention_exists(client: Any, uuid: str) -> bool:
     return bool(rows)
 
 
-async def save_native_episode(client: Any, episode: BackupEpisodeNode) -> None:
-    await client.execute_query(
-        """
+_EPISODE_UPSERT_STATEMENTS = """
         UPSERT episode SET
             uuid = $uuid,
             name = $name,
@@ -161,17 +163,46 @@ async def save_native_episode(client: Any, episode: BackupEpisodeNode) -> None:
             valid_at = $valid_at,
             entity_edges = $entity_edges
         WHERE uuid = $uuid;
-        """,
-        uuid=episode.uuid,
-        name=episode.name,
-        source=episode.source.value,
-        source_description=episode.source_description,
-        content=episode.content,
-        labels=list(episode.labels),
-        group_id=episode.group_id,
-        created_at=episode.created_at,
-        valid_at=episode.valid_at,
-        entity_edges=list(episode.entity_edges),
+        """
+
+_MENTION_UPSERT_STATEMENTS = """
+        DELETE FROM mentions WHERE uuid = $uuid AND (in != $src OR out != $tgt);
+        LET $updated = (UPDATE mentions SET
+            in = $src,
+            out = $tgt,
+            uuid = $uuid,
+            group_id = $group_id,
+            created_at = $created_at
+        WHERE uuid = $uuid RETURN id);
+        IF array::len($updated) = 0 THEN
+            RELATE $src->$rel->$tgt SET
+                uuid = $uuid,
+                group_id = $group_id,
+                created_at = $created_at;
+        END;
+        """
+
+
+def episode_record(episode: BackupEpisodeNode) -> dict[str, Any]:
+    """Keep ordinary and archive episode writes on the same storage contract."""
+    return {
+        "uuid": episode.uuid,
+        "name": episode.name,
+        "source": episode.source.value,
+        "source_description": episode.source_description,
+        "content": episode.content,
+        "labels": list(episode.labels),
+        "group_id": episode.group_id,
+        "created_at": episode.created_at,
+        "valid_at": episode.valid_at,
+        "entity_edges": list(episode.entity_edges),
+    }
+
+
+async def save_native_episode(client: Any, episode: BackupEpisodeNode) -> None:
+    await client.execute_query(
+        _EPISODE_UPSERT_STATEMENTS,
+        **native_archive_parameters(episode_record(episode)),
     )
 
 
@@ -187,28 +218,13 @@ async def save_native_mention(client: Any, mention: BackupMentionEdge) -> None:
         raise ValueError(msg)
 
     await client.execute_query(
-        """
-        DELETE FROM mentions WHERE uuid = $uuid AND (in != $src OR out != $tgt);
-        LET $updated = (UPDATE mentions SET
-            in = $src,
-            out = $tgt,
-            uuid = $uuid,
-            group_id = $group_id,
-            created_at = $created_at
-        WHERE uuid = $uuid RETURN id);
-        IF array::len($updated) = 0 THEN
-            RELATE $src->$rel->$tgt SET
-                uuid = $uuid,
-                group_id = $group_id,
-                created_at = $created_at;
-        END;
-        """,
+        _MENTION_UPSERT_STATEMENTS,
         rel=RecordID("mentions", mention.uuid),
         src=source_record_id,
         tgt=target_record_id,
         uuid=mention.uuid,
         group_id=mention.group_id,
-        created_at=mention.created_at,
+        created_at=native_archive_parameters(mention.created_at),
     )
 
 
