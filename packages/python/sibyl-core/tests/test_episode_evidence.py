@@ -201,6 +201,9 @@ async def test_projected_proposal_resolves_and_revalidates_original_ranges(monke
             self.output_type = output_type
             assert "evidence_id" in kwargs["system_prompt"]
 
+        async def output_schema(self):
+            return self.output_type.model_json_schema()
+
         async def extract_with_usage(self, prompt):
             assert "Evidence view:" in prompt
             return SimpleNamespace(

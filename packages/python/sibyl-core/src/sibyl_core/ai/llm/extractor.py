@@ -8,12 +8,15 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
+from weakref import WeakKeyDictionary
 
 from pydantic import BaseModel, Field, TypeAdapter
 from pydantic_ai import Agent, NativeOutput
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.models import Model, ModelSettings
+from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.openai import OpenAIResponsesModel
+from pydantic_ai.profiles import ModelProfile
 from pydantic_ai.profiles.openai import OpenAIJsonSchemaTransformer
 
 from sibyl_core.ai.clients import get_agent
@@ -24,6 +27,7 @@ from sibyl_core.ai.transport import (
     FailedExtractionUsage,
     TransportAttempt,
     collect_transport_attempts,
+    reserve_uncovered_transport_attempts,
 )
 from sibyl_core.observability import elapsed_ms, telemetry_registry
 
@@ -50,10 +54,13 @@ class ExtractionResult[T]:
 OutputMode = Literal["tool", "native_strict"]
 
 
-def extraction_schema(output_type: Any, output_mode: OutputMode = "tool") -> dict[str, Any]:
+def extraction_schema(
+    output_type: Any, output_mode: OutputMode = "tool", *, profile: ModelProfile | None = None
+) -> dict[str, Any]:
     schema = TypeAdapter(output_type).json_schema()
     if output_mode == "native_strict":
-        return OpenAIJsonSchemaTransformer(schema, strict=True).walk()
+        transformer = (profile or {}).get("json_schema_transformer") or OpenAIJsonSchemaTransformer
+        return transformer(schema, strict=True).walk()
     return schema
 
 
@@ -84,6 +91,9 @@ class Extractor[T]:
         self.output_retries = output_retries
         self.max_tokens = max_tokens
         self._agent = agent
+        self._prepared_agents: WeakKeyDictionary[asyncio.AbstractEventLoop, Agent[Any, Any]] = (
+            WeakKeyDictionary()
+        )
 
     async def extract(self, prompt: str) -> T:
         return (await self.extract_with_usage(prompt)).output
@@ -99,9 +109,15 @@ class Extractor[T]:
         try:
             agent = await self._get_agent()
             if self.output_mode == "native_strict" and not isinstance(
-                agent.model, OpenAIResponsesModel
+                agent.model, OpenAIResponsesModel | AnthropicModel
             ):
-                raise ValueError("native strict extraction requires OpenAI Responses")
+                raise ValueError("native strict extraction requires OpenAI Responses or Anthropic")
+            if (
+                self.output_mode == "native_strict"
+                and isinstance(agent.model, AnthropicModel)
+                and not agent.model.profile.get("supports_json_schema_output", False)
+            ):
+                raise ValueError("Anthropic model does not support native strict extraction")
             if self.openrouter_provider is not None and (
                 not isinstance(agent.model, OpenAIResponsesModel)
                 or agent.model.client.base_url.host != "openrouter.ai"
@@ -111,21 +127,29 @@ class Extractor[T]:
                 raise ValueError("OpenRouter routing requires the OpenRouter API origin")
             transport_retries = (
                 agent.model.client.max_retries
-                if isinstance(agent.model, OpenAIResponsesModel)
+                if isinstance(agent.model, OpenAIResponsesModel | AnthropicModel)
                 else 0
             )
             # An unspecified output retry policy estimates one model request;
             # dynamic agent settings and provider work are not bounded here.
-            await reserve_llm_budget(
-                surface=self.surface.value,
-                prompt=self._budget_prompt(prompt),
-                output_token_limit=self._budget_output_limit(agent),
-                attempt_envelope=(transport_retries + 1) * ((self.output_retries or 0) + 1),
-            )
-            result = await agent.run(
-                prompt,
-                model_settings=self._model_settings(),
-            )
+            budget_prompt = self._budget_prompt(prompt, agent)
+            output_limit = self._budget_output_limit(agent)
+            envelope = (transport_retries + 1) * ((self.output_retries or 0) + 1)
+
+            async def reserve(envelope: int = 1) -> None:
+                await reserve_llm_budget(
+                    surface=self.surface.value,
+                    prompt=budget_prompt,
+                    output_token_limit=output_limit,
+                    attempt_envelope=envelope,
+                )
+
+            await reserve(envelope)
+            with reserve_uncovered_transport_attempts(envelope, reserve):
+                result = await agent.run(
+                    prompt,
+                    model_settings=self._model_settings(),
+                )
             telemetry_registry().record_llm_call(
                 surface=self.surface.value,
                 provider="runtime",
@@ -165,11 +189,15 @@ class Extractor[T]:
             settings.update(agent.model_settings)
         return settings.get("max_tokens")
 
-    def _budget_prompt(self, prompt: str) -> str:
+    def _budget_prompt(self, prompt: str, agent: Agent[Any, Any]) -> str:
         instructions = self.system_prompt or ()
         if isinstance(instructions, str):
             instructions = (instructions,)
-        schema = extraction_schema(self.output_type, self.output_mode)
+        schema = extraction_schema(
+            self.output_type,
+            self.output_mode,
+            profile=agent.model.profile if isinstance(agent.model, Model) else None,
+        )
         return "\n".join((*instructions, prompt, json.dumps(schema, sort_keys=True)))
 
     async def extract_many(
@@ -189,9 +217,24 @@ class Extractor[T]:
 
         return await asyncio.gather(*(run_one(prompt) for prompt in prompts))
 
+    async def output_schema(self) -> dict[str, Any]:
+        """Resolve the schema from the same model used for this extraction."""
+        if self.output_mode == "tool":
+            return extraction_schema(self.output_type)
+        agent = await self._get_agent()
+        self._prepared_agents[asyncio.get_running_loop()] = agent
+        return extraction_schema(
+            self.output_type,
+            self.output_mode,
+            profile=agent.model.profile if isinstance(agent.model, Model) else None,
+        )
+
     async def _get_agent(self) -> Agent[Any, Any]:
         if self._agent is not None:
             return self._agent
+        prepared = self._prepared_agents.get(asyncio.get_running_loop())
+        if prepared is not None:
+            return prepared
         output_type: Any = self.output_type
         return await get_agent(
             self.surface,

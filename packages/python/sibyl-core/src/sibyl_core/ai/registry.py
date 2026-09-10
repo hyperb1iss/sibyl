@@ -145,6 +145,29 @@ _DEFAULT_ENTRIES = [
         last_verified_at=_VERIFIED_AT,
     ),
     ModelEntry(
+        alias="claude-opus-5",
+        snapshot="claude-opus-5",
+        kind=ModelKind.LLM,
+        provider="anthropic",
+        provider_model_id="claude-opus-5",
+        pydantic_ai_model_class="AnthropicModel",
+        use_cases=("native-structured-quality",),
+        capabilities=frozenset(
+            {
+                ModelCapability.STRUCTURED_OUTPUT,
+                ModelCapability.STREAMING,
+                ModelCapability.TOOL_USE,
+                ModelCapability.THINKING,
+            }
+        ),
+        max_output_tokens=128_000,
+        default_temperature=None,
+        input_cost_per_mtok_usd=5.0,
+        output_cost_per_mtok_usd=25.0,
+        cost_source_url="https://platform.claude.com/docs/en/models/opus-5/overview",
+        last_verified_at=datetime(2026, 9, 9, tzinfo=UTC),
+    ),
+    ModelEntry(
         alias="claude-sonnet-4-6",
         snapshot="claude-sonnet-4-6",
         kind=ModelKind.LLM,
