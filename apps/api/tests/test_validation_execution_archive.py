@@ -109,5 +109,8 @@ async def test_validation_archive_missing_retention_flag_rejected(history):
     _client, _execution = history
     archive = await content_archive.export_content_archive_payload("org")
     del archive["tables"]["memory_validation_executions"][0]["purged"]
-    with pytest.raises(ValueError, match="retention identity"):
-        await content_archive.restore_content_archive_payload(archive, clean=True)
+    result = await content_archive.restore_content_archive_payload(archive, clean=True)
+    assert not result.success
+    assert result.rows_restored == 0
+    assert result.errors == ["memory_validation_executions invalid archive row (ValueError)"]
+    assert await _execution.load()
