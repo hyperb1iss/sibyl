@@ -810,7 +810,7 @@ def test_migrate_import_restores_content_when_surreal_store_is_enabled(tmp_path:
     assert result.exit_code == 0
     payload = restore_content.call_args.args[0]
     assert payload["row_counts"]["document_chunks"] == 1
-    assert restore_content.call_args.kwargs == {"clean": False}
+    assert restore_content.call_args.kwargs == {"clean": False, "global_scope": False}
 
 
 def test_migrate_verify_uses_runtime_verifier(tmp_path: Path) -> None:

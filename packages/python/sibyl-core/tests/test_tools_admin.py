@@ -35,6 +35,30 @@ from sibyl_core.tools.admin import (
 )
 
 
+@pytest.fixture
+def archive_restore(monkeypatch):
+    """Expose serialized source units; real transactional behavior has SDK controls."""
+    from sibyl_core.migrate.source_integrity import validate_integrity_archive
+
+    async def restored(_execute, payload, *, kind, organizations, **_policy):
+        rows, _, _ = validate_integrity_archive(payload, kind=kind, organizations=organizations)
+        return {"restored_source_ids": [row["uuid"] for row in rows], "conflicts": []}
+
+    seam = AsyncMock(side_effect=restored)
+    monkeypatch.setattr("sibyl_core.services.source_archive_store.restore_source_integrity", seam)
+    return seam
+
+
+def archived_entities(archive_restore):
+    from sibyl_core.migrate.source_integrity import decode_record
+    from sibyl_core.services.graph_records import entity_from_surreal_row
+
+    return [
+        entity_from_surreal_row(decode_record(row))
+        for row in archive_restore.await_args.args[1]["source_rows"]
+    ]
+
+
 class TestRebuildIndices:
     """Admin index rebuilds should report real behavior, not placeholder success."""
 
@@ -282,14 +306,15 @@ class TestHealthAndStats:
 
 
 class TestRestoreBackup:
-    """Graph restores should use the fast direct entity seams."""
+    """Graph restore serialization must preserve values at the checked owner."""
 
     @pytest.mark.asyncio
-    async def test_clean_restore_uses_bulk_direct_entity_insert(self) -> None:
+    async def test_restore_submits_checked_source_unit_without_embedding_writes(
+        self, archive_restore
+    ) -> None:
         org_id = "00000000-0000-0000-0000-000000000111"
         entity_manager = AsyncMock()
         relationship_manager = AsyncMock()
-        driver = SimpleNamespace()
         entity_manager.create_direct_bulk = AsyncMock(return_value=["entity-1", "entity-2"])
         entity_manager.create_direct = AsyncMock()
         relationship_manager.create_bulk = AsyncMock(return_value=(1, 0))
@@ -322,7 +347,7 @@ class TestRestoreBackup:
             "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
-                    client=SimpleNamespace(get_org_driver=lambda group_id: driver),
+                    client=SimpleNamespace(execute_query=AsyncMock()),
                     entity_manager=entity_manager,
                     relationship_manager=relationship_manager,
                 )
@@ -337,16 +362,16 @@ class TestRestoreBackup:
         assert result.success is True
         assert result.entities_restored == 2
         assert result.entities_skipped == 0
-        entity_manager.create_direct_bulk.assert_awaited_once_with(
-            ANY,
-            generate_embeddings=False,
-        )
+        archive_restore.assert_awaited_once()
+        entity_manager.create_direct_bulk.assert_not_awaited()
         entity_manager.create_direct.assert_not_awaited()
         relationship_manager.create_bulk.assert_awaited_once()
         relationship_manager.create.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_restore_normalizes_owner_metadata_it_cannot_authorize(self) -> None:
+    async def test_restore_normalizes_owner_metadata_it_cannot_authorize(
+        self, archive_restore
+    ) -> None:
         """A restore rebuilds rows from a request body, not from a caller.
 
         It keeps the ownership the backup recorded, but must not introduce
@@ -397,7 +422,7 @@ class TestRestoreBackup:
             "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
-                    client=SimpleNamespace(get_org_driver=lambda group_id: None),
+                    client=SimpleNamespace(execute_query=AsyncMock()),
                     entity_manager=entity_manager,
                     relationship_manager=relationship_manager,
                 )
@@ -410,10 +435,7 @@ class TestRestoreBackup:
             )
 
         assert result.success is True
-        restored = {
-            entity.id: entity.metadata
-            for entity in entity_manager.create_direct_bulk.await_args.args[0]
-        }
+        restored = {entity.id: entity.metadata for entity in archived_entities(archive_restore)}
         # Recorded ownership survives; the extra owner channel does not.
         assert restored["episode_planted"]["memory_scope"] == "private"
         assert restored["episode_planted"]["principal_id"] == "victim"
@@ -441,7 +463,7 @@ class TestRestoreBackup:
         )
 
     @pytest.mark.asyncio
-    async def test_restore_rehydrates_typed_entities_losslessly(self) -> None:
+    async def test_restore_rehydrates_typed_entities_losslessly(self, archive_restore) -> None:
         org_id = "00000000-0000-0000-0000-000000000111"
         entity_manager = AsyncMock()
         relationship_manager = AsyncMock()
@@ -492,7 +514,7 @@ class TestRestoreBackup:
             "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
-                    client=SimpleNamespace(get_org_driver=lambda group_id: SimpleNamespace()),
+                    client=SimpleNamespace(execute_query=AsyncMock()),
                     entity_manager=entity_manager,
                     relationship_manager=relationship_manager,
                 )
@@ -505,18 +527,24 @@ class TestRestoreBackup:
             )
 
         assert result.success is True
-        restored = entity_manager.create_direct_bulk.await_args.args[0]
-        assert [type(entity) for entity in restored] == [Task, Project, Epic]
-        assert restored[0].status is TaskStatus.DOING
-        assert restored[0].priority is TaskPriority.CRITICAL
-        assert restored[0].project_id == "project-1"
-        assert restored[0].assignees == ["nova"]
-        assert restored[1].repository_url == "https://github.com/hyperb1iss/sibyl"
-        assert restored[1].tech_stack == ["python", "surrealdb"]
-        assert restored[2].project_id == "project-1"
+        restored = archived_entities(archive_restore)
+        assert [entity.entity_type for entity in restored] == [
+            EntityType.TASK,
+            EntityType.PROJECT,
+            EntityType.EPIC,
+        ]
+        assert restored[0].metadata["status"] == TaskStatus.DOING.value
+        assert restored[0].metadata["priority"] == TaskPriority.CRITICAL.value
+        assert restored[0].metadata["project_id"] == "project-1"
+        assert restored[0].metadata["assignees"] == ["nova"]
+        assert restored[1].metadata["repository_url"] == "https://github.com/hyperb1iss/sibyl"
+        assert restored[1].metadata["tech_stack"] == ["python", "surrealdb"]
+        assert restored[2].metadata["project_id"] == "project-1"
 
     @pytest.mark.asyncio
-    async def test_restore_preserves_legacy_typed_entities_as_generic(self) -> None:
+    async def test_restore_preserves_legacy_typed_entities_as_generic(
+        self, archive_restore
+    ) -> None:
         org_id = "00000000-0000-0000-0000-000000000111"
         entity_manager = AsyncMock()
         relationship_manager = AsyncMock()
@@ -551,7 +579,7 @@ class TestRestoreBackup:
             "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
-                    client=SimpleNamespace(get_org_driver=lambda group_id: SimpleNamespace()),
+                    client=SimpleNamespace(execute_query=AsyncMock()),
                     entity_manager=entity_manager,
                     relationship_manager=relationship_manager,
                 )
@@ -564,7 +592,7 @@ class TestRestoreBackup:
             )
 
         assert result.success is True
-        restored = entity_manager.create_direct_bulk.await_args.args[0]
+        restored = archived_entities(archive_restore)
         assert [type(entity) for entity in restored] == [Entity, Entity]
         assert [entity.entity_type for entity in restored] == [
             EntityType.NOTE,
@@ -574,11 +602,14 @@ class TestRestoreBackup:
         assert restored[1].content == "Old error pattern before structured fields"
 
     @pytest.mark.asyncio
-    async def test_skip_existing_restore_uses_bulk_create_without_embeddings(self) -> None:
+    async def test_skip_existing_restore_preserves_checked_owner_policy(
+        self, archive_restore
+    ) -> None:
+        archive_restore.side_effect = None
+        archive_restore.return_value = {"restored_source_ids": ["entity-2"], "conflicts": []}
         org_id = "00000000-0000-0000-0000-000000000111"
         entity_manager = AsyncMock()
         relationship_manager = AsyncMock()
-        driver = SimpleNamespace()
         entity_manager.get = AsyncMock(
             side_effect=[SimpleNamespace(id="entity-1"), Exception("missing")]
         )
@@ -610,7 +641,7 @@ class TestRestoreBackup:
             "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
-                    client=SimpleNamespace(get_org_driver=lambda group_id: driver),
+                    client=SimpleNamespace(execute_query=AsyncMock()),
                     entity_manager=entity_manager,
                     relationship_manager=relationship_manager,
                 )
@@ -625,14 +656,15 @@ class TestRestoreBackup:
         assert result.success is True
         assert result.entities_restored == 1
         assert result.entities_skipped == 1
-        entity_manager.create_direct_bulk.assert_awaited_once_with(
-            ANY,
-            generate_embeddings=False,
-        )
+        archive_restore.assert_awaited_once()
+        entity_manager.create_direct_bulk.assert_not_awaited()
         entity_manager.create_direct.assert_not_awaited()
         relationship_manager.create_bulk.assert_not_awaited()
-        create_args = entity_manager.create_direct_bulk.await_args
-        assert [entity.id for entity in create_args.args[0]] == ["entity-2"]
+        assert archive_restore.await_args.kwargs["skip_existing"] is True
+        assert [entity.id for entity in archived_entities(archive_restore)] == [
+            "entity-1",
+            "entity-2",
+        ]
 
     @pytest.mark.asyncio
     async def test_restore_rehydrates_episodes_and_mentions(self) -> None:
@@ -865,7 +897,7 @@ class TestRestoreBackup:
         ]
 
     @pytest.mark.asyncio
-    async def test_restore_preserves_task_link_source_metadata(self) -> None:
+    async def test_restore_preserves_task_link_source_metadata(self, archive_restore) -> None:
         org_id = "00000000-0000-0000-0000-000000000111"
         entity_manager = AsyncMock()
         relationship_manager = AsyncMock()
@@ -907,7 +939,7 @@ class TestRestoreBackup:
             "sibyl_core.tools.admin.get_graph_runtime",
             AsyncMock(
                 return_value=SimpleNamespace(
-                    client=SimpleNamespace(get_org_driver=lambda group_id: SimpleNamespace()),
+                    client=SimpleNamespace(execute_query=AsyncMock()),
                     entity_manager=entity_manager,
                     relationship_manager=relationship_manager,
                 )
@@ -920,7 +952,7 @@ class TestRestoreBackup:
             )
 
         assert result.success is True
-        restored_entities = entity_manager.create_direct_bulk.await_args.args[0]
+        restored_entities = archived_entities(archive_restore)
         restored_relationships = relationship_manager.create_bulk.await_args.args[0]
         assert [entity.id for entity in restored_entities] == ["project-1", "task-1"]
         assert restored_entities[1].metadata["source_ids"] == ["source:task"]

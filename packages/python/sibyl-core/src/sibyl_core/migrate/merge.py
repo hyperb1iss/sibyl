@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from sibyl_core.memory_pipeline.observations import SourceKind
 from sibyl_core.migrate.archive import (
     AUTH_FILENAME,
     CONTENT_FILENAME,
@@ -21,6 +24,7 @@ from sibyl_core.migrate.archive import (
     normalize_mention_payloads,
     normalize_relationship_payloads,
 )
+from sibyl_core.migrate.legacy_source_archive import legacy_memory_requires_quarantine
 
 REFERENCE_FIELDS = {
     "api_key_id",
@@ -181,6 +185,7 @@ def merge_archives(
             force_canonical_org=False,
             force_row_organization_id=True,
         )
+        content_payload["organization_id"] = options.canonical_org_id
         content_row_counts = dict(content_payload["row_counts"])
         files[CONTENT_FILENAME] = _json_bytes(content_payload)
         file_metadata[CONTENT_FILENAME] = {
@@ -192,6 +197,18 @@ def merge_archives(
     if not files:
         msg = "No mergeable graph, auth, or content payloads found"
         raise ValueError(msg)
+
+    provenance_files = []
+    for source_archive in archives:
+        for original_name in (GRAPH_FILENAME, CONTENT_FILENAME):
+            original = source_archive.files.get(original_name)
+            if original is None:
+                continue
+            digest = hashlib.sha256(original).hexdigest()
+            name = f"provenance/{digest}/{original_name}"
+            files[name] = original
+            file_metadata[name] = {"kind": "source_provenance", "sha256": digest}
+            provenance_files.append(name)
 
     manifest = build_manifest(
         organization_id=options.canonical_org_id,
@@ -209,6 +226,8 @@ def merge_archives(
                 "entity_alias_count": entity_alias_count,
                 "user_alias_count": user_alias_count,
                 "drop_volatile_auth": options.drop_volatile_auth,
+                "memory_lineage_policy": "quarantine_transformed_memory",
+                "original_provenance_files": sorted(set(provenance_files)),
             }
         },
     )
@@ -384,6 +403,11 @@ def _merge_graph_payloads(
             if not isinstance(raw_entity, dict):
                 continue
             entity = _rewrite_value(dict(raw_entity), replacements)
+            if legacy_memory_requires_quarantine(raw_entity, SourceKind.GRAPH_ENTITY):
+                for field in ("metadata", "provenance", "content", "description", "name"):
+                    if field in raw_entity:
+                        entity[field] = deepcopy(raw_entity[field])
+                entity["derivation_required"] = True
             entity["organization_id"] = options.canonical_org_id
             if "group_id" in entity:
                 entity["group_id"] = options.canonical_org_id
@@ -600,6 +624,11 @@ def _merge_tabular_payloads(
             for raw_row in raw_rows:
                 if isinstance(raw_row, dict):
                     row = _rewrite_value(dict(raw_row), replacements)
+                    if table_name == "raw_captures":
+                        for field in ("metadata", "provenance", "raw_content", "title"):
+                            if field in raw_row:
+                                row[field] = deepcopy(raw_row[field])
+                        row["derivation_required"] = True
                     if force_row_organization_id:
                         _force_row_organization_id(row, canonical_org_id)
                     rows.append(row)

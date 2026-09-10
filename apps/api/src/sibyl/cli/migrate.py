@@ -784,11 +784,15 @@ def _restore_auth_payload(payload: dict[str, object], *, clean: bool) -> bool:
     return _restore()
 
 
-def _restore_content_payload(payload: dict[str, object], *, clean: bool) -> bool:
+def _restore_content_payload(
+    payload: dict[str, object], *, clean: bool, global_scope: bool = False
+) -> bool:
     @run_async
     async def _restore() -> bool:
         try:
-            result = await restore_content_archive_payload(payload, clean=clean)
+            result = await restore_content_archive_payload(
+                payload, clean=clean, global_scope=global_scope
+            )
             if result.success:
                 success(
                     "  Content restored: "
@@ -816,12 +820,13 @@ def _restore_graph_payload(backup_dict: dict[str, object], org_id: str, *, clean
 
         try:
             backup_data = _coerce_graph_backup_data(backup_dict, org_id)
-            await _prepare_graph_runtime_async(org_id, clean=clean)
+            await _prepare_graph_runtime_async(org_id, clean=False)
 
             result = await restore_backup(
                 backup_data,
                 organization_id=org_id,
                 skip_existing=not clean,
+                clean=clean,
             )
 
             if result.success:
@@ -840,7 +845,7 @@ def _restore_graph_payload(backup_dict: dict[str, object], org_id: str, *, clean
     return _restore()
 
 
-def _bootstrap_surreal_runtimes(*, clean: bool) -> None:
+def _bootstrap_surreal_runtimes() -> None:
     """Bootstrap SCHEMAFULL tables + indexes in surreal auth and content namespaces.
 
     Runs unconditionally during import so namespaces are queryable even when the
@@ -855,10 +860,10 @@ def _bootstrap_surreal_runtimes(*, clean: bool) -> None:
     @run_async
     async def _bootstrap() -> None:
         info("Bootstrapping Surreal auth schema...")
-        await bootstrap_auth_schema(build_surreal_auth_client(), reset=clean)
+        await bootstrap_auth_schema(build_surreal_auth_client(), reset=False)
         if settings.store == "surreal":
             info("Bootstrapping Surreal content schema...")
-            await bootstrap_content_schema(build_surreal_content_client(), reset=clean)
+            await bootstrap_content_schema(build_surreal_content_client(), reset=False)
 
     _bootstrap()
 
@@ -1696,6 +1701,20 @@ def export_archive(
         )
         raise typer.Exit(code=1)
 
+    from sibyl_core.migrate.archive_lineage import seal_archive_lineage
+
+    sealed_graph, sealed_content, lineage_report = seal_archive_lineage(
+        json.loads(files[GRAPH_FILENAME]) if GRAPH_FILENAME in files else None,
+        json.loads(files[CONTENT_FILENAME]) if CONTENT_FILENAME in files else None,
+    )
+    for name, sealed_payload in (
+        (GRAPH_FILENAME, sealed_graph),
+        (CONTENT_FILENAME, sealed_content),
+    ):
+        if sealed_payload is not None:
+            files[name] = (json.dumps(sealed_payload, indent=2, default=str) + "\n").encode()
+    archive_metadata["lineage_validation"] = lineage_report
+
     manifest = build_manifest(
         organization_id=org_id,
         source_store=settings.store,
@@ -1749,6 +1768,13 @@ def import_archive(
             help="Restore content payload into Surreal content storage",
         ),
     ] = True,
+    global_content_scope: Annotated[
+        bool,
+        typer.Option(
+            "--global-content-scope",
+            help="Explicitly permit restoring all organizations in the content namespace",
+        ),
+    ] = False,
 ) -> None:
     """Import a manifest archive into the active store."""
     archive = _load_valid_archive(source)
@@ -1780,7 +1806,7 @@ def import_archive(
             info("Cancelled")
             return
 
-    _bootstrap_surreal_runtimes(clean=clean)
+    _bootstrap_surreal_runtimes()
 
     if restore_auth and AUTH_FILENAME in archive.files:
         info("Restoring auth payload into Surreal auth storage...")
@@ -1792,7 +1818,9 @@ def import_archive(
     if restore_content and CONTENT_FILENAME in archive.files and settings.store == "surreal":
         info("Restoring content payload into Surreal content storage...")
         payload = content_payload_from_archive(archive)
-        if payload is None or not _restore_content_payload(payload, clean=clean):
+        if payload is None or not _restore_content_payload(
+            payload, clean=clean, global_scope=global_content_scope
+        ):
             error("Content import failed")
             raise typer.Exit(code=1)
 
@@ -2043,6 +2071,13 @@ def rehearse_archive(
         int,
         typer.Option("--sample-size", help="How many entity IDs to spot-check during verify"),
     ] = 10,
+    global_content_scope: Annotated[
+        bool,
+        typer.Option(
+            "--global-content-scope",
+            help="Explicitly permit restoring all organizations in the content namespace",
+        ),
+    ] = False,
 ) -> None:
     """Run an import + verify + baseline smoke rehearsal against the active store."""
     archive = _load_valid_archive(source)
@@ -2075,7 +2110,7 @@ def rehearse_archive(
             info("Cancelled")
             return
 
-    _bootstrap_surreal_runtimes(clean=clean)
+    _bootstrap_surreal_runtimes()
 
     if restore_auth and AUTH_FILENAME in archive.files:
         info("Restoring auth payload into Surreal auth storage...")
@@ -2087,7 +2122,9 @@ def rehearse_archive(
     if restore_content and CONTENT_FILENAME in archive.files and settings.store == "surreal":
         info("Restoring content payload into Surreal content storage...")
         payload = content_payload_from_archive(archive)
-        if payload is None or not _restore_content_payload(payload, clean=clean):
+        if payload is None or not _restore_content_payload(
+            payload, clean=clean, global_scope=global_content_scope
+        ):
             error("Content import failed")
             raise typer.Exit(code=1)
 
@@ -2263,6 +2300,13 @@ def cutover_archive(
             help="Acknowledge that rollback is no longer promised once writes reopen on SurrealDB",
         ),
     ] = False,
+    global_content_scope: Annotated[
+        bool,
+        typer.Option(
+            "--global-content-scope",
+            help="Explicitly permit restoring all organizations in the content namespace",
+        ),
+    ] = False,
 ) -> None:
     """Run the explicit Surreal cutover acceptance gate on a validated archive."""
     _require_cutover_surreal_runtime()
@@ -2312,7 +2356,7 @@ def cutover_archive(
             info("Cancelled")
             return
 
-    _bootstrap_surreal_runtimes(clean=clean)
+    _bootstrap_surreal_runtimes()
 
     if restore_auth and AUTH_FILENAME in archive.files:
         info("Importing auth payload into the Surreal auth runtime...")
@@ -2324,7 +2368,9 @@ def cutover_archive(
     if restore_content and CONTENT_FILENAME in archive.files and settings.store == "surreal":
         info("Importing content payload into the Surreal content runtime...")
         payload = content_payload_from_archive(archive)
-        if payload is None or not _restore_content_payload(payload, clean=clean):
+        if payload is None or not _restore_content_payload(
+            payload, clean=clean, global_scope=global_content_scope
+        ):
             error("Content import failed")
             raise typer.Exit(code=1)
 

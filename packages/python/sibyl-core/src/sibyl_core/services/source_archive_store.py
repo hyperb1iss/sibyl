@@ -16,13 +16,34 @@ def _source_table(kind: SourceKind) -> tuple[str, str]:
     return "raw_captures", "organization_id"
 
 
+def _graph_auxiliary_snapshot_sql() -> str:
+    return """LET $graph_auxiliary = {
+        episode: (SELECT *, type::string(id) AS archive_record_key OMIT id
+            FROM episode WHERE group_id IN $organizations ORDER BY uuid, archive_record_key),
+        relates_to: (SELECT *, type::string(id) AS archive_record_key,
+            type::string(in) AS source_record_key, type::string(out) AS target_record_key OMIT id, in, out
+            FROM relates_to WHERE group_id IN $organizations ORDER BY uuid, archive_record_key),
+        mentions: (SELECT *, type::string(id) AS archive_record_key,
+            type::string(in) AS source_record_key, type::string(out) AS target_record_key OMIT id, in, out
+            FROM mentions WHERE group_id IN $organizations ORDER BY uuid, archive_record_key)
+    };"""
+
+
 async def read_source_archive_snapshot(
-    execute_query: SurrealExecute, *, kind: SourceKind, organizations: list[str] | None
+    execute_query: SurrealExecute,
+    *,
+    kind: SourceKind,
+    organizations: list[str] | None,
+    include_graph_auxiliary: bool = False,
 ) -> dict[str, Any]:
     """Read live sources, absent-source history, and target associations together."""
     table, org_field = _source_table(kind)
     row_scope = f"{org_field} IN $organizations" if organizations is not None else "true"
     ledger_scope = "organization_id IN $organizations" if organizations is not None else "true"
+    if include_graph_auxiliary and (kind is not SourceKind.GRAPH_ENTITY or organizations is None):
+        raise ValueError("graph companion inventory requires explicit organization scope")
+    companion_sql = _graph_auxiliary_snapshot_sql() if include_graph_auxiliary else ""
+    companion_field = ", graph_auxiliary: $graph_auxiliary" if include_graph_auxiliary else ""
     result = normalize_records(
         await execute_query(
             f"""RETURN {{
@@ -35,7 +56,8 @@ async def read_source_archive_snapshot(
             LET $derivations = SELECT * OMIT id FROM memory_derivations
                 WHERE {ledger_scope} AND target_kind=$kind
                 ORDER BY organization_id, target_id;
-            RETURN {{ source_rows: $rows, source_states: $states, derivations: $derivations }};
+            {companion_sql}
+            RETURN {{ source_rows: $rows, source_states: $states, derivations: $derivations {companion_field} }};
         }};""",
             organizations=organizations,
             kind=kind.value,
@@ -68,19 +90,30 @@ async def restore_source_integrity(
     organizations: list[str],
     clean: bool = False,
     skip_existing: bool = True,
+    global_scope: bool = False,
+    clean_graph_auxiliary: bool = False,
 ) -> dict[str, Any]:
     """Restore complete source units without lowering destination trust history."""
     from copy import deepcopy
 
     from sibyl_core.migrate.source_integrity import validate_integrity_archive
 
+    if clean_graph_auxiliary and (not clean or kind is not SourceKind.GRAPH_ENTITY):
+        raise ValueError("graph companion cleanup requires a scoped clean graph restore")
+    if global_scope and kind is not SourceKind.RAW_CAPTURE:
+        raise ValueError("global restore scope is only supported for the shared raw source store")
     rows, states, associations = validate_integrity_archive(
         payload, kind=kind, organizations=organizations
     )
     before = await read_source_archive_snapshot(
-        execute_query, kind=kind, organizations=organizations
+        execute_query,
+        kind=kind,
+        organizations=None if global_scope else organizations,
+        include_graph_auxiliary=clean_graph_auxiliary,
     )
     table, org_field = _source_table(kind)
+    row_scope = "true" if global_scope else f"{org_field} IN $organizations"
+    ledger_scope = "true" if global_scope else "organization_id IN $organizations"
 
     def row_key(row):
         return row[org_field], row["uuid"]
@@ -187,18 +220,28 @@ async def restore_source_integrity(
         deletes.extend(
             row["archive_record_key"] for key, row in old_rows.items() if key not in incoming_states
         )
+    companion_sql = _graph_auxiliary_snapshot_sql() if clean_graph_auxiliary else ""
+    companion_field = ", graph_auxiliary: $graph_auxiliary" if clean_graph_auxiliary else ""
+    companion_cleanup = (
+        """FOR $row IN array::concat($graph_auxiliary.relates_to,
+        $graph_auxiliary.mentions, $graph_auxiliary.episode) { DELETE type::record($row.archive_record_key); };"""
+        if clean_graph_auxiliary
+        else ""
+    )
     query = f"""BEGIN TRANSACTION;
         LET $rows = SELECT *, type::string(id) AS archive_record_key OMIT id
-            FROM {table} WHERE {org_field} IN $organizations ORDER BY {org_field}, uuid;
+            FROM {table} WHERE {row_scope} ORDER BY {org_field}, uuid;
         LET $states = SELECT * OMIT id FROM source_states
-            WHERE organization_id IN $organizations AND source_kind=$kind
+            WHERE {ledger_scope} AND source_kind=$kind
             ORDER BY organization_id, source_id;
         LET $associations = SELECT * OMIT id FROM memory_derivations
-            WHERE organization_id IN $organizations AND target_kind=$kind
+            WHERE {ledger_scope} AND target_kind=$kind
             ORDER BY organization_id, target_id;
-        IF {{ source_rows: $rows, source_states: $states, derivations: $associations }} != $expected {{
+        {companion_sql}
+        IF {{ source_rows: $rows, source_states: $states, derivations: $associations {companion_field} }} != $expected {{
             THROW 'archive destination changed before restore';
         }};
+        {companion_cleanup}
         FOR $key IN $deletes {{ DELETE type::record($key); }};
         FOR $entry IN $writes {{
             LET $existing = (SELECT * FROM type::record($entry.key))[0];
