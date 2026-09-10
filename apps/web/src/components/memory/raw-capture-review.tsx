@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { toast } from 'sonner';
 import { useSetBreadcrumb } from '@/components/layout/breadcrumb';
 import { PageHeader } from '@/components/layout/page-header';
 import { EntityBadge } from '@/components/ui/badge';
@@ -30,11 +29,11 @@ import {
 } from '@/components/ui/select';
 import { LoadingState } from '@/components/ui/spinner';
 import { formatDateTime, formatDistanceToNow } from '@/lib/constants/formatting';
-import { useRawCapture, useRawCaptures, useUpdateRawCaptureReviewState } from '@/lib/hooks/memory';
+import { useRawCapture, useRawCaptures } from '@/lib/hooks/memory';
 
 const MAX_CAPTURE_RESULTS = 200;
 const DEFAULT_TITLE = 'Memory Captures';
-const DEFAULT_DESCRIPTION = 'Review raw captures, graph linkage, and queued memory actions';
+const DEFAULT_DESCRIPTION = 'Inspect saved captures and graph links whenever you need to';
 type LinkFilter = 'all' | 'linked' | 'unlinked';
 type ReviewFilter = 'all' | 'pending' | 'deferred' | 'archived';
 
@@ -95,17 +94,17 @@ function normalizeLinkFilter(value: string | null): LinkFilter {
   return value === 'linked' || value === 'unlinked' ? value : 'all';
 }
 
-function normalizeReviewFilter(value: string | null, linkFilter: LinkFilter): ReviewFilter {
+function normalizeReviewFilter(value: string | null): ReviewFilter {
   if (value === 'pending' || value === 'deferred' || value === 'archived') {
     return value;
   }
 
-  return linkFilter === 'unlinked' ? 'pending' : 'all';
+  return 'all';
 }
 
 function reviewStateLabel(value: ReviewFilter | 'pending' | 'deferred' | 'archived'): string {
   if (value === 'all') return 'All states';
-  if (value === 'pending') return 'Open';
+  if (value === 'pending') return 'Stored';
   return titleCase(value);
 }
 
@@ -127,7 +126,7 @@ export function RawCaptureReview({
   const [typeFilter, setTypeFilter] = useState('all');
   const [linkFilter, setLinkFilter] = useState<LinkFilter>(initialLinkFilter);
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>(() =>
-    normalizeReviewFilter(searchParams.get('review'), initialLinkFilter)
+    normalizeReviewFilter(searchParams.get('review'))
   );
 
   const { data, isLoading, error } = useRawCaptures({
@@ -135,7 +134,6 @@ export function RawCaptureReview({
     entity_type: typeFilter === 'all' ? undefined : typeFilter,
     capture_surface: surfaceFilter === 'all' ? undefined : surfaceFilter,
   });
-  const updateReviewState = useUpdateRawCaptureReviewState();
 
   const captures = data?.captures ?? [];
   const surfaceOptions = useMemo(
@@ -241,14 +239,11 @@ export function RawCaptureReview({
   const updateLinkFilter = useCallback(
     (next: LinkFilter) => {
       setLinkFilter(next);
-      const nextReview = next === 'unlinked' && reviewFilter === 'all' ? 'pending' : reviewFilter;
-      setReviewFilter(nextReview);
       replaceCaptureParams({
         link: next === 'all' ? null : next,
-        review: nextReview === 'all' ? null : nextReview,
       });
     },
-    [replaceCaptureParams, reviewFilter]
+    [replaceCaptureParams]
   );
 
   const updateReviewFilter = useCallback(
@@ -273,8 +268,7 @@ export function RawCaptureReview({
   }, [searchParams]);
 
   useEffect(() => {
-    const nextLink = normalizeLinkFilter(searchParams.get('link'));
-    const nextReview = normalizeReviewFilter(searchParams.get('review'), nextLink);
+    const nextReview = normalizeReviewFilter(searchParams.get('review'));
     setReviewFilter(current => (current === nextReview ? current : nextReview));
   }, [searchParams]);
 
@@ -288,23 +282,6 @@ export function RawCaptureReview({
       archived: captures.filter(capture => capture.review_state === 'archived').length,
     };
   }, [captures]);
-
-  async function handleReviewAction(next: 'pending' | 'deferred' | 'archived') {
-    if (!selectedCapture) return;
-
-    try {
-      await updateReviewState.mutateAsync({ id: selectedCapture.id, reviewState: next });
-      toast.success(
-        next === 'pending'
-          ? 'Capture returned to the review queue'
-          : next === 'deferred'
-            ? 'Capture deferred'
-            : 'Capture archived from the queue'
-      );
-    } catch {
-      toast.error('Failed to update capture review state');
-    }
-  }
 
   if (error) {
     return (
@@ -363,9 +340,9 @@ export function RawCaptureReview({
           <p className="mt-1 text-sm text-sc-fg-muted">Verbatim quick-capture snapshots</p>
         </div>
         <div className="rounded-xl border border-sc-fg-subtle/20 bg-sc-bg-elevated p-4 shadow-card">
-          <p className="text-xs uppercase tracking-[0.12em] text-sc-fg-subtle">Needs Link</p>
+          <p className="text-xs uppercase tracking-[0.12em] text-sc-fg-subtle">Unlinked</p>
           <p className="mt-2 text-2xl font-semibold text-sc-fg-primary">{stats.unlinked}</p>
-          <p className="mt-1 text-sm text-sc-fg-muted">Captures that still need graph linkage</p>
+          <p className="mt-1 text-sm text-sc-fg-muted">Saved captures without graph links</p>
         </div>
         <div className="rounded-xl border border-sc-fg-subtle/20 bg-sc-bg-elevated p-4 shadow-card">
           <p className="text-xs uppercase tracking-[0.12em] text-sc-fg-subtle">Linked Entities</p>
@@ -381,7 +358,7 @@ export function RawCaptureReview({
               {[
                 { value: 'all', label: 'All', count: captures.length },
                 { value: 'linked', label: 'Linked', count: stats.linked },
-                { value: 'unlinked', label: 'Needs Link', count: stats.unlinked },
+                { value: 'unlinked', label: 'Unlinked', count: stats.unlinked },
               ].map(option => {
                 const active = linkFilter === option.value;
                 return (
@@ -409,7 +386,7 @@ export function RawCaptureReview({
                 { value: 'all', label: 'All states', count: captures.length },
                 {
                   value: 'pending',
-                  label: 'Open',
+                  label: 'Stored',
                   count: captures.length - stats.deferred - stats.archived,
                 },
                 { value: 'deferred', label: 'Deferred', count: stats.deferred },
@@ -526,7 +503,7 @@ export function RawCaptureReview({
                       <EntityBadge type={capture.entity_type} />
                       {!capture.entity_id && (
                         <span className="rounded border border-sc-yellow/30 bg-sc-yellow/10 px-2 py-0.5 text-xs font-medium text-sc-yellow">
-                          Needs link
+                          Unlinked
                         </span>
                       )}
                       {capture.review_state !== 'pending' && (
@@ -584,15 +561,15 @@ export function RawCaptureReview({
                   <div>
                     <p className="text-xs uppercase tracking-[0.12em] text-sc-fg-subtle">
                       {linkFilter === 'unlinked'
-                        ? 'Needs Link Queue'
+                        ? 'Unlinked Captures'
                         : linkFilter === 'linked'
-                          ? 'Linked Capture Review'
-                          : 'Capture Review'}
+                          ? 'Linked Captures'
+                          : 'Capture Details'}
                     </p>
                     <p className="mt-1 text-sm text-sc-fg-muted">
-                      Reviewing {activeCaptureIndex + 1} of {filteredCaptures.length}
+                      Viewing {activeCaptureIndex + 1} of {filteredCaptures.length}
                       {linkFilter === 'unlinked'
-                        ? ` | ${stats.unlinked} captures still need graph linkage`
+                        ? ` | ${stats.unlinked} captures have no graph link`
                         : ''}
                     </p>
                   </div>
@@ -617,35 +594,26 @@ export function RawCaptureReview({
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2 border-t border-sc-fg-subtle/15 pt-3">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    loading={updateReviewState.isPending}
-                    disabled={selectedCapture.review_state === 'pending'}
-                    onClick={() => handleReviewAction('pending')}
+                <div className="space-y-2 border-t border-sc-fg-subtle/15 pt-3">
+                  <p className="text-sm text-sc-fg-muted">
+                    Inspection is optional. Captures are saved automatically; a missing graph link
+                    does not mean you need to review an entry.
+                  </p>
+                  <p className="text-xs text-sc-fg-subtle">
+                    {selectedCapture.metadata.autonomy_outcome === 'exception'
+                      ? 'Automation recorded an exception. Inspect the source for its current state.'
+                      : selectedCapture.metadata.autonomy_outcome === 'auto_promote'
+                        ? 'An automatic promotion decision was recorded. Inspect the source for its current state.'
+                        : selectedCapture.metadata.autonomy_outcome === 'skip'
+                          ? 'Automation skipped this capture.'
+                          : 'No automation outcome is recorded for this capture.'}
+                  </p>
+                  <Link
+                    href={`/memory/sources/${encodeURIComponent(selectedCapture.id)}`}
+                    className="inline-flex rounded text-sm font-medium text-sc-cyan hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan"
                   >
-                    Return to Queue
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    loading={updateReviewState.isPending}
-                    disabled={selectedCapture.review_state === 'deferred'}
-                    onClick={() => handleReviewAction('deferred')}
-                  >
-                    Defer
-                  </Button>
-                  <span className="h-5 w-px bg-sc-fg-subtle/20" aria-hidden="true" />
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    loading={updateReviewState.isPending}
-                    disabled={selectedCapture.review_state === 'archived'}
-                    onClick={() => handleReviewAction('archived')}
-                  >
-                    Archive
-                  </Button>
+                    Inspect source or make a correction
+                  </Link>
                 </div>
               </div>
 
