@@ -262,6 +262,7 @@ async def _node_fulltext_field_rows(
         f"""
         SELECT *,
                {match.score_expr} AS score
+        OMIT name_embedding
         FROM entity
         WHERE """
         + _where_clause(["group_id = $group_id", *filter_clauses])
