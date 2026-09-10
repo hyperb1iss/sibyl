@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from sibyl_core.memory_pipeline.observations import SourceObservation
     from sibyl_core.services.dream_checkpoints import DreamCandidateWrite
     from sibyl_core.services.validation_candidate import ValidationCandidateWrite
+    from sibyl_core.services.validation_promotion import ValidatedPromotion
 
 _RAW_MEMORY_EMBEDDING_AUTO = object()
 
@@ -891,12 +892,28 @@ async def save_raw_memory(
     superseded_by_memory_id: str | None = None,
     source_observations: Sequence[RawMemory] = (),
     publication_operation_id: str | None = None,
+    validation_promotion: ValidatedPromotion | None = None,
+    validation_derivation: dict[str, object] | None = None,
 ) -> RawMemory:
     from sibyl_core.services.procedure_artifact import publication_build_receipt_json
+    from sibyl_core.services.validation_promotion import VALIDATION_PROMOTION_GUARD
+    from sibyl_core.tasks._evidence_json import canonical
+
+    validation_guard, validation_params = "", {}
+    if validation_promotion is not None:
+        if (memory.organization_id, memory.principal_id, memory.id) != (
+            validation_promotion.organization_id,
+            validation_promotion.principal_id,
+            validation_promotion.candidate_id,
+        ):
+            raise ValueError("Validation promotion owner differs")
+        validation_guard, validation_params = await validation_promotion.current_guard()
 
     if expected_revision is not None and expected_revision < 1:
         raise ValueError("expected_revision must be at least 1")
-    if (source_observations or publication_operation_id) and expected_revision is None:
+    if (
+        source_observations or publication_operation_id or validation_promotion
+    ) and expected_revision is None:
         raise ValueError("source-observed publication requires a revision fence")
     if any(source.organization_id != memory.organization_id for source in source_observations):
         raise ValueError("source observations must belong to the publication organization")
@@ -951,6 +968,8 @@ async def save_raw_memory(
                     client,
                     """
                         RETURN {
+                        __VALIDATION_SOURCE_GUARD__
+                        __VALIDATION_PROMOTION_GUARD__
                         __PUBLICATION_ADMISSION_GUARD__
                         FOR $source IN $source_observations {
                             LET $observed = (SELECT * FROM raw_captures
@@ -1031,9 +1050,30 @@ async def save_raw_memory(
                         };
                         RETURN $saved;
                         };
-                    """.replace(
-                        "__PUBLICATION_ADMISSION_GUARD__", PUBLICATION_ADMISSION_GUARD
-                    ).replace("__SOURCE_STATE_WRITE_WITNESS__", SOURCE_STATE_WRITE_WITNESS),
+                    """.replace("__PUBLICATION_ADMISSION_GUARD__", PUBLICATION_ADMISSION_GUARD)
+                    .replace("__SOURCE_STATE_WRITE_WITNESS__", SOURCE_STATE_WRITE_WITNESS)
+                    .replace("__VALIDATION_SOURCE_GUARD__", validation_guard)
+                    .replace("__VALIDATION_PROMOTION_GUARD__", VALIDATION_PROMOTION_GUARD),
+                    **validation_params,
+                    validation_binding=validation_promotion.binding.model_dump()
+                    if validation_promotion
+                    else None,
+                    validation_binding_json=canonical(validation_promotion.binding.model_dump())
+                    if validation_promotion
+                    else None,
+                    validation_principal=memory.principal_id,
+                    validation_entity_id=memory.metadata.get("promoted_entity_id")
+                    if validation_promotion
+                    else None,
+                    validation_derivation={
+                        **validation_derivation,
+                        "validation_entity_id": memory.metadata.get("promoted_entity_id"),
+                        "validation_binding_json": canonical(
+                            validation_promotion.binding.model_dump()
+                        ),
+                    }
+                    if validation_derivation and validation_promotion
+                    else None,
                     organization_id=memory.organization_id,
                     publication_operation_id=publication_operation_id
                     or (

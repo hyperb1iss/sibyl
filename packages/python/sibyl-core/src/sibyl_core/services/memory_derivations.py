@@ -114,6 +114,10 @@ async def _raw_association_current(
         or association.get("body_sha256") != hashlib.sha256(memory.raw_content.encode()).hexdigest()
     ):
         return False
+    from sibyl_core.services.validation_promotion import validation_binding_current
+
+    if not await validation_binding_current(memory, association):
+        return False
     from sibyl_core.services.memory_source_validation import (
         SOURCE_VALIDATION_CONTEXT_KEY,
         _saved_ceiling,
