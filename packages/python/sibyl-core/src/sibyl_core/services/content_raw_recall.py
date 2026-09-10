@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -823,33 +823,56 @@ async def list_reflection_dream_source_memories(
     *,
     organization_id: str,
     limit: int = 50,
+    is_pending: Callable[[RawMemory], Awaitable[bool]] | None = None,
+    after_source_id: str = "",
 ) -> list[RawMemory]:
+    """Page past excluded rows before applying the eligible-source budget.
+
+    The legacy processed timestamp is diagnostic, not a source-version fence.
+    The dream owner supplies its current observation/authority checkpoint test.
+    UUID keyset pagination keeps concurrent inserts from shifting page offsets.
+    """
     if limit <= 0:
         return []
-    query_limit = limit * content_client.LIFECYCLE_FILTER_OVERFETCH_FACTOR
+    result: list[RawMemory] = []
+    cursor = after_source_id
+    wrapped = not bool(after_source_id)
+    page_size = max(50, limit)
     async with content_client.surreal_content_client() as client:
-        rows = await content_client.select_many(
-            client,
-            "SELECT * FROM raw_captures "
-            "WHERE organization_id = $organization_id "
-            "AND (capture_surface != $candidate_surface OR capture_surface = NONE) "
-            "AND (capture_surface != $source_surface OR capture_surface = NONE) "
-            "AND (capture_surface != $reflection_surface OR capture_surface = NONE) "
-            "AND (capture_surface != $synthesis_surface OR capture_surface = NONE) "
-            "ORDER BY captured_at ASC LIMIT $limit;",
-            organization_id=organization_id,
-            candidate_surface="reflection_candidate",
-            source_surface="reflection_source",
-            reflection_surface="reflection",
-            synthesis_surface="synthesis_artifact",
-            limit=query_limit,
-        )
-    memories = [models.raw_memory_from_record(row) for row in rows]
-    return [
-        memory
-        for memory in memories
-        if models.raw_memory_currently_recallable(memory)
-        and models.raw_memory_capture_surface(memory)
-        not in _REFLECTION_DREAM_EXCLUDED_CAPTURE_SURFACES
-        and not memory.metadata.get("reflection_dream_processed_at")
-    ][:limit]
+        while len(result) < limit:
+            rows = await content_client.select_many(
+                client,
+                "SELECT * FROM raw_captures "
+                "WHERE organization_id = $organization_id AND uuid > $cursor "
+                "AND ($upper = NONE OR uuid <= $upper) "
+                "AND (capture_surface NOT IN $excluded OR capture_surface = NONE) "
+                "ORDER BY uuid ASC LIMIT $limit;",
+                organization_id=organization_id,
+                cursor=cursor,
+                upper=after_source_id if wrapped and after_source_id else None,
+                excluded=list(_REFLECTION_DREAM_EXCLUDED_CAPTURE_SURFACES),
+                limit=page_size,
+            )
+            if not rows:
+                if not wrapped:
+                    cursor, wrapped = "", True
+                    continue
+                break
+            cursor = str(rows[-1]["uuid"])
+            for row in rows:
+                memory = models.raw_memory_from_record(row)
+                if (
+                    models.raw_memory_currently_recallable(memory)
+                    and models.raw_memory_capture_surface(memory)
+                    not in _REFLECTION_DREAM_EXCLUDED_CAPTURE_SURFACES
+                    and (is_pending is None or await is_pending(memory))
+                ):
+                    result.append(memory)
+                    if len(result) == limit:
+                        break
+            if len(rows) < page_size:
+                if not wrapped:
+                    cursor, wrapped = "", True
+                else:
+                    break
+    return result
