@@ -217,6 +217,17 @@ _ORG_SCOPED_REDACTED_FIELDS = {
     "user_sessions": frozenset({"token_hash", "refresh_token_hash"}),
 }
 
+# Scoped archives retain credential-free metadata, not reusable grants.
+_ORG_NONRESTORABLE_CREDENTIAL_TABLES = frozenset(
+    {
+        "user_sessions",
+        "api_keys",
+        "device_authorization_requests",
+        "api_key_project_scopes",
+        "api_key_memory_space_scopes",
+    }
+)
+
 _AUTH_ORG_CLEAN_TABLES = (
     "organization_members",
     "user_sessions",
@@ -243,6 +254,7 @@ class AuthArchiveRestoreResult:
     rows_restored: int
     errors: list[str] = field(default_factory=list)
     dropped_fields: dict[str, list[str]] = field(default_factory=dict)
+    skipped_credential_rows: dict[str, int] = field(default_factory=dict)
 
 
 def _serialize_value(value: object) -> object:
@@ -544,6 +556,31 @@ async def _create_auth_archive_row(
     return True
 
 
+def _restorable_auth_tables(
+    tables: dict[str, object], organization_id: str | None
+) -> tuple[dict[str, object], dict[str, int]]:
+    if organization_id is None:
+        return tables, {}
+    tables = dict(tables)
+    skipped = {}
+    for table in _ORG_NONRESTORABLE_CREDENTIAL_TABLES:
+        rows = tables.get(table)
+        if isinstance(rows, list):
+            credential_count = sum(isinstance(row, dict) for row in rows)
+            if credential_count:
+                skipped[table] = credential_count
+            tables[table] = [row for row in rows if not isinstance(row, dict)]
+    invitations = tables.get("organization_invitations")
+    if isinstance(invitations, list):
+        tables["organization_invitations"] = [
+            {key: value for key, value in row.items() if key not in {"token", "token_hash"}}
+            if isinstance(row, dict)
+            else row
+            for row in invitations
+        ]
+    return tables, skipped
+
+
 async def restore_auth_archive_payload(
     payload: dict[str, object],
     *,
@@ -570,6 +607,7 @@ async def restore_auth_archive_payload(
     rows_restored = 0
     errors: list[str] = []
     dropped_fields: dict[str, set[str]] = {}
+    tables, skipped_credential_rows = _restorable_auth_tables(tables, organization_id)
 
     try:
         await bootstrap_auth_schema(client, reset=False)
@@ -633,6 +671,7 @@ async def restore_auth_archive_payload(
             tables_restored=tables_restored,
             rows_restored=rows_restored,
             errors=errors[:50],
+            skipped_credential_rows=skipped_credential_rows,
             dropped_fields={
                 table: sorted(names) for table, names in sorted(dropped_fields.items())
             },
