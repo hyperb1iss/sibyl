@@ -1,6 +1,7 @@
 """Archive and review writes retain storage-owned legacy content epochs."""
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -28,7 +29,11 @@ async def checkpoint_client(monkeypatch):
         await client.close()
 
 
-async def test_checkpoint_archive_restore_after_bootstrap(checkpoint_client):
+@pytest.mark.parametrize("supplied_timestamps", [False, True])
+@pytest.mark.parametrize("checkpoint_revision", [None, 7])
+async def test_checkpoint_archive_restore_after_bootstrap(
+    checkpoint_client, supplied_timestamps, checkpoint_revision
+):
     history = [{"action": "revise", "reason": "legacy corrected text"}]
     record = {
         "id": str(uuid4()),
@@ -37,6 +42,15 @@ async def test_checkpoint_archive_restore_after_bootstrap(checkpoint_client):
         "raw_content": "restored evidence",
         "metadata": {"correction_history": history},
     }
+    if checkpoint_revision is not None:
+        record["legacy_content_checkpoint"] = {
+            "entries": history,
+            "observed_revision": checkpoint_revision,
+        }
+    expected_checkpoint = checkpoint_revision or 9
+    supplied = datetime(2020, 1, 2, tzinfo=UTC)
+    if supplied_timestamps:
+        record.update(created_at=supplied.isoformat(), captured_at=supplied.isoformat())
     with (
         patch.object(
             content_archive, "build_surreal_content_client", return_value=checkpoint_client
@@ -45,6 +59,7 @@ async def test_checkpoint_archive_restore_after_bootstrap(checkpoint_client):
     ):
         result = await content_archive.restore_content_archive_payload(
             {
+                "organization_id": record["organization_id"],
                 "tables": {"raw_captures": [record]},
             }
         )
@@ -56,8 +71,12 @@ async def test_checkpoint_archive_restore_after_bootstrap(checkpoint_client):
     )[0]
     assert stored["revision"] == 9
     assert stored["metadata"]["correction_history"] == history
-    assert stored["legacy_content_checkpoint"] == {"entries": history, "observed_revision": 9}
-    record["legacy_content_checkpoint"] = {"entries": history, "observed_revision": 7}
+    assert stored["legacy_content_checkpoint"] == {
+        "entries": history,
+        "observed_revision": expected_checkpoint,
+    }
+    first_captured_at = stored["captured_at"]
+    record["legacy_content_checkpoint"] = {"entries": history, "observed_revision": 5}
     with (
         patch.object(
             content_archive, "build_surreal_content_client", return_value=checkpoint_client
@@ -66,6 +85,7 @@ async def test_checkpoint_archive_restore_after_bootstrap(checkpoint_client):
     ):
         result = await content_archive.restore_content_archive_payload(
             {
+                "organization_id": record["organization_id"],
                 "tables": {"raw_captures": [record]},
             }
         )
@@ -75,7 +95,17 @@ async def test_checkpoint_archive_restore_after_bootstrap(checkpoint_client):
             checkpoint_client, "SELECT * FROM raw_captures WHERE uuid = $uuid;", uuid=record["id"]
         )
     )[0]
-    assert stored["legacy_content_checkpoint"]["observed_revision"] == 7
+    assert stored["legacy_content_checkpoint"]["observed_revision"] == expected_checkpoint
+    assert stored["revision"] == 10
+    assert stored["derivation_required"] is True
+    assert stored["captured_at"] is not None
+    assert stored["created_at"] is not None
+    assert stored["metadata"]["correction_history"] == history
+    assert result.quarantined[0]["source_id"] == record["id"]
+    if supplied_timestamps:
+        assert stored["created_at"] == stored["captured_at"] == supplied
+    else:
+        assert stored["captured_at"] > first_captured_at
 
 
 async def test_checkpoint_stale_review_preserves_concurrent_history(checkpoint_client, monkeypatch):
