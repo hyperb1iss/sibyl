@@ -535,7 +535,27 @@ def _prepare_content_source_integrity(payload, tables, organization_id):
             raise ValueError("legacy raw capture collection is malformed")
         records = []
         for row in legacy_rows:
-            record = {str(key): value for key, value in row.items() if key != "id"}
+            # Legacy rows may omit fields whose defaults only run on CREATE.
+            # Complete those fields before a checked restore updates an existing row.
+            now = datetime.now(UTC)
+            record = {
+                "source_id": "",
+                "principal_id": "",
+                "memory_scope": "private",
+                "review_state": "pending",
+                "title": "",
+                "raw_content": "",
+                "entity_type": "",
+                "tags": [],
+                "metadata": {},
+                "provenance": {},
+                "captured_at": now,
+                "created_at": now,
+                "retrieval_count": 0,
+                "citation_count": 0,
+                "misled_count": 0,
+                **{str(key): value for key, value in row.items() if key != "id"},
+            }
             record["uuid"] = str(row.get("uuid") or row.get("id") or "").strip()
             for field in (
                 "created_at",
