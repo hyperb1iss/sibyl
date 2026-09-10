@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
+from datetime import datetime
 
 from surrealdb import RecordID
 
 from sibyl_core.backends.surreal.connection import _is_transient_connection_error
 from sibyl_core.embeddings.providers import EmbeddingProvider
 from sibyl_core.memory_pipeline.quality import expand_memory_quality_storage_metadata
+from sibyl_core.migrate.source_integrity import ArchiveDatetime, native_archive_parameters
 from sibyl_core.models.entities import Entity, Relationship, RelationshipType
 from sibyl_core.services.graph_client import (
     SurrealGraphClient,
@@ -595,7 +597,7 @@ async def _replace_relationship(
         src=src,
         tgt=tgt,
         rel=RecordID("relates_to", relationship.id),
-        **payload,
+        **native_archive_parameters(payload),
     )
 
 
@@ -679,7 +681,7 @@ async def _replace_relationships_bulk(
     try:
         await client.execute_query(
             _RELATIONSHIP_BULK_UPSERT_QUERY,
-            rows=rows,
+            rows=native_archive_parameters(rows),
             edges=edges,
         )
     except Exception as exc:
@@ -689,10 +691,18 @@ async def _replace_relationships_bulk(
         await prepare_graph_schema(client)
         await client.execute_query(
             _RELATIONSHIP_BULK_UPSERT_QUERY,
-            rows=rows,
+            rows=native_archive_parameters(rows),
             edges=edges,
         )
     return written_ids
+
+
+def _relationship_datetime(value: object) -> datetime | None:
+    """Preserve column precision without changing the original metadata value."""
+    parsed = _metadata_datetime(value)
+    if parsed is not None and isinstance(value, str):
+        return ArchiveDatetime.parse(value)
+    return parsed
 
 
 def _relationship_record(relationship: Relationship, *, group_id: str) -> SurrealRecord:
@@ -715,9 +725,11 @@ def _relationship_record(relationship: Relationship, *, group_id: str) -> Surrea
         "episodes": _metadata_str_list(metadata.get("episodes")),
         "attributes": attributes,
         "created_at": relationship.created_at,
-        "expired_at": _metadata_datetime(metadata.get("expired_at")),
-        "valid_at": _metadata_datetime(metadata.get("valid_at") or metadata.get("valid_from")),
-        "invalid_at": _metadata_datetime(metadata.get("invalid_at") or metadata.get("valid_to")),
+        "expired_at": _relationship_datetime(metadata.get("expired_at")),
+        "valid_at": _relationship_datetime(metadata.get("valid_at") or metadata.get("valid_from")),
+        "invalid_at": _relationship_datetime(
+            metadata.get("invalid_at") or metadata.get("valid_to")
+        ),
     }
 
 

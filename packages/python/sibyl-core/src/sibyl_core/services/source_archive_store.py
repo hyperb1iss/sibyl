@@ -24,13 +24,13 @@ def _source_table(kind: SourceKind) -> tuple[str, str]:
 def _graph_auxiliary_snapshot_sql() -> str:
     return """LET $graph_auxiliary = {
         episode: (SELECT *, type::string(id) AS archive_record_key OMIT id
-            FROM episode WHERE group_id IN $organizations ORDER BY uuid, archive_record_key),
+            FROM episode WHERE group_id IN $organizations ORDER BY uuid DESC, archive_record_key),
         relates_to: (SELECT *, type::string(id) AS archive_record_key,
             type::string(in) AS source_record_key, type::string(out) AS target_record_key OMIT id, in, out
-            FROM relates_to WHERE group_id IN $organizations ORDER BY uuid, archive_record_key),
+            FROM relates_to WHERE group_id IN $organizations ORDER BY created_at DESC, uuid DESC, archive_record_key),
         mentions: (SELECT *, type::string(id) AS archive_record_key,
             type::string(in) AS source_record_key, type::string(out) AS target_record_key OMIT id, in, out
-            FROM mentions WHERE group_id IN $organizations ORDER BY uuid, archive_record_key)
+            FROM mentions WHERE group_id IN $organizations ORDER BY uuid DESC, archive_record_key)
     };"""
 
 

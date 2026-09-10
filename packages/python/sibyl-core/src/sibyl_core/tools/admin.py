@@ -18,12 +18,6 @@ from sibyl_core.migrate.legacy_graph_archive import (
     episode_from_payload as _episode_from_payload,
 )
 from sibyl_core.migrate.legacy_graph_archive import (
-    list_native_backup_episodes as _list_native_backup_episodes,
-)
-from sibyl_core.migrate.legacy_graph_archive import (
-    list_native_backup_mentions as _list_native_backup_mentions,
-)
-from sibyl_core.migrate.legacy_graph_archive import (
     mention_exists as _mention_exists,
 )
 from sibyl_core.migrate.legacy_graph_archive import (
@@ -430,52 +424,6 @@ def _entity_from_backup_data(entity_data: dict[str, Any]) -> Entity:
         return Entity.model_validate(payload)
 
 
-async def _list_backup_episodes(
-    *,
-    organization_id: str,
-    client: Any,
-) -> list[dict[str, Any]]:
-    return await _list_native_backup_episodes(
-        organization_id=organization_id,
-        client=client,
-        page_size=BACKFILL_PAGE_SIZE,
-    )
-
-
-async def _list_backup_mentions(
-    *,
-    organization_id: str,
-    client: Any,
-) -> list[dict[str, Any]]:
-    return await _list_native_backup_mentions(
-        organization_id=organization_id,
-        client=client,
-        page_size=BACKFILL_PAGE_SIZE,
-    )
-
-
-async def _list_backup_relationships(
-    *,
-    organization_id: str,
-    client: Any,
-    relationship_manager: Any,
-) -> list[Relationship]:
-    relationships: list[Relationship] = []
-    offset = 0
-    while True:
-        batch = await relationship_manager.list_all(
-            limit=BACKFILL_PAGE_SIZE,
-            offset=offset,
-        )
-        if not batch:
-            break
-        relationships.extend(batch)
-        if len(batch) < BACKFILL_PAGE_SIZE:
-            break
-        offset += len(batch)
-    return relationships
-
-
 async def _list_backup_entities(
     *,
     organization_id: str,
@@ -513,16 +461,29 @@ async def create_backup(*, organization_id: str) -> BackupResult:
 
     try:
         runtime = await get_graph_runtime(organization_id)
-        relationship_manager = runtime.relationship_manager
         client = runtime.client
 
         from sibyl_core.memory_pipeline.observations import SourceKind
-        from sibyl_core.migrate.source_integrity import validate_integrity_archive
+        from sibyl_core.migrate.graph_companions import companion_payloads
+        from sibyl_core.migrate.source_integrity import (
+            build_integrity_archive,
+            validate_integrity_archive,
+        )
         from sibyl_core.services.graph_records import entity_from_surreal_row
-        from sibyl_core.services.source_archive_store import export_source_integrity
+        from sibyl_core.services.source_archive_store import read_source_archive_snapshot
 
-        source_integrity = await export_source_integrity(
-            client.execute_query, kind=SourceKind.GRAPH_ENTITY, organizations=[organization_id]
+        snapshot = await read_source_archive_snapshot(
+            client.execute_query,
+            kind=SourceKind.GRAPH_ENTITY,
+            organizations=[organization_id],
+            include_graph_auxiliary=True,
+        )
+        source_integrity = build_integrity_archive(
+            kind=SourceKind.GRAPH_ENTITY,
+            organizations=[organization_id],
+            source_rows=snapshot["source_rows"],
+            source_states=snapshot["source_states"],
+            derivations=snapshot["derivations"],
         )
         from sibyl_core.migrate.archive_lineage import seal_archive_lineage
 
@@ -536,18 +497,9 @@ async def create_backup(*, organization_id: str) -> BackupResult:
         )
         all_entities = [entity_from_surreal_row(row) for row in source_rows]
 
-        relationships = await _list_backup_relationships(
+        relationships, episodes, mentions = companion_payloads(
+            snapshot,
             organization_id=organization_id,
-            client=client,
-            relationship_manager=relationship_manager,
-        )
-        episodes = await _list_backup_episodes(
-            organization_id=organization_id,
-            client=client,
-        )
-        mentions = await _list_backup_mentions(
-            organization_id=organization_id,
-            client=client,
         )
 
         # Build backup data
@@ -560,7 +512,7 @@ async def create_backup(*, organization_id: str) -> BackupResult:
             entity_count=len(all_entities),
             relationship_count=len(relationships),
             entities=[e.model_dump(mode="json") for e in all_entities],
-            relationships=[r.model_dump(mode="json") for r in relationships],
+            relationships=relationships,
             episode_count=len(episodes),
             mention_count=len(mentions),
             episodes=episodes,
@@ -652,6 +604,12 @@ async def restore_backup(
             normalize_mention_payloads,
             normalize_relationship_payloads,
         )
+        from sibyl_core.migrate.graph_companions import DATETIME_PATHS, relationship_from_archive
+
+        # Reject malformed typed payloads before a clean restore can delete rows.
+        for payload in backup_data.relationships:
+            if DATETIME_PATHS in payload:
+                relationship_from_archive(payload)
 
         runtime = await get_graph_runtime(organization_id)
         relationship_manager = runtime.relationship_manager
@@ -753,7 +711,7 @@ async def restore_backup(
         relationships_to_restore: list[Relationship] = []
         for rel_data in normalize_relationship_payloads(backup_data.relationships):
             try:
-                relationship = Relationship.model_validate(rel_data)
+                relationship = relationship_from_archive(rel_data)
                 relationships_to_restore.append(relationship)
             except Exception as e:
                 error_msg = f"Relationship {rel_data.get('id', 'unknown')}: {e}"

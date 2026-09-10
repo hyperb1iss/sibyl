@@ -892,7 +892,7 @@ class TestRestoreBackup:
                 "source_id": "episode-legacy",
                 "target_id": "entity-legacy",
                 "group_id": org_id,
-                "created_at": "2026-04-19T00:00:00+00:00",
+                "created_at": "2026-04-19T00:00:00Z",
             }
         ]
 
