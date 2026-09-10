@@ -337,7 +337,11 @@ async def test_proposal_preserves_usage_bytes_sources_and_native_steps(group, pr
         )
         assert span["artifact_sha256"] == episode.artifact_sha256
     assert "inferred" in candidate.content
-    assert "capture-success" in candidate.content
+    assert "capture-success" in candidate.raw_source_ids
+    assert "capture-success" not in candidate.content
+    assert "```json" not in candidate.content
+    assert "evidence: /goal" in candidate.content
+    assert payload["render_version"] == c.RENDER_VERSION
     assert str(len(group.episodes[0].artifact)) in result.prompt
     assert c.validate_candidate_content_agreement(candidate, group=group) == []
     entity = Entity(
@@ -572,3 +576,37 @@ async def test_native_build_counts_transformed_schema_and_records_policy(group, 
     assert result.receipt["input_chars"] == actual
     assert result.receipt["output_mode"] == "native_strict"
     assert result.receipt["openrouter_provider"] == "parasail/bf16"
+
+
+async def test_compact_render_keeps_full_audit_without_growing_readable_body(
+    group, procedure, model
+):
+    result = await propose(group, procedure, model)
+    receipt = copy.deepcopy(result.receipt)
+    receipt["diagnostic"] = "retained audit detail " * 10000
+    expanded = c._candidate(group, procedure, receipt)
+    assert len(expanded.content) == len(result.candidate.content)
+    assert expanded.metadata[c.METADATA_KEY]["build_receipt"] == receipt
+    assert expanded.content != result.candidate.content
+    assert "retained audit detail" not in expanded.content
+    assert (
+        expanded.metadata[c.METADATA_KEY]["spans"]
+        == result.candidate.metadata[c.METADATA_KEY]["spans"]
+    )
+
+
+async def test_historical_render_remains_verifiable_and_rejects_version_mismatch(
+    group, procedure, model
+):
+    result = await propose(group, procedure, model)
+    receipt = copy.deepcopy(result.receipt)
+    receipt.pop("render_version")
+    historical = c._candidate(group, procedure, receipt, render_version=None)
+    assert "```json" in historical.content
+    assert c.validate_candidate_content_agreement(historical, group=group) == []
+    historical.metadata[c.METADATA_KEY]["render_version"] = c.RENDER_VERSION
+    assert c.validate_candidate_content_agreement(historical, group=group)
+    current = copy.deepcopy(result.candidate)
+    current.metadata[c.METADATA_KEY]["render_version"] = "unknown"
+    current.metadata[c.METADATA_KEY]["build_receipt"]["render_version"] = "unknown"
+    assert c.validate_candidate_content_agreement(current, group=group)

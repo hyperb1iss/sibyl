@@ -37,6 +37,7 @@ from sibyl_core.services.memory_source_validation import (
 from sibyl_core.tasks.consolidation import (
     EVIDENCE_SYSTEM_PROMPT,
     OUTPUT_RETRIES,
+    RENDER_VERSION,
     SCHEMA_VERSION,
     SYSTEM_PROMPT,
     AdmittedTaskOutcome,
@@ -524,6 +525,7 @@ async def _extractor_policy() -> _ExtractorPolicy:
     revision = _digest(
         {
             "protocol": SCHEMA_VERSION,
+            "rendering": RENDER_VERSION,
             "evidence_projection": PROJECTION_VERSION,
             "evidence_validation": EVIDENCE_PROPOSAL_VERSION,
             "projection_system_sha256": hashlib.sha256(EVIDENCE_SYSTEM_PROMPT.encode()).hexdigest(),
