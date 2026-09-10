@@ -1817,8 +1817,15 @@ def import_archive(
         ),
     ] = False,
 ) -> None:
-    """Import a manifest archive into the active store."""
+    """Import a manifest archive or API backup into the active store."""
     archive = _load_valid_archive(source)
+    if (
+        "backup_metadata" in archive.manifest.metadata
+        and org_id
+        and org_id != archive.manifest.organization_id
+    ):
+        error("API backup restore cannot override its organization")
+        raise typer.Exit(code=1)
     effective_org_id = (
         _resolve_org_id(org_id, archive.manifest.organization_id) if restore_graph else ""
     )
