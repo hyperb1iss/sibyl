@@ -44,7 +44,8 @@ def _path(request: str) -> Path:
     return _directory() / (review_digest(json.loads(request)) + ".receipt")
 
 
-def read(request: str, key: str) -> dict | None:
+def capture(request: str) -> bytes | None:
+    """Read private ciphertext without traversing unrelated receipt files."""
     path = _path(request)
     if not path.exists():
         return None
@@ -54,10 +55,48 @@ def read(request: str, key: str) -> dict | None:
         ciphertext = path.read_bytes()
     except FileNotFoundError:
         return None
-    value = json.loads(Fernet(key.encode()).decrypt(ciphertext))
-    if value.get("request") != request:
-        raise ValueError("Validation receipt request differs")
+    return ciphertext
+
+
+def decode(request: str, key: str, ciphertext: bytes) -> dict:
+    """Authenticate ciphertext against its exact immutable request."""
+    encoded = Fernet(key.encode()).decrypt(ciphertext).decode("utf-8")
+    value = json.loads(encoded)
+    if canonical(value) != encoded:
+        raise ValueError("Validation receipt JSON is not canonical")
+    if not isinstance(value, dict) or set(value) != {"request", "result"}:
+        raise ValueError("Validation receipt envelope differs")
+    if value["request"] != request or not isinstance(value["result"], dict):
+        raise ValueError("Validation receipt request or result differs")
     return value["result"]
+
+
+def read(request: str, key: str) -> dict | None:
+    ciphertext = capture(request)
+    return None if ciphertext is None else decode(request, key, ciphertext)
+
+
+def restore(request: str, key: str, ciphertext: bytes) -> None:
+    """Durably publish authenticated archive bytes without replacing local history."""
+    decode(request, key, ciphertext)
+    path = _path(request)
+    descriptor, name = tempfile.mkstemp(prefix=".receipt-", dir=path.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(ciphertext)
+            output.flush()
+            os.fsync(output.fileno())
+        try:
+            os.link(temporary, path)
+        except FileExistsError:
+            if capture(request) != ciphertext:
+                raise ValueError(
+                    "Validation receipt archive conflicts with local history"
+                ) from None
+        _sync_directory(path.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def retain(request: str, key: str, result: dict) -> None:

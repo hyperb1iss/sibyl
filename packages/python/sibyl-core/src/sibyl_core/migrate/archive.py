@@ -340,6 +340,13 @@ def validate_archive(archive: LoadedArchive) -> list[str]:
                 payload=content_payload,
                 errors=errors,
             )
+            if isinstance(content_payload, dict):
+                from sibyl_core.migrate.validation_receipt_archive import prepare_payload
+
+                try:
+                    prepare_payload(content_payload)
+                except (ValueError, TypeError, KeyError) as exc:
+                    errors.append(f"content.json validation receipts are invalid: {exc}")
 
     if not errors:
         try:

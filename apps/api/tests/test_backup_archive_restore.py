@@ -3,7 +3,6 @@
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
@@ -13,7 +12,6 @@ from fastapi import FastAPI
 from typer.testing import CliRunner
 
 from sibyl.api.routes import backups as backup_routes
-from sibyl.auth.dependencies import get_current_organization
 from sibyl.cli import migrate
 from sibyl.jobs import backup
 from sibyl.persistence import auth_archive, content_archive
@@ -98,6 +96,13 @@ def _configure_stores(monkeypatch, stores, active, org, tmp_path):
 
     async def graph_client(_organization):
         return (await graph_runtime(_organization)).client
+
+    async def auth_client():
+        return stores[active()][0]
+
+    monkeypatch.setattr(
+        "sibyl.persistence.surreal.auth.get_shared_surreal_auth_client", auth_client
+    )
 
     monkeypatch.setattr(content_client, "surreal_content_client", session)
     for module in (auth_archive,):
@@ -235,15 +240,7 @@ async def _seed_and_backup(stores, org, tmp_path):
     )
     result = await backup.run_backup({}, org, backup_id="owned_bundle")
     assert result["success"], result
-    app = FastAPI()
-    app.include_router(backup_routes.router)
-    app.dependency_overrides[get_current_organization] = lambda: SimpleNamespace(id=UUID(org))
-    app.dependency_overrides[backup_routes.router.dependencies[0].dependency] = lambda: None
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://owned"
-    ) as api:
-        response = await api.get("/backups/owned_bundle/download")
-        assert response.status_code == 200
+    response = await _authenticated_download(auth, org)
     path = tmp_path / "downloaded.tar.gz"
     path.write_bytes(response.content)
     assert path.read_bytes() == (tmp_path / "sibyl_owned_bundle.tar.gz").read_bytes()
@@ -253,7 +250,56 @@ async def _seed_and_backup(stores, org, tmp_path):
     return memory, path
 
 
-@pytest.mark.parametrize("content_version", ["2.0", "2.1", "2.2"])
+async def _authenticated_download(auth, org):
+    from sibyl.persistence.auth_runtime import create_api_key_for_user
+
+    assert backup.settings.disable_auth is False
+    user_id = uuid4()
+    await auth.execute_query(
+        "CREATE users CONTENT $row;",
+        row={"uuid": str(user_id), "email": f"{user_id}@archive.invalid", "name": "Backup owner"},
+    )
+    await auth.execute_query(
+        "CREATE organization_members CONTENT $row;",
+        row={
+            "uuid": str(uuid4()),
+            "organization_id": org,
+            "user_id": str(user_id),
+            "role": "owner",
+        },
+    )
+    _key, bearer = await create_api_key_for_user(
+        organization_id=UUID(org),
+        user_id=user_id,
+        name="Owned archive download",
+        live=False,
+        scopes=["api:read"],
+        expires_at=None,
+        request=None,
+    )
+    app = FastAPI()
+    app.include_router(backup_routes.router, prefix="/api")
+    assert not app.dependency_overrides
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://owned"
+    ) as api:
+        route = "/api/backups/owned_bundle/download"
+        assert (await api.get(route)).status_code == 401
+        assert (
+            await api.get(route, headers={"Authorization": "Bearer sk_invalid"})
+        ).status_code == 401
+        response = await api.get(route, headers={"Authorization": f"Bearer {bearer}"})
+        assert response.status_code == 200, response.text
+        await auth.execute_query(
+            "UPDATE organization_members SET role='viewer' WHERE user_id=$user;", user=str(user_id)
+        )
+        assert (
+            await api.get(route, headers={"Authorization": f"Bearer {bearer}"})
+        ).status_code == 403
+        return response
+
+
+@pytest.mark.parametrize("content_version", ["2.0", "2.1", "2.2", "2.3"])
 def test_actual_api_backup_public_import_retains_auth_and_source_revocation(
     monkeypatch, tmp_path, content_version
 ):
@@ -268,11 +314,16 @@ def test_actual_api_backup_public_import_retains_auth_and_source_revocation(
     }
     active = "source"
     closes = _configure_stores(monkeypatch, stores, lambda: active, org, tmp_path)
-    if content_version != "2.2":
+    if content_version != "2.3":
 
         async def historical_content(organization_id):
             payload = await content_archive.export_content_archive_payload(organization_id)
-            omitted = {"memory_validation_executions", "memory_validation_attempts"}
+            payload.pop("validation_receipts")
+            omitted = (
+                set()
+                if content_version == "2.2"
+                else {"memory_validation_executions", "memory_validation_attempts"}
+            )
             if content_version == "2.0":
                 omitted |= {"dream_source_checkpoints", "dream_source_cursors"}
             for table in omitted:

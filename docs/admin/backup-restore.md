@@ -149,3 +149,33 @@ Auth, content and graph restore in separate stages. A failure does not imply a
 cross-namespace rollback. Preserve the failed archive and destination, inspect the
 reported stage, and retry only after correcting the cause. Database dumps and
 legacy PostgreSQL bundles are not accepted by this logical backup adapter.
+
+### Completed validation receipts
+
+Content archive 2.3 includes encrypted completion receipts for the archived
+validation executions. A completed validation can remain in its private journal
+when the database cannot retain its result. Public backup and import preserve
+those ciphertext bytes, so recovery on a fresh host does not require the old
+receipt volume or another provider request.
+
+The `validation_receipts.executions` inventory identifies each execution as
+`journal`, `database`, `purged`, or `unresolved`. An unresolved execution has no
+retained completed result in that snapshot. Its provider outcome and cost may
+remain unknown; restoring the archive does not authorize redispatch.
+
+Export fails if execution history changes while receipts are captured. Retry the
+backup after the concurrent completion or purge settles. Import authenticates
+receipt bytes against the archived request and key before any content writes.
+Existing destination history, source revocation, and purge rules still apply.
+Older content archives remain supported but cannot supply omitted journal files.
+
+Receipt files are published privately before the content transaction. If that
+transaction fails, ciphertext may remain without an authorized execution row.
+Preserve the failed archive and receipt directory, then retry the same import
+after resolving the reported conflict. Import never replaces conflicting receipt
+bytes or restores an erased recovery key over current destination history.
+
+Protect the complete backup as secret material: the content payload includes the
+recovery keys needed to decrypt its receipts. The archive is not encrypted as a
+whole. Continue using encrypted backup storage and the configured private receipt
+directory. Logical backup still does not claim cross-namespace crash atomicity.

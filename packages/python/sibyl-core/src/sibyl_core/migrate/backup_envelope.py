@@ -104,7 +104,7 @@ def load_backup_archive(source: Path, files: dict[str, bytes]) -> LoadedArchive:
         payload = _backup_json(data)
         versions = {
             AUTH_FILENAME: {"1.0"},
-            CONTENT_FILENAME: {"1.0", "2.0", "2.1", "2.2"},
+            CONTENT_FILENAME: {"1.0", "2.0", "2.1", "2.2", "2.3"},
             GRAPH_FILENAME: {"2.0", "3.0"},
         }
         if payload.get("version") not in versions[name]:

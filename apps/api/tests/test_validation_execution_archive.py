@@ -98,6 +98,7 @@ async def test_validation_archive_accepts_prior_v21_without_history(history):
     _client, execution = history
     archive = await content_archive.export_content_archive_payload("org")
     archive["version"] = "2.1"
+    archive.pop("validation_receipts")
     del archive["tables"]["memory_validation_executions"]
     del archive["tables"]["memory_validation_attempts"]
     result = await content_archive.restore_content_archive_payload(archive, clean=True)
