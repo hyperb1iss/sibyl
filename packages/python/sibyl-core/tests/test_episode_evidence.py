@@ -192,9 +192,9 @@ def _proposal():
 @pytest.mark.parametrize("mutation", [None, "unknown_id", "coverage_hash", "outside_visible"])
 async def test_projected_proposal_resolves_and_revalidates_original_ranges(monkeypatch, mutation):
     group = _contrast_group()
-    proposal = deepcopy(_proposal())
+    proposal = {"outcome": {"kind": "procedure", **deepcopy(_proposal())}}
     if mutation == "unknown_id":
-        proposal["procedure"]["goal"]["support"] = [{"evidence_id": "not-visible"}]
+        proposal["outcome"]["procedure"]["goal"]["support"] = [{"evidence_id": "not-visible"}]
 
     class LocalExtractor:
         def __init__(self, output_type, **kwargs):

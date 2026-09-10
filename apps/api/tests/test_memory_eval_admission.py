@@ -366,6 +366,8 @@ async def test_http_consolidation_reads_admitted_sources(eval_api, monkeypatch, 
 def _candidate_extraction_result(prompt):
     from sibyl_core.tasks import consolidation
 
+    prompt, request = prompt.rsplit("\n\n", 1)
+    assert request == consolidation.RETROSPECTIVE_REQUEST
     header = json.loads(prompt.splitlines()[1])
     spans = [json.loads(line) for line in prompt.splitlines()[3:]]
 
