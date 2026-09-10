@@ -120,7 +120,12 @@ CONTENT_ANALYZER_DEFINITIONS = _load_schema_file("01_analyzers.surql")
 CONTENT_LEGACY_CONTENT_CHECKPOINT_DEFINITIONS = (
     _SCHEMA_DIR / "35_legacy_content_checkpoint.surql"
 ).read_text(encoding="utf-8")
-CONTENT_SCHEMA_DEFINITIONS = _load_schema_file("10_tables.surql")
+CONTENT_DREAM_CHECKPOINT_DEFINITIONS = (
+    _SCHEMA_DIR / "36_dream_source_checkpoints.surql"
+).read_text(encoding="utf-8")
+CONTENT_SCHEMA_DEFINITIONS = (
+    _load_schema_file("10_tables.surql") + "\n" + CONTENT_DREAM_CHECKPOINT_DEFINITIONS
+)
 
 
 CONTENT_EVAL_CONSOLIDATIONS_MIGRATION_DEFINITIONS = """
@@ -244,6 +249,8 @@ DEFINE FIELD OVERWRITE status ON backups TYPE string DEFAULT 'pending'
 """
 
 CONTENT_PERMISSION_MIGRATION_DEFINITIONS = """
+ALTER TABLE IF EXISTS dream_source_checkpoints PERMISSIONS NONE;
+ALTER TABLE IF EXISTS dream_source_cursors PERMISSIONS NONE;
 ALTER TABLE IF EXISTS eval_consolidations PERMISSIONS NONE;
 ALTER TABLE IF EXISTS eval_attempts PERMISSIONS NONE;
 ALTER TABLE IF EXISTS crawl_sources PERMISSIONS
@@ -990,27 +997,7 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
         SchemaMigration(
             version=36,
             name="content_dream_source_checkpoints",
-            statements=(
-                "DEFINE TABLE IF NOT EXISTS dream_source_cursors SCHEMAFULL PERMISSIONS NONE",
-                "DEFINE FIELD IF NOT EXISTS organization_id ON dream_source_cursors TYPE string",
-                "DEFINE FIELD IF NOT EXISTS source_id ON dream_source_cursors TYPE string",
-                "DEFINE FIELD IF NOT EXISTS revision ON dream_source_cursors TYPE int",
-                "DEFINE INDEX IF NOT EXISTS dream_cursor_org ON dream_source_cursors FIELDS organization_id UNIQUE",
-                "DEFINE TABLE IF NOT EXISTS dream_source_checkpoints SCHEMAFULL PERMISSIONS NONE",
-                "DEFINE FIELD IF NOT EXISTS uuid ON dream_source_checkpoints TYPE string",
-                "DEFINE FIELD IF NOT EXISTS organization_id ON dream_source_checkpoints TYPE string",
-                "DEFINE FIELD IF NOT EXISTS source_id ON dream_source_checkpoints TYPE string",
-                "DEFINE FIELD IF NOT EXISTS request_json ON dream_source_checkpoints TYPE string",
-                "DEFINE FIELD IF NOT EXISTS extraction_json ON dream_source_checkpoints TYPE string",
-                "DEFINE FIELD IF NOT EXISTS completion_json ON dream_source_checkpoints TYPE option<string>",
-                "DEFINE FIELD IF NOT EXISTS prepared_json ON dream_source_checkpoints TYPE option<string>",
-                "DEFINE FIELD IF NOT EXISTS candidate_fingerprints ON dream_source_checkpoints TYPE object FLEXIBLE DEFAULT {}",
-                "DEFINE INDEX IF NOT EXISTS dream_checkpoint_uuid ON dream_source_checkpoints FIELDS uuid UNIQUE",
-                "DEFINE INDEX IF NOT EXISTS dream_checkpoint_source ON dream_source_checkpoints FIELDS organization_id, source_id",
-                "DEFINE EVENT IF NOT EXISTS dream_source_purge ON raw_captures WHEN $event = 'DELETE' "
-                "THEN { DELETE dream_source_checkpoints WHERE organization_id = $before.organization_id "
-                "AND source_id = $before.uuid; }",
-            ),
+            statements=tuple(split_statements(CONTENT_DREAM_CHECKPOINT_DEFINITIONS)),
         ),
     )
 

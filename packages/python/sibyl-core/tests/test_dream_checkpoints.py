@@ -7,6 +7,7 @@ import pytest
 
 from sibyl_core.backends.surreal import SurrealContentClient
 from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
+from sibyl_core.backends.surreal.records import normalize_records
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
 from sibyl_core.services import content_client
 from sibyl_core.services.content_raw_persistence import remember_raw_memory, save_raw_memory
@@ -285,3 +286,20 @@ async def test_dream_cursor_is_durable_and_stale_worker_cannot_rewind(store):
     assert not await advance_dream_cursor("dream-org", "source-a", 0)
     assert await load_dream_cursor("dream-org") == ("source-b", 1)
     assert await load_dream_cursor("another-org") == ("", 0)
+
+
+async def test_dream_upgrade_repairs_schemaless_tables_and_permissions(store):
+    for table in ("dream_source_checkpoints", "dream_source_cursors"):
+        await store.execute_query(f"REMOVE TABLE {table};")
+        await store.execute_query(f"DEFINE TABLE {table} SCHEMALESS PERMISSIONS FULL;")
+    await store.execute_query("UPDATE schema_version SET version=35 WHERE name='content';")
+    await bootstrap_content_schema(store)
+    for table in ("dream_source_checkpoints", "dream_source_cursors"):
+        info = await store.execute_query("INFO FOR DB;")
+        definition = normalize_records(info)[0]["tables"][table]
+        assert "SCHEMAFULL" in definition
+        assert "PERMISSIONS NONE" in definition
+    memory = await source()
+    observed = await work(store, memory)
+    await CheckpointReflectionExtractor(observed).extract(request(memory))
+    assert await load_dream_stage(observed) is not None
