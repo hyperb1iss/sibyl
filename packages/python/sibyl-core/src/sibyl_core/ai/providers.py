@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import AsyncExitStack
 from typing import Literal
 
 from anthropic import AsyncAnthropic
@@ -22,7 +23,7 @@ from sibyl_core.ai.registry import ModelKind, model_registry
 from sibyl_core.ai.transport import RecordingAnthropicClient, RecordingOpenAIClient
 
 
-def build_model(config: LLMConfig) -> Model:
+def build_model(config: LLMConfig, *, resources: AsyncExitStack | None = None) -> Model:
     provider_model_id = resolve_provider_model_id(config)
     api_key = config.api_key.get_secret_value() if config.api_key else None
 
@@ -31,13 +32,16 @@ def build_model(config: LLMConfig) -> Model:
             settings = _settings(config)
             if resolved_model_profile(config).get("anthropic_disallows_sampling_settings", False):
                 settings.pop("temperature", None)
+            http_client = RecordingAnthropicClient()
+            if resources is not None:
+                resources.push_async_callback(http_client.aclose)
             return AnthropicModel(
                 provider_model_id,
                 provider=AnthropicProvider(
                     anthropic_client=AsyncAnthropic(
                         api_key=api_key,
                         max_retries=config.transport_max_retries,
-                        http_client=RecordingAnthropicClient(),
+                        http_client=http_client,
                     )
                 ),
                 settings=AnthropicModelSettings(**settings),
@@ -49,13 +53,16 @@ def build_model(config: LLMConfig) -> Model:
                 settings=GoogleModelSettings(**_settings(config)),
             )
         case "openai":
+            http_client = RecordingOpenAIClient()
+            if resources is not None:
+                resources.push_async_callback(http_client.aclose)
             return OpenAIResponsesModel(
                 provider_model_id,
                 provider=OpenAIProvider(
                     openai_client=AsyncOpenAI(
                         api_key=api_key,
                         max_retries=config.transport_max_retries,
-                        http_client=RecordingOpenAIClient(),
+                        http_client=http_client,
                     )
                 ),
                 settings=OpenAIResponsesModelSettings(**_settings(config)),

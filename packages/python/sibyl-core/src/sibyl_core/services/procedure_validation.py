@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -36,6 +37,7 @@ from sibyl_core.tasks.consolidation import (
 from sibyl_core.tasks.episode_evidence import EvidenceCitation
 from sibyl_core.tasks.memory_validation import (
     CriticOutput,
+    MemoryValidationResult,
     OriginalValidationEvidence,
     PreparedMemoryValidation,
     prepare_procedure_validation,
@@ -175,52 +177,81 @@ async def prepare_stored_procedure_validation(
     )
 
 
+async def _close_resources(resources: AsyncExitStack) -> None:
+    closing = asyncio.create_task(resources.aclose())
+    cancelled: asyncio.CancelledError | None = None
+    while True:
+        try:
+            await asyncio.shield(closing)
+            break
+        except asyncio.CancelledError as failure:
+            if closing.cancelled():
+                raise
+            cancelled = failure
+        except BaseException as failure:
+            if cancelled is not None:
+                raise cancelled from failure
+            raise
+    if cancelled is not None:
+        raise cancelled
+
+
+class _OwnedValidationExtractor(Extractor[CriticOutput]):
+    resources: AsyncExitStack
+
+
 async def validation_extractor() -> tuple[Extractor[CriticOutput], str]:
     """Freeze one resolved model and whitelist its effective policy, never repr/key."""
     resolved = await resolve_llm_config(LLMSurface.MEMORY)
     config = resolved.to_llm_config()
     if config.provider not in {"openai", "anthropic"}:
         raise ValueError("Durable validation requires an observed SDK transport")
-    model = build_model(config)
-    mode = settings.consolidation_output_mode
-    agent = Agent(
-        model,
-        output_type=NativeOutput(CriticOutput, strict=True)
-        if mode == "native_strict"
-        else CriticOutput,
-        retries={"output": 2},
-    )
-    extractor = Extractor(
-        CriticOutput,
-        agent=agent,
-        surface=LLMSurface.MEMORY,
-        model_override=model.model_name,
-        output_retries=2,
-        max_tokens=config.max_tokens,
-        output_mode=mode,
-        openrouter_provider=settings.consolidation_openrouter_provider,
-    )
-    schema = await extractor.output_schema()
-    policy = canonical(
-        {
-            "version": "memory-validation-execution-v1",
-            "provider": config.provider,
-            "model": model.model_name,
-            "model_settings": {
-                k: v
-                for k, v in (model.settings or {}).items()
-                if k in {"temperature", "max_tokens", "timeout"}
-            },
-            "max_tokens": config.max_tokens,
-            "output_retries": 2,
-            "output_mode": mode,
-            "route": settings.consolidation_openrouter_provider,
-            "schema": schema,
-            "transport": transport_policy(config),
-            "max_input_chars": settings.consolidation_max_input_chars,
-        }
-    )
-    return extractor, policy
+    resources = AsyncExitStack()
+    try:
+        model = build_model(config, resources=resources)
+        mode = settings.consolidation_output_mode
+        agent = Agent(
+            model,
+            output_type=NativeOutput(CriticOutput, strict=True)
+            if mode == "native_strict"
+            else CriticOutput,
+            retries={"output": 2},
+        )
+        extractor = _OwnedValidationExtractor(
+            CriticOutput,
+            agent=agent,
+            surface=LLMSurface.MEMORY,
+            model_override=model.model_name,
+            output_retries=2,
+            max_tokens=config.max_tokens,
+            output_mode=mode,
+            openrouter_provider=settings.consolidation_openrouter_provider,
+        )
+        extractor.resources = resources
+        schema = await extractor.output_schema()
+        policy = canonical(
+            {
+                "version": "memory-validation-execution-v1",
+                "provider": config.provider,
+                "model": model.model_name,
+                "model_settings": {
+                    k: v
+                    for k, v in (model.settings or {}).items()
+                    if k in {"temperature", "max_tokens", "timeout"}
+                },
+                "max_tokens": config.max_tokens,
+                "output_retries": 2,
+                "output_mode": mode,
+                "route": settings.consolidation_openrouter_provider,
+                "schema": schema,
+                "transport": transport_policy(config),
+                "max_input_chars": settings.consolidation_max_input_chars,
+            }
+        )
+        return extractor, policy
+    except BaseException:
+        await _close_resources(resources)
+        raise
 
 
 async def validate_stored_procedure(
@@ -233,7 +264,54 @@ async def validate_stored_procedure(
     """Run actual shared validation; callbacks reauthenticate, never supply evidence."""
     await authorize()
     original = await prepare_stored_procedure_validation(organization_id, principal_id, parent_id)
+    prompt_chars = len(original.prepared.prompt)
+    if prompt_chars > settings.consolidation_max_input_chars:
+        raise ConsolidationInputBudgetExceeded(prompt_chars, settings.consolidation_max_input_chars)
     extractor, policy = await validation_extractor()
+    try:
+        return await _validate_prepared_procedure(
+            original,
+            extractor,
+            policy,
+            organization_id=organization_id,
+            principal_id=principal_id,
+            parent_id=parent_id,
+            authorize=authorize,
+        )
+    finally:
+        if isinstance(extractor, _OwnedValidationExtractor):
+            await _close_resources(extractor.resources)
+
+
+async def _record_completed_validation(
+    execution: ValidationExecution, result: MemoryValidationResult
+) -> None:
+    try:
+        await execution.record_result(result)
+    except (Exception, asyncio.CancelledError) as failure:
+        usage = result.usage.model_dump(mode="json")
+        failure.__dict__["extraction_usage"] = usage
+        details = getattr(failure, "details", None)
+        if isinstance(details, dict):
+            details["extraction_usage"] = usage
+        try:
+            recovered = await execution.reconcile_result(result)
+        except (Exception, asyncio.CancelledError) as recovery_failure:
+            raise failure from recovery_failure
+        if not recovered or isinstance(failure, asyncio.CancelledError):
+            raise
+
+
+async def _validate_prepared_procedure(
+    original: AuthorizedProcedureValidation,
+    extractor: Extractor[CriticOutput],
+    policy: str,
+    *,
+    organization_id: str,
+    principal_id: str,
+    parent_id: str,
+    authorize: Callable[[], Awaitable[None]],
+) -> dict[str, Any]:
     actual_chars = len(original.prepared.prompt) + len(canonical(await extractor.output_schema()))
     if actual_chars > settings.consolidation_max_input_chars:
         raise ConsolidationInputBudgetExceeded(actual_chars, settings.consolidation_max_input_chars)
@@ -284,7 +362,7 @@ async def validate_stored_procedure(
                 raise
             raise
         # A cancellation after extraction must still retain its reported usage.
-        recording = asyncio.create_task(execution.record_result(result))
+        recording = asyncio.create_task(_record_completed_validation(execution, result))
         try:
             await asyncio.shield(recording)
         except asyncio.CancelledError as cancelled:

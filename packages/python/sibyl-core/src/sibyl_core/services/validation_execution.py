@@ -138,13 +138,67 @@ class ValidationExecution:
         if len(rows) != 1:
             raise ValidationExecutionUnavailable("Dispatch outcome was not committed")
 
-    async def record_result(self, result: MemoryValidationResult) -> None:
+    @staticmethod
+    def _result_value(result: MemoryValidationResult) -> dict[str, Any]:
         value = asdict(result)
         value["submission"] = (
             result.submission.model_dump(mode="json") if result.submission else None
         )
         value["usage"] = result.usage.model_dump(mode="json")
+        return value
+
+    async def record_result(self, result: MemoryValidationResult) -> None:
+        value = self._result_value(result)
         await self._finish("recorded", usage=value["usage"], result=canonical(value))
+
+    def _matches_request(self, row: dict[str, Any] | None) -> bool:
+        if row is None or row.get("purged") or row.get("request_sha256") != self.id:
+            return False
+        encoded = row.get("request_json")
+        if not isinstance(encoded, str):
+            return False
+        try:
+            request = json.loads(encoded)
+            return (
+                isinstance(request, dict)
+                and canonical(request) == encoded
+                and review_digest(request) == self.id
+                and request.get("org") == self.org
+                and request.get("principal") == self.principal
+            )
+        except (ValueError, TypeError):
+            return False
+
+    async def reconcile_result(self, result: MemoryValidationResult) -> bool:
+        """Recover a lost result acknowledgment without replacing terminal history."""
+        value = self._result_value(result)
+        encoded, usage = canonical(value), canonical(value["usage"])
+        row = await self.load()
+        if not self._matches_request(row):
+            return False
+        assert row is not None
+        request_json = row["request_json"]
+        if row.get("state") == "running":
+            await _query(
+                """UPDATE memory_validation_executions SET state = 'recorded',
+                        usage_json = $usage, result_json = $result, error_type = NONE
+                    WHERE uuid = $uuid AND organization_id = $org AND principal_id = $principal
+                        AND request_sha256 = $uuid AND state = 'running' AND purged = false
+                        AND request_json = $request_json RETURN AFTER;""",
+                **self.params,
+                usage=usage,
+                result=encoded,
+                request_json=request_json,
+            )
+            row = await self.load()
+        return bool(
+            self._matches_request(row)
+            and row is not None
+            and row.get("request_json") == request_json
+            and row.get("state") in {"recorded", "returned"}
+            and row.get("result_json") == encoded
+            and row.get("usage_json") == usage
+        )
 
     async def record_failure(self, failure: BaseException) -> None:
         details = getattr(failure, "details", None) or failure.__dict__
