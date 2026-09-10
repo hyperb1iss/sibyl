@@ -38,8 +38,8 @@ rehearsal notes.
 
 ## Quick Start
 
-Provision the `sibyl-validation-receipts` persistent claim before installation.
-API and worker share it; multi-node replicas require ReadWriteMany storage.
+Provision the `sibyl-validation-receipts` persistent claim before installation. API and worker share
+it; multi-node replicas require ReadWriteMany storage.
 
 ```bash
 # Add namespace
