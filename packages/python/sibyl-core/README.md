@@ -289,3 +289,29 @@ moon run core:bench-context
 `core:bench-live` probes the real `/api/search` path with CLI auth. `core:bench-context` probes
 `/api/context/pack`. Both benchmarks are read-only. Saved reports can be compared with
 `uv run python benchmarks/compare_eval_reports.py <baseline.json> <candidate.json>`.
+
+### Completed Validation Receipt Recovery
+
+Validation writes an encrypted completed-result receipt before committing its
+result to SurrealDB. Set `SIBYL_VALIDATION_RECEIPT_DIR` to persistent private
+storage (default: `~/.sibyl/validation-receipts`). Quickstart shares its existing
+server-state volume between API and worker; production Compose mounts a shared
+receipt volume. Helm deployments must provision a claim and set
+`backend.validationReceipts.existingClaim`; use ReadWriteMany storage when
+replicas run on different nodes. Keep the same directory available after process
+or container restart. A different replica without that storage refuses incomplete
+replay and cannot recover the receipt.
+
+Each receipt is encrypted with a per-execution key stored in the private content
+ledger. Source purge erases the key in the existing purge transaction. Recovery
+requires the original canonical request and current authorization, preserves
+terminal history, and runs the existing source/publication fences. Recovery never
+calls the model again. Files are removed only after database result retention.
+Back up the journal together with the content database when pending receipts must
+survive host loss; a database-only backup cannot recover a pending local receipt.
+
+The readiness probe checks journal write access before dispatch. If the journal
+fails after a provider returns, database result persistence can still preserve the
+receipt. Simultaneous loss of both stores, or a crash between provider completion
+and receipt fsync, leaves the pre-dispatch physical attempt explicitly unknown.
+The system does not report that interval as zero cost or automatically redispatch.

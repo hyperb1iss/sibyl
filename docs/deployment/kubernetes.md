@@ -38,6 +38,9 @@ rehearsal notes.
 
 ## Quick Start
 
+Provision the `sibyl-validation-receipts` persistent claim before installation. API and worker share
+it; multi-node replicas require ReadWriteMany storage.
+
 ```bash
 # Add namespace
 kubectl create namespace sibyl
@@ -85,6 +88,8 @@ backend:
 
   # Reference pre-created secrets
   existingSecret: sibyl-secrets
+  validationReceipts:
+    existingClaim: sibyl-validation-receipts
 
   # SurrealDB connection
   surreal:

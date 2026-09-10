@@ -344,7 +344,6 @@ class TestMaintenanceTriggers:
                 dry_run=True,
                 source_limit=2,
                 candidate_limit=5,
-                archive_exceptions=False,
                 org=org,
             )
 
@@ -353,7 +352,6 @@ class TestMaintenanceTriggers:
             dry_run=True,
             source_limit=2,
             candidate_limit=5,
-            archive_exceptions=False,
         )
         assert response == {
             "job_id": "reflection_dream:00000000-0000-0000-0000-000000000111",

@@ -5,6 +5,7 @@ Server-specific settings (HTTP and auth middleware) remain in sibyl-server.
 """
 
 import os
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, SecretStr, model_validator
@@ -51,6 +52,11 @@ class CoreConfig(BaseSettings):
     store: Literal["surreal"] = Field(
         default="surreal",
         description="Active persistence runtime for this process",
+    )
+
+    validation_receipt_dir: str = Field(
+        default_factory=lambda: str(Path.home() / ".sibyl" / "validation-receipts"),
+        description="Persistent private receipt directory; share across validation replicas",
     )
 
     # SurrealDB configuration

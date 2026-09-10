@@ -67,9 +67,13 @@ async def graph_association_current(entity, association, *, ancestors=frozenset(
     except SourceUnavailableError:
         return False
     if any(o.source.kind is SourceKind.RAW_CAPTURE for o in observations):
+        from sibyl_core.services.validation_execution import ValidationExecutionUnavailable
         from sibyl_core.services.validation_promotion import validated_graph_current
 
-        if not await validated_graph_current(entity.organization_id, entity.id):
+        try:
+            if not await validated_graph_current(entity.organization_id, entity.id):
+                return False
+        except ValidationExecutionUnavailable:
             return False
     return await validate_observations(
         observations, authority, organization_id=entity.organization_id, ancestors=ancestors

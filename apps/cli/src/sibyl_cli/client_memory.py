@@ -324,7 +324,6 @@ class ClientMemoryMixin:
         dry_run: bool = True,
         source_limit: int = 20,
         candidate_limit: int = 50,
-        archive_exceptions: bool = True,
     ) -> dict[str, Any]:
         """Queue an org-scoped automatic reflection maintenance run."""
         return await self._request(
@@ -334,7 +333,6 @@ class ClientMemoryMixin:
                 "dry_run": dry_run,
                 "source_limit": source_limit,
                 "candidate_limit": candidate_limit,
-                "archive_exceptions": archive_exceptions,
             },
         )
 

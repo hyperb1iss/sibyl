@@ -47,6 +47,8 @@ async def run_validation_stage(
         parent_id=parent_id, source_ids=source_ids, policy=policy, request=request
     )
     if not claimed:
+        await check_current()
+        await execution.recover_completed_receipt()
         row = await execution.load()
         if row is None or row.get("state") not in {"recorded", "returned"}:
             return await execution.result()
@@ -64,14 +66,24 @@ async def run_validation_stage(
                 raise
             raise
         recording = asyncio.create_task(_record_completed_validation(execution, result))
-        try:
-            await asyncio.shield(recording)
-        except asyncio.CancelledError as cancelled:
+        cancelled: asyncio.CancelledError | None = None
+        while True:
             try:
-                await recording
-            except Exception:
-                raise cancelled from None
-            raise
+                await asyncio.shield(recording)
+                break
+            except asyncio.CancelledError as failure:
+                if recording.cancelled():
+                    raise
+                cancelled = failure
+            except BaseException as failure:
+                if cancelled is not None:
+                    cancelled.__dict__["extraction_usage"] = result.usage.model_dump(mode="json")
+                    raise cancelled from failure
+                raise
+        if cancelled is not None:
+            cancelled.__dict__["extraction_usage"] = result.usage.model_dump(mode="json")
+            raise cancelled
+
     try:
         await check_current()
         rows = await _query(

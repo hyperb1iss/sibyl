@@ -216,8 +216,28 @@ async def validate_reflection_stage(
     original: AuthorizedReflection, resolver: SourceAuthorityResolver, review=None
 ) -> dict[str, object]:
     """Run the shared semantic critic as a replayable, source-fenced stage."""
+    from sibyl_core.services.procedure_validation import (
+        _close_resources,
+        _OwnedValidationExtractor,
+        validation_extractor,
+    )
+
+    extractor, policy = await validation_extractor()
+    try:
+        return await _validate_prepared_reflection(original, resolver, extractor, policy, review)
+    finally:
+        if isinstance(extractor, _OwnedValidationExtractor):
+            await _close_resources(extractor.resources)
+
+
+async def _validate_prepared_reflection(
+    original: AuthorizedReflection,
+    resolver: SourceAuthorityResolver,
+    extractor,
+    policy: str,
+    review=None,
+) -> dict[str, object]:
     from sibyl_core.config import settings
-    from sibyl_core.services.procedure_validation import validation_extractor
     from sibyl_core.services.validation_execution import ValidationExecution
     from sibyl_core.services.validation_stages import run_validation_stage
     from sibyl_core.tasks._evidence_json import canonical
@@ -225,7 +245,6 @@ async def validate_reflection_stage(
     from sibyl_core.tasks.memory_validation import run_memory_validation
 
     memory = original.memory
-    extractor, policy = await validation_extractor()
     prompt = original.prepared.prompt
     schema = await extractor.output_schema()
     if review is not None:

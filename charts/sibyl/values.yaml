@@ -17,6 +17,7 @@ publicUrl: ""
 # Sibyl's active Helm runtime is fully SurrealDB-backed.
 # Archive and legacy migration sidecars are operated outside this release chart.
 # -- Coordination backend: "auto", "local", or "redis"
+
 coordinationBackend: "auto"
 
 # -- Authentication defaults. Local username/password auth is the default simple path; enterprise
@@ -51,6 +52,11 @@ oidc:
 
 # -- Backend configuration
 backend:
+  # -- Shared persistent claim for completed validation receipts. Use RWX when
+  # replicas may run on different nodes. Provision before running validation.
+  validationReceipts:
+    existingClaim: ""
+
   # -- Number of replicas (ignored if autoscaling is enabled)
   replicaCount: 1
 

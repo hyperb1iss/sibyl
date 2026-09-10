@@ -8,11 +8,12 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import uuid4
 
+from cryptography.fernet import Fernet
 from pydantic import TypeAdapter
 
 from sibyl_core.ai.llm.extractor import ExtractionUsage
 from sibyl_core.ai.transport import FailedExtractionUsage, TransportAttempt
-from sibyl_core.services import content_client
+from sibyl_core.services import content_client, validation_receipts
 from sibyl_core.tasks._evidence_json import canonical
 from sibyl_core.tasks.memory_validation import MemoryValidationResult
 from sibyl_core.tasks.procedure_correction_result import ProcedureCorrectionResult
@@ -69,7 +70,9 @@ class ValidationExecution:
         self, *, parent_id: str, source_ids: list[str], policy: str, request: dict[str, Any]
     ) -> bool:
         # The UUID unique index arbitrates only identical operations, not global work.
+        await asyncio.to_thread(validation_receipts.ready)
         nonce = uuid4().hex
+        recovery_key = Fernet.generate_key().decode()
         if review_digest(request) != self.id:
             raise ValidationExecutionUnavailable("Execution request identity differs")
         rows = await _query(
@@ -90,6 +93,7 @@ class ValidationExecution:
                 "policy_json": policy,
                 "state": "running",
                 "claim_id": nonce,
+                "recovery_key": recovery_key,
                 "request_json": canonical(request),
             },
         )
@@ -99,6 +103,10 @@ class ValidationExecution:
             or rows[0].get("principal_id") != self.principal
         ):
             raise ValidationExecutionUnavailable("Execution identity conflict")
+        if not self._matches_request(rows[0]):
+            raise ValidationExecutionUnavailable("Execution request identity differs")
+        self._request_json = rows[0]["request_json"]
+        self._recovery_key = rows[0].get("recovery_key")
         return rows[0].get("claim_id") == nonce
 
     async def before_dispatch(self) -> str:
@@ -150,7 +158,49 @@ class ValidationExecution:
 
     async def record_result(self, result: ValidationStageResult) -> None:
         value = self._result_value(result)
-        await self._finish("recorded", usage=value["usage"], result=canonical(value))
+        if self._recovery_key is None:
+            raise ValidationExecutionUnavailable("Execution has no durable receipt key")
+        await asyncio.to_thread(
+            validation_receipts.retain, self._request_json, self._recovery_key, value
+        )
+        await self._finish(
+            "recorded",
+            usage=value["usage"],
+            result=canonical(value),
+            request_json=self._request_json,
+        )
+        if not await self.reconcile_result(result):
+            row = await self.load()
+            erased_by_purge = bool(
+                row is not None
+                and row.get("purged") is True
+                and row.get("recovery_key") is None
+                and row.get("request_json") == self._request_json
+                and row.get("request_sha256") == self.id
+                and row.get("result_json") is None
+                and row.get("usage_json") == canonical(value["usage"])
+            )
+            if not erased_by_purge:
+                raise ValidationExecutionUnavailable("Completed receipt retention differs")
+        await asyncio.to_thread(validation_receipts.discard, self._request_json)
+
+    async def recover_completed_receipt(self) -> bool:
+        """Recover only this authenticated request; never create a new dispatch claim."""
+        if self.authorize is not None:
+            await self.authorize()
+        row = await self.load()
+        if not self._matches_request(row) or row is None or not row.get("recovery_key"):
+            return False
+        value = await asyncio.to_thread(
+            validation_receipts.read, row["request_json"], row["recovery_key"]
+        )
+        if value is None:
+            return False
+        result = TypeAdapter(ValidationStageResult).validate_python(value)
+        recovered = await self.reconcile_result(result)
+        if recovered:
+            await asyncio.to_thread(validation_receipts.discard, row["request_json"])
+        return recovered
 
     def _matches_request(self, row: dict[str, Any] | None) -> bool:
         if row is None or row.get("purged") or row.get("request_sha256") != self.id:
@@ -215,14 +265,28 @@ class ValidationExecution:
         )
 
     async def _finish(
-        self, state: str, *, usage: object, result: str | None = None, error: str | None = None
+        self,
+        state: str,
+        *,
+        usage: object,
+        result: str | None = None,
+        error: str | None = None,
+        request_json: str | None = None,
     ) -> None:
+        request_guard = (
+            " AND request_json = $expected_request AND request_sha256 = $uuid"
+            if request_json is not None
+            else ""
+        )
         rows = await _query(
             """UPDATE memory_validation_executions SET state = $state, usage_json = $usage,
                     result_json = IF purged THEN NONE ELSE $result END, error_type = $error
                 WHERE uuid = $uuid AND organization_id = $org AND principal_id = $principal
-                    AND state = 'running' RETURN AFTER;""",
+                    AND state = 'running'"""
+            + request_guard
+            + " RETURN AFTER;",
             **self.params,
+            expected_request=request_json,
             state=state,
             usage=canonical(usage),
             result=result,
@@ -246,9 +310,58 @@ class ValidationExecution:
         return {"execution_id": self.id, **json.loads(row["result_json"])}
 
 
+def _archive_request(record: dict[str, Any]) -> dict[str, Any]:
+    """Check persisted JSON shape before comparing its immutable bindings."""
+    for field in (
+        "uuid",
+        "organization_id",
+        "principal_id",
+        "parent_id",
+        "policy_json",
+        "request_sha256",
+        "request_json",
+    ):
+        if not isinstance(record.get(field), str) or not record[field]:
+            raise ValueError(f"Validation archive {field} must be a nonempty string")
+    source_ids = record.get("source_ids")
+    if not isinstance(source_ids, list) or any(
+        not isinstance(value, str) or not value for value in source_ids
+    ):
+        raise ValueError("Validation archive source IDs must be strings")
+    request = json.loads(record["request_json"])
+    if not isinstance(request, dict):
+        raise ValueError("Validation archive request must be an object")
+    for field in ("org", "principal", "parent", "policy"):
+        if not isinstance(request.get(field), str) or not request[field]:
+            raise ValueError(f"Validation archive request {field} must be a nonempty string")
+    bindings = request.get("source_bindings")
+    if not isinstance(bindings, list):
+        raise ValueError("Validation archive source bindings must be a list")
+    for binding in bindings:
+        if (
+            not isinstance(binding, dict)
+            or any(
+                not isinstance(binding.get(field), str) or not binding[field]
+                for field in ("source_id", "incarnation")
+            )
+            or type(binding.get("generation")) is not int
+        ):
+            raise ValueError("Validation archive source binding is malformed")
+    if record.get("result_json") is not None and not isinstance(record["result_json"], str):
+        raise ValueError("Validation archive result must be encoded JSON")
+    return request
+
+
 def validation_archive_guard(table: str, record: dict[str, Any]) -> str:
     """Validate private history before the existing atomic archive writer runs."""
+    if not isinstance(record, dict):
+        raise ValueError("Validation archive row must be an object")
     if table == "memory_validation_attempts":
+        for field in ("execution_id", "organization_id", "principal_id"):
+            if not isinstance(record.get(field), str) or not record[field]:
+                raise ValueError(f"Validation attempt {field} must be a nonempty string")
+        if record.get("outcome_json") is not None and not isinstance(record["outcome_json"], str):
+            raise ValueError("Validation attempt outcome must be encoded JSON")
         if record.get("outcome_json") is not None:
             outcome = TransportAttempt.model_validate_json(record["outcome_json"])
             if outcome.usage_known:
@@ -261,7 +374,7 @@ def validation_archive_guard(table: str, record: dict[str, Any]) -> str:
         raise ValueError("Unknown validation history table")
     if type(record.get("purged")) is not bool or record.get("request_sha256") != record.get("uuid"):
         raise ValueError("Validation archive retention identity differs")
-    request = json.loads(record["request_json"])
+    request = _archive_request(record)
     if canonical(request) != record["request_json"] or review_digest(request) != record["uuid"]:
         raise ValueError("Validation archive identity differs")
     if (

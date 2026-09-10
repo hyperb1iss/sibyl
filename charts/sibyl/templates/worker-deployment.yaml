@@ -66,6 +66,8 @@ spec:
                 name: {{ .Values.backend.existingSecret }}
             {{- end }}
           env:
+            - name: SIBYL_VALIDATION_RECEIPT_DIR
+              value: /var/lib/sibyl-receipts/private
             {{- if .Values.backend.existingSecret }}
             - name: SIBYL_JWT_SECRET
               valueFrom:
@@ -115,9 +117,14 @@ spec:
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
           volumeMounts:
+            - name: validation-receipts
+              mountPath: /var/lib/sibyl-receipts
             - name: tmp
               mountPath: /tmp
       volumes:
+        - name: validation-receipts
+          persistentVolumeClaim:
+            claimName: {{ .Values.backend.validationReceipts.existingClaim | quote }}
         - name: tmp
           emptyDir: {}
       {{- with .Values.worker.nodeSelector }}
