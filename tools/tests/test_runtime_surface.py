@@ -961,6 +961,7 @@ def test_production_compose_validation_receipts_share_durable_state() -> None:
             service["depends_on"]["receipts-init"]["condition"] == "service_completed_successfully"
         )
     assert "validation_receipts" in compose["volumes"]
+    assert "validation_receipts:/home/sibyl/.sibyl" in compose["services"]["receipts-init"]["volumes"]
     assert compose["services"]["receipts-init"]["command"] == [
         "chown",
         "10001:10001",
