@@ -710,9 +710,7 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
             index = rows_restored
             parameters[f"archive_record_{index}"] = record
             parameters[f"archive_identity_{index}"] = identity
-            statement = _auxiliary_restore_statement(
-                spec, organization_id, record, legacy=legacy
-            )
+            statement = _auxiliary_restore_statement(spec, organization_id, record, legacy=legacy)
             statements.append(
                 f"FOR $archive_once IN [true] {{ LET $record = $archive_record_{index}; "
                 f"LET $identity = $archive_identity_{index}; {statement} }};"
