@@ -45,6 +45,8 @@ from sibyl_core.services.eval_publication_guards import PUBLICATION_ADMISSION_GU
 if TYPE_CHECKING:
     from sibyl_core.memory_pipeline.observations import SourceObservation
     from sibyl_core.services.dream_checkpoints import DreamCandidateWrite
+    from sibyl_core.services.validation_candidate import ValidationCandidateWrite
+    from sibyl_core.services.validation_promotion import ValidatedPromotion
 
 _RAW_MEMORY_EMBEDDING_AUTO = object()
 
@@ -372,6 +374,7 @@ async def remember_raw_memory(
     embedding_provider: EmbeddingProvider | object | None = _RAW_MEMORY_EMBEDDING_AUTO,
     source_memories: Sequence[RawMemory] = (),
     dream_write: DreamCandidateWrite | None = None,
+    validation_write: ValidationCandidateWrite | None = None,
     source_observations: Sequence[SourceObservation] = (),
     accessible_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
@@ -406,6 +409,10 @@ async def remember_raw_memory(
         ),
         captured_at=models.utcnow(),
     )
+    if validation_write is not None:
+        if dream_write is not None or not source_observations:
+            raise ValueError("Corrected review requires observed original sources")
+        memory.id = validation_write.id
     if dream_write is not None:
         if source_observations or len(source_memories) != 1:
             raise ValueError("Dream review requires its single captured source")
@@ -437,7 +444,24 @@ async def remember_raw_memory(
     )
     memory = await _raw_memory_with_embedding(memory, provider)
     async with content_client.surreal_content_client() as client:
-        if dream_write is not None:
+        if validation_write is not None:
+            from sibyl_core.services.memory_derivations import raw_derivation_record
+            from sibyl_core.services.validation_candidate import insert_validation_candidate
+
+            authority = SourceReadAuthority(
+                principal_id=principal_id,
+                projects=frozenset(accessible_projects),
+                teams=frozenset(accessible_teams),
+                delegations=frozenset(accessible_delegations),
+                scope_keys=allowed_memory_scope_keys,
+            )
+            record = await insert_validation_candidate(
+                client,
+                models.raw_memory_record(memory),
+                validation_write,
+                raw_derivation_record(memory, source_observations, authority),
+            )
+        elif dream_write is not None:
             from sibyl_core.services.dream_checkpoints import insert_dream_candidate
 
             record = await insert_dream_candidate(
@@ -616,7 +640,9 @@ async def remember_reflection_candidate_review(
     suggested_scope_key: str | None = None,
     extraction_prompt_metadata: dict[str, object] | None = None,
     source_memories: Sequence[RawMemory] = (),
+    source_observations: Sequence[SourceObservation] = (),
     dream_write: DreamCandidateWrite | None = None,
+    validation_write: ValidationCandidateWrite | None = None,
     accessible_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
@@ -649,6 +675,8 @@ async def remember_reflection_candidate_review(
         entity_type=candidate.kind,
         source_memories=source_memories,
         dream_write=dream_write,
+        validation_write=validation_write,
+        source_observations=source_observations,
         accessible_projects=accessible_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
@@ -864,12 +892,28 @@ async def save_raw_memory(
     superseded_by_memory_id: str | None = None,
     source_observations: Sequence[RawMemory] = (),
     publication_operation_id: str | None = None,
+    validation_promotion: ValidatedPromotion | None = None,
+    validation_derivation: dict[str, object] | None = None,
 ) -> RawMemory:
     from sibyl_core.services.procedure_artifact import publication_build_receipt_json
+    from sibyl_core.services.validation_promotion import VALIDATION_PROMOTION_GUARD
+    from sibyl_core.tasks._evidence_json import canonical
+
+    validation_guard, validation_params = "", {}
+    if validation_promotion is not None:
+        if (memory.organization_id, memory.principal_id, memory.id) != (
+            validation_promotion.organization_id,
+            validation_promotion.principal_id,
+            validation_promotion.candidate_id,
+        ):
+            raise ValueError("Validation promotion owner differs")
+        validation_guard, validation_params = await validation_promotion.current_guard()
 
     if expected_revision is not None and expected_revision < 1:
         raise ValueError("expected_revision must be at least 1")
-    if (source_observations or publication_operation_id) and expected_revision is None:
+    if (
+        source_observations or publication_operation_id or validation_promotion
+    ) and expected_revision is None:
         raise ValueError("source-observed publication requires a revision fence")
     if any(source.organization_id != memory.organization_id for source in source_observations):
         raise ValueError("source observations must belong to the publication organization")
@@ -924,6 +968,8 @@ async def save_raw_memory(
                     client,
                     """
                         RETURN {
+                        __VALIDATION_SOURCE_GUARD__
+                        __VALIDATION_PROMOTION_GUARD__
                         __PUBLICATION_ADMISSION_GUARD__
                         FOR $source IN $source_observations {
                             LET $observed = (SELECT * FROM raw_captures
@@ -1004,9 +1050,30 @@ async def save_raw_memory(
                         };
                         RETURN $saved;
                         };
-                    """.replace(
-                        "__PUBLICATION_ADMISSION_GUARD__", PUBLICATION_ADMISSION_GUARD
-                    ).replace("__SOURCE_STATE_WRITE_WITNESS__", SOURCE_STATE_WRITE_WITNESS),
+                    """.replace("__PUBLICATION_ADMISSION_GUARD__", PUBLICATION_ADMISSION_GUARD)
+                    .replace("__SOURCE_STATE_WRITE_WITNESS__", SOURCE_STATE_WRITE_WITNESS)
+                    .replace("__VALIDATION_SOURCE_GUARD__", validation_guard)
+                    .replace("__VALIDATION_PROMOTION_GUARD__", VALIDATION_PROMOTION_GUARD),
+                    **validation_params,
+                    validation_binding=validation_promotion.binding.model_dump()
+                    if validation_promotion
+                    else None,
+                    validation_binding_json=canonical(validation_promotion.binding.model_dump())
+                    if validation_promotion
+                    else None,
+                    validation_principal=memory.principal_id,
+                    validation_entity_id=memory.metadata.get("promoted_entity_id")
+                    if validation_promotion
+                    else None,
+                    validation_derivation={
+                        **validation_derivation,
+                        "validation_entity_id": memory.metadata.get("promoted_entity_id"),
+                        "validation_binding_json": canonical(
+                            validation_promotion.binding.model_dump()
+                        ),
+                    }
+                    if validation_derivation and validation_promotion
+                    else None,
                     organization_id=memory.organization_id,
                     publication_operation_id=publication_operation_id
                     or (

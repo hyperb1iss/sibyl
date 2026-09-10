@@ -20,6 +20,7 @@ from sibyl_core.auth.memory_policy import (
     EVAL_ADMISSION_METADATA_KEY,
     EVAL_CONSOLIDATION_METADATA_KEY,
 )
+from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.config import core_config
 from sibyl_core.memory_pipeline.source_lifecycle import (
     SOURCE_BINDINGS_KEY,
@@ -34,6 +35,7 @@ from sibyl_core.services.memory_source_validation import (
     SOURCE_VALIDATION_CONTEXT_KEY,
     SourceReadAuthority,
 )
+from sibyl_core.services.validation_candidate import ValidationCandidateWrite
 from sibyl_core.tasks.consolidation import (
     EVIDENCE_SYSTEM_PROMPT,
     OUTPUT_RETRIES,
@@ -74,8 +76,23 @@ class ConsolidationOperation:
     mechanism: str
     controller_policy_sha256: str
     extractor_revision: str
+    correction_execution_id: str | None = None
+    parent_operation_id: str | None = None
+    parent_candidate_sha256: str | None = None
 
     def __post_init__(self) -> None:
+        lineage = (
+            self.correction_execution_id,
+            self.parent_operation_id,
+            self.parent_candidate_sha256,
+        )
+        if any(value is not None for value in lineage) and not all(
+            isinstance(value, str)
+            and len(value) == 64
+            and all(c in "0123456789abcdef" for c in value)
+            for value in lineage
+        ):
+            raise ValueError("complete correction lineage is required")
         if (
             any(
                 not value.strip()
@@ -110,6 +127,15 @@ class ConsolidationOperation:
                 self.checkpoint,
                 self.group_id,
             ]
+            + (
+                [
+                    self.correction_execution_id,
+                    self.parent_operation_id,
+                    self.parent_candidate_sha256,
+                ]
+                if self.correction_execution_id is not None
+                else []
+            )
         )
 
     @property
@@ -169,6 +195,13 @@ IF $existing != NONE {
             THROW 'consolidation conflict: original admitted source changed';
         };
     };
+    LET $source_ids=$sources.map(|$source| $source.capture_id);
+    LET $source_states_to_fence=(SELECT * FROM source_states WHERE organization_id=$organization_id
+        AND source_kind='raw_capture' AND source_id IN $source_ids);
+    IF array::len($source_states_to_fence)!=array::len(array::distinct($source_ids)) {
+        THROW 'consolidation conflict: source state unavailable';
+    };
+    __SOURCE_STATE_WRITE_WITNESS__
     IF $candidate != NONE { CREATE raw_captures CONTENT $candidate; };
     CREATE eval_consolidations CONTENT $ledger;
 };
@@ -178,7 +211,7 @@ LET $memory = (SELECT * FROM raw_captures WHERE organization_id = $organization_
     AND uuid = $stored.candidate_id LIMIT 1)[0];
 RETURN { ledger: $stored, memory: $memory };
 };
-"""
+""".replace("__SOURCE_STATE_WRITE_WITNESS__", SOURCE_STATE_WRITE_WITNESS)
 
 
 def _decode_build_receipt(ledger: dict) -> dict[str, Any] | None:
@@ -269,12 +302,52 @@ RETURN { ledger: $ledger, memory: (SELECT * FROM raw_captures
 async def store_consolidation(
     operation: ConsolidationOperation,
     result: ConsolidationResult,
+    *,
+    validation_write: ValidationCandidateWrite | None = None,
 ) -> StoredConsolidation:
     """Persist a server-verified proposal under its original source observations.
 
     The caller authenticates and revalidates the admitted group before invoking
     this writer. The transaction closes the last read-to-write revision gap.
     """
+    from pydantic import TypeAdapter
+
+    from sibyl_core.tasks.procedure_correction_result import ProcedureCorrectionResult
+
+    guard = ""
+    guard_params = {}
+    if operation.correction_execution_id is not None:
+        if (
+            validation_write is None
+            or validation_write.execution_id != operation.correction_execution_id
+        ):
+            raise ConsolidationConflict("stored correction authority is required")
+        corrected = TypeAdapter(ProcedureCorrectionResult).validate_json(
+            validation_write.result_json
+        )
+        if (
+            corrected.parent_operation_id != operation.parent_operation_id
+            or corrected.parent_candidate_sha256 != operation.parent_candidate_sha256
+            or TypeAdapter(ConsolidationResult).dump_python(corrected.result, mode="json")
+            != TypeAdapter(ConsolidationResult).dump_python(result, mode="json")
+        ):
+            raise ConsolidationConflict("stored correction result differs")
+        guard = (
+            validation_write.source_guard
+            + """
+        LET $stage=(SELECT * FROM memory_validation_executions WHERE uuid=$correction_execution
+            AND organization_id=$organization_id AND principal_id=$principal_id)[0];
+        IF $stage=NONE OR $stage.state!='returned' OR $stage.purged
+            OR $stage.result_json!=$correction_result { THROW 'consolidation conflict: correction changed'; };
+        """
+        )
+        guard_params = {
+            **validation_write.guard_params,
+            "correction_execution": validation_write.execution_id,
+            "correction_result": validation_write.result_json,
+        }
+    elif validation_write is not None:
+        raise ConsolidationConflict("correction operation identity is required")
     existing = await get_stored_consolidation(operation)
     if existing is not None:
         return existing
@@ -483,7 +556,8 @@ async def store_consolidation(
         try:
             rows = content_client.normalize_records(
                 await client.execute_query(
-                    _STORE,
+                    _STORE.replace("RETURN {\n", "RETURN {\n" + guard, 1) if guard else _STORE,
+                    **guard_params,
                     operation_id=operation.key,
                     organization_id=operation.organization_id,
                     principal_id=operation.principal_id,

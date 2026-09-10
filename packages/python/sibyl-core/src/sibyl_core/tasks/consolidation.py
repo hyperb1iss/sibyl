@@ -382,6 +382,17 @@ def _extraction_input(group: ConsolidationGroup) -> _ExtractionInput:
     return _ExtractionInput(prompt, EVIDENCE_SYSTEM_PROMPT, EvidenceProposal, citations, receipt)
 
 
+def procedure_review_citations(
+    group: ConsolidationGroup, *, evidence: _ExtractionInput | None = None
+) -> dict[str, EvidenceCitation]:
+    """Use one original-evidence namespace for stored critique and reconsideration."""
+    extracted = evidence if evidence is not None else _extraction_input(group)
+    return extracted.citations or {
+        f"episode:{index}": EvidenceCitation(episode.episode_id, ((0, len(episode.artifact)),))
+        for index, episode in enumerate(group.episodes)
+    }
+
+
 def _review_input(
     group: ConsolidationGroup, evidence: _ExtractionInput, record: dict[str, Any]
 ) -> _ExtractionInput:
@@ -390,10 +401,7 @@ def _review_input(
         raise ValueError("invalid reconsideration record")
     submission = ReviewSubmission.model_validate(record["submission"])
     parent = DraftConditionalProcedure.model_validate(record["parent_procedure"])
-    citations = evidence.citations or {
-        f"episode:{index}": EvidenceCitation(episode.episode_id, ((0, len(episode.artifact)),))
-        for index, episode in enumerate(group.episodes)
-    }
+    citations = procedure_review_citations(group, evidence=evidence)
     resolved = resolve_review_findings(submission, parent, citations)
     retained = {
         "submission": submission.model_dump(mode="json"),

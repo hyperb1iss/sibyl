@@ -43,3 +43,29 @@ THEN {
             AND (parent_id = $before.uuid OR $before.uuid IN source_ids);
 };
 """
+
+
+VALIDATION_PROMOTION_SCHEMA = """
+DEFINE FIELD IF NOT EXISTS validation_binding_json ON memory_derivations TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS validation_entity_id ON memory_derivations TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS memory_derivation_validation_entity ON memory_derivations FIELDS organization_id, validation_entity_id;
+DEFINE FIELD IF NOT EXISTS promotion_write_witness ON memory_validation_executions TYPE option<int> DEFAULT 0;
+DEFINE EVENT IF NOT EXISTS retain_validation_binding ON memory_derivations WHEN $event='UPDATE'
+    AND $before.validation_binding_json!=NONE
+    AND ($after.validation_binding_json!=$before.validation_binding_json OR $after.validation_entity_id!=$before.validation_entity_id)
+    THEN { THROW 'validation binding is immutable'; };
+"""
+
+
+VALIDATION_RECEIPT_RECOVERY_SCHEMA = """
+DEFINE FIELD IF NOT EXISTS recovery_key ON memory_validation_executions TYPE option<string>;
+"""
+
+VALIDATION_RECEIPT_PURGE_EVENT = """
+DEFINE EVENT OVERWRITE memory_validation_purge ON raw_captures WHEN $event = 'DELETE'
+THEN {
+    UPDATE memory_validation_executions SET result_json = NONE, recovery_key = NONE, purged = true
+        WHERE organization_id = $before.organization_id
+            AND (parent_id = $before.uuid OR $before.uuid IN source_ids);
+};
+"""

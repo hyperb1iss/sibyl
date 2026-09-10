@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from sibyl_core.services.memory_source_validation import SourceReadAuthority
+    from sibyl_core.services.validation_promotion import ValidatedPromotion
 
 import re
 from collections.abc import Iterable, Sequence
@@ -641,6 +642,8 @@ async def _write_promotion_relationships(
 async def promote_reflection_candidate_review(
     *,
     candidate_id: str,
+    expected_candidate_revision: int | None = None,
+    validation_promotion: ValidatedPromotion | None = None,
     organization_id: str,
     principal_id: str | None,
     promote_to_scope: MemoryScope | str | None,
@@ -674,6 +677,19 @@ async def promote_reflection_candidate_review(
     if isinstance(plan, ReflectionPromotionResult):
         return plan
 
+    if (
+        expected_candidate_revision is not None
+        and plan.candidate_memory.revision != expected_candidate_revision
+    ):
+        return _promotion_denied(
+            candidate_id=candidate_id,
+            reason="validated_candidate_changed",
+            review_state=plan.candidate_memory.review_state,
+            memory_scope=plan.target_scope,
+            scope_key=plan.target_scope_key,
+            raw_source_ids=plan.raw_source_ids,
+        )
+
     return await _apply_promotion_plan(
         plan=plan,
         organization_id=organization_id,
@@ -687,6 +703,7 @@ async def promote_reflection_candidate_review(
         native_source_id=plan.raw_source_ids[0] if plan.raw_source_ids else None,
         lifecycle_source_id=plan.candidate_memory.id,
         lifecycle_reason="accepted_reflection_candidate",
+        validation_promotion=validation_promotion,
     )
 
 
@@ -884,6 +901,7 @@ async def _apply_promotion_plan(
     native_source_id: str | None,
     lifecycle_source_id: str,
     lifecycle_reason: str,
+    validation_promotion: ValidatedPromotion | None = None,
 ) -> ReflectionPromotionResult:
     accessible_projects = (
         frozenset(accessible_projects) if accessible_projects is not None else None
@@ -925,6 +943,7 @@ async def _apply_promotion_plan(
     reservation = await _reserve_promotion(
         plan,
         prospective.id,
+        validation_promotion=validation_promotion,
         legacy_entity_id=reflection_entity_id(
             prospective.model_copy(update={"name": plan.promotion_candidate.title}), version=2
         ),
@@ -962,6 +981,7 @@ async def _apply_promotion_plan(
         result=result,
         lifecycle_source_id=lifecycle_source_id,
         lifecycle_reason=lifecycle_reason,
+        validation_promotion=validation_promotion,
     )
 
 
@@ -1021,8 +1041,11 @@ async def _reserve_promotion(
     entity_id: str,
     *,
     legacy_entity_id: str | None = None,
+    validation_promotion: ValidatedPromotion | None = None,
 ) -> _ReflectionPromotionPlan | ReflectionPromotionResult:
     """Reserve correction's existing pointer before publishing any graph row."""
+    if validation_promotion is not None:
+        await validation_promotion.current_guard()
     memory = plan.candidate_memory
     recorded_id = _metadata_str(memory.metadata, "promoted_entity_id")
     if recorded_id or memory.review_state == _PROMOTED_REVIEW_STATE:
@@ -1035,7 +1058,8 @@ async def _reserve_promotion(
                 scope_key=plan.target_scope_key,
                 raw_source_ids=plan.raw_source_ids,
             )
-        return plan
+        if validation_promotion is None:
+            return plan
     try:
         reserved = await save_raw_memory(
             replace(
@@ -1043,10 +1067,14 @@ async def _reserve_promotion(
                 metadata={
                     **memory.metadata,
                     "promoted_entity_id": entity_id,
-                    "promotion_state": "pending",
+                    "promotion_state": memory.metadata.get("promotion_state", "pending")
+                    if recorded_id
+                    else "pending",
                 },
             ),
             expected_revision=memory.revision,
+            validation_promotion=validation_promotion,
+            validation_derivation=_validation_derivation(plan) if validation_promotion else None,
             **(
                 {"publication_operation_id": str(memory.metadata[EVAL_CONSOLIDATION_METADATA_KEY])}
                 if memory.metadata.get(EVAL_CONSOLIDATION_METADATA_KEY)
@@ -1123,7 +1151,10 @@ async def _mark_promotion_plan_promoted(
     result: ReflectionWriteResult,
     lifecycle_source_id: str,
     lifecycle_reason: str,
+    validation_promotion: ValidatedPromotion | None = None,
 ) -> ReflectionPromotionResult:
+    if validation_promotion is not None:
+        await validation_promotion.current_guard()
     if (
         result.metadata.get("publication_outcome") == "replayed"
         and plan.candidate_memory.review_state == _PROMOTED_REVIEW_STATE
@@ -1145,6 +1176,7 @@ async def _mark_promotion_plan_promoted(
                     metadata=metadata,
                 ),
                 expected_revision=plan.candidate_memory.revision,
+                validation_promotion=validation_promotion,
                 **(
                     {"source_observations": plan.input_memories}
                     if plan.candidate_memory.metadata.get(EVAL_CONSOLIDATION_METADATA_KEY)
@@ -1551,3 +1583,14 @@ async def _resolve_raw_memory_promotion_plan(
         input_memories=input_memories,
         source_observations=(snapshot.observation,) if snapshot is not None else (),
     )
+
+
+def _validation_derivation(plan: _ReflectionPromotionPlan) -> dict[str, object]:
+    from sibyl_core.services.memory_derivations import raw_derivation_record
+
+    if plan.source_authority is None:
+        raise ValueError("Validated promotion requires current source authority")
+    observations = tuple(
+        o for o in plan.source_observations if o.source.id != plan.candidate_memory.id
+    )
+    return raw_derivation_record(plan.candidate_memory, observations, plan.source_authority)

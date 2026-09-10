@@ -399,7 +399,6 @@ class QueueBroker(Protocol):
         dry_run: bool = False,
         source_limit: int = 20,
         candidate_limit: int = 50,
-        archive_exceptions: bool = True,
         confidence_threshold: float | None = None,
     ) -> str: ...
 

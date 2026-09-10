@@ -211,14 +211,14 @@ async def test_validation_execution_actual_sdk_durable_attempts(candidate, monke
 
 
 async def test_validation_execution_final_snapshot_cas(candidate, monkeypatch):
-    from sibyl_core.services import content_client
+    from sibyl_core.services import content_client, validation_stages
 
-    query = validation._query
+    query = validation_stages._query
     mutated = False
 
     async def race(sql, **params):
         nonlocal mutated
-        if "SET state = IF" in sql and not mutated:
+        if "SET state='returned'" in sql and not mutated:
             mutated = True
             async with content_client.surreal_content_client() as client:
                 await client.execute_query(
@@ -227,8 +227,8 @@ async def test_validation_execution_final_snapshot_cas(candidate, monkeypatch):
                 )
         return await query(sql, **params)
 
-    monkeypatch.setattr(validation, "_query", race)
-    with pytest.raises(ValidationExecutionUnavailable):
+    monkeypatch.setattr(validation_stages, "_query", race)
+    with pytest.raises(Exception, match="Validation sources changed"):
         await validation.validate_stored_procedure(
             organization_id="org",
             principal_id="owner",

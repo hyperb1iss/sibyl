@@ -30,7 +30,10 @@ from sibyl_core.backends.surreal.schema_source_states import (
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WITNESS_DEFINITION
 from sibyl_core.backends.surreal.schema_validation_execution import (
     VALIDATION_EXECUTION_SCHEMA,
+    VALIDATION_PROMOTION_SCHEMA,
     VALIDATION_PURGE_EVENT,
+    VALIDATION_RECEIPT_PURGE_EVENT,
+    VALIDATION_RECEIPT_RECOVERY_SCHEMA,
 )
 from sibyl_core.backends.surreal.schema_version import (
     SCHEMA_VERSION_TABLE,
@@ -86,7 +89,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 38
+CONTENT_SCHEMA_CURRENT_VERSION = 40
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -1020,6 +1023,16 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=38,
             name="content_source_write_witness",
             statements=tuple(split_statements(SOURCE_STATE_WITNESS_DEFINITION)),
+        ),
+        SchemaMigration(
+            version=39,
+            name="content_validation_promotion_binding",
+            statements=tuple(split_statements(VALIDATION_PROMOTION_SCHEMA)),
+        ),
+        SchemaMigration(
+            version=40,
+            name="content_validation_receipt_recovery",
+            statements=(VALIDATION_RECEIPT_RECOVERY_SCHEMA, VALIDATION_RECEIPT_PURGE_EVENT),
         ),
     )
 

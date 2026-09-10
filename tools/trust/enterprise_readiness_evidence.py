@@ -74,6 +74,8 @@ SIBYL_HELM_RENDER_ARGS = (
     "enterprise",
     "charts/sibyl",
     "--set",
+    "backend.validationReceipts.existingClaim=validation-receipts",
+    "--set",
     "auth.localAuthEnabled=false",
     "--set",
     "ingress.gatewayApi.enabled=true",
