@@ -27,6 +27,41 @@ def test_archive_codec_keeps_native_precision_through_copy_and_json():
     assert restored["created_at"].isoformat() == "2026-09-10T02:47:11.572211+00:00"
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        ["missing"],
+        ["missing", "date"],
+        ["items", 2],
+        ["items", -1],
+        ["items", "0"],
+        ["items", True],
+        ["scalar", "date"],
+        ["scalar", 0],
+        ["mapping", 0],
+        ["mapping", "missing"],
+        ["nothing", "date"],
+    ],
+)
+def test_archive_codec_rejects_invalid_datetime_paths(path):
+    payload = {
+        "record": {"items": [FIRST], "scalar": FIRST, "mapping": {"0": FIRST}, "nothing": None},
+        "datetimes": [path],
+    }
+    before = deepcopy(payload)
+    with pytest.raises(ValueError, match="archive datetime path"):
+        decode_record(payload)
+    assert payload == before
+
+
+def test_archive_codec_nested_datetime_paths_preserve_literal_strings():
+    original = {"items": [{"0": ArchiveDatetime.parse(FIRST)}, FIRST]}
+    restored = decode_record(encode_record(original))
+    assert isinstance(restored["items"][0]["0"], ArchiveDatetime)
+    assert type(restored["items"][1]) is str
+    assert encode_record(restored) == encode_record(original)
+
+
 async def seed(runtime):
     await runtime.entity_manager.create_direct(
         Entity(id="precision", entity_type=EntityType.SESSION, name="Precision", content="Evidence")

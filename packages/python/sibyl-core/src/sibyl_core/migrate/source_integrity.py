@@ -94,14 +94,21 @@ def decode_record(payload: object) -> dict[str, Any]:
         if not isinstance(path, list) or not path:
             raise ValueError("invalid archive datetime path")
         parent: Any = record
-        for key in path[:-1]:
-            if type(key) not in (str, int):
+        for index, key in enumerate(path):
+            if isinstance(parent, dict):
+                valid = type(key) is str and key in parent
+            elif isinstance(parent, list):
+                valid = type(key) is int and 0 <= key < len(parent)
+            else:
+                valid = False
+            if not valid:
                 raise ValueError("invalid archive datetime path component")
-            parent = parent[key]
-        key = path[-1]
-        if type(key) not in (str, int) or not isinstance(parent[key], str):
-            raise ValueError("archive datetime path must identify a string")
-        parent[key] = ArchiveDatetime.parse(parent[key])
+            if index == len(path) - 1:
+                if not isinstance(parent[key], str):
+                    raise ValueError("archive datetime path must identify a string")
+                parent[key] = ArchiveDatetime.parse(parent[key])
+            else:
+                parent = parent[key]
     return record
 
 
@@ -174,6 +181,8 @@ def validate_integrity_archive(
         org, identity = row.get(org_field), row.get("uuid")
         if org not in orgs or not isinstance(identity, str) or not identity:
             raise ValueError("archive source identity mismatch")
+        if kind is SourceKind.RAW_CAPTURE and not isinstance(row.get("raw_content"), str):
+            raise ValueError("archive raw source content must be a string")
         key = (org, identity)
         if key in row_keys:
             raise ValueError("duplicate archive source identity")

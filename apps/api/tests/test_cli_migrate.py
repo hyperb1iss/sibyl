@@ -1337,3 +1337,72 @@ def test_migrate_collapse_epics_dry_run_then_apply(tmp_path: Path) -> None:
         assert "Converted 1" in applied.output
         # Apply flipped the epic into a task in place.
         assert run_async(_epic_type)() is EntityType.TASK
+
+
+def test_content_restore_reports_preservation_and_quarantine_without_failing(capsys):
+    result = SimpleNamespace(
+        success=True,
+        rows_restored=2,
+        tables_restored=1,
+        errors=[],
+        integrity_conflicts=[{"reason": "retained_tombstone"}, {"reason": "retained_tombstone"}],
+        quarantined=[{"reason": "unverifiable_legacy_lineage"}],
+    )
+    with patch("sibyl.cli.migrate.restore_content_archive_payload", AsyncMock(return_value=result)):
+        assert migrate_cli._restore_content_payload({}, clean=True)
+    output = _strip_ansi(capsys.readouterr().out)
+    assert "Destination source histories preserved instead of replaced: 2" in output
+    assert "retained deletion history: 2" in output
+    assert "Memories quarantined with content retained: 1" in output
+    assert "unverifiable legacy lineage: 1" in output
+    assert "Content writes applied: 2 rows across 1 tables" in output
+    assert "new source_id" in output
+
+
+def test_graph_restore_reports_integrity_even_when_other_writes_fail(capsys):
+    result = SimpleNamespace(
+        success=False,
+        entities_restored=1,
+        relationships_restored=0,
+        errors=["write failure"],
+        integrity_conflicts=[{"reason": "existing_source_preserved"}],
+        quarantined=[{"reason": "captured_dependency_mismatch"}],
+    )
+    with (
+        patch("sibyl.cli.db._coerce_graph_backup_data", return_value=object()),
+        patch("sibyl.cli.db._prepare_graph_runtime_async", AsyncMock()),
+        patch("sibyl_core.tools.admin.restore_backup", AsyncMock(return_value=result)),
+    ):
+        assert not migrate_cli._restore_graph_payload({}, "org", clean=True)
+    output = _strip_ansi(capsys.readouterr().out)
+    assert "existing source preserved: 1" in output
+    assert "source evidence changed: 1" in output
+    assert "Graph restore completed with errors: 1" in output
+
+
+def test_restore_integrity_summary_does_not_echo_archive_text(capsys):
+    migrate_cli._report_restore_integrity(
+        integrity_conflicts=[{"reason": "[red]private\\nsecret", "source_id": "private-id"}],
+        quarantined=[],
+    )
+    output = _strip_ansi(capsys.readouterr().out)
+    assert "unspecified reason: 1" in output
+    assert "private" not in output
+    assert "secret" not in output
+
+
+def test_content_restore_without_integrity_decisions_keeps_success_summary(capsys):
+    result = SimpleNamespace(
+        success=True,
+        rows_restored=4,
+        tables_restored=2,
+        errors=[],
+        integrity_conflicts=[],
+        quarantined=[],
+    )
+    with patch("sibyl.cli.migrate.restore_content_archive_payload", AsyncMock(return_value=result)):
+        assert migrate_cli._restore_content_payload({}, clean=False)
+    output = _strip_ansi(capsys.readouterr().out)
+    assert "Content writes applied: 4 rows across 2 tables" in output
+    assert "quarantined" not in output
+    assert "histories" not in output

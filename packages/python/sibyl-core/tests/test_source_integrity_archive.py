@@ -1,8 +1,10 @@
 """Archive completeness and typed evidence must survive JSON transport."""
 
+import hashlib
 import json
 from copy import deepcopy
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -418,3 +420,28 @@ async def test_foreign_physical_record_collision_rolls_back_scoped_cleanup(runti
         )
         assert after == before
         assert selected.id in {row["uuid"] for row in after["source_rows"]}
+
+
+@pytest.mark.parametrize("raw_content", [None, 7, False, [], {}])
+def test_archive_validation_reports_invalid_raw_content(raw_content):
+    from sibyl_core.migrate.archive import LoadedArchive, build_manifest, validate_archive
+
+    section = archive()
+    section["source_rows"][0]["record"]["raw_content"] = raw_content
+    unsigned = {key: value for key, value in section.items() if key != "sha256"}
+    section["sha256"] = hashlib.sha256(
+        json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    files = {
+        "content.json": json.dumps(
+            {"version": "2.0", "tables": {}, "source_integrity": section}
+        ).encode()
+    }
+    loaded = LoadedArchive(
+        source=Path("invalid-raw-content"),
+        files=files,
+        manifest=build_manifest(organization_id="org", source_store="surreal", files=files),
+    )
+    assert validate_archive(loaded) == [
+        "archive source integrity validation failed: archive raw source content must be a string"
+    ]

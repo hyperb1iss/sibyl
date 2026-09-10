@@ -15,7 +15,6 @@ from sibyl_core.backends.surreal import SurrealContentClient, bootstrap_content_
 from sibyl_core.backends.surreal.records import (
     normalize_records as _normalize_records,
     query_error as _query_error,
-    raise_on_error as _raise_on_error,
 )
 from sibyl_core.backends.surreal.schema_invariants import (
     drop_undeclared_fields as _drop_undeclared_fields,
@@ -380,10 +379,7 @@ def _content_archive_export_query(
     )
 
 
-async def _clean_content_archive_rows(
-    client: SurrealContentClient,
-    organization_id: str | None,
-) -> None:
+def _clean_content_archive_statements(organization_id: str | None) -> str:
     wipe_specs = sorted(
         [
             spec
@@ -393,23 +389,12 @@ async def _clean_content_archive_rows(
         key=lambda spec: spec.name not in _CONTENT_RELATION_ARCHIVE_TABLES,
     )
     if organization_id is None:
-        wipe_sql = "\n".join(spec.delete_all_sql for spec in wipe_specs)
-        wipe_result = await client.execute_query_raw(
-            f"BEGIN TRANSACTION;\n{wipe_sql}\nCOMMIT TRANSACTION;",
-        )
-        _raise_on_error(wipe_result, query="restore_content_archive_payload:clean")
-        return
-
-    wipe_sql = "\n".join(
+        return "\n".join(spec.delete_all_sql for spec in wipe_specs)
+    return "\n".join(
         f"DELETE FROM {spec.name} WHERE organization_id = $organization_id;"  # noqa: S608
         for spec in wipe_specs
         if spec.name not in _GLOBAL_CONTENT_ARCHIVE_TABLES
     )
-    wipe_result = await client.execute_query_raw(
-        f"BEGIN TRANSACTION;\n{wipe_sql}\nCOMMIT TRANSACTION;",
-        organization_id=organization_id,
-    )
-    _raise_on_error(wipe_result, query="restore_content_archive_payload:clean_org")
 
 
 async def _export_surreal_content_archive_payload(
@@ -556,6 +541,9 @@ def _prepare_content_source_integrity(payload, tables, organization_id):
                 "misled_count": 0,
                 **{str(key): value for key, value in row.items() if key != "id"},
             }
+            for field in ("created_at", "captured_at"):
+                if record[field] is None:
+                    record[field] = now
             record["uuid"] = str(row.get("uuid") or row.get("id") or "").strip()
             for field in (
                 "created_at",
@@ -612,7 +600,11 @@ async def _filter_legacy_source_fields(client, integrity, scope):
 
 
 def _auxiliary_restore_statement(
-    spec: ContentArchiveTableSpec, organization_id: str | None, record: dict[str, object]
+    spec: ContentArchiveTableSpec,
+    organization_id: str | None,
+    record: dict[str, object],
+    *,
+    legacy: bool = False,
 ) -> str:
     """Preserve operation history and reject foreign identities in the same transaction."""
     existing = (
@@ -638,18 +630,26 @@ def _auxiliary_restore_statement(
             for field in fields
         )
         conversion = f"LET $record = (SELECT *, {converted} FROM ONLY $record);\n"  # noqa: S608
+        comparison = "$existing != [$record]"
+        if legacy and "created_at" not in record:
+            comparison = (
+                "(SELECT * OMIT created_at FROM $existing) "
+                "!= (SELECT * OMIT created_at FROM [$record])"
+            )
         write = (
             f"IF array::len($existing) = 0 {{ {spec.create_sql} }} ELSE {{ "
-            "IF $existing != [$record] { "
+            f"IF {comparison} {{ "
             "THROW 'archive conflicts with retained operation history'; }; };\n"
         )
     else:
         write = f"{spec.delete_by_identity_sql}\n{spec.create_sql}\n"
-    return f"BEGIN TRANSACTION;\n{conversion}{existing}{ownership_guard}{write}COMMIT TRANSACTION;"
+    return f"{conversion}{existing}{ownership_guard}{write}"
 
 
-async def _restore_auxiliary_content_tables(client, tables, organization_id):
-    """Restore non-source tables using their existing per-record transactions."""
+async def _prepare_auxiliary_content_restore(client, tables, organization_id, *, legacy=False):
+    """Validate and compile non-source writes for the source-local transaction."""
+    statements: list[str] = []
+    parameters: dict[str, object] = {"organization_id": organization_id}
     tables_restored = rows_restored = 0
     errors: list[str] = []
     dropped_fields: dict[str, set[str]] = {}
@@ -694,6 +694,10 @@ async def _restore_auxiliary_content_tables(client, tables, organization_id):
                     and key == spec.source_identity_field
                 )
             }
+            if legacy and spec.name == "eval_consolidations":
+                record.setdefault("admission_bindings", [])
+            elif legacy and spec.name == "api_idempotency_records":
+                record.setdefault("response_body", {})
             if spec.name == "document_chunks":
                 record["embedding"] = _deserialize_vector(record.get("embedding"))
             record[spec.target_identity_field] = identity
@@ -703,20 +707,19 @@ async def _restore_auxiliary_content_tables(client, tables, organization_id):
 
             if spec.name == "eval_attempts" and record.get("admitted_at") is None:
                 record.pop("admitted_at", None)
-            restore_row_sql = _auxiliary_restore_statement(spec, organization_id, record)
-            try:
-                result = await client.execute_query_raw(
-                    restore_row_sql,
-                    identity=identity,
-                    record=record,
-                    organization_id=organization_id,
-                )
-                _raise_on_error(result, query=restore_row_sql)
-                rows_restored += 1
-            except Exception as exc:
-                errors.append(f"{spec.name}:{identity}: {exc}")
+            index = rows_restored
+            parameters[f"archive_record_{index}"] = record
+            parameters[f"archive_identity_{index}"] = identity
+            statement = _auxiliary_restore_statement(
+                spec, organization_id, record, legacy=legacy
+            )
+            statements.append(
+                f"FOR $archive_once IN [true] {{ LET $record = $archive_record_{index}; "
+                f"LET $identity = $archive_identity_{index}; {statement} }};"
+            )
+            rows_restored += 1
 
-    return tables_restored, rows_restored, errors, dropped_fields
+    return tables_restored, rows_restored, errors, dropped_fields, "\n".join(statements), parameters
 
 
 async def restore_content_archive_payload(
@@ -766,15 +769,60 @@ async def restore_content_archive_payload(
                 dropped_fields["raw_captures"] = legacy_dropped
         from sibyl_core.services.source_archive_store import restore_source_integrity
 
-        restored = await restore_source_integrity(
-            client.execute_query,
-            integrity,
-            kind=SourceKind.RAW_CAPTURE,
-            organizations=scope,
-            clean=clean,
-            skip_existing=False,
-            global_scope=global_scope,
+        (
+            auxiliary_tables,
+            auxiliary_rows,
+            errors,
+            auxiliary_dropped,
+            auxiliary_sql,
+            auxiliary_parameters,
+        ) = await _prepare_auxiliary_content_restore(
+            client, tables, organization_id, legacy=payload.get("version", "1.0") == "1.0"
         )
+        if errors:
+            return ContentArchiveRestoreResult(
+                success=False, tables_restored=0, rows_restored=0, errors=errors[:50]
+            )
+        specs = [
+            spec
+            for spec in _CONTENT_ARCHIVE_TABLE_SPECS
+            if spec.name != "raw_captures"
+            and (organization_id is None or spec.name not in _GLOBAL_CONTENT_ARCHIVE_TABLES)
+        ]
+        predicate = "" if organization_id is None else " WHERE organization_id = $organization_id"
+        snapshot_fields = ", ".join(
+            f"{spec.name}: (SELECT * FROM {spec.name}{predicate} ORDER BY id)"  # noqa: S608
+            for spec in specs
+        )
+        snapshot = f"crypto::sha256(type::string({{{snapshot_fields}}}))"
+        fingerprints = await client.execute_query(
+            f"RETURN {{ fingerprint: {snapshot} }};", organization_id=organization_id
+        )
+        auxiliary_parameters["archive_auxiliary_fingerprint"] = _normalize_records(fingerprints)[0][
+            "fingerprint"
+        ]
+        auxiliary_sql = (
+            f"IF {snapshot} != $archive_auxiliary_fingerprint {{ "
+            "THROW 'archive auxiliary destination changed before restore'; };\n"
+            + (_clean_content_archive_statements(organization_id) if clean else "")
+            + auxiliary_sql
+        )
+        try:
+            restored = await restore_source_integrity(
+                client.execute_query,
+                integrity,
+                kind=SourceKind.RAW_CAPTURE,
+                organizations=scope,
+                clean=clean,
+                skip_existing=False,
+                global_scope=global_scope,
+                auxiliary_statements=auxiliary_sql,
+                auxiliary_parameters=auxiliary_parameters,
+            )
+        except Exception as exc:
+            return ContentArchiveRestoreResult(
+                success=False, tables_restored=0, rows_restored=0, errors=[str(exc)]
+            )
         restored_ids = restored["restored_source_ids"]
         rows_restored += len(restored_ids)
         tables_restored += 1
@@ -793,15 +841,6 @@ async def restore_content_archive_payload(
             for row in payload.get("lineage_validation", [])
             if isinstance(row, dict) and row.get("status") == "quarantined"
         )
-        if clean:
-            await _clean_content_archive_rows(client, organization_id)
-
-        (
-            auxiliary_tables,
-            auxiliary_rows,
-            errors,
-            auxiliary_dropped,
-        ) = await _restore_auxiliary_content_tables(client, tables, organization_id)
         dropped_fields.update(auxiliary_dropped)
         tables_restored += auxiliary_tables
         rows_restored += auxiliary_rows

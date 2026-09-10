@@ -7,6 +7,7 @@ import secrets
 import shlex
 import shutil
 import subprocess
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -784,6 +785,38 @@ def _restore_auth_payload(payload: dict[str, object], *, clean: bool) -> bool:
     return _restore()
 
 
+def _report_restore_integrity(
+    *, integrity_conflicts: list[dict[str, str]], quarantined: list[dict[str, str]]
+) -> None:
+    """Summarize restore decisions without echoing archive-controlled text or identities."""
+    reasons = {
+        "retained_tombstone": "retained deletion history",
+        "retained_high_water": "retained source generation",
+        "existing_source_preserved": "existing source preserved",
+        "incoming_lineage_not_adopted": "incoming lineage not adopted",
+        "captured_dependency_mismatch": "source evidence changed",
+        "external_dependency_omitted": "source dependency absent",
+        "unverifiable_legacy_lineage": "unverifiable legacy lineage",
+    }
+    for records, summary in (
+        (integrity_conflicts, "destination source histories preserved instead of replaced"),
+        (quarantined, "memories quarantined with content retained"),
+    ):
+        if not records:
+            continue
+        warn(f"  {summary.capitalize()}: {len(records)}.")
+        counts = Counter(
+            reasons.get(row.get("reason", ""), "unspecified reason") for row in records
+        )
+        for reason, count in sorted(counts.items()):
+            info(f"    {reason}: {count}")
+    if quarantined:
+        info(
+            "  Reauthor reviewed content through POST /api/memory/raw with a new source_id; "
+            "the original remains quarantined."
+        )
+
+
 def _restore_content_payload(
     payload: dict[str, object], *, clean: bool, global_scope: bool = False
 ) -> bool:
@@ -793,9 +826,12 @@ def _restore_content_payload(
             result = await restore_content_archive_payload(
                 payload, clean=clean, global_scope=global_scope
             )
+            _report_restore_integrity(
+                integrity_conflicts=result.integrity_conflicts, quarantined=result.quarantined
+            )
             if result.success:
                 success(
-                    "  Content restored: "
+                    "  Content writes applied: "
                     f"{result.rows_restored} rows across {result.tables_restored} tables"
                 )
             else:
@@ -829,9 +865,12 @@ def _restore_graph_payload(backup_dict: dict[str, object], org_id: str, *, clean
                 clean=clean,
             )
 
+            _report_restore_integrity(
+                integrity_conflicts=result.integrity_conflicts, quarantined=result.quarantined
+            )
             if result.success:
                 success(
-                    f"  Graph restored: {result.entities_restored} entities, "
+                    f"  Graph writes applied: {result.entities_restored} entities, "
                     f"{result.relationships_restored} relationships"
                 )
             else:
