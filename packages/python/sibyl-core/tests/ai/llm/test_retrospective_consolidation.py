@@ -26,9 +26,27 @@ async def test_native_retrospective_request_preserves_both_valid_outcomes(
 ):
     monkeypatch.setattr(extraction, "reserve_llm_budget", AsyncMock())
     source = _contrast_group() if projected else group
-    # Both fixtures deliberately use one family and compatible environments.
+    source = c.ConsolidationGroup.model_validate(
+        source.model_copy(
+            update={
+                "episodes": tuple(
+                    episode.model_copy(
+                        update={
+                            "environment": episode.environment | {"execution_label": f"run-{i}"}
+                        }
+                    )
+                    for i, episode in enumerate(source.episodes)
+                )
+            }
+        )
+    )
+    # Compatibility is bounded to declared keys, not every observation.
     assert len({episode.family_id for episode in source.episodes}) == 1
-    assert all(episode.environment == source.episodes[0].environment for episode in source.episodes)
+    assert all(
+        len({episode.environment[key] for episode in source.episodes}) == 1
+        for key in source.environment_compatibility_keys
+    )
+    assert len({episode.environment["execution_label"] for episode in source.episodes}) > 1
     reason = "The evidence does not identify an action and check that distinguish the outcomes."
     if projected:
         output = {
