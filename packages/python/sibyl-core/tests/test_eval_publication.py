@@ -339,3 +339,14 @@ async def test_evidence_semantic_validation_changes_extractor_revision(monkeypat
     current = await p.consolidation_extractor_configuration()
     monkeypatch.setattr(p, "EVIDENCE_PROPOSAL_VERSION", "old-validation")
     assert await p.consolidation_extractor_configuration() != current
+
+
+async def test_retrospective_framing_changes_extractor_revision(monkeypatch):
+    from sibyl_core.ai.llm.config import EnvConfigSource
+    from sibyl_core.tasks.consolidation import RETROSPECTIVE_REQUEST
+
+    monkeypatch.setattr(p, "resolve_llm_config", EnvConfigSource({}).resolve)
+    current = await p.consolidation_extractor_configuration()
+    assert RETROSPECTIVE_REQUEST in p.SYSTEM_PROMPT
+    monkeypatch.setattr(p, "SYSTEM_PROMPT", p.SYSTEM_PROMPT.replace(RETROSPECTIVE_REQUEST, ""))
+    assert await p.consolidation_extractor_configuration() != current
