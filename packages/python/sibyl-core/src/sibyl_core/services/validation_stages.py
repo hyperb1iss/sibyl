@@ -13,6 +13,25 @@ from sibyl_core.services.validation_execution import (
 )
 
 
+async def _record_completed_validation(
+    execution: ValidationExecution, result: ValidationStageResult
+) -> None:
+    try:
+        await execution.record_result(result)
+    except (Exception, asyncio.CancelledError) as failure:
+        usage = result.usage.model_dump(mode="json")
+        failure.__dict__["extraction_usage"] = usage
+        details = getattr(failure, "details", None)
+        if isinstance(details, dict):
+            details["extraction_usage"] = usage
+        try:
+            recovered = await execution.reconcile_result(result)
+        except (Exception, asyncio.CancelledError) as recovery_failure:
+            raise failure from recovery_failure
+        if not recovered or isinstance(failure, asyncio.CancelledError):
+            raise
+
+
 async def run_validation_stage(
     *,
     execution: ValidationExecution,
@@ -44,7 +63,7 @@ async def run_validation_stage(
                     raise failure from None
                 raise
             raise
-        recording = asyncio.create_task(execution.record_result(result))
+        recording = asyncio.create_task(_record_completed_validation(execution, result))
         try:
             await asyncio.shield(recording)
         except asyncio.CancelledError as cancelled:

@@ -439,12 +439,31 @@ jobs:
           path: dist/
           if-no-files-found: warn
 
-  tests:
-    name: Package Tests
+  test-suites:
+    name: Test Suite (${{ matrix.suite }})
     needs: changes
     if: needs.changes.outputs.run_tests == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: api
+            command: moon run api:test-cov
+            coverage: apps/api/coverage.xml
+          - suite: cli
+            command: moon run cli:test-cov
+            coverage: apps/cli/coverage.xml
+          - suite: core
+            command: moon run core:test-cov
+            coverage: packages/python/sibyl-core/coverage.xml
+          - suite: web
+            command: moon run web:test-cov
+            coverage: apps/web/coverage.xml
+          - suite: eval
+            command: moon run bench-gate && moon run bench-gate-test
+            coverage: ""
     steps:
       - uses: actions/checkout@v7
         with:
@@ -500,19 +519,26 @@ jobs:
       - name: Install Node dependencies
         run: cd apps/web && pnpm install --frozen-lockfile
 
-      - name: Run package test suites
-        run: moon run api:test-cov cli:test-cov core:test-cov web:test-cov
-
-      - name: Run eval regression gates
-        run: |
-          moon run bench-gate
-          moon run bench-gate-test
+      - name: Run test suite
+        run: ${{ matrix.command }}
 
       - name: Upload coverage
+        if: matrix.coverage != ''
         uses: codecov/codecov-action@v7
         with:
-          files: apps/api/coverage.xml,apps/cli/coverage.xml,packages/python/sibyl-core/coverage.xml,apps/web/coverage.xml
+          files: ${{ matrix.coverage }}
           fail_ci_if_error: false
+
+  tests:
+    name: Package Tests
+    needs: [changes, test-suites]
+    if: always() && needs.changes.outputs.run_tests == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every test suite
+        env:
+          SUITE_RESULT: ${{ needs.test-suites.result }}
+        run: test "$SUITE_RESULT" = success
 
   darwin-eval-authority:
     name: Darwin Eval Authority

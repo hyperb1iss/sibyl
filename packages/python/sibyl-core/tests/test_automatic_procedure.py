@@ -324,3 +324,26 @@ async def test_signed_correction_purge_removes_stored_source_bodies(candidate, c
     after = await rows("memory_validation_executions")
     assert all(stage["purged"] and stage.get("result_json") is None for stage in after)
     assert all(json.loads(stage["usage_json"])["requests"] == 1 for stage in after)
+
+
+@pytest.mark.parametrize("committed", [False, True])
+async def test_signed_correction_result_write_recovery_preserves_replay(
+    candidate, correction_model, monkeypatch, committed
+):
+    from sibyl_core.services.validation_execution import ValidationExecution
+    from sibyl_core.tasks.procedure_correction_result import ProcedureCorrectionResult
+
+    record = ValidationExecution.record_result
+    corrections = []
+
+    async def fail_correction(execution, result):
+        if isinstance(result, ProcedureCorrectionResult):
+            corrections.append(result)
+            if committed:
+                await record(execution, result)
+            raise OSError("correction result acknowledgment lost")
+        await record(execution, result)
+
+    monkeypatch.setattr(ValidationExecution, "record_result", fail_correction)
+    await test_signed_automatic_correction_rechecks_and_replays(candidate, correction_model)
+    assert len(corrections) == 1
