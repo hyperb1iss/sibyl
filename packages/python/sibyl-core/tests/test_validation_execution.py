@@ -257,8 +257,12 @@ async def test_validation_execution_duplicate_claim_does_not_repeat(candidate):
     assert json.loads(executions[0]["usage_json"])["requests"] == 1
 
 
-async def test_validation_execution_schema_upgrade_preserves_sources(candidate):
-    from sibyl_core.backends.surreal.content_schema import bootstrap_content_schema
+@pytest.mark.parametrize("prior_version", [36, 37])
+async def test_validation_execution_schema_upgrade_preserves_sources(candidate, prior_version):
+    from sibyl_core.backends.surreal.content_schema import (
+        CONTENT_SCHEMA_CURRENT_VERSION,
+        bootstrap_content_schema,
+    )
     from sibyl_core.backends.surreal.schema_version import get_schema_version
 
     before = await rows("raw_captures")
@@ -266,11 +270,20 @@ async def test_validation_execution_schema_upgrade_preserves_sources(candidate):
     from sibyl_core.services.content_client import surreal_content_client
 
     async with surreal_content_client() as client:
-        await client.execute_query("REMOVE TABLE memory_validation_attempts;")
-        await client.execute_query("REMOVE TABLE memory_validation_executions;")
-        await client.execute_query("UPDATE schema_version SET version=36 WHERE name='content';")
+        if prior_version == 36:
+            await client.execute_query("REMOVE TABLE memory_validation_attempts;")
+            await client.execute_query("REMOVE TABLE memory_validation_executions;")
+        await client.execute_query("REMOVE FIELD validation_write_witness ON source_states;")
+        await client.execute_query(
+            "UPDATE schema_version SET version=$prior WHERE name='content';", prior=prior_version
+        )
         await bootstrap_content_schema(client)
-        assert await get_schema_version(client.execute_query, name="content") == 37
+        assert (
+            await get_schema_version(client.execute_query, name="content")
+            == CONTENT_SCHEMA_CURRENT_VERSION
+        )
+        info = await client.execute_query("INFO FOR TABLE source_states;")
+        assert "validation_write_witness" in str(info)
     assert await rows("raw_captures") == before
     assert await rows("source_states") == states
     assert await rows("memory_validation_executions") == []

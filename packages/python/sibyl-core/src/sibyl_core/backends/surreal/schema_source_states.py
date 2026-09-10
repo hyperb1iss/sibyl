@@ -7,6 +7,7 @@ import time
 import structlog
 
 from sibyl_core.backends.surreal.schema_ownership import SchemaOwnership
+from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WITNESS_DEFINITION
 from sibyl_core.backends.surreal.schema_version import SurrealExecute
 from sibyl_core.memory_pipeline.observations import SourceKind
 
@@ -23,6 +24,8 @@ DEFINE FIELD IF NOT EXISTS deleted ON source_states TYPE bool;
 DEFINE INDEX IF NOT EXISTS source_state_identity ON source_states
     FIELDS organization_id, source_kind, source_id UNIQUE;
 """
+
+SOURCE_STATE_DEFINITIONS += SOURCE_STATE_WITNESS_DEFINITION
 
 _SOURCE_TABLES = {
     SourceKind.GRAPH_ENTITY: ("entity", "group_id"),

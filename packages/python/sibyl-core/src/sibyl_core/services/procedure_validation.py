@@ -13,6 +13,7 @@ from sibyl_core.ai.llm.config import LLMSurface, resolve_llm_config
 from sibyl_core.ai.llm.extractor import Extractor
 from sibyl_core.ai.providers import build_model
 from sibyl_core.ai.transport import observe_transport_attempts, transport_policy
+from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.config import settings
 from sibyl_core.services.content_models import (
     raw_memory_currently_recallable,
@@ -49,7 +50,7 @@ LET $ledger = (SELECT * FROM eval_consolidations WHERE organization_id = $org
     AND candidate_id = $parent LIMIT 1)[0];
 LET $ids = array::distinct(array::concat([$parent], ($ledger.admission_bindings ?? []).map(|$b| $b.capture_id)));
 LET $captures = (SELECT * FROM raw_captures WHERE organization_id = $org AND uuid IN $ids ORDER BY uuid);
-LET $states = (SELECT * FROM source_states WHERE organization_id = $org AND source_kind = 'raw_capture'
+LET $states = (SELECT * OMIT validation_write_witness FROM source_states WHERE organization_id = $org AND source_kind = 'raw_capture'
     AND source_id IN $ids ORDER BY source_id);
 LET $attempts = (SELECT * FROM eval_attempts WHERE organization_id = $org
     AND capture_id IN $ids ORDER BY uuid);
@@ -252,7 +253,9 @@ async def validate_stored_procedure(
         principal_id,
         authorize=authorize,
         dispatch_guard=_SNAPSHOT
-        + "IF $snapshot_digest != $expected { THROW 'Validation sources changed before dispatch'; };",
+        + "IF $snapshot_digest != $expected { THROW 'Validation sources changed before dispatch'; };"
+        + "LET $source_states_to_fence=$states;"
+        + SOURCE_STATE_WRITE_WITNESS,
         guard_params={"parent": parent_id, "expected": original.snapshot_sha256},
     )
     claimed = await execution.begin(
@@ -300,6 +303,8 @@ async def validate_stored_procedure(
         rows = await _query(
             "RETURN {"
             + _SNAPSHOT
+            + "LET $source_states_to_fence=$states;"
+            + SOURCE_STATE_WRITE_WITNESS
             + """
             RETURN (UPDATE memory_validation_executions SET state = IF $snapshot_digest = $expected THEN 'returned' ELSE 'fenced' END
                 WHERE uuid = $uuid AND organization_id = $org AND principal_id = $principal
