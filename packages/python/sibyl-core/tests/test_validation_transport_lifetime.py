@@ -151,3 +151,43 @@ async def test_cancellation_waits_for_owned_transport_close():
     with pytest.raises(asyncio.CancelledError):
         await task
     assert closed.is_set()
+
+
+@pytest.mark.parametrize("outcome", ["success", "resume", "failure", "cancel"])
+@pytest.mark.parametrize("correction", [False, True])
+async def test_reflection_transport_closes_after_stage(
+    owned_transport, monkeypatch, outcome, correction
+):
+    from sibyl_core.services import reflection_validation as reflection
+
+    _, clients = owned_transport
+    error = asyncio.CancelledError() if outcome == "cancel" else RuntimeError("failed")
+    result = {"status": outcome}
+    run = AsyncMock(return_value=result)
+    if outcome in {"failure", "cancel"}:
+        run.side_effect = error
+    monkeypatch.setattr(reflection, "_validate_prepared_reflection", run)
+    review = object() if correction else None
+    if run.side_effect:
+        with pytest.raises(type(error)):
+            await reflection.validate_reflection_stage(SimpleNamespace(), AsyncMock(), review)
+    else:
+        assert (
+            await reflection.validate_reflection_stage(SimpleNamespace(), AsyncMock(), review)
+            == result
+        )
+    assert run.call_args.args[-1] is review
+    assert len(clients) == 1 and clients[0].is_closed
+
+
+async def test_reflection_schema_budget_closes_allocated_transport(owned_transport, monkeypatch):
+    from sibyl_core.services import reflection_validation as reflection
+
+    _, clients = owned_transport
+    monkeypatch.setattr(validation.settings, "consolidation_max_input_chars", 1)
+    original = SimpleNamespace(
+        memory=SimpleNamespace(), prepared=SimpleNamespace(prompt="evidence")
+    )
+    with pytest.raises(ConsolidationInputBudgetExceeded):
+        await reflection.validate_reflection_stage(original, AsyncMock())
+    assert len(clients) == 1 and clients[0].is_closed
