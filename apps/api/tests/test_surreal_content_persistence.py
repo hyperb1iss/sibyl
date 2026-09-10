@@ -1848,7 +1848,7 @@ async def test_content_archive_restore_preserves_embeddings_and_metadata(
             return_value=surreal_content_client,
         ),
     ):
-        result = await restore_content_archive_payload(payload, clean=True)
+        result = await restore_content_archive_payload(payload, clean=True, global_scope=True)
 
     assert result.success is True
     assert result.tables_restored == 8
@@ -1983,7 +1983,7 @@ async def test_content_archive_restore_parses_pgvector_text_embeddings(
             return_value=surreal_content_client,
         ),
     ):
-        result = await restore_content_archive_payload(payload, clean=True)
+        result = await restore_content_archive_payload(payload, clean=True, global_scope=True)
 
     assert result.success is True
     chunk_rows = _normalize_records(

@@ -81,14 +81,17 @@ async def test_raw_source_generation_survives_actual_purge_and_archive_restore(m
         assert retired[0]["deleted"] is True
         result = await content_archive.restore_content_archive_payload(archive)
         assert not result.errors
-        restored = await snapshot()
-        assert isinstance(restored, RawSourceSnapshot)
-        assert restored.observation.generation > retired[0]["generation"]
-        assert restored.observation.content_sha256 == original.observation.content_sha256
+        assert await snapshot() is None
+        assert any(
+            row["source_id"] == raw.id and row["reason"] == "retained_tombstone"
+            for row in result.integrity_conflicts
+        )
         result = await content_archive.restore_content_archive_payload(archive, clean=True)
         assert not result.errors
-        replaced = await snapshot()
-        assert isinstance(replaced, RawSourceSnapshot)
-        assert replaced.observation.generation > restored.observation.generation
+        assert await snapshot() is None
+        retained = await client.execute_query(
+            "SELECT * FROM source_states WHERE source_id=$uuid;", uuid=raw.id
+        )
+        assert retained == retired
     finally:
         await close()

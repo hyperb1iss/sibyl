@@ -133,6 +133,12 @@ class BackupDataSchema(BaseModel):
     relationship_count: int
     entities: list[dict]
     relationships: list[dict]
+    episode_count: int = 0
+    mention_count: int = 0
+    episodes: list[dict] = Field(default_factory=list)
+    mentions: list[dict] = Field(default_factory=list)
+    source_integrity: dict[str, Any] | None = None
+    lineage_validation: list[dict[str, str]] = Field(default_factory=list)
 
 
 class BackupResponse(BaseModel):
@@ -163,6 +169,8 @@ class RestoreResponse(BaseModel):
     relationships_skipped: int
     errors: list[str]
     duration_seconds: float
+    integrity_conflicts: list[dict[str, str]] = Field(default_factory=list)
+    quarantined: list[dict[str, str]] = Field(default_factory=list)
 
 
 class BackfillRequest(BaseModel):
