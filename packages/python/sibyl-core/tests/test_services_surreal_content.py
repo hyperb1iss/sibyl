@@ -2294,11 +2294,10 @@ class TestSurrealContentHelpers:
             )
 
         query, params = fake_client.calls[0]
-        assert "capture_surface != $reflection_surface" in query
-        assert "capture_surface != $synthesis_surface" in query
-        assert params["reflection_surface"] == "reflection"
-        assert params["synthesis_surface"] == "synthesis_artifact"
-        assert [memory.id for memory in memories] == ["valid-cli"]
+        assert "capture_surface NOT IN $excluded" in query
+        assert "reflection" in params["excluded"]
+        assert "synthesis_artifact" in params["excluded"]
+        assert [memory.id for memory in memories] == ["valid-cli", "processed"]
 
     @pytest.mark.asyncio
     async def test_recall_raw_memory_scopes_private_memories_to_principal(self) -> None:

@@ -14,6 +14,13 @@ from sibyl_core.services.memory import (
 )
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 
+
+@pytest.fixture(autouse=True)
+def dispatch_cursor(monkeypatch):
+    monkeypatch.setattr("sibyl.jobs.reflection.load_dream_cursor", AsyncMock(return_value=("", 0)))
+    monkeypatch.setattr("sibyl.jobs.reflection.advance_dream_cursor", AsyncMock(return_value=True))
+
+
 ORG_ID = "00000000-0000-0000-0000-000000000111"
 USER_ID = "00000000-0000-0000-0000-000000000222"
 

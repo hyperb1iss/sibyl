@@ -15,7 +15,16 @@ from sibyl.persistence.auth_runtime import (
     resolve_accessible_project_graph_ids,
 )
 from sibyl_core.auth import ProjectRole
+from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
 from sibyl_core.models.reflection import ReflectionPack
+from sibyl_core.services.dream_checkpoints import (
+    CheckpointReflectionExtractor,
+    DreamSourceWork,
+    advance_dream_cursor,
+    complete_dream_stage,
+    load_dream_cursor,
+    load_dream_stage,
+)
 from sibyl_core.services.memory import (
     ReflectionPromotionResult,
     preview_reflection_candidate_promotion,
@@ -26,6 +35,10 @@ from sibyl_core.services.memory_autonomy import (
     ReflectionAutonomyPolicy,
     decide_reflection_candidate_autonomy,
 )
+from sibyl_core.services.memory_source_validation import SourceReadAuthority
+from sibyl_core.services.observed_sources import load_authorized_source_snapshot
+from sibyl_core.services.source_observations import SourceUnavailableError
+from sibyl_core.services.source_state_store import RawSourceSnapshot
 from sibyl_core.services.surreal_content import (
     MemoryScope,
     RawMemory,
@@ -173,16 +186,45 @@ async def _reflect_dream_sources(
 ) -> list[dict[str, Any]]:
     if limit <= 0:
         return []
+    selected: dict[str, DreamSourceWork] = {}
+    selection_errors: dict[str, Exception] = {}
+    after_source_id, cursor_revision = await load_dream_cursor(group_id)
+    cursor_owned = not dry_run
+
+    async def pending(source: RawMemory) -> bool:
+        try:
+            work = await _load_dream_work(group_id, source)
+            if work is None:
+                return False
+            stage = await load_dream_stage(work)
+            if stage is not None and stage.get("completion_json") is not None:
+                return False
+        except SourceUnavailableError:
+            return False
+        except Exception as exc:
+            selection_errors[source.id] = exc
+            return True
+        selected[source.id] = work
+        return True
+
     sources = await list_reflection_dream_source_memories(
         organization_id=group_id,
         limit=limit,
+        is_pending=pending,
+        after_source_id=after_source_id,
     )
     results: list[dict[str, Any]] = []
     for source in sources:
+        if cursor_owned:
+            cursor_owned = await advance_dream_cursor(group_id, source.id, cursor_revision)
+            cursor_revision += int(cursor_owned)
         try:
+            if source.id in selection_errors:
+                raise selection_errors[source.id]
             results.append(
                 await _reflect_dream_source(
                     source=source,
+                    work=selected.get(source.id),
                     group_id=group_id,
                     run_id=run_id,
                     dry_run=dry_run,
@@ -205,9 +247,33 @@ async def _reflect_dream_sources(
     return results
 
 
+async def _load_dream_work(group_id: str, source: RawMemory) -> DreamSourceWork | None:
+    if not source.principal_id or not source.raw_content.strip():
+        return None
+    readable = frozenset(await _accessible_projects_for_source(group_id=group_id, source=source))
+    writable = frozenset(
+        await _resolve_accessible_projects(
+            group_id=group_id,
+            principal_id=source.principal_id,
+            required_role=ProjectRole.CONTRIBUTOR,
+        )
+    )
+    snapshot = await load_authorized_source_snapshot(
+        SourceIdentity(group_id, SourceKind.RAW_CAPTURE, source.id),
+        SourceReadAuthority(source.principal_id, projects=readable),
+        organization_id=group_id,
+    )
+    if not isinstance(snapshot, RawSourceSnapshot):
+        raise SourceUnavailableError
+    if snapshot.memory.principal_id != source.principal_id:
+        raise SourceUnavailableError
+    return DreamSourceWork(snapshot, readable, writable)
+
+
 async def _reflect_dream_source(
     *,
     source: RawMemory,
+    work: DreamSourceWork | None = None,
     group_id: str,
     run_id: str,
     dry_run: bool,
@@ -229,9 +295,15 @@ async def _reflect_dream_source(
             reason="empty_source",
         )
 
+    if work is not None:
+        source = work.snapshot.memory
     accessible_projects = await _accessible_projects_for_source(group_id=group_id, source=source)
+    dream_kwargs = {}
+    if work is not None and not dry_run:
+        dream_kwargs = {"extractor": CheckpointReflectionExtractor(work), "dream_work": work}
     pack = await reflect_memory(
         source.raw_content,
+        **dream_kwargs,
         source_title=source.title or source.source_id or source.id,
         intent="maintenance",
         domain=_metadata_str(source.metadata, "domain"),
@@ -254,7 +326,20 @@ async def _reflect_dream_source(
         persist_review=not dry_run,
         existing_source_id=source.id,
     )
-    return await _mark_source_reflected(source, pack=pack, run_id=run_id, dry_run=dry_run)
+    if work is None or dry_run:
+        return await _mark_source_reflected(source, pack=pack, run_id=run_id, dry_run=dry_run)
+    result = {
+        "source_id": source.id,
+        "outcome": "reflected",
+        "candidate_count": len(pack.candidates),
+        "persisted_count": pack.persisted_count,
+        "operation_id": work.key,
+        "candidate_ids": [candidate.persisted_id for candidate in pack.candidates],
+    }
+    current = await _load_dream_work(group_id, source)
+    if current is None or current.key != work.key or not await complete_dream_stage(work, result):
+        raise SourceUnavailableError
+    return result
 
 
 async def _drain_dream_candidates(
