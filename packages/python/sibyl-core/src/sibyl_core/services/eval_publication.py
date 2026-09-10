@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Any, Literal
 from uuid import NAMESPACE_URL, uuid5
@@ -125,8 +126,9 @@ class ConsolidationOperation:
 @dataclass(frozen=True)
 class StoredConsolidation:
     operation_id: str
-    status: Literal["candidate", "abstained", "gone"]
+    status: Literal["candidate", "abstained", "rejected", "gone"]
     memory: content_models.RawMemory | None
+    build_receipt: dict[str, Any] | None = None
 
 
 # One RETURN statement is an implicit atomic transaction on both SDK transports.
@@ -177,6 +179,43 @@ RETURN { ledger: $stored, memory: $memory };
 """
 
 
+def _decode_build_receipt(ledger: dict) -> dict[str, Any] | None:
+    encoded_receipt = ledger.get("build_receipt_json")
+    try:
+        result_kind = ledger.get("result_kind")
+        if result_kind not in {"candidate", "abstained"}:
+            raise ValueError("receipt has an invalid outcome kind")
+        receipt = json.loads(encoded_receipt) if encoded_receipt is not None else None
+        if encoded_receipt is not None:
+            allowed_statuses = (
+                {"abstained", "rejected"} if result_kind == "abstained" else {"proposed"}
+            )
+            if (
+                not isinstance(receipt, dict)
+                or receipt.get("schema_version") != SCHEMA_VERSION
+                or receipt.get("status") not in allowed_statuses
+                or not isinstance(receipt.get("usage"), dict)
+                or (
+                    ledger["result_kind"] == "abstained"
+                    and (
+                        not isinstance(receipt.get("reason"), str) or not receipt["reason"].strip()
+                    )
+                )
+                or json.dumps(
+                    receipt,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                    allow_nan=False,
+                )
+                != encoded_receipt
+            ):
+                raise ValueError("receipt has an invalid schema or outcome")
+    except (TypeError, ValueError) as exc:
+        raise ConsolidationConflict("stored consolidation receipt is invalid") from exc
+    return receipt
+
+
 def _decode(operation: ConsolidationOperation, row: dict) -> StoredConsolidation:
     ledger = row["ledger"]
     if (
@@ -184,19 +223,23 @@ def _decode(operation: ConsolidationOperation, row: dict) -> StoredConsolidation
         or ledger["request_sha256"] != operation.request_sha256
     ):
         raise ConsolidationConflict("immutable consolidation request differs")
+    receipt = _decode_build_receipt(ledger)
     if ledger["result_kind"] == "abstained":
-        return StoredConsolidation(operation.key, "abstained", None)
+        status: Literal["abstained", "rejected"] = (
+            "rejected" if receipt and receipt.get("status") == "rejected" else "abstained"
+        )
+        return StoredConsolidation(operation.key, status, None, receipt)
     record = row.get("memory")
     memory = content_models.raw_memory_from_record(record) if record else None
     if memory is None or memory.deleted_at is not None:
-        return StoredConsolidation(operation.key, "gone", None)
+        return StoredConsolidation(operation.key, "gone", None, receipt)
     if (
         memory.principal_id != operation.principal_id
         or memory.memory_scope != "private"
         or memory.metadata.get(CONSOLIDATION_METADATA_KEY) != operation.key
     ):
         raise ConsolidationConflict("stored consolidation candidate was replaced")
-    return StoredConsolidation(operation.key, "candidate", memory)
+    return StoredConsolidation(operation.key, "candidate", memory, receipt)
 
 
 async def get_stored_consolidation(operation: ConsolidationOperation) -> StoredConsolidation | None:
@@ -233,6 +276,23 @@ async def store_consolidation(
     existing = await get_stored_consolidation(operation)
     if existing is not None:
         return existing
+    build_receipt = deepcopy(result.receipt)
+    status = build_receipt.get("status")
+    if (
+        (result.candidate is not None and status != "proposed")
+        or (result.candidate is None and status not in {"abstained", "rejected"})
+        or (
+            status == "abstained"
+            and build_receipt.get("reason") != result.proposal.abstention_reason
+        )
+        or (status in {"abstained", "rejected"} and not build_receipt.get("reason"))
+    ):
+        raise ConsolidationConflict("consolidation receipt disagrees with its outcome")
+    result_kind = "candidate" if result.candidate is not None else "abstained"
+    encoded_receipt = json.dumps(
+        build_receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+    )
+    _decode_build_receipt({"result_kind": result_kind, "build_receipt_json": encoded_receipt})
     group = result.group
     if result.candidate is not None and validate_candidate_content_agreement(
         result.candidate, group=group
@@ -412,11 +472,10 @@ async def store_consolidation(
                 ).hexdigest(),
             }
             for source in sources
-        ]
-        if candidate
-        else [],
+        ],
+        "build_receipt_json": encoded_receipt,
         "candidate_id": candidate_id,
-        "result_kind": "candidate" if candidate else "abstained",
+        "result_kind": result_kind,
     }
     async with content_client.surreal_content_client() as client:
         try:

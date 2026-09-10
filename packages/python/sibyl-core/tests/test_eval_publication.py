@@ -149,6 +149,7 @@ async def test_abstention_is_terminal_and_contains_no_source_text(proposal):
     abstention = replace(
         result,
         candidate=None,
+        receipt=result.receipt | {"status": "abstained", "reason": "insufficient support"},
         proposal=c.ProcedureProposal(abstention_reason="insufficient support"),
     )
     assert (await p.store_consolidation(op, abstention)).status == "abstained"

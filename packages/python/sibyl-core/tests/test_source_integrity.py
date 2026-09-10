@@ -186,7 +186,7 @@ async def test_content_upgrade_from_33_preserves_retained_identity(runtime, cont
         current = (
             await client.execute_query("SELECT version FROM schema_version WHERE name='content';")
         )[0]["version"]
-        assert current == CONTENT_SCHEMA_CURRENT_VERSION == 34
+        assert current == CONTENT_SCHEMA_CURRENT_VERSION
         after = await load_source_snapshot(
             source, organization_id=source.organization_id, execute_query=client.execute_query
         )
