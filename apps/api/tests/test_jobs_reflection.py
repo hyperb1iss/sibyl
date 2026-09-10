@@ -298,3 +298,18 @@ async def test_reflection_dream_cycle_archives_terminal_exception_candidates() -
     assert receipt["candidates"][0]["outcome"] == "abstained"
     assert receipt["candidates"][0]["recommended_action"] == "abstain"
     assert receipt["candidates"][0]["exception_reasons"] == ["duplicate_candidate"]
+
+
+@pytest.mark.parametrize("archive_exceptions", [False, True])
+async def test_dream_worker_accepts_legacy_archive_payload(archive_exceptions):
+    result = await run_reflection_dream_cycle(
+        {},
+        ORG_ID,
+        source_limit=0,
+        candidate_limit=0,
+        archive_exceptions=archive_exceptions,
+        archive_exception_reasons=["duplicate_candidate"],
+    )
+    assert result["sources_scanned"] == 0
+    assert result["candidates_scanned"] == 0
+    assert result["failed"] == 0

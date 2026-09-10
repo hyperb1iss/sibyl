@@ -303,7 +303,6 @@ async def trigger_reflection_dream_cycle(
     dry_run: bool = Query(default=False),
     source_limit: int = Query(default=20, ge=0, le=100),
     candidate_limit: int = Query(default=50, ge=0, le=200),
-    archive_exceptions: bool = Query(default=True),
     org: AuthOrganization = Depends(get_current_organization),
 ) -> dict[str, Any]:
     """Trigger an org-scoped reflection dream-cycle run."""
@@ -315,7 +314,6 @@ async def trigger_reflection_dream_cycle(
             dry_run=dry_run,
             source_limit=source_limit,
             candidate_limit=candidate_limit,
-            archive_exceptions=archive_exceptions,
         )
     except Exception as e:
         log.warning("Failed to enqueue reflection dream cycle", org_id=str(org.id), error=str(e))

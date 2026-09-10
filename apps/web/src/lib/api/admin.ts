@@ -518,16 +518,12 @@ export const jobsApi = {
     dry_run?: boolean;
     source_limit?: number;
     candidate_limit?: number;
-    archive_exceptions?: boolean;
   }) => {
     const search = new URLSearchParams();
     if (params?.dry_run !== undefined) search.set('dry_run', String(params.dry_run));
     if (params?.source_limit !== undefined) search.set('source_limit', String(params.source_limit));
     if (params?.candidate_limit !== undefined) {
       search.set('candidate_limit', String(params.candidate_limit));
-    }
-    if (params?.archive_exceptions !== undefined) {
-      search.set('archive_exceptions', String(params.archive_exceptions));
     }
     const suffix = search.toString();
     return fetchApi<MaintenanceJobResponse>(`/jobs/reflection-dream${suffix ? `?${suffix}` : ''}`, {

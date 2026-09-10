@@ -50,8 +50,6 @@ from sibyl_core.tools.reflect import reflect_memory
 
 log = structlog.get_logger()
 
-_ARCHIVEABLE_EXCEPTION_REASONS = frozenset({"duplicate_candidate", "stale_candidate"})
-
 
 async def run_reflection_dream_cycle_all_orgs(
     ctx: dict[str, Any],
@@ -59,7 +57,7 @@ async def run_reflection_dream_cycle_all_orgs(
     dry_run: bool = False,
     source_limit: int = 20,
     candidate_limit: int = 50,
-    archive_exceptions: bool = True,
+    archive_exceptions: bool = True,  # noqa: ARG001 - retained queued-job compatibility
     confidence_threshold: float | None = None,
 ) -> dict[str, Any]:
     org_ids = await _list_organization_ids()
@@ -73,7 +71,6 @@ async def run_reflection_dream_cycle_all_orgs(
                     dry_run=dry_run,
                     source_limit=source_limit,
                     candidate_limit=candidate_limit,
-                    archive_exceptions=archive_exceptions,
                     confidence_threshold=confidence_threshold,
                 )
             )
@@ -107,8 +104,8 @@ async def run_reflection_dream_cycle(
     dry_run: bool = False,
     source_limit: int = 20,
     candidate_limit: int = 50,
-    archive_exceptions: bool = True,
-    archive_exception_reasons: list[str] | None = None,
+    archive_exceptions: bool = True,  # noqa: ARG001 - retained queued-job compatibility
+    archive_exception_reasons: list[str] | None = None,  # noqa: ARG001 - queued-job compatibility
     confidence_threshold: float | None = None,
 ) -> dict[str, Any]:
     started = datetime.now(UTC)
@@ -116,11 +113,6 @@ async def run_reflection_dream_cycle(
     run_id = f"reflection_dream:{group_id}:{uuid4()}"
     source_budget = max(0, min(source_limit, 100))
     candidate_budget = max(0, min(candidate_limit, 200))
-    archive_reasons = {
-        reason
-        for reason in (archive_exception_reasons or sorted(_ARCHIVEABLE_EXCEPTION_REASONS))
-        if reason in _ARCHIVEABLE_EXCEPTION_REASONS
-    }
 
     log.info(
         "reflection_dream_cycle_started",
@@ -142,8 +134,6 @@ async def run_reflection_dream_cycle(
         run_id=run_id,
         dry_run=dry_run,
         limit=candidate_budget,
-        archive_exceptions=archive_exceptions,
-        archive_reasons=archive_reasons,
         confidence_threshold=confidence_threshold,
     )
 
@@ -348,8 +338,6 @@ async def _drain_dream_candidates(
     run_id: str,
     dry_run: bool,
     limit: int,
-    archive_exceptions: bool,
-    archive_reasons: set[str],
     confidence_threshold: float | None,
 ) -> list[dict[str, Any]]:
     if limit <= 0:
@@ -368,8 +356,6 @@ async def _drain_dream_candidates(
                     group_id=group_id,
                     run_id=run_id,
                     dry_run=dry_run,
-                    archive_exceptions=archive_exceptions,
-                    archive_reasons=archive_reasons,
                     confidence_threshold=confidence_threshold,
                 )
             )
@@ -397,8 +383,6 @@ async def _drain_dream_candidate(
     group_id: str,
     run_id: str,
     dry_run: bool,
-    archive_exceptions: bool,  # noqa: ARG001 - retained queued-job compatibility
-    archive_reasons: set[str],  # noqa: ARG001 - automatic abstention owns terminal policy
     confidence_threshold: float | None,
 ) -> dict[str, Any]:
     automatic_executions: list[str] = []
@@ -706,15 +690,6 @@ async def _log_dream_candidate_audit(
             error=str(exc),
             exc_info=True,
         )
-
-
-def _archiveable_exception(
-    exception_reasons: list[str],
-    *,
-    archive_reasons: set[str],
-) -> bool:
-    reasons = {str(reason) for reason in exception_reasons if str(reason)}
-    return bool(reasons & archive_reasons) and reasons <= archive_reasons
 
 
 def _candidate_target_scope(candidate: RawMemory) -> str:

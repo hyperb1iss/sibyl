@@ -343,7 +343,6 @@ async def test_local_queue_broker_executes_local_jobs_and_reports_health() -> No
         dry_run: bool = False,
         source_limit: int = 20,
         candidate_limit: int = 50,
-        archive_exceptions: bool = True,
         confidence_threshold: float | None = None,
     ) -> dict[str, object]:
         calls.append(
@@ -354,7 +353,6 @@ async def test_local_queue_broker_executes_local_jobs_and_reports_health() -> No
                     "dry_run": dry_run,
                     "source_limit": source_limit,
                     "candidate_limit": candidate_limit,
-                    "archive_exceptions": archive_exceptions,
                     "confidence_threshold": confidence_threshold,
                     "ctx_has_start_time": "start_time" in ctx,
                 },
@@ -409,7 +407,6 @@ async def test_local_queue_broker_executes_local_jobs_and_reports_health() -> No
             dry_run=True,
             source_limit=3,
             candidate_limit=7,
-            archive_exceptions=False,
             confidence_threshold=0.91,
         )
 

@@ -117,11 +117,6 @@ def memory_review_dream(
         max=200,
         help="Pending reflection candidates",
     ),
-    archive_exceptions: bool = typer.Option(
-        True,
-        "--archive-exceptions/--keep-exceptions",
-        help="Archive terminal duplicate/stale exceptions when applying",
-    ),
     json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
 ) -> None:
     """Queue the automatic reflection dream-cycle maintenance job."""
@@ -135,7 +130,6 @@ def memory_review_dream(
                     dry_run=dry_run,
                     source_limit=source_limit,
                     candidate_limit=candidate_limit,
-                    archive_exceptions=archive_exceptions,
                 )
             if json_output:
                 print_json(data)
