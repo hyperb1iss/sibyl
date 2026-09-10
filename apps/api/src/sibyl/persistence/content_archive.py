@@ -23,8 +23,11 @@ from sibyl_core.backends.surreal.schema_invariants import (
 
 log = structlog.get_logger()
 
-CONTENT_ARCHIVE_VERSION = "2.1"
-_INTEGRITY_ARCHIVE_VERSIONS = {"2.0", CONTENT_ARCHIVE_VERSION}
+CONTENT_ARCHIVE_VERSION = "2.2"
+_INTEGRITY_ARCHIVE_VERSIONS = {"2.0", "2.1", CONTENT_ARCHIVE_VERSION}
+_VALIDATION_ARCHIVE_TABLES = frozenset(
+    {"memory_validation_executions", "memory_validation_attempts"}
+)
 _DREAM_ARCHIVE_TABLES = frozenset({"dream_source_checkpoints", "dream_source_cursors"})
 
 
@@ -225,11 +228,24 @@ _CONTENT_ARCHIVE_TABLE_SPECS += (
     ),
 )
 
+_CONTENT_ARCHIVE_TABLE_SPECS += tuple(
+    ContentArchiveTableSpec(
+        name=name,
+        source_identity_field="id",
+        target_identity_field="uuid",
+        select_sql=f"SELECT * FROM {name} ORDER BY id ASC;",  # noqa: S608
+        delete_by_identity_sql=f"DELETE {name} WHERE uuid = $identity;",
+        delete_all_sql=f"DELETE {name};",
+        create_sql=f"CREATE {name} CONTENT $record;",
+    )
+    for name in ("memory_validation_executions", "memory_validation_attempts")
+)
+
 CONTENT_ARCHIVE_TABLES = tuple(spec.name for spec in _CONTENT_ARCHIVE_TABLE_SPECS)
 _CONTENT_ARCHIVE_TABLES_BY_NAME = {spec.name: spec for spec in _CONTENT_ARCHIVE_TABLE_SPECS}
 _BACKUP_ARCHIVE_TABLES = frozenset({"backup_settings", "backups"})
 _GLOBAL_CONTENT_ARCHIVE_TABLES = frozenset({"system_settings", "telemetry_rollups"})
-_RETAINED_OPERATION_TABLES = frozenset(
+_RETAINED_OPERATION_TABLES = _VALIDATION_ARCHIVE_TABLES | frozenset(
     {"eval_attempts", "eval_consolidations", "api_idempotency_records"}
 )
 _CONTENT_RELATION_ARCHIVE_TABLES = frozenset(
@@ -506,12 +522,18 @@ def _prepare_content_source_integrity(payload, tables, organization_id):
     required = set(CONTENT_ARCHIVE_TABLES)
     if version == "2.0":
         required -= _DREAM_ARCHIVE_TABLES
+    if version in {"2.0", "2.1"}:
+        required -= _VALIDATION_ARCHIVE_TABLES
     if version in _INTEGRITY_ARCHIVE_VERSIONS and required - set(tables):
         raise ValueError("current content archive is missing required tables")
-    if version != CONTENT_ARCHIVE_VERSION and any(
+    if version not in {"2.1", CONTENT_ARCHIVE_VERSION} and any(
         tables.get(name) for name in _DREAM_ARCHIVE_TABLES
     ):
         raise ValueError("dream checkpoints require content archive 2.1")
+    if version != CONTENT_ARCHIVE_VERSION and any(
+        tables.get(name) for name in _VALIDATION_ARCHIVE_TABLES
+    ):
+        raise ValueError("validation history requires content archive 2.2")
     for table, rows in tables.items():
         if table not in CONTENT_ARCHIVE_TABLES or not isinstance(rows, list):
             raise ValueError("content archive has an unknown or malformed table")
@@ -679,6 +701,10 @@ def _auxiliary_restore_statement(
         )
     else:
         write = f"{spec.delete_by_identity_sql}\n{spec.create_sql}\n"
+    if spec.name in _VALIDATION_ARCHIVE_TABLES:
+        from sibyl_core.services.validation_execution import validation_archive_guard
+
+        conversion += validation_archive_guard(spec.name, record)
     return f"{conversion}{existing}{ownership_guard}{write}"
 
 
@@ -739,7 +765,7 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
             record[spec.target_identity_field] = identity
             record, dropped = _drop_undeclared_fields(record, declared)
             if dropped:
-                if spec.name in _DREAM_ARCHIVE_TABLES:
+                if spec.name in _DREAM_ARCHIVE_TABLES | _VALIDATION_ARCHIVE_TABLES:
                     errors.append(f"{spec.name} has undeclared checkpoint fields")
                     continue
                 dropped_fields.setdefault(spec.name, set()).update(dropped)

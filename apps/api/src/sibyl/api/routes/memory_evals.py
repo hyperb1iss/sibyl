@@ -340,3 +340,52 @@ async def consolidate_admitted_attempts(
             "current_lifecycle_required_for_publication"
         ),
     )
+
+
+@router.post("/candidates/{candidate_id}/validate")
+async def validate_procedure_candidate(
+    candidate_id: str,
+    http_request: Request,
+    org: AuthOrganization = Depends(get_current_organization),
+    ctx: AuthContext = Depends(get_auth_context),
+) -> dict[str, object]:
+    """Automatically critique an owned candidate; never approve or promote it."""
+    from sibyl_core.services.procedure_validation import validate_stored_procedure
+    from sibyl_core.services.validation_execution import ValidationExecutionUnavailable
+
+    organization_id = str(org.id)
+    principal_id = ctx.user_id
+    if not principal_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    async def authorize() -> None:
+        # Provider work can outlive a membership change within this request.
+        http_request.state.auth_context = None
+        current = await get_auth_context(http_request)
+        if current.org_role not in {OrganizationRole.OWNER, OrganizationRole.ADMIN}:
+            raise HTTPException(status_code=403, detail="Validation authority is unavailable")
+        await _authorize_owner(
+            ctx=current,
+            organization_id=organization_id,
+            owner_principal_id=principal_id,
+            request=http_request,
+        )
+
+    try:
+        return await validate_stored_procedure(
+            organization_id=organization_id,
+            principal_id=principal_id,
+            parent_id=candidate_id,
+            authorize=authorize,
+        )
+    except ConsolidationInputBudgetExceeded as exc:
+        raise HTTPException(
+            status_code=413,
+            detail={"actual_chars": exc.actual_chars, "max_input_chars": exc.max_input_chars},
+        ) from exc
+    except ValidationExecutionUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except LLMError as exc:
+        raise HTTPException(
+            status_code=502, detail="Validation failed; usage history retained"
+        ) from exc
