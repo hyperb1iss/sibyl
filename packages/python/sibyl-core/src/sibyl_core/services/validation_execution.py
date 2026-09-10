@@ -310,9 +310,58 @@ class ValidationExecution:
         return {"execution_id": self.id, **json.loads(row["result_json"])}
 
 
+def _archive_request(record: dict[str, Any]) -> dict[str, Any]:
+    """Check persisted JSON shape before comparing its immutable bindings."""
+    for field in (
+        "uuid",
+        "organization_id",
+        "principal_id",
+        "parent_id",
+        "policy_json",
+        "request_sha256",
+        "request_json",
+    ):
+        if not isinstance(record.get(field), str) or not record[field]:
+            raise ValueError(f"Validation archive {field} must be a nonempty string")
+    source_ids = record.get("source_ids")
+    if not isinstance(source_ids, list) or any(
+        not isinstance(value, str) or not value for value in source_ids
+    ):
+        raise ValueError("Validation archive source IDs must be strings")
+    request = json.loads(record["request_json"])
+    if not isinstance(request, dict):
+        raise ValueError("Validation archive request must be an object")
+    for field in ("org", "principal", "parent", "policy"):
+        if not isinstance(request.get(field), str) or not request[field]:
+            raise ValueError(f"Validation archive request {field} must be a nonempty string")
+    bindings = request.get("source_bindings")
+    if not isinstance(bindings, list):
+        raise ValueError("Validation archive source bindings must be a list")
+    for binding in bindings:
+        if (
+            not isinstance(binding, dict)
+            or any(
+                not isinstance(binding.get(field), str) or not binding[field]
+                for field in ("source_id", "incarnation")
+            )
+            or type(binding.get("generation")) is not int
+        ):
+            raise ValueError("Validation archive source binding is malformed")
+    if record.get("result_json") is not None and not isinstance(record["result_json"], str):
+        raise ValueError("Validation archive result must be encoded JSON")
+    return request
+
+
 def validation_archive_guard(table: str, record: dict[str, Any]) -> str:
     """Validate private history before the existing atomic archive writer runs."""
+    if not isinstance(record, dict):
+        raise ValueError("Validation archive row must be an object")
     if table == "memory_validation_attempts":
+        for field in ("execution_id", "organization_id", "principal_id"):
+            if not isinstance(record.get(field), str) or not record[field]:
+                raise ValueError(f"Validation attempt {field} must be a nonempty string")
+        if record.get("outcome_json") is not None and not isinstance(record["outcome_json"], str):
+            raise ValueError("Validation attempt outcome must be encoded JSON")
         if record.get("outcome_json") is not None:
             outcome = TransportAttempt.model_validate_json(record["outcome_json"])
             if outcome.usage_known:
@@ -325,7 +374,7 @@ def validation_archive_guard(table: str, record: dict[str, Any]) -> str:
         raise ValueError("Unknown validation history table")
     if type(record.get("purged")) is not bool or record.get("request_sha256") != record.get("uuid"):
         raise ValueError("Validation archive retention identity differs")
-    request = json.loads(record["request_json"])
+    request = _archive_request(record)
     if canonical(request) != record["request_json"] or review_digest(request) != record["uuid"]:
         raise ValueError("Validation archive identity differs")
     if (
