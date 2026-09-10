@@ -10,7 +10,6 @@ import pytest
 import pytest_asyncio
 from surrealdb import AsyncSurreal
 
-from sibyl.persistence import content_archive
 from sibyl.persistence.auth_archive import restore_auth_archive_payload
 from sibyl.persistence.content_archive import restore_content_archive_payload
 from sibyl.persistence.surreal import auth as surreal_auth, content as surreal_content
@@ -111,7 +110,7 @@ async def test_content_restore_drops_undeclared_fields_and_reports_them(
     """
     capture_id = uuid4()
     payload = {
-        "version": content_archive.CONTENT_ARCHIVE_VERSION,
+        "version": "1.0",
         "organization_id": "org-123",
         "tables": {
             "raw_captures": [

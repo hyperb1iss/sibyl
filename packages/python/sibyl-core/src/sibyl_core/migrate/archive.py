@@ -327,14 +327,28 @@ def validate_archive(archive: LoadedArchive) -> list[str]:
                 errors=errors,
             )
 
+    if not errors:
+        try:
+            _sealed_memory_payloads(archive)
+        except (ValueError, TypeError, KeyError, RuntimeError) as exc:
+            errors.append(f"archive source integrity validation failed: {exc}")
     return errors
 
 
+def _sealed_memory_payloads(archive: LoadedArchive):
+    from sibyl_core.migrate.archive_lineage import seal_archive_lineage
+
+    graph = archive.files.get(GRAPH_FILENAME)
+    content = archive.files.get(CONTENT_FILENAME)
+    return seal_archive_lineage(
+        json.loads(graph.decode("utf-8")) if graph is not None else None,
+        json.loads(content.decode("utf-8")) if content is not None else None,
+    )
+
+
 def graph_payload_from_archive(archive: LoadedArchive) -> dict[str, Any] | None:
-    payload = archive.files.get(GRAPH_FILENAME)
-    if payload is None:
-        return None
-    return json.loads(payload.decode("utf-8"))
+    graph, _, _ = _sealed_memory_payloads(archive)
+    return graph
 
 
 def auth_payload_from_archive(archive: LoadedArchive) -> dict[str, Any] | None:
@@ -345,10 +359,8 @@ def auth_payload_from_archive(archive: LoadedArchive) -> dict[str, Any] | None:
 
 
 def content_payload_from_archive(archive: LoadedArchive) -> dict[str, Any] | None:
-    payload = archive.files.get(CONTENT_FILENAME)
-    if payload is None:
-        return None
-    return json.loads(payload.decode("utf-8"))
+    _, content, _ = _sealed_memory_payloads(archive)
+    return content
 
 
 def normalize_relationship_payloads(

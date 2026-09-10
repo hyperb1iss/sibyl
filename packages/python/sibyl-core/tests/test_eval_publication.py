@@ -350,3 +350,10 @@ async def test_retrospective_framing_changes_extractor_revision(monkeypatch):
     assert RETROSPECTIVE_REQUEST in p.SYSTEM_PROMPT
     monkeypatch.setattr(p, "SYSTEM_PROMPT", p.SYSTEM_PROMPT.replace(RETROSPECTIVE_REQUEST, ""))
     assert await p.consolidation_extractor_configuration() != current
+
+
+async def test_procedure_rendering_changes_extractor_revision(monkeypatch):
+    before = await p.consolidation_extractor_configuration()
+    monkeypatch.setattr(p, "RENDER_VERSION", "future-render-version")
+    after = await p.consolidation_extractor_configuration()
+    assert before != after
