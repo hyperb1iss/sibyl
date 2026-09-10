@@ -514,6 +514,8 @@ def _coerce_graph_backup_data(payload: dict[str, object], org_id: str):
         mention_count=_count("mention_count", len(mentions)),
         episodes=episodes,
         mentions=mentions,
+        source_integrity=payload.get("source_integrity"),
+        lineage_validation=payload.get("lineage_validation", []),
     )
 
 
@@ -616,6 +618,17 @@ def restore_db(
                 skip_existing=skip_existing,
             )
 
+            if result.quarantined:
+                warn(
+                    f"Quarantined {len(result.quarantined)} memories with unverifiable lineage; content is retained."
+                )
+                info(
+                    "Reauthor reviewed content through POST /api/memory/raw with a new source_id; the original remains quarantined."
+                )
+            if result.integrity_conflicts:
+                warn(
+                    f"Preserved {len(result.integrity_conflicts)} destination source histories that conflict with the archive."
+                )
             if result.success:
                 success("Restore complete!")
             else:

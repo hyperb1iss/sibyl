@@ -104,7 +104,10 @@ export default function SetupPage() {
       <main className="flex-1 flex items-start justify-center px-4 pb-12">
         <SetupWizard
           initialStatus={status}
-          onComplete={() => router.push('/login?setup=complete')}
+          onComplete={() => {
+            // Start with the signup cookies and discard pre-setup query caches.
+            window.location.assign('/');
+          }}
         />
       </main>
     </div>

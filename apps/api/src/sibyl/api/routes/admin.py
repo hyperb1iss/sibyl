@@ -451,6 +451,12 @@ async def create_backup(
         relationship_count=result.backup_data.relationship_count,
         entities=result.backup_data.entities,
         relationships=result.backup_data.relationships,
+        episode_count=result.backup_data.episode_count,
+        mention_count=result.backup_data.mention_count,
+        episodes=result.backup_data.episodes,
+        mentions=result.backup_data.mentions,
+        source_integrity=result.backup_data.source_integrity,
+        lineage_validation=result.backup_data.lineage_validation,
     )
 
     return BackupResponse(
@@ -489,6 +495,12 @@ async def restore_backup_endpoint(
         relationship_count=request.backup_data.relationship_count,
         entities=request.backup_data.entities,
         relationships=request.backup_data.relationships,
+        episode_count=request.backup_data.episode_count,
+        mention_count=request.backup_data.mention_count,
+        episodes=request.backup_data.episodes,
+        mentions=request.backup_data.mentions,
+        source_integrity=request.backup_data.source_integrity,
+        lineage_validation=request.backup_data.lineage_validation,
     )
 
     result = await do_restore(
@@ -505,6 +517,8 @@ async def restore_backup_endpoint(
         relationships_skipped=result.relationships_skipped,
         errors=result.errors,
         duration_seconds=result.duration_seconds,
+        integrity_conflicts=result.integrity_conflicts,
+        quarantined=result.quarantined,
     )
 
 
