@@ -152,3 +152,22 @@ async def test_invalid_receipt_cannot_create_terminal_record(proposal):
     with pytest.raises(p.ConsolidationConflict, match="receipt is invalid"):
         await p.store_consolidation(op, invalid)
     assert await rows("eval_consolidations") == []
+
+
+@pytest.mark.parametrize("kind", ["invalid", "", None, [], {}, "missing"])
+@pytest.mark.parametrize("receipt_present", [False, True])
+def test_receipt_decode_rejects_invalid_or_missing_outcome_kind(kind, receipt_present):
+    ledger = {} if kind == "missing" else {"result_kind": kind}
+    if receipt_present:
+        ledger["build_receipt_json"] = json.dumps(
+            {"schema_version": p.SCHEMA_VERSION, "status": "proposed", "usage": {}},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    with pytest.raises(p.ConsolidationConflict, match="stored consolidation receipt is invalid"):
+        p._decode_build_receipt(ledger)
+
+
+@pytest.mark.parametrize("kind", ["candidate", "abstained"])
+def test_receipt_decode_keeps_valid_legacy_outcome_unavailable(kind):
+    assert p._decode_build_receipt({"result_kind": kind}) is None

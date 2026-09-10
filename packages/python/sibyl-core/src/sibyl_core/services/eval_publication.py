@@ -182,10 +182,13 @@ RETURN { ledger: $stored, memory: $memory };
 def _decode_build_receipt(ledger: dict) -> dict[str, Any] | None:
     encoded_receipt = ledger.get("build_receipt_json")
     try:
+        result_kind = ledger.get("result_kind")
+        if result_kind not in {"candidate", "abstained"}:
+            raise ValueError("receipt has an invalid outcome kind")
         receipt = json.loads(encoded_receipt) if encoded_receipt is not None else None
         if encoded_receipt is not None:
             allowed_statuses = (
-                {"abstained", "rejected"} if ledger["result_kind"] == "abstained" else {"proposed"}
+                {"abstained", "rejected"} if result_kind == "abstained" else {"proposed"}
             )
             if (
                 not isinstance(receipt, dict)
