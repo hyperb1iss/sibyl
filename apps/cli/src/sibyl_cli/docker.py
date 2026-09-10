@@ -14,6 +14,7 @@ import yaml
 
 from sibyl_cli import config_store
 from sibyl_cli.common import NEON_CYAN, console, error, info, success
+from sibyl_cli.docker_storage import surreal_data_mount, surreal_volume_initializer
 from sibyl_cli.local import DEFAULT_IMAGE_TAG, check_docker, check_docker_compose
 
 app = typer.Typer(
@@ -79,9 +80,11 @@ def compose_config(
             },
             "restart": "unless-stopped",
         },
+        "surreal-init": surreal_volume_initializer(),
         "surrealdb": {
             "image": "${SIBYL_SURREAL_IMAGE:-surrealdb/surrealdb:v3.2.3}",
             "container_name": "sibyl-surrealdb",
+            "depends_on": {"surreal-init": {"condition": "service_completed_successfully"}},
             "command": [
                 "start",
                 "--log",
@@ -93,7 +96,7 @@ def compose_config(
                 "rocksdb:///data/sibyl.db",
             ],
             "ports": [f"127.0.0.1:{surreal_port}:8000"],
-            "volumes": ["sibyl_surreal:/data"],
+            "volumes": [surreal_data_mount()],
             "healthcheck": {
                 "test": ["CMD", "/surreal", "is-ready", "--endpoint", "http://localhost:8000"],
                 "interval": "5s",
