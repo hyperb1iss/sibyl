@@ -27,6 +27,10 @@ from sibyl_core.backends.surreal.schema_source_states import (
     retire_source_states,
     source_state_event,
 )
+from sibyl_core.backends.surreal.schema_validation_execution import (
+    VALIDATION_EXECUTION_SCHEMA,
+    VALIDATION_PURGE_EVENT,
+)
 from sibyl_core.backends.surreal.schema_version import (
     SCHEMA_VERSION_TABLE,
     SchemaMigration,
@@ -68,6 +72,10 @@ CONTENT_TABLES = (
     "raw_captures",
     "eval_attempts",
     "eval_consolidations",
+    "dream_source_checkpoints",
+    "dream_source_cursors",
+    "memory_validation_executions",
+    "memory_validation_attempts",
     "memory_usage_events",
     "api_idempotency_records",
     "source_imports",
@@ -77,7 +85,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 35
+CONTENT_SCHEMA_CURRENT_VERSION = 37
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -118,7 +126,15 @@ CONTENT_ANALYZER_DEFINITIONS = _load_schema_file("01_analyzers.surql")
 CONTENT_LEGACY_CONTENT_CHECKPOINT_DEFINITIONS = (
     _SCHEMA_DIR / "35_legacy_content_checkpoint.surql"
 ).read_text(encoding="utf-8")
-CONTENT_SCHEMA_DEFINITIONS = _load_schema_file("10_tables.surql")
+CONTENT_DREAM_CHECKPOINT_DEFINITIONS = (
+    _SCHEMA_DIR / "36_dream_source_checkpoints.surql"
+).read_text(encoding="utf-8")
+CONTENT_SCHEMA_DEFINITIONS = (
+    _load_schema_file("10_tables.surql")
+    + "\n"
+    + CONTENT_DREAM_CHECKPOINT_DEFINITIONS
+    + VALIDATION_EXECUTION_SCHEMA
+)
 
 
 CONTENT_EVAL_CONSOLIDATIONS_MIGRATION_DEFINITIONS = """
@@ -242,6 +258,10 @@ DEFINE FIELD OVERWRITE status ON backups TYPE string DEFAULT 'pending'
 """
 
 CONTENT_PERMISSION_MIGRATION_DEFINITIONS = """
+ALTER TABLE IF EXISTS memory_validation_executions PERMISSIONS NONE;
+ALTER TABLE IF EXISTS memory_validation_attempts PERMISSIONS NONE;
+ALTER TABLE IF EXISTS dream_source_checkpoints PERMISSIONS NONE;
+ALTER TABLE IF EXISTS dream_source_cursors PERMISSIONS NONE;
 ALTER TABLE IF EXISTS eval_consolidations PERMISSIONS NONE;
 ALTER TABLE IF EXISTS eval_attempts PERMISSIONS NONE;
 ALTER TABLE IF EXISTS crawl_sources PERMISSIONS
@@ -984,6 +1004,16 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
                 "DEFINE FIELD IF NOT EXISTS build_receipt_json ON eval_consolidations "
                 "TYPE option<string>",
             ),
+        ),
+        SchemaMigration(
+            version=36,
+            name="content_dream_source_checkpoints",
+            statements=tuple(split_statements(CONTENT_DREAM_CHECKPOINT_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=37,
+            name="content_memory_validation_execution",
+            statements=(*split_statements(VALIDATION_EXECUTION_SCHEMA), VALIDATION_PURGE_EVENT),
         ),
     )
 
