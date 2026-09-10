@@ -26,7 +26,10 @@ async def test_native_retrospective_request_preserves_both_valid_outcomes(
 ):
     monkeypatch.setattr(extraction, "reserve_llm_budget", AsyncMock())
     source = _contrast_group() if projected else group
-    reason = "The different outcomes do not isolate which condition caused the difference."
+    # Both fixtures deliberately use one family and compatible environments.
+    assert len({episode.family_id for episode in source.episodes}) == 1
+    assert all(episode.environment == source.episodes[0].environment for episode in source.episodes)
+    reason = "The evidence does not identify an action and check that distinguish the outcomes."
     if projected:
         output = {
             "outcome": {"kind": "procedure", **_proposal()}
@@ -97,6 +100,11 @@ async def test_native_retrospective_request_preserves_both_valid_outcomes(
     assert "retrospective memory consolidation" in wire["instructions"]
     assert "not the agent executing any recorded task" in wire["instructions"]
     assert c.RETROSPECTIVE_REQUEST in wire["instructions"]
+    assert "unverified conditional candidate" in wire["instructions"]
+    assert "neither establish nor disqualify" in wire["instructions"]
+    assert "different domains or environments is not required" in wire["instructions"]
+    assert "Transfer must be evaluated separately" in wire["instructions"]
+    assert "cannot support useful conditions, actions and checks, abstain" in wire["instructions"]
     user_input = next(item["content"] for item in wire["input"] if item.get("role") == "user")
     assert user_input.endswith(c.RETROSPECTIVE_REQUEST)
     assert (
@@ -107,6 +115,8 @@ async def test_native_retrospective_request_preserves_both_valid_outcomes(
     assert result.receipt["usage"]["input_tokens"] == 31
     assert result.receipt["usage"]["output_tokens"] == 17
     assert result.receipt["output_retries"] == 2
+    assert result.receipt["transfer"] == "not_measured"
+    assert result.receipt["entailment"] == "pending"
     if outcome == "abstention":
         assert result.candidate is None and result.receipt["reason"] == reason
         assert result.receipt["status"] == "abstained"
