@@ -327,7 +327,6 @@ async def test_reflection_dream_client_posts_query_contract() -> None:
         dry_run=False,
         source_limit=12,
         candidate_limit=34,
-        archive_exceptions=False,
     )
 
     assert data == {"job_id": "reflection_dream:org-1"}
@@ -338,7 +337,6 @@ async def test_reflection_dream_client_posts_query_contract() -> None:
             "dry_run": False,
             "source_limit": 12,
             "candidate_limit": 34,
-            "archive_exceptions": False,
         },
     )
 
@@ -2415,7 +2413,6 @@ def test_memory_review_dream_command_queues_dry_run(mock_get_client: MagicMock) 
             "3",
             "--candidate-limit",
             "5",
-            "--keep-exceptions",
         ],
     )
 
@@ -2427,7 +2424,6 @@ def test_memory_review_dream_command_queues_dry_run(mock_get_client: MagicMock) 
         dry_run=True,
         source_limit=3,
         candidate_limit=5,
-        archive_exceptions=False,
     )
 
 
@@ -2455,7 +2451,6 @@ def test_memory_review_dream_command_apply_queues_mutating_run(
         dry_run=False,
         source_limit=20,
         candidate_limit=50,
-        archive_exceptions=True,
     )
 
 
@@ -3200,3 +3195,10 @@ def test_brief_command_prints_markdown_only(
         markdown_token_budget=1500,
     )
     mock_resolve_project_from_cwd.assert_called_once_with()
+
+
+def test_memory_review_dream_help_omits_obsolete_archive_controls() -> None:
+    result = CliRunner().invoke(app, ["admin", "memory", "review", "dream", "--help"])
+    assert result.exit_code == 0
+    assert "--keep-exceptions" not in result.stdout
+    assert "--archive-exceptions" not in result.stdout

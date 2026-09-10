@@ -1456,7 +1456,15 @@ async def test_promote_review_candidate_persists_native_record_and_marks_promote
             },
         )
 
-    async def fake_save(memory: RawMemory, *, expected_revision=None) -> RawMemory:
+    async def fake_save(
+        memory: RawMemory,
+        *,
+        expected_revision=None,
+        validation_promotion=None,
+        validation_derivation=None,
+    ) -> RawMemory:
+        assert validation_promotion is None
+        assert validation_derivation is None
         saved.append(memory)
         memories[memory.id] = memory
         return memory
@@ -1636,7 +1644,15 @@ async def test_promote_review_candidate_bounds_contradicted_source_for_as_of_rea
         assert organization_id == "org-1"
         return memories.get(memory_id)
 
-    async def fake_save_raw_memory(memory: RawMemory, *, expected_revision=None) -> RawMemory:
+    async def fake_save_raw_memory(
+        memory: RawMemory,
+        *,
+        expected_revision=None,
+        validation_promotion=None,
+        validation_derivation=None,
+    ) -> RawMemory:
+        assert validation_promotion is None
+        assert validation_derivation is None
         memories[memory.id] = memory
         saved.append(memory)
         return memory
@@ -1744,7 +1760,15 @@ async def test_promote_review_candidate_skips_other_private_principal_invalidati
         assert organization_id == "org-1"
         return memories.get(memory_id)
 
-    async def fake_save_raw_memory(memory: RawMemory, *, expected_revision=None) -> RawMemory:
+    async def fake_save_raw_memory(
+        memory: RawMemory,
+        *,
+        expected_revision=None,
+        validation_promotion=None,
+        validation_derivation=None,
+    ) -> RawMemory:
+        assert validation_promotion is None
+        assert validation_derivation is None
         memories[memory.id] = memory
         saved.append(memory)
         return memory
@@ -1892,7 +1916,15 @@ async def test_promote_raw_memory_persists_native_record_and_marks_promoted(
             },
         )
 
-    async def fake_save(memory: RawMemory, *, expected_revision=None) -> RawMemory:
+    async def fake_save(
+        memory: RawMemory,
+        *,
+        expected_revision=None,
+        validation_promotion=None,
+        validation_derivation=None,
+    ) -> RawMemory:
+        assert validation_promotion is None
+        assert validation_derivation is None
         saved.append(memory)
         memories[memory.id] = memory
         return memory

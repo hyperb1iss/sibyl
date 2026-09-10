@@ -35,7 +35,7 @@ async def populate(store, monkeypatch):
 async def test_dream_archive_restart_does_not_repeat_extraction(dream_store, monkeypatch, clean):
     close_source = dream_store.close
     archive = await populate(dream_store, monkeypatch)
-    assert archive["version"] == "2.1"
+    assert archive["version"] == content_archive.CONTENT_ARCHIVE_VERSION
     assert archive["tables"]["dream_source_checkpoints"]
     before = await dream_store.execute_query("SELECT uuid FROM raw_captures ORDER BY uuid;")
     assert len(before) > 1

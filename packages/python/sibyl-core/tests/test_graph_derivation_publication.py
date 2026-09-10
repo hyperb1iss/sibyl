@@ -486,3 +486,37 @@ async def test_graph_descendant_retains_original_raw_ancestry(runtime, content_s
         action="hide",
     )
     assert descendant.id in await unavailable_publication_ids(runtime.client.group_id, rows)
+
+
+async def test_unavailable_validation_snapshot_excludes_graph_derivation(
+    runtime, content_store, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    from sibyl_core.services import validation_execution
+    from sibyl_core.services.graph_derivations import unavailable_graph_derivation_ids
+    from sibyl_core.services.memory_source_validation import SourceReadAuthority
+
+    source = await remember_raw_memory(
+        organization_id=runtime.client.group_id,
+        principal_id="user_a",
+        source_id="validation-snapshot",
+        raw_content="Deployment requires blue approval.",
+        embedding_provider=None,
+    )
+    published = await publish(runtime, await share_plan(runtime, source.id))
+    assert published.success
+    resolver = AsyncMock(
+        return_value=SourceReadAuthority("user_a", projects=frozenset({"project_a"}))
+    )
+    monkeypatch.setattr(
+        "sibyl_core.services.graph_derivations.get_source_authority_resolver", lambda: resolver
+    )
+    identifiers = [published.promoted_id]
+    assert not await unavailable_graph_derivation_ids(runtime.client.group_id, identifiers)
+    query = AsyncMock(return_value=[])
+    monkeypatch.setattr(validation_execution, "_query", query)
+    assert await unavailable_graph_derivation_ids(runtime.client.group_id, identifiers) == set(
+        identifiers
+    )
+    query.assert_awaited_once()

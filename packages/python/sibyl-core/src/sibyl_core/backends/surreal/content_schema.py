@@ -27,6 +27,14 @@ from sibyl_core.backends.surreal.schema_source_states import (
     retire_source_states,
     source_state_event,
 )
+from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WITNESS_DEFINITION
+from sibyl_core.backends.surreal.schema_validation_execution import (
+    VALIDATION_EXECUTION_SCHEMA,
+    VALIDATION_PROMOTION_SCHEMA,
+    VALIDATION_PURGE_EVENT,
+    VALIDATION_RECEIPT_PURGE_EVENT,
+    VALIDATION_RECEIPT_RECOVERY_SCHEMA,
+)
 from sibyl_core.backends.surreal.schema_version import (
     SCHEMA_VERSION_TABLE,
     SchemaMigration,
@@ -70,6 +78,8 @@ CONTENT_TABLES = (
     "eval_consolidations",
     "dream_source_checkpoints",
     "dream_source_cursors",
+    "memory_validation_executions",
+    "memory_validation_attempts",
     "memory_usage_events",
     "api_idempotency_records",
     "source_imports",
@@ -79,7 +89,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 36
+CONTENT_SCHEMA_CURRENT_VERSION = 40
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -124,7 +134,10 @@ CONTENT_DREAM_CHECKPOINT_DEFINITIONS = (
     _SCHEMA_DIR / "36_dream_source_checkpoints.surql"
 ).read_text(encoding="utf-8")
 CONTENT_SCHEMA_DEFINITIONS = (
-    _load_schema_file("10_tables.surql") + "\n" + CONTENT_DREAM_CHECKPOINT_DEFINITIONS
+    _load_schema_file("10_tables.surql")
+    + "\n"
+    + CONTENT_DREAM_CHECKPOINT_DEFINITIONS
+    + VALIDATION_EXECUTION_SCHEMA
 )
 
 
@@ -249,6 +262,8 @@ DEFINE FIELD OVERWRITE status ON backups TYPE string DEFAULT 'pending'
 """
 
 CONTENT_PERMISSION_MIGRATION_DEFINITIONS = """
+ALTER TABLE IF EXISTS memory_validation_executions PERMISSIONS NONE;
+ALTER TABLE IF EXISTS memory_validation_attempts PERMISSIONS NONE;
 ALTER TABLE IF EXISTS dream_source_checkpoints PERMISSIONS NONE;
 ALTER TABLE IF EXISTS dream_source_cursors PERMISSIONS NONE;
 ALTER TABLE IF EXISTS eval_consolidations PERMISSIONS NONE;
@@ -998,6 +1013,26 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             version=36,
             name="content_dream_source_checkpoints",
             statements=tuple(split_statements(CONTENT_DREAM_CHECKPOINT_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=37,
+            name="content_memory_validation_execution",
+            statements=(*split_statements(VALIDATION_EXECUTION_SCHEMA), VALIDATION_PURGE_EVENT),
+        ),
+        SchemaMigration(
+            version=38,
+            name="content_source_write_witness",
+            statements=tuple(split_statements(SOURCE_STATE_WITNESS_DEFINITION)),
+        ),
+        SchemaMigration(
+            version=39,
+            name="content_validation_promotion_binding",
+            statements=tuple(split_statements(VALIDATION_PROMOTION_SCHEMA)),
+        ),
+        SchemaMigration(
+            version=40,
+            name="content_validation_receipt_recovery",
+            statements=(VALIDATION_RECEIPT_RECOVERY_SCHEMA, VALIDATION_RECEIPT_PURGE_EVENT),
         ),
     )
 

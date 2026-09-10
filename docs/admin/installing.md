@@ -27,6 +27,8 @@ controller for TLS and routing.
 ## Prerequisites
 
 - Kubernetes cluster with a block-storage CSI driver.
+- A persistent claim shared by API and worker for completed validation receipts (ReadWriteMany
+  access for multi-node replicas).
 - Helm 3.
 - A Gateway API-compatible controller or classic Ingress controller.
 - A secrets injector such as External Secrets Operator, Sealed Secrets, or your cloud KMS-backed
@@ -86,6 +88,8 @@ oidc:
 
 backend:
   existingSecret: sibyl-secrets
+  validationReceipts:
+    existingClaim: sibyl-validation-receipts
   env:
     SIBYL_ENVIRONMENT: "production"
     SIBYL_PUBLIC_URL: "https://sibyl.example.com"

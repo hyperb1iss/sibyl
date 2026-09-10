@@ -268,7 +268,12 @@ async def test_dream_checkpoint_upgrade_preserves_existing_raw_source(store):
 
     assert await get_schema_version(store.execute_query, name="content") == 35
     await bootstrap_content_schema(store)
-    assert await get_schema_version(store.execute_query, name="content") == 36
+    from sibyl_core.backends.surreal.content_schema import CONTENT_SCHEMA_CURRENT_VERSION
+
+    assert (
+        await get_schema_version(store.execute_query, name="content")
+        == CONTENT_SCHEMA_CURRENT_VERSION
+    )
     after = await store.execute_query(
         "SELECT * FROM raw_captures WHERE uuid=$uuid;", uuid=memory.id
     )

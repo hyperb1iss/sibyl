@@ -161,3 +161,45 @@ def test_e2e_ci_tasks_are_finite_tasks() -> None:
         assert task.get("preset") is None
         assert options.get("runInCI", True) is True
         assert options.get("persistent", False) is False
+
+
+def test_test_suites_use_independent_runners_without_losing_coverage() -> None:
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text())
+    job = workflow["jobs"]["test-suites"]
+    assert job["needs"] == "changes"
+    assert job["if"] == "needs.changes.outputs.run_tests == 'true'"
+    assert job["strategy"]["fail-fast"] is False
+    suites = job["strategy"]["matrix"]["include"]
+    assert {entry["suite"]: entry["command"] for entry in suites} == {
+        "api": "moon run api:test-cov",
+        "cli": "moon run cli:test-cov",
+        "core": "moon run core:test-cov",
+        "web": "moon run web:test-cov",
+        "eval": "moon run bench-gate && moon run bench-gate-test",
+    }
+    assert {entry["coverage"] for entry in suites if entry["coverage"]} == {
+        "apps/api/coverage.xml",
+        "apps/cli/coverage.xml",
+        "packages/python/sibyl-core/coverage.xml",
+        "apps/web/coverage.xml",
+    }
+    upload = next(step for step in job["steps"] if step.get("name") == "Upload coverage")
+    assert upload["with"]["files"] == "${{ matrix.coverage }}"
+    assert upload["if"] == "matrix.coverage != ''"
+
+
+@pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped"])
+def test_stable_package_check_requires_all_suites(result: str) -> None:
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text())
+    job = workflow["jobs"]["tests"]
+    assert job["name"] == "Package Tests"
+    assert job["needs"] == ["changes", "test-suites"]
+    assert job["if"] == "always() && needs.changes.outputs.run_tests == 'true'"
+    step = job["steps"][0]
+    assert step["env"]["SUITE_RESULT"] == "${{ needs.test-suites.result }}"
+    completed = subprocess.run(  # noqa: S603 - execute the checked-in workflow gate
+        ["/bin/bash", "-c", step["run"]],
+        env={"SUITE_RESULT": result},
+        check=False,
+    )
+    assert (completed.returncode == 0) is (result == "success")

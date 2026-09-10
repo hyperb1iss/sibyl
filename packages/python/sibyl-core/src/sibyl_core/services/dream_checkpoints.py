@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import TypeAdapter
 
 from sibyl_core.backends.surreal import SurrealContentClient
+from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.memory_pipeline.observations import evidence_hash
 from sibyl_core.models.reflection import ReflectionCandidate
 from sibyl_core.services import content_client
@@ -111,8 +112,12 @@ class CheckpointReflectionExtractor:
                             OR $state.incarnation != $incarnation OR $state.generation != $generation {
                             THROW 'Dream extraction source changed';
                         };
+                        __SOURCE_WRITE_WITNESS__
                         INSERT IGNORE INTO dream_source_checkpoints $row;
-                    };""",
+                    };""".replace(
+                        "__SOURCE_WRITE_WITNESS__",
+                        "LET $source_states_to_fence=[$state];" + SOURCE_STATE_WRITE_WITNESS,
+                    ),
                     org=self.work.snapshot.memory.organization_id,
                     source_id=self.work.snapshot.memory.id,
                     revision=self.work.snapshot.memory.revision,
@@ -151,6 +156,7 @@ async def complete_dream_stage(work: DreamSourceWork, result: dict[str, object])
                     OR $state.incarnation != $incarnation OR $state.generation != $generation {
                     RETURN {completed: false};
                 };
+                __SOURCE_WRITE_WITNESS__
                 LET $stage = (SELECT * FROM dream_source_checkpoints WHERE uuid = $uuid LIMIT 1)[0];
                 IF $stage = NONE OR $stage.request_json != $request_json {
                     THROW 'Dream checkpoint request differs';
@@ -160,7 +166,10 @@ async def complete_dream_stage(work: DreamSourceWork, result: dict[str, object])
                         WHERE uuid = $uuid;
                 };
                 RETURN {completed: true};
-            };""",
+            };""".replace(
+                    "__SOURCE_WRITE_WITNESS__",
+                    "LET $source_states_to_fence=[$state];" + SOURCE_STATE_WRITE_WITNESS,
+                ),
                 org=source.organization_id,
                 source_id=source.id,
                 revision=source.revision,
@@ -282,13 +291,17 @@ async def insert_dream_candidate(
                 OR $state.incarnation != $incarnation OR $state.generation != $generation {
                 THROW 'Dream candidate source changed';
             };
+            __SOURCE_WRITE_WITNESS__
             LET $existing = (SELECT * FROM raw_captures WHERE uuid = $candidate_id LIMIT 1)[0];
             LET $bindings = $stage.candidate_fingerprints ?? {};
             LET $expected = $bindings[$candidate_id];
             IF $expected != NONE {
                 IF $existing = NONE { THROW 'Dream candidate was purged'; };
                 LET $memory = $existing;
-                IF """
+                IF """.replace(
+                "__SOURCE_WRITE_WITNESS__",
+                "LET $source_states_to_fence=[$state];" + SOURCE_STATE_WRITE_WITNESS,
+            )
             + fingerprint
             + """ != $expected.stored {
                     THROW 'Dream candidate immutable result changed';

@@ -248,6 +248,10 @@ def validate_integrity_archive(
             or not isinstance(association.get("authority_ceiling"), dict)
         ):
             raise ValueError("archive derivation body or authority is malformed")
+        if association.get("validation_binding_json") is not None:
+            from sibyl_core.services.validation_promotion import ValidationBinding
+
+            ValidationBinding.model_validate_json(association["validation_binding_json"])
         from sibyl_core.services.memory_derivations import observation_from_record
 
         for value in association["observations"]:
