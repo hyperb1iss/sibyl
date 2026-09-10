@@ -218,10 +218,10 @@ jobs:
       matrix:
         include:
           - profile: defaults
-            values: '["--set","backend.env.SIBYL_ENVIRONMENT=development"]'
+            values: '["--set","backend.env.SIBYL_ENVIRONMENT=development","--set","backend.validationReceipts.existingClaim=ci-validation-receipts"]'
             worker: absent
           - profile: production-redis
-            values: '["--set","backend.existingSecret=sibyl-secrets","--set","coordinationBackend=redis","--set","backend.redis.password=ci-only","--set","publicUrl=https://sibyl.example.test"]'
+            values: '["--set","backend.existingSecret=sibyl-secrets","--set","coordinationBackend=redis","--set","backend.redis.password=ci-only","--set","publicUrl=https://sibyl.example.test","--set","backend.validationReceipts.existingClaim=ci-validation-receipts"]'
             worker: present
     steps:
       - uses: actions/checkout@v7

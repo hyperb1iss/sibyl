@@ -20,6 +20,10 @@ Release builds update `version` and `appVersion` from the repository `VERSION` f
 Release charts are published to the `sibyl` Helm repository on the `gh-pages` branch. The repository
 serves two charts: `sibyl` (the application) and `sibyl-surrealdb` (a SurrealDB wrapper).
 
+Provision a persistent claim before installation and set
+`backend.validationReceipts.existingClaim` in `values.yaml`. API and worker must
+share that claim; multi-node replicas require ReadWriteMany storage.
+
 ```bash
 # From the published Helm repository (recommended)
 helm repo add sibyl https://raw.githubusercontent.com/hyperb1iss/sibyl/gh-pages
@@ -682,6 +686,8 @@ backend:
     tag: "1.3.2"
     pullPolicy: Always
   existingSecret: sibyl-secrets
+  validationReceipts:
+    existingClaim: sibyl-validation-receipts
   surreal:
     url: "ws://prod-surrealdb.internal:8000/rpc"
     username: "root"
@@ -799,7 +805,7 @@ The chart includes these templates:
 helm template sibyl ./charts/sibyl -f values.yaml
 
 # Debug with notes
-helm install sibyl ./charts/sibyl --debug --dry-run
+helm install sibyl ./charts/sibyl -f values.yaml --debug --dry-run
 
 # Get release values
 helm get values sibyl -n sibyl

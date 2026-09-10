@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import shutil
 import subprocess
 
@@ -965,3 +966,35 @@ def test_production_compose_validation_receipts_share_durable_state() -> None:
         "10001:10001",
         "/home/sibyl/.sibyl",
     ]
+
+
+@requires_helm
+@pytest.mark.parametrize("profile", ["defaults", "production-redis"])
+def test_helm_ci_profile_renders_exact_workflow_arguments(profile: str) -> None:
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text())
+    profiles = workflow["jobs"]["helm"]["strategy"]["matrix"]["include"]
+    selected = next(item for item in profiles if item["profile"] == profile)
+    assert _HELM_BINARY is not None
+    result = subprocess.run(  # noqa: S603
+        [_HELM_BINARY, "template", "sibyl", "charts/sibyl", *json.loads(selected["values"])],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    deployments = [
+        item
+        for item in yaml.safe_load_all(result.stdout)
+        if item and item.get("kind") == "Deployment"
+    ]
+    backend_pods = [
+        item["spec"]["template"]["spec"]
+        for item in deployments
+        if item["metadata"]["name"] in {"sibyl-backend", "sibyl-worker"}
+    ]
+    assert backend_pods
+    for pod in backend_pods:
+        volume = next(item for item in pod["volumes"] if item["name"] == "validation-receipts")
+        assert volume["persistentVolumeClaim"]["claimName"] == "ci-validation-receipts"
+    assert ("name: sibyl-worker" in result.stdout) == (selected["worker"] == "present")
