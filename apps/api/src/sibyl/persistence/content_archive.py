@@ -23,7 +23,9 @@ from sibyl_core.backends.surreal.schema_invariants import (
 
 log = structlog.get_logger()
 
-CONTENT_ARCHIVE_VERSION = "2.0"
+CONTENT_ARCHIVE_VERSION = "2.1"
+_INTEGRITY_ARCHIVE_VERSIONS = {"2.0", CONTENT_ARCHIVE_VERSION}
+_DREAM_ARCHIVE_TABLES = frozenset({"dream_source_checkpoints", "dream_source_cursors"})
 
 
 @dataclass(frozen=True)
@@ -199,6 +201,27 @@ _CONTENT_ARCHIVE_TABLE_SPECS = (
         delete_by_identity_sql="DELETE FROM backups WHERE uuid = $identity;",
         delete_all_sql="DELETE FROM backups;",
         create_sql="CREATE backups CONTENT $record;",
+    ),
+)
+
+_CONTENT_ARCHIVE_TABLE_SPECS += (
+    ContentArchiveTableSpec(
+        name="dream_source_checkpoints",
+        source_identity_field="id",
+        target_identity_field="uuid",
+        select_sql="SELECT * FROM dream_source_checkpoints ORDER BY id ASC;",
+        delete_by_identity_sql="DELETE dream_source_checkpoints WHERE uuid = $identity;",
+        delete_all_sql="DELETE dream_source_checkpoints;",
+        create_sql="CREATE dream_source_checkpoints CONTENT $record;",
+    ),
+    ContentArchiveTableSpec(
+        name="dream_source_cursors",
+        source_identity_field="organization_id",
+        target_identity_field="organization_id",
+        select_sql="SELECT * FROM dream_source_cursors ORDER BY id ASC;",
+        delete_by_identity_sql="DELETE dream_source_cursors WHERE organization_id = $identity;",
+        delete_all_sql="DELETE dream_source_cursors;",
+        create_sql="CREATE dream_source_cursors CONTENT $record;",
     ),
 )
 
@@ -384,7 +407,9 @@ def _clean_content_archive_statements(organization_id: str | None) -> str:
         [
             spec
             for spec in _CONTENT_ARCHIVE_TABLE_SPECS
-            if spec.name != "raw_captures" and spec.name not in _RETAINED_OPERATION_TABLES
+            if spec.name != "raw_captures"
+            and spec.name not in _RETAINED_OPERATION_TABLES
+            and spec.name not in _DREAM_ARCHIVE_TABLES
         ],
         key=lambda spec: spec.name not in _CONTENT_RELATION_ARCHIVE_TABLES,
     )
@@ -478,8 +503,15 @@ def _prepare_content_source_integrity(payload, tables, organization_id):
     from sibyl_core.migrate.source_integrity import validate_integrity_archive
 
     version = payload.get("version", "1.0")
-    if version == CONTENT_ARCHIVE_VERSION and set(CONTENT_ARCHIVE_TABLES) - set(tables):
+    required = set(CONTENT_ARCHIVE_TABLES)
+    if version == "2.0":
+        required -= _DREAM_ARCHIVE_TABLES
+    if version in _INTEGRITY_ARCHIVE_VERSIONS and required - set(tables):
         raise ValueError("current content archive is missing required tables")
+    if version != CONTENT_ARCHIVE_VERSION and any(
+        tables.get(name) for name in _DREAM_ARCHIVE_TABLES
+    ):
+        raise ValueError("dream checkpoints require content archive 2.1")
     for table, rows in tables.items():
         if table not in CONTENT_ARCHIVE_TABLES or not isinstance(rows, list):
             raise ValueError("content archive has an unknown or malformed table")
@@ -494,10 +526,10 @@ def _prepare_content_source_integrity(payload, tables, organization_id):
                 and str(row.get("organization_id")) != organization_id
             ):
                 raise ValueError("content archive row is outside restore organization")
-    if version not in {"1.0", CONTENT_ARCHIVE_VERSION}:
+    if version not in {"1.0", *_INTEGRITY_ARCHIVE_VERSIONS}:
         raise ValueError("unsupported content archive version")
     integrity = payload.get("source_integrity")
-    if version == CONTENT_ARCHIVE_VERSION:
+    if version in _INTEGRITY_ARCHIVE_VERSIONS:
         scope = (
             [organization_id]
             if organization_id is not None
@@ -510,7 +542,7 @@ def _prepare_content_source_integrity(payload, tables, organization_id):
         raise ValueError("legacy content archive cannot carry unrecognized integrity")
 
     unavailable_ids: set[str] = set()
-    if version != CONTENT_ARCHIVE_VERSION:
+    if version not in _INTEGRITY_ARCHIVE_VERSIONS:
         from sibyl_core.migrate.legacy_source_archive import build_legacy_source_archive
 
         legacy_rows = tables.get("raw_captures", [])
@@ -618,6 +650,10 @@ def _auxiliary_restore_statement(
             "!= array::len($existing) { "
             "THROW 'archive identity belongs to another organization'; };\n"
         )
+    if spec.name in _DREAM_ARCHIVE_TABLES:
+        from sibyl_core.services.dream_checkpoints import archive_dream_restore_statement
+
+        return existing + ownership_guard + archive_dream_restore_statement(spec.name, record)
     conversion = ""
     if spec.name in _RETAINED_OPERATION_TABLES:
         fields = ["created_at"] + (
@@ -703,6 +739,9 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
             record[spec.target_identity_field] = identity
             record, dropped = _drop_undeclared_fields(record, declared)
             if dropped:
+                if spec.name in _DREAM_ARCHIVE_TABLES:
+                    errors.append(f"{spec.name} has undeclared checkpoint fields")
+                    continue
                 dropped_fields.setdefault(spec.name, set()).update(dropped)
 
             if spec.name == "eval_attempts" and record.get("admitted_at") is None:
@@ -761,7 +800,7 @@ async def restore_content_archive_payload(
 
     try:
         await bootstrap_content_schema(client, reset=False)
-        if payload.get("version", "1.0") != CONTENT_ARCHIVE_VERSION:
+        if payload.get("version", "1.0") not in _INTEGRITY_ARCHIVE_VERSIONS:
             integrity, legacy_dropped = await _filter_legacy_source_fields(client, integrity, scope)
             if legacy_dropped:
                 dropped_fields["raw_captures"] = legacy_dropped

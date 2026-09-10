@@ -35,7 +35,9 @@ def seal_archive_lineage(
         (SourceKind.GRAPH_ENTITY, graph, "3.0"),
         (SourceKind.RAW_CAPTURE, content, "2.0"),
     ):
-        if payload is None or payload.get("version") != current_version:
+        if payload is None or payload.get("version") not in (
+            {"2.0", "2.1"} if kind is SourceKind.RAW_CAPTURE else {current_version}
+        ):
             continue
         section = payload.get("source_integrity")
         organizations = section.get("organizations") if isinstance(section, dict) else None
