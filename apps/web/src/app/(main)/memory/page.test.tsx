@@ -226,9 +226,13 @@ describe('MemoryContent', () => {
 
     expect(screen.getByText('Memory Workspace')).toBeInTheDocument();
     expect(screen.getByText('Recent Captures')).toBeInTheDocument();
-    expect(screen.getByText('Review Actions')).toBeInTheDocument();
+    expect(screen.queryByText('Review Actions')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /inspect captures/i })).toHaveAttribute(
+      'href',
+      '/memory/captures'
+    );
     expect(screen.getByText('Recent Imports')).toBeInTheDocument();
-    expect(screen.getByText('Reflection Queue')).toBeInTheDocument();
+    expect(screen.getByText('Reflection Candidates')).toBeInTheDocument();
     expect(screen.getByText('Agent Access')).toBeInTheDocument();
     expect(screen.getByText('Terminal capture')).toBeInTheDocument();
     expect(screen.getByText('Mailbox import')).toBeInTheDocument();

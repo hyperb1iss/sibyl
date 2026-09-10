@@ -590,6 +590,10 @@ _SCOPE_READERS_THAT_DO_NOT_AUTHORIZE = {
     "services/content_raw_persistence.py::get_raw_memory_by_source_id": "matches a stored source id",
     "session_bundle.py::summarize_memory": "serializes the scope for display",
     "session_bundle.py::summarize_raw_memory": "serializes the scope for display",
+    "services/dream_checkpoints.py::insert_dream_candidate": (
+        "write identity: requires the prepared candidate scope to equal its authorized source; "
+        "does not decide read visibility"
+    ),
     "tools/add.py::add": "write guard: refuses a scope it was not authorized to keep",
     "tools/admin.py::_normalized_backup_metadata": "write stamp for a restored row",
     "tools/reflect.py::_persist_reflection_source_review": "passes an authorized scope to a write",

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from sibyl_core.services.dream_checkpoints import DreamSourceWork
 
 import structlog
 
@@ -65,6 +68,7 @@ async def reflect_memory(
     existing_source_id: str | None = None,
     limit: int = 12,
     extractor: ReflectionExtractor | None = None,
+    dream_work: DreamSourceWork | None = None,
 ) -> ReflectionPack:
     """Reflect raw notes into reviewable, optionally persisted memory candidates."""
 
@@ -298,8 +302,12 @@ async def reflect_memory(
         )
     validate_reflection_candidates(candidates, require_source_ids=persist)
 
+    if dream_work is not None:
+        from sibyl_core.services.dream_checkpoints import checkpoint_prepared_candidates
+
+        candidates = await checkpoint_prepared_candidates(dream_work, candidates)
     persisted: list[ReflectionCandidate] = []
-    for candidate in candidates:
+    for candidate_index, candidate in enumerate(candidates):
         if not persist:
             persisted.append(candidate)
             continue
@@ -320,7 +328,13 @@ async def reflect_memory(
             metadata["reflection_source_id"] = source_id
         if persist_review:
             candidate_metadata = {**metadata, **persist_policy_metadata}
+            dream_kwargs = {}
+            if dream_work is not None:
+                from sibyl_core.services.dream_checkpoints import DreamCandidateWrite
+
+                dream_kwargs["dream_write"] = DreamCandidateWrite(dream_work, candidate_index)
             review = await _persist_reflection_candidate_review(
+                **dream_kwargs,
                 candidate=replace(candidate, metadata=candidate_metadata),
                 organization_id=str(organization_id),
                 principal_id=str(principal_id),

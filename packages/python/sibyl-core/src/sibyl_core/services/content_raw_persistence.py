@@ -14,6 +14,7 @@ from sibyl_core.auth.memory_policy import (
     MEMORY_PROVENANCE_METADATA_KEYS,
 )
 from sibyl_core.backends.surreal import SurrealContentClient
+from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.embeddings.providers import (
     EmbeddingProvider,
 )
@@ -43,6 +44,7 @@ from sibyl_core.services.eval_publication_guards import PUBLICATION_ADMISSION_GU
 
 if TYPE_CHECKING:
     from sibyl_core.memory_pipeline.observations import SourceObservation
+    from sibyl_core.services.dream_checkpoints import DreamCandidateWrite
 
 _RAW_MEMORY_EMBEDDING_AUTO = object()
 
@@ -369,6 +371,7 @@ async def remember_raw_memory(
     entity_type: str = "raw_memory",
     embedding_provider: EmbeddingProvider | object | None = _RAW_MEMORY_EMBEDDING_AUTO,
     source_memories: Sequence[RawMemory] = (),
+    dream_write: DreamCandidateWrite | None = None,
     source_observations: Sequence[SourceObservation] = (),
     accessible_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
@@ -403,6 +406,12 @@ async def remember_raw_memory(
         ),
         captured_at=models.utcnow(),
     )
+    if dream_write is not None:
+        if source_observations or len(source_memories) != 1:
+            raise ValueError("Dream review requires its single captured source")
+        if source_memories[0] != dream_write.work.snapshot.memory:
+            raise ValueError("Dream review source snapshot differs")
+        memory.id = dream_write.id
     if source_memories:
         memory.metadata[SOURCE_BINDINGS_KEY] = source_revision_bindings(source_memories)
         memory.metadata["raw_source_ids"] = list(
@@ -428,7 +437,13 @@ async def remember_raw_memory(
     )
     memory = await _raw_memory_with_embedding(memory, provider)
     async with content_client.surreal_content_client() as client:
-        if source_observations:
+        if dream_write is not None:
+            from sibyl_core.services.dream_checkpoints import insert_dream_candidate
+
+            record = await insert_dream_candidate(
+                client, models.raw_memory_record(memory), dream_write
+            )
+        elif source_observations:
             from sibyl_core.services.memory_derivations import raw_derivation_record
 
             authority = SourceReadAuthority(
@@ -601,6 +616,7 @@ async def remember_reflection_candidate_review(
     suggested_scope_key: str | None = None,
     extraction_prompt_metadata: dict[str, object] | None = None,
     source_memories: Sequence[RawMemory] = (),
+    dream_write: DreamCandidateWrite | None = None,
     accessible_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
     accessible_delegations: Iterable[str] | None = None,
@@ -632,6 +648,7 @@ async def remember_reflection_candidate_review(
         capture_surface="reflection_candidate",
         entity_type=candidate.kind,
         source_memories=source_memories,
+        dream_write=dream_write,
         accessible_projects=accessible_projects,
         accessible_teams=accessible_teams,
         accessible_delegations=accessible_delegations,
@@ -924,6 +941,14 @@ async def save_raw_memory(
                                 THROW 'publication_source_observation_changed';
                             };
                         };
+                        LET $observed_ids = array::distinct($source_observations.map(|$s| $s.uuid));
+                        LET $source_states_to_fence = (SELECT * FROM source_states
+                            WHERE organization_id=$organization_id AND source_kind='raw_capture'
+                                AND source_id IN $observed_ids);
+                        IF array::len($source_states_to_fence) != array::len($observed_ids) {
+                            THROW 'publication_source_observation_changed';
+                        };
+                        __SOURCE_STATE_WRITE_WITNESS__
                         LET $current = (SELECT revision FROM raw_captures
                             WHERE organization_id = $organization_id AND uuid = $uuid LIMIT 1)[0];
                         LET $next = object::from_entries(array::concat(
@@ -979,7 +1004,9 @@ async def save_raw_memory(
                         };
                         RETURN $saved;
                         };
-                    """.replace("__PUBLICATION_ADMISSION_GUARD__", PUBLICATION_ADMISSION_GUARD),
+                    """.replace(
+                        "__PUBLICATION_ADMISSION_GUARD__", PUBLICATION_ADMISSION_GUARD
+                    ).replace("__SOURCE_STATE_WRITE_WITNESS__", SOURCE_STATE_WRITE_WITNESS),
                     organization_id=memory.organization_id,
                     publication_operation_id=publication_operation_id
                     or (
