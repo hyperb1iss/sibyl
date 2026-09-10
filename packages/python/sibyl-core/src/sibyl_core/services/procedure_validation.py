@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from typing import Any
@@ -12,7 +13,7 @@ from pydantic_ai import Agent, NativeOutput
 from sibyl_core.ai.llm.config import LLMSurface, resolve_llm_config
 from sibyl_core.ai.llm.extractor import Extractor
 from sibyl_core.ai.providers import build_model
-from sibyl_core.ai.transport import observe_transport_attempts, transport_policy
+from sibyl_core.ai.transport import transport_policy
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.config import settings
 from sibyl_core.services.content_models import (
@@ -21,7 +22,7 @@ from sibyl_core.services.content_models import (
 )
 from sibyl_core.services.eval_publication_guards import verify_publication_admissions
 from sibyl_core.services.memory_policy import _authorize_share_source_read
-from sibyl_core.services.procedure_artifact import resolve_procedure_artifact
+from sibyl_core.services.procedure_artifact import ProcedureArtifact, resolve_procedure_artifact
 from sibyl_core.services.validation_execution import (
     ValidationExecution,
     ValidationExecutionUnavailable,
@@ -32,8 +33,8 @@ from sibyl_core.tasks.consolidation import (
     METADATA_KEY,
     ConsolidationInputBudgetExceeded,
     DraftConditionalProcedure,
+    procedure_review_citations,
 )
-from sibyl_core.tasks.episode_evidence import EvidenceCitation
 from sibyl_core.tasks.memory_validation import (
     CriticOutput,
     OriginalValidationEvidence,
@@ -46,15 +47,15 @@ from sibyl_core.tasks.procedure_review import review_digest
 # Hash the server's representation before SDK datetime/null normalization. The
 # same selection closes the final write race without persisting source bodies.
 _SNAPSHOT = """
-LET $ledger = (SELECT * FROM eval_consolidations WHERE organization_id = $org
+LET $validation_ledger = (SELECT * FROM eval_consolidations WHERE organization_id = $org
     AND candidate_id = $parent LIMIT 1)[0];
-LET $ids = array::distinct(array::concat([$parent], ($ledger.admission_bindings ?? []).map(|$b| $b.capture_id)));
+LET $ids = array::distinct(array::concat([$parent], ($validation_ledger.admission_bindings ?? []).map(|$b| $b.capture_id)));
 LET $captures = (SELECT * FROM raw_captures WHERE organization_id = $org AND uuid IN $ids ORDER BY uuid);
 LET $states = (SELECT * OMIT validation_write_witness FROM source_states WHERE organization_id = $org AND source_kind = 'raw_capture'
     AND source_id IN $ids ORDER BY source_id);
 LET $attempts = (SELECT * FROM eval_attempts WHERE organization_id = $org
     AND capture_id IN $ids ORDER BY uuid);
-LET $snapshot = {ledger: $ledger, captures: $captures, states: $states, attempts: $attempts};
+LET $snapshot = {ledger: $validation_ledger, captures: $captures, states: $states, attempts: $attempts};
 LET $snapshot_digest = crypto::sha256(type::string($snapshot));
 """
 
@@ -65,6 +66,8 @@ class AuthorizedProcedureValidation:
     snapshot_sha256: str
     source_ids: list[str]
     source_bindings: list[dict[str, Any]]
+    artifact: ProcedureArtifact
+    assignments: tuple[dict[str, Any], ...]
 
 
 async def prepare_stored_procedure_validation(
@@ -133,8 +136,8 @@ async def prepare_stored_procedure_validation(
     audit = artifact.candidate.metadata[METADATA_KEY]
     procedure = DraftConditionalProcedure.model_validate(audit["procedure"])
     evidence = []
-    citations = {}
-    for index, episode in enumerate(artifact.group.episodes):
+    citations = await asyncio.to_thread(procedure_review_citations, artifact.group)
+    for episode in artifact.group.episodes:
         source_id = episode.stored_sources[0].source_id
         evidence.append(
             OriginalValidationEvidence(
@@ -156,7 +159,6 @@ async def prepare_stored_procedure_validation(
                 "signed",
             )
         )
-        citations[f"s{index}"] = EvidenceCitation(episode.episode_id, ((0, len(episode.artifact)),))
     prepared = prepare_procedure_validation(
         procedure,
         parent_operation_id=ledger["uuid"],
@@ -172,6 +174,8 @@ async def prepare_stored_procedure_validation(
             {key: states[identifier][key] for key in ("source_id", "incarnation", "generation")}
             for identifier in sorted(by_id)
         ],
+        artifact,
+        tuple(json.loads(row["assignment_json"]) for row in data["attempts"]),
     )
 
 
@@ -258,73 +262,22 @@ async def validate_stored_procedure(
         + SOURCE_STATE_WRITE_WITNESS,
         guard_params={"parent": parent_id, "expected": original.snapshot_sha256},
     )
-    claimed = await execution.begin(
-        parent_id=parent_id, source_ids=original.source_ids, policy=policy, request=request
-    )
-    if not claimed:
-        existing = await execution.load()
-        if existing is None or existing.get("state") not in {"recorded", "returned"}:
-            return await execution.result()
-    if claimed:
-        try:
-            await authorize()
-            current = await prepare_stored_procedure_validation(
-                organization_id, principal_id, parent_id
-            )
-            if current.snapshot_sha256 != original.snapshot_sha256:
-                raise ValidationExecutionUnavailable("Sources changed before dispatch")
-            with observe_transport_attempts(execution):
-                result = await run_memory_validation(original.prepared, extractor)
-        except (Exception, asyncio.CancelledError) as failure:
-            try:
-                await execution.record_failure(failure)
-            except Exception:
-                if isinstance(failure, asyncio.CancelledError):
-                    raise failure from None
-                raise
-            raise
-        # A cancellation after extraction must still retain its reported usage.
-        recording = asyncio.create_task(execution.record_result(result))
-        try:
-            await asyncio.shield(recording)
-        except asyncio.CancelledError as cancelled:
-            try:
-                await recording
-            except Exception:
-                raise cancelled from None
-            raise
-    try:
+    from sibyl_core.services.validation_stages import run_validation_stage
+
+    async def current():
         await authorize()
-        current = await prepare_stored_procedure_validation(
+        refreshed = await prepare_stored_procedure_validation(
             organization_id, principal_id, parent_id
         )
-        if current.snapshot_sha256 != original.snapshot_sha256:
-            raise ValidationExecutionUnavailable("Sources changed after validation")
-        rows = await _query(
-            "RETURN {"
-            + _SNAPSHOT
-            + "LET $source_states_to_fence=$states;"
-            + SOURCE_STATE_WRITE_WITNESS
-            + """
-            RETURN (UPDATE memory_validation_executions SET state = IF $snapshot_digest = $expected THEN 'returned' ELSE 'fenced' END
-                WHERE uuid = $uuid AND organization_id = $org AND principal_id = $principal
-                    AND state IN ['recorded', 'returned'] AND purged = false RETURN AFTER);
-        };""",
-            **execution.params,
-            parent=parent_id,
-            expected=original.snapshot_sha256,
-        )
-        if len(rows) != 1 or rows[0].get("state") != "returned":
-            raise ValidationExecutionUnavailable("Final validation source fence failed")
-    except (Exception, asyncio.CancelledError) as failure:
-        try:
-            await _query(
-                "UPDATE memory_validation_executions SET state = 'fenced' WHERE uuid = $uuid AND organization_id = $org AND principal_id = $principal AND state = 'recorded';",
-                **execution.params,
-            )
-        except Exception:
-            if isinstance(failure, asyncio.CancelledError):
-                raise failure from None
-            raise
-        raise
-    return await execution.result()
+        if refreshed.snapshot_sha256 != original.snapshot_sha256:
+            raise ValidationExecutionUnavailable("Validation sources changed")
+
+    return await run_validation_stage(
+        execution=execution,
+        parent_id=parent_id,
+        source_ids=original.source_ids,
+        request=request,
+        policy=policy,
+        check_current=current,
+        run=lambda: run_memory_validation(original.prepared, extractor),
+    )
