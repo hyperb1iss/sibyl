@@ -140,6 +140,34 @@ async def export_source_integrity(
     )
 
 
+def _source_visibility(row: dict[str, Any], kind: SourceKind) -> tuple[bool, tuple[object, ...]]:
+    """Read lifecycle and audience through the same adapters used by source reads."""
+    from sibyl_core.memory_pipeline.lifecycle import (
+        graph_metadata_recallable,
+        raw_memory_lifecycle_recallable,
+    )
+    from sibyl_core.services.content_models import raw_memory_from_record
+    from sibyl_core.services.graph_records import _entity_from_row
+
+    if kind is SourceKind.RAW_CAPTURE:
+        memory = raw_memory_from_record(row)
+        return (
+            memory.deleted_at is None and raw_memory_lifecycle_recallable(memory),
+            (
+                memory.principal_id,
+                memory.memory_scope.value,
+                memory.scope_key,
+                memory.project_id,
+                memory.agent_id,
+            ),
+        )
+    entity = _entity_from_row(row)
+    return graph_metadata_recallable(entity.metadata), tuple(
+        entity.metadata.get(key) or None
+        for key in ("principal_id", "memory_scope", "scope_key", "project_id", "agent_id")
+    )
+
+
 async def restore_source_integrity(
     execute_query: SurrealExecute,
     payload: object,
@@ -218,6 +246,20 @@ async def restore_source_integrity(
                 {"organization_id": key[0], "source_id": key[1], "reason": "retained_tombstone"}
             )
             continue
+        if row is not None and previous_row is not None and not trusted:
+            recallable, audience = _source_visibility(previous_row, kind)
+            _, incoming_audience = _source_visibility(row, kind)
+            if not recallable or audience != incoming_audience:
+                conflicts.append(
+                    {
+                        "organization_id": key[0],
+                        "source_id": key[1],
+                        "reason": "retained_source_revocation"
+                        if not recallable
+                        else "retained_source_authority",
+                    }
+                )
+                continue
         if row is None:
             if fresh or forward:
                 if previous_row is not None:
