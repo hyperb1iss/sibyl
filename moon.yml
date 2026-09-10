@@ -759,7 +759,7 @@ tasks:
     command:
       uv run pytest tools/tests/test_runtime_surface.py tools/tests/test_retrieval_mode_history.py
       tools/tests/test_longmemeval_v2_reader_replay.py
-      tools/tests/test_usage_rerank_harness.py -v
+      tools/tests/test_usage_rerank_harness.py tools/tests/test_installer_qualification.py -v
     inputs:
       - tools/**/*.py
       - benchmarks/git_provenance.py
@@ -1972,3 +1972,31 @@ tasks:
   e2e-down:
     command: docker compose --env-file /dev/null -f compose.e2e.yml down -v
     preset: server
+
+  installer-clean-machine:
+    command: python tools/installer/driver.py
+    inputs:
+      - install.sh
+      - tools/installer/**/*
+      - dist/*.whl
+    options:
+      cache: false
+
+  installer-harness-format:
+    script: |
+      set -eu
+      uv run --no-sync ruff check tools/installer --fix
+      uv run --no-sync ruff format tools/installer
+    options:
+      cache: false
+
+  installer-harness-check:
+    script: |
+      set -eu
+      uv run --no-sync ruff check tools/installer
+      uv run --no-sync ruff format --check tools/installer
+      uv run --no-sync ty check tools/installer
+    inputs:
+      - tools/installer/**/*.py
+    options:
+      cache: false
