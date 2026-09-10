@@ -150,6 +150,8 @@ async def restore_source_integrity(
     skip_existing: bool = True,
     global_scope: bool = False,
     clean_graph_auxiliary: bool = False,
+    auxiliary_statements: str = "",
+    auxiliary_parameters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Restore complete source units without lowering destination trust history."""
     from copy import deepcopy
@@ -321,8 +323,20 @@ async def restore_source_integrity(
             IF $existing = NONE {{ CREATE memory_derivations CONTENT $association; }}
             ELSE {{ UPDATE $existing.id CONTENT $association; }};
         }};
+        {auxiliary_statements}
         COMMIT TRANSACTION;
     """
+    extra = auxiliary_parameters or {}
+    if set(extra) & {
+        "organizations",
+        "kind",
+        "expected",
+        "deletes",
+        "writes",
+        "ledger_writes",
+        "association_writes",
+    }:
+        raise ValueError("archive auxiliary parameters conflict with source bindings")
     await execute_query(
         query,
         organizations=organizations,
@@ -332,5 +346,6 @@ async def restore_source_integrity(
         writes=native_archive_parameters(writes),
         ledger_writes=ledger_writes,
         association_writes=association_writes,
+        **extra,
     )
     return {"restored_source_ids": restored, "conflicts": conflicts}

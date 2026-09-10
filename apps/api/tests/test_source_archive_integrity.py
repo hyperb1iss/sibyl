@@ -104,7 +104,6 @@ async def test_global_restore_requires_explicit_operator_scope_before_client(mon
 
 
 async def test_explicit_global_clean_retains_omitted_org_highwater_and_fences_new_org(monkeypatch):
-    import pytest
 
     client = SurrealContentClient(url="memory://")
     await bootstrap_content_schema(client)
@@ -155,10 +154,12 @@ async def test_explicit_global_clean_retains_omitted_org_highwater_and_fences_ne
             return await execute(statement, **params)
 
         monkeypatch.setattr(client, "execute_query", race)
-        with pytest.raises(Exception, match="destination changed"):
-            await content_archive.restore_content_archive_payload(
-                payload, clean=True, global_scope=True
-            )
+        failed = await content_archive.restore_content_archive_payload(
+            payload, clean=True, global_scope=True
+        )
+        assert not failed.success
+        assert failed.rows_restored == 0
+        assert any("destination changed" in error for error in failed.errors)
         assert injected
         assert new_source is not None
         rows = await execute("SELECT * FROM raw_captures;")
