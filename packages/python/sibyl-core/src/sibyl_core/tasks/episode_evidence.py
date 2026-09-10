@@ -16,7 +16,7 @@ from sibyl_core.tasks._evidence_json import (
     share_exact_values,
 )
 
-PROJECTION_VERSION = "sibyl-controller-evidence-view-v1"
+PROJECTION_VERSION = "sibyl-controller-evidence-view-v2"
 EPISODE_VERSION = "sibyl-learning-episode-v1"
 TRACE_VERSION = "sibyl-coding-trace-v1"
 
@@ -272,7 +272,9 @@ class _EpisodeBuilder:
                 base, ("request", "options", "workspace_initial", "image", "interpreter")
             )
         elif kind == "tool_call":
-            view, paths = self.select(base, ("index", "tool_call_id", "name", "command", "call"))
+            view, paths = self.select(
+                base, ("index", "tool_call_id", "name", "command", "call", "argv")
+            )
         elif kind == "tool_result":
             for key in ("stdout", "stderr"):
                 self.encoded_alias((*base, key + "_base64"), (*base, key), json_value=False)

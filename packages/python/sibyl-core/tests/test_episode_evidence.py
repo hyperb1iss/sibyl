@@ -274,3 +274,68 @@ def test_projection_receipt_is_stable_across_hash_seeds() -> None:
         )
         results.append(process.stdout)
     assert results[0] == results[1]
+
+
+def test_launch_argv_is_visible_cited_and_changes_native_projection() -> None:
+    argv = [
+        "docker",
+        "run",
+        "--read-only",
+        "--tmpfs",
+        "/tmp:rw,nosuid,nodev,size=16777216",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges",
+        "image",
+        "-c",
+        "write-result",
+    ]
+    episode = _episode()
+    launch = deepcopy(episode["trace"][-1])
+    launch.update(kind="tool_call", index=3)
+    launch["payload"] = {"name": "command", "command": "write-result", "argv": argv}
+    episode["trace"].insert(3, launch)
+    artifact = json.dumps(episode).encode()
+    projection = project_episode("source", artifact, prefix="s0")
+    assert projection.view["events"][3]["argv"] == argv
+    assert argv in [
+        json.loads(artifact[start:end]) for start, end in projection.citations["s0.e3"].ranges
+    ]
+    assert any(
+        row["path"] == ["trace", 3, "payload", "argv"] and row["disposition"] == "visible"
+        for row in projection.coverage
+    )
+    group = _contrast_group()
+    group = group.model_copy(
+        update={
+            "episodes": tuple(
+                source.model_copy(
+                    update={
+                        "artifact": artifact,
+                        "artifact_sha256": hashlib.sha256(artifact).hexdigest(),
+                    }
+                )
+                for source in group.episodes
+            )
+        }
+    )
+    original = c._extraction_input(group)
+    assert original.projection_receipt["version"] == "sibyl-controller-evidence-view-v2"
+    assert "--read-only" in original.prompt and "--cap-drop=ALL" in original.prompt
+    episode["trace"][3]["payload"]["argv"].remove("--read-only")
+    changed = json.dumps(episode).encode()
+    group = group.model_copy(
+        update={
+            "episodes": tuple(
+                source.model_copy(
+                    update={
+                        "artifact": changed,
+                        "artifact_sha256": hashlib.sha256(changed).hexdigest(),
+                    }
+                )
+                for source in group.episodes
+            )
+        }
+    )
+    altered = c._extraction_input(group)
+    assert original.projection_receipt != altered.projection_receipt
+    assert "--read-only" not in altered.prompt
