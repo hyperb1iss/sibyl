@@ -139,7 +139,7 @@ function scopeDot(scope: MemoryScope | null): string {
 
 interface HeroProps {
   captureCount: number;
-  pendingCount: number;
+  unlinkedCount: number;
   recallCount: number;
   agentReaders: number;
   scopeChip: string | null;
@@ -147,7 +147,7 @@ interface HeroProps {
 
 function MemoryHero({
   captureCount,
-  pendingCount,
+  unlinkedCount,
   recallCount,
   agentReaders,
   scopeChip,
@@ -172,19 +172,13 @@ function MemoryHero({
               )}
             </div>
             <p className="text-[11px] text-sc-fg-muted">
-              Raw memory, imports, review, recall, and source-grounded synthesis.
+              Saved memory, imports, recall, and source-grounded synthesis.
             </p>
           </div>
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1 pl-10 text-[11px] sm:pl-0">
           <HeroStat icon={Database} tone="cyan" value={captureCount} label="captures" />
-          <HeroStat
-            icon={WarningCircle}
-            tone="yellow"
-            value={pendingCount}
-            label="to review"
-            pulse={pendingCount > 0}
-          />
+          <HeroStat icon={WarningCircle} tone="yellow" value={unlinkedCount} label="unlinked" />
           <HeroStat icon={Search} tone="coral" value={recallCount} label="recalls" />
           <HeroStat icon={Key} tone="purple" value={agentReaders} label="readers" />
         </div>
@@ -246,12 +240,6 @@ function MemoryExplainer({ onDismiss }: { onDismiss: () => void }) {
       body: 'Raw memory written from CLI, MCP, the web, or imports. Source of truth.',
     },
     {
-      icon: WarningCircle,
-      tone: 'yellow',
-      title: 'Review',
-      body: 'Captures or reflections waiting for you to confirm, link, or correct.',
-    },
-    {
       icon: Search,
       tone: 'coral',
       title: 'Recalls',
@@ -261,7 +249,7 @@ function MemoryExplainer({ onDismiss }: { onDismiss: () => void }) {
       icon: Eye,
       tone: 'purple',
       title: 'Inspections',
-      body: 'When someone opened a source to see what it is, who wrote it, and why.',
+      body: 'Optional source visits to inspect saved content, history, and correction controls.',
     },
   ];
 
@@ -278,7 +266,7 @@ function MemoryExplainer({ onDismiss }: { onDismiss: () => void }) {
       <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-sc-fg-subtle">
         What you're looking at
       </p>
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-2 sm:grid-cols-3">
         {concepts.map(concept => {
           const toneClass = {
             cyan: 'text-sc-cyan',
@@ -611,7 +599,6 @@ export function MemoryHome() {
   }
 
   const capturesQuery = useRawCaptures({ limit: 24 });
-  const pendingQuery = useRawCaptures({ review_state: 'pending', limit: 24 });
   const importsQuery = useRawCaptures({ capture_surface: 'source_import', limit: 8 });
   const reflectionsQuery = useRawCaptures({
     capture_surface: 'reflection_candidate',
@@ -625,11 +612,6 @@ export function MemoryHome() {
     () =>
       (capturesQuery.data?.captures ?? []).filter(capture => matchesCaptureScope(scope, capture)),
     [capturesQuery.data?.captures, scope]
-  );
-  const pending = useMemo(
-    () =>
-      (pendingQuery.data?.captures ?? []).filter(capture => matchesCaptureScope(scope, capture)),
-    [pendingQuery.data?.captures, scope]
   );
   const imports = useMemo(
     () =>
@@ -655,14 +637,9 @@ export function MemoryHome() {
   const recalls = events.filter(eventIsRecall);
   const agentAccess = events.filter(eventIsAgentAccess);
   const synthesisEvents = events.filter(event => event.action.includes('synthesis'));
-  const isLoading =
-    capturesQuery.isLoading &&
-    pendingQuery.isLoading &&
-    auditQuery.isLoading &&
-    spacesQuery.isLoading;
+  const isLoading = capturesQuery.isLoading && auditQuery.isLoading && spacesQuery.isLoading;
   const panelErrors = [
     capturesQuery.error,
-    pendingQuery.error,
     importsQuery.error,
     reflectionsQuery.error,
     auditQuery.error,
@@ -680,7 +657,7 @@ export function MemoryHome() {
     <div className="space-y-4">
       <MemoryHero
         captureCount={captures.length}
-        pendingCount={pending.length}
+        unlinkedCount={captures.filter(capture => !capture.entity_id).length}
         recallCount={recalls.length}
         agentReaders={agentReaders}
         scopeChip={scopeChip}
@@ -712,16 +689,11 @@ export function MemoryHome() {
           tone="cyan"
         />
         <PrimaryActionTile
-          href="/memory/captures?link=unlinked"
-          icon={WarningCircle}
-          label="Review Queue"
-          description={
-            pending.length > 0
-              ? `${pending.length} captures waiting on your review`
-              : 'Triage pending captures and reflections'
-          }
-          tone="coral"
-          badge={pending.length > 0 ? `${pending.length}` : undefined}
+          href="/memory/captures"
+          icon={FileText}
+          label="Inspect Captures"
+          description="Explore saved content or make an optional correction"
+          tone="cyan"
         />
       </div>
 
@@ -758,42 +730,19 @@ export function MemoryHome() {
             <CaptureRows captures={captures.slice(0, 6)} emptyLabel="No captures in this scope" />
           </Panel>
 
-          <Panel
-            title="Review Actions"
-            icon={WarningCircle}
-            iconTone="yellow"
-            count={pending.length}
-            action={
-              pending.length > 0 && (
-                <Link
-                  href="/memory/captures?link=unlinked"
-                  className="rounded text-[11px] font-medium text-sc-yellow transition-colors duration-200 hover:text-sc-yellow/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sc-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-sc-bg-elevated"
-                >
-                  Open Queue →
-                </Link>
-              )
-            }
-          >
-            <CaptureRows
-              captures={pending.slice(0, 5)}
-              emptyLabel="Inbox zero. No pending reviews."
-              linkToReview
-            />
-          </Panel>
-
           <div className="grid gap-4 lg:grid-cols-2">
             <Panel title="Recent Imports" icon={Upload} iconTone="cyan" count={imports.length}>
               <CaptureRows captures={imports.slice(0, 4)} emptyLabel="No source imports yet" />
             </Panel>
             <Panel
-              title="Reflection Queue"
+              title="Reflection Candidates"
               icon={LightBulb}
               iconTone="coral"
               count={reflections.length}
             >
               <CaptureRows
                 captures={reflections.slice(0, 4)}
-                emptyLabel="No reflection candidates waiting"
+                emptyLabel="No reflection candidates in this view"
                 linkToReview
               />
             </Panel>

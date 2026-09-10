@@ -6,7 +6,7 @@ export default function MemoryCapturesPage() {
     <RawCaptureReview
       basePath="/memory/captures"
       title="Memory Captures"
-      description="Review raw captures, graph linkage, and queued memory actions"
+      description="Inspect saved captures and graph links whenever you need to"
       breadcrumbItems={[
         { label: 'Home', href: '/' },
         { label: 'Memory', href: '/memory', icon: Database },
