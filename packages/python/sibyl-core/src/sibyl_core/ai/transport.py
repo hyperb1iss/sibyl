@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from importlib.metadata import version
-from typing import Any
+from typing import Any, Protocol
 
 from anthropic import DefaultAsyncHttpxClient as AnthropicHttpClient
 from openai import DefaultAsyncHttpxClient
@@ -36,6 +36,33 @@ class FailedExtractionUsage(BaseModel):
 _attempts: ContextVar[list[TransportAttempt] | None] = ContextVar(
     "llm_transport_attempts", default=None
 )
+
+
+class TransportObserver(Protocol):
+    """Persist safe attempt state without receiving request or response bodies.
+
+    A durable implementation must commit before_dispatch before returning.
+    An unfinished dispatch remains usage-unknown if the process disappears.
+    HTTP completion alone does not establish token usage or billed cost.
+    """
+
+    async def before_dispatch(self) -> str: ...
+
+    async def after_dispatch(self, attempt_id: str, outcome: TransportAttempt) -> None: ...
+
+
+_observer: ContextVar[TransportObserver | None] = ContextVar("llm_transport_observer", default=None)
+
+
+@contextmanager
+def observe_transport_attempts(observer: TransportObserver) -> Iterator[None]:
+    """Observe supported SDK hops independently of in-memory extraction receipts."""
+    token = _observer.set(observer)
+    try:
+        yield
+    finally:
+        _observer.reset(token)
+
 
 _reserve_attempt: ContextVar[Callable[[], Awaitable[None]] | None] = ContextVar(
     "llm_reserve_physical_attempt", default=None
@@ -89,20 +116,37 @@ async def _record_send(
     send: Callable[..., Awaitable[Any]], request: Any, *, request_id_header: str, **kwargs: Any
 ) -> Any:
     attempts = _attempts.get()
+    observer = _observer.get()
     if reserve := _reserve_attempt.get():
         await reserve()
+    attempt_id = await observer.before_dispatch() if observer is not None else None
+    if observer is not None and (not isinstance(attempt_id, str) or not attempt_id.strip()):
+        raise ValueError("transport observer must return an explicit attempt identity")
     try:
         response = await send(request, **kwargs)
     except (Exception, asyncio.CancelledError) as exc:
+        # Exception messages and request/response bodies may contain secrets.
+        outcome = TransportAttempt(exception_type=type(exc).__name__)
         if attempts is not None:
-            # Exception messages and request/response bodies may contain secrets.
-            attempts.append(TransportAttempt(exception_type=type(exc).__name__))
+            attempts.append(outcome)
+        if observer is not None and attempt_id is not None:
+            try:
+                await observer.after_dispatch(attempt_id, outcome)
+            except Exception:
+                if isinstance(exc, asyncio.CancelledError):
+                    # Cancellation must not become a retryable SDK connection error.
+                    # The committed dispatch still records an unknown outcome.
+                    raise exc from None
+                raise
         raise
+    request_id = response.headers.get(request_id_header)
+    if request_id is not None and re.fullmatch(r"[a-zA-Z0-9_.:-]{1,200}", request_id) is None:
+        request_id = None
+    outcome = TransportAttempt(status_code=response.status_code, request_id=request_id)
     if attempts is not None:
-        request_id = response.headers.get(request_id_header)
-        if request_id is not None and re.fullmatch(r"[a-zA-Z0-9_.:-]{1,200}", request_id) is None:
-            request_id = None
-        attempts.append(TransportAttempt(status_code=response.status_code, request_id=request_id))
+        attempts.append(outcome)
+    if observer is not None and attempt_id is not None:
+        await observer.after_dispatch(attempt_id, outcome)
     return response
 
 
