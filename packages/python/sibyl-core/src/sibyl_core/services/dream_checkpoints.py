@@ -387,3 +387,51 @@ async def advance_dream_cursor(organization_id: str, source_id: str, revision: i
             )
         )
     return len(rows) == 1 and rows[0].get("advanced") is True
+
+
+def archive_dream_restore_statement(table: str, record: dict[str, object]) -> str:
+    """Compile checked operation-history writes inside the raw restore transaction."""
+    if table == "dream_source_cursors":
+        if not isinstance(record.get("source_id"), str) or type(record.get("revision")) is not int:
+            raise ValueError("Malformed dream selection cursor")
+        return "IF array::len($existing) = 0 { CREATE dream_source_cursors CONTENT $record; };"
+    if table != "dream_source_checkpoints":
+        raise ValueError("Unknown dream archive table")
+    request = json.loads(str(record.get("request_json", "")))
+    if not isinstance(request, dict) or canonical(request) != record["request_json"]:
+        raise ValueError("Malformed dream checkpoint request")
+    if evidence_hash(request) != record.get("uuid"):
+        raise ValueError("Dream checkpoint identity differs")
+    from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
+
+    source = SourceIdentity(
+        str(record["organization_id"]), SourceKind.RAW_CAPTURE, str(record["source_id"])
+    )
+    if request.get("source") != source.key or not isinstance(request.get("incarnation"), str):
+        raise ValueError("Dream checkpoint source identity differs")
+    if type(request.get("generation")) is not int or request["generation"] < 1:
+        raise ValueError("Dream checkpoint generation differs")
+    candidates = _CANDIDATES.validate_json(str(record.get("extraction_json", "")))
+    validate_reflection_candidates(candidates, require_source_ids=False)
+    if record.get("prepared_json") is not None:
+        prepared = _CANDIDATES.validate_json(str(record["prepared_json"]))
+        validate_reflection_candidates(prepared, require_source_ids=False)
+    if record.get("completion_json") is not None and not isinstance(
+        json.loads(str(record["completion_json"])), dict
+    ):
+        raise ValueError("Malformed dream completion")
+    # These checked scalar values become literal JSON, never executable archive SQL.
+    incarnation = canonical(request["incarnation"])
+    generation = request["generation"]
+    return f"""
+        LET $source = (SELECT * FROM raw_captures WHERE uuid = $record.source_id
+            AND organization_id = $record.organization_id LIMIT 1)[0];
+        LET $state = (SELECT * FROM source_states WHERE source_id = $record.source_id
+            AND organization_id = $record.organization_id AND source_kind = 'raw_capture' LIMIT 1)[0];
+        IF $source = NONE OR $state = NONE OR $state.deleted != false
+            OR $state.incarnation != {incarnation} OR $state.generation < {generation} {{
+            THROW 'Dream archive source was revoked or replaced';
+        }};
+        IF array::len($existing) = 0 {{ CREATE dream_source_checkpoints CONTENT $record; }}
+        ELSE {{ IF $existing != [$record] {{ THROW 'Dream archive conflicts with retained stage'; }}; }};
+    """
