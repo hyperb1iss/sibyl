@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -125,6 +126,81 @@ def _configure_stores(monkeypatch, stores, active, org, tmp_path):
     return closes
 
 
+CREDENTIAL_TABLES = (
+    "user_sessions",
+    "api_keys",
+    "device_authorization_requests",
+    "api_key_project_scopes",
+    "api_key_memory_space_scopes",
+)
+
+
+async def _seed_credentials(auth, org, prefix):
+    rows = {
+        "user_sessions": {
+            "user_id": "owner",
+            "organization_id": org,
+            "token_hash": prefix + "-session",
+            "refresh_token_hash": prefix + "-refresh",
+            "expires_at": datetime.now(UTC) + timedelta(hours=1),
+        },
+        "api_keys": {
+            "organization_id": org,
+            "user_id": "owner",
+            "key_prefix": prefix,
+            "key_salt": "salt",
+            "key_hash": prefix + "-hash",
+        },
+        "device_authorization_requests": {
+            "organization_id": org,
+            "user_id": "owner",
+            "device_code_hash": prefix + "-device",
+            "user_code": prefix + "-code",
+            "expires_at": datetime.now(UTC) + timedelta(hours=1),
+        },
+        "api_key_project_scopes": {"api_key_id": prefix + "-api_keys", "project_id": "project"},
+        "api_key_memory_space_scopes": {
+            "api_key_id": prefix + "-api_keys",
+            "memory_space_id": "space",
+        },
+        "organization_invitations": {
+            "organization_id": org,
+            "invited_email": "owned@example.test",
+            "created_by_user_id": "owner",
+            "token": prefix + "-invite",
+            "token_hash": prefix + "-invite-hash",
+        },
+    }
+    for table, row in rows.items():
+        await auth.execute_query(
+            f"CREATE {table} CONTENT $row;", row={"uuid": prefix + "-" + table, **row}
+        )
+
+
+async def _credential_rows(auth, table):
+    assert table in CREDENTIAL_TABLES
+    return await auth.execute_query(f"SELECT * FROM {table};")  # noqa: S608 - fixed table inventory
+
+
+async def _seed_destination_credentials(auth, org):
+    await _seed_credentials(auth, str(uuid4()), "unrelated")
+    before = {table: await _credential_rows(auth, table) for table in CREDENTIAL_TABLES}
+    await _seed_credentials(auth, org, "old-target")
+    return before
+
+
+async def _assert_scoped_credentials(auth, org, before, output):
+    for table in CREDENTIAL_TABLES:
+        assert f"Skipped 1 {table} rows" in output
+        assert await _credential_rows(auth, table) == before[table]
+    invitations = await auth.execute_query(
+        "SELECT * FROM organization_invitations WHERE organization_id=$org;", org=org
+    )
+    assert len(invitations) == 1
+    assert invitations[0].get("token") is None
+    assert invitations[0].get("token_hash") is None
+
+
 async def _seed_and_backup(stores, org, tmp_path):
     for auth, content, graph in stores.values():
         await bootstrap_auth_schema(auth)
@@ -135,6 +211,7 @@ async def _seed_and_backup(stores, org, tmp_path):
     await auth.execute_query(
         "CREATE organizations CONTENT $row;", row={"uuid": org, "name": "Owned", "slug": org}
     )
+    await _seed_credentials(auth, org, "source")
     memory = await remember_raw_memory(
         organization_id=org,
         principal_id="owner",
@@ -214,6 +291,9 @@ def test_actual_api_backup_public_import_retains_auth_and_source_revocation(
         try:
             memory, path = loop.run(_seed_and_backup(stores, org, tmp_path))
             active = "destination"
+            unrelated_before = loop.run(
+                _seed_destination_credentials(stores["destination"][0], org)
+            )
             args = [
                 "import",
                 str(path),
@@ -237,6 +317,11 @@ def test_actual_api_backup_public_import_retains_auth_and_source_revocation(
             )
             result = CliRunner().invoke(migrate.app, args)
             assert result.exit_code == 0, result.output
+            loop.run(
+                _assert_scoped_credentials(
+                    stores["destination"][0], org, unrelated_before, result.output
+                )
+            )
 
             async def assert_restored_and_hide():
                 auth, content, graph = stores["destination"]
@@ -279,3 +364,80 @@ def test_actual_api_backup_public_import_retains_auth_and_source_revocation(
         finally:
             for close in closes:
                 loop.run(close())
+
+
+@pytest.mark.parametrize("scoped", [False, True])
+@pytest.mark.parametrize("clean", [False, True])
+def test_auth_restore_separates_global_credentials_from_scoped_metadata(monkeypatch, scoped, clean):
+    org = str(uuid4())
+    source = SurrealAuthClient(url="memory://")
+    destination = SurrealAuthClient(url="memory://")
+    closes = [source.close, destination.close]
+    active = source
+    monkeypatch.setattr(auth_archive, "build_surreal_auth_client", lambda: active)
+    monkeypatch.setattr(source, "close", AsyncMock())
+    monkeypatch.setattr(destination, "close", AsyncMock())
+    with asyncio.Runner() as loop:
+        try:
+            loop.run(bootstrap_auth_schema(source))
+            loop.run(bootstrap_auth_schema(destination))
+            loop.run(_seed_credentials(source, org, "source"))
+            # A fully credential-bearing payload must not confer authority merely
+            # because an importer labels it as organization scoped.
+            payload = loop.run(auth_archive.export_auth_archive_payload())
+            if scoped:
+                payload["organization_id"] = org
+            active = destination
+            result = loop.run(auth_archive.restore_auth_archive_payload(payload, clean=clean))
+            assert result.success, result.errors
+            for table in CREDENTIAL_TABLES:
+                rows = loop.run(_credential_rows(destination, table))
+                assert len(rows) == (0 if scoped else 1)
+                if scoped:
+                    assert result.skipped_credential_rows[table] == 1
+                else:
+                    original = loop.run(_credential_rows(source, table))[0]
+                    for field in (
+                        "token_hash",
+                        "refresh_token_hash",
+                        "key_salt",
+                        "key_hash",
+                        "device_code_hash",
+                        "user_code",
+                        "api_key_id",
+                    ):
+                        assert rows[0].get(field) == original.get(field)
+            invitations = loop.run(
+                destination.execute_query("SELECT * FROM organization_invitations;")
+            )
+            assert len(invitations) == 1
+            assert invitations[0].get("token_hash") == (None if scoped else "source-invite-hash")
+            if not scoped:
+                assert result.skipped_credential_rows == {}
+        finally:
+            for close in closes:
+                loop.run(close())
+
+
+@pytest.mark.parametrize("table", CREDENTIAL_TABLES)
+def test_scoped_malformed_credential_table_never_imports_valid_grants(monkeypatch, table):
+    org = str(uuid4())
+    store = SurrealAuthClient(url="memory://")
+    close = store.close
+    monkeypatch.setattr(store, "close", AsyncMock())
+    monkeypatch.setattr(auth_archive, "build_surreal_auth_client", lambda: store)
+    with asyncio.Runner() as loop:
+        try:
+            loop.run(bootstrap_auth_schema(store))
+            loop.run(_seed_credentials(store, org, "source"))
+            payload = loop.run(auth_archive.export_auth_archive_payload())
+            payload["organization_id"] = org
+            payload["tables"][table].append(None)
+            result = loop.run(auth_archive.restore_auth_archive_payload(payload, clean=True))
+            assert not result.success
+            assert f"{table} row payload must be an object" in result.errors
+            for credential_table in CREDENTIAL_TABLES:
+                assert loop.run(_credential_rows(store, credential_table)) == []
+                assert result.skipped_credential_rows[credential_table] == 1
+        finally:
+            loop.run(close())

@@ -137,8 +137,10 @@ before using the existing restore owners. The organization must match the backup
 this command does not move protected memory into another organization.
 
 An organization backup excludes reusable authentication secrets. Restoring one
-does not restore passwords or active sessions; use the destination's supported
-account recovery or authentication setup. Source tombstones and newer destination
+does not restore passwords, sessions, API keys, device authorizations or API key
+scope grants. The command reports credential-dependent rows as skipped, including
+rows from older backups. Invitation metadata is restored without acceptance tokens.
+Use the destination's supported account recovery or authentication setup. Source tombstones and newer destination
 revocations remain authoritative, so an older backup cannot make purged or hidden
 memory readable again. The command reports retained history and quarantined
 records instead of claiming every archived row was written.

@@ -773,6 +773,10 @@ def _restore_auth_payload(payload: dict[str, object], *, clean: bool) -> bool:
                 success(
                     f"  Auth restored: {result.rows_restored} rows across {result.tables_restored} tables"
                 )
+                for table, count in sorted(result.skipped_credential_rows.items()):
+                    info(
+                        f"  Skipped {count} {table} rows: scoped backups do not restore credentials"
+                    )
             else:
                 warn(f"  Auth restore completed with errors: {len(result.errors)}")
                 for issue in result.errors[:10]:
