@@ -43,8 +43,14 @@ SHA256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 RETROSPECTIVE_REQUEST = (
     "Assess whether the contrast across these completed historical episodes supports "
     "a reusable conditional procedure for a future agent facing similar conditions. "
-    "Consider both successful and failed outcomes. If the evidence cannot support "
-    "such a procedure, abstain and identify the missing support or uncertainty."
+    "Consider both successful and failed outcomes. The output is an unverified "
+    "conditional candidate, not a claim of demonstrated transfer. Limit its "
+    "applicability to conditions supported by the evidence. Shared task families "
+    "or environments neither establish nor disqualify a candidate; evidence from "
+    "different domains or environments is not required at this stage. Transfer "
+    "must be evaluated separately, not asserted from these episodes. If the "
+    "contrast cannot support useful conditions, actions and checks, abstain and "
+    "identify the missing support or uncertainty."
 )
 SYSTEM_PROMPT = (
     "You are performing retrospective memory consolidation. You are not the agent "
