@@ -85,7 +85,14 @@ async def _current_authority(
     ceiling = _saved_ceiling(memory)
     if ceiling is None:
         return None
-    current = await resolver(memory.organization_id, ceiling.principal_id)
+    return await resolve_current_source_authority(ceiling, memory.organization_id, resolver)
+
+
+async def resolve_current_source_authority(
+    ceiling: SourceReadAuthority, organization_id: str, resolver: SourceAuthorityResolver
+) -> SourceReadAuthority | None:
+    """Intersect a retained ceiling with the principal's current memberships."""
+    current = await resolver(organization_id, ceiling.principal_id)
     if current is None or current.principal_id != ceiling.principal_id:
         return None
     scopes = ceiling.scope_keys

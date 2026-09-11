@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sibyl_core.backends.surreal.connection import _is_transient_connection_error
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM, render_surreal_compatible_sql
@@ -972,6 +972,172 @@ def _entity_update_metadata_patch(updates: Mapping[str, Any]) -> dict[str, objec
 
 
 __all__ = ["CLEAR_MEMORY_SCOPE", "MAX_ENTITY_CONTENT_CHARS", "heal_entity_metadata_snapshots"]
+
+
+if TYPE_CHECKING:
+    from sibyl_core.models.experience import OperationalExperienceProjection
+    from sibyl_core.services.operational_projection import OperationalProjectionSource
+
+
+async def _publish_operational_entities(
+    client: SurrealGraphClient, source: OperationalProjectionSource, *, group_id: str
+) -> OperationalExperienceProjection:
+    """Publish only the deterministic pending projection of retained raw evidence."""
+    from dataclasses import asdict
+
+    from sibyl_core.services.graph_derivations import graph_target_digest
+    from sibyl_core.services.graph_records import entity_from_surreal_row
+    from sibyl_core.services.memory_derivations import observation_from_record
+    from sibyl_core.services.source_observations import SourceUnavailableError
+
+    if source.observation.source.organization_id != group_id:
+        raise SourceUnavailableError()
+    projection = await source.projection()
+    _enforce_entity_content_limit(projection.entities)
+    records = [_entity_record(entity, group_id=group_id) for entity in projection.entities]
+    ids = [record["uuid"] for record in records]
+    snapshots = normalize_records(
+        await client.execute_query(
+            """RETURN {
+                LET $targets = SELECT * FROM entity WHERE uuid IN $ids ORDER BY uuid;
+                LET $associations = SELECT * FROM memory_derivations WHERE organization_id=$org
+                    AND target_kind='graph_entity' AND target_id IN $ids ORDER BY target_id;
+                LET $states = SELECT * FROM source_states WHERE organization_id=$org
+                    AND source_kind='graph_entity' AND source_id IN $ids ORDER BY source_id;
+                RETURN {targets:$targets, associations:$associations, states:$states,
+                    fingerprint:crypto::sha256(type::string([$targets,$associations,$states]))};
+            };""",
+            ids=ids,
+            org=group_id,
+        )
+    )
+    if len(snapshots) != 1:
+        raise SourceUnavailableError()
+    snapshot = snapshots[0]
+    target_rows, association_rows, state_rows = (
+        snapshot.get("targets"),
+        snapshot.get("associations"),
+        snapshot.get("states"),
+    )
+    if not all(isinstance(rows, list) for rows in (target_rows, association_rows, state_rows)):
+        raise SourceUnavailableError()
+    targets = {row["uuid"]: row for row in normalize_records(target_rows)}
+    associations = {row["target_id"]: row for row in normalize_records(association_rows)}
+    states = {row["source_id"]: row for row in normalize_records(state_rows)}
+    entries = []
+    for record in records:
+        old = targets.get(record["uuid"])
+        association = associations.get(record["uuid"])
+        previous = None
+        if old is None:
+            if association is not None or states.get(record["uuid"]) is not None:
+                raise SourceUnavailableError()
+        else:
+            state = states.get(record["uuid"])
+            observations = association.get("observations") if association is not None else None
+            if (
+                not isinstance(old, dict)
+                or old.get("group_id") != group_id
+                or old.get("created_by") != source.creator_id
+                or old.get("derivation_required") is not True
+                or not isinstance(state, dict)
+                or state.get("deleted") is not False
+                or state.get("revision") != old.get("revision")
+                or not isinstance(association, dict)
+                or association.get("active") is not True
+                or association.get("target_id") != record["uuid"]
+                or association.get("body_sha256")
+                != graph_target_digest(entity_from_surreal_row(old))
+                or not isinstance(observations, list)
+                or len(observations) != 1
+            ):
+                raise SourceUnavailableError()
+            previous = observation_from_record(observations[0])
+            if previous.source != source.observation.source:
+                raise SourceUnavailableError()
+            record["created_by"] = old.get("created_by")
+            record["created_at"] = old.get("created_at")
+        desired = {
+            "organization_id": group_id,
+            "target_kind": "graph_entity",
+            "target_id": record["uuid"],
+            "body_sha256": graph_target_digest(entity_from_surreal_row(record)),
+            "principal_id": source.authority.principal_id,
+            "authority_ceiling": source.authority.ceiling_metadata(),
+            "observations": [asdict(source.observation)],
+            "active": True,
+        }
+        old_attributes = old.get("attributes") if old is not None else None
+        desired_attributes = record.get("attributes")
+        if not isinstance(desired_attributes, dict):
+            raise SourceUnavailableError()
+        replay = (
+            association is not None
+            and all(
+                association.get(key) == desired[key]
+                for key in ("body_sha256", "principal_id", "authority_ceiling")
+            )
+            and previous is not None
+            and previous.same_evidence(source.observation)
+            and isinstance(old_attributes, dict)
+            and all(
+                old_attributes.get(key) == desired_attributes.get(key)
+                for key in ("operational_schema_version", "operational_content_hash")
+            )
+        )
+        entries.append(
+            {
+                "uuid": record["uuid"],
+                "record": {**record, "derivation_required": True},
+                "association": desired,
+                "replay": replay,
+            }
+        )
+    # Inspect graph state before this recheck: an older worker must not adopt
+    # a newer graph projection as the baseline for its stale replacement.
+    await source.current()
+    upsert = (
+        render_surreal_compatible_sql(_ENTITY_BULK_UPSERT_QUERY, url=client._url)
+        .strip()
+        .rstrip(";")
+    )
+    await client.execute_query(
+        """RETURN {
+        LET $targets = SELECT * FROM entity WHERE uuid IN $ids ORDER BY uuid;
+        LET $associations = SELECT * FROM memory_derivations WHERE organization_id=$org
+            AND target_kind='graph_entity' AND target_id IN $ids ORDER BY target_id;
+        LET $states = SELECT * FROM source_states WHERE organization_id=$org
+            AND source_kind='graph_entity' AND source_id IN $ids ORDER BY source_id;
+        IF crypto::sha256(type::string([$targets,$associations,$states])) != $fingerprint {
+            THROW 'operational graph target changed during publication';
+        };
+        FOR $entry IN $entries {
+            LET $uuid = $entry.uuid;
+            LET $association = (SELECT * FROM memory_derivations WHERE organization_id=$org
+                AND target_kind='graph_entity' AND target_id=$uuid LIMIT 1)[0];
+            IF !$entry.replay {
+                LET $rows = [$entry.record];
+                """
+        + upsert
+        + """;
+                UPDATE entity SET derivation_required=true WHERE uuid=$uuid AND group_id=$org;
+                IF $association = NONE { CREATE memory_derivations CONTENT $entry.association; }
+                ELSE {
+                    UPDATE $association.id CONTENT $entry.association;
+                    UPDATE source_states SET generation += 1 WHERE organization_id=$org
+                        AND source_kind='graph_entity' AND source_id=$uuid;
+                };
+            };
+        };
+        RETURN true;
+        };""",
+        entries=entries,
+        ids=ids,
+        fingerprint=snapshot["fingerprint"],
+        org=group_id,
+    )
+    await source.current()
+    return projection
 
 
 async def _replace_projected_entities(client, records, *, group_id, projection_source):

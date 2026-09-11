@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sibyl_core.embeddings.providers import entity_embedding_text
 from sibyl_core.errors import RevisionConflictError
@@ -30,10 +30,22 @@ from sibyl_core.services.graph_entity_store import (
 from sibyl_core.services.graph_entity_work_items import _EntityWorkItemManager
 from sibyl_core.services.graph_records import _entity_from_row, entity_from_surreal_row
 
+if TYPE_CHECKING:
+    from sibyl_core.models.experience import OperationalExperienceProjection
+    from sibyl_core.services.operational_projection import OperationalProjectionSource
+
 
 class EntityManager(_EntityWorkItemManager):
     supports_bounded_entity_list = True
     supports_lightweight_entity_list = True
+
+    async def publish_operational_entities(
+        self, source: OperationalProjectionSource
+    ) -> OperationalExperienceProjection:
+        """Write source-bound entities with a pending manifest, without edges."""
+        from sibyl_core.services.graph_entity_store import _publish_operational_entities
+
+        return await _publish_operational_entities(self._client, source, group_id=self._group_id)
 
     async def create_direct_if_absent(
         self, entity: Entity, *, derivation: Mapping[str, object] | None = None
