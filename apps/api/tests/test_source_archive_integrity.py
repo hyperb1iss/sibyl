@@ -41,6 +41,7 @@ async def test_legacy_content_archive_quarantines_imported_memory_with_exact_met
         )
         payload = await content_archive.export_content_archive_payload(org)
         payload["version"] = "1.0"
+        payload.pop("validation_receipts")
         payload.pop("source_integrity")
         monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: destination)
         result = await content_archive.restore_content_archive_payload(payload, clean=True)

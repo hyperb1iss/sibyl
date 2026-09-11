@@ -103,6 +103,7 @@ async def test_dream_archive_legacy_v2_without_checkpoints_is_accepted(dream_sto
     try:
         archive = await content_archive.export_content_archive_payload("dream-org")
         archive["version"] = "2.0"
+        archive.pop("validation_receipts")
         del archive["tables"]["dream_source_checkpoints"]
         del archive["tables"]["dream_source_cursors"]
         result = await content_archive.restore_content_archive_payload(archive)
