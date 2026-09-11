@@ -384,6 +384,10 @@ class TestInaccessibleProjectWire:
                 AsyncMock(return_value=runtime),
             ),
             patch(
+                "sibyl.api.routes.graph.available_graph_entities",
+                AsyncMock(return_value={entity.id: entity for entity in [victim, mine]}),
+            ),
+            patch(
                 "sibyl.api.routes.graph.get_graph_query_adapter",
                 AsyncMock(return_value=adapter),
             ),
