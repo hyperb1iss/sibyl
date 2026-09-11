@@ -54,11 +54,12 @@ async def correction_model(candidate, proposal, monkeypatch):
 
     async def agent(extractor):
         calls.append("correction")
-        output = proposal[1].proposal.model_dump(mode="json")
+        output = {"outcome": {"kind": "edits", "edits": []}}
         if controls["correction_abstain"]:
-            output.update(
-                procedure=None, abstention_reason="Original evidence cannot support a correction."
-            )
+            output["outcome"] = {
+                "kind": "abstention",
+                "reason": "Original evidence cannot support a correction.",
+            }
         output["assessments"] = [
             {
                 "finding_id": review.finding_ids()[0],

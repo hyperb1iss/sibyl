@@ -60,33 +60,48 @@ class EvidenceProposal(_StrictModel):
     outcome: EvidenceProcedureOutcome | EvidenceAbstentionOutcome
 
 
+def resolve_evidence_assertion(
+    assertion: EvidenceAssertion, citations: dict[str, EvidenceCitation]
+) -> dict[str, Any]:
+    """Resolve a typed assertion through the same citation owner as proposals."""
+    checked = EvidenceAssertion.model_validate(assertion.model_dump())
+    return _resolve_evidence_value(checked.model_dump(mode="json"), citations)
+
+
+def _resolve_evidence_value(value: Any, citations: dict[str, EvidenceCitation]) -> Any:
+    if isinstance(value, list):
+        return [_resolve_evidence_value(item, citations) for item in value]
+    if not isinstance(value, dict):
+        return value
+    result = {
+        key: _resolve_evidence_value(item, citations)
+        for key, item in value.items()
+        if key != "support"
+    }
+    if "support" in value:
+        support = []
+        for reference in value["support"]:
+            citation = citations.get(reference["evidence_id"])
+            if citation is None or not citation.ranges:
+                raise ValueError("proposal cites an unknown or empty evidence ID")
+            support.extend(
+                {"episode_id": citation.episode_id, "start_byte": start, "end_byte": end}
+                for start, end in citation.ranges
+            )
+        result["support"] = support
+    return result
+
+
 def resolve_evidence_proposal(
     proposal: EvidenceProposal, citations: dict[str, EvidenceCitation]
 ) -> dict[str, Any]:
     """Expand only server-known IDs; never accept model-supplied byte offsets."""
 
-    def resolve(value: Any) -> Any:
-        if isinstance(value, list):
-            return [resolve(item) for item in value]
-        if not isinstance(value, dict):
-            return value
-        result = {key: resolve(item) for key, item in value.items() if key != "support"}
-        if "support" in value:
-            support = []
-            for reference in value["support"]:
-                citation = citations.get(reference["evidence_id"])
-                if citation is None or not citation.ranges:
-                    raise ValueError("proposal cites an unknown or empty evidence ID")
-                support.extend(
-                    {"episode_id": citation.episode_id, "start_byte": start, "end_byte": end}
-                    for start, end in citation.ranges
-                )
-            result["support"] = support
-        return result
-
     if isinstance(proposal.outcome, EvidenceAbstentionOutcome):
         return {"procedure": None, "abstention_reason": proposal.outcome.reason}
     return {
-        "procedure": resolve(proposal.outcome.procedure.model_dump(mode="json")),
+        "procedure": _resolve_evidence_value(
+            proposal.outcome.procedure.model_dump(mode="json"), citations
+        ),
         "abstention_reason": None,
     }

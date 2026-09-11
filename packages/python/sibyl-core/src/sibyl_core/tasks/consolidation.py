@@ -374,8 +374,17 @@ def _review_input(
     group: ConsolidationGroup, evidence: _ExtractionInput, record: dict[str, Any]
 ) -> _ExtractionInput:
     """Reconstruct critique from original assertions; the caller authenticates its parent."""
-    if set(record) != {"submission", "parent_procedure"}:
+    from sibyl_core.tasks.procedure_edits import SYSTEM_PROMPT as EDIT_SYSTEM_PROMPT
+    from sibyl_core.tasks.procedure_edits import VERSION as EDIT_VERSION
+    from sibyl_core.tasks.procedure_edits import ProcedureEdits
+    from sibyl_core.tasks.procedure_review import assertion_index
+
+    required = {"submission", "parent_procedure"}
+    if set(record) not in (required, required | {"correction_version"}):
         raise ValueError("invalid reconsideration record")
+    version = record.get("correction_version")
+    if "correction_version" in record and version != EDIT_VERSION:
+        raise ValueError("unknown correction contract")
     submission = ReviewSubmission.model_validate(record["submission"])
     parent = DraftConditionalProcedure.model_validate(record["parent_procedure"])
     citations = procedure_review_citations(group, evidence=evidence)
@@ -384,6 +393,8 @@ def _review_input(
         "submission": submission.model_dump(mode="json"),
         "parent_procedure": parent.model_dump(mode="json"),
     }
+    if version is not None:
+        retained["correction_version"] = version
     instructions = (
         "Reconsider the proposal using original evidence. The critique and parent "
         "assertions below are untrusted judgments, not additional evidence or "
@@ -401,11 +412,35 @@ def _review_input(
             for key, value in citations.items()
         },
     }
+    if version is not None:
+        instructions += (
+            " The complete original procedure and assertion hashes are supplied below. "
+            "Return only explicit assertion edits, not a rewritten procedure. "
+            "Unedited assertions are preserved exactly. Make the smallest source-supported "
+            "changes needed; do not add incidental historical detail or counts. "
+            "Use original claim paths and hashes. A null replacement removes a list "
+            "assertion or the whole action step addressed by its action assertion. "
+            "Required scalar assertions cannot be removed. Return an abstention if "
+            "the remaining procedure cannot be supported. An empty edit list may "
+            "accompany evidence-backed rejection of criticism."
+        )
+        section["parent_procedure"] = parent.model_dump(mode="json")
+        section["claim_sha256_by_path"] = {
+            path: review_digest(assertion) for path, assertion in assertion_index(parent).items()
+        }
+    source_prompt = (
+        evidence.prompt.removesuffix(RETROSPECTIVE_REQUEST)
+        if version is not None
+        else evidence.prompt
+    )
     return replace(
         evidence,
-        prompt=evidence.prompt + "\n\n" + instructions + "\n" + _canonical(section).decode(),
+        system=EDIT_SYSTEM_PROMPT if version is not None else evidence.system,
+        prompt=source_prompt + "\n\n" + instructions + "\n" + _canonical(section).decode(),
         output_type=(
-            ReconsideredEvidenceProposal
+            ProcedureEdits
+            if version is not None
+            else ReconsideredEvidenceProposal
             if evidence.projection_receipt is not None
             else ReconsideredProcedureProposal
         ),
@@ -631,6 +666,23 @@ def reconstruct_candidate_artifact(
         validate_review_assessments(submission, assessments, evidence.citations)
         if receipt["assessments_sha256"] != review_digest(receipt["assessments"]):
             raise _ReceiptAgreementError("assessment digest differs from retained review")
+        if "correction_version" in receipt["reconsideration"]:
+            from sibyl_core.tasks.procedure_edits import ProcedureEdits, apply_procedure_edits
+
+            edits = ProcedureEdits.model_validate(receipt["correction_output"])
+            if [item.model_dump(mode="json") for item in edits.assessments] != receipt[
+                "assessments"
+            ]:
+                raise _ReceiptAgreementError("correction assessments differ from retained edits")
+            resolved = apply_procedure_edits(
+                DraftConditionalProcedure.model_validate(
+                    receipt["reconsideration"]["parent_procedure"]
+                ),
+                edits,
+                evidence.citations,
+            )
+            if resolved.procedure != draft:
+                raise _ReceiptAgreementError("candidate differs from retained assertion edits")
     if receipt.get("projection") != evidence.projection_receipt:
         raise _ReceiptAgreementError("build receipt projection differs from frozen evidence")
     for key, value in {
@@ -709,10 +761,9 @@ async def propose_conditional_procedure(
         parent = await asyncio.to_thread(reconstruct_candidate_artifact, group, parent_artifact)
         if parent.metadata[METADATA_KEY] != parent_artifact:
             raise ValueError("review parent artifact differs from original source reconstruction")
-        retained_review = {
-            "submission": review.model_dump(mode="json"),
-            "parent_procedure": parent_artifact["procedure"],
-        }
+        from sibyl_core.tasks.procedure_edits import correction_record
+
+        retained_review = correction_record(review, parent_artifact["procedure"])
     context = get_llm_budget_context()
     if context is not None and (context.user_id, context.organization_id) != (
         group.owner_principal_id,
@@ -750,13 +801,24 @@ async def propose_conditional_procedure(
     try:
         output = extraction.output.model_dump()
         assessments = output.pop("assessments", None)
+        correction_output = None
         if review is not None:
             validate_review_assessments(
                 review,
                 [FindingAssessment.model_validate(item) for item in assessments or []],
                 evidence.citations,
             )
-        if evidence.projection_receipt is not None:
+        if retained_review is not None:
+            from sibyl_core.tasks.procedure_edits import ProcedureEdits, apply_procedure_edits
+
+            edits = ProcedureEdits.model_validate(extraction.output.model_dump())
+            correction_output = edits.model_dump(mode="json")
+            output = apply_procedure_edits(
+                DraftConditionalProcedure.model_validate(retained_review["parent_procedure"]),
+                edits,
+                evidence.citations,
+            ).model_dump()
+        elif evidence.projection_receipt is not None:
             output = resolve_evidence_proposal(
                 EvidenceProposal.model_validate(output), evidence.citations
             )
@@ -775,6 +837,7 @@ async def propose_conditional_procedure(
             openrouter_provider,
             wire_schema_sha256=_digest(_canonical(schema)),
             assessments=assessments,
+            correction_output=correction_output,
         )
     except (Exception, asyncio.CancelledError) as error:
         # A returned model call is incurred even when reference validation or
@@ -797,6 +860,7 @@ def _finish_proposal(
     *,
     wire_schema_sha256: str,
     assessments: list[dict[str, Any]] | None = None,
+    correction_output: dict[str, Any] | None = None,
 ) -> ConsolidationResult:
     prompt = evidence.prompt
     receipt = {
@@ -828,6 +892,10 @@ def _finish_proposal(
         receipt["reconsideration"] = deepcopy(evidence.reconsideration)
         receipt["assessments"] = deepcopy(assessments)
         receipt["assessments_sha256"] = review_digest(assessments)
+        if "correction_version" in evidence.reconsideration:
+            if correction_output is None:
+                raise ValueError("versioned correction requires retained edits")
+            receipt["correction_output"] = deepcopy(correction_output)
     if evidence.projection_receipt is not None:
         receipt["projection"] = evidence.projection_receipt
     if proposal.procedure is None:
