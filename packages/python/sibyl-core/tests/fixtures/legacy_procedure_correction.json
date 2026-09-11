@@ -1,0 +1,419 @@
+{
+  "source_revision": "8d85182d1d7ce7d71f8178d3f0d3d78b665c8621",
+  "candidate": {
+    "kind": "procedure",
+    "title": "Procedure: Make documents searchable",
+    "content": "# Procedure: Make documents searchable\n\nUnverified proposal. Source authorization, freshness, entailment, and transfer require separate checks.\n\n## Goal\nMake documents searchable (observed; evidence: /goal)\n\n## Environment\n- The repository uses scoped indexing (observed; evidence: /environment/0)\n\n## Preconditions\n- Resolve the intended project first (inferred; evidence: /preconditions/0)\n\n## Required tools\n- Index CLI (observed; evidence: /required_tools/0)\n\n## Actions\n1. Run scoped rebuild (observed; evidence: /actions/0/action)\n   Check: Café is searchable (observed; evidence: /actions/0/success_criteria)\n\n## Expected result\n- Documents are searchable (observed; evidence: /expected_result)\n\n## Failure modes\n- Global rebuilding used the wrong project (observed; evidence: /failure_modes/0)\n\n## Abstain when\n- The project cannot be resolved (inferred; evidence: /abstain_when/0)\n\n## Evidence\nEvidence paths identify assertions in conditional_procedure.procedure metadata. Complete source spans, outcomes, and the build receipt remain in conditional_procedure metadata.\nAudit SHA-256: 2593503a4428b2a06f152edfbb79ecf616e44bad32c47325043296055ceb0621",
+    "reason": "Cross-session contrast proposal; structural citation checks only",
+    "confidence": 0.0,
+    "tags": [],
+    "metadata": {
+      "conditional_procedure": {
+        "schema_version": "sibyl-conditional-procedure-v1",
+        "group": {
+          "group_id": "contrast-one",
+          "mechanism": "scope before rebuild",
+          "organization_id": "org-one",
+          "owner_principal_id": "owner-one",
+          "memory_scope": "project",
+          "scope_key": "project-one",
+          "environment_compatibility_keys": [
+            "runtime",
+            "repository"
+          ],
+          "episodes": [
+            {
+              "episode_id": "success",
+              "session_id": "session-success",
+              "family_id": "index-recovery",
+              "split": "learning",
+              "artifact_sha256": "ebbc92ffcf7a19f85e07c8ad3399794bbe8e9aa582b3d36fce1b4ad17e1b28bb",
+              "environment": {
+                "runtime": "python-3.13",
+                "repository": "sibyl"
+              },
+              "stored_sources": [
+                {
+                  "source_id": "capture-success",
+                  "observed_revision": 7
+                }
+              ],
+              "outcome": {
+                "receipt_schema_version": "sibyl-agent-task-receipt-v1",
+                "task_id": "task-success",
+                "attempt_id": "attempt-success",
+                "status": "passed",
+                "success": true,
+                "controller_final_snapshot_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "checker_input_snapshot_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "receipt_sha256": "2666507ad85ebd0318b24ade0560542c425469b15dc9b31c8bf2cc45750b4ef2"
+              }
+            },
+            {
+              "episode_id": "failure",
+              "session_id": "session-failure",
+              "family_id": "index-recovery",
+              "split": "learning",
+              "artifact_sha256": "c5c8d1bd5b6f53aafb6324f195483fc29f9d897a3c15464ce3ca647579f33351",
+              "environment": {
+                "runtime": "python-3.13",
+                "repository": "sibyl"
+              },
+              "stored_sources": [
+                {
+                  "source_id": "capture-failure",
+                  "observed_revision": 7
+                }
+              ],
+              "outcome": {
+                "receipt_schema_version": "sibyl-agent-task-receipt-v1",
+                "task_id": "task-failure",
+                "attempt_id": "attempt-failure",
+                "status": "task_failed",
+                "success": false,
+                "controller_final_snapshot_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "checker_input_snapshot_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "receipt_sha256": "5bc95e870d0e73eafb57a80064acdb747adeb28267cf8ab9065eafe32088f398"
+              }
+            }
+          ]
+        },
+        "procedure": {
+          "goal": {
+            "statement": "Make documents searchable",
+            "label": "observed",
+            "support": [
+              {
+                "episode_id": "success",
+                "start_byte": 0,
+                "end_byte": 41
+              }
+            ]
+          },
+          "environment": [
+            {
+              "statement": "The repository uses scoped indexing",
+              "label": "observed",
+              "support": [
+                {
+                  "episode_id": "success",
+                  "start_byte": 0,
+                  "end_byte": 41
+                }
+              ]
+            }
+          ],
+          "preconditions": [
+            {
+              "statement": "Resolve the intended project first",
+              "label": "inferred",
+              "support": [
+                {
+                  "episode_id": "success",
+                  "start_byte": 0,
+                  "end_byte": 41
+                }
+              ]
+            }
+          ],
+          "required_tools": [
+            {
+              "statement": "Index CLI",
+              "label": "observed",
+              "support": [
+                {
+                  "episode_id": "success",
+                  "start_byte": 0,
+                  "end_byte": 41
+                }
+              ]
+            }
+          ],
+          "actions": [
+            {
+              "order": 1,
+              "action": {
+                "statement": "Run scoped rebuild",
+                "label": "observed",
+                "support": [
+                  {
+                    "episode_id": "success",
+                    "start_byte": 0,
+                    "end_byte": 41
+                  }
+                ]
+              },
+              "success_criteria": {
+                "statement": "Café is searchable",
+                "label": "observed",
+                "support": [
+                  {
+                    "episode_id": "success",
+                    "start_byte": 0,
+                    "end_byte": 41
+                  }
+                ]
+              }
+            }
+          ],
+          "expected_result": {
+            "statement": "Documents are searchable",
+            "label": "observed",
+            "support": [
+              {
+                "episode_id": "success",
+                "start_byte": 0,
+                "end_byte": 41
+              }
+            ]
+          },
+          "failure_modes": [
+            {
+              "statement": "Global rebuilding used the wrong project",
+              "label": "observed",
+              "support": [
+                {
+                  "episode_id": "failure",
+                  "start_byte": 0,
+                  "end_byte": 38
+                }
+              ]
+            }
+          ],
+          "abstain_when": [
+            {
+              "statement": "The project cannot be resolved",
+              "label": "inferred",
+              "support": [
+                {
+                  "episode_id": "failure",
+                  "start_byte": 0,
+                  "end_byte": 38
+                }
+              ]
+            }
+          ]
+        },
+        "spans": [
+          {
+            "episode_id": "failure",
+            "start_byte": 0,
+            "end_byte": 38,
+            "artifact_sha256": "c5c8d1bd5b6f53aafb6324f195483fc29f9d897a3c15464ce3ca647579f33351",
+            "slice_sha256": "c5c8d1bd5b6f53aafb6324f195483fc29f9d897a3c15464ce3ca647579f33351"
+          },
+          {
+            "episode_id": "success",
+            "start_byte": 0,
+            "end_byte": 41,
+            "artifact_sha256": "ebbc92ffcf7a19f85e07c8ad3399794bbe8e9aa582b3d36fce1b4ad17e1b28bb",
+            "slice_sha256": "ebbc92ffcf7a19f85e07c8ad3399794bbe8e9aa582b3d36fce1b4ad17e1b28bb"
+          }
+        ],
+        "build_receipt": {
+          "schema_version": "sibyl-conditional-procedure-v1",
+          "render_version": "sibyl-conditional-procedure-render-v2",
+          "evidence_validation": "sibyl-evidence-proposal-v3",
+          "outcome_join": "caller_declared",
+          "budget_principal": "caller_declared_matching_active_context_when_present",
+          "source_authorization": "caller_responsibility",
+          "source_freshness": "not_checked",
+          "entailment": "pending",
+          "transfer": "not_measured",
+          "configured_model": "fixture",
+          "max_input_chars": 100000,
+          "input_chars": 1,
+          "input_budget_unit": "system_user_declared_schema_characters",
+          "max_output_tokens": 1024,
+          "output_retries": 2,
+          "output_mode": "tool",
+          "openrouter_provider": null,
+          "wire_schema_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "input_sha256": "c6a1b5506df5f22edf5d114d48cce9673575413f9ac9c82a7bf41597f79de23d",
+          "prompt_sha256": "5cdd568b8efab5af261d7bcdb1b055ffd3dfb50dc8dfef97f305aee035f79757",
+          "schema_sha256": "88715e0d071d80bfb5c41cfa8a5f5f02f8d8d90ad013cf4901482cee85d1a35a",
+          "output_sha256": "0913df66427cd8f72ebfa7f3aa9c6fec6925b6b3d668ac4d2121ea399b3cffeb",
+          "usage": {},
+          "reconsideration": {
+            "submission": {
+              "parent_operation_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "parent_candidate_sha256": "bdf3644554fa9cf4f9c4b009110fdaa8420ccaef8fc49a80943d8deffc44e5e8",
+              "prior_review_id": null,
+              "findings": [
+                {
+                  "claim_path": "/goal",
+                  "claim_sha256": "4a56aa4855c3e0a300b546ed0103ae535a73f44d998bd19c6a4d2841e585f84f",
+                  "evidence_refs": [
+                    {
+                      "evidence_id": "episode:0"
+                    }
+                  ],
+                  "basis": "unsupported_generalization",
+                  "disposition": "qualify",
+                  "critique": "Limit the goal to the scoped rebuild."
+                }
+              ]
+            },
+            "parent_procedure": {
+              "goal": {
+                "statement": "Make documents searchable",
+                "label": "observed",
+                "support": [
+                  {
+                    "episode_id": "success",
+                    "start_byte": 0,
+                    "end_byte": 41
+                  }
+                ]
+              },
+              "environment": [
+                {
+                  "statement": "The repository uses scoped indexing",
+                  "label": "observed",
+                  "support": [
+                    {
+                      "episode_id": "success",
+                      "start_byte": 0,
+                      "end_byte": 41
+                    }
+                  ]
+                }
+              ],
+              "preconditions": [
+                {
+                  "statement": "Resolve the intended project first",
+                  "label": "inferred",
+                  "support": [
+                    {
+                      "episode_id": "success",
+                      "start_byte": 0,
+                      "end_byte": 41
+                    }
+                  ]
+                }
+              ],
+              "required_tools": [
+                {
+                  "statement": "Index CLI",
+                  "label": "observed",
+                  "support": [
+                    {
+                      "episode_id": "success",
+                      "start_byte": 0,
+                      "end_byte": 41
+                    }
+                  ]
+                }
+              ],
+              "actions": [
+                {
+                  "order": 1,
+                  "action": {
+                    "statement": "Run scoped rebuild",
+                    "label": "observed",
+                    "support": [
+                      {
+                        "episode_id": "success",
+                        "start_byte": 0,
+                        "end_byte": 41
+                      }
+                    ]
+                  },
+                  "success_criteria": {
+                    "statement": "Café is searchable",
+                    "label": "observed",
+                    "support": [
+                      {
+                        "episode_id": "success",
+                        "start_byte": 0,
+                        "end_byte": 41
+                      }
+                    ]
+                  }
+                }
+              ],
+              "expected_result": {
+                "statement": "Documents are searchable",
+                "label": "observed",
+                "support": [
+                  {
+                    "episode_id": "success",
+                    "start_byte": 0,
+                    "end_byte": 41
+                  }
+                ]
+              },
+              "failure_modes": [
+                {
+                  "statement": "Global rebuilding used the wrong project",
+                  "label": "observed",
+                  "support": [
+                    {
+                      "episode_id": "failure",
+                      "start_byte": 0,
+                      "end_byte": 38
+                    }
+                  ]
+                }
+              ],
+              "abstain_when": [
+                {
+                  "statement": "The project cannot be resolved",
+                  "label": "inferred",
+                  "support": [
+                    {
+                      "episode_id": "failure",
+                      "start_byte": 0,
+                      "end_byte": 38
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "assessments": [
+            {
+              "finding_id": "c3122da5506328f7eb7044f0723a14b4dd11a6d22c3be686a62059bd40bcff37",
+              "disposition": "accepted",
+              "explanation": "The source supports the scoped goal.",
+              "evidence_refs": [
+                {
+                  "evidence_id": "episode:0"
+                }
+              ]
+            }
+          ],
+          "assessments_sha256": "f2f27845d7d29c1fda7f4cf98ea55ac09bae606f41d970ec13105ae5f27c0436",
+          "status": "proposed",
+          "structural": "pass"
+        },
+        "render_version": "sibyl-conditional-procedure-render-v2"
+      },
+      "steps": [
+        {
+          "order": 1,
+          "title": "Run scoped rebuild",
+          "description": "Run scoped rebuild",
+          "success_criteria": "Café is searchable"
+        }
+      ],
+      "required_tools": [
+        "Index CLI"
+      ],
+      "category": "conditional_procedure",
+      "automation_level": "manual"
+    },
+    "raw_source_ids": [
+      "capture-failure",
+      "capture-success"
+    ],
+    "suggested_memory_scope": "project",
+    "suggested_scope_key": "project-one",
+    "review_state": "pending",
+    "persisted_id": null,
+    "claim_records": [],
+    "reflection_findings": [],
+    "relationship_records": [],
+    "sensitivity_flags": []
+  }
+}

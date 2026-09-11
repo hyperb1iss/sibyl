@@ -34,6 +34,8 @@ from sibyl_core.tasks.consolidation import (
     propose_conditional_procedure,
 )
 from sibyl_core.tasks.procedure_correction_result import ProcedureCorrectionResult
+from sibyl_core.tasks.procedure_edits import VERSION as CORRECTION_VERSION
+from sibyl_core.tasks.procedure_edits import correction_record
 from sibyl_core.tasks.procedure_review import ReviewSubmission, review_digest
 
 
@@ -83,14 +85,11 @@ async def automatically_reconsider_procedure(
         _review_input,
         original.artifact.group,
         evidence,
-        {
-            "submission": review.model_dump(mode="json"),
-            "parent_procedure": original.artifact.candidate.metadata[METADATA_KEY]["procedure"],
-        },
+        correction_record(review, original.artifact.candidate.metadata[METADATA_KEY]["procedure"]),
     )
     policy = canonical(
         {
-            "kind": "signed_procedure_correction-v1",
+            "kind": CORRECTION_VERSION,
             **asdict(resolved),
             "system_sha256": review_digest(evidence.system),
             "prompt_sha256": review_digest(evidence.prompt),
