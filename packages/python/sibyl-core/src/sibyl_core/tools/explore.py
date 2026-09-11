@@ -6,9 +6,7 @@ import structlog
 
 from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
 from sibyl_core.models.entities import Entity, EntityType, RelationshipType
-from sibyl_core.services.eval_publication_guards import (
-    unavailable_publication_ids,
-)
+from sibyl_core.services.graph_read_availability import available_graph_entities
 from sibyl_core.tools.helpers import (
     VALID_ENTITY_TYPES,
     ScopeGuard,
@@ -654,6 +652,16 @@ async def _explore_related(
     runtime = await get_graph_runtime(group_id)
     relationship_manager = runtime.relationship_manager
 
+    def allowed(entity):
+        project = _project_id_for_policy(entity)
+        return (scope_guard is None or scope_guard(entity)) and (
+            accessible_projects is None or project is None or project in accessible_projects
+        )
+
+    seeds = await available_graph_entities(group_id, [entity_id], runtime=runtime)
+    if entity_id not in seeds or not allowed(seeds[entity_id]):
+        return ExploreResponse(mode=mode, entities=[], total=0, filters=filters)
+
     # Convert relationship type strings to enum
     rel_types = None
     if relationship_types:
@@ -672,34 +680,27 @@ async def _explore_related(
         limit=limit,
     )
 
-    unavailable_publications = await unavailable_publication_ids(
-        group_id,
-        {
-            str(entity.id): getattr(entity, "metadata", None)
-            for entity, _relationship in raw_results
-        },
-    )
+    endpoint_ids = {entity_id}
+    for _entity, relationship in raw_results:
+        endpoint_ids.update((relationship.source_id, relationship.target_id))
+    current = await available_graph_entities(group_id, sorted(endpoint_ids), runtime=runtime)
+    current = {key: entity for key, entity in current.items() if allowed(entity)}
+    if entity_id not in current:
+        return ExploreResponse(mode=mode, entities=[], total=0, filters=filters)
     results = []
     for entity, relationship in raw_results:
-        if scope_guard is not None and not scope_guard(entity):
-            continue
-        # Synthesis sources its neighborhood through this lane, so a corrected
-        # or superseded row reached a rendered handbook as a cited source
-        # without ever passing pack admission.
-        if (
-            not graph_metadata_recallable(getattr(entity, "metadata", None))
-            or str(entity.id) in unavailable_publications
+        if not graph_metadata_recallable(getattr(relationship, "metadata", None)) or not allowed(
+            relationship
         ):
             continue
-
-        # RBAC: Filter by accessible projects
-        entity_project = _project_id_for_policy(entity)
+        endpoints = {relationship.source_id, relationship.target_id}
         if (
-            accessible_projects is not None
-            and entity_project is not None
-            and entity_project not in accessible_projects
+            entity_id not in endpoints
+            or entity.id not in endpoints
+            or not endpoints <= current.keys()
         ):
             continue
+        entity = current[entity.id]
 
         direction: Literal["outgoing", "incoming"] = (
             "outgoing" if relationship.source_id == entity_id else "incoming"

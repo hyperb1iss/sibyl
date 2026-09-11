@@ -768,7 +768,10 @@ async def test_the_edge_lookup_is_not_fed_ids_that_cannot_be_edge_endpoints() ->
 
     class RecordingClient:
         async def execute_query(self, _query: str, **params: object) -> list[dict[str, object]]:
-            seen_uuids.append(list(params.get("uuids") or ()))
+            if "uuids" in params:
+                seen_uuids.append(list(params["uuids"]))
+            else:
+                assert params["ids"] == ["rel-1"]
             return []
 
     def candidate(identifier: str, entity_type: str) -> RetrievalCandidate:
