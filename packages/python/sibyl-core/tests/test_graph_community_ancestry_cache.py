@@ -41,7 +41,10 @@ def test_snapshot_fingerprint_ignores_order_but_tracks_content() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("surface", ["clusters", "hierarchy"])
-async def test_derived_cache_reuses_only_current_visible_input(monkeypatch, surface) -> None:
+@pytest.mark.parametrize("networkx_available", [True, False])
+async def test_derived_cache_reuses_only_current_visible_input(
+    monkeypatch, surface, networkx_available
+) -> None:
     clusters.CLUSTER_CACHE.clear()
     hierarchy.GRAPH_LOD_CACHE.clear()
     hierarchy.HIERARCHICAL_CACHE.clear()
@@ -55,8 +58,12 @@ async def test_derived_cache_reuses_only_current_visible_input(monkeypatch, surf
     empty = GraphSnapshot([], [], {})
     visible = AsyncMock(side_effect=[initial, initial, replacement, empty])
     detect = Mock(return_value=[])
+    convert = Mock(return_value=object())
+    if not networkx_available:
+        convert.side_effect = ImportError("NetworkX is optional")
     monkeypatch.setattr(module, "_get_visible_graph_snapshot", visible)
     monkeypatch.setattr(module, "_detect_communities_from_graph", detect)
+    monkeypatch.setattr(module, "_snapshot_to_networkx", convert)
     call = (
         clusters.get_clusters_for_visualization
         if surface == "clusters"
@@ -64,14 +71,17 @@ async def test_derived_cache_reuses_only_current_visible_input(monkeypatch, surf
     )
     first = await call(object(), "org-cache")
     assert await call(object(), "org-cache") is first
-    assert detect.call_count == 1
+    assert convert.call_count == 1
+    assert detect.call_count == (1 if networkx_available else 0)
     updated = await call(object(), "org-cache")
     assert updated is not first
     if surface == "hierarchy":
         assert next(node for node in updated.nodes if node["id"] == "one")["name"] == "replacement"
-    assert detect.call_count == 2
+    assert convert.call_count == 2
+    assert detect.call_count == (2 if networkx_available else 0)
     retired = await call(object(), "org-cache")
-    assert detect.call_count == 3
+    assert convert.call_count == 3
+    assert detect.call_count == (3 if networkx_available else 0)
     if surface == "clusters":
         assert retired == []
     else:
