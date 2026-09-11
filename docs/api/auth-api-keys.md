@@ -28,20 +28,22 @@ access within the organization.
 
 ### Deleted scope targets and upgrades
 
-Deleting a bound project or memory space removes that grant. The key keeps its restriction, including
-when its last bound target disappears. A key with no remaining project grants cannot access other
-projects merely because its owner can. Other valid grants on the same key remain available.
+Deleting a bound project or memory space removes that grant. The key keeps its restriction,
+including when its last bound target disappears. A key with no remaining project grants cannot
+access other projects merely because its owner can. Other valid grants on the same key remain
+available.
 
 Auth schema version 8 records whether each new key was created with project or memory-space
-restrictions. During upgrade, retained scope declarations or a matching creation audit with a positive
-scope count establish a historical restriction. The migration preserves that fact without recreating
-deleted grants. Global auth archive imports apply the same repair to newly imported credentials;
-organization-scoped imports still exclude credentials.
+restrictions. During upgrade, retained scope declarations or a matching creation audit with a
+positive scope count establish a historical restriction. The migration preserves that fact without
+recreating deleted grants. Global auth archive imports apply the same repair to newly imported
+credentials; organization-scoped imports still exclude credentials.
 
-Older project deletion removed the scope declaration itself. If both that declaration and its creation
-audit are missing, the original restriction cannot be recovered. Such keys keep their legacy behavior;
-the upgrade cannot distinguish them from genuinely unrestricted keys. Revoke and recreate any key
-known to have lost its last project binding before this fix, with its intended current restrictions.
+Older project deletion removed the scope declaration itself. If both that declaration and its
+creation audit are missing, the original restriction cannot be recovered. Such keys keep their
+legacy behavior; the upgrade cannot distinguish them from genuinely unrestricted keys. Revoke and
+recreate any key known to have lost its last project binding before this fix, with its intended
+current restrictions.
 
 ## Creating API Keys
 
