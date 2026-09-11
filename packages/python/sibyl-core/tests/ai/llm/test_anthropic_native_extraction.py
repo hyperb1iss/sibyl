@@ -5,7 +5,7 @@ import json
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
-import httpx
+import httpx2 as httpx
 import pytest
 from tests.ai.llm.test_evidence_proposal_validation import procedure
 
