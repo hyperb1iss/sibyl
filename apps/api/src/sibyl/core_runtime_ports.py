@@ -311,6 +311,10 @@ class ApiAuditPort:
 
 
 def install_core_runtime_ports() -> None:
+    from sibyl.jobs.lifecycle_repair import resolve_source_authority
+    from sibyl_core.runtime_ports import install_source_authority_resolver
+
+    install_source_authority_resolver(resolve_source_authority)
     install_queue_port(ApiQueuePort())
     install_content_port(ApiContentPort())
     install_graph_link_port(ApiGraphLinkPort())

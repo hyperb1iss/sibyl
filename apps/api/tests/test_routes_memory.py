@@ -65,6 +65,7 @@ from sibyl_core.services.memory import (
     ReflectionPromotionPreview,
     ReflectionPromotionResult,
 )
+from sibyl_core.services.memory_source_validation import SourceReadAuthority
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory, RawMemoryRecallResult
 
 
@@ -720,7 +721,7 @@ async def test_remember_raw_denies_project_scope_without_contributor_role() -> N
 
 
 @pytest.mark.asyncio
-async def test_recall_raw_returns_scoped_memories() -> None:
+async def test_recall_raw_returns_scoped_memories(correction_memberships) -> None:
     org = _org()
     http_request = _http_request()
     with (
@@ -747,6 +748,7 @@ async def test_recall_raw_returns_scoped_memories() -> None:
     recall.assert_awaited_once_with(
         organization_id=str(org.id),
         principal_id="user-123",
+        source_authority=SourceReadAuthority("user-123"),
         query="raw memory",
         memory_scope="private",
         scope_key=None,
@@ -778,7 +780,7 @@ async def test_recall_raw_returns_scoped_memories() -> None:
 
 
 @pytest.mark.asyncio
-async def test_recall_raw_response_reports_degraded_sources() -> None:
+async def test_recall_raw_response_reports_degraded_sources(correction_memberships) -> None:
     org = _org()
     raw_memory = _memory(
         organization_id=str(org.id),
@@ -812,7 +814,7 @@ async def test_recall_raw_response_reports_degraded_sources() -> None:
 
 
 @pytest.mark.asyncio
-async def test_recall_raw_forwards_import_metadata_filters() -> None:
+async def test_recall_raw_forwards_import_metadata_filters(correction_memberships) -> None:
     org = _org()
     http_request = _http_request()
     occurred_after = datetime(2014, 1, 1, tzinfo=UTC)
@@ -843,6 +845,7 @@ async def test_recall_raw_forwards_import_metadata_filters() -> None:
     recall.assert_awaited_once_with(
         organization_id=str(org.id),
         principal_id="user-123",
+        source_authority=SourceReadAuthority("user-123"),
         query="surrealdb",
         memory_scope="private",
         scope_key=None,
@@ -891,7 +894,7 @@ async def test_recall_raw_rate_limits_concurrent_member_recall() -> None:
 
 
 @pytest.mark.asyncio
-async def test_recall_raw_diary_filters_agent_and_project() -> None:
+async def test_recall_raw_diary_filters_agent_and_project(correction_memberships) -> None:
     org = _org()
     ctx = _ctx()
     with (
@@ -921,6 +924,7 @@ async def test_recall_raw_diary_filters_agent_and_project() -> None:
     recall.assert_awaited_once_with(
         organization_id=str(org.id),
         principal_id="user-123",
+        source_authority=SourceReadAuthority("user-123"),
         query="implementation state",
         memory_scope="private",
         scope_key=None,
@@ -970,7 +974,7 @@ async def test_recall_raw_diary_requires_private_scope() -> None:
 
 
 @pytest.mark.asyncio
-async def test_recall_raw_uses_shared_policy_for_project_scope_read() -> None:
+async def test_recall_raw_uses_shared_policy_for_project_scope_read(correction_memberships) -> None:
     org = _org()
     ctx = _ctx()
     with (
@@ -1045,7 +1049,7 @@ async def test_recall_raw_denies_unverified_team_scope() -> None:
 
 
 @pytest.mark.asyncio
-async def test_recall_raw_uses_shared_policy_for_team_scope_read() -> None:
+async def test_recall_raw_uses_shared_policy_for_team_scope_read(correction_memberships) -> None:
     org = _org()
     ctx = _ctx()
     with (
@@ -1836,8 +1840,23 @@ async def test_blame_memory_source_hides_revision_bodies_after_redaction() -> No
     assert "content_revisions" not in response.source.metadata
 
 
+@pytest.fixture
+def correction_memberships():
+    with (
+        patch(
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
+            AsyncMock(return_value=set()),
+        ),
+        patch(
+            "sibyl.api.routes.memory_auth.list_accessible_team_scope_keys",
+            AsyncMock(return_value=set()),
+        ),
+    ):
+        yield
+
+
 @pytest.mark.asyncio
-async def test_preview_memory_correction_audits_lifecycle_action() -> None:
+async def test_preview_memory_correction_audits_lifecycle_action(correction_memberships) -> None:
     org = _org()
     memory = _memory(id="memory-1", organization_id=str(org.id), source_id="source-1")
     preview = MemoryCorrectionPreview(
@@ -1882,11 +1901,13 @@ async def test_preview_memory_correction_audits_lifecycle_action() -> None:
         principal_id="user-123",
         action="hide",
         reason="outdated",
-        accessible_projects=None,
-        accessible_teams=None,
+        accessible_projects=set(),
+        writable_projects=set(),
+        accessible_teams=set(),
         replacement_source_id=None,
         duplicate_of_source_id=None,
         revised_content=None,
+        allowed_memory_scope_keys=None,
     )
     audit.assert_awaited_once()
     assert audit.await_args.kwargs["action"] == "memory.correction.hide.preview"
@@ -1894,7 +1915,7 @@ async def test_preview_memory_correction_audits_lifecycle_action() -> None:
 
 
 @pytest.mark.asyncio
-async def test_apply_memory_correction_returns_updated_review_state() -> None:
+async def test_apply_memory_correction_returns_updated_review_state(correction_memberships) -> None:
     org = _org()
     memory = _memory(id="memory-1", organization_id=str(org.id), source_id="source-1")
     updated = _memory(
@@ -1972,11 +1993,13 @@ async def test_apply_memory_correction_returns_updated_review_state() -> None:
         principal_id="user-123",
         action="hide",
         reason="outdated",
-        accessible_projects=None,
-        accessible_teams=None,
+        accessible_projects=set(),
+        writable_projects=set(),
+        accessible_teams=set(),
         replacement_source_id=None,
         duplicate_of_source_id=None,
         revised_content=None,
+        allowed_memory_scope_keys=None,
         expected_revision=1,
     )
     audit.assert_awaited_once()
@@ -1985,7 +2008,7 @@ async def test_apply_memory_correction_returns_updated_review_state() -> None:
 
 
 @pytest.mark.asyncio
-async def test_correction_receipt_names_the_graph_rows_it_retired() -> None:
+async def test_correction_receipt_names_the_graph_rows_it_retired(correction_memberships) -> None:
     """The receipt has to show the write reached retrieval, not just the capture.
 
     A correction that stamps entity rows but reports only `raw_captures:` reads
@@ -2051,7 +2074,9 @@ async def test_correction_receipt_names_the_graph_rows_it_retired() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_partially_applied_correction_says_so_in_recall_impact() -> None:
+async def test_a_partially_applied_correction_says_so_in_recall_impact(
+    correction_memberships,
+) -> None:
     """`applied: true` with a refused target must not read as a complete write."""
 
     org = _org()
@@ -2108,7 +2133,7 @@ async def test_a_partially_applied_correction_says_so_in_recall_impact() -> None
 
 
 @pytest.mark.asyncio
-async def test_denied_memory_correction_receipt_reports_no_write() -> None:
+async def test_denied_memory_correction_receipt_reports_no_write(correction_memberships) -> None:
     org = _org()
     memory = _memory(id="memory-1", organization_id=str(org.id), source_id="source-1")
     preview = MemoryCorrectionPreview(
@@ -2209,9 +2234,14 @@ async def test_preview_memory_share_returns_disabled_contract_and_audit() -> Non
             ctx=ctx,
         )
 
-    accessible.assert_awaited_once_with(ctx)
+    assert accessible.await_count == 2
+    assert accessible.await_args_list[0].args == (ctx,)
+    assert accessible.await_args_list[0].kwargs == {}
+    assert accessible.await_args_list[1].args == (ctx,)
+    assert accessible.await_args_list[1].kwargs == {"required_role": ProjectRole.CONTRIBUTOR}
     accessible_teams.assert_awaited_once_with(ctx)
     preview.assert_awaited_once_with(
+        allowed_memory_scope_keys=None,
         source_ids=["memory-1"],
         organization_id=str(org.id),
         principal_id="user-123",
@@ -2219,6 +2249,7 @@ async def test_preview_memory_share_returns_disabled_contract_and_audit() -> Non
         target_scope_key=None,
         recipient_organization_id="org-2",
         accessible_projects={"project_123"},
+        writable_projects={"project_123"},
         accessible_teams=set(),
     )
     audit.assert_awaited_once_with(
@@ -2374,6 +2405,7 @@ async def test_share_memory_applies_promotions_and_returns_audit_receipt() -> No
 
     accessible_teams.assert_awaited_once_with(ctx)
     share.assert_awaited_once_with(
+        allowed_memory_scope_keys=None,
         source_ids=["memory-1"],
         organization_id=str(org.id),
         principal_id="user-123",
@@ -2382,6 +2414,7 @@ async def test_share_memory_applies_promotions_and_returns_audit_receipt() -> No
         recipient_organization_id=None,
         project="project_123",
         accessible_projects={"project_123"},
+        writable_projects={"project_123"},
         accessible_teams=set(),
     )
     audit.assert_awaited_once()
@@ -2474,6 +2507,7 @@ async def test_share_memory_applies_team_promotions_with_membership_scope() -> N
 
     accessible_teams.assert_awaited_once_with(ctx)
     share.assert_awaited_once_with(
+        allowed_memory_scope_keys=None,
         source_ids=["memory-1"],
         organization_id=str(org.id),
         principal_id="user-123",
@@ -2482,6 +2516,7 @@ async def test_share_memory_applies_team_promotions_with_membership_scope() -> N
         recipient_organization_id=None,
         project=None,
         accessible_projects={"project_123"},
+        writable_projects={"project_123"},
         accessible_teams={"team_123"},
     )
     audit.assert_awaited_once()
@@ -2599,6 +2634,16 @@ async def test_preview_reflection_promotion_verifies_project_target() -> None:
         },
     )
     with (
+        patch(
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
+            AsyncMock(
+                side_effect=lambda ctx, required_role=ProjectRole.VIEWER: (
+                    {"project_123"}
+                    if required_role == ProjectRole.CONTRIBUTOR
+                    else {"project_123", "read_only_source"}
+                )
+            ),
+        ),
         patch("sibyl.api.routes.memory_auth.verify_entity_project_access", AsyncMock()) as verify,
         patch(
             "sibyl.api.routes.memory_promotion.preview_reflection_candidate_promotion",
@@ -2635,7 +2680,8 @@ async def test_preview_reflection_promotion_verifies_project_target() -> None:
         promote_to_scope_key="project_123",
         domain="sibyl",
         project="project_123",
-        accessible_projects={"project_123"},
+        accessible_projects={"project_123", "read_only_source"},
+        writable_projects={"project_123"},
     )
     audit.assert_awaited_once_with(
         action="memory.reflect.promote.preview",
@@ -2695,6 +2741,16 @@ async def test_preview_memory_promotion_routes_imported_raw_memory() -> None:
     )
 
     with (
+        patch(
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
+            AsyncMock(
+                side_effect=lambda ctx, required_role=ProjectRole.VIEWER: (
+                    {"project_123"}
+                    if required_role == ProjectRole.CONTRIBUTOR
+                    else {"project_123", "read_only_source"}
+                )
+            ),
+        ),
         patch("sibyl.api.routes.memory_auth.verify_entity_project_access", AsyncMock()),
         patch(
             "sibyl.api.routes.memory_promotion.preview_reflection_candidate_promotion",
@@ -2727,7 +2783,8 @@ async def test_preview_memory_promotion_routes_imported_raw_memory() -> None:
         promote_to_scope_key="project_123",
         domain=None,
         project="project_123",
-        accessible_projects={"project_123"},
+        accessible_projects={"project_123", "read_only_source"},
+        writable_projects={"project_123"},
     )
     audit.assert_awaited_once()
     assert response.allowed is True
@@ -2891,6 +2948,16 @@ async def test_auto_review_reflection_candidate_promotes_safe_candidate() -> Non
         },
     )
     with (
+        patch(
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
+            AsyncMock(
+                side_effect=lambda ctx, required_role=ProjectRole.VIEWER: (
+                    {"project_123"}
+                    if required_role == ProjectRole.CONTRIBUTOR
+                    else {"project_123", "read_only_source"}
+                )
+            ),
+        ),
         patch("sibyl.api.routes.memory_auth.verify_entity_project_access", AsyncMock()) as verify,
         patch(
             "sibyl.api.routes.memory_review.preview_reflection_candidate_promotion",
@@ -2931,9 +2998,11 @@ async def test_auto_review_reflection_candidate_promotes_safe_candidate() -> Non
         promote_to_scope_key="project_123",
         domain="sibyl",
         project="project_123",
-        accessible_projects={"project_123"},
+        accessible_projects={"project_123", "read_only_source"},
+        writable_projects={"project_123"},
     )
     promote.assert_awaited_once_with(
+        allowed_memory_scope_keys=None,
         candidate_id="candidate-1",
         organization_id=str(org.id),
         principal_id="user-123",
@@ -2942,7 +3011,8 @@ async def test_auto_review_reflection_candidate_promotes_safe_candidate() -> Non
         domain="sibyl",
         project="project_123",
         related_to=["task_123"],
-        accessible_projects={"project_123"},
+        accessible_projects={"project_123", "read_only_source"},
+        writable_projects={"project_123"},
     )
     audit.assert_awaited_once_with(
         action="memory.reflect.auto_promote",
@@ -3312,6 +3382,16 @@ async def test_promote_reflection_candidate_verifies_project_target() -> None:
         },
     )
     with (
+        patch(
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
+            AsyncMock(
+                side_effect=lambda ctx, required_role=ProjectRole.VIEWER: (
+                    {"project_123"}
+                    if required_role == ProjectRole.CONTRIBUTOR
+                    else {"project_123", "read_only_source"}
+                )
+            ),
+        ),
         patch("sibyl.api.routes.memory_auth.verify_entity_project_access", AsyncMock()) as verify,
         patch(
             "sibyl.api.routes.memory_promotion.promote_reflection_candidate_review",
@@ -3341,6 +3421,7 @@ async def test_promote_reflection_candidate_verifies_project_target() -> None:
         require_existing_project=True,
     )
     promote.assert_awaited_once_with(
+        allowed_memory_scope_keys=None,
         candidate_id="candidate-1",
         organization_id=str(org.id),
         principal_id="user-123",
@@ -3349,7 +3430,8 @@ async def test_promote_reflection_candidate_verifies_project_target() -> None:
         domain="sibyl",
         project="project_123",
         related_to=["task_123"],
-        accessible_projects={"project_123"},
+        accessible_projects={"project_123", "read_only_source"},
+        writable_projects={"project_123"},
     )
     audit.assert_awaited_once_with(
         action="memory.reflect.promote",
@@ -3404,6 +3486,16 @@ async def test_promote_memory_routes_imported_raw_memory() -> None:
         raw_source_ids=[],
     )
     with (
+        patch(
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
+            AsyncMock(
+                side_effect=lambda ctx, required_role=ProjectRole.VIEWER: (
+                    {"project_123"}
+                    if required_role == ProjectRole.CONTRIBUTOR
+                    else {"project_123", "read_only_source"}
+                )
+            ),
+        ),
         patch("sibyl.api.routes.memory_auth.verify_entity_project_access", AsyncMock()),
         patch(
             "sibyl.api.routes.memory_promotion.promote_reflection_candidate_review",
@@ -3429,6 +3521,7 @@ async def test_promote_memory_routes_imported_raw_memory() -> None:
 
     reflection_promote.assert_awaited_once()
     raw_promote.assert_awaited_once_with(
+        allowed_memory_scope_keys=None,
         raw_memory_id="raw-1",
         organization_id=str(org.id),
         principal_id="user-123",
@@ -3437,7 +3530,8 @@ async def test_promote_memory_routes_imported_raw_memory() -> None:
         domain=None,
         project="project_123",
         related_to=[],
-        accessible_projects={"project_123"},
+        accessible_projects={"project_123", "read_only_source"},
+        writable_projects={"project_123"},
     )
     audit.assert_awaited_once()
     assert response.success is True
@@ -3555,7 +3649,9 @@ async def test_promote_reflection_candidate_returns_404_for_missing_candidate() 
 
 
 @pytest.mark.asyncio
-async def test_a_truncated_projection_walk_says_the_correction_was_partial() -> None:
+async def test_a_truncated_projection_walk_says_the_correction_was_partial(
+    correction_memberships,
+) -> None:
     """The lineage walk stopping early is a partial write, not a complete one.
 
     A capture with more projected rows than the walk's page ceiling admits
@@ -3613,3 +3709,40 @@ async def test_a_truncated_projection_walk_says_the_correction_was_partial() -> 
 
     assert response.recall_impact["projection_walk_truncated"] is True
     assert response.recall_impact["partially_applied"] is True
+
+
+@pytest.mark.asyncio
+async def test_remember_raw_forwards_source_memberships_and_credential_grants() -> None:
+    org = _org()
+    grants = {api_key_memory_scope_key("private", "user-123")}
+    ctx = _ctx(api_key_memory_scope_keys=grants)
+    with (
+        patch(
+            "sibyl.api.routes.memory_raw.remember_raw_memory",
+            AsyncMock(return_value=_memory(organization_id=str(org.id))),
+        ) as remember,
+        patch(
+            "sibyl.api.routes.memory_auth.list_accessible_project_graph_ids",
+            AsyncMock(return_value={"source-project", "other-project"}),
+        ) as projects,
+        patch(
+            "sibyl.api.routes.memory_auth.list_accessible_team_scope_keys",
+            AsyncMock(return_value={"source-team"}),
+        ) as teams,
+        patch("sibyl.api.routes.memory_auth.log_memory_audit_event", AsyncMock()),
+        patch("sibyl.api.routes.memory_raw.publish_raw_capture_changed", AsyncMock()),
+    ):
+        await remember_raw(
+            RawMemoryRememberRequest(
+                raw_content="Private note derived from shared source material.",
+                metadata={"raw_source_ids": ["source-capture"]},
+            ),
+            http_request=_http_request(),
+            org=org,
+            ctx=ctx,
+        )
+    projects.assert_awaited_once_with(ctx)
+    teams.assert_awaited_once_with(ctx)
+    assert remember.await_args.kwargs["accessible_projects"] == {"source-project", "other-project"}
+    assert remember.await_args.kwargs["accessible_teams"] == {"source-team"}
+    assert remember.await_args.kwargs["allowed_memory_scope_keys"] == grants

@@ -80,10 +80,16 @@ async def reserve_llm_budget(
     surface: str,
     prompt: str,
     output_token_limit: int | None = None,
+    attempt_envelope: int = 1,
 ) -> int:
+    """Reserve a character-based estimate, including the configured retry envelope."""
+    if attempt_envelope < 1:
+        raise ValueError("attempt envelope must be positive")
     enforcer = _budget_enforcer
     context = _budget_context.get()
-    estimated_tokens = estimate_llm_tokens(prompt, output_token_limit=output_token_limit)
+    estimated_tokens = (
+        estimate_llm_tokens(prompt, output_token_limit=output_token_limit) * attempt_envelope
+    )
     if enforcer is None or context is None:
         return estimated_tokens
     await enforcer.reserve(

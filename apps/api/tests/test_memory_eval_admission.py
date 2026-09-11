@@ -22,6 +22,7 @@ from sibyl.config import EvalIssuerSettings
 from sibyl_core.auth import OrganizationRole
 from sibyl_core.backends.surreal import SurrealContentClient, bootstrap_content_schema
 from sibyl_core.services import content_client
+from sibyl_core.tasks import consolidation
 from sibyl_core.tasks.eval_receipts import TaskAssignment, sign_outcome
 
 
@@ -122,6 +123,8 @@ async def eval_api(monkeypatch):
                 role=role,
                 policy=policy,
                 body=body,
+                key=key,
+                evidence=evidence,
                 path=path,
             )
         finally:
@@ -229,3 +232,285 @@ async def test_archive_restore_preserves_consumed_attempt(eval_api, monkeypatch,
     finally:
         await restored_close()
         await original_close()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        None,
+        "candidate",
+        "source_deleted_replay",
+        "stamp_changed_replay",
+        "owner",
+        "role",
+        "arm",
+        "deleted",
+        "duplicate",
+        "all_passed",
+        "blank",
+        "input_budget",
+        "transport_failure",
+        "structural_rejection",
+    ],
+)
+async def test_http_consolidation_reads_admitted_sources(eval_api, monkeypatch, change):
+
+    api = eval_api
+    assert (await _register(api)).status_code == 200
+    assert (await api.client.post(api.path, json=api.body)).status_code == 200
+    second = api.assignment.model_copy(update={"attempt_id": uuid4().hex})
+    assert (
+        await api.client.post(
+            "/memory/eval/assignments",
+            json={"issuer_id": "oracle", "assignment": second.model_dump(mode="json")},
+        )
+    ).status_code == 200
+    outcome = json.loads(api.evidence["outcome_bytes"]) | {
+        "attempt_id": second.attempt_id,
+        "status": "task_failed",
+        "passed": False,
+    }
+    if change == "all_passed":
+        outcome.update(status="passed", passed=True)
+    evidence = api.evidence | {
+        "outcome_bytes": json.dumps(outcome).encode(),
+        "episode_bytes": b"The output differed from the expected result.",
+    }
+    signed = sign_outcome(assignment=second, issuer_id="oracle", private_key=api.key, **evidence)
+    body = {"issuer_id": "oracle", "receipt_base64": base64.b64encode(signed).decode()}
+    body.update(
+        {
+            name.replace("_bytes", "_base64"): base64.b64encode(value).decode()
+            for name, value in evidence.items()
+        }
+    )
+    path = f"/memory/eval/experiments/experiment/attempts/{second.attempt_id}/admit"
+    assert (await api.client.post(path, json=body)).status_code == 200
+    request = {
+        "issuer_id": "oracle",
+        "experiment_revision": "1",
+        "arm_id": "raw",
+        "through_checkpoint": 0,
+        "attempt_ids": [api.assignment.attempt_id, second.attempt_id],
+        "group_id": "contrast",
+        "mechanism": "compare output",
+    }
+    calls = []
+    candidate_changes = {
+        "candidate",
+        "source_deleted_replay",
+        "stamp_changed_replay",
+        "structural_rejection",
+    }
+
+    async def extract(_self, prompt):
+        calls.append(prompt)
+        if change == "transport_failure":
+            _raise_transport_failure()
+        if change in candidate_changes:
+            return _candidate_extraction_result(prompt)
+        return SimpleNamespace(
+            output=consolidation.ProcedureProposal(
+                abstention_reason="Insufficient transferable evidence"
+            ),
+            usage=SimpleNamespace(model_dump=lambda **_: {}),
+        )
+
+    monkeypatch.setattr(consolidation.Extractor, "extract_with_usage", extract)
+    _configure_structural_rejection(monkeypatch, change)
+    if change == "owner":
+        api.ctx.user_id = "other"
+    elif change == "role":
+        api.role.value = OrganizationRole.MEMBER
+    elif change == "arm":
+        request["arm_id"] = "other"
+    elif change == "deleted":
+        await api.store.execute_query("DELETE raw_captures;")
+    elif change == "duplicate":
+        request["attempt_ids"] = [api.assignment.attempt_id] * 2
+    elif change == "blank":
+        request["mechanism"] = "   "
+    elif change == "input_budget":
+        from sibyl_core.services.eval_publication import core_config
+
+        monkeypatch.setattr(core_config, "consolidation_max_input_chars", 10)
+    response = await api.client.post(
+        "/memory/eval/experiments/experiment/consolidate", json=request
+    )
+    expected = (
+        200 if change in {None, *candidate_changes} else 403 if change in {"owner", "role"} else 409
+    )
+    if change == "blank":
+        expected = 422
+    if change == "input_budget":
+        expected = 413
+        await _assert_consolidation_input_budget(api, response)
+    if change == "transport_failure":
+        await _assert_transport_failure(api, response)
+        return
+    assert response.status_code == expected, response.text
+    assert len(calls) == (1 if change in {None, *candidate_changes} else 0)
+
+    _assert_outcome_receipt(change, response, calls)
+    if change in {None, *candidate_changes}:
+        await _assert_same_consolidation_replay(api, request, response, calls)
+    if change is None:
+        await _assert_legacy_receipt_unavailable(api, request, calls)
+    if change in {"source_deleted_replay", "stamp_changed_replay"}:
+        await _assert_unavailable_consolidation_replay(api, request, change)
+    if change == "candidate":
+        await _assert_purged_consolidation_replay(api, request, response)
+        assert len(calls) == 1
+
+
+def _candidate_extraction_result(prompt):
+    from sibyl_core.tasks import consolidation
+
+    prompt, request = prompt.rsplit("\n\n", 1)
+    assert request == consolidation.RETROSPECTIVE_REQUEST
+    header = json.loads(prompt.splitlines()[1])
+    spans = [json.loads(line) for line in prompt.splitlines()[3:]]
+
+    def assertion(status):
+        episode = next(e for e in header["episodes"] if e["outcome"]["status"] == status)
+        span = next(s for s in spans if s["episode_id"] == episode["episode_id"])
+        return consolidation.ConditionalAssertion(
+            statement="Check observed output",
+            label="inferred",
+            support=[
+                consolidation.SupportRef(
+                    episode_id=episode["episode_id"],
+                    start_byte=span["start_byte"],
+                    end_byte=span["end_byte"],
+                )
+            ],
+        )
+
+    success = assertion("passed")
+    failure = assertion("task_failed")
+    draft = consolidation.DraftConditionalProcedure(
+        goal=success,
+        environment=[success],
+        preconditions=[success],
+        actions=[
+            consolidation.ConditionalAction(order=1, action=success, success_criteria=success)
+        ],
+        expected_result=success,
+        failure_modes=[failure],
+        abstain_when=[failure],
+    )
+    return SimpleNamespace(
+        output=consolidation.ProcedureProposal(procedure=draft),
+        usage=SimpleNamespace(model_dump=lambda **_: {}),
+    )
+
+
+async def _assert_unavailable_consolidation_replay(api, request, change):
+    query = (
+        "DELETE raw_captures WHERE capture_surface = 'verified_eval';"
+        if change == "source_deleted_replay"
+        else "UPDATE raw_captures SET metadata.eval_admission.receipt_sha256 = 'changed' WHERE capture_surface = 'verified_eval';"
+    )
+    await api.store.execute_query(query)
+    replay = await api.client.post("/memory/eval/experiments/experiment/consolidate", json=request)
+    assert replay.status_code == 409, replay.text
+    assert "candidate" not in replay.json()
+
+
+async def _assert_purged_consolidation_replay(api, request, response):
+    candidate_id = response.json()["memory_id"]
+    assert candidate_id
+    assert response.json()["candidate"]["review_state"] == "pending"
+    await api.store.execute_query("DELETE raw_captures WHERE uuid = $id;", id=candidate_id)
+    gone = await api.client.post("/memory/eval/experiments/experiment/consolidate", json=request)
+    assert gone.status_code == 200
+    assert gone.json()["status"] == "gone"
+    assert gone.json()["candidate"] is None
+
+
+async def _assert_consolidation_input_budget(api, response):
+    detail = response.json()["detail"]
+    assert detail["code"] == "consolidation_input_budget_exceeded"
+    assert detail["actual_chars"] > detail["max_input_chars"] == 10
+    from sibyl_core.services.content_client import normalize_records
+
+    assert (
+        normalize_records(await api.store.execute_query("SELECT * FROM eval_consolidations;")) == []
+    )
+    assert len(normalize_records(await api.store.execute_query("SELECT * FROM raw_captures;"))) == 2
+
+
+def _raise_transport_failure():
+    from sibyl_core.ai.errors import LLMProviderError
+    from sibyl_core.ai.transport import FailedExtractionUsage, TransportAttempt
+
+    raise LLMProviderError(
+        "private provider error",
+        details={
+            "body": "private response",
+            "extraction_usage": FailedExtractionUsage(
+                transport_attempts=[
+                    TransportAttempt(status_code=500, request_id="req_1"),
+                    TransportAttempt(exception_type="ReadTimeout"),
+                ]
+            ).model_dump(mode="json"),
+        },
+    )
+
+
+async def _assert_transport_failure(api, response):
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert detail["code"] == "consolidation_extraction_failed"
+    assert len(detail["usage"]["transport_attempts"]) == 2
+    assert detail["usage"]["cost_usd"] is None
+    assert not detail["usage"]["usage_complete"]
+    assert "private" not in response.text
+    from sibyl_core.services.content_client import normalize_records
+
+    assert (
+        normalize_records(await api.store.execute_query("SELECT * FROM eval_consolidations;")) == []
+    )
+
+
+async def _assert_same_consolidation_replay(api, request, response, calls):
+    replay = await api.client.post("/memory/eval/experiments/experiment/consolidate", json=request)
+    assert replay.status_code == 200
+    assert replay.json() == response.json()
+    assert len(calls) == 1
+
+
+def _configure_structural_rejection(monkeypatch, change):
+    if change == "structural_rejection":
+
+        def reject(*_args):
+            raise ValueError("Missing failure support")
+
+        monkeypatch.setattr(consolidation, "_candidate", reject)
+
+
+def _assert_outcome_receipt(change, response, calls):
+    if change is None:
+        assert response.json()["candidate"] is None
+        assert response.json()["source_join"] == "authenticated_admission_ledger"
+        assert "sibyl-signed-eval-outcome-v1" in calls[0]
+        assert response.json()["receipt_status"] == "available"
+        assert response.json()["abstention_reason"] == "Insufficient transferable evidence"
+        assert response.json()["build_receipt"]["reason"] == "Insufficient transferable evidence"
+        assert response.json()["rejection_reason"] is None
+    elif change == "structural_rejection":
+        assert response.json()["status"] == "rejected"
+        assert response.json()["rejection_reason"] == "Missing failure support"
+        assert response.json()["abstention_reason"] is None
+        assert response.json()["build_receipt"]["status"] == "rejected"
+        assert response.json()["receipt_status"] == "available"
+
+
+async def _assert_legacy_receipt_unavailable(api, request, calls):
+    await api.store.execute_query("UPDATE eval_consolidations UNSET build_receipt_json;")
+    legacy = await api.client.post("/memory/eval/experiments/experiment/consolidate", json=request)
+    assert legacy.status_code == 200
+    assert legacy.json()["receipt_status"] == "unavailable"
+    assert legacy.json()["abstention_reason"] is None
+    assert legacy.json()["build_receipt"] == {}
+    assert len(calls) == 1

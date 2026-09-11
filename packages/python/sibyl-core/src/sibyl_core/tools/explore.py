@@ -6,6 +6,9 @@ import structlog
 
 from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
 from sibyl_core.models.entities import Entity, EntityType, RelationshipType
+from sibyl_core.services.eval_publication_guards import (
+    unavailable_publication_ids,
+)
 from sibyl_core.tools.helpers import (
     VALID_ENTITY_TYPES,
     ScopeGuard,
@@ -669,6 +672,13 @@ async def _explore_related(
         limit=limit,
     )
 
+    unavailable_publications = await unavailable_publication_ids(
+        group_id,
+        {
+            str(entity.id): getattr(entity, "metadata", None)
+            for entity, _relationship in raw_results
+        },
+    )
     results = []
     for entity, relationship in raw_results:
         if scope_guard is not None and not scope_guard(entity):
@@ -676,7 +686,10 @@ async def _explore_related(
         # Synthesis sources its neighborhood through this lane, so a corrected
         # or superseded row reached a rendered handbook as a cited source
         # without ever passing pack admission.
-        if not graph_metadata_recallable(getattr(entity, "metadata", None)):
+        if (
+            not graph_metadata_recallable(getattr(entity, "metadata", None))
+            or str(entity.id) in unavailable_publications
+        ):
             continue
 
         # RBAC: Filter by accessible projects

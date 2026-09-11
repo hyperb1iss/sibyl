@@ -702,7 +702,8 @@ async def test_requeue_operational_embedding_job_restores_manifest_completion() 
 
 
 @pytest.mark.asyncio
-async def test_requeue_completed_operational_manifest_is_idempotent() -> None:
+@pytest.mark.parametrize("coverage", ["complete", "incomplete"])
+async def test_requeue_completed_operational_manifest_is_idempotent(coverage: str) -> None:
     org = _org()
     ctx = _ctx()
     manifest = Entity(
@@ -718,10 +719,17 @@ async def test_requeue_completed_operational_manifest_is_idempotent() -> None:
             "expected_entity_ids": ["event_pruned", "artifact_capture-complete"],
         },
     )
+    current = Entity(
+        id="event_pruned",
+        entity_type=EntityType.EVENT,
+        name="Current",
+        metadata={"project_id": "project_shared"},
+    )
     runtime = SimpleNamespace(
         entity_manager=SimpleNamespace(
             get=AsyncMock(return_value=manifest),
-            get_many=AsyncMock(),
+            get_many=AsyncMock(return_value=[current, manifest]),
+            complete_embedding_manifest=AsyncMock(return_value=coverage),
         )
     )
 
@@ -740,7 +748,7 @@ async def test_requeue_completed_operational_manifest_is_idempotent() -> None:
         ),
         patch(
             "sibyl.jobs.queue.enqueue_entity_embedding_backfill",
-            AsyncMock(),
+            AsyncMock(return_value="repair-job"),
         ) as enqueue_embeddings,
     ):
         response = await requeue_entity_background_jobs(
@@ -753,14 +761,16 @@ async def test_requeue_completed_operational_manifest_is_idempotent() -> None:
             content_session="session",
         )
 
-    assert response.entity_ids == [manifest.id]
-    assert response.background_jobs["embedding_backfill"] == {
-        "status": "skipped",
-        "job_ids": [],
-        "reason": "manifest_complete",
-    }
-    runtime.entity_manager.get_many.assert_not_awaited()
-    enqueue_embeddings.assert_not_awaited()
+    if coverage == "complete":
+        assert response.entity_ids == [manifest.id]
+        assert response.background_jobs["embedding_backfill"]["status"] == "skipped"
+        runtime.entity_manager.get_many.assert_not_awaited()
+        enqueue_embeddings.assert_not_awaited()
+    else:
+        assert response.background_jobs["embedding_backfill"]["status"] == "queued"
+        enqueue_embeddings.assert_awaited_once()
+        assert [row["id"] for row in enqueue_embeddings.await_args.args[0]] == [current.id]
+        assert enqueue_embeddings.await_args.kwargs["completion_manifest"]["id"] == manifest.id
 
 
 @pytest.mark.asyncio

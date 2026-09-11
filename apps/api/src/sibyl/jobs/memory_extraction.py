@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 from dataclasses import dataclass
@@ -231,6 +232,9 @@ async def extract_memory_entities(
             "projection_errors": [],
             "extractions": [],
         }
+    source_payloads, projection_sources = await _capture_projection_payloads(
+        source_payloads, group_id=group_id, max_source_chars=max_source_chars
+    )
     prompt = build_memory_batch_entity_extraction_prompt(
         sources=[
             {
@@ -296,6 +300,7 @@ async def extract_memory_entities(
         group_id=group_id,
         extracted_by_source_id=extracted_by_source_id,
         max_entities_per_source=max_entities_per_source,
+        projection_sources=projection_sources,
     )
     chunk_links = await _link_projected_entities_to_document_chunks(
         source_payloads,
@@ -592,12 +597,41 @@ def _limited_entities(
     return result.entities[: max(1, max_entities)]
 
 
+async def _capture_projection_payloads(
+    payloads: list[_SourcePayload], *, group_id: str, max_source_chars: int
+) -> tuple[list[_SourcePayload], dict[str, Any]]:
+    """Capture retained protected evidence before constructing the extraction prompt."""
+    runtime = await get_surreal_graph_runtime(group_id)
+    loader = getattr(runtime.entity_manager, "load_projection_source", None)
+    if not callable(loader):
+        return payloads, {}
+    snapshots = await asyncio.gather(*(loader(payload.source_id) for payload in payloads))
+    sources = {}
+    captured = []
+    for payload, snapshot in zip(payloads, snapshots, strict=True):
+        if snapshot is None:
+            captured.append(payload)
+            continue
+        sources[payload.source_id] = snapshot
+        entity = snapshot[0].entity
+        content = (entity.content or entity.description or "")[:max_source_chars]
+        captured.append(
+            _SourcePayload(
+                source={**entity.model_dump(mode="json"), "content": content},
+                source_id=payload.source_id,
+                char_count=len(content),
+            )
+        )
+    return captured, sources
+
+
 async def _project_extracted_entities(
     source_payloads: list[_SourcePayload],
     *,
     group_id: str,
     extracted_by_source_id: dict[str, list[ExtractedMemoryEntity]],
     max_entities_per_source: int,
+    projection_sources: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not extracted_by_source_id:
         return {
@@ -624,6 +658,7 @@ async def _project_extracted_entities(
             created_source_ids=[source.source_id for source in source_payloads],
             max_entities=max_entities_per_source,
             generate_embeddings=True,
+            projection_sources=projection_sources,
         )
         return {
             "projected_entities": projection.projected_entities,

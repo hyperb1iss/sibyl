@@ -27,7 +27,12 @@ def _subprocess_env() -> dict[str, str]:
         )
     )
     return {
-        **os.environ,
+        **{
+            key: value
+            for key, value in os.environ.items()
+            if not any(marker in key.upper() for marker in ("KEY", "TOKEN", "SECRET", "PASSWORD"))
+        },
+        "UV_NO_ENV_FILE": "1",
         "PYTHONPATH": pythonpath,
         "SIBYL_REPO_ROOT": str(_REPO_ROOT),
     }
@@ -61,6 +66,9 @@ async def main():
     )
     import sibyl_core.retrieval._search_database as retrieval_database
     import sibyl_core.services.memory_reflection as memory_module
+    import sibyl_core.services.graph_runtime as core_graph_runtime
+    import sibyl_core.services.content_models as content_models
+    content_models.configured_raw_memory_embedding_provider = lambda: None
     import sibyl_core.tools.add as add_module
     import sibyl_core.tools.context as context_module
     import sibyl_core.tools.core as core_module
@@ -95,6 +103,7 @@ async def main():
     async def empty_raw_recall(**_kwargs):
         return []
 
+    core_graph_runtime.get_surreal_graph_runtime = runtime_factory
     add_module.get_surreal_graph_runtime = runtime_factory
     context_module.get_surreal_graph_runtime = runtime_factory
     explore_module.get_graph_runtime = runtime_factory

@@ -97,7 +97,7 @@ describe('RawCaptureReview', () => {
     expect(screen.getByText('Verbatim Content')).toBeInTheDocument();
     expect(screen.getByText('remember this exact text from the dashboard')).toBeInTheDocument();
     expect(screen.getAllByText('Quick memory').length).toBeGreaterThan(0);
-    expect(screen.getByText('Needs link')).toBeInTheDocument();
+    expect(screen.getAllByText('Unlinked').length).toBeGreaterThan(0);
   });
 
   it('updates the memory captures route when selecting a different capture', async () => {
@@ -121,7 +121,7 @@ describe('RawCaptureReview', () => {
   it('filters captures down to entries that still need linking', async () => {
     const { user } = render(<RawCaptureReview />);
 
-    await user.click(screen.getByRole('button', { name: /needs link1/i }));
+    await user.click(screen.getByRole('button', { name: /unlinked1/i }));
 
     expect(
       screen.getByRole('button', { name: /select capture deep thought/i })
@@ -132,19 +132,19 @@ describe('RawCaptureReview', () => {
     expect(screen.getByText('remember this exact text from the terminal')).toBeInTheDocument();
   });
 
-  it('starts in the needs-link queue when requested in the url', () => {
+  it('starts in the unlinked view when requested in the url', () => {
     navigationState.searchParams = new URLSearchParams('link=unlinked');
 
     render(<RawCaptureReview />);
 
-    expect(screen.getByText('Needs Link Queue')).toBeInTheDocument();
+    expect(screen.getByText('Unlinked Captures')).toBeInTheDocument();
     expect(screen.getByText('remember this exact text from the terminal')).toBeInTheDocument();
     expect(
       screen.queryByText('remember this exact text from the dashboard')
     ).not.toBeInTheDocument();
   });
 
-  it('advances review navigation from the detail pane', async () => {
+  it('advances capture navigation from the detail pane', async () => {
     const { user } = render(<RawCaptureReview />);
 
     await user.click(screen.getByRole('button', { name: 'Next' }));
@@ -152,21 +152,29 @@ describe('RawCaptureReview', () => {
     expect(replace).toHaveBeenCalledWith('/memory/captures?id=raw-2', { scroll: false });
   });
 
-  it('sends a defer action for the selected capture', async () => {
-    const mutateAsync = vi.fn().mockResolvedValue({
-      ...captureList.captures[0],
-      raw_content: 'remember this exact text from the dashboard',
-      review_state: 'deferred',
+  it('does not silently hide deferred unlinked captures', () => {
+    navigationState.searchParams = new URLSearchParams('link=unlinked');
+    hooks.useRawCaptures.mockReturnValue({
+      data: {
+        ...captureList,
+        captures: captureList.captures.map(capture => ({ ...capture, review_state: 'deferred' })),
+      },
+      isLoading: false,
+      error: null,
     });
-    hooks.useUpdateRawCaptureReviewState.mockReturnValue({
-      mutateAsync,
-      isPending: false,
-    });
+    render(<RawCaptureReview />);
+    expect(
+      screen.getByRole('button', { name: /select capture deep thought/i })
+    ).toBeInTheDocument();
+  });
 
-    const { user } = render(<RawCaptureReview />);
-
-    await user.click(screen.getByRole('button', { name: 'Defer' }));
-
-    expect(mutateAsync).toHaveBeenCalledWith({ id: 'raw-1', reviewState: 'deferred' });
+  it('keeps inspection optional and links to existing correction controls', () => {
+    render(<RawCaptureReview />);
+    expect(screen.queryByRole('button', { name: 'Defer' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Return to Queue' })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: /inspect source or make a correction/i })
+    ).toHaveAttribute('href', '/memory/sources/raw-1');
+    expect(screen.getByText(/inspection is optional/i)).toBeInTheDocument();
   });
 });

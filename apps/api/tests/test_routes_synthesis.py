@@ -28,6 +28,7 @@ from sibyl_core.models.context import (
     ContextPack,
     ContextSection,
 )
+from sibyl_core.models.entities import Entity, EntityType
 from sibyl_core.models.synthesis import (
     SynthesisArtifactFormat,
     SynthesisOutputType,
@@ -35,6 +36,7 @@ from sibyl_core.models.synthesis import (
 )
 from sibyl_core.tools.responses import SearchResponse, SearchResult
 from tests.harness.auth import stub_auth_context
+from tests.harness.source_observations import observed_graph_sources
 
 
 def _org() -> SimpleNamespace:
@@ -46,6 +48,22 @@ def _ctx() -> AuthContext:
         user_id=UUID("00000000-0000-0000-0000-000000000123"),
         org_role=OrganizationRole.MEMBER,
     )
+
+
+@pytest.fixture(autouse=True)
+async def materialization_source():
+    async with observed_graph_sources(
+        str(_org().id),
+        [
+            Entity(
+                id="artifact:context",
+                entity_type=EntityType.ARTIFACT,
+                name="Context artifact",
+                content="Authorized graph text enters the materialized pack.",
+            )
+        ],
+    ):
+        yield
 
 
 def test_synthesis_plan_route_is_registered() -> None:
@@ -158,10 +176,10 @@ async def test_plan_synthesis_route_scopes_to_accessible_projects() -> None:
     assert response.status == SynthesisRunStatus.PLANNED
     assert response.outline.sections[0].title == "Current State"
     assert response.verification.gap_count == 0
-    assert response.source_packs[0].source_ids == ["source:context"]
+    assert response.source_packs[0].source_ids == ["graph_entity:artifact:context"]
     assert (
         response.source_packs[0].sources[0].content_preview
-        == "Only authorized source text enters the materialized pack."
+        == "Authorized graph text enters the materialized pack."
     )
 
 
@@ -197,7 +215,9 @@ async def test_plan_synthesis_route_verifies_explicit_project() -> None:
 
     verify_project.assert_awaited_once()
     assert response.request.project == "project-sibyl"
-    assert response.source_packs[0].freshness == {"source:context": "2026-05-14T12:00:00Z"}
+    assert response.source_packs[0].freshness == {
+        "graph_entity:artifact:context": "2026-05-14T12:00:00Z"
+    }
 
 
 @pytest.mark.asyncio
@@ -271,9 +291,11 @@ async def test_draft_synthesis_route_returns_verified_artifact() -> None:
     assert response.status == SynthesisRunStatus.VERIFIED
     assert response.artifact.format is SynthesisArtifactFormat.MARKDOWN
     assert response.artifact.verification.status.value == "pass"
-    assert "Only authorized source text" in response.artifact.markdown
-    assert "[source:context]" in response.artifact.markdown
-    assert response.artifact.json_payload["sections"][0]["source_ids"] == ["source:context"]
+    assert "Authorized graph text" in response.artifact.markdown
+    assert "[graph_entity:artifact:context]" in response.artifact.markdown
+    assert response.artifact.json_payload["sections"][0]["source_ids"] == [
+        "graph_entity:artifact:context"
+    ]
 
 
 @pytest.mark.asyncio
@@ -321,7 +343,7 @@ async def test_draft_synthesis_route_can_remember_artifact() -> None:
     assert response.artifact.remembered_memory_id == "memory:artifact"
     assert response.artifact.remembered_source_id == remember_calls[0]["source_id"]
     assert remember_calls[0]["memory_scope"] == "private"
-    assert remember_calls[0]["metadata"]["source_ids"] == ["source:context"]
+    assert remember_calls[0]["metadata"]["source_ids"] == ["graph_entity:artifact:context"]
     assert '"source:context"' in remember_calls[0]["raw_content"]
 
 
@@ -344,10 +366,10 @@ async def test_handbook_route_composes_a_cited_body_for_one_project() -> None:
 
     verify_project.assert_awaited_once()
     assert response.project == "project-sibyl"
-    assert response.source_ids == ["source:context"]
+    assert response.source_ids == ["graph_entity:artifact:context"]
     # Run bookkeeping belongs in the response envelope, never in the file body.
     assert response.run_id not in response.markdown
-    assert "[source:context]" in response.markdown
+    assert "[graph_entity:artifact:context]" in response.markdown
 
 
 @pytest.mark.asyncio
@@ -370,3 +392,60 @@ async def test_handbook_route_is_stable_across_identical_requests() -> None:
 
     assert first.run_id == second.run_id
     assert first.markdown == second.markdown
+
+
+@pytest.mark.parametrize("surface", ["plan", "draft", "remember"])
+async def test_synthesis_keeps_source_clocks_out_of_responses_and_saved_json(surface):
+    packs = []
+
+    async def context_with_clock(**kwargs):
+        pack = await _fake_context_pack(**kwargs)
+        pack.items[0].metadata.update(
+            {
+                "correction_blockers": {"private-root-clock": {"revision": 9, "blocking": False}},
+                "source_bindings": {"declared-source": 2},
+                "authored": {"correction_blockers": "literal documentation"},
+            }
+        )
+        packs.append(pack)
+        return pack
+
+    remember = AsyncMock(return_value=SimpleNamespace(id="saved", source_id="saved-source"))
+    with (
+        patch(
+            "sibyl.api.routes.synthesis.list_accessible_project_graph_ids",
+            AsyncMock(return_value=["project-sibyl"]),
+        ),
+        patch("sibyl_core.services.synthesis.default_search", _fake_search),
+        patch("sibyl_core.services.synthesis.default_related_sources", _empty_related),
+        patch("sibyl_core.services.synthesis.default_context_pack", context_with_clock),
+        patch("sibyl_core.services.synthesis.default_remember_artifact", remember),
+    ):
+        if surface == "plan":
+            response = await plan_synthesis_route(
+                SynthesisPlanRequest(goal="Write a sourced roadmap"), org=_org(), ctx=_ctx()
+            )
+        else:
+            response = await draft_synthesis_route(
+                SynthesisDraftRequest(
+                    goal="Write a sourced roadmap",
+                    output_format=SynthesisArtifactFormat.JSON,
+                    remember=surface == "remember",
+                ),
+                org=_org(),
+                ctx=_ctx(),
+            )
+    assert "private-root-clock" not in response.model_dump_json()
+    for pack in response.source_packs:
+        for source in pack.sources:
+            assert "correction_blockers" not in source.metadata
+            assert "source_bindings" not in source.metadata
+            assert source.metadata["authored"] == {"correction_blockers": "literal documentation"}
+    assert packs
+    assert all("correction_blockers" in pack.items[0].metadata for pack in packs)
+    if surface == "remember":
+        remember.assert_awaited_once()
+        assert "private-root-clock" not in remember.await_args.kwargs["raw_content"]
+        assert '"declared-source"' not in remember.await_args.kwargs["raw_content"]
+    else:
+        remember.assert_not_awaited()

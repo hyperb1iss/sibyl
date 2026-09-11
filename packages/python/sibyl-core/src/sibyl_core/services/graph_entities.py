@@ -18,6 +18,7 @@ from sibyl_core.services.graph_embeddings import (
 )
 from sibyl_core.services.graph_entity_store import (
     _CONTENT_MIRRORS_DESCRIPTION_TYPES,
+    _complete_embedding_manifest,
     _entity_update_patch,
     _heal_metadata_snapshots_for_write,
     _insert_entity_if_absent,
@@ -34,12 +35,15 @@ class EntityManager(_EntityWorkItemManager):
     supports_bounded_entity_list = True
     supports_lightweight_entity_list = True
 
-    async def create_direct_if_absent(self, entity: Entity) -> tuple[Entity, bool]:
+    async def create_direct_if_absent(
+        self, entity: Entity, *, derivation: Mapping[str, object] | None = None
+    ) -> tuple[Entity, bool]:
         """Insert once, returning the stored row and whether this call created it."""
         row, created = await _insert_entity_if_absent(
             self._client,
             entity,
             group_id=self._group_id,
+            derivation=derivation,
         )
         return _entity_from_row(row), created
 
@@ -49,6 +53,13 @@ class EntityManager(_EntityWorkItemManager):
         await _replace_entity(self._client, entity, group_id=self._group_id)
         return entity.id
 
+    async def load_projection_source(self, source_id: str):
+        from sibyl_core.services.graph_derivations import load_graph_projection_source
+
+        return await load_graph_projection_source(
+            self._client, organization_id=self._group_id, source_id=source_id
+        )
+
     async def create_direct_bulk(
         self,
         entities: Sequence[Entity],
@@ -56,6 +67,7 @@ class EntityManager(_EntityWorkItemManager):
         generate_embeddings: bool = False,
         embedding_batch_size: int = 64,
         write_batch_size: int = 128,
+        projection_source=None,
     ) -> list[str]:
         prepared_entities = await self.prepare_entities_for_write(
             entities,
@@ -69,7 +81,9 @@ class EntityManager(_EntityWorkItemManager):
         batch_size = max(int(write_batch_size), 1)
         for index in range(0, len(prepared_entities), batch_size):
             batch = prepared_entities[index : index + batch_size]
-            await _replace_entities_bulk(self._client, batch, group_id=self._group_id)
+            await _replace_entities_bulk(
+                self._client, batch, group_id=self._group_id, projection_source=projection_source
+            )
             created_ids.extend(entity.id for entity in batch)
         return created_ids
 
@@ -157,6 +171,17 @@ class EntityManager(_EntityWorkItemManager):
         ready_ids.update(written_ids)
         return [entity.id for entity in current_entities if entity.id in ready_ids]
 
+    async def complete_embedding_manifest(self, expected: Entity, *, complete: bool = True) -> str:
+        if self._embedding_provider is None:
+            raise RuntimeError("embedding manifest requires a configured provider")
+        return await _complete_embedding_manifest(
+            self._client,
+            expected,
+            group_id=self._group_id,
+            embedding_metadata=self._embedding_provider.metadata.to_dict(),
+            complete=complete,
+        )
+
     async def create(self, entity: Entity) -> str:
         return await self.create_direct(entity, generate_embedding=True)
 
@@ -212,6 +237,9 @@ class EntityManager(_EntityWorkItemManager):
             self._client,
             """
                 BEGIN TRANSACTION;
+                LET $embedding_input = (SELECT name, description, content,
+                    attributes.summary AS embedding_summary FROM entity
+                    WHERE group_id = $group_id AND uuid = $uuid LIMIT 1)[0];
                 LET $updated = (
                     UPDATE entity MERGE $patch
                     WHERE group_id = $group_id
@@ -240,7 +268,16 @@ class EntityManager(_EntityWorkItemManager):
                         content
                     END,
                     revision += 1
-                RETURN AFTER;
+                RETURN NONE;
+                UPDATE $updated SET name_embedding = NONE,
+                    attributes.embedding_metadata = NONE
+                WHERE name != $embedding_input.name
+                    OR description != $embedding_input.description
+                    OR content != $embedding_input.content
+                    OR attributes.summary != $embedding_input.embedding_summary
+                RETURN NONE;
+                SELECT * FROM entity WHERE group_id = $group_id AND uuid = $uuid
+                    AND array::len($updated) > 0 LIMIT 1;
                 COMMIT TRANSACTION;
             """,
             group_id=self._group_id,

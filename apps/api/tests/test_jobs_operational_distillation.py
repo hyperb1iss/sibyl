@@ -123,6 +123,8 @@ async def test_distillation_writes_current_notes_and_removes_stale_kind(
         "total_tokens": 160,
         "cost_usd": 0.00042,
         "cost_complete": True,
+        "transport_attempts": [],
+        "transport_usage_complete": None,
     }
     assert result["distillation_receipt"]["observed_absence"] == {
         "proposed_count": 0,

@@ -14,6 +14,13 @@ from sibyl_core.services.memory import (
 )
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 
+
+@pytest.fixture(autouse=True)
+def dispatch_cursor(monkeypatch):
+    monkeypatch.setattr("sibyl.jobs.reflection.load_dream_cursor", AsyncMock(return_value=("", 0)))
+    monkeypatch.setattr("sibyl.jobs.reflection.advance_dream_cursor", AsyncMock(return_value=True))
+
+
 ORG_ID = "00000000-0000-0000-0000-000000000111"
 USER_ID = "00000000-0000-0000-0000-000000000222"
 
@@ -112,6 +119,12 @@ async def test_reflection_dream_cycle_reflects_sources_and_promotes_candidates()
 
     with (
         patch(
+            "sibyl_core.services.automatic_reflection.automatically_review_reflection",
+            AsyncMock(
+                return_value=SimpleNamespace(candidate=candidate, executions=("critic-fixture",))
+            ),
+        ),
+        patch(
             "sibyl.jobs.reflection.list_reflection_dream_source_memories",
             AsyncMock(return_value=[source]),
         ),
@@ -171,6 +184,12 @@ async def test_reflection_dream_cycle_dry_run_writes_no_memory() -> None:
     )
 
     with (
+        patch(
+            "sibyl_core.services.automatic_reflection.automatically_review_reflection",
+            AsyncMock(
+                return_value=SimpleNamespace(candidate=candidate, executions=("critic-fixture",))
+            ),
+        ),
         patch(
             "sibyl.jobs.reflection.list_reflection_dream_source_memories",
             AsyncMock(return_value=[source]),
@@ -232,6 +251,12 @@ async def test_reflection_dream_cycle_archives_terminal_exception_candidates() -
 
     with (
         patch(
+            "sibyl_core.services.automatic_reflection.automatically_review_reflection",
+            AsyncMock(
+                return_value=SimpleNamespace(candidate=candidate, executions=("critic-fixture",))
+            ),
+        ),
+        patch(
             "sibyl.jobs.reflection.list_reflection_dream_source_memories",
             AsyncMock(return_value=[]),
         ),
@@ -269,5 +294,22 @@ async def test_reflection_dream_cycle_archives_terminal_exception_candidates() -
     saved_memory = save.await_args.args[0]
     assert saved_memory.review_state == "archived"
     assert receipt["archived"] == 1
-    assert receipt["exceptioned"] == 1
+    assert receipt["exceptioned"] == 0
+    assert receipt["candidates"][0]["outcome"] == "abstained"
+    assert receipt["candidates"][0]["recommended_action"] == "abstain"
     assert receipt["candidates"][0]["exception_reasons"] == ["duplicate_candidate"]
+
+
+@pytest.mark.parametrize("archive_exceptions", [False, True])
+async def test_dream_worker_accepts_legacy_archive_payload(archive_exceptions):
+    result = await run_reflection_dream_cycle(
+        {},
+        ORG_ID,
+        source_limit=0,
+        candidate_limit=0,
+        archive_exceptions=archive_exceptions,
+        archive_exception_reasons=["duplicate_candidate"],
+    )
+    assert result["sources_scanned"] == 0
+    assert result["candidates_scanned"] == 0
+    assert result["failed"] == 0

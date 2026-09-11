@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import os
+from contextlib import AsyncExitStack
 from typing import Literal
 
+from anthropic import AsyncAnthropic
+from openai import AsyncOpenAI
 from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.models.openai import OpenAIResponsesModel, OpenAIResponsesModelSettings
+from pydantic_ai.profiles import ModelProfile
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -16,18 +20,31 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from sibyl_core.ai.errors import LLMConfigError
 from sibyl_core.ai.llm.config import LLMConfig
 from sibyl_core.ai.registry import ModelKind, model_registry
+from sibyl_core.ai.transport import RecordingAnthropicClient, RecordingOpenAIClient
 
 
-def build_model(config: LLMConfig) -> Model:
+def build_model(config: LLMConfig, *, resources: AsyncExitStack | None = None) -> Model:
     provider_model_id = resolve_provider_model_id(config)
     api_key = config.api_key.get_secret_value() if config.api_key else None
 
     match config.provider:
         case "anthropic":
+            settings = _settings(config)
+            if resolved_model_profile(config).get("anthropic_disallows_sampling_settings", False):
+                settings.pop("temperature", None)
+            http_client = RecordingAnthropicClient()
+            if resources is not None:
+                resources.push_async_callback(http_client.aclose)
             return AnthropicModel(
                 provider_model_id,
-                provider=AnthropicProvider(api_key=api_key),
-                settings=AnthropicModelSettings(**_settings(config)),
+                provider=AnthropicProvider(
+                    anthropic_client=AsyncAnthropic(
+                        api_key=api_key,
+                        max_retries=config.transport_max_retries,
+                        http_client=http_client,
+                    )
+                ),
+                settings=AnthropicModelSettings(**settings),
             )
         case "gemini":
             return GoogleModel(
@@ -36,11 +53,28 @@ def build_model(config: LLMConfig) -> Model:
                 settings=GoogleModelSettings(**_settings(config)),
             )
         case "openai":
+            http_client = RecordingOpenAIClient()
+            if resources is not None:
+                resources.push_async_callback(http_client.aclose)
             return OpenAIResponsesModel(
                 provider_model_id,
-                provider=OpenAIProvider(api_key=api_key),
+                provider=OpenAIProvider(
+                    openai_client=AsyncOpenAI(
+                        api_key=api_key,
+                        max_retries=config.transport_max_retries,
+                        http_client=http_client,
+                    )
+                ),
                 settings=OpenAIResponsesModelSettings(**_settings(config)),
             )
+
+
+def resolved_model_profile(config: LLMConfig) -> ModelProfile:
+    """Resolve provider schema capabilities without creating a network client."""
+    provider = {"anthropic": AnthropicProvider, "openai": OpenAIProvider, "gemini": GoogleProvider}[
+        config.provider
+    ]
+    return provider.model_profile(resolve_provider_model_id(config)) or {}
 
 
 def resolve_provider_model_id(config: LLMConfig) -> str:

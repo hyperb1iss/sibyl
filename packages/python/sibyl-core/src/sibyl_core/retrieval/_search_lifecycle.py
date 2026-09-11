@@ -13,6 +13,7 @@ from sibyl_core.retrieval._search_candidates import _string_value
 from sibyl_core.retrieval._search_database import _execute_query_records
 from sibyl_core.retrieval._search_plan import RetrievalSignal
 from sibyl_core.retrieval.candidates import RetrievalCandidate
+from sibyl_core.services.eval_publication_guards import unavailable_publication_ids
 
 _SUPERSEDES_PREDICATE = "SUPERSEDES"
 _SUPERSESSION_LOOKUP_BATCH_SIZE = 512
@@ -218,12 +219,23 @@ async def _apply_supersession_gate(
     signal, this is also what makes the newer row win whenever both match.
     """
 
+    unavailable_publications = await unavailable_publication_ids(
+        group_id,
+        {
+            candidate.id: candidate.metadata
+            for _signal, candidates in source_lists
+            for candidate in candidates
+        },
+    )
     lifecycle_dropped = 0
     surviving: list[tuple[RetrievalSignal, list[RetrievalCandidate]]] = []
     for signal, candidates in source_lists:
         kept: list[RetrievalCandidate] = []
         for candidate in candidates:
-            if graph_metadata_recallable(candidate.metadata):
+            if (
+                graph_metadata_recallable(candidate.metadata)
+                and candidate.id not in unavailable_publications
+            ):
                 kept.append(candidate)
             else:
                 lifecycle_dropped += 1

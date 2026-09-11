@@ -8,7 +8,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sibyl_core.backends.surreal.connection import _is_transient_connection_error
-from sibyl_core.backends.surreal.schema import EMBEDDING_DIM
+from sibyl_core.backends.surreal.schema import EMBEDDING_DIM, render_surreal_compatible_sql
+from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.embeddings.providers import entity_embedding_text
 from sibyl_core.memory_pipeline.retrieval_keys import coerce_retrieval_keys
 from sibyl_core.models.entities import Entity, EntityType
@@ -67,6 +68,23 @@ CLEAR_SENTINEL_VALUES = frozenset({CLEAR_MEMORY_SCOPE})
 # write path would hold the caller's own write open indefinitely.
 _MAX_SNAPSHOT_HEAL_ATTEMPTS = 5
 
+
+def _pending_upsert_entries(key: str) -> str:
+    """An insert may add pending owners; only a fenced update may clear them."""
+    return """
+        IF attributes.@key@ OR $input.attributes.@key@ {
+            [["@key@", object::from_entries(array::concat(
+                IF type::is::object(attributes.@key@) {
+                    object::entries(attributes.@key@)
+                } ELSE IF attributes.@key@ { [["unknown", true]] } ELSE { [] },
+                IF type::is::object($input.attributes.@key@) {
+                    object::entries($input.attributes.@key@)
+                } ELSE IF $input.attributes.@key@ { [["unknown", true]] } ELSE { [] }
+            ))]]
+        } ELSE { [] }
+    """.replace("@key@", key)
+
+
 _ENTITY_BULK_UPSERT_QUERY = f"""
 INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
     uuid = $input.uuid,
@@ -88,7 +106,9 @@ INSERT INTO entity $rows ON DUPLICATE KEY UPDATE
     -- the slot and no later write puts it back.
     attributes = object::from_entries(array::concat(
         object::entries(attributes ?? {{}}),
-        object::entries($input.attributes)
+        object::entries($input.attributes),
+        {_pending_upsert_entries("lifecycle_reconciliation_pending")},
+        {_pending_upsert_entries("source_validation_pending")}
     )),
     attributes.memory_scope = IF $input.memory_scope = '{CLEAR_MEMORY_SCOPE}' {{ NONE }}
         ELSE {{ $input.memory_scope ?? memory_scope }},
@@ -199,11 +219,70 @@ async def _insert_entity_if_absent(
     entity: Entity,
     *,
     group_id: str,
+    derivation: Mapping[str, object] | None = None,
 ) -> tuple[SurrealRecord, bool]:
     """Arbitrate creation by physical record ID without rewriting a retry."""
     _enforce_entity_content_limit([entity])
     record = _entity_record(entity, group_id=group_id)
     record["id"] = entity.id
+    if derivation is not None:
+        record["derivation_required"] = True
+        from sibyl_core.services.graph_derivations import graph_target_digest
+        from sibyl_core.services.graph_records import entity_from_surreal_row
+
+        association = dict(derivation)
+        if (
+            association.get("organization_id") != group_id
+            or association.get("target_id") != entity.id
+            or association.get("target_kind") != "graph_entity"
+        ):
+            raise ValueError("derivation does not match graph target")
+        association["body_sha256"] = graph_target_digest(entity_from_surreal_row(record))
+        result = normalize_records(
+            await client.execute_query(
+                """RETURN {
+                LET $inserted = INSERT IGNORE INTO entity $rows;
+                IF array::len($inserted) > 0 {
+                    CREATE memory_derivations CONTENT $association;
+                    RETURN {row: $inserted[0], created: true};
+                };
+                LET $existing = (SELECT * FROM memory_derivations WHERE organization_id=$org
+                    AND target_kind='graph_entity' AND target_id=$uuid LIMIT 1)[0];
+                RETURN {row: (SELECT * FROM entity WHERE uuid=$uuid LIMIT 1)[0], created: false, association: $existing};
+            };""",
+                rows=[record],
+                association=association,
+                org=group_id,
+                uuid=entity.id,
+            )
+        )
+        stored = result[0].get("row") if len(result) == 1 else None
+        if not isinstance(stored, dict):
+            raise RuntimeError("graph derivation publication returned no target")
+        created = result[0]["created"] is True
+        if not created:
+            from sibyl_core.services.memory_derivations import observation_from_record
+
+            existing = result[0].get("association")
+            if not isinstance(existing, dict) or any(
+                existing.get(key) != association.get(key)
+                for key in ("active", "body_sha256", "principal_id", "authority_ceiling")
+            ):
+                raise ValueError("graph derivation replay mismatch")
+            saved_observations = existing.get("observations")
+            expected_observations = association.get("observations")
+            if (
+                not isinstance(saved_observations, list)
+                or not isinstance(expected_observations, list)
+                or len(saved_observations) != len(expected_observations)
+            ):
+                raise ValueError("graph derivation replay mismatch")
+            if any(
+                not observation_from_record(saved).same_evidence(observation_from_record(expected))
+                for saved, expected in zip(saved_observations, expected_observations, strict=True)
+            ):
+                raise ValueError("graph derivation replay mismatch")
+        return stored, created
     query = "INSERT IGNORE INTO entity $rows;"
     try:
         result = await client.execute_query(query, rows=[record])
@@ -231,12 +310,17 @@ async def _replace_entities_bulk(
     entities: Sequence[Entity],
     *,
     group_id: str,
+    projection_source=None,
 ) -> list[SurrealRecord]:
     _enforce_entity_content_limit(entities)
     records = [_entity_record(entity, group_id=group_id) for entity in entities]
     if not records:
         return []
     await heal_entity_metadata_snapshots(client, records, group_id=group_id)
+    if projection_source is not None:
+        return await _replace_projected_entities(
+            client, records, group_id=group_id, projection_source=projection_source
+        )
     try:
         result = await _execute_replace_entities_with_schema_retry(client, records)
     except Exception as exc:
@@ -489,6 +573,79 @@ RETURN AFTER;
 """
 
 
+async def _complete_embedding_manifest(
+    client: SurrealGraphClient,
+    expected: Entity,
+    *,
+    group_id: str,
+    embedding_metadata: Mapping[str, object],
+    complete: bool,
+) -> str:
+    """Fence completion against the current inventory and embedding coverage."""
+    rows = normalize_records(
+        await client.execute_query(
+            """
+            RETURN {
+                LET $manifest = (SELECT * FROM entity
+                    WHERE group_id = $group_id AND uuid = $uuid LIMIT 1)[0];
+                IF $manifest = NONE { RETURN {state: 'missing'}; };
+                IF $manifest.entity_type != 'artifact'
+                    OR $manifest.attributes.projection_kind != 'manifest'
+                    OR $manifest.attributes.operational_source_id != $expected.operational_source_id
+                    OR $manifest.attributes.operational_schema_version != $expected.operational_schema_version
+                    OR $manifest.attributes.operational_content_hash != $expected.operational_content_hash
+                    OR $manifest.attributes.project_id != $expected.project_id
+                    OR $manifest.attributes.expected_entity_ids != $expected.expected_entity_ids
+                    OR $manifest.attributes.expected_relationship_ids != $expected.expected_relationship_ids
+                    OR $manifest.attributes.operational_projection_state NOT IN ['embedding_pending', 'complete']
+                { RETURN {state: 'stale'}; };
+                LET $witnesses = $source_identities.map(|$identity|
+                    type::record(string::concat('source_states:',
+                        crypto::sha256(type::string($identity)))));
+                LET $source_states_to_fence = SELECT * FROM $witnesses;
+                IF array::len($source_states_to_fence) != array::len($witnesses)
+                    OR array::len($source_states_to_fence.filter(|$state| $state.deleted != false)) > 0
+                    { RETURN {state: 'incomplete'}; };
+                LET $sources = $expected.expected_entity_ids.map(|$source| {
+                    RETURN (SELECT uuid, group_id, entity_type, name_embedding,
+                        attributes.embedding_metadata AS embedding_metadata FROM entity
+                        WHERE uuid = $source LIMIT 1)[0];
+                });
+                IF array::len($sources.filter(|$source| $source = NONE)) > 0
+                    { RETURN {state: 'incomplete'}; };
+                LET $missing = SELECT uuid FROM $sources WHERE group_id != $group_id
+                    OR (entity_type != 'artifact' AND (
+                        name_embedding = NONE OR name_embedding = NULL
+                        OR array::len(name_embedding ?? []) != $dimensions
+                        OR embedding_metadata != $embedding_metadata));
+                IF array::len($missing) > 0 { RETURN {state: 'incomplete'}; };
+                IF $manifest.attributes.operational_projection_state = 'complete'
+                    { RETURN {state: 'complete'}; };
+                IF $complete = false { RETURN {state: 'ready'}; };
+                __SOURCE_STATE_WRITE_WITNESS__
+                UPDATE $manifest.id SET attributes.operational_projection_state = 'complete',
+                    revision = (revision ?? 0) + 1,
+                    attributes.updated_at = time::now(), updated_at = time::now();
+                RETURN {state: 'completed'};
+            };
+            """.replace("__SOURCE_STATE_WRITE_WITNESS__", SOURCE_STATE_WRITE_WITNESS),
+            group_id=group_id,
+            uuid=expected.id,
+            expected=expected.metadata,
+            dimensions=embedding_metadata["dimensions"],
+            embedding_metadata=dict(embedding_metadata),
+            complete=complete,
+            source_identities=[
+                [group_id, "graph_entity", identity]
+                for identity in dict.fromkeys(expected.metadata["expected_entity_ids"])
+            ],
+        )
+    )
+    if len(rows) != 1 or not isinstance(rows[0].get("state"), str):
+        raise RuntimeError("invalid embedding manifest completion result")
+    return str(rows[0]["state"])
+
+
 async def _update_entity_embeddings_if_current(
     client: SurrealGraphClient,
     entities: Sequence[Entity],
@@ -553,7 +710,8 @@ async def _execute_replace_entities_bulk_query(
     client: SurrealGraphClient,
     records: Sequence[SurrealRecord],
 ) -> object:
-    return await client.execute_query(_ENTITY_BULK_UPSERT_QUERY, rows=list(records))
+    query = render_surreal_compatible_sql(_ENTITY_BULK_UPSERT_QUERY, url=client._url)
+    return await client.execute_query(query, rows=list(records))
 
 
 async def _execute_replace_entities_with_schema_retry(
@@ -814,3 +972,98 @@ def _entity_update_metadata_patch(updates: Mapping[str, Any]) -> dict[str, objec
 
 
 __all__ = ["CLEAR_MEMORY_SCOPE", "MAX_ENTITY_CONTENT_CHARS", "heal_entity_metadata_snapshots"]
+
+
+async def _replace_projected_entities(client, records, *, group_id, projection_source):
+    """Write projections and their protected parent observations atomically."""
+    from dataclasses import asdict
+
+    from sibyl_core.memory_pipeline.observations import legacy_source_incarnation
+    from sibyl_core.services.graph_derivations import graph_target_digest
+    from sibyl_core.services.graph_records import entity_from_surreal_row
+
+    snapshot, parent_association = projection_source
+    observation = snapshot.observation
+    if observation.source.organization_id != group_id or not observation.durable:
+        raise ValueError("projection source does not match organization")
+    associations = []
+    for record in records:
+        entity = entity_from_surreal_row(record)
+        if (
+            entity.entity_type is not EntityType.PASSAGE
+            and entity.metadata.get("category")
+            not in {"memory_projection", "memory_fact_projection"}
+        ) or (entity.metadata.get("source_entity_id") != observation.source.id):
+            raise ValueError("projection target does not match parent")
+        associations.append(
+            {
+                "organization_id": group_id,
+                "target_kind": "graph_entity",
+                "target_id": entity.id,
+                "body_sha256": graph_target_digest(entity),
+                "principal_id": parent_association["principal_id"],
+                "authority_ceiling": parent_association["authority_ceiling"],
+                "observations": [asdict(observation)],
+                "active": True,
+            }
+        )
+    upsert = (
+        render_surreal_compatible_sql(_ENTITY_BULK_UPSERT_QUERY, url=client._url)
+        .strip()
+        .rstrip(";")
+    )
+    query = (
+        """RETURN {
+        LET $parent = (SELECT * FROM entity WHERE group_id=$org AND uuid=$parent_id LIMIT 1)[0];
+        LET $state = (SELECT * FROM source_states WHERE organization_id=$org AND source_kind='graph_entity' AND source_id=$parent_id LIMIT 1)[0];
+        LET $parent_derivation = (SELECT * FROM memory_derivations WHERE organization_id=$org AND target_kind='graph_entity' AND target_id=$parent_id LIMIT 1)[0];
+        IF $parent = NONE OR $state = NONE OR $parent.revision != $revision
+            OR $state.revision != $revision OR $state.generation != $generation OR $state.deleted
+            OR $state.incarnation != $incarnation
+            OR $parent_derivation.active != true
+            OR $parent_derivation.body_sha256 != $parent_association.body_sha256
+            OR $parent_derivation.observations != $parent_association.observations
+            OR $parent_derivation.authority_ceiling != $parent_association.authority_ceiling {
+            THROW 'projection parent observation changed';
+        };
+        LET $previous_targets = SELECT uuid FROM entity WHERE group_id=$org AND uuid IN $ids;
+        LET $written = ("""
+        + upsert
+        + """);
+        FOR $association IN $associations {
+            LET $old = (SELECT * FROM memory_derivations WHERE organization_id=$org AND target_kind='graph_entity' AND target_id=$association.target_id LIMIT 1)[0];
+            IF $old != NONE AND (array::len($old.observations) != 1
+                OR $old.observations[0].source != $association.observations[0].source) {
+                THROW 'projection association belongs to another source';
+            };
+            LET $was_present = array::len($previous_targets[WHERE uuid=$association.target_id]) > 0;
+            IF $was_present AND ($old = NONE
+                OR $old.observations[0].generation != $association.observations[0].generation
+                OR ($old.observations[0].incarnation ?? $legacy_incarnation)
+                    != ($association.observations[0].incarnation ?? $legacy_incarnation)
+                OR $old.observations[0].content_sha256 != $association.observations[0].content_sha256
+                OR $old.active != true) {
+                UPDATE source_states SET generation += 1
+                    WHERE organization_id=$org AND source_kind='graph_entity' AND source_id=$association.target_id;
+            };
+            IF $old = NONE { CREATE memory_derivations CONTENT $association; }
+            ELSE { UPDATE $old.id CONTENT $association; };
+        };
+        RETURN $written;
+    };"""
+    )
+    return normalize_records(
+        await client.execute_query(
+            query,
+            rows=[{**record, "derivation_required": True} for record in records],
+            ids=[record["uuid"] for record in records],
+            associations=associations,
+            org=group_id,
+            parent_id=observation.source.id,
+            revision=observation.revision,
+            generation=observation.generation,
+            incarnation=observation.effective_incarnation,
+            legacy_incarnation=legacy_source_incarnation(observation.source),
+            parent_association=parent_association,
+        )
+    )

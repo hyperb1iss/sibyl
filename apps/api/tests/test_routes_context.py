@@ -1155,7 +1155,7 @@ class TestReflectRoute:
                 ctx=ctx,
             )
 
-        list_projects.assert_not_awaited()
+        list_projects.assert_awaited_once_with(ctx, required_role=ProjectRole.CONTRIBUTOR)
         verify_project.assert_awaited_once_with(
             None,
             ctx,
@@ -1298,6 +1298,10 @@ class TestReflectRoute:
 
         with (
             patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value={"proj_1"}),
+            ),
+            patch(
                 "sibyl.api.routes.context.verify_entity_project_access",
                 AsyncMock(),
             ),
@@ -1364,7 +1368,7 @@ class TestReflectRoute:
                 ctx=ctx,
             )
 
-        list_projects.assert_not_awaited()
+        list_projects.assert_awaited_once_with(ctx, required_role=ProjectRole.CONTRIBUTOR)
         verify_project.assert_awaited_once_with(
             None,
             ctx,
@@ -1386,6 +1390,10 @@ class TestReflectRoute:
         ctx = _ctx()
 
         with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value={"proj_1"}),
+            ),
             patch(
                 "sibyl.api.routes.context.verify_entity_project_access",
                 AsyncMock(),
@@ -1424,6 +1432,10 @@ class TestReflectRoute:
         http_request = _http_request()
 
         with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value={"proj_1"}),
+            ),
             patch(
                 "sibyl.api.routes.context.verify_entity_project_access",
                 AsyncMock(),
@@ -1535,6 +1547,10 @@ class TestReflectRoute:
         org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
 
         with (
+            patch(
+                "sibyl.api.routes.context.list_accessible_project_graph_ids",
+                AsyncMock(return_value={"proj_1"}),
+            ),
             patch(
                 "sibyl.api.routes.context.verify_entity_project_access",
                 AsyncMock(),

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from sibyl_core.services.memory_source_validation import SourceAuthorityResolver
 
 
 class RuntimePortUnavailable(RuntimeError):
@@ -143,10 +146,22 @@ class _NoAuditPort:
         return None
 
 
+_source_authority_resolver: SourceAuthorityResolver | None = None
 _queue_port: QueuePort | None = None
 _content_port: ContentPort | None = None
 _graph_link_port: GraphLinkPort | None = None
 _audit_port: AuditPort = _NoAuditPort()
+
+
+def install_source_authority_resolver(resolver: SourceAuthorityResolver) -> None:
+    global _source_authority_resolver
+    _source_authority_resolver = resolver
+
+
+def get_source_authority_resolver() -> SourceAuthorityResolver:
+    if _source_authority_resolver is None:
+        raise RuntimePortUnavailable("Source authority resolver is not installed")
+    return _source_authority_resolver
 
 
 def install_queue_port(port: QueuePort) -> None:
@@ -170,7 +185,8 @@ def install_audit_port(port: AuditPort) -> None:
 
 
 def reset_runtime_ports() -> None:
-    global _audit_port, _content_port, _graph_link_port, _queue_port
+    global _audit_port, _content_port, _graph_link_port, _queue_port, _source_authority_resolver
+    _source_authority_resolver = None
     _queue_port = None
     _content_port = None
     _graph_link_port = None

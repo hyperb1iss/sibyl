@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -10,10 +11,29 @@ from sibyl_core.backends.surreal.schema import (
     render_fulltext_compatible_sql,
     render_surreal_compatible_sql,
 )
+from sibyl_core.backends.surreal.schema_derivations import DERIVATION_DEFINITIONS
 from sibyl_core.backends.surreal.schema_helpers import is_missing_table_error, split_statements
 from sibyl_core.backends.surreal.schema_invariants import (
     SchemaInvariantPlan,
     expected_unique_indexes,
+)
+from sibyl_core.backends.surreal.schema_source_integrity import (
+    migrate_source_integrity,
+    prepare_source_integrity_upgrade,
+)
+from sibyl_core.backends.surreal.schema_source_states import (
+    SOURCE_STATE_DEFINITIONS,
+    migrate_source_states,
+    retire_source_states,
+    source_state_event,
+)
+from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WITNESS_DEFINITION
+from sibyl_core.backends.surreal.schema_validation_execution import (
+    VALIDATION_EXECUTION_SCHEMA,
+    VALIDATION_PROMOTION_SCHEMA,
+    VALIDATION_PURGE_EVENT,
+    VALIDATION_RECEIPT_PURGE_EVENT,
+    VALIDATION_RECEIPT_RECOVERY_SCHEMA,
 )
 from sibyl_core.backends.surreal.schema_version import (
     SCHEMA_VERSION_TABLE,
@@ -23,6 +43,7 @@ from sibyl_core.backends.surreal.schema_version import (
     get_schema_version,
 )
 from sibyl_core.config import core_config
+from sibyl_core.memory_pipeline.observations import SourceKind
 from sibyl_core.models.memory_scope import MemoryScope
 from sibyl_core.models.sources import CrawlStatus, SourceType
 
@@ -54,6 +75,11 @@ CONTENT_TABLES = (
     "document_chunks",
     "raw_captures",
     "eval_attempts",
+    "eval_consolidations",
+    "dream_source_checkpoints",
+    "dream_source_cursors",
+    "memory_validation_executions",
+    "memory_validation_attempts",
     "memory_usage_events",
     "api_idempotency_records",
     "source_imports",
@@ -63,7 +89,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 28
+CONTENT_SCHEMA_CURRENT_VERSION = 40
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -104,7 +130,34 @@ CONTENT_ANALYZER_DEFINITIONS = _load_schema_file("01_analyzers.surql")
 CONTENT_LEGACY_CONTENT_CHECKPOINT_DEFINITIONS = (
     _SCHEMA_DIR / "35_legacy_content_checkpoint.surql"
 ).read_text(encoding="utf-8")
-CONTENT_SCHEMA_DEFINITIONS = _load_schema_file("10_tables.surql")
+CONTENT_DREAM_CHECKPOINT_DEFINITIONS = (
+    _SCHEMA_DIR / "36_dream_source_checkpoints.surql"
+).read_text(encoding="utf-8")
+CONTENT_SCHEMA_DEFINITIONS = (
+    _load_schema_file("10_tables.surql")
+    + "\n"
+    + CONTENT_DREAM_CHECKPOINT_DEFINITIONS
+    + VALIDATION_EXECUTION_SCHEMA
+)
+
+
+CONTENT_EVAL_CONSOLIDATIONS_MIGRATION_DEFINITIONS = """
+DEFINE TABLE IF NOT EXISTS eval_consolidations SCHEMAFULL;
+ALTER TABLE IF EXISTS eval_consolidations SCHEMAFULL;
+ALTER TABLE IF EXISTS eval_consolidations PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS uuid ON eval_consolidations TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON eval_consolidations TYPE string;
+DEFINE FIELD IF NOT EXISTS principal_id ON eval_consolidations TYPE string;
+DEFINE FIELD IF NOT EXISTS request_sha256 ON eval_consolidations TYPE string;
+DEFINE FIELD IF NOT EXISTS admission_bindings ON eval_consolidations TYPE array<object> FLEXIBLE DEFAULT [];
+DEFINE FIELD IF NOT EXISTS candidate_id ON eval_consolidations TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS promoted_entity_id ON eval_consolidations TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS result_kind ON eval_consolidations TYPE string ASSERT $value IN ['candidate', 'abstained'];
+DEFINE FIELD IF NOT EXISTS created_at ON eval_consolidations TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_eval_consolidations_uuid ON eval_consolidations FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_eval_consolidations_candidate ON eval_consolidations FIELDS organization_id, candidate_id;
+DEFINE INDEX IF NOT EXISTS idx_eval_consolidations_promoted ON eval_consolidations FIELDS organization_id, promoted_entity_id;
+"""
 
 
 CONTENT_EVAL_ATTEMPTS_MIGRATION_DEFINITIONS = """
@@ -209,6 +262,11 @@ DEFINE FIELD OVERWRITE status ON backups TYPE string DEFAULT 'pending'
 """
 
 CONTENT_PERMISSION_MIGRATION_DEFINITIONS = """
+ALTER TABLE IF EXISTS memory_validation_executions PERMISSIONS NONE;
+ALTER TABLE IF EXISTS memory_validation_attempts PERMISSIONS NONE;
+ALTER TABLE IF EXISTS dream_source_checkpoints PERMISSIONS NONE;
+ALTER TABLE IF EXISTS dream_source_cursors PERMISSIONS NONE;
+ALTER TABLE IF EXISTS eval_consolidations PERMISSIONS NONE;
 ALTER TABLE IF EXISTS eval_attempts PERMISSIONS NONE;
 ALTER TABLE IF EXISTS crawl_sources PERMISSIONS
     FOR select, create, update, delete WHERE organization_id = $token.org OR organization_id = $auth.organization_id;
@@ -895,19 +953,102 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             name="content_eval_attempts",
             statements=tuple(split_statements(CONTENT_EVAL_ATTEMPTS_MIGRATION_DEFINITIONS)),
         ),
+        SchemaMigration(
+            version=29,
+            name="content_raw_source_validation_index",
+            statements=(
+                "DEFINE INDEX IF NOT EXISTS idx_raw_captures_source_validation "
+                "ON raw_captures FIELDS organization_id, metadata.source_validation_pending, uuid",
+            ),
+        ),
+        SchemaMigration(
+            version=30,
+            name="content_eval_consolidations",
+            statements=tuple(split_statements(CONTENT_EVAL_CONSOLIDATIONS_MIGRATION_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=31,
+            name="content_source_states",
+            statements=(
+                *split_statements(SOURCE_STATE_DEFINITIONS),
+                source_state_event(SourceKind.RAW_CAPTURE),
+            ),
+            action=partial(migrate_source_states, kind=SourceKind.RAW_CAPTURE),
+        ),
+        SchemaMigration(
+            version=32,
+            name="content_observation_associations",
+            statements=(
+                *split_statements(DERIVATION_DEFINITIONS),
+                source_state_event(SourceKind.RAW_CAPTURE, retire_derivations=True).replace(
+                    "DEFINE EVENT IF NOT EXISTS", "DEFINE EVENT OVERWRITE"
+                ),
+            ),
+        ),
+        SchemaMigration(
+            version=33,
+            name="content_source_publication_bookkeeping",
+            statements=(
+                source_state_event(
+                    SourceKind.RAW_CAPTURE,
+                    retire_derivations=True,
+                    publication_bookkeeping=True,
+                ).replace("DEFINE EVENT IF NOT EXISTS", "DEFINE EVENT OVERWRITE"),
+            ),
+        ),
+        SchemaMigration(
+            version=34,
+            name="content_source_integrity",
+            action=partial(migrate_source_integrity, kind=SourceKind.RAW_CAPTURE),
+        ),
+        SchemaMigration(
+            version=35,
+            name="content_consolidation_receipts",
+            statements=(
+                "DEFINE FIELD IF NOT EXISTS build_receipt_json ON eval_consolidations "
+                "TYPE option<string>",
+            ),
+        ),
+        SchemaMigration(
+            version=36,
+            name="content_dream_source_checkpoints",
+            statements=tuple(split_statements(CONTENT_DREAM_CHECKPOINT_DEFINITIONS)),
+        ),
+        SchemaMigration(
+            version=37,
+            name="content_memory_validation_execution",
+            statements=(*split_statements(VALIDATION_EXECUTION_SCHEMA), VALIDATION_PURGE_EVENT),
+        ),
+        SchemaMigration(
+            version=38,
+            name="content_source_write_witness",
+            statements=tuple(split_statements(SOURCE_STATE_WITNESS_DEFINITION)),
+        ),
+        SchemaMigration(
+            version=39,
+            name="content_validation_promotion_binding",
+            statements=tuple(split_statements(VALIDATION_PROMOTION_SCHEMA)),
+        ),
+        SchemaMigration(
+            version=40,
+            name="content_validation_receipt_recovery",
+            statements=(VALIDATION_RECEIPT_RECOVERY_SCHEMA, VALIDATION_RECEIPT_PURGE_EVENT),
+        ),
     )
 
 
 def content_schema_invariant_plan(*, url: str = "") -> SchemaInvariantPlan:
     return SchemaInvariantPlan(
-        schemafull_tables=CONTENT_TABLES,
+        schemafull_tables=(*CONTENT_TABLES, "source_states", "memory_derivations"),
         relation_tables=CONTENT_RELATION_TABLES,
         unique_indexes=expected_unique_indexes(_content_schema_migrations(url=url)),
     )
 
 
 async def bootstrap_content_schema(client: SurrealContentClient, *, reset: bool = False) -> None:
+    await prepare_source_integrity_upgrade(client.execute_query)
     if reset:
+        await retire_source_states(client.execute_query, kind=SourceKind.RAW_CAPTURE)
         for table in (*CONTENT_TABLES, SCHEMA_VERSION_TABLE):
             await client.execute_query(f"REMOVE TABLE IF EXISTS {table};")
 

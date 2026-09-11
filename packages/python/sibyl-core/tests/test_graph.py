@@ -67,6 +67,7 @@ from sibyl_core.services.usage import (
 
 
 class _EmbeddingWriteClient:
+    _url = "memory://"
     group_id = "org-native"
 
     def __init__(self) -> None:
@@ -190,13 +191,29 @@ class _TransactionDeleteClient:
 
 
 class _RelatedBatchClient:
+    pool_size = 1
     group_id = "org-native"
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
 
+    async def execute_query_batch(self, query: str, **params: object) -> object:
+        return await self.execute_query(query, **params)
+
     async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
         self.calls.append((query, params))
+        if "seed_0" in params:
+            rows = []
+            for key, seed in params.items():
+                if not key.startswith("seed_"):
+                    continue
+                seed_params = {k: v for k, v in params.items() if not k.startswith("seed_")}
+                seed_params["entity_id"] = seed
+                rows.extend(
+                    await self.execute_query(query.replace(f"${key}", "$entity_id"), **seed_params)
+                )
+                self.calls.pop()
+            return rows
         now = datetime.now(UTC)
         if "FROM relates_to" in query and "source_id = $entity_id" in query:
             if params["entity_id"] != "seed-a":
@@ -310,13 +327,29 @@ def _related_entity_row(
 
 
 class _CappedRelatedBatchClient:
+    pool_size = 1
     group_id = "org-native"
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
 
+    async def execute_query_batch(self, query: str, **params: object) -> object:
+        return await self.execute_query(query, **params)
+
     async def execute_query(self, query: str, **params: object) -> list[dict[str, object]]:
         self.calls.append((query, params))
+        if "seed_0" in params:
+            rows = []
+            for key, seed in params.items():
+                if not key.startswith("seed_"):
+                    continue
+                seed_params = {k: v for k, v in params.items() if not k.startswith("seed_")}
+                seed_params["entity_id"] = seed
+                rows.extend(
+                    await self.execute_query(query.replace(f"${key}", "$entity_id"), **seed_params)
+                )
+                self.calls.pop()
+            return rows
         now = datetime.now(UTC)
         if "FROM relates_to" in query and "source_id = $entity_id" in query:
             if params["entity_id"] == "seed-b":
@@ -668,6 +701,7 @@ class _TransientEntityWriteClient:
 
 
 class _LegacyUpdatedAtEntityWriteClient:
+    _url = "memory://"
     group_id = "org-legacy-updated-at"
 
     def __init__(self) -> None:
@@ -3933,10 +3967,13 @@ async def test_native_relationship_batch_uses_native_traversal_projection() -> N
 
     relates_queries = [call for call in client.calls if "FROM relates_to" in call[0]]
     entity_queries = [call for call in client.calls if "FROM entity" in call[0]]
-    assert len(relates_queries) == 4
+    assert len(relates_queries) == 2
     assert entity_queries == []
-    assert all("= $entity_id" in query for query, _ in relates_queries)
-    assert {params["entity_id"] for _, params in relates_queries} == {"seed-a", "seed-b"}
+    assert all("= $seed_0" in query for query, _ in relates_queries)
+    assert all(
+        params["seed_0"] == "seed-a" and params["seed_1"] == "seed-b"
+        for _, params in relates_queries
+    )
     assert all(params["limit"] == 3 for _, params in relates_queries)
     assert any("out.uuid AS related_uuid" in query for query, _ in relates_queries)
     assert any("in.uuid AS related_uuid" in query for query, _ in relates_queries)
@@ -3996,9 +4033,9 @@ async def test_native_relationship_batch_applies_limit_per_seed_with_indexed_que
 
     relates_queries = [call for call in client.calls if "FROM relates_to" in call[0]]
     entity_queries = [call for call in client.calls if "FROM entity" in call[0]]
-    assert len(relates_queries) == 4
+    assert len(relates_queries) == 2
     assert entity_queries == []
-    assert all("= $entity_id" in query for query, _ in relates_queries)
+    assert all("= $seed_0" in query for query, _ in relates_queries)
     assert all(params["limit"] == 2 for _, params in relates_queries)
     assert [entity.id for entity, _ in related["seed-a"]] == ["target-0", "target-1"]
     assert [entity.id for entity, _ in related["seed-b"]] == ["target-b"]

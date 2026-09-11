@@ -264,3 +264,42 @@ def test_up_starts_local_runtime_without_agent_setup(
     assert (local_dir / "docker-compose.yml").exists()
     assert "sibyl local setup" not in result.output
     assert "Connect page" in result.output
+
+
+@pytest.mark.parametrize("runtime", ["local", "docker"])
+def test_surreal_volume_initialization_preserves_nonroot_and_existing_files(runtime: str) -> None:
+    config = (
+        local_module.COMPOSE_CONFIG
+        if runtime == "local"
+        else docker_module.compose_config(
+            image_tag="test",
+            api_port=3334,
+            web_port=3337,
+            surreal_port=8000,
+            with_worker=False,
+            with_crawler=False,
+        )
+    )
+    services = config["services"]
+    initializer = services["surreal-init"]
+    database = services["surrealdb"]
+    assert initializer["command"] == ["chown", "65532:65532", "/data"]
+    assert initializer["user"] == "0:0"
+    assert initializer["network_mode"] == "none"
+    assert initializer["cap_drop"] == ["ALL"]
+    assert initializer["cap_add"] == ["CHOWN"]
+    assert initializer["read_only"] is True
+    assert "user" not in database
+    assert database["depends_on"]["surreal-init"] == {"condition": "service_completed_successfully"}
+    assert (
+        database["volumes"]
+        == initializer["volumes"]
+        == [
+            {
+                "type": "volume",
+                "source": "sibyl_surreal",
+                "target": "/data",
+                "volume": {"nocopy": True},
+            }
+        ]
+    )

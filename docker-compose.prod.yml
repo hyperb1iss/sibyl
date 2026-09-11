@@ -29,7 +29,11 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     container_name: sibyl-backend
+    volumes:
+      - validation_receipts:/home/sibyl/.sibyl
     depends_on:
+      receipts-init:
+        condition: service_completed_successfully
       surrealdb:
         condition: service_healthy
     ports:
@@ -107,7 +111,11 @@ services:
       dockerfile: apps/api/Dockerfile
     container_name: sibyl-worker
     command: ["sibyld", "worker"]
+    volumes:
+      - validation_receipts:/home/sibyl/.sibyl
     depends_on:
+      receipts-init:
+        condition: service_completed_successfully
       surrealdb:
         condition: service_healthy
       backend:
@@ -154,6 +162,13 @@ services:
   # fresh named volume is created root-owned, so SurrealDB cannot create
   # its RocksDB directory under /data. This one-shot fixes the volume
   # ownership before SurrealDB starts; the chown is idempotent on reruns.
+  receipts-init:
+    image: busybox:1.37
+    command: ["chown", "10001:10001", "/home/sibyl/.sibyl"]
+    volumes:
+      - validation_receipts:/home/sibyl/.sibyl
+    restart: "no"
+
   surreal-init:
     image: busybox:1.37
     container_name: sibyl-surreal-init
@@ -191,6 +206,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  validation_receipts:
   surreal_data:
 
 networks:

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sibyl_core.services.memory_source_validation import SourceReadAuthority
 
 import structlog
 
@@ -24,6 +28,7 @@ from sibyl_core.services import content_client
 from sibyl_core.services import content_documents as documents
 from sibyl_core.services import content_models as models
 from sibyl_core.services.content_models import RawMemory, RawMemoryRecallResult
+from sibyl_core.services.eval_publication_guards import unavailable_publication_ids
 from sibyl_core.utils.resilience import with_timeout
 
 _REFLECTION_DREAM_EXCLUDED_CAPTURE_SURFACES = frozenset(
@@ -490,6 +495,7 @@ async def _recall_raw_memory_result(
     organization_id: str,
     principal_id: str,
     query: str,
+    source_authority: SourceReadAuthority | None = None,
     memory_scope: MemoryScope | str = MemoryScope.PRIVATE,
     scope_key: str | None = None,
     agent_id: str | None = None,
@@ -504,6 +510,8 @@ async def _recall_raw_memory_result(
     limit: int = 10,
     raise_on_source_failure: bool,
 ) -> RawMemoryRecallResult:
+    if source_authority is not None and source_authority.principal_id != principal_id:
+        raise ValueError("source authority principal does not match recall principal")
     normalized_query = query.strip()
     if not normalized_query or limit <= 0:
         return RawMemoryRecallResult(())
@@ -587,6 +595,33 @@ async def _recall_raw_memory_result(
                 )
             else:
                 source_results.append(CandidateSourceResult.success("raw_vector", vector_memories))
+        from sibyl_core.services.memory_source_validation import SourceReadAuthority
+
+        authority = source_authority or SourceReadAuthority(
+            principal_id=principal_id,
+            projects=frozenset([scope_key])
+            if normalized_scope is MemoryScope.PROJECT and scope_key
+            else frozenset(),
+            teams=frozenset([scope_key])
+            if normalized_scope is MemoryScope.TEAM and scope_key
+            else frozenset(),
+        )
+        unavailable = await unavailable_publication_ids(
+            organization_id,
+            {memory.id: memory.metadata for memory in [*fulltext_memories, *vector_memories]},
+            raw_memories=[*fulltext_memories, *vector_memories],
+            source_authority=authority,
+        )
+
+        def current_publication(memory: RawMemory) -> bool:
+            return memory.id not in unavailable
+
+        fulltext_memories = list(filter(current_publication, fulltext_memories))
+        vector_memories = list(filter(current_publication, vector_memories))
+        source_results = [
+            replace(source, candidates=tuple(filter(current_publication, source.candidates)))
+            for source in source_results
+        ]
         memories = await _fuse_raw_memory_results(
             client,
             [fulltext_memories, vector_memories],
@@ -614,6 +649,13 @@ async def _recall_raw_memory_result(
                 raise
             lexical_memories = []
         else:
+            unavailable = await unavailable_publication_ids(
+                organization_id,
+                {memory.id: memory.metadata for memory in lexical_memories},
+                raw_memories=lexical_memories,
+                source_authority=authority,
+            )
+            lexical_memories = list(filter(current_publication, lexical_memories))
             source_results.append(CandidateSourceResult.success("raw_lexical", lexical_memories))
         return RawMemoryRecallResult(tuple(lexical_memories), tuple(source_results))
 
@@ -623,6 +665,7 @@ async def recall_raw_memory_with_sources(
     organization_id: str,
     principal_id: str,
     query: str,
+    source_authority: SourceReadAuthority | None = None,
     memory_scope: MemoryScope | str = MemoryScope.PRIVATE,
     scope_key: str | None = None,
     agent_id: str | None = None,
@@ -653,6 +696,7 @@ async def recall_raw_memory_with_sources(
         as_of=as_of,
         limit=limit,
         raise_on_source_failure=False,
+        source_authority=source_authority,
     )
 
 
@@ -661,6 +705,7 @@ async def recall_raw_memory(
     organization_id: str,
     principal_id: str,
     query: str,
+    source_authority: SourceReadAuthority | None = None,
     memory_scope: MemoryScope | str = MemoryScope.PRIVATE,
     scope_key: str | None = None,
     agent_id: str | None = None,
@@ -691,6 +736,7 @@ async def recall_raw_memory(
         as_of=as_of,
         limit=limit,
         raise_on_source_failure=True,
+        source_authority=source_authority,
     )
     return list(result.memories)
 
@@ -777,33 +823,56 @@ async def list_reflection_dream_source_memories(
     *,
     organization_id: str,
     limit: int = 50,
+    is_pending: Callable[[RawMemory], Awaitable[bool]] | None = None,
+    after_source_id: str = "",
 ) -> list[RawMemory]:
+    """Page past excluded rows before applying the eligible-source budget.
+
+    The legacy processed timestamp is diagnostic, not a source-version fence.
+    The dream owner supplies its current observation/authority checkpoint test.
+    UUID keyset pagination keeps concurrent inserts from shifting page offsets.
+    """
     if limit <= 0:
         return []
-    query_limit = limit * content_client.LIFECYCLE_FILTER_OVERFETCH_FACTOR
+    result: list[RawMemory] = []
+    cursor = after_source_id
+    wrapped = not bool(after_source_id)
+    page_size = max(50, limit)
     async with content_client.surreal_content_client() as client:
-        rows = await content_client.select_many(
-            client,
-            "SELECT * FROM raw_captures "
-            "WHERE organization_id = $organization_id "
-            "AND (capture_surface != $candidate_surface OR capture_surface = NONE) "
-            "AND (capture_surface != $source_surface OR capture_surface = NONE) "
-            "AND (capture_surface != $reflection_surface OR capture_surface = NONE) "
-            "AND (capture_surface != $synthesis_surface OR capture_surface = NONE) "
-            "ORDER BY captured_at ASC LIMIT $limit;",
-            organization_id=organization_id,
-            candidate_surface="reflection_candidate",
-            source_surface="reflection_source",
-            reflection_surface="reflection",
-            synthesis_surface="synthesis_artifact",
-            limit=query_limit,
-        )
-    memories = [models.raw_memory_from_record(row) for row in rows]
-    return [
-        memory
-        for memory in memories
-        if models.raw_memory_currently_recallable(memory)
-        and models.raw_memory_capture_surface(memory)
-        not in _REFLECTION_DREAM_EXCLUDED_CAPTURE_SURFACES
-        and not memory.metadata.get("reflection_dream_processed_at")
-    ][:limit]
+        while len(result) < limit:
+            rows = await content_client.select_many(
+                client,
+                "SELECT * FROM raw_captures "
+                "WHERE organization_id = $organization_id AND uuid > $cursor "
+                "AND ($upper = NONE OR uuid <= $upper) "
+                "AND (capture_surface NOT IN $excluded OR capture_surface = NONE) "
+                "ORDER BY uuid ASC LIMIT $limit;",
+                organization_id=organization_id,
+                cursor=cursor,
+                upper=after_source_id if wrapped and after_source_id else None,
+                excluded=list(_REFLECTION_DREAM_EXCLUDED_CAPTURE_SURFACES),
+                limit=page_size,
+            )
+            if not rows:
+                if not wrapped:
+                    cursor, wrapped = "", True
+                    continue
+                break
+            cursor = str(rows[-1]["uuid"])
+            for row in rows:
+                memory = models.raw_memory_from_record(row)
+                if (
+                    models.raw_memory_currently_recallable(memory)
+                    and models.raw_memory_capture_surface(memory)
+                    not in _REFLECTION_DREAM_EXCLUDED_CAPTURE_SURFACES
+                    and (is_pending is None or await is_pending(memory))
+                ):
+                    result.append(memory)
+                    if len(result) == limit:
+                        break
+            if len(rows) < page_size:
+                if not wrapped:
+                    cursor, wrapped = "", True
+                else:
+                    break
+    return result

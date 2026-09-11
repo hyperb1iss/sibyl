@@ -58,6 +58,10 @@ async def runtime(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[GraphRuntime
             AsyncMock(return_value=runtime),
         )
         monkeypatch.setattr(
+            "sibyl_core.services.graph_runtime.get_surreal_graph_runtime",
+            AsyncMock(return_value=runtime),
+        )
+        monkeypatch.setattr(
             "sibyl_core.tools.reflect._load_reflection_decision_memories",
             AsyncMock(return_value=[]),
         )
@@ -380,6 +384,7 @@ async def test_public_promotion_and_share_replay_preserve_raw_lifecycle(
             organization_id=runtime.client.group_id,
             principal_id="user_a",
             accessible_projects={project},
+            writable_projects={project},
         )
         if mode == "share":
             result = await share_memory(
@@ -441,6 +446,7 @@ async def test_partial_promotion_is_retryable_before_raw_review_transition(
             organization_id=runtime.client.group_id,
             principal_id="user_a",
             accessible_projects={"project_a"},
+            writable_projects={"project_a"},
         )
         if mode == "share":
             result = await share_memory(
@@ -961,9 +967,9 @@ async def test_source_correction_during_promotion_cannot_publish_live_evidence(
     else:
         insert = runtime.entity_manager.create_direct_if_absent
 
-        async def correcting_insert(entity):
+        async def correcting_insert(entity, **kwargs):
             await correct()
-            return await insert(entity)
+            return await insert(entity, **kwargs)
 
         monkeypatch.setattr(runtime.entity_manager, "create_direct_if_absent", correcting_insert)
     common = dict(
@@ -1166,6 +1172,7 @@ async def test_source_change_during_share_cannot_publish_live_evidence(
         organization_id=runtime.client.group_id,
         principal_id="user_a",
         accessible_projects={"project_a"},
+        writable_projects={"project_a"},
         target_scope="project",
         target_scope_key="project_a",
     )
@@ -1209,6 +1216,7 @@ async def test_sharing_review_requires_available_authorized_support(
         organization_id=runtime.client.group_id,
         principal_id="user_a",
         accessible_projects={"project_a"},
+        writable_projects={"project_a"},
         target_scope="project",
         target_scope_key="project_a",
     )
@@ -1235,3 +1243,640 @@ async def test_sharing_review_requires_available_authorized_support(
             )
             == []
         )
+
+
+@pytest.mark.parametrize("mode", ["share", "review"])
+@pytest.mark.parametrize("action", ["delete", "hide", "revise"])
+async def test_upstream_correction_retires_published_derivatives(
+    runtime: GraphRuntime,
+    content_store: None,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    action: str,
+) -> None:
+    from sibyl_core.services.surreal_content import raw_memory_recallable
+
+    monkeypatch.setattr(
+        "sibyl_core.services.memory_lifecycle.get_surreal_graph_runtime",
+        AsyncMock(return_value=runtime),
+    )
+    source = await remember_raw_memory(
+        organization_id=runtime.client.group_id,
+        principal_id="user_a",
+        source_id="upstream-policy",
+        title="Original policy",
+        raw_content="Keep the original policy.",
+        embedding_provider=None,
+    )
+    review = None
+    if mode == "share":
+        shared = await share_memory(
+            source_ids=[source.id],
+            organization_id=runtime.client.group_id,
+            principal_id="user_a",
+            accessible_projects={"project_a"},
+            writable_projects={"project_a"},
+            target_scope="project",
+            target_scope_key="project_a",
+        )
+        publication = shared.promotions[0]
+    else:
+        review = await remember_reflection_candidate_review(
+            organization_id=runtime.client.group_id,
+            principal_id="user_a",
+            candidate=candidate(),
+            raw_source_ids=[source.id],
+        )
+        publication = await promote_reflection_candidate_review(
+            candidate_id=review.id,
+            organization_id=runtime.client.group_id,
+            principal_id="user_a",
+            accessible_projects={"project_a"},
+            promote_to_scope="project",
+            promote_to_scope_key="project_a",
+        )
+    assert publication.success
+    before = await runtime.entity_manager.get(publication.promoted_id)
+    assert graph_metadata_recallable(before.metadata)
+    correction = await apply_memory_correction(
+        organization_id=runtime.client.group_id,
+        source_id=source.id,
+        principal_id="user_a",
+        action=action,
+        revised_content="Use the revised policy." if action == "revise" else None,
+        accessible_projects={"project_a"},
+    )
+    assert correction.applied
+    row = await runtime.entity_manager.get(publication.promoted_id)
+    assert not graph_metadata_recallable(row.metadata)
+    if review is not None:
+        retained = await get_raw_memory(
+            organization_id=runtime.client.group_id, memory_id=review.id
+        )
+        assert not raw_memory_recallable(retained)
+
+
+@pytest.mark.parametrize("action", ["hide", "revise"])
+@pytest.mark.parametrize("independent_hide", [False, True])
+async def test_source_restore_preserves_content_epoch_and_independent_verdict(
+    runtime, content_store, monkeypatch, action, independent_hide
+):
+    from sibyl_core.services.surreal_content import raw_memory_recallable
+
+    monkeypatch.setattr(
+        "sibyl_core.services.memory_lifecycle.get_surreal_graph_runtime",
+        AsyncMock(return_value=runtime),
+    )
+    org = runtime.client.group_id
+    source = await remember_raw_memory(
+        organization_id=org,
+        principal_id="user_a",
+        source_id="root",
+        raw_content="Original rule",
+        embedding_provider=None,
+    )
+    review = await remember_reflection_candidate_review(
+        organization_id=org,
+        principal_id="user_a",
+        candidate=candidate(),
+        raw_source_ids=[source.id],
+        source_memories=[source],
+    )
+    publication = await promote_reflection_candidate_review(
+        candidate_id=review.id,
+        organization_id=org,
+        principal_id="user_a",
+        promote_to_scope="private",
+    )
+    assert publication.success
+    if independent_hide:
+        await apply_memory_correction(
+            organization_id=org,
+            source_id=review.id,
+            principal_id="user_a",
+            action="hide",
+        )
+    await apply_memory_correction(
+        organization_id=org,
+        source_id=source.id,
+        principal_id="user_a",
+        action=action,
+        revised_content="New rule" if action == "revise" else None,
+    )
+    result = await apply_memory_correction(
+        organization_id=org,
+        source_id=source.id,
+        principal_id="user_a",
+        action="restore",
+    )
+    assert result.applied and result.propagation_complete
+    retained = await get_raw_memory(organization_id=org, memory_id=review.id)
+    row = await runtime.entity_manager.get(publication.promoted_id)
+    expected = action == "hide" and not independent_hide
+    assert raw_memory_recallable(retained) is expected
+    assert graph_metadata_recallable(row.metadata) is expected
+
+
+async def test_new_review_binds_revised_source_without_reviving_old_review(
+    runtime, content_store, monkeypatch
+):
+    from sibyl_core.services.surreal_content import raw_memory_recallable
+
+    monkeypatch.setattr(
+        "sibyl_core.services.memory_lifecycle.get_surreal_graph_runtime",
+        AsyncMock(return_value=runtime),
+    )
+    org = runtime.client.group_id
+    source = await remember_raw_memory(
+        organization_id=org,
+        principal_id="user_a",
+        source_id="root",
+        raw_content="Original rule",
+        embedding_provider=None,
+    )
+    old_review = await remember_reflection_candidate_review(
+        organization_id=org,
+        principal_id="user_a",
+        candidate=candidate(),
+        raw_source_ids=[source.id],
+        source_memories=[source],
+    )
+    revised = await apply_memory_correction(
+        organization_id=org,
+        source_id=source.id,
+        principal_id="user_a",
+        action="revise",
+        revised_content="New rule",
+    )
+    new_review = await remember_reflection_candidate_review(
+        organization_id=org,
+        principal_id="user_a",
+        candidate=replace(candidate(), content="Follow the new rule."),
+        raw_source_ids=[source.id],
+        source_memories=[revised.updated_memory],
+    )
+    await apply_memory_correction(
+        organization_id=org,
+        source_id=source.id,
+        principal_id="user_a",
+        action="restore",
+    )
+    old_current = await get_raw_memory(organization_id=org, memory_id=old_review.id)
+    new_current = await get_raw_memory(organization_id=org, memory_id=new_review.id)
+    assert not raw_memory_recallable(old_current)
+    assert raw_memory_recallable(new_current)
+
+
+@pytest.mark.parametrize("source_state", ["new", "existing", "revised"])
+async def test_production_reflection_binds_the_extracted_source_revision(
+    runtime: GraphRuntime,
+    content_store: None,
+    monkeypatch: pytest.MonkeyPatch,
+    source_state: str,
+) -> None:
+    from sibyl_core.memory_pipeline.source_lifecycle import SOURCE_BINDINGS_KEY
+
+    org = runtime.client.group_id
+    text = "We decided to preserve exact source evidence before publishing a procedure."
+    source = None
+    if source_state != "new":
+        source = await remember_raw_memory(
+            organization_id=org,
+            principal_id="user_a",
+            source_id="binding-source",
+            raw_content="Old evidence" if source_state == "revised" else text,
+        )
+        if source_state == "revised":
+            monkeypatch.setattr(
+                "sibyl_core.services.memory_lifecycle.get_surreal_graph_runtime",
+                AsyncMock(return_value=runtime),
+            )
+            correction = await apply_memory_correction(
+                organization_id=org,
+                principal_id="user_a",
+                source_id=source.id,
+                action="revise",
+                revised_content=text,
+            )
+            source = correction.updated_memory
+    pack = await reflect_memory(
+        text,
+        organization_id=org,
+        principal_id="user_a",
+        persist=True,
+        persist_review=True,
+        persist_source=source is None,
+        existing_source_id=source.id if source else None,
+    )
+    assert pack.persisted_count == 1
+    observed_source = source or await get_raw_memory(
+        organization_id=org, memory_id=str(pack.source_id)
+    )
+    assert observed_source is not None
+    review = await get_raw_memory(
+        organization_id=org, memory_id=str(pack.candidates[0].persisted_id)
+    )
+    assert review is not None
+    bindings = review.metadata.get(SOURCE_BINDINGS_KEY, {})
+    assert bindings.get(observed_source.id) == observed_source.revision
+
+
+@pytest.mark.parametrize(
+    "unavailable", ["missing", "foreign_org", "foreign_owner", "project", "hidden", "changed"]
+)
+async def test_reflection_rejects_unavailable_source_before_extraction(
+    runtime: GraphRuntime,
+    content_store: None,
+    monkeypatch: pytest.MonkeyPatch,
+    unavailable: str,
+) -> None:
+    from types import SimpleNamespace
+
+    org = runtime.client.group_id
+    text = "We decided to preserve original evidence."
+    source = await remember_raw_memory(
+        organization_id="other-org" if unavailable == "foreign_org" else org,
+        principal_id="other-user" if unavailable == "foreign_owner" else "user_a",
+        source_id="unavailable-source",
+        raw_content="Changed evidence" if unavailable == "changed" else text,
+        memory_scope="project" if unavailable == "project" else "private",
+        scope_key="project_b" if unavailable == "project" else None,
+    )
+    if unavailable == "hidden":
+        monkeypatch.setattr(
+            "sibyl_core.services.memory_lifecycle.get_surreal_graph_runtime",
+            AsyncMock(return_value=runtime),
+        )
+        await apply_memory_correction(
+            organization_id=org, principal_id="user_a", source_id=source.id, action="hide"
+        )
+    extractor = SimpleNamespace(extract=AsyncMock())
+    with pytest.raises(ValueError, match=r"^Reflection source is unavailable or changed$"):
+        await reflect_memory(
+            text,
+            organization_id=org,
+            principal_id="user_a",
+            accessible_projects=set(),
+            persist=True,
+            persist_review=True,
+            persist_source=False,
+            existing_source_id="missing" if unavailable == "missing" else source.id,
+            extractor=extractor,
+        )
+    extractor.extract.assert_not_awaited()
+
+
+@pytest.mark.parametrize("bound", [False, True])
+async def test_revise_retires_direct_graph_copies_and_their_projections(
+    runtime, content_store, monkeypatch, bound
+):
+    monkeypatch.setattr(
+        "sibyl_core.services.memory_lifecycle.get_surreal_graph_runtime",
+        AsyncMock(return_value=runtime),
+    )
+    raw = await remember_raw_memory(
+        organization_id=runtime.client.group_id,
+        principal_id="user_a",
+        source_id="projected-source",
+        raw_content="Original instructions",
+        embedding_provider=None,
+    )
+    metadata = {"memory_scope": "private", "principal_id": "user_a"}
+    if bound:
+        metadata["source_bindings"] = {raw.id: raw.observed_revision}
+    await runtime.entity_manager.create_direct(
+        Entity(
+            id="direct-copy",
+            name="Original source",
+            entity_type=EntityType.EPISODE,
+            content=raw.raw_content,
+            metadata={**metadata, "raw_memory_id": raw.id},
+        ),
+        generate_embedding=False,
+    )
+    await runtime.entity_manager.create_direct(
+        Entity(
+            id="projected-copy",
+            name="Original passage",
+            entity_type=EntityType.EPISODE,
+            content=raw.raw_content,
+            metadata={**metadata, "parent_entity_id": "direct-copy", "projection_kind": "passage"},
+        ),
+        generate_embedding=False,
+    )
+    for action in ("revise", "restore"):
+        result = await apply_memory_correction(
+            organization_id=runtime.client.group_id,
+            source_id=raw.id,
+            principal_id="user_a",
+            action=action,
+            revised_content="Corrected instructions" if action == "revise" else None,
+        )
+        assert result.applied
+        for row_id in ("direct-copy", "projected-copy"):
+            row = await runtime.entity_manager.get(row_id)
+            assert row.content == "Original instructions"
+            assert not graph_metadata_recallable(row.metadata)
+            assert row.metadata["correction_blockers"][raw.id]["blocking"] is True
+
+
+async def test_source_restore_preserves_graph_copy_own_hide(runtime, content_store, monkeypatch):
+    monkeypatch.setattr(
+        "sibyl_core.services.memory_lifecycle.get_surreal_graph_runtime",
+        AsyncMock(return_value=runtime),
+    )
+    raw = await remember_raw_memory(
+        organization_id=runtime.client.group_id,
+        principal_id="user_a",
+        source_id="independently-hidden-source",
+        raw_content="Original instructions",
+        embedding_provider=None,
+    )
+    await runtime.entity_manager.create_direct(
+        Entity(
+            id="independently-hidden-copy",
+            name="Hidden copy",
+            entity_type=EntityType.EPISODE,
+            content=raw.raw_content,
+            metadata={
+                "memory_scope": "private",
+                "principal_id": "user_a",
+                "raw_memory_id": raw.id,
+                "lifecycle_state": "hidden",
+                "lifecycle_flags": ["hidden"],
+                "excluded_from_recall": True,
+            },
+        ),
+        generate_embedding=False,
+    )
+    for action in ("hide", "restore"):
+        await apply_memory_correction(
+            organization_id=runtime.client.group_id,
+            source_id=raw.id,
+            principal_id="user_a",
+            action=action,
+        )
+    copy = await runtime.entity_manager.get("independently-hidden-copy")
+    assert copy.metadata["lifecycle_flags"] == ["hidden"]
+    assert copy.metadata["excluded_from_recall"] is True
+    assert not graph_metadata_recallable(copy.metadata)
+    assert copy.metadata["correction_blockers"][raw.id]["blocking"] is False
+
+
+async def test_graph_copy_born_during_hide_can_follow_source_restore(
+    runtime, content_store, monkeypatch
+):
+    from sibyl_core.services.memory_lifecycle import projected_row_lifecycle_stamp
+
+    monkeypatch.setattr(
+        "sibyl_core.services.memory_lifecycle.get_surreal_graph_runtime",
+        AsyncMock(return_value=runtime),
+    )
+    raw = await remember_raw_memory(
+        organization_id=runtime.client.group_id,
+        principal_id="user_a",
+        source_id="late-copy-source",
+        raw_content="Source instructions",
+        embedding_provider=None,
+    )
+    await apply_memory_correction(
+        organization_id=runtime.client.group_id,
+        source_id=raw.id,
+        principal_id="user_a",
+        action="hide",
+    )
+    provenance = {"raw_memory_id": raw.id}
+    stamp = await projected_row_lifecycle_stamp(
+        organization_id=runtime.client.group_id,
+        metadata=provenance,
+    )
+    assert not graph_metadata_recallable(stamp)
+    await runtime.entity_manager.create_direct(
+        Entity(
+            id="late-hidden-copy",
+            name="Late copy",
+            entity_type=EntityType.EPISODE,
+            content=raw.raw_content,
+            metadata={"memory_scope": "private", "principal_id": "user_a", **provenance, **stamp},
+        ),
+        generate_embedding=False,
+    )
+    await apply_memory_correction(
+        organization_id=runtime.client.group_id,
+        source_id=raw.id,
+        principal_id="user_a",
+        action="restore",
+    )
+    copy = await runtime.entity_manager.get("late-hidden-copy")
+    assert graph_metadata_recallable(copy.metadata)
+
+
+async def test_promotion_check_preserves_concurrent_source_restore(
+    runtime, content_store, monkeypatch
+):
+    from sibyl_core.services.memory_reflection import _verify_promotion_sources
+
+    monkeypatch.setattr(
+        "sibyl_core.services.memory_lifecycle.get_surreal_graph_runtime",
+        AsyncMock(return_value=runtime),
+    )
+    org = runtime.client.group_id
+    source = await remember_raw_memory(
+        organization_id=org,
+        principal_id="user_a",
+        source_id="promotion-race-source",
+        raw_content="Keep the original rule.",
+        embedding_provider=None,
+    )
+    entity = Entity(
+        id="promotion-race-row",
+        name="Derived rule",
+        entity_type=EntityType.EPISODE,
+        content=source.raw_content,
+        metadata={
+            "memory_scope": "private",
+            "principal_id": "user_a",
+            "raw_memory_id": source.id,
+            "raw_source_ids": [source.id],
+            "source_bindings": {source.id: source.revision},
+        },
+    )
+    hidden = await apply_memory_correction(
+        organization_id=org, principal_id="user_a", source_id=source.id, action="hide"
+    )
+    assert hidden.applied and hidden.propagation_complete
+    await runtime.entity_manager.create_direct(entity, generate_embedding=False)
+    update = runtime.entity_manager.update
+    restored = False
+
+    async def restore_before_stale_write(*args, **kwargs):
+        nonlocal restored
+        if not restored:
+            restored = True
+            result = await apply_memory_correction(
+                organization_id=org,
+                principal_id="user_a",
+                source_id=source.id,
+                action="restore",
+            )
+            assert result.applied and result.propagation_complete
+            row = await runtime.entity_manager.get(entity.id)
+            assert graph_metadata_recallable(row.metadata)
+        return await update(*args, **kwargs)
+
+    monkeypatch.setattr(runtime.entity_manager, "update", restore_before_stale_write)
+    await _verify_promotion_sources(runtime, [source], entity_id=entity.id)
+    assert restored
+    row = await runtime.entity_manager.get(entity.id)
+    assert graph_metadata_recallable(row.metadata)
+    assert row.metadata["correction_blockers"][source.id]["blocking"] is False
+
+
+async def test_promotion_missing_capture_recovers_without_authored_deletion(
+    runtime, content_store, monkeypatch
+):
+    from sibyl_core.projection.repair import repair_graph_lifecycle
+    from sibyl_core.services.memory_reflection import _verify_promotion_sources
+
+    source = await remember_raw_memory(
+        organization_id=runtime.client.group_id,
+        principal_id="user_a",
+        source_id="temporarily-missing-promotion-source",
+        raw_content="Retain the source evidence.",
+        embedding_provider=None,
+    )
+    entity = Entity(
+        id="pending-promotion-row",
+        name="Pending source verification",
+        entity_type=EntityType.EPISODE,
+        metadata={
+            "memory_scope": "private",
+            "principal_id": "user_a",
+            "raw_source_ids": [source.id],
+            "source_bindings": {source.id: source.revision},
+        },
+    )
+    await runtime.entity_manager.create_direct(entity, generate_embedding=False)
+    with monkeypatch.context() as unavailable:
+        for module in ("memory_reflection", "memory_lifecycle"):
+            unavailable.setattr(
+                f"sibyl_core.services.{module}.get_raw_memory", AsyncMock(return_value=None)
+            )
+        assert not await _verify_promotion_sources(runtime, [source], entity_id=entity.id)
+    pending = await runtime.entity_manager.get(entity.id)
+    assert not graph_metadata_recallable(pending.metadata)
+    owners = pending.metadata["lifecycle_reconciliation_pending"]
+    assert len(owners) == 1 and list(owners.values()) == [True]
+    assert next(iter(owners)).startswith(f"capture-signature-v1:{source.id}:")
+    assert not pending.metadata.get("excluded_from_recall")
+    repaired = await repair_graph_lifecycle(runtime)
+    assert repaired.recovered == 1 and repaired.pending == repaired.failed == 0
+    recovered = await runtime.entity_manager.get(entity.id)
+    assert graph_metadata_recallable(recovered.metadata)
+    assert recovered.metadata["source_bindings"] == {source.id: source.revision}
+
+
+async def test_promotion_checks_every_hidden_source_before_restore(
+    runtime, content_store, monkeypatch
+):
+    from sibyl_core.services.memory_reflection import _verify_promotion_sources
+
+    monkeypatch.setattr(
+        "sibyl_core.services.memory_lifecycle.get_surreal_graph_runtime",
+        AsyncMock(return_value=runtime),
+    )
+    org = runtime.client.group_id
+    sources = [
+        await remember_raw_memory(
+            organization_id=org,
+            principal_id="user_a",
+            source_id=f"late-promotion-source-{index}",
+            raw_content=f"Supporting evidence {index}",
+            embedding_provider=None,
+        )
+        for index in range(2)
+    ]
+    for source in sources:
+        hidden = await apply_memory_correction(
+            organization_id=org, principal_id="user_a", source_id=source.id, action="hide"
+        )
+        assert hidden.applied and hidden.propagation_complete
+    entity = Entity(
+        id="late-multiple-source-promotion",
+        name="Combined evidence",
+        entity_type=EntityType.EPISODE,
+        metadata={
+            "memory_scope": "private",
+            "principal_id": "user_a",
+            "raw_source_ids": [source.id for source in sources],
+            "source_bindings": {source.id: source.revision for source in sources},
+        },
+    )
+    await runtime.entity_manager.create_direct(entity, generate_embedding=False)
+    assert not await _verify_promotion_sources(runtime, sources, entity_id=entity.id)
+    restored = await apply_memory_correction(
+        organization_id=org, principal_id="user_a", source_id=sources[0].id, action="restore"
+    )
+    assert restored.applied and restored.propagation_complete
+    row = await runtime.entity_manager.get(entity.id)
+    assert not graph_metadata_recallable(row.metadata)
+    assert row.metadata["correction_blockers"][sources[1].id]["blocking"] is True
+    restored = await apply_memory_correction(
+        organization_id=org, principal_id="user_a", source_id=sources[1].id, action="restore"
+    )
+    assert restored.applied and restored.propagation_complete
+    row = await runtime.entity_manager.get(entity.id)
+    assert graph_metadata_recallable(row.metadata)
+
+
+async def test_capture_reconciliation_respects_the_derived_content_binding(
+    runtime, content_store, monkeypatch
+):
+    from sibyl_core.projection.reconcile import reconcile_with_capture
+
+    monkeypatch.setattr(
+        "sibyl_core.services.memory_lifecycle.get_surreal_graph_runtime",
+        AsyncMock(return_value=runtime),
+    )
+    org = runtime.client.group_id
+    source = await remember_raw_memory(
+        organization_id=org,
+        principal_id="user_a",
+        source_id="reconciled-content-epoch",
+        raw_content="Original evidence",
+        embedding_provider=None,
+    )
+    revised = await apply_memory_correction(
+        organization_id=org,
+        principal_id="user_a",
+        source_id=source.id,
+        action="revise",
+        revised_content="Corrected evidence",
+    )
+    assert revised.applied and revised.updated_memory is not None
+    restored = await apply_memory_correction(
+        organization_id=org, principal_id="user_a", source_id=source.id, action="restore"
+    )
+    assert restored.applied and restored.propagation_complete
+    for name, binding in (("old", source.revision), ("current", revised.updated_memory.revision)):
+        entity = Entity(
+            id=f"reconciled-{name}-content",
+            name=f"Derived {name} evidence",
+            entity_type=EntityType.EPISODE,
+            metadata={
+                "memory_scope": "private",
+                "principal_id": "user_a",
+                "raw_source_ids": [source.id],
+                "source_bindings": {source.id: binding},
+            },
+        )
+        await runtime.entity_manager.create_direct(entity, generate_embedding=False)
+        await reconcile_with_capture(
+            runtime.entity_manager,
+            organization_id=org,
+            metadata={"raw_memory_id": source.id},
+            row_ids=[entity.id],
+        )
+        row = await runtime.entity_manager.get(entity.id)
+        assert graph_metadata_recallable(row.metadata) is (name == "current")
+        assert row.metadata["source_bindings"] == {source.id: binding}

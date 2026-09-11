@@ -531,8 +531,6 @@ async def accessible_projects_for_promotion(
             request=http_request,
         )
 
-    if project_ids:
-        return project_ids
     accessible_projects = await list_accessible_project_graph_ids(ctx)
     return {str(project_id) for project_id in accessible_projects or set()}
 
@@ -765,3 +763,9 @@ async def accessible_teams_for_share(
 ) -> set[str] | None:
     accessible_teams = await list_accessible_team_scope_keys(ctx)
     return {str(team_id) for team_id in accessible_teams or set()}
+
+
+async def writable_projects_for_memory(*, ctx: AuthContext) -> set[str]:
+    """Resolve contributor grants independently of readable memory evidence."""
+    projects = await list_accessible_project_graph_ids(ctx, required_role=ProjectRole.CONTRIBUTOR)
+    return {str(project_id) for project_id in projects or set()}

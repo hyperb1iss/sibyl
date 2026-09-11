@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, cast
 
 import structlog
 
+from sibyl_core.backends.surreal.schema_derivations import DERIVATION_DEFINITIONS
 from sibyl_core.backends.surreal.schema_helpers import execute_schema_statement, split_statements
 from sibyl_core.backends.surreal.schema_index_recovery import ensure_owned_concurrent_index
 from sibyl_core.backends.surreal.schema_lifecycle_repair import (
@@ -21,6 +22,17 @@ from sibyl_core.backends.surreal.schema_ownership import (
     SchemaOwnership,
     try_acquire_schema_ownership,
 )
+from sibyl_core.backends.surreal.schema_source_integrity import (
+    migrate_graph_source_integrity,
+    prepare_source_integrity_upgrade,
+)
+from sibyl_core.backends.surreal.schema_source_states import (
+    SOURCE_STATE_DEFINITIONS,
+    migrate_graph_source_states,
+    retire_source_states,
+    source_state_event,
+)
+from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WITNESS_DEFINITION
 from sibyl_core.backends.surreal.schema_version import (
     GRAPH_SCHEMA_CURRENT_VERSION,
     SCHEMA_VERSION_TABLE,
@@ -35,6 +47,7 @@ from sibyl_core.backends.surreal.schema_version import (
     record_schema_version,
 )
 from sibyl_core.config import core_config
+from sibyl_core.memory_pipeline.observations import SourceKind
 from sibyl_core.models.entities import EntityType
 
 if TYPE_CHECKING:
@@ -823,6 +836,33 @@ GRAPH_SCHEMA_MIGRATIONS = (
         statements=tuple(split_statements(LIFECYCLE_REPAIR_FIELDS)),
         action=migrate_lifecycle_repair,
     ),
+    SchemaMigration(
+        version=24,
+        name="graph_source_states",
+        statements=(
+            *split_statements(SOURCE_STATE_DEFINITIONS),
+            source_state_event(SourceKind.GRAPH_ENTITY),
+        ),
+        action=migrate_graph_source_states,
+    ),
+    SchemaMigration(
+        version=25,
+        name="graph_observation_associations",
+        statements=(
+            *split_statements(DERIVATION_DEFINITIONS),
+            source_state_event(SourceKind.GRAPH_ENTITY, retire_derivations=True).replace(
+                "DEFINE EVENT IF NOT EXISTS", "DEFINE EVENT OVERWRITE"
+            ),
+        ),
+    ),
+    SchemaMigration(
+        version=26, name="graph_source_integrity", action=migrate_graph_source_integrity
+    ),
+    SchemaMigration(
+        version=27,
+        name="graph_source_write_witness",
+        statements=tuple(split_statements(SOURCE_STATE_WITNESS_DEFINITION)),
+    ),
 )
 
 
@@ -844,6 +884,10 @@ def _graph_schema_migrations(
                     ownership=ownership,
                 )
                 if migration.action is migrate_lifecycle_repair
+                else partial(migrate_graph_source_states, ownership=ownership)
+                if migration.action is migrate_graph_source_states
+                else partial(migrate_graph_source_integrity, ownership=ownership)
+                if migration.action is migrate_graph_source_integrity
                 else migration.action
             ),
         )
@@ -1249,8 +1293,10 @@ async def _bootstrap_owned_schema(
     reset: bool,
     force: bool,
 ) -> None:
+    await prepare_source_integrity_upgrade(ownership.read, ownership=ownership)
     current_version = 0
     if reset:
+        await retire_source_states(ownership.mutate, kind=SourceKind.GRAPH_ENTITY)
         for table in (*GRAPH_EDGES, *GRAPH_TABLES, *REMOVED_GRAPH_EDGES, *REMOVED_GRAPH_TABLES):
             await ownership.mutate(f"REMOVE TABLE IF EXISTS {table};")
         await ownership.mutate(f"REMOVE TABLE IF EXISTS {SCHEMA_VERSION_TABLE};")

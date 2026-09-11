@@ -701,7 +701,6 @@ async def test_enqueue_reflection_dream_cycle_uses_org_scoped_job_id() -> None:
         dry_run=True,
         source_limit=3,
         candidate_limit=7,
-        archive_exceptions=False,
         confidence_threshold=0.91,
     )
 
@@ -711,7 +710,7 @@ async def test_enqueue_reflection_dream_cycle_uses_org_scoped_job_id() -> None:
     assert pool.calls[0][2]["dry_run"] is True
     assert pool.calls[0][2]["source_limit"] == 3
     assert pool.calls[0][2]["candidate_limit"] == 7
-    assert pool.calls[0][2]["archive_exceptions"] is False
+    assert "archive_exceptions" not in pool.calls[0][2]
     assert pool.calls[0][2]["confidence_threshold"] == 0.91
     assert pool.delete.await_args_list[-1].args == ("arq:result:reflection_dream:org-123",)
     assert_recent_job_indexed(pool, "reflection_dream:org-123")

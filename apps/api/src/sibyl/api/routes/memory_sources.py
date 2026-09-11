@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import structlog
@@ -25,7 +26,8 @@ from sibyl.api.schemas import (
 from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
 from sibyl.jobs.source_imports import get_source_import_status
-from sibyl_core.auth import AuthOrganization, OrganizationRole
+from sibyl.services.memory_correction_disclosure import filter_correction_disclosure
+from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
 from sibyl_core.auth.memory_policy import (
     MemoryPolicyAction,
 )
@@ -240,15 +242,15 @@ async def preview_memory_correction_route(
         surface="memory_correction_preview",
         request=http_request,
     )
-    accessible_projects = await memory_auth.project_accessible_for_policy(
+    await memory_auth.authorize_project_scope_write(
         ctx=ctx,
         memory_scope=memory.memory_scope.value,
         scope_key=memory.scope_key,
     )
-    accessible_teams = await memory_auth.team_accessible_for_policy(
-        ctx=ctx,
-        memory_scope=memory.memory_scope.value,
-        scope_key=memory.scope_key,
+    accessible_projects, accessible_teams, writable_projects = await asyncio.gather(
+        memory_auth.list_accessible_project_graph_ids(ctx),
+        memory_auth.list_accessible_team_scope_keys(ctx),
+        memory_auth.list_accessible_project_graph_ids(ctx, required_role=ProjectRole.CONTRIBUTOR),
     )
     preview = await preview_memory_correction(
         organization_id=str(org.id),
@@ -257,10 +259,12 @@ async def preview_memory_correction_route(
         action=request.action,
         reason=request.reason,
         accessible_projects=accessible_projects,
+        writable_projects=writable_projects,
         accessible_teams=accessible_teams,
         replacement_source_id=request.replacement_source_id,
         duplicate_of_source_id=request.duplicate_of_source_id,
         revised_content=request.revised_content,
+        allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
     )
     response = serialization.correction_response(preview)
     await memory_auth.log_memory_audit(
@@ -317,15 +321,15 @@ async def apply_memory_correction_route(
         surface="memory_correction",
         request=http_request,
     )
-    accessible_projects = await memory_auth.project_accessible_for_policy(
+    await memory_auth.authorize_project_scope_write(
         ctx=ctx,
         memory_scope=memory.memory_scope.value,
         scope_key=memory.scope_key,
     )
-    accessible_teams = await memory_auth.team_accessible_for_policy(
-        ctx=ctx,
-        memory_scope=memory.memory_scope.value,
-        scope_key=memory.scope_key,
+    accessible_projects, accessible_teams, writable_projects = await asyncio.gather(
+        memory_auth.list_accessible_project_graph_ids(ctx),
+        memory_auth.list_accessible_team_scope_keys(ctx),
+        memory_auth.list_accessible_project_graph_ids(ctx, required_role=ProjectRole.CONTRIBUTOR),
     )
     idempotency_path = f"/memory/inspect/{source_id}/corrections"
     idempotency_payload = {"body": request.model_dump(mode="json")}
@@ -340,7 +344,16 @@ async def apply_memory_correction_route(
         content_session=None,
     )
     if replayed is not None:
-        return replayed
+        return MemoryCorrectionResponse.model_validate(
+            await filter_correction_disclosure(
+                replayed.model_dump(mode="python"),
+                organization_id=str(org.id),
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
+                accessible_teams=accessible_teams,
+                allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
+            )
+        )
     correction_kwargs: dict[str, Any] = {
         "organization_id": str(org.id),
         "source_id": memory.id,
@@ -348,10 +361,12 @@ async def apply_memory_correction_route(
         "action": request.action,
         "reason": request.reason,
         "accessible_projects": accessible_projects,
+        "writable_projects": writable_projects,
         "accessible_teams": accessible_teams,
         "replacement_source_id": request.replacement_source_id,
         "duplicate_of_source_id": request.duplicate_of_source_id,
         "revised_content": request.revised_content,
+        "allowed_memory_scope_keys": ctx.api_key_memory_scope_keys,
     }
     if request.expected_revision is not None:
         correction_kwargs["expected_revision"] = request.expected_revision

@@ -9,6 +9,7 @@ from sibyl_core.backends.surreal.schema_ownership import (
     SchemaOwnershipLost,
     try_acquire_schema_ownership,
 )
+from sibyl_core.backends.surreal.schema_version import GRAPH_SCHEMA_CURRENT_VERSION
 from sibyl_core.models.entities import Entity, EntityType
 from tests.test_reflection_identity import runtime as runtime
 
@@ -115,7 +116,9 @@ async def test_experimental_v22_upgrades_and_force_restores_repair_schema(runtim
     info = await execute("INFO FOR TABLE entity;")
     assert "idx_entity_lifecycle_repair" not in info["indexes"]
     assert "lifecycle_repair_pending" not in info["fields"]
-    assert (await execute("SELECT version FROM schema_version:graph;"))[0]["version"] == 23
+    assert (await execute("SELECT version FROM schema_version:graph;"))[0][
+        "version"
+    ] == GRAPH_SCHEMA_CURRENT_VERSION
 
     await execute("REMOVE INDEX idx_entity_lifecycle_repair_key ON entity;")
     await execute("REMOVE FIELD lifecycle_repair_key ON entity;")

@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, cast
 
+from sibyl_core.memory_pipeline.audit import decode_audit_metadata, encode_audit_metadata
 from sibyl_core.memory_pipeline.quality import (
     expand_memory_quality_storage_metadata,
     normalize_memory_quality_metadata,
@@ -42,6 +43,7 @@ _RELATED_ENTITY_PROJECTION_FIELDS = (
     ("created_at", "created_at"),
     ("updated_at", "updated_at"),
     ("revision", "revision"),
+    ("derivation_required", "derivation_required"),
     ("project_id", "project_id"),
     ("epic_id", "epic_id"),
     ("parent_task_id", "parent_task_id"),
@@ -156,12 +158,23 @@ def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
     record_id = _row_record_id(normalized_row)
     if record_id and record_id != entity_id and metadata.get("record_id") is None:
         metadata["record_id"] = record_id
-    metadata = normalize_memory_quality_metadata(metadata)
+    metadata = normalize_memory_quality_metadata(decode_audit_metadata(metadata))
+    name = _first_text(normalized_row.get("name"), normalized_row.get("title"), entity_id)
+    identity = metadata.get("reflection_identity")
+    stored_name = normalized_row.get("name")
+    if (
+        isinstance(identity, Mapping)
+        and identity.get("version") == 2
+        and isinstance(stored_name, str)
+    ):
+        # A v2 identity can bind an empty title. Preserve the actual stored
+        # value so identity verification cannot confuse it with an ID fallback.
+        name = stored_name.strip()
 
     entity = Entity(
         id=entity_id,
         entity_type=_entity_type_from_row(normalized_row, attributes=attributes),
-        name=_first_text(normalized_row.get("name"), normalized_row.get("title"), entity_id),
+        name=name,
         description=_first_text(
             normalized_row.get("description"),
             normalized_row.get("summary"),
@@ -197,6 +210,7 @@ def entity_from_surreal_row(row: Mapping[str, object]) -> Entity:
     )
     entity = _coerce_native_entity(entity)
     observed_revision = normalized_row.get("revision")
+    entity.derivation_required = normalized_row.get("derivation_required") is True
     entity.observed_revision = (
         observed_revision if type(observed_revision) is int and observed_revision > 0 else None
     )
@@ -525,7 +539,7 @@ def relationship_from_surreal_row(row: Mapping[str, object]) -> Relationship:
     record_id = _row_record_id(normalized_row)
     if record_id and record_id != relationship_id and metadata.get("record_id") is None:
         metadata["record_id"] = record_id
-    metadata = normalize_memory_quality_metadata(metadata)
+    metadata = normalize_memory_quality_metadata(decode_audit_metadata(metadata))
 
     return Relationship(
         id=relationship_id,
@@ -684,7 +698,7 @@ def _entity_metadata(entity: Entity) -> dict[str, object]:
     for key, value in model_dump.items():
         if value not in (None, "", [], {}):
             metadata[key] = _jsonable(value)
-    return expand_memory_quality_storage_metadata(metadata)
+    return encode_audit_metadata(expand_memory_quality_storage_metadata(metadata))
 
 
 def _jsonable(value: object) -> object:

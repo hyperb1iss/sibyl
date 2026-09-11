@@ -19,17 +19,28 @@ from typing import Any
 
 import structlog
 
+from sibyl_core.memory_pipeline.lifecycle import RECONCILE_PENDING_KEY
+from sibyl_core.memory_pipeline.source_lifecycle import (
+    CORRECTION_BLOCKERS_KEY,
+    SOURCE_BINDINGS_KEY,
+    SOURCE_VALIDATION_PENDING_KEY,
+)
+
 log = structlog.get_logger()
 
 # What a correction stamps onto a memory. A derived row that does not carry
 # these keeps serving the retired body under its own id.
 LIFECYCLE_METADATA_KEYS = (
+    RECONCILE_PENDING_KEY,
     "lifecycle_state",
     "lifecycle_flags",
     "lifecycle_action",
     "excluded_from_recall",
     "superseded_by_source_id",
     "duplicate_of_source_id",
+    CORRECTION_BLOCKERS_KEY,
+    SOURCE_BINDINGS_KEY,
+    SOURCE_VALIDATION_PENDING_KEY,
 )
 
 

@@ -10,6 +10,7 @@ from sibyl_core.memory_pipeline.retrieval_keys import (
     MAX_RETRIEVAL_KEY_LENGTH,
     MAX_RETRIEVAL_KEYS,
 )
+from sibyl_core.memory_pipeline.source_lifecycle import public_memory_metadata
 from sibyl_core.memory_pipeline.spans import MAX_AGENT_SPANS, MAX_SPAN_LABEL_CHARS
 from sibyl_core.memory_pipeline.structure import MAX_PROBE_CHARS, MAX_PROBES_PER_MEMORY
 from sibyl_core.models.entities import EntityType
@@ -182,6 +183,11 @@ class RelatedEntitySummary(BaseModel):
 
 class EntityResponse(EntityBase):
     """Full entity response with all fields."""
+
+    @field_validator("metadata")
+    @classmethod
+    def filter_source_clocks(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return public_memory_metadata(value)
 
     id: str = Field(..., description="Unique entity ID")
     entity_type: EntityType = Field(..., description="Type of entity")

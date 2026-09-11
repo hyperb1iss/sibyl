@@ -42,16 +42,19 @@ function getVersion(): string {
 
 const SIBYL_VERSION = getVersion();
 const buildCpus = Number.parseInt(process.env.SIBYL_NEXT_BUILD_CPUS ?? '', 10);
-const allowedDevOrigins = (process.env.SIBYL_ALLOWED_DEV_ORIGINS ?? '')
-  .split(',')
-  .map(origin => origin.trim())
-  .filter(origin => origin.length > 0);
+const allowedDevOrigins = [
+  '127.0.0.1',
+  ...(process.env.SIBYL_ALLOWED_DEV_ORIGINS ?? '')
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(origin => origin.length > 0),
+];
 
 const nextConfig: NextConfig = {
   // Enable React Compiler for automatic memoization
   reactCompiler: true,
 
-  ...(allowedDevOrigins.length > 0 ? { allowedDevOrigins } : {}),
+  allowedDevOrigins,
 
   // Standalone output for Docker deployment
   output: 'standalone',

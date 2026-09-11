@@ -31,6 +31,7 @@ from sibyl_core.retrieval.hybrid import _apply_current_entity_gate
 from sibyl_core.retrieval.temporal import parse_temporal_datetime
 from sibyl_core.services import document_search as document_search_service
 from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
+from sibyl_core.services.memory_source_validation import SourceReadAuthority
 from sibyl_core.services.surreal_content import (
     MemoryScope,
     RawMemory,
@@ -629,6 +630,7 @@ def _raw_memory_search_result(
 async def _search_raw_memories(
     *,
     query: str,
+    source_authority: SourceReadAuthority,
     organization_id: str,
     principal_id: str,
     memory_scope: str,
@@ -649,6 +651,7 @@ async def _search_raw_memories(
         organization_id=organization_id,
         principal_id=principal_id,
         query=query,
+        source_authority=source_authority,
         memory_scope=memory_scope,
         scope_key=scope_key,
         project_id=project_id,
@@ -962,6 +965,13 @@ async def search(
                 with_timeout(
                     _search_raw_memories(
                         query=query,
+                        source_authority=SourceReadAuthority(
+                            principal_id=principal_id,
+                            projects=frozenset(accessible_projects or ()),
+                            scope_keys=None
+                            if allowed_memory_scope_keys is None
+                            else frozenset(allowed_memory_scope_keys),
+                        ),
                         organization_id=organization_id,
                         principal_id=principal_id,
                         memory_scope=memory_scope,

@@ -32,6 +32,7 @@ import sibyl_core.services.memory_correction as memory_correction_module
 import sibyl_core.services.memory_lifecycle as memory_lifecycle_module
 import sibyl_core.tools.context as context_module
 from sibyl_core.auth.memory_policy import stamp_memory_scope_metadata
+from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
 from sibyl_core.models.context import ContextFacet, ContextPack
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
 from sibyl_core.projection.memory import project_memory_entity
@@ -40,6 +41,7 @@ from sibyl_core.retrieval import _search_database as database_module
 from sibyl_core.retrieval import _search_expansion as expansion_module
 from sibyl_core.retrieval import _search_lifecycle as lifecycle_module
 from sibyl_core.retrieval.search import build_context_retrieval_plan
+from sibyl_core.services.content_raw_persistence import save_raw_memory
 from sibyl_core.services.graph import (
     EntityManager,
     RelationshipManager,
@@ -47,6 +49,7 @@ from sibyl_core.services.graph import (
     prepare_graph_schema,
 )
 from sibyl_core.services.surreal_content import MemoryScope, RawMemory
+from tests.test_reflection_identity import content_store as content_store
 
 PROJECT_ID = "proj-supersession"
 PRINCIPAL = "user-supersession"
@@ -508,6 +511,7 @@ async def _correct(
     """
 
     memory = RawMemory(
+        observed_revision=1,
         id=raw_memory_id,
         organization_id=graph.group_id,
         source_id=f"source-{raw_memory_id}",
@@ -623,8 +627,7 @@ async def test_spans_cut_after_the_correction_are_born_retired(
     )
     assert projection.passages >= 2, "the spans have to exist for the test to mean anything"
     for span in projection.created_passages:
-        assert span.metadata.get("excluded_from_recall") is True
-        assert span.metadata.get("lifecycle_state") == "contested"
+        assert not graph_metadata_recallable(span.metadata)
 
     served = _pack_ids(await _pack(graph, "interleaved passage body"))
     assert "raced-parent" not in served
@@ -699,7 +702,7 @@ async def test_correcting_a_memory_retires_the_entities_and_facts_projected_from
     for row_id in projected:
         stored = await graph.entity_manager.get(row_id)
         assert stored is not None
-        assert stored.metadata.get("excluded_from_recall") is True
+        assert not graph_metadata_recallable(stored.metadata)
 
     after = _pack_ids(await _pack(graph, "Grafana dashboard reads from Prometheus"))
     assert not (after & set(projected))
@@ -727,7 +730,7 @@ async def test_rows_projected_after_the_correction_are_born_retired(
     for row_id in projected:
         stored = await graph.entity_manager.get(row_id)
         assert stored is not None
-        assert stored.metadata.get("excluded_from_recall") is True
+        assert not graph_metadata_recallable(stored.metadata)
 
     served = _pack_ids(await _pack(graph, "Grafana dashboard reads from Prometheus"))
     assert not (served & set(projected))
@@ -737,6 +740,7 @@ async def test_rows_projected_after_the_correction_are_born_retired(
 async def test_a_row_written_through_add_is_reachable_by_a_correction(
     graph: _Runtime,
     monkeypatch: pytest.MonkeyPatch,
+    content_store,
 ) -> None:
     """The write path and the correction path have to agree on one key.
 
@@ -754,6 +758,16 @@ async def test_a_row_written_through_add_is_reachable_by_a_correction(
         return graph
 
     monkeypatch.setattr(add_module, "get_graph_runtime", runtime_factory)
+    await save_raw_memory(
+        RawMemory(
+            id="raw-through-add",
+            organization_id=graph.group_id,
+            source_id="source-raw-through-add",
+            principal_id=PRINCIPAL,
+            raw_content="We decided to deploy to fly.io.",
+        ),
+        embedding_provider=None,
+    )
 
     response = await add_module.add(
         title="Deploy to Fly",
@@ -1127,10 +1141,10 @@ async def test_a_readable_verdict_clears_the_pending_marker(
     await graph.entity_manager.create_direct(row)
     await graph.entity_manager.update(
         "pending-row",
-        {"metadata": {"excluded_from_recall": True, RECONCILE_PENDING_KEY: True}},
+        {"metadata": {RECONCILE_PENDING_KEY: {"capture:raw-pending": True}}},
     )
     marked = await graph.entity_manager.get("pending-row")
-    assert marked.metadata.get(RECONCILE_PENDING_KEY) is True
+    assert marked.metadata[RECONCILE_PENDING_KEY] == {"capture:raw-pending": True}
     assert "pending-row" not in _pack_ids(await _pack(graph, "pending marker hosting body"))
 
     async def healthy_verdict(**_kwargs: object) -> dict[str, Any]:
@@ -1151,7 +1165,7 @@ async def test_a_readable_verdict_clears_the_pending_marker(
     assert outcome.changed
     settled = await graph.entity_manager.get("pending-row")
     assert RECONCILE_PENDING_KEY not in settled.metadata, "the marker has to be gone, not falsy"
-    assert settled.metadata.get("excluded_from_recall") is False
+    assert not settled.metadata.get("excluded_from_recall")
     assert "pending-row" in _pack_ids(await _pack(graph, "pending marker hosting body"))
 
 
@@ -1174,7 +1188,7 @@ async def test_a_correction_clears_the_pending_marker_it_finds(
     await graph.entity_manager.create_direct(row)
     await graph.entity_manager.update(
         "marked-parent",
-        {"metadata": {RECONCILE_PENDING_KEY: True}},
+        {"metadata": {RECONCILE_PENDING_KEY: {"capture:raw-marked-parent": True}}},
     )
 
     result = await _correct(graph, monkeypatch, raw_memory_id="raw-marked-parent")
@@ -1183,4 +1197,26 @@ async def test_a_correction_clears_the_pending_marker_it_finds(
 
     settled = await graph.entity_manager.get("marked-parent")
     assert RECONCILE_PENDING_KEY not in settled.metadata
-    assert settled.metadata.get("excluded_from_recall") is True
+    assert not graph_metadata_recallable(settled.metadata)
+
+
+async def test_legacy_pending_without_an_owner_is_not_cleared_by_one_capture(graph, monkeypatch):
+    from sibyl_core.projection.reconcile import RECONCILE_PENDING_KEY, reconcile_with_capture
+
+    row = _entity(graph, "legacy-pending", "Legacy pending", "Legacy pending body")
+    await graph.entity_manager.create_direct(row)
+    await graph.entity_manager.update(row.id, {"metadata": {RECONCILE_PENDING_KEY: True}})
+
+    async def healthy_verdict(**_kwargs):
+        return {}
+
+    monkeypatch.setattr("sibyl_core.services.memory.projected_row_lifecycle_stamp", healthy_verdict)
+    await reconcile_with_capture(
+        graph.entity_manager,
+        organization_id=graph.group_id,
+        metadata={"raw_memory_id": "one-capture"},
+        row_ids=[row.id],
+    )
+    stored = await graph.entity_manager.get(row.id)
+    assert stored.metadata[RECONCILE_PENDING_KEY] == {"unknown": True}
+    assert not graph_metadata_recallable(stored.metadata)
