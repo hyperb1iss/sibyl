@@ -1099,6 +1099,7 @@ tasks:
       tools/tests/test_longmemeval_qa_accounting.py
       tools/tests/test_longmemeval_replay.py
       tools/tests/test_longmemeval_v2_probe.py tools/tests/test_longmemeval_v2_official.py
+      tools/tests/test_operational_outcome_rendering.py
       tools/tests/test_longmemeval_v2_official_source.py
       tools/tests/test_longmemeval_v2_composition_replay.py
       tools/tests/test_longmemeval_v2_diagnostics.py

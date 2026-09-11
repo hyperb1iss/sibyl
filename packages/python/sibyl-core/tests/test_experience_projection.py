@@ -515,7 +515,7 @@ def test_failure_projection_reports_failure_without_inventing_cause_or_resolutio
     ]
 
     assert len(errors) == 1
-    assert "Reported outcome: failure" in errors[0].content
+    assert 'Source-reported trajectory outcome: "failure"' in errors[0].content
     assert errors[0].metadata["resolution_status"] == "unknown"
     assert not any(entity.entity_type is EntityType.CLAIM for entity in projection.entities)
     assert not any(

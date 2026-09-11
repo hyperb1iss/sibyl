@@ -40,6 +40,7 @@ from sibyl_core.evals.longmemeval_v2 import (  # noqa: E402
 )
 from sibyl_core.models import EntityType, OperationalExperience  # noqa: E402
 from sibyl_core.projection import project_operational_experience  # noqa: E402
+from sibyl_core.projection.outcome import outcome_context  # noqa: E402
 from sibyl_core.retrieval.operational_evidence import (  # noqa: E402
     TYPED_NOTE_RESERVATION_ITEMS,
 )
@@ -2582,6 +2583,9 @@ def _memory_context_header(rank: int, result: dict[str, object]) -> str:
         f"Trajectory: {trajectory_id or 'unknown'}",
         f"Chunk: {chunk_index if isinstance(chunk_index, int) else 'unknown'}",
     ]
+    provenance = outcome_context(metadata)
+    if provenance:
+        lines.append(provenance)
     inventory_count = metadata.get("ui_inventory_item_count")
     if (
         isinstance(inventory_count, int)
