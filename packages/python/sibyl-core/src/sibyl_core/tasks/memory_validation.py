@@ -17,7 +17,13 @@ from sibyl_core.ai.llm.extractor import ExtractionUsage, Extractor
 from sibyl_core.models.reflection import ReflectionCandidate
 from sibyl_core.tasks._evidence_json import canonical
 from sibyl_core.tasks.consolidation import ConditionalAssertion, DraftConditionalProcedure
-from sibyl_core.tasks.episode_evidence import EvidenceCitation
+from sibyl_core.tasks.episode_evidence import (
+    EvidenceCitation,
+    encode_episode_views,
+    episode_projection_receipt,
+    is_controller_episode,
+    project_episode,
+)
 from sibyl_core.tasks.procedure_review import (
     ReviewFinding,
     ReviewSubmission,
@@ -97,6 +103,29 @@ def _prepare(
 ) -> PreparedMemoryValidation:
     _digest(parent_operation_id)
     _digest(parent_candidate_sha256)
+    projected = (
+        kind == "conditional_procedure"
+        and bool(evidence)
+        and all(is_controller_episode(source.content) for source in evidence)
+    )
+    projections = (
+        [
+            project_episode(source.source_id, source.content, prefix=f"s{index}")
+            for index, source in enumerate(evidence)
+        ]
+        if projected
+        else []
+    )
+    if (
+        projected
+        and {
+            key: citation
+            for projection in projections
+            for key, citation in projection.citations.items()
+        }
+        != citations
+    ):
+        raise ValueError("procedure citations differ from original controller projection")
     sources: dict[str, object] = {}
     for source in evidence:
         _digest(source.observation_sha256)
@@ -105,7 +134,7 @@ def _prepare(
         if source.provenance not in ("reported", "signed"):
             raise ValueError("invalid source provenance")
         sources[source.source_id] = {
-            "text": source.content.decode("utf-8"),
+            **({} if projected else {"text": source.content.decode("utf-8")}),
             "sha256": hashlib.sha256(source.content).hexdigest(),
             "observation_sha256": source.observation_sha256,
             "provenance": source.provenance,
@@ -127,9 +156,26 @@ def _prepare(
         references[identifier] = {"source_id": citation.episode_id, "ranges": citation.ranges}
     if not sources or not references or not assertions:
         raise ValueError("validation requires original evidence and assertions")
+    representation: dict[str, object] = {}
+    if projected:
+        view = encode_episode_views(projections)
+        representation = {
+            "evidence_representation": "controller_episode_projection_v1",
+            "evidence_view_instructions": (
+                "Resolve $ref objects by their index in values; $literal contains literal "
+                "object key/value pairs. Evidence IDs resolve to immutable original byte "
+                "ranges, not offsets into the view. Audit-only transport fields are "
+                "classified in the projection receipt and are not assertion evidence."
+            ),
+            "evidence_view": view,
+            "evidence_projection": episode_projection_receipt(
+                [(source.source_id, source.content) for source in evidence], projections, view
+            ),
+        }
     return PreparedMemoryValidation(
         canonical(
             {
+                **representation,
                 "version": VALIDATION_VERSION,
                 "kind": kind,
                 "parent_operation_id": parent_operation_id,

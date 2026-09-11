@@ -23,10 +23,10 @@ from sibyl_core.models.entities import ProcedureStep
 from sibyl_core.models.memory_scope import MemoryScope
 from sibyl_core.models.reflection import ReflectionCandidate
 from sibyl_core.tasks.episode_evidence import (
-    EPISODE_VERSION,
-    PROJECTION_VERSION,
     EvidenceCitation,
     encode_episode_views,
+    episode_projection_receipt,
+    is_controller_episode,
     project_episode,
 )
 from sibyl_core.tasks.procedure_evidence import (
@@ -320,16 +320,8 @@ class _ExtractionInput:
     reconsideration: dict[str, Any] | None = None
 
 
-def _is_controller_episode(artifact: bytes) -> bool:
-    try:
-        value = json.loads(artifact)
-    except (ValueError, UnicodeError):
-        return False
-    return isinstance(value, dict) and value.get("schema_version") == EPISODE_VERSION
-
-
 def _extraction_input(group: ConsolidationGroup) -> _ExtractionInput:
-    if not all(_is_controller_episode(episode.artifact) for episode in group.episodes):
+    if not all(is_controller_episode(episode.artifact) for episode in group.episodes):
         return _ExtractionInput(_prompt(group), SYSTEM_PROMPT, ProcedureProposal, {})
     projections = [
         project_episode(episode.episode_id, episode.artifact, prefix=f"s{index}")
@@ -355,30 +347,9 @@ def _extraction_input(group: ConsolidationGroup) -> _ExtractionInput:
         + "\n\n"
         + RETROSPECTIVE_REQUEST
     )
-    receipt = {
-        "version": PROJECTION_VERSION,
-        "view_sha256": _digest(_canonical(view)),
-        "citations_sha256": _digest(
-            _canonical(
-                {
-                    key: {"episode_id": value.episode_id, "ranges": value.ranges}
-                    for key, value in citations.items()
-                }
-            )
-        ),
-        "coverage_sha256": _digest(
-            _canonical(
-                [
-                    {
-                        "episode_id": episode.episode_id,
-                        "artifact_sha256": episode.artifact_sha256,
-                        "coverage": projection.coverage,
-                    }
-                    for episode, projection in zip(group.episodes, projections, strict=True)
-                ]
-            )
-        ),
-    }
+    receipt = episode_projection_receipt(
+        [(episode.episode_id, episode.artifact) for episode in group.episodes], projections, view
+    )
     return _ExtractionInput(prompt, EVIDENCE_SYSTEM_PROMPT, EvidenceProposal, citations, receipt)
 
 

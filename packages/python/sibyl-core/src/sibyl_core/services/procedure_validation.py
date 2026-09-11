@@ -160,7 +160,8 @@ async def prepare_stored_procedure_validation(
                 "signed",
             )
         )
-    prepared = prepare_procedure_validation(
+    prepared = await asyncio.to_thread(
+        prepare_procedure_validation,
         procedure,
         parent_operation_id=ledger["uuid"],
         parent_candidate_sha256=review_digest(audit),
