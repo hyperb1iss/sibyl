@@ -117,13 +117,13 @@ timestamp.
 
 ## Restore an API backup
 
-A backup downloaded from the web settings or `/api/backups/{id}/download` contains
-`metadata.json` and the enabled auth, content and graph JSON payloads. The migration
-CLI accepts this version 2.0 backup format directly, as well as its own manifest
-archives. Do not unpack or rename the metadata file.
+A backup downloaded from the web settings or `/api/backups/{id}/download` contains `metadata.json`
+and the enabled auth, content and graph JSON payloads. The migration CLI accepts this version 2.0
+backup format directly, as well as its own manifest archives. Do not unpack or rename the metadata
+file.
 
-Stop writers and configure `sibyld` for the intended destination, then check the
-bundle before restoring it:
+Stop writers and configure `sibyld` for the intended destination, then check the bundle before
+restoring it:
 
 ```bash
 sibyld migrate check ./sibyl_backup.tar.gz
@@ -132,50 +132,47 @@ sibyld migrate import ./sibyl_backup.tar.gz \
   --org-id YOUR_ORGANIZATION_UUID --clean
 ```
 
-The loader verifies the declared file inventory, checksums and organization
-before using the existing restore owners. The organization must match the backup;
-this command does not move protected memory into another organization.
+The loader verifies the declared file inventory, checksums and organization before using the
+existing restore owners. The organization must match the backup; this command does not move
+protected memory into another organization.
 
-An organization backup excludes reusable authentication secrets. Restoring one
-does not restore passwords, sessions, API keys, device authorizations or API key
-scope grants. The command reports credential-dependent rows as skipped, including
-rows from older backups. Invitation metadata is restored without acceptance tokens.
-Use the destination's supported account recovery or authentication setup. Source tombstones and newer destination
-revocations remain authoritative, so an older backup cannot make purged or hidden
-memory readable again. The command reports retained history and quarantined
-records instead of claiming every archived row was written.
+An organization backup excludes reusable authentication secrets. Restoring one does not restore
+passwords, sessions, API keys, device authorizations or API key scope grants. The command reports
+credential-dependent rows as skipped, including rows from older backups. Invitation metadata is
+restored without acceptance tokens. Use the destination's supported account recovery or
+authentication setup. Source tombstones and newer destination revocations remain authoritative, so
+an older backup cannot make purged or hidden memory readable again. The command reports retained
+history and quarantined records instead of claiming every archived row was written.
 
-Auth, content and graph restore in separate stages. A failure does not imply a
-cross-namespace rollback. Preserve the failed archive and destination, inspect the
-reported stage, and retry only after correcting the cause. Database dumps and
-legacy PostgreSQL bundles are not accepted by this logical backup adapter.
+Auth, content and graph restore in separate stages. A failure does not imply a cross-namespace
+rollback. Preserve the failed archive and destination, inspect the reported stage, and retry only
+after correcting the cause. Database dumps and legacy PostgreSQL bundles are not accepted by this
+logical backup adapter.
 
 ### Completed validation receipts
 
-Content archive 2.3 includes encrypted completion receipts for the archived
-validation executions. A completed validation can remain in its private journal
-when the database cannot retain its result. Public backup and import preserve
-those ciphertext bytes, so recovery on a fresh host does not require the old
-receipt volume or another provider request.
+Content archive 2.3 includes encrypted completion receipts for the archived validation executions. A
+completed validation can remain in its private journal when the database cannot retain its result.
+Public backup and import preserve those ciphertext bytes, so recovery on a fresh host does not
+require the old receipt volume or another provider request.
 
-The `validation_receipts.executions` inventory identifies each execution as
-`journal`, `database`, `purged`, or `unresolved`. An unresolved execution has no
-retained completed result in that snapshot. Its provider outcome and cost may
-remain unknown; restoring the archive does not authorize redispatch.
+The `validation_receipts.executions` inventory identifies each execution as `journal`, `database`,
+`purged`, or `unresolved`. An unresolved execution has no retained completed result in that
+snapshot. Its provider outcome and cost may remain unknown; restoring the archive does not authorize
+redispatch.
 
-Export fails if execution history changes while receipts are captured. Retry the
-backup after the concurrent completion or purge settles. Import authenticates
-receipt bytes against the archived request and key before any content writes.
-Existing destination history, source revocation, and purge rules still apply.
-Older content archives remain supported but cannot supply omitted journal files.
+Export fails if execution history changes while receipts are captured. Retry the backup after the
+concurrent completion or purge settles. Import authenticates receipt bytes against the archived
+request and key before any content writes. Existing destination history, source revocation, and
+purge rules still apply. Older content archives remain supported but cannot supply omitted journal
+files.
 
-Receipt files are published privately before the content transaction. If that
-transaction fails, ciphertext may remain without an authorized execution row.
-Preserve the failed archive and receipt directory, then retry the same import
-after resolving the reported conflict. Import never replaces conflicting receipt
-bytes or restores an erased recovery key over current destination history.
+Receipt files are published privately before the content transaction. If that transaction fails,
+ciphertext may remain without an authorized execution row. Preserve the failed archive and receipt
+directory, then retry the same import after resolving the reported conflict. Import never replaces
+conflicting receipt bytes or restores an erased recovery key over current destination history.
 
-Protect the complete backup as secret material: the content payload includes the
-recovery keys needed to decrypt its receipts. The archive is not encrypted as a
-whole. Continue using encrypted backup storage and the configured private receipt
-directory. Logical backup still does not claim cross-namespace crash atomicity.
+Protect the complete backup as secret material: the content payload includes the recovery keys
+needed to decrypt its receipts. The archive is not encrypted as a whole. Continue using encrypted
+backup storage and the configured private receipt directory. Logical backup still does not claim
+cross-namespace crash atomicity.
