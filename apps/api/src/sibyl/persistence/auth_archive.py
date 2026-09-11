@@ -13,6 +13,7 @@ import structlog
 
 from sibyl.persistence.surreal.auth import build_surreal_auth_client
 from sibyl_core.backends.surreal import bootstrap_auth_schema
+from sibyl_core.backends.surreal.auth_schema import backfill_api_key_scope_restrictions
 from sibyl_core.backends.surreal.records import (
     normalize_records as _normalize_records,
     query_error as _query_error,
@@ -542,6 +543,7 @@ async def _create_auth_archive_row(
     *,
     uuid: str,
     record: dict[str, object],
+    imported_api_key_ids: list[str],
 ) -> bool:
     existing_result = await client.execute_query(_SELECT_BY_UUID[table], uuid=uuid)
     existing_error = _query_error(existing_result)
@@ -553,6 +555,8 @@ async def _create_auth_archive_row(
     create_error = _query_error(create_result)
     if create_error is not None:
         raise RuntimeError(create_error)
+    if table == "api_keys":
+        imported_api_key_ids.append(uuid)
     return True
 
 
@@ -579,6 +583,18 @@ def _restorable_auth_tables(
             for row in invitations
         ]
     return tables, skipped
+
+
+async def _finalize_auth_restore(
+    client: Any, *, source_instance_id: str | None, api_key_ids: list[str]
+) -> None:
+    await backfill_api_key_scope_restrictions(client, api_key_ids=api_key_ids)
+    if source_instance_id is not None:
+        identity_result = await client.execute_query(
+            "UPSERT server_identity:singleton SET instance_id = $instance_id;",
+            instance_id=source_instance_id,
+        )
+        _raise_on_error(identity_result, query="restore_auth_archive_payload:identity")
 
 
 async def restore_auth_archive_payload(
@@ -608,6 +624,7 @@ async def restore_auth_archive_payload(
     errors: list[str] = []
     dropped_fields: dict[str, set[str]] = {}
     tables, skipped_credential_rows = _restorable_auth_tables(tables, organization_id)
+    imported_api_key_ids: list[str] = []
 
     try:
         await bootstrap_auth_schema(client, reset=False)
@@ -646,19 +663,24 @@ async def restore_auth_archive_payload(
                     dropped_fields.setdefault(table, set()).update(dropped)
 
                 try:
-                    if await _create_auth_archive_row(client, table, uuid=uuid, record=record):
+                    if await _create_auth_archive_row(
+                        client,
+                        table,
+                        uuid=uuid,
+                        record=record,
+                        imported_api_key_ids=imported_api_key_ids,
+                    ):
                         rows_restored += 1
                         restored_table = True
                 except Exception as exc:
                     errors.append(f"{table}:{uuid}: {exc}")
             if restored_table:
                 tables_restored += 1
-        if not errors and source_instance_id is not None:
-            identity_result = await client.execute_query(
-                "UPSERT server_identity:singleton SET instance_id = $instance_id;",
-                instance_id=source_instance_id,
-            )
-            _raise_on_error(identity_result, query="restore_auth_archive_payload:identity")
+        await _finalize_auth_restore(
+            client,
+            source_instance_id=source_instance_id if not errors else None,
+            api_key_ids=imported_api_key_ids,
+        )
         if dropped_fields:
             log.warning(
                 "auth_archive_restore_dropped_undeclared_fields",

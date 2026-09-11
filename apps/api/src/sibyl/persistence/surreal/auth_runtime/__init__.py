@@ -42,6 +42,7 @@ from sibyl.persistence.surreal.auth_runtime.api_keys import (
     authenticate_api_key,
     create_api_key_for_user,
     list_api_keys_for_user,
+    resolve_api_key_authority,
     revoke_api_key_for_user,
 )
 from sibyl.persistence.surreal.auth_runtime.audit import (
@@ -150,6 +151,7 @@ __all__ = [
     "UserRepository",
     "approve_device_authorization",
     "authenticate_api_key",
+    "resolve_api_key_authority",
     "authenticate_local_user",
     "build_surreal_auth_client",
     "confirm_password_reset",

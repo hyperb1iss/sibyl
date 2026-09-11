@@ -29,6 +29,7 @@ from sibyl.persistence.surreal.auth_runtime._common import (
     _unique_uuids,
 )
 from sibyl_core.backends.surreal.records import (
+    SurrealRecord,
     coerce_datetime as _coerce_datetime,
     coerce_uuid as _coerce_uuid,
     normalize_records as _normalize_records,
@@ -45,10 +46,7 @@ async def authenticate_api_key(raw_key: str):
         )
         now = _utcnow()
         for candidate in candidates:
-            if candidate.get("revoked_at") is not None:
-                continue
-            expires_at = _coerce_datetime(candidate.get("expires_at"))
-            if expires_at is not None and expires_at <= now:
+            if not _key_is_current(candidate):
                 continue
             if not verify_api_key(
                 raw_key,
@@ -67,64 +65,110 @@ async def authenticate_api_key(raw_key: str):
                 last_used_at=now,
                 updated_at=now,
             )
-            project_scope_records = await repo.select_many(
-                "SELECT * FROM api_key_project_scopes "
-                "WHERE api_key_id = $api_key_id ORDER BY created_at ASC;",
-                api_key_id=str(api_key_id),
-            )
-            project_record_ids = [
-                str(record["project_id"])
-                for record in project_scope_records
-                if str(record.get("project_id") or "").strip()
-            ]
-            project_records = (
-                await repo.select_many(
-                    "SELECT uuid, graph_project_id, created_at FROM projects "
-                    "WHERE uuid IN $project_ids ORDER BY created_at ASC;",
-                    project_ids=project_record_ids,
-                )
-                if project_record_ids
-                else []
-            )
-            project_ids = [
-                str(record["graph_project_id"])
-                for record in project_records
-                if str(record.get("graph_project_id") or "").strip()
-            ]
-            memory_scope_records = await repo.select_many(
-                "SELECT * FROM api_key_memory_space_scopes "
-                "WHERE api_key_id = $api_key_id ORDER BY created_at ASC;",
-                api_key_id=str(api_key_id),
-            )
-            memory_space_ids = [
-                str(record["memory_space_id"])
-                for record in memory_scope_records
-                if str(record.get("memory_space_id") or "").strip()
-            ]
-            memory_space_records = (
-                await repo.select_many(
-                    "SELECT uuid, memory_scope, scope_key, created_at FROM memory_spaces "
-                    "WHERE uuid IN $memory_space_ids AND organization_id = $organization_id "
-                    "ORDER BY created_at ASC;",
-                    memory_space_ids=memory_space_ids,
-                    organization_id=str(candidate.get("organization_id")),
-                )
-                if memory_space_ids
-                else []
-            )
-            memory_spaces = [_api_key_memory_space_scope(record) for record in memory_space_records]
-            return ApiKeyAuth(
-                api_key_id=api_key_id,
-                user_id=_coerce_uuid(candidate.get("user_id"), field_name="api_key.user_id"),
-                organization_id=_coerce_uuid(
-                    candidate.get("organization_id"), field_name="api_key.organization_id"
-                ),
-                scopes=_scopes_list(candidate.get("scopes")),
-                project_ids=project_ids or None,
-                memory_space_ids=[space.memory_space_id for space in memory_spaces] or None,
-                memory_spaces=memory_spaces or None,
-            )
+            return await _resolve_key_scopes(repo, candidate)
     return None
+
+
+async def resolve_api_key_authority(
+    *, api_key_id: UUID, organization_id: UUID, user_id: UUID
+) -> ApiKeyAuth | None:
+    """Refresh a previously authenticated key identity, without authenticating by ID.
+
+    Deferred owners must retain the trusted intake identity and intersect this
+    current authority with their original ceiling. User membership remains the
+    responsibility of the existing auth-context and project policy owners.
+    """
+    async with _auth_client_scope() as client:
+        repo = _SurrealRepository(client)
+        candidate = await repo.select_one(
+            "SELECT * FROM api_keys WHERE uuid = $uuid "
+            "AND organization_id = $organization_id AND user_id = $user_id LIMIT 1;",
+            uuid=str(api_key_id),
+            organization_id=str(organization_id),
+            user_id=str(user_id),
+        )
+        if candidate is None or not _key_is_current(candidate):
+            return None
+        return await _resolve_key_scopes(repo, candidate)
+
+
+def _key_is_current(candidate: SurrealRecord) -> bool:
+    expires_at = _coerce_datetime(candidate.get("expires_at"))
+    return candidate.get("revoked_at") is None and (expires_at is None or expires_at > _utcnow())
+
+
+async def _resolve_key_scopes(repo: _SurrealRepository, candidate: SurrealRecord) -> ApiKeyAuth:
+    api_key_id = _coerce_uuid(candidate.get("uuid"), field_name="api_key.uuid")
+    project_scope_records = await repo.select_many(
+        "SELECT * FROM api_key_project_scopes "
+        "WHERE api_key_id = $api_key_id ORDER BY created_at ASC;",
+        api_key_id=str(api_key_id),
+    )
+    project_record_ids = [
+        str(record["project_id"])
+        for record in project_scope_records
+        if str(record.get("project_id") or "").strip()
+    ]
+    project_records = (
+        await repo.select_many(
+            "SELECT uuid, graph_project_id, created_at FROM projects "
+            "WHERE uuid IN $project_ids AND organization_id = $organization_id ORDER BY created_at ASC;",
+            organization_id=str(candidate.get("organization_id")),
+            project_ids=project_record_ids,
+        )
+        if project_record_ids
+        else []
+    )
+    project_ids = [
+        str(record["graph_project_id"])
+        for record in project_records
+        if str(record.get("graph_project_id") or "").strip()
+    ]
+    memory_scope_records = await repo.select_many(
+        "SELECT * FROM api_key_memory_space_scopes "
+        "WHERE api_key_id = $api_key_id ORDER BY created_at ASC;",
+        api_key_id=str(api_key_id),
+    )
+    memory_space_ids = [
+        str(record["memory_space_id"])
+        for record in memory_scope_records
+        if str(record.get("memory_space_id") or "").strip()
+    ]
+    memory_space_records = (
+        await repo.select_many(
+            "SELECT uuid, memory_scope, scope_key, created_at FROM memory_spaces "
+            "WHERE uuid IN $memory_space_ids AND organization_id = $organization_id "
+            "ORDER BY created_at ASC;",
+            memory_space_ids=memory_space_ids,
+            organization_id=str(candidate.get("organization_id")),
+        )
+        if memory_space_ids
+        else []
+    )
+    memory_spaces = [_api_key_memory_space_scope(record) for record in memory_space_records]
+    return ApiKeyAuth(
+        api_key_id=api_key_id,
+        user_id=_coerce_uuid(candidate.get("user_id"), field_name="api_key.user_id"),
+        organization_id=_coerce_uuid(
+            candidate.get("organization_id"), field_name="api_key.organization_id"
+        ),
+        scopes=_scopes_list(candidate.get("scopes")),
+        project_ids=(
+            project_ids
+            if project_scope_records or candidate.get("project_scope_restricted") is True
+            else None
+        ),
+        memory_space_ids=(
+            [space.memory_space_id for space in memory_spaces]
+            if memory_scope_records or candidate.get("memory_scope_restricted") is True
+            else None
+        ),
+        memory_spaces=(
+            memory_spaces
+            if memory_scope_records or candidate.get("memory_scope_restricted") is True
+            else None
+        ),
+    )
 
 
 async def _resolve_api_key_project_record_ids(
@@ -321,6 +365,8 @@ async def create_api_key_for_user(
             "key_salt": salt_hex,
             "key_hash": hash_hex,
             "scopes": normalized_scopes,
+            "project_scope_restricted": bool(project_record_ids),
+            "memory_scope_restricted": bool(resolved_memory_space_ids),
             "expires_at": _coerce_datetime(expires_at),
             "revoked_at": None,
             "last_used_at": None,
