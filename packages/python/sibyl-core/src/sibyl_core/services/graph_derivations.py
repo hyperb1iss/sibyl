@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from sibyl_core.backends.surreal.records import normalize_records
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind, evidence_hash
+from sibyl_core.models.entities import Entity
 from sibyl_core.runtime_ports import RuntimePortUnavailable, get_source_authority_resolver
+from sibyl_core.services.graph_client import SurrealGraphClient
 from sibyl_core.services.memory_derivations import observation_from_record, validate_observations
 from sibyl_core.services.memory_source_validation import source_authority_ceiling
 from sibyl_core.services.source_observations import SourceUnavailableError, graph_evidence
@@ -94,16 +96,23 @@ async def graph_derivation_current(entity, *, ancestors=frozenset()) -> bool:
     return await graph_association_current(entity, rows[0] if rows else None, ancestors=ancestors)
 
 
-async def unavailable_graph_derivation_ids(organization_id: str, ids: Sequence[str]) -> set[str]:
+async def unavailable_graph_derivation_ids(
+    organization_id: str,
+    ids: Sequence[str],
+    *,
+    expected_entities: Mapping[str, Entity] | None = None,
+    client: SurrealGraphClient | None = None,
+) -> set[str]:
     from sibyl_core.services.graph_records import entity_from_surreal_row
 
     if not ids:
         return set()
     from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
 
-    runtime = await get_surreal_graph_runtime(organization_id)
+    if client is None:
+        client = (await get_surreal_graph_runtime(organization_id)).client
     snapshots = normalize_records(
-        await runtime.client.execute_query(
+        await client.execute_query(
             """RETURN {
             RETURN {
                 associations: (SELECT * FROM memory_derivations WHERE organization_id=$org
@@ -129,6 +138,18 @@ async def unavailable_graph_derivation_ids(organization_id: str, ids: Sequence[s
         association = associations.get(target_id)
         entity = targets.get(target_id)
         identity = SourceIdentity(organization_id, SourceKind.GRAPH_ENTITY, target_id)
+        if expected_entities is not None:
+            expected = expected_entities.get(target_id)
+            if (
+                expected is None
+                or entity is None
+                or (
+                    expected.model_dump(mode="json") != entity.model_dump(mode="json")
+                    or expected.derivation_required != entity.derivation_required
+                    or expected.observed_revision != entity.observed_revision
+                )
+            ):
+                return target_id
         if entity is None or not await graph_association_current(
             entity, association, ancestors=frozenset({identity})
         ):
@@ -138,7 +159,12 @@ async def unavailable_graph_derivation_ids(organization_id: str, ids: Sequence[s
     return {
         value
         for value in await asyncio.gather(
-            *(current(target_id) for target_id in targets.keys() | associations.keys())
+            *(
+                current(target_id)
+                for target_id in targets.keys()
+                | associations.keys()
+                | (expected_entities.keys() if expected_entities is not None else set())
+            )
         )
         if value is not None
     }
