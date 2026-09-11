@@ -131,6 +131,7 @@ def decide_reflection_candidate_autonomy(
     *,
     policy: ReflectionAutonomyPolicy | None = None,
     dry_run: bool = False,
+    validated_source_support: bool = False,
 ) -> ReflectionAutonomyDecision:
     active_policy = policy or ReflectionAutonomyPolicy()
     metadata = dict(preview.metadata or {})
@@ -139,7 +140,10 @@ def decide_reflection_candidate_autonomy(
         preview=preview,
         metadata=metadata,
         policy=active_policy,
+        validated_source_support=validated_source_support,
     )
+    if validated_source_support:
+        metadata["autonomy_confidence_basis"] = "validated_source_support"
     confidence = _metadata_float(metadata, "confidence")
 
     if preview.reason in {"candidate_already_promoted", "candidate_archived"}:
@@ -228,6 +232,7 @@ def _exception_reasons(
     preview: ReflectionPromotionPreviewLike,
     metadata: Mapping[str, Any],
     policy: ReflectionAutonomyPolicy,
+    validated_source_support: bool = False,
 ) -> list[str]:
     reasons: list[str] = []
     if preview.reason == "candidate_not_found":
@@ -240,10 +245,11 @@ def _exception_reasons(
         reasons.append("missing_source")
 
     confidence = _metadata_float(metadata, "confidence")
-    if confidence is None:
-        reasons.append("missing_confidence")
-    elif confidence < policy.confidence_threshold:
-        reasons.append("low_confidence")
+    if not validated_source_support:
+        if confidence is None:
+            reasons.append("missing_confidence")
+        elif confidence < policy.confidence_threshold:
+            reasons.append("low_confidence")
 
     sensitivity_flags = _str_list(metadata.get("sensitivity_flags"))
     if sensitivity_flags:

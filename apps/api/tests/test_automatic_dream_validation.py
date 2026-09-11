@@ -203,7 +203,7 @@ async def _assert_job_reuses_validation(monkeypatch, resolver, recheck, candidat
         "validation_extractor",
         AsyncMock(return_value=(recheck, '{"model":"offline"}')),
     )
-    monkeypatch.setattr("sibyl.jobs.lifecycle_repair.resolve_source_authority", resolver)
+    monkeypatch.setattr("sibyl.jobs.ordinary_cohorts.writable_source_authority", resolver)
     monkeypatch.setattr(
         reflection,
         "preview_reflection_candidate_promotion",

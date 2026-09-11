@@ -148,7 +148,14 @@ async def run_reflection_dream_cycle(
         "latency_ms": round((perf_counter() - start_time) * 1000, 2),
         "source_limit": source_budget,
         "candidate_limit": candidate_budget,
-        "sources_scanned": len(source_results),
+        "sources_scanned": len(
+            {
+                identifier
+                for item in source_results
+                for identifier in item.get("source_ids", [item.get("source_id")])
+                if identifier is not None
+            }
+        ),
         "sources_reflected": sum(1 for item in source_results if item["outcome"] == "reflected"),
         "candidates_scanned": len(candidate_results),
         "promoted": sum(1 for item in candidate_results if item["outcome"] == "auto_promote"),
@@ -157,8 +164,19 @@ async def run_reflection_dream_cycle(
         "skipped": sum(1 for item in all_results if item["outcome"] == "skip"),
         "failed": sum(1 for item in all_results if item["outcome"] == "error"),
         "model_usage": {
-            "extractor": "sibyl_reflection_extractor",
-            "metered": False,
+            "accounting": "durable_validation_stages",
+            "execution_ids": sorted(
+                {
+                    str(identifier)
+                    for item in all_results
+                    for identifier in (
+                        [item.get("operation_id")]
+                        if item.get("stage_kind") == "ordinary_cohort"
+                        else item.get("validation_executions", [])
+                    )
+                    if identifier is not None
+                }
+            ),
         },
         "sources": source_results,
         "candidates": candidate_results,
@@ -186,9 +204,6 @@ async def _reflect_dream_sources(
             work = await _load_dream_work(group_id, source)
             if work is None:
                 return False
-            stage = await load_dream_stage(work)
-            if stage is not None and stage.get("completion_json") is not None:
-                return False
         except SourceUnavailableError:
             return False
         except Exception as exc:
@@ -203,14 +218,23 @@ async def _reflect_dream_sources(
         is_pending=pending,
         after_source_id=after_source_id,
     )
-    results: list[dict[str, Any]] = []
+    from sibyl.jobs.ordinary_cohorts import reflect_cohorts
+
+    results, consumed = await reflect_cohorts(group_id, sources, dry_run=dry_run)
     for source in sources:
         if cursor_owned:
             cursor_owned = await advance_dream_cursor(group_id, source.id, cursor_revision)
             cursor_revision += int(cursor_owned)
+        if source.id in consumed:
+            continue
         try:
             if source.id in selection_errors:
                 raise selection_errors[source.id]
+            work = selected.get(source.id)
+            if work is not None:
+                stage = await load_dream_stage(work)
+                if stage is not None and stage.get("completion_json") is not None:
+                    continue
             results.append(
                 await _reflect_dream_source(
                     source=source,
@@ -386,12 +410,13 @@ async def _drain_dream_candidate(
     confidence_threshold: float | None,
 ) -> dict[str, Any]:
     automatic_executions: list[str] = []
+    validation_promotion = None
     if not dry_run:
-        from sibyl.jobs.lifecycle_repair import resolve_source_authority
+        from sibyl.jobs.ordinary_cohorts import writable_source_authority
         from sibyl_core.services.automatic_reflection import automatically_review_reflection
 
         automatic = await automatically_review_reflection(
-            group_id, str(candidate.principal_id or ""), candidate.id, resolve_source_authority
+            group_id, str(candidate.principal_id or ""), candidate.id, writable_source_authority
         )
         automatic_executions = list(automatic.executions)
         if automatic.candidate is None:
@@ -412,6 +437,19 @@ async def _drain_dream_candidate(
                 "validation_executions": automatic_executions,
             }
         candidate = automatic.candidate
+        from sibyl_core.services.ordinary_publication import ordinary_promotion_binding
+
+        async def authorize_publication():
+            await writable_source_authority(group_id, str(candidate.principal_id or ""))
+
+        validation_promotion = await ordinary_promotion_binding(
+            group_id,
+            str(candidate.principal_id or ""),
+            candidate.id,
+            automatic_executions[-1],
+            writable_source_authority,
+            authorize_publication,
+        )
     target_scope = _candidate_target_scope(candidate)
     target_scope_key = _candidate_target_scope_key(candidate, target_scope)
     project = _candidate_project(
@@ -436,6 +474,19 @@ async def _drain_dream_candidate(
             required_role=ProjectRole.CONTRIBUTOR,
         ),
     )
+    if validation_promotion is not None:
+        from sibyl_core.services.memory_autonomy import reflection_autonomy_candidate_metadata
+        from sibyl_core.services.reflection_validation import prepare_stored_reflection
+
+        current = await prepare_stored_reflection(
+            group_id, str(candidate.principal_id or ""), candidate.id, writable_source_authority
+        )
+        flags = set((preview.metadata or {}).get("sensitivity_flags", []))
+        for source in current.sources:
+            flags.update(reflection_autonomy_candidate_metadata(source)["sensitivity_flags"])
+        preview = replace(
+            preview, metadata={**(preview.metadata or {}), "sensitivity_flags": sorted(flags)}
+        )
     policy = ReflectionAutonomyPolicy(
         confidence_threshold=confidence_threshold
         if confidence_threshold is not None
@@ -445,10 +496,12 @@ async def _drain_dream_candidate(
         preview,
         policy=policy,
         dry_run=dry_run,
+        validated_source_support=validation_promotion is not None,
     )
     promotion: ReflectionPromotionResult | None = None
     if decision.should_promote:
         promotion = await promote_reflection_candidate_review(
+            validation_promotion=validation_promotion,
             candidate_id=candidate.id,
             expected_candidate_revision=candidate.revision,
             organization_id=group_id,

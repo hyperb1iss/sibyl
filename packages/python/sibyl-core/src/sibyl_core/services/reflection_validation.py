@@ -54,6 +54,7 @@ class AuthorizedReflection:
     snapshot_sha256: str
     source_bindings: list[dict[str, object]]
     observations: list[SourceObservation]
+    publication_policy_sha256: str
 
     @property
     def source_ids(self) -> list[str]:
@@ -61,7 +62,12 @@ class AuthorizedReflection:
 
 
 async def prepare_stored_reflection(
-    organization_id: str, principal_id: str, parent_id: str, resolver: SourceAuthorityResolver
+    organization_id: str,
+    principal_id: str,
+    parent_id: str,
+    resolver: SourceAuthorityResolver,
+    *,
+    publication: bool = False,
 ) -> AuthorizedReflection:
     """Require protected derivation observations and freshly resolved memberships."""
     authority = await resolver(organization_id, principal_id)
@@ -78,7 +84,7 @@ async def prepare_stored_reflection(
     if (
         memory.principal_id != principal_id
         or memory.deleted_at is not None
-        or memory.review_state != "pending"
+        or memory.review_state not in ({"pending", "promoted"} if publication else {"pending"})
         or not raw_memory_currently_recallable(memory)
         or not _authorize_share_source_read(
             memory=memory,
@@ -197,6 +203,11 @@ async def prepare_stored_reflection(
         evidence=evidence,
         citations=citations,
     )
+    from sibyl_core.services.ordinary_publication import ordinary_policy_digest
+
+    publication_policy = ordinary_policy_digest(
+        [raw_memory_from_record(row) for row in snapshot[0]["data"]["captures"]]
+    )
     return AuthorizedReflection(
         memory,
         candidate,
@@ -209,6 +220,7 @@ async def prepare_stored_reflection(
             for state in states
         ],
         observations,
+        publication_policy,
     )
 
 
@@ -294,12 +306,17 @@ async def _validate_prepared_reflection(
     chars = len(prompt) + len(canonical(schema))
     if chars > settings.consolidation_max_input_chars:
         raise ConsolidationInputBudgetExceeded(chars, settings.consolidation_max_input_chars)
+    from sibyl_core.services.ordinary_publication import ordinary_semantic_digest
+
     request = {
-        "kind": "ordinary_reflection_validation",
+        "kind": "ordinary_reflection_validation-v2",
+        "ordinary_semantic_input": ordinary_semantic_digest(original.prepared),
+        "ordinary_publication_policy": original.publication_policy_sha256,
         "org": memory.organization_id,
         "principal": memory.principal_id,
         "parent": memory.id,
-        "input": review_digest(prompt),
+        "input": original.prepared.input_sha256 if review is None else review_digest(prompt),
+        "prompt_sha256": review_digest(prompt),
         "snapshot": original.snapshot_sha256,
         "source_bindings": original.source_bindings,
         "policy": policy,
