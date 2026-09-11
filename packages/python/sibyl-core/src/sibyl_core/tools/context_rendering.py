@@ -24,6 +24,7 @@ from sibyl_core.models.context import (
     ContextSection,
     RenderedContextPack,
 )
+from sibyl_core.projection.outcome import OUTCOME_METADATA_KEY, outcome_context
 
 
 def _compact_metadata_value(value: Any, max_chars: int = 120) -> str | None:
@@ -190,6 +191,9 @@ def _render_item(
     )
     quality_label = f" _{quality}_" if quality else ""
     lines = [f"- **{item.name}**{type_label} `{item.id}`{quality_label}"]
+    provenance = outcome_context(item.metadata)
+    if provenance:
+        lines[0] += "\n  - " + provenance.replace("\n", "\n    ")
     content_prefix = None
     if atomic_procedures and item.type == "procedure" and item.content.strip():
         # A procedure's conditions and indentation are part of its meaning.
@@ -271,6 +275,11 @@ def _item_render_spans(
             "type": item.type,
             "content": item.content,
             "status": _compact_metadata_value(item.metadata.get("status")),
+            **(
+                {OUTCOME_METADATA_KEY: item.metadata[OUTCOME_METADATA_KEY]}
+                if outcome_context(item.metadata)
+                else {}
+            ),
             "quality": {key: _quality_value(item.quality, key) for key in _V1_QUALITY_DIGEST_KEYS},
             "related": [
                 {
@@ -300,9 +309,13 @@ def _item_render_spans(
             start_byte=start,
             end_byte=start + len(block.encode()),
             input_sha256=_text_digest(snapshot),
-            transform="markdown_item_v2"
-            if rendered_item.content_prefix is not None
-            else "markdown_item_v1",
+            transform=(
+                "markdown_item_outcome_v1"
+                if outcome_context(item.metadata)
+                else "markdown_item_v2"
+                if rendered_item.content_prefix is not None
+                else "markdown_item_v1"
+            ),
         )
     ]
     name_start = start + len(b"- **")

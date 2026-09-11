@@ -2571,6 +2571,8 @@ def _merged_interval_chars(intervals: list[tuple[int, int]]) -> int:
 
 
 def _memory_context_header(rank: int, result: dict[str, object]) -> str:
+    from sibyl_core.projection.outcome import outcome_context
+
     metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
     trajectory_id = _stripped_str(metadata.get("longmemeval_v2_trajectory_id"))
     chunk_index = metadata.get("longmemeval_v2_chunk_index")
@@ -2582,6 +2584,9 @@ def _memory_context_header(rank: int, result: dict[str, object]) -> str:
         f"Trajectory: {trajectory_id or 'unknown'}",
         f"Chunk: {chunk_index if isinstance(chunk_index, int) else 'unknown'}",
     ]
+    provenance = outcome_context(metadata)
+    if provenance:
+        lines.append(provenance)
     inventory_count = metadata.get("ui_inventory_item_count")
     if (
         isinstance(inventory_count, int)

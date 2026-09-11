@@ -19,6 +19,11 @@ from sibyl_core.models.experience import (
     OperationalExperienceWriteResult,
     OperationalObservation,
 )
+from sibyl_core.projection.outcome import (
+    OUTCOME_METADATA_KEY,
+    outcome_context,
+    outcome_provenance,
+)
 from sibyl_core.projection.slicing import (
     ACCESSIBILITY_NODE_PATTERN,
     render_slice,
@@ -26,7 +31,7 @@ from sibyl_core.projection.slicing import (
     slice_header,
 )
 
-OPERATIONAL_EXPERIENCE_SCHEMA_VERSION = 6
+OPERATIONAL_EXPERIENCE_SCHEMA_VERSION = 7
 MAX_TYPED_ENTITY_CONTENT_CHARS = 18_000
 MAX_PASSAGE_DESCRIPTION_CHARS = 500
 MAX_UI_INVENTORY_CHARS = 16_000
@@ -111,6 +116,18 @@ def _passage_entity_id(
     )
 
 
+def _outcome_context(experience: OperationalExperience) -> str:
+    context = outcome_context(
+        {
+            "category": "operational_experience",
+            "operational_schema_version": OPERATIONAL_EXPERIENCE_SCHEMA_VERSION,
+            OUTCOME_METADATA_KEY: outcome_provenance(experience.outcome),
+        }
+    )
+    assert context is not None
+    return context
+
+
 def _observation_content(
     experience: OperationalExperience,
     observation: OperationalObservation,
@@ -155,6 +172,7 @@ def _common_metadata(
         "operational_source_id": experience.source_id,
         "operational_schema_version": OPERATIONAL_EXPERIENCE_SCHEMA_VERSION,
         "operational_content_hash": content_hash,
+        OUTCOME_METADATA_KEY: outcome_provenance(experience.outcome),
     }
     if experience.project_id:
         metadata["project_id"] = experience.project_id
@@ -311,8 +329,8 @@ def _passage_description(
     """
     return _bounded_lines(
         (
+            _outcome_context(experience).split("\n", 1)[0],
             f"Goal: {experience.goal}",
-            f"Reported outcome: {experience.outcome}" if experience.outcome else None,
             f"URI: {observation.uri}" if observation.uri else None,
             f"Action producing this observation: {observation.action}"
             if observation.action
@@ -784,6 +802,16 @@ def project_operational_experience(
                     metadata={**common, "source_observation_id": final.id},
                 )
             )
+
+    # Preserve the original evidence budgets and source-body spans. Context
+    # rendering always carries the metadata envelope, even when a body is full.
+    provenance = _outcome_context(experience)
+    for entity in entities:
+        if entity.entity_type == EntityType.PASSAGE:
+            continue
+        annotated = f"{provenance}\n{entity.content}"
+        if len(annotated) <= MAX_TYPED_ENTITY_CONTENT_CHARS:
+            entity.content = annotated
 
     _validate_typed_entity_sizes(entities)
     projected_ids = [entity.id for entity in entities]
