@@ -45,6 +45,7 @@ from sibyl_core.services.eval_publication_guards import PUBLICATION_ADMISSION_GU
 if TYPE_CHECKING:
     from sibyl_core.memory_pipeline.observations import SourceObservation
     from sibyl_core.services.dream_checkpoints import DreamCandidateWrite
+    from sibyl_core.services.operational_capture import OperationalSourceWrite
     from sibyl_core.services.validation_candidate import ValidationCandidateWrite
     from sibyl_core.services.validation_promotion import ValidatedPromotion
 
@@ -375,6 +376,7 @@ async def remember_raw_memory(
     source_memories: Sequence[RawMemory] = (),
     dream_write: DreamCandidateWrite | None = None,
     validation_write: ValidationCandidateWrite | None = None,
+    operational_write: OperationalSourceWrite | None = None,
     source_observations: Sequence[SourceObservation] = (),
     accessible_projects: Iterable[str] | None = None,
     accessible_teams: Iterable[str] | None = None,
@@ -409,6 +411,16 @@ async def remember_raw_memory(
         ),
         captured_at=models.utcnow(),
     )
+    if operational_write is not None:
+        if (
+            dream_write is not None
+            or validation_write is not None
+            or source_memories
+            or source_observations
+        ):
+            raise ValueError("Operational source cannot also be a derived candidate")
+        operational_write.validate(memory, incoming=True)
+        memory.id = operational_write.id
     if validation_write is not None:
         if dream_write is not None or not source_observations:
             raise ValueError("Corrected review requires observed original sources")
@@ -442,9 +454,23 @@ async def remember_raw_memory(
         if embedding_provider is _RAW_MEMORY_EMBEDDING_AUTO
         else cast("EmbeddingProvider | None", embedding_provider)
     )
-    memory = await _raw_memory_with_embedding(memory, provider)
+    if operational_write is None:
+        memory = await _raw_memory_with_embedding(memory, provider)
     async with content_client.surreal_content_client() as client:
-        if validation_write is not None:
+        if operational_write is not None:
+            from sibyl_core.services.operational_capture import write_operational_source
+
+            async def prepare_operational_record() -> dict[str, object]:
+                embedded = await _raw_memory_with_embedding(memory, provider)
+                return models.raw_memory_record(embedded)
+
+            record = await write_operational_source(
+                client,
+                models.raw_memory_record(memory),
+                operational_write,
+                prepare_record=prepare_operational_record,
+            )
+        elif validation_write is not None:
             from sibyl_core.services.memory_derivations import raw_derivation_record
             from sibyl_core.services.validation_candidate import insert_validation_candidate
 
