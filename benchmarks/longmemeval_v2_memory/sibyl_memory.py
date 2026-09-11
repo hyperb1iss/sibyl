@@ -40,6 +40,7 @@ from sibyl_core.evals.longmemeval_v2 import (  # noqa: E402
 )
 from sibyl_core.models import EntityType, OperationalExperience  # noqa: E402
 from sibyl_core.projection import project_operational_experience  # noqa: E402
+from sibyl_core.projection.outcome import outcome_context  # noqa: E402
 from sibyl_core.retrieval.operational_evidence import (  # noqa: E402
     TYPED_NOTE_RESERVATION_ITEMS,
 )
@@ -2571,8 +2572,6 @@ def _merged_interval_chars(intervals: list[tuple[int, int]]) -> int:
 
 
 def _memory_context_header(rank: int, result: dict[str, object]) -> str:
-    from sibyl_core.projection.outcome import outcome_context
-
     metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
     trajectory_id = _stripped_str(metadata.get("longmemeval_v2_trajectory_id"))
     chunk_index = metadata.get("longmemeval_v2_chunk_index")
