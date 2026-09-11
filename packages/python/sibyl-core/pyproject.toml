@@ -94,7 +94,7 @@ dev = [
     "surrealdb>=2.0.0,<3.0",
     "numpy>=2.5.1",
     "pydantic-ai-slim[anthropic,google,openai]>=2.33.0,<3",
-    "ty>=0.0.75",
+    "ty>=0.0.78",
 ]
 
 [project.urls]
