@@ -58,10 +58,10 @@ def extractor(output):
 
 
 def finding(prepared):
-    assertion = json.loads(prepared.payload_json)["assertions"]["/content"]
+    payload = json.loads(prepared.payload_json)
     return {
         "claim_path": "/content",
-        "claim_sha256": review_digest(assertion),
+        "claim_sha256": payload["assertion_hashes"]["/content"],
         "evidence_refs": [{"evidence_id": "observed"}],
         "basis": "factual_contradiction",
         "disposition": "reconsider",
@@ -151,6 +151,9 @@ def test_memory_validation_procedure_adapter_keeps_original_assertions(procedure
         citations=citations,
     )
     payload = json.loads(result.payload_json)
+    assert payload["assertion_hashes"] == {
+        path: review_digest(value) for path, value in payload["assertions"].items()
+    }
     assert "/goal" in payload["assertions"]
     assert "/actions/0/action" in payload["assertions"]
     assert payload["candidate"] == procedure.model_dump(mode="json")
@@ -198,3 +201,11 @@ async def test_memory_validation_config_identity_is_not_model_output(prepared):
     assert policy["max_tokens"] == 1024
     assert "reviewer_id" not in policy["output_schema"]["properties"]
     assert "model_override" not in policy["output_schema"]["properties"]
+
+
+def test_memory_validation_supplies_exact_claim_identities(prepared):
+    payload = json.loads(prepared.payload_json)
+    assert payload["assertion_hashes"] == {
+        path: review_digest(assertion) for path, assertion in payload["assertions"].items()
+    }
+    assert "never compute or invent a hash" in prepared.prompt
