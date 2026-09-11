@@ -291,14 +291,20 @@ def _prompt(group: ConsolidationGroup) -> str:
             "episodes": {"__all__": {"artifact"}},
         },
     )
+    return _episode_prompt(
+        header, [(e.episode_id, e.artifact) for e in group.episodes], RETROSPECTIVE_REQUEST
+    )
+
+
+def _episode_prompt(header: dict[str, Any], episodes: list[tuple[str, bytes]], request: str) -> str:
     lines = ["Declared contrast group:", _canonical(header).decode(), "Evidence byte ranges:"]
-    for episode in group.episodes:
+    for episode_id, artifact in episodes:
         offset = 0
-        for line in episode.artifact.splitlines(keepends=True):
+        for line in artifact.splitlines(keepends=True):
             lines.append(
                 _canonical(
                     {
-                        "episode_id": episode.episode_id,
+                        "episode_id": episode_id,
                         "start_byte": offset,
                         "end_byte": offset + len(line),
                         "text": line.decode(),
@@ -306,7 +312,7 @@ def _prompt(group: ConsolidationGroup) -> str:
                 ).decode()
             )
             offset += len(line)
-    lines.extend(("", RETROSPECTIVE_REQUEST))
+    lines.extend(("", request))
     return "\n".join(lines)
 
 
@@ -414,6 +420,30 @@ def _spans(
     evidence: _ExtractionInput | None = None,
 ) -> list[dict[str, Any]]:
     episodes = {e.episode_id: e for e in group.episodes}
+    spans = _support_spans({e.episode_id: e.artifact for e in group.episodes}, draft, evidence)
+    # Both outcomes must support the procedure as a whole. An inferred preventive
+    # action may cite a failed episode alone; entailment is a separate review.
+    if not any(
+        episodes[r.episode_id].outcome.status == "passed"
+        for action in draft.actions
+        for r in action.action.support
+    ):
+        raise ValueError("at least one action needs support from a passed episode")
+    if not any(
+        episodes[r.episode_id].outcome.status == "task_failed"
+        for failure in draft.failure_modes
+        for r in failure.support
+    ):
+        raise ValueError("at least one failure mode needs support from a task_failed episode")
+    return spans
+
+
+def _support_spans(
+    artifacts: dict[str, bytes],
+    draft: DraftConditionalProcedure,
+    evidence: _ExtractionInput | None = None,
+) -> list[dict[str, Any]]:
+    artifact_hashes = {key: _digest(value) for key, value in artifacts.items()}
     visible = (
         None
         if evidence is None or evidence.projection_receipt is None
@@ -438,38 +468,24 @@ def _spans(
     spans: dict[tuple[str, int, int], dict[str, Any]] = {}
     for assertion in assertions:
         for ref in assertion.support:
-            episode = episodes.get(ref.episode_id)
-            if episode is None:
+            artifact = artifacts.get(ref.episode_id)
+            if artifact is None:
                 raise ValueError("support refers to an episode outside the group")
-            if not 0 <= ref.start_byte < ref.end_byte <= len(episode.artifact):
+            if not 0 <= ref.start_byte < ref.end_byte <= len(artifact):
                 raise ValueError("support byte range is empty or out of bounds")
             if (
                 visible is not None
                 and (ref.episode_id, ref.start_byte, ref.end_byte) not in visible
             ):
                 raise ValueError("support lies outside visible projected evidence")
-            content = episode.artifact[ref.start_byte : ref.end_byte]
+            content = artifact[ref.start_byte : ref.end_byte]
             if not content.decode("utf-8").strip():
                 raise ValueError("support cannot contain only whitespace")
             spans[(ref.episode_id, ref.start_byte, ref.end_byte)] = {
                 **ref.model_dump(),
-                "artifact_sha256": episode.artifact_sha256,
+                "artifact_sha256": artifact_hashes[ref.episode_id],
                 "slice_sha256": _digest(content),
             }
-    # Both outcomes must support the procedure as a whole. An inferred preventive
-    # action may cite a failed episode alone; entailment is a separate review.
-    if not any(
-        episodes[r.episode_id].outcome.status == "passed"
-        for action in draft.actions
-        for r in action.action.support
-    ):
-        raise ValueError("at least one action needs support from a passed episode")
-    if not any(
-        episodes[r.episode_id].outcome.status == "task_failed"
-        for failure in draft.failure_modes
-        for r in failure.support
-    ):
-        raise ValueError("at least one failure mode needs support from a task_failed episode")
     return [spans[key] for key in sorted(spans)]
 
 
