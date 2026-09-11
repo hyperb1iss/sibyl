@@ -483,3 +483,69 @@ async def test_embedded_schema_renewal_preserves_the_original_store(monkeypatch)
         assert len(clients) == 1 and not clients[0].closed
     finally:
         await client.close()
+
+
+@pytest.mark.parametrize(
+    ("query", "first", "expected_calls"),
+    [
+        ("RETURN { UPDATE item SET value = 1; RETURN true; };", "atomic", 2),
+        ("BEGIN; UPDATE item SET value = 1; COMMIT;", "transaction", 2),
+        ("UPDATE item SET value = 1; UPDATE other SET value = 2;", "mixed", 1),
+        ("RETURN true;", "domain_error", 1),
+        ("RETURN true;", "unmarked", 1),
+        ("RETURN true;", "data", 1),
+    ],
+)
+async def test_raw_query_preserves_envelopes_and_retries_only_atomic_conflicts(
+    monkeypatch, query, first, expected_calls
+):
+    conflict = "Transaction conflict: Write conflict. This transaction can be retried"
+    error = {"status": "ERR", "result": conflict}
+    ok = {"status": "OK", "result": [{"uuid": "retained"}]}
+    envelopes = {
+        "atomic": {"result": [error]},
+        "transaction": {
+            "result": [
+                {
+                    "status": "ERR",
+                    "result": "The query was not executed due to a failed transaction",
+                },
+                error,
+            ]
+        },
+        "mixed": {"result": [ok, error]},
+        "domain_error": {"result": [{"status": "ERR", "result": "source changed"}]},
+        "unmarked": {"result": [{"status": "ERR", "result": "Transaction conflict: unknown"}]},
+        "data": {"result": [{"status": "OK", "result": conflict}]},
+    }
+    original = envelopes[first]
+    success = {"result": [ok], "id": "response-2"}
+    calls = []
+
+    async def send(_client, statement, *, params, raw):
+        if statement == "RETURN true;" and statement != query:
+            return {"result": [{"status": "OK", "result": True}]}
+        calls.append((statement, params))
+        return original if len(calls) == 1 else success
+
+    async def connect(_self):
+        return object()
+
+    async def sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(dedicated_client_module._PooledConnection, "connect", connect)
+    monkeypatch.setattr(dedicated_client_module.asyncio, "sleep", sleep)
+    client = DedicatedSurrealClient(
+        url="ws://localhost:8000/rpc",
+        username="",
+        password="",
+        namespace="raw_conflict",
+        database="content",
+        pool_size=1,
+    )
+    monkeypatch.setattr(client, "_send_query", send)
+    result = await client.execute_query_raw(query, expected_revision=7)
+    assert result is (success if expected_calls == 2 else original)
+    assert len(calls) == expected_calls
+    assert all(params == {"expected_revision": 7} for _, params in calls)
