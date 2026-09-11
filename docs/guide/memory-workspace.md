@@ -5,22 +5,22 @@ description: The web surface for captures, imports, and synthesis
 
 # Memory Workspace 🎭
 
-The memory workspace is the web UI's home for the [memory loop](./memory-loop.md). It is where a
-human reviews what agents captured, watches source imports land, and runs synthesis interactively.
-The CLI drives the loop from the terminal; the workspace gives it oversight.
+The memory workspace is the web UI's home for the [memory loop](./memory-loop.md). Use it to inspect
+saved captures, follow source imports, and run synthesis interactively. Inspection is optional:
+users do not need to review each memory entry or clear a queue for automatic processing to run.
 
 It lives at the protected `/memory` route. Earlier releases called this surface the cockpit; it is
 now the workspace.
 
 ## What's in the Workspace
 
-| Surface        | Route                  | Purpose                                         |
-| -------------- | ---------------------- | ----------------------------------------------- |
-| **Overview**   | `/memory`              | Activity feed of recent memory writes           |
-| **Captures**   | `/memory/captures`     | Raw quick captures awaiting review or promotion |
-| **Imports**    | `/memory/imports`      | Source import jobs and their progress           |
-| **Sources**    | `/memory/sources/[id]` | A single import source and its records          |
-| **Synthesize** | `/memory/synthesize`   | Interactive plan, draft, and verify             |
+| Surface        | Route                  | Purpose                                |
+| -------------- | ---------------------- | -------------------------------------- |
+| **Overview**   | `/memory`              | Activity feed of recent memory writes  |
+| **Captures**   | `/memory/captures`     | Saved captures and optional inspection |
+| **Imports**    | `/memory/imports`      | Source import jobs and their progress  |
+| **Sources**    | `/memory/sources/[id]` | A single import source and its records |
+| **Synthesize** | `/memory/synthesize`   | Interactive plan, draft, and verify    |
 
 ## Activity Feed
 
@@ -31,17 +31,17 @@ team's memory been doing".
 ## Captures
 
 Captures are raw, low-friction memories created with `sibyl capture` or the `remember` flow. The
-captures surface lists them so a human can:
+captures surface lists them so you can:
 
-- See what agents captured without leaving the browser
-- Promote a capture into durable typed memory
-- Discard noise before it clutters the graph
+- Read the original content and inspect linked memories
+- Follow processing state and provenance
+- Make an optional correction or remove an unwanted capture
 
-This is the human half of the reflection workflow. The
-[dream-cycle](./memory-loop.md#the-reflection-dream-cycle) handles automatic review; the captures
-surface handles the judgment calls.
+The [dream-cycle](./memory-loop.md#the-reflection-dream-cycle) handles automatic validation and
+promotion of eligible candidates. Captures with no graph links are still saved; the unlinked count
+is not a request for manual approval. Open a capture when you want to inspect or correct it.
 
-Starting with 1.3.2, a newly projected memory appears once in the capture queue. Sibyl keeps the
+Starting with 1.3.2, a newly projected memory appears once in the capture list. Sibyl keeps the
 verbatim raw memory and its projection, but hides the raw row after recording their relationship.
 
 Existing raw memory and projection pairs can still appear twice after an upgrade. Startup does not
