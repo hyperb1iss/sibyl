@@ -147,3 +147,27 @@ def test_config_field_tracks_env_lock_metadata() -> None:
 
     assert field.locked_by_env is True
     assert field.env_var == "MODEL"
+
+
+@pytest.mark.parametrize(
+    ("surface", "provider", "model", "override", "expected"),
+    [
+        (LLMSurface.MEMORY, "anthropic", "claude-opus-5", None, 32768),
+        (LLMSurface.MEMORY, "anthropic", "claude-opus-5", "8192", 8192),
+        (LLMSurface.MEMORY, "anthropic", "claude-opus-5", "65536", 65536),
+        (LLMSurface.DEFAULT, "anthropic", "claude-opus-5", None, None),
+        (LLMSurface.MEMORY, "anthropic", "claude-haiku-4-5", None, None),
+        (LLMSurface.MEMORY, "openai", "claude-opus-5", None, None),
+    ],
+)
+async def test_opus_memory_output_default_preserves_explicit_policy(
+    surface, provider, model, override, expected
+):
+    environment = {"SIBYL_LLM_PROVIDER": provider, "SIBYL_LLM_MODEL": model}
+    if override is not None:
+        environment["SIBYL_LLM_MAX_TOKENS"] = override
+    resolved = await EnvConfigSource(environment).resolve(surface)
+    assert resolved.max_tokens.value == expected
+    assert resolved.to_llm_config().max_tokens == expected
+    assert resolved.max_tokens.source == ("env" if override is not None else "default")
+    assert resolved.max_tokens.locked_by_env is (override is not None)

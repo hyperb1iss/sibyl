@@ -53,6 +53,22 @@ class ResolvedLLMConfig(BaseModel):
     )
     cached_at: datetime | None = None
 
+    def with_model_defaults(self) -> ResolvedLLMConfig:
+        """Apply defaults after provider/model overrides, preserving explicit limits."""
+        if self.max_tokens.source != "default":
+            return self
+        # Opus 5 shares the output ceiling between adaptive thinking and the answer.
+        max_tokens = (
+            32_768
+            if self.surface is LLMSurface.MEMORY
+            and self.provider.value == "anthropic"
+            and self.model.value == "claude-opus-5"
+            else None
+        )
+        return self.model_copy(
+            update={"max_tokens": ConfigField[int | None](value=max_tokens, source="default")}
+        )
+
     def to_llm_config(self) -> LLMConfig:
         return LLMConfig(
             provider=self.provider.value,
@@ -90,7 +106,7 @@ class EnvConfigSource:
             timeout_seconds=self._resolve_float(surface, "TIMEOUT_SECONDS", default=60.0),
             api_key=self._resolve_api_key(provider.value),
             transport_max_retries=self._resolve_transport_retries(surface),
-        )
+        ).with_model_defaults()
 
     def _resolve_transport_retries(self, surface: LLMSurface) -> ConfigField[int]:
         resolved = self._resolve_int(surface, "TRANSPORT_MAX_RETRIES", default=2)
