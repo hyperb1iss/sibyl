@@ -111,3 +111,26 @@ async def test_db_config_source_caches_until_invalidated() -> None:
     assert first.model.value == "claude-haiku-4-5"
     assert second.model.value == "claude-haiku-4-5"
     assert third.model.value == "claude-sonnet-4-6"
+
+
+@pytest.mark.parametrize(
+    ("model", "override", "expected"),
+    [
+        ("claude-opus-5", None, 32768),
+        ("claude-opus-5", "8192", 8192),
+        ("claude-haiku-4-5", None, None),
+    ],
+)
+async def test_opus_memory_output_default_uses_final_db_model(model, override, expected):
+    values = {"llm.memory.provider": "anthropic", "llm.memory.model": model}
+    if override is not None:
+        values["llm.memory.max_tokens"] = override
+    settings = FakeSettingsService(values)
+    source = DBSettingsConfigSource(settings, environ={})
+    result = await source.resolve(LLMSurface.MEMORY)
+    assert result.max_tokens.value == expected
+    assert result.max_tokens.source == ("db" if override is not None else "default")
+    settings.values["llm.memory.model"] = "claude-haiku-4-5"
+    await source.invalidate()
+    changed = await source.resolve(LLMSurface.MEMORY)
+    assert changed.max_tokens.value == (8192 if override is not None else None)
