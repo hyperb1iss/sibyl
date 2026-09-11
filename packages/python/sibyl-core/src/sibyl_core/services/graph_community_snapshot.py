@@ -3,23 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
 
-from sibyl_core.auth.memory_policy import (
-    memory_metadata_read_allowed,
-    memory_row_project_id,
-    private_scope_granted_for,
-)
 from sibyl_core.models.entities import Entity
 from sibyl_core.services.graph_community_managers import (
     _list_all_entities,
     _list_all_relationships,
 )
 from sibyl_core.services.graph_community_models import GraphSnapshot
+from sibyl_core.services.graph_visibility import graph_row_read_allowed
 
 log = structlog.get_logger()
 
@@ -180,29 +178,23 @@ def _reader_visible_snapshot(
     is the drift this filter exists to prevent, so the snapshot loads whole and
     is narrowed here, once, through the shared rule.
     """
-    entities = [
-        entity
-        for entity in snapshot.entities
-        if memory_metadata_read_allowed(
-            getattr(entity, "metadata", None),
+
+    def allowed(row):
+        return graph_row_read_allowed(
+            row,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
-            private_scope_granted=private_scope_granted_for(
-                allowed_memory_scope_keys, principal_id=principal_id
-            ),
-            row_project_id=memory_row_project_id(
-                getattr(entity, "metadata", None),
-                entity_type=getattr(getattr(entity, "entity_type", None), "value", None),
-                entity_id=getattr(entity, "id", None),
-            ),
         )
-    ]
+
+    entities = [entity for entity in snapshot.entities if allowed(entity)]
     entity_by_id = _entity_index(entities)
     relationships = [
         relationship
         for relationship in snapshot.relationships
-        if relationship.source_id in entity_by_id and relationship.target_id in entity_by_id
+        if relationship.source_id in entity_by_id
+        and relationship.target_id in entity_by_id
+        and allowed(relationship)
     ]
     return GraphSnapshot(
         entities=entities,
@@ -227,12 +219,86 @@ async def _get_visible_graph_snapshot(
         max_entities=max_entities,
         max_relationships=max_relationships,
     )
+    snapshot = await _current_graph_snapshot(client, organization_id, snapshot)
     return _reader_visible_snapshot(
         snapshot,
         principal_id=principal_id,
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
+
+
+async def _current_graph_entities(
+    client: Any, organization_id: str, ids: list[str]
+) -> dict[str, Entity]:
+    """Keep current-row and ancestry reads on the supplied graph owner."""
+    from sibyl_core.services.graph_community_managers import (
+        _entity_manager_for_client,
+        _relationship_manager_for_client,
+    )
+    from sibyl_core.services.graph_read_availability import available_graph_entities
+    from sibyl_core.services.graph_runtime import GraphRuntime
+
+    runtime = GraphRuntime(
+        client=client,
+        entity_manager=_entity_manager_for_client(client, organization_id),
+        relationship_manager=_relationship_manager_for_client(client, organization_id),
+    )
+    return await available_graph_entities(organization_id, ids, runtime=runtime)
+
+
+async def _current_graph_snapshot(
+    client: Any, organization_id: str, snapshot: GraphSnapshot
+) -> GraphSnapshot:
+    """Refresh cached identities before their content enters a reader cache.
+
+    Enumeration stays cached. Current rows and protected ancestry determine
+    what can be rendered; a replacement using the same ID cannot revive an
+    older cached label or relationship fact.
+    """
+    from sibyl_core.services.graph_common import normalize_graph_records
+    from sibyl_core.services.graph_records import relationship_from_surreal_row
+
+    entities = await _current_graph_entities(client, organization_id, list(snapshot.entity_by_id))
+    edge_ids = [relationship.id for relationship in snapshot.relationships]
+    relationships = []
+    if edge_ids:
+        rows = normalize_graph_records(
+            await client.execute_query(
+                "SELECT * FROM relates_to WHERE group_id=$group_id AND uuid IN $ids;",
+                group_id=organization_id,
+                ids=edge_ids,
+            )
+        )
+        relationships = [relationship_from_surreal_row(row) for row in rows]
+    return GraphSnapshot(
+        entities=list(entities.values()),
+        relationships=[
+            relationship
+            for relationship in relationships
+            if relationship.source_id in entities and relationship.target_id in entities
+        ],
+        entity_by_id=entities,
+    )
+
+
+def _snapshot_fingerprint(snapshot: GraphSnapshot) -> str:
+    """Bind derived cache values to their current, authorized input content."""
+    payload = {
+        "entities": [
+            entity.model_dump(mode="json", exclude={"embedding"})
+            for entity in sorted(snapshot.entities, key=lambda entity: entity.id)
+        ],
+        "relationships": [
+            relationship.model_dump(mode="json", exclude={"embedding"})
+            for relationship in sorted(
+                snapshot.relationships, key=lambda relationship: relationship.id
+            )
+        ],
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def _count_int(value: object) -> int:

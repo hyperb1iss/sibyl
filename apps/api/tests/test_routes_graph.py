@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 from uuid import UUID
 
 import pytest
@@ -27,6 +27,28 @@ def _accessible_projects(*project_ids: str):
         "sibyl.api.routes.graph.list_accessible_project_graph_ids",
         AsyncMock(return_value=set(project_ids)),
     )
+
+
+@pytest.fixture(autouse=True)
+def stored_graph_rows(monkeypatch):
+    """Keep route scope controls on their stored-row doubles.
+
+    Protected ancestry and source replacement run against the native runtime
+    in the graph availability and community source-retirement controls.
+    """
+
+    async def available(org, ids):
+        runtime = await graph_routes.get_entity_graph_runtime(org)
+        manager = runtime.entity_manager
+        if hasattr(manager, "get_many"):
+            rows = await manager.get_many(ids)
+        elif hasattr(manager, "get"):
+            rows = [await manager.get(identity) for identity in ids]
+        else:
+            rows = manager.list_all.return_value
+        return {row.id: row for row in rows if row is not None and row.id in ids}
+
+    monkeypatch.setattr(graph_routes, "available_graph_entities", available)
 
 
 class TestGraphRoutes:
@@ -61,7 +83,7 @@ class TestGraphRoutes:
             result = await graph_routes.debug_graph(org=_org(), ctx=_ctx())
 
         assert result["node_count"] == 2
-        assert result["edge_count"] == 2
+        assert result["edge_count"] == 1
         assert result["matching_edges"] == 1
         runtime.entity_manager.list_all.assert_awaited_once_with(
             limit=1000,
@@ -115,7 +137,7 @@ class TestGraphRoutes:
             offset=0,
             include_archived=True,
         )
-        adapter.get_connection_counts.assert_awaited_once_with(["task-1"])
+        adapter.get_connection_counts.assert_awaited_once_with(["task-1"], entity_visible=ANY)
 
     @pytest.mark.asyncio
     async def test_get_all_edges_uses_entity_graph_runtime(self) -> None:
