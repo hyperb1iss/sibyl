@@ -244,3 +244,56 @@ async def test_function_query_does_not_replay_after_lost_response(raw, query):
     with pytest.raises(ConnectionClosedError):
         await (client.execute_query_raw(query) if raw else client.execute_query(query))
     assert writes == 1
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"error": {"kind": "NotAllowed", "message": "denied"}},
+        {
+            "result": [
+                {"status": "OK", "result": []},
+                {"status": "ERR", "kind": "Thrown", "result": "second seed failed"},
+            ]
+        },
+        {"result": [{"status": "OK", "result": []}, None]},
+    ],
+)
+async def test_checked_batch_rejects_rpc_and_later_statement_failures(response, monkeypatch):
+    client = DedicatedSurrealClient(
+        url="memory://",
+        username="",
+        password="",
+        namespace="batch_error",
+        database="graph",
+    )
+    transport = SimpleNamespace(query_raw=AsyncMock(return_value=response))
+    monkeypatch.setattr(client._pool[0], "connect", AsyncMock(return_value=transport))
+    try:
+        with pytest.raises(SurrealError):
+            await client.execute_query_batch("SELECT * FROM entity; SELECT * FROM entity;")
+        transport.query_raw.assert_awaited_once()
+    finally:
+        await client.close()
+
+
+async def test_checked_batch_returns_all_results_without_decoding_data_as_errors(monkeypatch):
+    payload = [{"status": "ERR", "result": "ordinary stored data"}]
+    response = {"result": [{"status": "OK", "result": []}, {"status": "OK", "result": payload}]}
+    client = DedicatedSurrealClient(
+        url="memory://",
+        username="",
+        password="",
+        namespace="batch_success",
+        database="graph",
+    )
+    transport = SimpleNamespace(query_raw=AsyncMock(return_value=response))
+    monkeypatch.setattr(client._pool[0], "connect", AsyncMock(return_value=transport))
+    try:
+        assert await client.execute_query_batch("SELECT * FROM entity; SELECT * FROM entity;") == [
+            [],
+            payload,
+        ]
+        assert await client.execute_query("SELECT * FROM entity; SELECT * FROM entity;") == []
+    finally:
+        await client.close()

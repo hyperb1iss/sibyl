@@ -387,46 +387,62 @@ class RelationshipManager:
         type_values: Sequence[str],
         limit: int,
     ) -> list[SurrealRecord]:
-        async def get_seed_rows(seed_id: str) -> list[SurrealRecord]:
+        # Keep each SELECT top-level so SurrealDB can push ORDER/LIMIT into
+        # the composite endpoint index instead of sorting inside a closure.
+        statement = (
+            f"""
+            SELECT id AS record_id,
+                   uuid,
+                   name,
+                   fact,
+                   group_id,
+                   episodes,
+                   attributes,
+                   created_at,
+                   expired_at,
+                   valid_at,
+                   invalid_at,
+                   source_id AS source_uuid,
+                   target_id AS target_uuid,
+                   {endpoint_field} AS seed_uuid,
+                   {_related_entity_projection(related_side)}
+            FROM relates_to
+            WHERE group_id = $group_id
+              AND {endpoint_field} = $entity_id
+              AND {related_side}.group_id = $group_id
+            """
+            + type_clause
+            + """
+            ORDER BY created_at DESC, uuid DESC
+            LIMIT $limit;
+            """
+        )
+
+        async def get_batch_rows(batch: Sequence[str]) -> list[SurrealRecord]:
+            query = "\n".join(
+                statement.replace("$entity_id", f"$seed_{index}") for index in range(len(batch))
+            )
             return normalize_records(
-                await self._client.execute_query(
-                    f"""
-                SELECT id AS record_id,
-                       uuid,
-                       name,
-                       fact,
-                       group_id,
-                       episodes,
-                       attributes,
-                       created_at,
-                       expired_at,
-                       valid_at,
-                       invalid_at,
-                       source_id AS source_uuid,
-                       target_id AS target_uuid,
-                       {endpoint_field} AS seed_uuid,
-                       {_related_entity_projection(related_side)}
-                FROM relates_to
-                WHERE group_id = $group_id
-                  AND {endpoint_field} = $entity_id
-                  AND {related_side}.group_id = $group_id
-                """
-                    + type_clause
-                    + """
-                ORDER BY created_at DESC, uuid DESC
-                LIMIT $limit;
-                """,
+                await self._client.execute_query_batch(
+                    query,
                     group_id=self._group_id,
-                    entity_id=seed_id,
                     relationship_types=type_values,
                     limit=limit,
+                    **{f"seed_{index}": seed_id for index, seed_id in enumerate(batch)},
                 )
             )
 
+        if not seed_ids:
+            return []
+        capacity = self._client.pool_size
+        batch_size = max(1, (len(seed_ids) + capacity - 1) // capacity)
+        batches = (
+            seed_ids[index : index + batch_size] for index in range(0, len(seed_ids), batch_size)
+        )
         rows = [
             row
-            for seed_rows in await asyncio.gather(*(get_seed_rows(seed_id) for seed_id in seed_ids))
-            for row in seed_rows
+            for batch in await asyncio.gather(*(get_batch_rows(batch) for batch in batches))
+            for row in batch
         ]
         for row in rows:
             row["direction"] = direction
