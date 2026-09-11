@@ -1,6 +1,7 @@
 """Stored signed critique drives the existing extraction and persistence owners."""
 
 import json
+import threading
 from unittest.mock import AsyncMock
 
 import pytest
@@ -347,3 +348,19 @@ async def test_signed_correction_result_write_recovery_preserves_replay(
     monkeypatch.setattr(ValidationExecution, "record_result", fail_correction)
     await test_signed_automatic_correction_rechecks_and_replays(candidate, correction_model)
     assert len(corrections) == 1
+
+
+@pytest.mark.asyncio
+async def test_stored_procedure_validation_prepares_evidence_off_event_loop(candidate, monkeypatch):
+    original = validation.prepare_procedure_validation
+    event_loop_thread = threading.get_ident()
+    threads = []
+
+    def observed(*args, **kwargs):
+        threads.append(threading.get_ident())
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(validation, "prepare_procedure_validation", observed)
+    result = await validation.prepare_stored_procedure_validation("org", "owner", candidate.id)
+    assert result.prepared.input_sha256
+    assert len(threads) == 1 and threads[0] != event_loop_thread

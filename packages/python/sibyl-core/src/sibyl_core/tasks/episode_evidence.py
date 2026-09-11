@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 from bisect import bisect_right
 from dataclasses import dataclass, field
 from typing import Any
@@ -358,3 +359,45 @@ def _verify_complete_coverage(builder: _EpisodeBuilder) -> None:
 
 def encode_episode_views(projections: list[EpisodeProjection]) -> dict[str, Any]:
     return share_exact_values([projection.view for projection in projections])
+
+
+def is_controller_episode(artifact: bytes) -> bool:
+    """Recognize the controller format without treating malformed projections as legacy."""
+    try:
+        value = json.loads(artifact)
+    except (ValueError, UnicodeError):
+        return False
+    return isinstance(value, dict) and value.get("schema_version") == EPISODE_VERSION
+
+
+def episode_projection_receipt(
+    episodes: list[tuple[str, bytes]],
+    projections: list[EpisodeProjection],
+    view: dict[str, Any],
+) -> dict[str, Any]:
+    """Bind a semantic view and its coverage to immutable original episode bytes."""
+
+    def digest(value: Any) -> str:
+        return hashlib.sha256(canonical(value).encode()).hexdigest()
+
+    return {
+        "version": PROJECTION_VERSION,
+        "view_sha256": digest(view),
+        "citations_sha256": digest(
+            {
+                key: {"episode_id": citation.episode_id, "ranges": citation.ranges}
+                for projection in projections
+                for key, citation in projection.citations.items()
+            }
+        ),
+        "coverage_sha256": digest(
+            [
+                {
+                    "episode_id": episode_id,
+                    "artifact_sha256": hashlib.sha256(artifact).hexdigest(),
+                    "coverage": projection.coverage,
+                }
+                for (episode_id, artifact), projection in zip(episodes, projections, strict=True)
+            ]
+        ),
+    }
