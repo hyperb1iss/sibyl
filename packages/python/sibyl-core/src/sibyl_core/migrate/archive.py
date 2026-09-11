@@ -8,7 +8,7 @@ import tarfile
 import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 ARCHIVE_VERSION = "1.0"
@@ -16,6 +16,7 @@ MANIFEST_FILENAME = "manifest.json"
 GRAPH_FILENAME = "graph.json"
 AUTH_FILENAME = "auth.json"
 CONTENT_FILENAME = "content.json"
+BACKUP_METADATA_FILENAME = "metadata.json"
 
 
 def _sha256_bytes(payload: bytes) -> str:
@@ -147,6 +148,8 @@ def _load_archive_bytes(source: Path) -> dict[str, bytes]:
 
     if source.is_dir():
         for path in source.rglob("*"):
+            if path.is_symlink():
+                raise ValueError("Archive directory contains a symlink")
             if path.is_file():
                 files[path.relative_to(source).as_posix()] = path.read_bytes()
         return files
@@ -154,8 +157,16 @@ def _load_archive_bytes(source: Path) -> dict[str, bytes]:
     if source.is_file() and (source.name.endswith(".tar.gz") or source.name.endswith(".tgz")):
         with tarfile.open(source, "r:gz") as tar:
             for member in tar.getmembers():
-                if not member.isfile():
+                path = PurePosixPath(member.name)
+                if member.isdir():
                     continue
+                if (
+                    not member.isfile()
+                    or path.is_absolute()
+                    or ".." in path.parts
+                    or member.name in files
+                ):
+                    raise ValueError("Archive contains an unsafe or duplicate member")
                 extracted = tar.extractfile(member)
                 if extracted is None:
                     continue
@@ -170,8 +181,11 @@ def load_archive(source: Path) -> LoadedArchive:
     files = _load_archive_bytes(source)
     manifest_bytes = files.pop(MANIFEST_FILENAME, None)
     if manifest_bytes is None:
-        msg = "Archive is missing manifest.json"
-        raise ValueError(msg)
+        from sibyl_core.migrate.backup_envelope import load_backup_archive
+
+        return load_backup_archive(source, files)
+    if BACKUP_METADATA_FILENAME in files:
+        raise ValueError("Archive contains ambiguous manifest and backup metadata")
     manifest = ArchiveManifest.from_dict(json.loads(manifest_bytes.decode("utf-8")))
     return LoadedArchive(source=source, manifest=manifest, files=files)
 
@@ -326,6 +340,13 @@ def validate_archive(archive: LoadedArchive) -> list[str]:
                 payload=content_payload,
                 errors=errors,
             )
+            if isinstance(content_payload, dict):
+                from sibyl_core.migrate.validation_receipt_archive import prepare_payload
+
+                try:
+                    prepare_payload(content_payload)
+                except (ValueError, TypeError, KeyError) as exc:
+                    errors.append(f"content.json validation receipts are invalid: {exc}")
 
     if not errors:
         try:

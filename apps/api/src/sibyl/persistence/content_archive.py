@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -20,11 +21,12 @@ from sibyl_core.backends.surreal.schema_invariants import (
     drop_undeclared_fields as _drop_undeclared_fields,
     fetch_declared_fields,
 )
+from sibyl_core.migrate import validation_receipt_archive
 
 log = structlog.get_logger()
 
-CONTENT_ARCHIVE_VERSION = "2.2"
-_INTEGRITY_ARCHIVE_VERSIONS = {"2.0", "2.1", CONTENT_ARCHIVE_VERSION}
+CONTENT_ARCHIVE_VERSION = "2.3"
+_INTEGRITY_ARCHIVE_VERSIONS = {"2.0", "2.1", "2.2", CONTENT_ARCHIVE_VERSION}
 _VALIDATION_ARCHIVE_TABLES = frozenset(
     {"memory_validation_executions", "memory_validation_attempts"}
 )
@@ -491,12 +493,29 @@ async def _export_surreal_content_archive_payload(
             for row in raw_rows
         ]
         row_counts["raw_captures"] = len(raw_rows)
+        receipt_rows = tables["memory_validation_executions"]
+        receipt_section = await asyncio.to_thread(validation_receipt_archive.capture, receipt_rows)
+        spec = _CONTENT_ARCHIVE_TABLES_BY_NAME["memory_validation_executions"]
+        receipt_query = _content_archive_export_query(spec, org_id)
+        assert receipt_query is not None
+        statement, params = receipt_query
+        current = await client.execute_query(statement, **params)
+        current_rows = _sort_content_rows(
+            spec,
+            [
+                {str(key): _serialize_value(value) for key, value in row.items()}
+                for row in _normalize_records(current)
+            ],
+        )
+        if _query_error(current) is not None or current_rows != receipt_rows:
+            raise ValueError("Validation executions changed during receipt archive capture")
     finally:
         await client.close()
 
     return {
         "version": CONTENT_ARCHIVE_VERSION,
         "source_integrity": integrity,
+        "validation_receipts": receipt_section,
         "created_at": datetime.now(UTC).isoformat(),
         "organization_id": str(organization_id) if organization_id is not None else None,
         "tables": tables,
@@ -526,11 +545,11 @@ def _prepare_content_source_integrity(payload, tables, organization_id):
         required -= _VALIDATION_ARCHIVE_TABLES
     if version in _INTEGRITY_ARCHIVE_VERSIONS and required - set(tables):
         raise ValueError("current content archive is missing required tables")
-    if version not in {"2.1", CONTENT_ARCHIVE_VERSION} and any(
+    if version not in {"2.1", "2.2", CONTENT_ARCHIVE_VERSION} and any(
         tables.get(name) for name in _DREAM_ARCHIVE_TABLES
     ):
         raise ValueError("dream checkpoints require content archive 2.1")
-    if version != CONTENT_ARCHIVE_VERSION and any(
+    if version not in {"2.2", CONTENT_ARCHIVE_VERSION} and any(
         tables.get(name) for name in _VALIDATION_ARCHIVE_TABLES
     ):
         raise ValueError("validation history requires content archive 2.2")
@@ -824,8 +843,7 @@ async def restore_content_archive_payload(
     )
 
     client = build_surreal_content_client()
-    tables_restored = 0
-    rows_restored = 0
+    tables_restored = rows_restored = 0
     errors: list[str] = []
     dropped_fields: dict[str, set[str]] = {}
     integrity_conflicts: list[dict[str, str]] = []
@@ -853,6 +871,9 @@ async def restore_content_archive_payload(
             return ContentArchiveRestoreResult(
                 success=False, tables_restored=0, rows_restored=0, errors=errors[:50]
             )
+        pending_receipts = await asyncio.to_thread(
+            validation_receipt_archive.prepare_payload, payload
+        )
         specs = [
             spec
             for spec in _CONTENT_ARCHIVE_TABLE_SPECS
@@ -878,6 +899,7 @@ async def restore_content_archive_payload(
             + auxiliary_sql
         )
         try:
+            await asyncio.to_thread(validation_receipt_archive.publish, pending_receipts)
             restored = await restore_source_integrity(
                 client.execute_query,
                 integrity,
