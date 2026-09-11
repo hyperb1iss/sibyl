@@ -197,7 +197,7 @@ async def test_reflection_schema_budget_closes_allocated_transport(owned_transpo
 async def test_opus_memory_output_default_binds_wire_policy_and_reservation(monkeypatch, override):
     import json
 
-    import httpx
+    import httpx2 as httpx
 
     from sibyl_core.ai.llm.budget import llm_budget_context, set_budget_enforcer
     from sibyl_core.ai.llm.config import EnvConfigSource
