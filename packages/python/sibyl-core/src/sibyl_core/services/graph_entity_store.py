@@ -1024,6 +1024,11 @@ async def _publish_operational_entities(
     targets = {row["uuid"]: row for row in normalize_records(target_rows)}
     associations = {row["target_id"]: row for row in normalize_records(association_rows)}
     states = {row["source_id"]: row for row in normalize_records(state_rows)}
+    legacy = (
+        await source.legacy_adoption_proof(client)
+        if any(row.get("derivation_required") is not True for row in targets.values())
+        else None
+    )
     entries = []
     for record in records:
         old = targets.get(record["uuid"])
@@ -1033,28 +1038,32 @@ async def _publish_operational_entities(
             if association is not None or states.get(record["uuid"]) is not None:
                 raise SourceUnavailableError()
         else:
-            state = states.get(record["uuid"])
-            observations = association.get("observations") if association is not None else None
-            if (
-                not isinstance(old, dict)
-                or old.get("group_id") != group_id
-                or old.get("created_by") != source.creator_id
-                or old.get("derivation_required") is not True
-                or not isinstance(state, dict)
-                or state.get("deleted") is not False
-                or state.get("revision") != old.get("revision")
-                or not isinstance(association, dict)
-                or association.get("active") is not True
-                or association.get("target_id") != record["uuid"]
-                or association.get("body_sha256")
-                != graph_target_digest(entity_from_surreal_row(old))
-                or not isinstance(observations, list)
-                or len(observations) != 1
-            ):
-                raise SourceUnavailableError()
-            previous = observation_from_record(observations[0])
-            if previous.source != source.observation.source:
-                raise SourceUnavailableError()
+            if legacy is not None and legacy.permits_entity(old):
+                if association is not None:
+                    raise SourceUnavailableError()
+            else:
+                state = states.get(record["uuid"])
+                observations = association.get("observations") if association is not None else None
+                if (
+                    not isinstance(old, dict)
+                    or old.get("group_id") != group_id
+                    or old.get("created_by") != source.creator_id
+                    or old.get("derivation_required") is not True
+                    or not isinstance(state, dict)
+                    or state.get("deleted") is not False
+                    or state.get("revision") != old.get("revision")
+                    or not isinstance(association, dict)
+                    or association.get("active") is not True
+                    or association.get("target_id") != record["uuid"]
+                    or association.get("body_sha256")
+                    != graph_target_digest(entity_from_surreal_row(old))
+                    or not isinstance(observations, list)
+                    or len(observations) != 1
+                ):
+                    raise SourceUnavailableError()
+                previous = observation_from_record(observations[0])
+                if previous.source != source.observation.source:
+                    raise SourceUnavailableError()
             record["created_by"] = old.get("created_by")
             record["created_at"] = old.get("created_at")
         desired = {
@@ -1091,6 +1100,7 @@ async def _publish_operational_entities(
                 "record": {**record, "derivation_required": True},
                 "association": desired,
                 "replay": replay,
+                "adopting": old is not None and association is None,
             }
         )
     # Inspect graph state before this recheck: an older worker must not adopt
@@ -1101,7 +1111,7 @@ async def _publish_operational_entities(
         .strip()
         .rstrip(";")
     )
-    await client.execute_query(
+    written = await client.execute_query(
         """RETURN {
         LET $targets = SELECT * FROM entity WHERE uuid IN $ids ORDER BY uuid;
         LET $associations = SELECT * FROM memory_derivations WHERE organization_id=$org
@@ -1110,6 +1120,17 @@ async def _publish_operational_entities(
             AND source_kind='graph_entity' AND source_id IN $ids ORDER BY source_id;
         IF crypto::sha256(type::string([$targets,$associations,$states])) != $fingerprint {
             THROW 'operational graph target changed during publication';
+        };
+        IF $legacy_fingerprint != NONE {
+            LET $legacy_edges = SELECT *, in.uuid AS source_uuid, out.uuid AS target_uuid
+                FROM relates_to WHERE group_id=$org AND uuid IN $legacy_edge_ids ORDER BY uuid;
+            IF crypto::sha256(type::string($legacy_edges)) != $legacy_fingerprint {
+                RETURN {applied:false};
+            };
+            -- Include supporting edges in the write set so concurrent edits
+            -- conflict with adoption even after the snapshot read succeeds.
+            UPDATE relates_to SET attributes.operational_write_witness = <string>rand::uuid()
+                WHERE group_id=$org AND uuid IN $legacy_edge_ids;
         };
         FOR $entry IN $entries {
             LET $uuid = $entry.uuid;
@@ -1121,7 +1142,13 @@ async def _publish_operational_entities(
         + upsert
         + """;
                 UPDATE entity SET derivation_required=true WHERE uuid=$uuid AND group_id=$org;
-                IF $association = NONE { CREATE memory_derivations CONTENT $entry.association; }
+                IF $association = NONE {
+                    CREATE memory_derivations CONTENT $entry.association;
+                    IF $entry.adopting {
+                        UPDATE source_states SET generation += 1 WHERE organization_id=$org
+                            AND source_kind='graph_entity' AND source_id=$uuid;
+                    };
+                }
                 ELSE {
                     UPDATE $association.id CONTENT $entry.association;
                     UPDATE source_states SET generation += 1 WHERE organization_id=$org
@@ -1129,13 +1156,17 @@ async def _publish_operational_entities(
                 };
             };
         };
-        RETURN true;
+        RETURN {applied:true};
         };""",
         entries=entries,
         ids=ids,
         fingerprint=snapshot["fingerprint"],
         org=group_id,
+        legacy_fingerprint=legacy.relationship_snapshot_sha256 if legacy is not None else None,
+        legacy_edge_ids=[row[0] for row in legacy.relationship_rows] if legacy is not None else [],
     )
+    if normalize_records(written) != [{"applied": True}]:
+        raise SourceUnavailableError()
     await source.current()
     return projection
 
