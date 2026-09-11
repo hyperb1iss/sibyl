@@ -655,6 +655,7 @@ def reflection_candidate_metadata(
 
 async def remember_reflection_candidate_review(
     *,
+    embedding_provider: EmbeddingProvider | object | None = _RAW_MEMORY_EMBEDDING_AUTO,
     organization_id: str,
     principal_id: str,
     candidate: ReflectionCandidate,
@@ -687,6 +688,7 @@ async def remember_reflection_candidate_review(
         extraction_prompt_metadata=extraction_prompt_metadata,
     )
     return await remember_raw_memory(
+        embedding_provider=embedding_provider,
         organization_id=organization_id,
         principal_id=principal_id,
         source_id=resolved_source_id,

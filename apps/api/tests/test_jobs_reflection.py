@@ -19,6 +19,16 @@ from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 def dispatch_cursor(monkeypatch):
     monkeypatch.setattr("sibyl.jobs.reflection.load_dream_cursor", AsyncMock(return_value=("", 0)))
     monkeypatch.setattr("sibyl.jobs.reflection.advance_dream_cursor", AsyncMock(return_value=True))
+    # These orchestration tests stub the validator; the public cohort tests
+    # exercise the durable binding and real publisher together.
+    monkeypatch.setattr(
+        "sibyl_core.services.ordinary_publication.ordinary_promotion_binding",
+        AsyncMock(return_value=SimpleNamespace()),
+    )
+    monkeypatch.setattr(
+        "sibyl_core.services.reflection_validation.prepare_stored_reflection",
+        AsyncMock(return_value=SimpleNamespace(sources=[])),
+    )
 
 
 ORG_ID = "00000000-0000-0000-0000-000000000111"

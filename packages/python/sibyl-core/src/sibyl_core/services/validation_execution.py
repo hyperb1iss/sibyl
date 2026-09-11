@@ -16,12 +16,16 @@ from sibyl_core.ai.transport import FailedExtractionUsage, TransportAttempt
 from sibyl_core.services import content_client, validation_receipts
 from sibyl_core.tasks._evidence_json import canonical
 from sibyl_core.tasks.memory_validation import MemoryValidationResult
+from sibyl_core.tasks.ordinary_proposal_result import OrdinaryProposalResult
 from sibyl_core.tasks.procedure_correction_result import ProcedureCorrectionResult
 from sibyl_core.tasks.procedure_review import review_digest
 from sibyl_core.tasks.reflection_correction import ReflectionCorrectionResult
 
 ValidationStageResult = (
-    MemoryValidationResult | ReflectionCorrectionResult | ProcedureCorrectionResult
+    MemoryValidationResult
+    | ReflectionCorrectionResult
+    | ProcedureCorrectionResult
+    | OrdinaryProposalResult
 )
 
 
