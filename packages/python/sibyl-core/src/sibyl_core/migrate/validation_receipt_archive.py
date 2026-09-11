@@ -6,10 +6,18 @@ import json
 from typing import Any
 
 from cryptography.fernet import InvalidToken
-from pydantic import TypeAdapter
 
 from sibyl_core.services import validation_receipts
-from sibyl_core.services.validation_execution import ValidationStageResult, validation_archive_guard
+from sibyl_core.services.validation_execution import validation_archive_guard
+from sibyl_core.services.validation_progress_history import (
+    ProgressHistoryBinding,
+    validate_history_row,
+    validate_progress_assessments,
+)
+from sibyl_core.services.validation_result_codec import (
+    decode_validation_result,
+    validate_result_request,
+)
 from sibyl_core.tasks._evidence_json import canonical
 
 
@@ -21,10 +29,26 @@ def _rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         if identity in result:
             raise ValueError("Duplicate validation archive execution")
         result[identity] = row
+    for row in result.values():
+        history = json.loads(row["request_json"]).get("progress_history")
+        if history is not None and not row["purged"]:
+            binding = ProgressHistoryBinding.model_validate(history)
+            prior = result.get(binding.execution_id)
+            if prior is None or binding.execution_id == row["uuid"]:
+                raise ValueError("Progress archive prior execution is unavailable")
+            critique = validate_history_row(
+                prior, binding, row["organization_id"], row["principal_id"]
+            )
+            if row.get("result_json") is not None:
+                validate_progress_assessments(
+                    decode_validation_result(json.loads(row["result_json"])), critique
+                )
     return result
 
 
-def _status(row: dict[str, Any], ciphertext: bytes | None) -> str:
+def _status(
+    row: dict[str, Any], ciphertext: bytes | None, records: dict[str, dict[str, Any]]
+) -> str:
     if row["purged"]:
         if row.get("recovery_key") is not None:
             raise ValueError("Purged validation archive retains a recovery key")
@@ -34,7 +58,15 @@ def _status(row: dict[str, Any], ciphertext: bytes | None) -> str:
             value = validation_receipts.decode(row["request_json"], row["recovery_key"], ciphertext)
         except InvalidToken:
             raise ValueError("Validation archive ciphertext authentication failed") from None
-        TypeAdapter(ValidationStageResult).validate_python(value)
+        decoded = decode_validation_result(value)
+        request = json.loads(row["request_json"])
+        validate_result_request(decoded, request)
+        if request.get("progress_history") is not None:
+            binding = ProgressHistoryBinding.model_validate(request["progress_history"])
+            prior = validate_history_row(
+                records[binding.execution_id], binding, row["organization_id"], row["principal_id"]
+            )
+            validate_progress_assessments(decoded, prior)
         if row.get("result_json") is not None and canonical(value) != row["result_json"]:
             raise ValueError("Validation archive receipt and database result differ")
         if row.get("usage_json") is not None and canonical(value["usage"]) != row["usage_json"]:
@@ -51,11 +83,12 @@ def _status(row: dict[str, Any], ciphertext: bytes | None) -> str:
 def capture(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Capture only files named by this authorized execution snapshot."""
     entries = []
-    for identity, row in sorted(_rows(rows).items()):
+    records = _rows(rows)
+    for identity, row in sorted(records.items()):
         ciphertext = None
         if not row["purged"] and row.get("recovery_key") is not None:
             ciphertext = validation_receipts.capture(row["request_json"])
-        entry = {"execution_id": identity, "status": _status(row, ciphertext)}
+        entry = {"execution_id": identity, "status": _status(row, ciphertext, records)}
         if ciphertext is not None:
             entry.update(
                 ciphertext=base64.b64encode(ciphertext).decode("ascii"),
@@ -94,7 +127,7 @@ def prepare(section: Any, rows: list[dict[str, Any]]) -> list[tuple[str, str, by
                 raise ValueError("Validation receipt archive checksum differs")
             if row["purged"] or not isinstance(row.get("recovery_key"), str):
                 raise ValueError("Validation receipt archive key is unavailable")
-        if set(entry) != fields or entry.get("status") != _status(row, ciphertext):
+        if set(entry) != fields or entry.get("status") != _status(row, ciphertext, records):
             raise ValueError("Validation receipt archive status differs")
         if ciphertext is not None:
             pending.append((row["request_json"], row["recovery_key"], ciphertext))

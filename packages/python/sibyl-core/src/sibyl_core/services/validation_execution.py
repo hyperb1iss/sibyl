@@ -9,24 +9,20 @@ from typing import Any
 from uuid import uuid4
 
 from cryptography.fernet import Fernet
-from pydantic import TypeAdapter
 
 from sibyl_core.ai.llm.extractor import ExtractionUsage
 from sibyl_core.ai.transport import FailedExtractionUsage, TransportAttempt
 from sibyl_core.services import content_client, validation_receipts
-from sibyl_core.tasks._evidence_json import canonical
-from sibyl_core.tasks.memory_validation import MemoryValidationResult
-from sibyl_core.tasks.ordinary_proposal_result import OrdinaryProposalResult
-from sibyl_core.tasks.procedure_correction_result import ProcedureCorrectionResult
-from sibyl_core.tasks.procedure_review import review_digest
-from sibyl_core.tasks.reflection_correction import ReflectionCorrectionResult
-
-ValidationStageResult = (
-    MemoryValidationResult
-    | ReflectionCorrectionResult
-    | ProcedureCorrectionResult
-    | OrdinaryProposalResult
+from sibyl_core.services.validation_result_codec import (
+    ValidationStageResult,
+    decode_validation_result,
+    encode_validation_result,
+    validate_result_request,
 )
+from sibyl_core.tasks._evidence_json import canonical
+from sibyl_core.tasks.memory_progress import ProgressMemoryValidationResult
+from sibyl_core.tasks.memory_validation import MemoryValidationResult
+from sibyl_core.tasks.procedure_review import review_digest
 
 
 class ValidationExecutionUnavailable(ValueError):
@@ -57,6 +53,7 @@ class ValidationExecution:
         self.authorize = authorize
         self.dispatch_guard = dispatch_guard
         self.guard_params = guard_params or {}
+        self._source_dispatch_guard = dispatch_guard
 
     @property
     def params(self) -> dict[str, str]:
@@ -74,6 +71,7 @@ class ValidationExecution:
         self, *, parent_id: str, source_ids: list[str], policy: str, request: dict[str, Any]
     ) -> bool:
         # The UUID unique index arbitrates only identical operations, not global work.
+        await self._check_progress_history(request)
         await asyncio.to_thread(validation_receipts.ready)
         nonce = uuid4().hex
         recovery_key = Fernet.generate_key().decode()
@@ -113,9 +111,36 @@ class ValidationExecution:
         self._recovery_key = rows[0].get("recovery_key")
         return rows[0].get("claim_id") == nonce
 
+    async def _check_progress_history(
+        self, request: dict[str, Any]
+    ) -> MemoryValidationResult | None:
+        from sibyl_core.services.validation_progress_history import (
+            ProgressHistoryBinding,
+            progress_history_guard,
+            validate_history_row,
+        )
+
+        value = request.get("progress_history")
+        if value is None:
+            return
+        binding = ProgressHistoryBinding.model_validate(value)
+        if binding.execution_id == self.id:
+            raise ValidationExecutionUnavailable("Progress history cannot reference itself")
+        row = await ValidationExecution(binding.execution_id, self.org, self.principal).load()
+        if row is None:
+            raise ValidationExecutionUnavailable("Progress prior execution disappeared")
+        prior = validate_history_row(row, binding, self.org, self.principal)
+        self.dispatch_guard = self._source_dispatch_guard + progress_history_guard(
+            binding, self.org, self.principal
+        )
+        return prior
+
     async def before_dispatch(self) -> str:
         if self.authorize is not None:
             await self.authorize()
+        row = await self.load()
+        if row is not None and self._matches_request(row):
+            await self._check_progress_history(json.loads(row["request_json"]))
         attempt_id = uuid4().hex
         rows = await _query(
             "RETURN {"
@@ -158,10 +183,11 @@ class ValidationExecution:
 
     @staticmethod
     def _result_value(result: ValidationStageResult) -> dict[str, Any]:
-        return TypeAdapter(ValidationStageResult).dump_python(result, mode="json")
+        return encode_validation_result(result)
 
     async def record_result(self, result: ValidationStageResult) -> None:
         value = self._result_value(result)
+        validate_result_request(result, json.loads(self._request_json))
         if self._recovery_key is None:
             raise ValidationExecutionUnavailable("Execution has no durable receipt key")
         await asyncio.to_thread(
@@ -200,7 +226,7 @@ class ValidationExecution:
         )
         if value is None:
             return False
-        result = TypeAdapter(ValidationStageResult).validate_python(value)
+        result = decode_validation_result(value)
         recovered = await self.reconcile_result(result)
         if recovered:
             await asyncio.to_thread(validation_receipts.discard, row["request_json"])
@@ -233,6 +259,7 @@ class ValidationExecution:
             return False
         assert row is not None
         request_json = row["request_json"]
+        validate_result_request(result, json.loads(request_json))
         if row.get("state") == "running":
             await _query(
                 """UPDATE memory_validation_executions SET state = 'recorded',
@@ -310,7 +337,16 @@ class ValidationExecution:
             raise ValidationExecutionUnavailable(
                 f"Validation has no available completed result: {row.get('state') if row else 'missing'}"
             )
-        TypeAdapter(ValidationStageResult).validate_json(row["result_json"])
+        decoded = decode_validation_result(json.loads(row["result_json"]))
+        validate_result_request(decoded, json.loads(row["request_json"]))
+        prior = await self._check_progress_history(json.loads(row["request_json"]))
+        if isinstance(decoded, ProgressMemoryValidationResult):
+            from sibyl_core.services.validation_progress_history import (
+                validate_progress_assessments,
+            )
+
+            assert prior is not None
+            validate_progress_assessments(decoded, prior)
         return {"execution_id": self.id, **json.loads(row["result_json"])}
 
 
@@ -394,7 +430,8 @@ def validation_archive_guard(table: str, record: dict[str, Any]) -> str:
     if sorted(binding["source_id"] for binding in bindings) != sorted(record["source_ids"]):
         raise ValueError("Validation archive source set differs")
     if record.get("result_json") is not None:
-        TypeAdapter(ValidationStageResult).validate_json(record["result_json"])
+        decoded = decode_validation_result(json.loads(record["result_json"]))
+        validate_result_request(decoded, request)
         if record.get("purged"):
             raise ValueError("Purged validation cannot retain readable output")
     clauses = []
