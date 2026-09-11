@@ -3316,12 +3316,26 @@ class TestExploreTool:
             )
         )
 
-        with patch(
-            "sibyl_core.tools.explore.get_graph_runtime",
-            AsyncMock(
-                return_value=make_graph_runtime(
-                    relationship_manager=relationship_manager,
-                )
+        seed = MockEntity(
+            id="task_visible",
+            entity_type=EntityType.TASK,
+            name="Seed",
+            project_id="project_visible",
+        )
+        stored = {row.id: row for row in (seed, visible, hidden, unassigned)}
+
+        async def available(_org, ids, **_kwargs):
+            return {key: stored[key] for key in ids if key in stored}
+
+        with (
+            patch("sibyl_core.tools.explore.available_graph_entities", side_effect=available),
+            patch(
+                "sibyl_core.tools.explore.get_graph_runtime",
+                AsyncMock(
+                    return_value=make_graph_runtime(
+                        relationship_manager=relationship_manager,
+                    )
+                ),
             ),
         ):
             response = await explore(

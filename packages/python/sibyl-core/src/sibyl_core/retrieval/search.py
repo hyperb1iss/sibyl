@@ -215,6 +215,7 @@ async def context_search(
     direct_lists, direct_supersession_metadata = await lifecycle_stage._apply_supersession_gate(
         client=client,
         group_id=search_plan.organization_id,
+        plan=search_plan,
         source_lists=direct_lists,
     )
     stage_timings_ms["candidate_filtering"] = _elapsed_ms(stage_started_at)
@@ -257,6 +258,7 @@ async def context_search(
     ) = await lifecycle_stage._apply_supersession_gate(
         client=client,
         group_id=search_plan.organization_id,
+        plan=search_plan,
         source_lists=[
             (
                 RetrievalSignal.GRAPH_EXPANSION,
