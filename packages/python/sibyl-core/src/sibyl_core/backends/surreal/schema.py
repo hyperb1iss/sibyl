@@ -32,6 +32,7 @@ from sibyl_core.backends.surreal.schema_source_states import (
     retire_source_states,
     source_state_event,
 )
+from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WITNESS_DEFINITION
 from sibyl_core.backends.surreal.schema_version import (
     GRAPH_SCHEMA_CURRENT_VERSION,
     SCHEMA_VERSION_TABLE,
@@ -856,6 +857,11 @@ GRAPH_SCHEMA_MIGRATIONS = (
     ),
     SchemaMigration(
         version=26, name="graph_source_integrity", action=migrate_graph_source_integrity
+    ),
+    SchemaMigration(
+        version=27,
+        name="graph_source_write_witness",
+        statements=tuple(split_statements(SOURCE_STATE_WITNESS_DEFINITION)),
     ),
 )
 

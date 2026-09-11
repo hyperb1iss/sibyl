@@ -82,16 +82,7 @@ async def _complete_operational_manifest(
     from sibyl.locks import entity_lock
 
     async with entity_lock(group_id, expected.id, blocking=True):
-        state = await _load_operational_manifest_state(entity_manager, expected)
-        if state != "pending":
-            return state
-        written = await entity_manager.create_direct_bulk(
-            (expected,),
-            generate_embeddings=False,
-        )
-        if expected.id not in written:
-            raise RuntimeError("failed to complete operational embedding manifest")
-        return "completed"
+        return await entity_manager.complete_embedding_manifest(expected)
 
 
 def serialize_memory_policy_context(
@@ -971,6 +962,10 @@ async def backfill_entity_embeddings(
             )
             if manifest_state == "missing":
                 raise RuntimeError("operational embedding manifest is missing")
+            if manifest_state == "complete":
+                manifest_state = await runtime.entity_manager.complete_embedding_manifest(
+                    expected_manifest, complete=False
+                )
             if manifest_state in {"complete", "stale"}:
                 return {
                     "entities": 0,
@@ -993,6 +988,10 @@ async def backfill_entity_embeddings(
                     runtime.entity_manager,
                     expected_manifest,
                 )
+                if manifest_state == "complete":
+                    manifest_state = await runtime.entity_manager.complete_embedding_manifest(
+                        expected_manifest, complete=False
+                    )
                 if manifest_state in {"complete", "stale"}:
                     return {
                         "entities": len(created_ids),
@@ -1003,11 +1002,6 @@ async def backfill_entity_embeddings(
                         "manifest_state": manifest_state,
                     }
             missing_ids = sorted(expected_entity_ids - set(created_ids))
-            # A refused write is not a missing row: operational ids are
-            # stable, so a re-capture between enqueue and drain updates the
-            # row and the currency fence rightly refuses the stale payload
-            # while the newer capture's own backfill owns the current text.
-            # Only rows that are actually gone fail the job.
             present = await runtime.entity_manager.get_many(missing_ids)
             present_ids = {entity.id for entity in present}
             stale_entity_ids = [entity_id for entity_id in missing_ids if entity_id in present_ids]
@@ -1022,6 +1016,15 @@ async def backfill_entity_embeddings(
                 entity_ids=stale_entity_ids,
                 group_id=group_id,
             )
+            # Reconcile current evidence through the same text-fenced writer.
+            # A second change leaves the manifest incomplete for a later drain.
+            refreshed_ids = await _retry_surreal_write_conflict(
+                "entity_embedding_backfill_current_entities",
+                lambda: runtime.entity_manager.backfill_embeddings_if_current(present),
+            )
+            created_ids = list(dict.fromkeys([*created_ids, *refreshed_ids]))
+            if expected_entity_ids - set(created_ids):
+                raise RuntimeError("entity embedding evidence changed during reconciliation")
 
         relationship_ids: list[str] = []
         if relationships:
@@ -1062,6 +1065,10 @@ async def backfill_entity_embeddings(
             )
             if manifest_state == "missing":
                 raise RuntimeError("operational embedding manifest disappeared")
+            if manifest_state == "incomplete":
+                raise RuntimeError(
+                    "operational embedding manifest has incomplete current embeddings"
+                )
 
     result = {
         "entities": len(created_ids),

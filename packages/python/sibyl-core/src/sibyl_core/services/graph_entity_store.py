@@ -9,6 +9,7 @@ from typing import Any
 
 from sibyl_core.backends.surreal.connection import _is_transient_connection_error
 from sibyl_core.backends.surreal.schema import EMBEDDING_DIM, render_surreal_compatible_sql
+from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.embeddings.providers import entity_embedding_text
 from sibyl_core.memory_pipeline.retrieval_keys import coerce_retrieval_keys
 from sibyl_core.models.entities import Entity, EntityType
@@ -570,6 +571,79 @@ WHERE group_id = $group_id
   AND (attributes.summary ?? '') = $rows_by_uuid[uuid].summary
 RETURN AFTER;
 """
+
+
+async def _complete_embedding_manifest(
+    client: SurrealGraphClient,
+    expected: Entity,
+    *,
+    group_id: str,
+    embedding_metadata: Mapping[str, object],
+    complete: bool,
+) -> str:
+    """Fence completion against the current inventory and embedding coverage."""
+    rows = normalize_records(
+        await client.execute_query(
+            """
+            RETURN {
+                LET $manifest = (SELECT * FROM entity
+                    WHERE group_id = $group_id AND uuid = $uuid LIMIT 1)[0];
+                IF $manifest = NONE { RETURN {state: 'missing'}; };
+                IF $manifest.entity_type != 'artifact'
+                    OR $manifest.attributes.projection_kind != 'manifest'
+                    OR $manifest.attributes.operational_source_id != $expected.operational_source_id
+                    OR $manifest.attributes.operational_schema_version != $expected.operational_schema_version
+                    OR $manifest.attributes.operational_content_hash != $expected.operational_content_hash
+                    OR $manifest.attributes.project_id != $expected.project_id
+                    OR $manifest.attributes.expected_entity_ids != $expected.expected_entity_ids
+                    OR $manifest.attributes.expected_relationship_ids != $expected.expected_relationship_ids
+                    OR $manifest.attributes.operational_projection_state NOT IN ['embedding_pending', 'complete']
+                { RETURN {state: 'stale'}; };
+                LET $witnesses = $source_identities.map(|$identity|
+                    type::record(string::concat('source_states:',
+                        crypto::sha256(type::string($identity)))));
+                LET $source_states_to_fence = SELECT * FROM $witnesses;
+                IF array::len($source_states_to_fence) != array::len($witnesses)
+                    OR array::len($source_states_to_fence.filter(|$state| $state.deleted != false)) > 0
+                    { RETURN {state: 'incomplete'}; };
+                LET $sources = $expected.expected_entity_ids.map(|$source| {
+                    RETURN (SELECT uuid, group_id, entity_type, name_embedding,
+                        attributes.embedding_metadata AS embedding_metadata FROM entity
+                        WHERE uuid = $source LIMIT 1)[0];
+                });
+                IF array::len($sources.filter(|$source| $source = NONE)) > 0
+                    { RETURN {state: 'incomplete'}; };
+                LET $missing = SELECT uuid FROM $sources WHERE group_id != $group_id
+                    OR (entity_type != 'artifact' AND (
+                        name_embedding = NONE OR name_embedding = NULL
+                        OR array::len(name_embedding ?? []) != $dimensions
+                        OR embedding_metadata != $embedding_metadata));
+                IF array::len($missing) > 0 { RETURN {state: 'incomplete'}; };
+                IF $manifest.attributes.operational_projection_state = 'complete'
+                    { RETURN {state: 'complete'}; };
+                IF $complete = false { RETURN {state: 'ready'}; };
+                __SOURCE_STATE_WRITE_WITNESS__
+                UPDATE $manifest.id SET attributes.operational_projection_state = 'complete',
+                    revision = (revision ?? 0) + 1,
+                    attributes.updated_at = time::now(), updated_at = time::now();
+                RETURN {state: 'completed'};
+            };
+            """.replace("__SOURCE_STATE_WRITE_WITNESS__", SOURCE_STATE_WRITE_WITNESS),
+            group_id=group_id,
+            uuid=expected.id,
+            expected=expected.metadata,
+            dimensions=embedding_metadata["dimensions"],
+            embedding_metadata=dict(embedding_metadata),
+            complete=complete,
+            source_identities=[
+                [group_id, "graph_entity", identity]
+                for identity in dict.fromkeys(expected.metadata["expected_entity_ids"])
+            ],
+        )
+    )
+    if len(rows) != 1 or not isinstance(rows[0].get("state"), str):
+        raise RuntimeError("invalid embedding manifest completion result")
+    return str(rows[0]["state"])
 
 
 async def _update_entity_embeddings_if_current(
