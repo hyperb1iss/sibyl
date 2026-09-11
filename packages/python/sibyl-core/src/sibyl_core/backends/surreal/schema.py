@@ -2,13 +2,37 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import asyncio
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, cast
 
 import structlog
 
+from sibyl_core.backends.surreal.schema_derivations import DERIVATION_DEFINITIONS
 from sibyl_core.backends.surreal.schema_helpers import execute_schema_statement, split_statements
+from sibyl_core.backends.surreal.schema_index_recovery import ensure_owned_concurrent_index
+from sibyl_core.backends.surreal.schema_lifecycle_repair import (
+    LIFECYCLE_REPAIR_FIELDS,
+    migrate_lifecycle_repair,
+)
+from sibyl_core.backends.surreal.schema_ownership import (
+    SchemaOwnership,
+    try_acquire_schema_ownership,
+)
+from sibyl_core.backends.surreal.schema_source_integrity import (
+    migrate_graph_source_integrity,
+    prepare_source_integrity_upgrade,
+)
+from sibyl_core.backends.surreal.schema_source_states import (
+    SOURCE_STATE_DEFINITIONS,
+    migrate_graph_source_states,
+    retire_source_states,
+    source_state_event,
+)
+from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WITNESS_DEFINITION
 from sibyl_core.backends.surreal.schema_version import (
     GRAPH_SCHEMA_CURRENT_VERSION,
     SCHEMA_VERSION_TABLE,
@@ -18,11 +42,12 @@ from sibyl_core.backends.surreal.schema_version import (
     apply_schema_migrations,
     ensure_schema_version_table,
     get_schema_embedding_dimension,
+    get_schema_embedding_rebuild_dimension,
     get_schema_version,
-    rebuild_index_concurrently,
     record_schema_version,
 )
 from sibyl_core.config import core_config
+from sibyl_core.memory_pipeline.observations import SourceKind
 from sibyl_core.models.entities import EntityType
 
 if TYPE_CHECKING:
@@ -108,6 +133,11 @@ DEFINE FIELD IF NOT EXISTS retrieval_keys_normalized ON entity TYPE option<array
 DEFINE FIELD IF NOT EXISTS name_embedding ON entity TYPE option<array<float, {EMBEDDING_DIM}>>;
 
 DEFINE INDEX IF NOT EXISTS idx_entity_uuid ON entity FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_entity_raw_sources ON entity FIELDS attributes.raw_source_ids.*;
+DEFINE INDEX IF NOT EXISTS idx_entity_raw_memory ON entity FIELDS attributes.raw_memory_id;
+DEFINE INDEX IF NOT EXISTS idx_entity_review_capture ON entity FIELDS attributes.review_capture_id;
+DEFINE INDEX IF NOT EXISTS idx_entity_projection_parent ON entity FIELDS attributes.parent_entity_id;
+DEFINE INDEX IF NOT EXISTS idx_entity_projection_source ON entity FIELDS attributes.source_entity_id;
 DEFINE INDEX IF NOT EXISTS idx_entity_type ON entity FIELDS entity_type;
 DEFINE INDEX IF NOT EXISTS idx_entity_labels ON entity FIELDS labels.*;
 DEFINE INDEX IF NOT EXISTS idx_entity_project ON entity FIELDS project_id;
@@ -563,6 +593,48 @@ DEFINE FIELD OVERWRITE retrieval_keys_normalized ON entity TYPE option<array<str
 DEFINE INDEX OVERWRITE idx_entity_retrieval_keys ON entity FIELDS retrieval_keys_normalized.*;
 """
 
+# Rebuilding indexes rewrites rows under the strict schema. Restore missing
+# canonical field declarations before a rebuild can discard existing values.
+ENTITY_SOURCE_LINEAGE_INDEX_DEFINITIONS = f"""
+DEFINE FIELD IF NOT EXISTS uuid ON entity TYPE string;
+DEFINE FIELD IF NOT EXISTS name ON entity TYPE string;
+DEFINE FIELD IF NOT EXISTS entity_type ON entity TYPE string;
+DEFINE FIELD IF NOT EXISTS summary ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS description ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS content ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS labels ON entity TYPE array<string> DEFAULT [];
+DEFINE FIELD IF NOT EXISTS attributes ON entity TYPE object FLEXIBLE DEFAULT {{}};
+DEFINE FIELD IF NOT EXISTS group_id ON entity TYPE string;
+DEFINE FIELD IF NOT EXISTS created_at ON entity TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS updated_at ON entity TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS created_by ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS modified_by ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS revision ON entity TYPE option<int> DEFAULT 1;
+DEFINE FIELD IF NOT EXISTS last_recalled_at ON entity TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS last_used_at ON entity TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS retrieval_count ON entity TYPE option<int> DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS citation_count ON entity TYPE option<int> DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS misled_count ON entity TYPE option<int> DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS project_id ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS epic_id ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS parent_task_id ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS task_id ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS status ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS priority ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS complexity ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS feature ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS tags ON entity TYPE option<array<string>>;
+DEFINE FIELD IF NOT EXISTS memory_scope ON entity TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS retrieval_keys ON entity TYPE option<array<string>>;
+DEFINE FIELD IF NOT EXISTS retrieval_keys_normalized ON entity TYPE option<array<string>>;
+DEFINE FIELD IF NOT EXISTS name_embedding ON entity TYPE option<array<float, {EMBEDDING_DIM}>>;
+DEFINE INDEX IF NOT EXISTS idx_entity_raw_sources ON entity FIELDS attributes.raw_source_ids.*;
+DEFINE INDEX IF NOT EXISTS idx_entity_raw_memory ON entity FIELDS attributes.raw_memory_id;
+DEFINE INDEX IF NOT EXISTS idx_entity_review_capture ON entity FIELDS attributes.review_capture_id;
+DEFINE INDEX IF NOT EXISTS idx_entity_projection_parent ON entity FIELDS attributes.parent_entity_id;
+DEFINE INDEX IF NOT EXISTS idx_entity_projection_source ON entity FIELDS attributes.source_entity_id;
+"""
+
 # Same element-vs-array distinction as idx_entity_retrieval_keys above: the
 # bare-array shape answers CONTAINS with a table scan and bare equality with
 # zero rows on SurrealDB 3.2.3. OVERWRITE converts the index every existing
@@ -749,10 +821,54 @@ GRAPH_SCHEMA_MIGRATIONS = (
         name="relation_created_at_cursor",
         statements=tuple(split_statements(RELATION_CREATED_AT_CURSOR_MIGRATION_DEFINITIONS)),
     ),
+    SchemaMigration(
+        version=21,
+        name="entity_source_lineage_indexes",
+        statements=tuple(split_statements(ENTITY_SOURCE_LINEAGE_INDEX_DEFINITIONS)),
+    ),
+    SchemaMigration(
+        version=22,
+        name="entity_lifecycle_repair_index",
+    ),
+    SchemaMigration(
+        version=23,
+        name="entity_lifecycle_repair_key_batches",
+        statements=tuple(split_statements(LIFECYCLE_REPAIR_FIELDS)),
+        action=migrate_lifecycle_repair,
+    ),
+    SchemaMigration(
+        version=24,
+        name="graph_source_states",
+        statements=(
+            *split_statements(SOURCE_STATE_DEFINITIONS),
+            source_state_event(SourceKind.GRAPH_ENTITY),
+        ),
+        action=migrate_graph_source_states,
+    ),
+    SchemaMigration(
+        version=25,
+        name="graph_observation_associations",
+        statements=(
+            *split_statements(DERIVATION_DEFINITIONS),
+            source_state_event(SourceKind.GRAPH_ENTITY, retire_derivations=True).replace(
+                "DEFINE EVENT IF NOT EXISTS", "DEFINE EVENT OVERWRITE"
+            ),
+        ),
+    ),
+    SchemaMigration(
+        version=26, name="graph_source_integrity", action=migrate_graph_source_integrity
+    ),
+    SchemaMigration(
+        version=27,
+        name="graph_source_write_witness",
+        statements=tuple(split_statements(SOURCE_STATE_WITNESS_DEFINITION)),
+    ),
 )
 
 
-def _graph_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
+def _graph_schema_migrations(
+    *, url: str, ownership: SchemaOwnership | None = None
+) -> tuple[SchemaMigration, ...]:
     return tuple(
         SchemaMigration(
             version=migration.version,
@@ -760,6 +876,19 @@ def _graph_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             statements=tuple(
                 render_surreal_compatible_sql(statement, url=url)
                 for statement in migration.statements
+            ),
+            action=(
+                partial(
+                    migrate_lifecycle_repair,
+                    concurrent=not url.startswith(_EMBEDDED_SURREAL_SCHEMES),
+                    ownership=ownership,
+                )
+                if migration.action is migrate_lifecycle_repair
+                else partial(migrate_graph_source_states, ownership=ownership)
+                if migration.action is migrate_graph_source_states
+                else partial(migrate_graph_source_integrity, ownership=ownership)
+                if migration.action is migrate_graph_source_integrity
+                else migration.action
             ),
         )
         for migration in GRAPH_SCHEMA_MIGRATIONS
@@ -806,6 +935,7 @@ async def rebuild_embedding_indexes_for_dimension(
     driver: SchemaDriver,
     *,
     dimension: int,
+    ownership: SchemaOwnership | None = None,
 ) -> None:
     """Resize every HNSW vector field/index to ``dimension`` and record the new size.
 
@@ -817,26 +947,42 @@ async def rebuild_embedding_indexes_for_dimension(
         msg = "rebuild_embedding_indexes_for_dimension requires driver.clone(group_id) first"
         raise ValueError(msg)
 
+    if ownership is None:
+        async with _graph_schema_ownership(driver) as acquired:
+            await ensure_schema_version_table(acquired.mutate, group_id=driver.group_id)
+            await rebuild_embedding_indexes_for_dimension(
+                driver, dimension=dimension, ownership=acquired
+            )
+        return
+
+    await ownership.mutate(
+        "UPDATE schema_version:graph SET embedding_rebuild_dimension = $dimension RETURN NONE;",
+        dimension=dimension,
+    )
     for vector_field in EMBEDDING_VECTOR_FIELDS:
         await execute_schema_statement(
-            driver.execute_query,
+            ownership.mutate,
             vector_field.clear_statement(),
             scope="graph_embedding_dimension_rebuild",
             group_id=driver.group_id,
         )
         await execute_schema_statement(
-            driver.execute_query,
+            ownership.mutate,
             vector_field.field_redefinition(dimension),
             scope="graph_embedding_dimension_rebuild",
             group_id=driver.group_id,
         )
-        await rebuild_index_concurrently(
-            driver.execute_query,
-            vector_field.index_definition(dimension),
-        )
+        definition = vector_field.index_definition(dimension)
+        if _store_supports_concurrent_rebuild(driver._url):
+            await ensure_owned_concurrent_index(ownership, definition, rebuild=True)
+        else:
+            await ownership.mutate(
+                f"REMOVE INDEX IF EXISTS {definition.name} ON {definition.table};\n"
+                f"{definition.definition};"
+            )
 
     await record_schema_version(
-        driver.execute_query,
+        ownership.mutate,
         version=GRAPH_SCHEMA_CURRENT_VERSION,
         migrations=list(GRAPH_SCHEMA_MIGRATIONS),
         embedding_dimension=dimension,
@@ -849,14 +995,20 @@ async def rebuild_embedding_indexes_for_dimension(
 
 
 def _store_supports_concurrent_rebuild(url: str) -> bool:
-    return not url.startswith(("memory://", "surrealkv://"))
+    return not url.startswith(_EMBEDDED_SURREAL_SCHEMES)
 
 
-async def _reconcile_embedding_dimension(driver: SchemaDriver) -> None:
-    recorded = await get_schema_embedding_dimension(driver.execute_query)
+async def _reconcile_embedding_dimension(driver: SchemaDriver, ownership: SchemaOwnership) -> None:
+    pending = await get_schema_embedding_rebuild_dimension(ownership.read)
+    if pending is not None:
+        await rebuild_embedding_indexes_for_dimension(
+            driver, dimension=EMBEDDING_DIM, ownership=ownership
+        )
+        return
+    recorded = await get_schema_embedding_dimension(ownership.read)
     if recorded is None:
         await record_schema_version(
-            driver.execute_query,
+            ownership.mutate,
             version=GRAPH_SCHEMA_CURRENT_VERSION,
             migrations=list(GRAPH_SCHEMA_MIGRATIONS),
             embedding_dimension=EMBEDDING_DIM,
@@ -879,7 +1031,9 @@ async def _reconcile_embedding_dimension(driver: SchemaDriver) -> None:
         recorded_dimension=recorded,
         configured_dimension=EMBEDDING_DIM,
     )
-    await rebuild_embedding_indexes_for_dimension(driver, dimension=EMBEDDING_DIM)
+    await rebuild_embedding_indexes_for_dimension(
+        driver, dimension=EMBEDDING_DIM, ownership=ownership
+    )
 
 
 def _is_relation_cleanup_statement(statement: str) -> bool:
@@ -925,10 +1079,13 @@ def _first_count_value(value: object) -> object:
     return None
 
 
-async def _dead_graph_object_count(driver: SchemaDriver, table: str) -> int:
+async def _dead_graph_object_count(
+    driver: SchemaDriver, table: str, *, ownership: SchemaOwnership | None = None
+) -> int:
     _validate_identifier(table)
     try:
-        result = await driver.execute_query(f"SELECT count() AS count FROM {table} GROUP ALL;")
+        execute = ownership.read if ownership is not None else driver.execute_query
+        result = await execute(f"SELECT count() AS count FROM {table} GROUP ALL;")
     except Exception as exc:
         if _is_missing_table_error(exc):
             return 0
@@ -936,10 +1093,12 @@ async def _dead_graph_object_count(driver: SchemaDriver, table: str) -> int:
     return _coerce_count(_first_count_value(result))
 
 
-async def _ensure_removed_graph_objects_empty(driver: SchemaDriver) -> None:
+async def _ensure_removed_graph_objects_empty(
+    driver: SchemaDriver, *, ownership: SchemaOwnership | None = None
+) -> None:
     occupied: dict[str, int] = {}
     for table in REMOVED_GRAPH_OBJECTS:
-        count = await _dead_graph_object_count(driver, table)
+        count = await _dead_graph_object_count(driver, table, ownership=ownership)
         if count:
             occupied[table] = count
 
@@ -956,6 +1115,7 @@ async def _assert_graph_migrations_safe(
     driver: SchemaDriver,
     *,
     current_version: int,
+    ownership: SchemaOwnership | None = None,
 ) -> None:
     if current_version >= 8:
         return
@@ -965,6 +1125,7 @@ async def _assert_graph_migrations_safe(
         table="entity",
         field="entity_type",
         allowed=_GRAPH_ENTITY_TYPE_VALUES,
+        ownership=ownership,
     )
     if invalid_entity_type is not None:
         raise RuntimeError(
@@ -979,11 +1140,13 @@ async def _first_invalid_graph_enum_value(
     table: str,
     field: str,
     allowed: tuple[str, ...],
+    ownership: SchemaOwnership | None = None,
 ) -> str | None:
     _validate_identifier(table)
     _validate_identifier(field)
     try:
-        result = await driver.execute_query(
+        execute = ownership.read if ownership is not None else driver.execute_query
+        result = await execute(
             f"""
             SELECT {field}
             FROM {table}
@@ -1020,11 +1183,91 @@ def render_surreal_compatible_sql(sql: str, *, url: str) -> str:
     if not url.startswith(_EMBEDDED_SURREAL_SCHEMES):
         rendered = (
             rendered.replace("type::is::string", "type::is_string")
+            .replace("type::is::object", "type::is_object")
+            .replace("type::is::array", "type::is_array")
+            .replace("type::is::int", "type::is_int")
             .replace("type::is::number", "type::is_number")
             .replace("type::is::datetime", "type::is_datetime")
             .replace("string::is::datetime", "string::is_datetime")
         )
     return rendered
+
+
+async def _renew_schema_ownership(ownership: SchemaOwnership) -> None:
+    while True:
+        await asyncio.sleep(ownership.lease_seconds / 3)
+        await ownership.heartbeat()
+
+
+@asynccontextmanager
+async def _graph_schema_ownership(driver: SchemaDriver) -> AsyncIterator[SchemaOwnership]:
+    async with driver.schema_lease_executor() as lease_execute:
+        ownership = await try_acquire_schema_ownership(
+            lease_execute,
+            mutation_execute=driver.execute_query,
+            renew_after_operation=driver._url.startswith(_EMBEDDED_SURREAL_SCHEMES),
+        )
+        while ownership is None:
+            await asyncio.sleep(0.2)
+            active = await lease_execute(
+                "SELECT owner FROM schema_lease:graph WHERE deadline > time::now();"
+            )
+            if not isinstance(active, list):
+                raise TypeError("schema ownership wait expected a record list")
+            if not active:
+                ownership = await try_acquire_schema_ownership(
+                    lease_execute,
+                    initialize=False,
+                    mutation_execute=driver.execute_query,
+                    renew_after_operation=driver._url.startswith(_EMBEDDED_SURREAL_SCHEMES),
+                )
+        try:
+            try:
+                async with asyncio.TaskGroup() as tasks:
+                    renewal = (
+                        tasks.create_task(_renew_schema_ownership(ownership))
+                        if _store_supports_concurrent_rebuild(driver._url)
+                        else None
+                    )
+                    try:
+                        yield ownership
+                    finally:
+                        if renewal is not None:
+                            renewal.cancel()
+            except BaseExceptionGroup as exc:
+                if len(exc.exceptions) == 1:
+                    raise exc.exceptions[0] from None
+                raise
+        except BaseException:
+            try:
+                await ownership.release()
+            except Exception as exc:
+                logger.warning(
+                    "surreal_schema_lease_release_failed",
+                    group_id=driver.group_id,
+                    error_type=type(exc).__name__,
+                )
+            raise
+        else:
+            await ownership.release()
+
+
+async def _graph_schema_is_current(driver: SchemaDriver) -> bool:
+    try:
+        if await get_schema_version(driver.execute_query) < GRAPH_SCHEMA_CURRENT_VERSION:
+            return False
+        if await get_schema_embedding_dimension(driver.execute_query) != EMBEDDING_DIM:
+            return False
+        if await get_schema_embedding_rebuild_dimension(driver.execute_query) is not None:
+            return False
+        active = await driver.execute_query(
+            "SELECT owner FROM schema_lease:graph WHERE deadline > time::now();"
+        )
+    except Exception as exc:
+        if _is_missing_table_error(exc):
+            return False
+        raise
+    return not active
 
 
 async def bootstrap_schema(
@@ -1037,28 +1280,47 @@ async def bootstrap_schema(
         msg = "bootstrap_schema requires driver.clone(group_id) first"
         raise ValueError(msg)
 
+    if not reset and not force and await _graph_schema_is_current(driver):
+        return
+    async with _graph_schema_ownership(driver) as ownership:
+        await _bootstrap_owned_schema(driver, ownership, reset=reset, force=force)
+
+
+async def _bootstrap_owned_schema(
+    driver: SchemaDriver,
+    ownership: SchemaOwnership,
+    *,
+    reset: bool,
+    force: bool,
+) -> None:
+    await prepare_source_integrity_upgrade(ownership.read, ownership=ownership)
+    current_version = 0
     if reset:
+        await retire_source_states(ownership.mutate, kind=SourceKind.GRAPH_ENTITY)
         for table in (*GRAPH_EDGES, *GRAPH_TABLES, *REMOVED_GRAPH_EDGES, *REMOVED_GRAPH_TABLES):
-            await driver.execute_query(f"REMOVE TABLE IF EXISTS {table};")
-        await driver.execute_query(f"REMOVE TABLE IF EXISTS {SCHEMA_VERSION_TABLE};")
+            await ownership.mutate(f"REMOVE TABLE IF EXISTS {table};")
+        await ownership.mutate(f"REMOVE TABLE IF EXISTS {SCHEMA_VERSION_TABLE};")
     else:
-        await ensure_schema_version_table(driver.execute_query, group_id=driver.group_id)
-        current_version = await get_schema_version(driver.execute_query)
+        await ensure_schema_version_table(ownership.mutate, group_id=driver.group_id)
+        current_version = await get_schema_version(ownership.read)
         if current_version >= GRAPH_SCHEMA_CURRENT_VERSION:
             if not force:
-                await _reconcile_embedding_dimension(driver)
+                await _reconcile_embedding_dimension(driver, ownership)
                 return
         elif current_version > 0 and not force:
-            await _assert_graph_migrations_safe(driver, current_version=current_version)
-            await _ensure_removed_graph_objects_empty(driver)
-            await apply_schema_migrations(
-                driver.execute_query,
-                _graph_schema_migrations(url=driver._url),
-                group_id=driver.group_id,
+            await _assert_graph_migrations_safe(
+                driver, current_version=current_version, ownership=ownership
             )
-            await _reconcile_embedding_dimension(driver)
+            await _ensure_removed_graph_objects_empty(driver, ownership=ownership)
+            await apply_schema_migrations(
+                ownership.read,
+                _graph_schema_migrations(url=driver._url, ownership=ownership),
+                group_id=driver.group_id,
+                ownership=ownership,
+            )
+            await _reconcile_embedding_dimension(driver, ownership)
             return
-        await _ensure_removed_graph_objects_empty(driver)
+        await _ensure_removed_graph_objects_empty(driver, ownership=ownership)
 
     compatible_blocks = (
         ANALYZER_DEFINITIONS,
@@ -1071,13 +1333,26 @@ async def bootstrap_schema(
             driver,
             block,
             ignore_missing_relation_tables=block == RELATION_EDGE_CLEANUP_DEFINITIONS,
+            ownership=ownership,
+        )
+    if force and not reset and current_version >= 23:
+        for statement in split_statements(LIFECYCLE_REPAIR_FIELDS):
+            await execute_schema_statement(
+                ownership.mutate, statement, scope="graph", group_id=driver.group_id
+            )
+        await migrate_lifecycle_repair(
+            ownership.read,
+            concurrent=not driver._url.startswith(_EMBEDDED_SURREAL_SCHEMES),
+            resume=False,
+            ownership=ownership,
         )
     await apply_schema_migrations(
-        driver.execute_query,
-        _graph_schema_migrations(url=driver._url),
+        ownership.read,
+        _graph_schema_migrations(url=driver._url, ownership=ownership),
         group_id=driver.group_id,
+        ownership=ownership,
     )
-    await _reconcile_embedding_dimension(driver)
+    await _reconcile_embedding_dimension(driver, ownership)
 
 
 async def _execute_graph_schema_block(
@@ -1085,12 +1360,13 @@ async def _execute_graph_schema_block(
     block: str,
     *,
     ignore_missing_relation_tables: bool = False,
+    ownership: SchemaOwnership | None = None,
 ) -> bool:
     skipped_missing_relation_table = False
     for statement in split_statements(block):
         try:
             await execute_schema_statement(
-                driver.execute_query,
+                ownership.mutate if ownership is not None else driver.execute_query,
                 statement,
                 scope="graph",
                 group_id=driver.group_id,
@@ -1111,19 +1387,25 @@ async def _execute_graph_schema_block(
     return skipped_missing_relation_table
 
 
-async def drop_all_indexes(driver: SchemaDriver) -> None:
+async def drop_all_indexes(
+    driver: SchemaDriver, *, ownership: SchemaOwnership | None = None
+) -> None:
     if not driver.group_id:
+        return
+    if ownership is None:
+        async with _graph_schema_ownership(driver) as acquired:
+            await drop_all_indexes(driver, ownership=acquired)
         return
 
     for table in (*GRAPH_TABLES, *GRAPH_EDGES):
-        info = await driver.execute_query(f"INFO FOR TABLE {table};")
+        info = await ownership.read(f"INFO FOR TABLE {table};")
         index_names = _index_names_from_info(info)
         if not index_names and isinstance(info, list) and info:
             index_names = _index_names_from_info(info[0])
 
         for index_name in index_names:
             _validate_identifier(index_name)
-            await driver.execute_query(f"REMOVE INDEX IF EXISTS {index_name} ON TABLE {table};")
+            await ownership.mutate(f"REMOVE INDEX IF EXISTS {index_name} ON TABLE {table};")
 
 
 __all__ = [

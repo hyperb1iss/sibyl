@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import shutil
 import subprocess
 
@@ -106,7 +107,15 @@ requires_helm = pytest.mark.skipif(_HELM_BINARY is None, reason="helm CLI is not
 def _helm_template(*overrides: str) -> subprocess.CompletedProcess[str]:
     assert _HELM_BINARY is not None
     return subprocess.run(  # noqa: S603
-        [_HELM_BINARY, "template", "sibyl", "charts/sibyl", *overrides],
+        [
+            _HELM_BINARY,
+            "template",
+            "sibyl",
+            "charts/sibyl",
+            "--set",
+            "backend.validationReceipts.existingClaim=validation-receipts",
+            *overrides,
+        ],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -902,3 +911,93 @@ def test_helm_restore_drill_pod_never_restarts_in_place() -> None:
         break
     else:
         pytest.fail("restore-drill CronJob not rendered")
+
+
+@requires_helm
+def test_helm_validation_receipts_require_and_share_persistent_claim() -> None:
+    missing = _helm_template(
+        "--set",
+        "backend.existingSecret=runtime-secret",
+        "--set",
+        "backend.validationReceipts.existingClaim=",
+    )
+    assert missing.returncode != 0
+    assert "validationReceipts.existingClaim is required" in missing.stderr
+    rendered = _helm_template(
+        "--set",
+        "backend.existingSecret=runtime-secret",
+        "--set",
+        "coordinationBackend=redis",
+        "--set",
+        "backend.redis.password=fixture-only",
+        "--set",
+        "worker.enabled=true",
+    )
+    assert rendered.returncode == 0, rendered.stderr
+    deployments = [
+        d for d in yaml.safe_load_all(rendered.stdout) if d and d.get("kind") == "Deployment"
+    ]
+    checked = set()
+    for deployment in deployments:
+        spec = deployment["spec"]["template"]["spec"]
+        for container in spec["containers"]:
+            if container["name"] not in {"backend", "worker"}:
+                continue
+            mount = next(m for m in container["volumeMounts"] if m["name"] == "validation-receipts")
+            assert mount["mountPath"] == "/var/lib/sibyl-receipts"
+            volume = next(v for v in spec["volumes"] if v["name"] == "validation-receipts")
+            assert volume["persistentVolumeClaim"]["claimName"] == "validation-receipts"
+            assert "emptyDir" not in volume
+            checked.add(container["name"])
+    assert checked == {"backend", "worker"}
+
+
+def test_production_compose_validation_receipts_share_durable_state() -> None:
+    compose = yaml.safe_load((REPO_ROOT / "docker-compose.prod.yml").read_text())
+    for owner in ("backend", "worker"):
+        service = compose["services"][owner]
+        assert "validation_receipts:/home/sibyl/.sibyl" in service["volumes"]
+        assert (
+            service["depends_on"]["receipts-init"]["condition"] == "service_completed_successfully"
+        )
+    assert "validation_receipts" in compose["volumes"]
+    assert (
+        "validation_receipts:/home/sibyl/.sibyl" in compose["services"]["receipts-init"]["volumes"]
+    )
+    assert compose["services"]["receipts-init"]["command"] == [
+        "chown",
+        "10001:10001",
+        "/home/sibyl/.sibyl",
+    ]
+
+
+@requires_helm
+@pytest.mark.parametrize("profile", ["defaults", "production-redis"])
+def test_helm_ci_profile_renders_exact_workflow_arguments(profile: str) -> None:
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text())
+    profiles = workflow["jobs"]["helm"]["strategy"]["matrix"]["include"]
+    selected = next(item for item in profiles if item["profile"] == profile)
+    assert _HELM_BINARY is not None
+    result = subprocess.run(  # noqa: S603
+        [_HELM_BINARY, "template", "sibyl", "charts/sibyl", *json.loads(selected["values"])],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    deployments = [
+        item
+        for item in yaml.safe_load_all(result.stdout)
+        if item and item.get("kind") == "Deployment"
+    ]
+    backend_pods = [
+        item["spec"]["template"]["spec"]
+        for item in deployments
+        if item["metadata"]["name"] in {"sibyl-backend", "sibyl-worker"}
+    ]
+    assert backend_pods
+    for pod in backend_pods:
+        volume = next(item for item in pod["volumes"] if item["name"] == "validation-receipts")
+        assert volume["persistentVolumeClaim"]["claimName"] == "ci-validation-receipts"
+    assert ("name: sibyl-worker" in result.stdout) == (selected["worker"] == "present")

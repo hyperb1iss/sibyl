@@ -72,6 +72,51 @@ class Program(FrozenModel):
     args: list[str] = Field(default_factory=list)
 
 
+class JsonOracleChecker(FrozenModel):
+    """Frozen black-box checker; private artifacts never enter candidate execution."""
+
+    schema_version: Literal["sibyl-json-cli-oracle-v1"]
+    oracle: Artifact
+    runtime: Artifact
+    evaluator: Artifact
+    argv: list[str] = Field(min_length=1)
+    image: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    docker: str
+    docker_host: str | None = None
+    timeout_seconds: float = Field(gt=0, allow_inf_nan=False)
+    memory_mb: int = Field(gt=0)
+
+    @field_validator("argv")
+    @classmethod
+    def validate_argv(cls, value: list[str]) -> list[str]:
+        if not value[0] or any("\x00" in item for item in value):
+            raise ValueError("candidate argv requires an executable and no null bytes")
+        return value
+
+    @field_validator("docker")
+    @classmethod
+    def validate_docker(cls, value: str) -> str:
+        if not Path(value).is_absolute() or "\x00" in value:
+            raise ValueError("docker must name an absolute executable path")
+        return value
+
+    @field_validator("docker_host")
+    @classmethod
+    def validate_docker_host(cls, value: str | None) -> str | None:
+        if value is not None and (
+            not value.startswith("unix:///")
+            or any(char.isspace() or char == "\x00" for char in value)
+        ):
+            raise ValueError("docker_host must be an absolute Unix socket URL")
+        return value
+
+
+def checker_artifacts(checker: Program | JsonOracleChecker) -> list[Artifact]:
+    if isinstance(checker, Program):
+        return [checker.script]
+    return [checker.oracle, checker.runtime, checker.evaluator]
+
+
 class Experience(FrozenModel):
     id: str = Field(pattern=IDENTIFIER_PATTERN)
     family_id: str = Field(pattern=IDENTIFIER_PATTERN)
@@ -86,7 +131,7 @@ class Task(FrozenModel):
     split: Literal["learning", "development", "sealed"]
     prompt: Artifact
     workspace: list[WorkspaceFile]
-    checker: Program
+    checker: Program | JsonOracleChecker
 
 
 class Arm(FrozenModel):
@@ -177,7 +222,8 @@ def validate_partitions(manifest: Manifest) -> None:
         item.artifact.sha256 for item in manifest.experiences if item.split != "learning"
     }
     for task in manifest.tasks:
-        nonlearning_hashes.update([task.prompt.sha256, task.checker.script.sha256])
+        nonlearning_hashes.add(task.prompt.sha256)
+        nonlearning_hashes.update(item.sha256 for item in checker_artifacts(task.checker))
         nonlearning_hashes.update(item.artifact.sha256 for item in task.workspace)
     for arm in manifest.arms:
         if arm.memory_pack.sha256 != digest(b"") and arm.memory_pack.sha256 in nonlearning_hashes:
@@ -188,6 +234,18 @@ def validate_partitions(manifest: Manifest) -> None:
             for source_id in arm.learning_source_ids
         ):
             raise ManifestError("memory packs may reference only declared learning sources")
+    private_oracles = {
+        task.checker.oracle.sha256
+        for task in manifest.tasks
+        if isinstance(task.checker, JsonOracleChecker)
+    }
+    public_hashes = {arm.memory_pack.sha256 for arm in manifest.arms}
+    public_hashes.update(item.artifact.sha256 for item in manifest.experiences)
+    for task in manifest.tasks:
+        public_hashes.add(task.prompt.sha256)
+        public_hashes.update(item.artifact.sha256 for item in task.workspace)
+    if private_oracles & public_hashes:
+        raise ManifestError("private oracle overlaps a candidate-visible artifact")
     for task in manifest.tasks:
         destinations = [item.destination for item in task.workspace]
         _unique(destinations, "workspace destination")
@@ -273,7 +331,7 @@ def load_manifest(path: Path) -> tuple[Manifest, dict[str, bytes]]:
         arm.native_render_payload for arm in manifest.arms if arm.native_render_payload
     )
     for task in manifest.tasks:
-        artifacts.extend([task.prompt, task.checker.script])
+        artifacts.extend([task.prompt, *checker_artifacts(task.checker)])
         artifacts.extend(item.artifact for item in task.workspace)
     content: dict[str, bytes] = {}
     for artifact in artifacts:
@@ -291,9 +349,17 @@ def load_manifest(path: Path) -> tuple[Manifest, dict[str, bytes]]:
             raise ManifestError(
                 f"prompt and memory pack inputs require UTF-8: {artifact.path}"
             ) from exc
-    for program in [manifest.controller, *(task.checker for task in manifest.tasks)]:
+    for program in [
+        manifest.controller,
+        *(task.checker for task in manifest.tasks if isinstance(task.checker, Program)),
+    ]:
         if any("\x00" in arg for arg in program.args):
             raise ManifestError("program argument contains a null character")
+    for task in manifest.tasks:
+        if isinstance(task.checker, JsonOracleChecker):
+            from benchmarks.agent_tasks.json_oracle import validate_oracle_inputs  # noqa: PLC0415
+
+            validate_oracle_inputs(task.checker, content)
     for arm in manifest.arms:
         validate_native_render_binding(arm, content)
     return manifest, content

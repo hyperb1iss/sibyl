@@ -9,6 +9,7 @@ from typing import Any, cast
 
 import structlog
 
+from sibyl_core.auth.memory_policy import memory_scope_policy_key
 from sibyl_core.backends.surreal.fulltext import (
     build_fulltext_terms,
     build_match_disjunction,
@@ -32,6 +33,7 @@ from sibyl_core.retrieval._search_plan import (
     SearchFilter,
 )
 from sibyl_core.retrieval.candidates import RetrievalCandidate, VectorCandidateFetch
+from sibyl_core.services.memory_source_validation import SourceReadAuthority
 from sibyl_core.services.surreal_content import (
     MemoryScope,
     RawMemory,
@@ -126,6 +128,29 @@ async def _recall_raw_candidates(
                 organization_id=plan.organization_id,
                 principal_id=scope.principal_id,
                 query=plan.query,
+                source_authority=SourceReadAuthority(
+                    principal_id=scope.principal_id,
+                    projects=frozenset(plan.accessible_projects or ()),
+                    teams=frozenset(
+                        item.scope_key
+                        for item in plan.scopes
+                        if item.memory_scope is MemoryScope.TEAM and item.scope_key
+                    ),
+                    delegations=frozenset(
+                        item.scope_key
+                        for item in plan.scopes
+                        if item.memory_scope is MemoryScope.DELEGATED and item.scope_key
+                    ),
+                    scope_keys=frozenset(
+                        memory_scope_policy_key(
+                            item.memory_scope,
+                            item.principal_id
+                            if item.memory_scope is MemoryScope.PRIVATE
+                            else item.scope_key,
+                        )
+                        for item in plan.scopes
+                    ),
+                ),
                 memory_scope=scope.memory_scope.value,
                 scope_key=scope.scope_key,
                 agent_id=scope.agent_id,
@@ -237,6 +262,7 @@ async def _node_fulltext_field_rows(
         f"""
         SELECT *,
                {match.score_expr} AS score
+        OMIT name_embedding
         FROM entity
         WHERE """
         + _where_clause(["group_id = $group_id", *filter_clauses])

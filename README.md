@@ -324,6 +324,7 @@ sibyl docker init && sibyl docker up
 helm repo add sibyl https://raw.githubusercontent.com/hyperb1iss/sibyl/gh-pages
 helm install sibyl sibyl/sibyl \
   --set backend.existingSecret=sibyl-secrets \
+  --set backend.validationReceipts.existingClaim=sibyl-validation-receipts \
   --set backend.surreal.existingSecret=sibyl-surreal \
   --set ingress.enabled=true
 ```

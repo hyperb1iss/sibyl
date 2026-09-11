@@ -32,6 +32,7 @@ on:
       - "tools/tests/test_compare_eval_reports.py"
       - "tools/tests/test_context_pack_eval_script.py"
       - "tools/tests/test_longmemeval_live.py"
+      - "tools/tests/test_longmemeval_qa_accounting.py"
       - "uv.lock"
   workflow_dispatch:
     inputs:

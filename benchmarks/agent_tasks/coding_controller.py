@@ -610,11 +610,24 @@ def _require_normal_stop(finish_reason: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _docker_argv(options: Options, name: str, stage: Path, command: str) -> list[str]:
-    """Fixed argv: no network, no privileges, one writable staging bind."""
+def container_argv(
+    options: Options,
+    name: str,
+    stage: Path,
+    command: list[str],
+    *,
+    read_only: bool = False,
+    stdin: bool = False,
+) -> list[str]:
+    """Build a fixed isolation boundary around a caller-selected container command."""
+    if not command or not command[0] or any("\x00" in value for value in command):
+        raise ValueError("container command requires nonempty arguments")
+    if not stage.is_absolute() or any(char in str(stage) for char in ",\n\r\x00"):
+        raise ValueError("workspace cannot be expressed as a bind mount")
     return [
         options.docker,
         "run",
+        *(["--interactive"] if stdin else []),
         "--name",
         name,
         "--network",
@@ -633,16 +646,19 @@ def _docker_argv(options: Options, name: str, stage: Path, command: str) -> list
         "--tmpfs",
         CONTAINER_TMPFS,
         "--mount",
-        f"type=bind,src={stage},dst=/workspace",
+        f"type=bind,src={stage},dst=/workspace" + (",readonly" if read_only else ""),
         "--workdir",
         "/workspace",
         *[argument for value in CONTAINER_ENVIRONMENT for argument in ("--env", value)],
         "--entrypoint",
-        "/bin/sh",
+        command[0],
         options.image,
-        "-c",
-        command,
+        *command[1:],
     ]
+
+
+def _docker_argv(options: Options, name: str, stage: Path, command: str) -> list[str]:
+    return container_argv(options, name, stage, ["/bin/sh", "-c", command])
 
 
 def _container_state(
@@ -718,6 +734,97 @@ def _tool_text(outcome: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def execute_container(
+    options: Options,
+    *,
+    name: str,
+    argv: list[str],
+    environment: dict[str, str],
+    stdin: bytes | None = None,
+) -> dict[str, Any]:
+    """Run one owned container and return execution evidence, never a verdict."""
+    timed_out = False
+    container_state: dict[str, Any] | None = None
+    completed: subprocess.CompletedProcess[bytes] | None = None
+    captured: tuple[bytes | None, bytes | None] = (b"", b"")
+    failure: str | None = None
+    try:
+        completed = subprocess.run(  # noqa: S603
+            argv,
+            capture_output=True,
+            timeout=options.tool_timeout,
+            check=False,
+            env=environment,
+            **({"input": stdin} if stdin is not None else {}),
+        )
+        captured = (completed.stdout, completed.stderr)
+        container_state = _container_state(options, name, environment)
+    except subprocess.TimeoutExpired as exc:
+        timed_out = True
+        captured = (exc.stdout, exc.stderr)
+    except (OSError, subprocess.SubprocessError) as exc:
+        failure = type(exc).__name__
+    finally:
+        cleanup = _cleanup_container(options, name, environment)
+    if failure is not None:
+        return _execution_outcome(options, "operational", cleanup, captured, detail=failure)
+    if not cleanup["terminated"]:
+        # A container that may still be writing forbids reading its stage.
+        detail = "the owned container was not confirmed stopped"
+        return _execution_outcome(options, "operational", cleanup, captured, detail=detail)
+    if timed_out or completed is None:
+        return _execution_outcome(options, "timeout", cleanup, captured)
+    if (
+        container_state is None
+        or container_state.get("Status") != "exited"
+        or container_state.get("Error")
+        or container_state.get("OOMKilled")
+        or container_state.get("ExitCode") != completed.returncode
+    ):
+        return _execution_outcome(
+            options,
+            "operational",
+            cleanup,
+            captured,
+            returncode=completed.returncode,
+            detail="the container did not report a completed shell command",
+        )
+    # Inspect distinguishes a shell exit (including 125..127) from launch failure.
+    return _execution_outcome(options, "ok", cleanup, captured, returncode=completed.returncode)
+
+
+def _execution_outcome(
+    options: Options,
+    status: str,
+    cleanup: dict[str, Any],
+    captured: tuple[bytes | None, bytes | None],
+    *,
+    returncode: int | None = None,
+    detail: str | None = None,
+) -> dict[str, Any]:
+    stdout, stdout_sha256 = _captured(captured[0])
+    stderr, stderr_sha256 = _captured(captured[1])
+    return {
+        "status": status,
+        "returncode": returncode,
+        "stdout": stdout,
+        "stderr": stderr,
+        "stdout_sha256": stdout_sha256,
+        "stdout_base64": base64.b64encode(captured[0] or b"").decode("ascii"),
+        "stderr_base64": base64.b64encode(captured[1] or b"").decode("ascii"),
+        "stderr_sha256": stderr_sha256,
+        "cleanup": cleanup,
+        "carried_back": False,
+        "refusal": None,
+        "detail": detail,
+        "timeout_seconds": options.tool_timeout,
+        "stage": None,
+        "stage_removed": False,
+        "workspace_before": None,
+        "workspace_after": None,
+    }
+
+
 class Controller:
     """This process owns the workspace; the model owns a disposable copy of it."""
 
@@ -782,7 +889,7 @@ class Controller:
 
     # -- budget -----------------------------------------------------------
 
-    def _remaining(self, name: str) -> int | None:
+    def _remaining(self, name: str) -> int | float | None:
         used = getattr(self.usage, name)
         return None if used is None else self._budget[name] - used
 
@@ -813,12 +920,27 @@ class Controller:
 
     # -- provider ---------------------------------------------------------
 
+    def _budget_message(self) -> dict[str, str]:
+        state = {
+            "declared": self._budget,
+            "remaining": {name: self._remaining(name) for name in BUDGET_FIELDS},
+        }
+        instruction = (
+            "Controller budget before this request (reported usage, cumulative limits): "
+            + json.dumps(state, sort_keys=True, allow_nan=False)
+            + "\nPlan tool use within the remaining allowance and reserve output for your final "
+            "response. Each invocation, including a refused invocation, consumes one tool call. "
+            "When no tool calls remain, give a final response describing completed work and "
+            "any unresolved problems. Do not claim unperformed verification."
+        )
+        return {"role": "system", "content": instruction}
+
     def _body(self, messages: list[dict[str, Any]], max_tokens: int) -> dict[str, Any]:
         return {
             "model": self.request["controller_model"],
-            "messages": messages,
+            "messages": [messages[0], self._budget_message(), *messages[1:]],
             "tools": [SHELL_TOOL],
-            "tool_choice": "auto",
+            "tool_choice": "none" if self._remaining("tool_calls") == 0 else "auto",
             "seed": self.request["seed"],
             "max_tokens": max_tokens,
             "stream": False,
@@ -902,83 +1024,10 @@ class Controller:
     # -- tool -------------------------------------------------------------
 
     def _invoke(self, name: str, argv: list[str], stage: Path) -> dict[str, Any]:
-        timed_out = False
-        container_state: dict[str, Any] | None = None
-        completed: subprocess.CompletedProcess[bytes] | None = None
-        captured: tuple[bytes | None, bytes | None] = (b"", b"")
-        failure: str | None = None
-        try:
-            completed = subprocess.run(  # noqa: S603
-                argv,
-                capture_output=True,
-                timeout=self.options.tool_timeout,
-                check=False,
-                env=self.environment,
-            )
-            captured = (completed.stdout, completed.stderr)
-            container_state = _container_state(self.options, name, self.environment)
-        except subprocess.TimeoutExpired as exc:
-            timed_out = True
-            captured = (exc.stdout, exc.stderr)
-        except (OSError, subprocess.SubprocessError) as exc:
-            failure = type(exc).__name__
-        finally:
-            cleanup = _cleanup_container(self.options, name, self.environment)
-        if failure is not None:
-            return self._outcome("operational", cleanup, captured, detail=failure)
-        if not cleanup["terminated"]:
-            # A container that may still be writing forbids reading its stage.
-            detail = "the owned container was not confirmed stopped"
-            return self._outcome("operational", cleanup, captured, detail=detail)
-        if timed_out or completed is None:
-            return self._outcome("timeout", cleanup, captured)
-        if (
-            container_state is None
-            or container_state.get("Status") != "exited"
-            or container_state.get("Error")
-            or container_state.get("OOMKilled")
-            or container_state.get("ExitCode") != completed.returncode
-        ):
-            return self._outcome(
-                "operational",
-                cleanup,
-                captured,
-                returncode=completed.returncode,
-                detail="the container did not report a completed shell command",
-            )
-        # Inspect distinguishes a shell exit (including 125..127) from launch failure.
-        return self._outcome("ok", cleanup, captured, returncode=completed.returncode)
+        return execute_container(self.options, name=name, argv=argv, environment=self.environment)
 
-    def _outcome(
-        self,
-        status: str,
-        cleanup: dict[str, Any],
-        captured: tuple[bytes | None, bytes | None],
-        *,
-        returncode: int | None = None,
-        detail: str | None = None,
-    ) -> dict[str, Any]:
-        stdout, stdout_sha256 = _captured(captured[0])
-        stderr, stderr_sha256 = _captured(captured[1])
-        return {
-            "status": status,
-            "returncode": returncode,
-            "stdout": stdout,
-            "stderr": stderr,
-            "stdout_sha256": stdout_sha256,
-            "stdout_base64": base64.b64encode(captured[0] or b"").decode("ascii"),
-            "stderr_base64": base64.b64encode(captured[1] or b"").decode("ascii"),
-            "stderr_sha256": stderr_sha256,
-            "cleanup": cleanup,
-            "carried_back": False,
-            "refusal": None,
-            "detail": detail,
-            "timeout_seconds": self.options.tool_timeout,
-            "stage": None,
-            "stage_removed": False,
-            "workspace_before": None,
-            "workspace_after": None,
-        }
+    def _outcome(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return _execution_outcome(self.options, *args, **kwargs)
 
     def _carry_back(self, stage: Path) -> list[dict[str, Any]]:
         """Validate before applying; an I/O failure may leave a partial copy."""

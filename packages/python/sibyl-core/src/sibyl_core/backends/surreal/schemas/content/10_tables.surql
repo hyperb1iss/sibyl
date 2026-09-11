@@ -152,6 +152,8 @@ DEFINE FIELD IF NOT EXISTS created_at ON raw_captures TYPE datetime DEFAULT time
 
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_uuid ON raw_captures FIELDS uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_org ON raw_captures FIELDS organization_id;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_source_validation ON raw_captures
+    FIELDS organization_id, metadata.source_validation_pending, uuid;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_source ON raw_captures FIELDS source_id;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_source_lookup ON raw_captures
     FIELDS source_id, organization_id, memory_scope, scope_key;
@@ -162,6 +164,7 @@ DEFINE INDEX IF NOT EXISTS idx_raw_captures_project ON raw_captures FIELDS organ
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_review ON raw_captures FIELDS organization_id, review_state;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_purge_after ON raw_captures FIELDS purge_after;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_entity_id ON raw_captures FIELDS entity_id;
+DEFINE INDEX IF NOT EXISTS idx_raw_captures_source_lineage ON raw_captures FIELDS metadata.raw_source_ids.*;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_org_dedupe ON raw_captures FIELDS organization_id, metadata.dedupe_key;
 DEFINE INDEX IF NOT EXISTS idx_raw_captures_dedupe_lookup ON raw_captures
     FIELDS metadata.dedupe_key, organization_id, memory_scope, scope_key;
@@ -400,3 +403,41 @@ DEFINE INDEX IF NOT EXISTS idx_backups_uuid ON backups FIELDS uuid UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_backups_org ON backups FIELDS organization_id;
 DEFINE INDEX IF NOT EXISTS idx_backups_backup_id ON backups FIELDS backup_id UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_backups_status ON backups FIELDS status;
+
+DEFINE TABLE IF NOT EXISTS eval_attempts SCHEMAFULL;
+ALTER TABLE IF EXISTS eval_attempts SCHEMAFULL;
+ALTER TABLE IF EXISTS eval_attempts PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS uuid ON eval_attempts TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON eval_attempts TYPE string;
+DEFINE FIELD IF NOT EXISTS experiment_id ON eval_attempts TYPE string;
+DEFINE FIELD IF NOT EXISTS attempt_id ON eval_attempts TYPE string;
+DEFINE FIELD IF NOT EXISTS assignment_sha256 ON eval_attempts TYPE string;
+DEFINE FIELD IF NOT EXISTS assignment_json ON eval_attempts TYPE string;
+DEFINE FIELD IF NOT EXISTS receipt_sha256 ON eval_attempts TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS receipt_base64 ON eval_attempts TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS outcome_sha256 ON eval_attempts TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS transcript_sha256 ON eval_attempts TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS episode_sha256 ON eval_attempts TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS capture_id ON eval_attempts TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created_at ON eval_attempts TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS admitted_at ON eval_attempts TYPE option<datetime>;
+DEFINE INDEX IF NOT EXISTS idx_eval_attempts_uuid ON eval_attempts FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_eval_attempts_identity ON eval_attempts
+    FIELDS organization_id, experiment_id, attempt_id UNIQUE;
+
+DEFINE TABLE IF NOT EXISTS eval_consolidations SCHEMAFULL;
+ALTER TABLE IF EXISTS eval_consolidations SCHEMAFULL;
+ALTER TABLE IF EXISTS eval_consolidations PERMISSIONS NONE;
+DEFINE FIELD IF NOT EXISTS uuid ON eval_consolidations TYPE string;
+DEFINE FIELD IF NOT EXISTS organization_id ON eval_consolidations TYPE string;
+DEFINE FIELD IF NOT EXISTS principal_id ON eval_consolidations TYPE string;
+DEFINE FIELD IF NOT EXISTS request_sha256 ON eval_consolidations TYPE string;
+DEFINE FIELD IF NOT EXISTS admission_bindings ON eval_consolidations TYPE array<object> FLEXIBLE DEFAULT [];
+DEFINE FIELD IF NOT EXISTS build_receipt_json ON eval_consolidations TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS candidate_id ON eval_consolidations TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS promoted_entity_id ON eval_consolidations TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS result_kind ON eval_consolidations TYPE string ASSERT $value IN ['candidate', 'abstained'];
+DEFINE FIELD IF NOT EXISTS created_at ON eval_consolidations TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_eval_consolidations_uuid ON eval_consolidations FIELDS uuid UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_eval_consolidations_candidate ON eval_consolidations FIELDS organization_id, candidate_id;
+DEFINE INDEX IF NOT EXISTS idx_eval_consolidations_promoted ON eval_consolidations FIELDS organization_id, promoted_entity_id;

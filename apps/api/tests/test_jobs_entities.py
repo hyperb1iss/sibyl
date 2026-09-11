@@ -408,7 +408,7 @@ class TestBackfillEntityEmbeddingsJob:
         entity_manager.get_many.assert_awaited_once_with(["session-123"])
 
     @pytest.mark.asyncio
-    async def test_stale_but_present_entity_is_skipped_not_fatal(self) -> None:
+    async def test_stale_but_present_entity_is_refreshed(self) -> None:
         stale = Entity(
             id="event-42",
             entity_type="event",
@@ -423,7 +423,9 @@ class TestBackfillEntityEmbeddingsJob:
             content="Persisted before embeddings were available.",
         )
         entity_manager = MagicMock()
-        entity_manager.backfill_embeddings_if_current = AsyncMock(return_value=[embedded.id])
+        entity_manager.backfill_embeddings_if_current = AsyncMock(
+            side_effect=[[embedded.id], [stale.id]]
+        )
         entity_manager.get_many = AsyncMock(return_value=[current_row])
         runtime = SimpleNamespace(
             entity_manager=entity_manager,
@@ -440,15 +442,16 @@ class TestBackfillEntityEmbeddingsJob:
                 "org-1",
             )
 
-        assert result["entities"] == 1
-        assert result["entity_ids"] == [embedded.id]
+        assert result["entities"] == 2
+        assert result["entity_ids"] == [embedded.id, stale.id]
         assert result["stale_entity_ids"] == [stale.id]
         entity_manager.get_many.assert_awaited_once_with([stale.id])
 
-        entity_manager.backfill_embeddings_if_current.assert_awaited_once()
+        assert entity_manager.backfill_embeddings_if_current.await_count == 2
+        assert entity_manager.backfill_embeddings_if_current.await_args.args[0] == [current_row]
 
     @pytest.mark.asyncio
-    async def test_stale_but_present_entities_still_complete_a_pending_manifest(self) -> None:
+    async def test_refreshed_entities_complete_a_pending_manifest(self) -> None:
         entity = Entity(
             id="session-123",
             entity_type=EntityType.SESSION,
@@ -462,9 +465,9 @@ class TestBackfillEntityEmbeddingsJob:
         entity_manager.get = AsyncMock(
             side_effect=[pending_manifest, pending_manifest, pending_manifest]
         )
-        entity_manager.backfill_embeddings_if_current = AsyncMock(return_value=[])
+        entity_manager.backfill_embeddings_if_current = AsyncMock(side_effect=[[], [entity.id]])
         entity_manager.get_many = AsyncMock(return_value=[current_row])
-        entity_manager.create_direct_bulk = AsyncMock(return_value=[complete_manifest.id])
+        entity_manager.complete_embedding_manifest = AsyncMock(return_value="completed")
         runtime = SimpleNamespace(
             entity_manager=entity_manager,
             relationship_manager=MagicMock(),
@@ -486,12 +489,12 @@ class TestBackfillEntityEmbeddingsJob:
             )
 
         assert result["manifest_state"] == "completed"
-        assert result["entities"] == 0
+        assert result["entities"] == 1
         assert result["stale_entity_ids"] == [entity.id]
         entity_manager.get_many.assert_awaited_once_with([entity.id])
-        entity_manager.create_direct_bulk.assert_awaited_once()
-        written = entity_manager.create_direct_bulk.await_args.args[0]
-        assert written[0].metadata["operational_projection_state"] == "complete"
+        entity_manager.complete_embedding_manifest.assert_awaited_once()
+        written = entity_manager.complete_embedding_manifest.await_args.args[0]
+        assert written.metadata["operational_projection_state"] == "complete"
         warning_events = [call.args[0] for call in log_mock.warning.call_args_list]
         assert "entity_embedding_backfill_stale_expectations" in warning_events
 
@@ -508,7 +511,7 @@ class TestBackfillEntityEmbeddingsJob:
         entity_manager = MagicMock()
         entity_manager.get = AsyncMock(side_effect=[pending_manifest, pending_manifest])
         entity_manager.backfill_embeddings_if_current = AsyncMock(return_value=[entity.id])
-        entity_manager.create_direct_bulk = AsyncMock(return_value=[complete_manifest.id])
+        entity_manager.complete_embedding_manifest = AsyncMock(return_value="completed")
         runtime = SimpleNamespace(
             entity_manager=entity_manager,
             relationship_manager=MagicMock(),
@@ -529,9 +532,9 @@ class TestBackfillEntityEmbeddingsJob:
             )
 
         assert result["manifest_state"] == "completed"
-        entity_manager.create_direct_bulk.assert_awaited_once()
-        written = entity_manager.create_direct_bulk.await_args.args[0]
-        assert written[0].metadata["operational_projection_state"] == "complete"
+        entity_manager.complete_embedding_manifest.assert_awaited_once()
+        written = entity_manager.complete_embedding_manifest.await_args.args[0]
+        assert written.metadata["operational_projection_state"] == "complete"
 
     @pytest.mark.asyncio
     async def test_partial_backfill_leaves_current_manifest_pending(self) -> None:
@@ -617,6 +620,7 @@ class TestBackfillEntityEmbeddingsJob:
         entity_manager = MagicMock()
         entity_manager.get = AsyncMock(return_value=complete_manifest)
         entity_manager.backfill_embeddings_if_current = AsyncMock()
+        entity_manager.complete_embedding_manifest = AsyncMock(return_value="complete")
         runtime = SimpleNamespace(
             entity_manager=entity_manager,
             relationship_manager=MagicMock(),

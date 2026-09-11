@@ -330,6 +330,9 @@ async def create_entity(
             entity_type=entity.entity_type.value,
             tags=list(entity.tags or []),
             metadata=raw_capture_metadata,
+            source_capture_id=str(request_metadata["raw_memory_id"])
+            if request_metadata.get("raw_memory_id")
+            else None,
         )
 
     result_background_jobs = getattr(result, "background_jobs", {})

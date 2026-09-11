@@ -31,11 +31,24 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 import structlog
 
+from sibyl_core.memory_pipeline.lifecycle import (
+    RECONCILE_PENDING_KEY,
+    graph_metadata_recallable,
+)
+from sibyl_core.memory_pipeline.source_lifecycle import (
+    CORRECTION_BLOCKERS_KEY,
+    SOURCE_BINDINGS_KEY,
+    SOURCE_VALIDATION_PENDING_KEY,
+    SourceCorrection,
+    merge_source_correction,
+)
 from sibyl_core.projection.inheritance import inherited_lifecycle_metadata
+from sibyl_core.projection.pending import PENDING_KEYS, inherited_pending, pending_patch
 
 log = structlog.get_logger()
 
@@ -57,19 +70,9 @@ RECONCILE_FENCE_ATTEMPTS = 5
 # not check" and "it is fine" are not the same statement and a reader cannot
 # tell them apart from the row. Cleared by the next pass that manages to read a
 # verdict, and by a correction or restore that writes one.
-RECONCILE_PENDING_KEY = "lifecycle_reconciliation_pending"
+_UNVERIFIED_STAMP: dict[str, Any] = {RECONCILE_PENDING_KEY: True}
 
-_UNVERIFIED_STAMP: dict[str, Any] = {
-    "excluded_from_recall": True,
-    RECONCILE_PENDING_KEY: True,
-}
-
-# What a row carries once somebody could read its verdict and it said nothing
-# is wrong. `None` removes a key on the graph's merge patch, which is how the
-# marker actually leaves the row rather than merely reading falsy.
-_CLEARED_MARKER: dict[str, Any] = {RECONCILE_PENDING_KEY: None}
-
-_VerdictReader = Callable[[], Coroutine[Any, Any, dict[str, Any]]]
+_VerdictReader = Callable[[Mapping[str, Any]], Coroutine[Any, Any, dict[str, Any]]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,8 +146,8 @@ def _row_metadata(row: Any) -> dict[str, Any]:
 
 
 def _row_revision(row: Any) -> int | None:
-    revision = getattr(row, "revision", None)
-    return revision if isinstance(revision, int) else None
+    revision = getattr(row, "observed_revision", None)
+    return revision if type(revision) is int and revision > 0 else None
 
 
 def _revision_conflict(exc: BaseException) -> bool:
@@ -184,6 +187,7 @@ async def _write_stamp(
                 row_id,
                 {"metadata": dict(patch)},
                 expected_revision=expected_revision,
+                replace_metadata_keys=tuple(key for key in PENDING_KEYS if key in patch),
             )
         except Exception as exc:
             if _revision_conflict(exc):
@@ -223,18 +227,47 @@ async def _read_row(entity_manager: Any, row_id: str) -> tuple[Any, bool]:
 
 
 def _desired_patch(verdict: Mapping[str, Any], current: Mapping[str, Any]) -> dict[str, Any]:
-    """What has to change on a row whose verdict is now known.
+    """Merge observed source clocks without changing authored exclusions or bindings.
 
-    An empty verdict on a row that carries an exclusion is a real change, not a
-    no-op: the capture was corrected and then restored while this row was being
-    written, so the exclusion has to come back off.
+    A post-write read observes source state, not which source text the row used.
+    Existing bindings therefore remain immutable. Root clocks merge by revision,
+    including when the row already carries a later correction than this read.
     """
 
-    if verdict:
-        return {key: value for key, value in verdict.items() if current.get(key) != value}
-    if current.get("excluded_from_recall"):
-        return {"excluded_from_recall": False}
-    return {}
+    merged = dict(current)
+    for key, value in verdict.items():
+        if key == SOURCE_BINDINGS_KEY:
+            continue
+        if key == CORRECTION_BLOCKERS_KEY:
+            if not isinstance(value, Mapping):
+                raise ValueError("correction clocks must be a mapping")
+            for root_id, entry in value.items():
+                if not isinstance(entry, Mapping):
+                    raise ValueError("source correction clock must be a mapping")
+                revision = entry.get("revision")
+                blocking = entry.get("blocking")
+                if (
+                    not isinstance(root_id, str)
+                    or not isinstance(revision, int)
+                    or isinstance(revision, bool)
+                    or not isinstance(blocking, bool)
+                ):
+                    raise ValueError("source correction clock has invalid fields")
+                merged = merge_source_correction(
+                    merged,
+                    SourceCorrection(root_id=root_id, revision=revision, blocking=blocking),
+                )
+            continue
+        if (
+            key not in {SOURCE_VALIDATION_PENDING_KEY, RECONCILE_PENDING_KEY}
+            and key in current
+            and not graph_metadata_recallable({key: current[key]})
+        ):
+            # Flat legacy/parent verdicts cannot establish ownership of an
+            # existing exclusion. A clear verdict must not erase an own hide.
+            continue
+        merged[key] = value
+    return {key: value for key, value in merged.items() if current.get(key) != value}
 
 
 async def _reconcile_row(
@@ -244,6 +277,7 @@ async def _reconcile_row(
     operation: str,
     organization_id: str | None,
     read_verdict: _VerdictReader,
+    authority: str,
 ) -> str:
     """Bring one written row into agreement with its verdict, under the fence."""
 
@@ -254,27 +288,27 @@ async def _reconcile_row(
             # no safe write from here. An unfenced write at this point is how a
             # run of failed reads ends up overwriting a correction that landed
             # while they were failing.
-            return await _force_exclusion(entity_manager, row_id, operation, organization_id)
+            return await _force_exclusion(
+                entity_manager, row_id, operation, organization_id, authority
+            )
         if row is None:
             # The row is gone. Nothing to reconcile and nothing to fail over.
             return "missing"
         metadata = _row_metadata(row)
         revision = _row_revision(row)
 
-        verdict, verified = await _with_retries(operation, read_verdict)
+        verdict, verified = await _with_retries(operation, partial(read_verdict, metadata))
         if not verified:
-            if metadata and inherited_lifecycle_metadata(metadata):
-                # Somebody authoritative already wrote a verdict onto this row,
-                # so an unread capture does not make it unverified.
-                return "unchanged"
             if revision is None:
                 # Every write is fenced, so a row that cannot supply a revision
                 # cannot be written from here.
-                return await _force_exclusion(entity_manager, row_id, operation, organization_id)
+                return await _force_exclusion(
+                    entity_manager, row_id, operation, organization_id, authority
+                )
             applied, fenced_out = await _write_stamp(
                 entity_manager,
                 row_id,
-                _UNVERIFIED_STAMP,
+                pending_patch(metadata, _UNVERIFIED_STAMP, authority=authority),
                 expected_revision=revision,
             )
             if applied:
@@ -290,17 +324,30 @@ async def _reconcile_row(
             continue
 
         current = dict(verdict or {})
-        patch = _desired_patch(current, metadata)
-        if metadata.get(RECONCILE_PENDING_KEY):
-            # A verdict was readable this time, so the marker that said nobody
-            # could read one has to come off with the same write.
-            patch.update(_CLEARED_MARKER)
+        try:
+            patch = _desired_patch(
+                {key: value for key, value in current.items() if key not in PENDING_KEYS},
+                metadata,
+            )
+            patch.update(pending_patch(metadata, current, authority=authority))
+        except (TypeError, ValueError) as exc:
+            log.warning(
+                "lifecycle_reconciliation_invalid_verdict",
+                operation=operation,
+                entity_id=row_id,
+                error_type=type(exc).__name__,
+            )
+            return await _force_exclusion(
+                entity_manager, row_id, operation, organization_id, authority
+            )
         if not patch:
             return "unchanged"
         if revision is None:
             # The row needs a write and cannot be fenced, which is the one
             # combination this pass refuses to resolve by writing anyway.
-            return await _force_exclusion(entity_manager, row_id, operation, organization_id)
+            return await _force_exclusion(
+                entity_manager, row_id, operation, organization_id, authority
+            )
 
         applied, fenced_out = await _write_stamp(
             entity_manager,
@@ -309,15 +356,23 @@ async def _reconcile_row(
             expected_revision=revision,
         )
         if applied:
+            remaining = {**metadata, **patch}
+            unverified = any(remaining.get(key) for key in PENDING_KEYS)
+            cleared_marker = not unverified and any(
+                metadata.get(key) and key in patch for key in PENDING_KEYS
+            )
             log.info(
                 "lifecycle_reconciliation_restamped",
                 operation=operation,
                 organization_id=organization_id,
                 entity_id=row_id,
                 lifecycle_state=current.get("lifecycle_state"),
-                cleared_marker=RECONCILE_PENDING_KEY in patch,
+                cleared_marker=cleared_marker,
+                unverified=unverified,
             )
-            return "cleared" if set(patch) == {RECONCILE_PENDING_KEY} else "restamped"
+            if unverified:
+                return "unverified"
+            return "cleared" if cleared_marker else "restamped"
         if fenced_out:
             # Somebody wrote between this pass's read and its write. Re-read and
             # agree with them rather than overwriting a newer verdict.
@@ -326,7 +381,7 @@ async def _reconcile_row(
 
     # Every attempt lost the fence or failed to apply. The row's verdict is
     # unknown to this pass, so it is excluded rather than left servable.
-    return await _force_exclusion(entity_manager, row_id, operation, organization_id)
+    return await _force_exclusion(entity_manager, row_id, operation, organization_id, authority)
 
 
 async def _force_exclusion(
@@ -334,6 +389,7 @@ async def _force_exclusion(
     row_id: str,
     operation: str,
     organization_id: str | None,
+    authority: str,
 ) -> str:
     """Exclude a row this pass could not settle, or say plainly that it could not.
 
@@ -348,9 +404,6 @@ async def _force_exclusion(
         if row_read and row is None:
             return "missing"
         metadata = _row_metadata(row)
-        if inherited_lifecycle_metadata(metadata):
-            # A verdict landed while this pass was losing its fences.
-            return "unchanged"
         revision = _row_revision(row)
         applied = False
         if revision is not None:
@@ -361,7 +414,7 @@ async def _force_exclusion(
             applied, _fenced_out = await _write_stamp(
                 entity_manager,
                 row_id,
-                _UNVERIFIED_STAMP,
+                pending_patch(metadata, _UNVERIFIED_STAMP, authority=authority),
                 expected_revision=revision,
             )
         if applied:
@@ -393,6 +446,7 @@ async def _reconcile(
     organization_id: str | None,
     read_verdict: _VerdictReader,
     row_ids: Sequence[str],
+    authority: str,
 ) -> ReconcileOutcome:
     ids = [str(row_id) for row_id in dict.fromkeys(row_ids) if row_id]
     if not ids:
@@ -408,6 +462,7 @@ async def _reconcile(
             operation=operation,
             organization_id=organization_id,
             read_verdict=read_verdict,
+            authority=authority,
         )
         if result == "restamped":
             restamped += 1
@@ -421,6 +476,17 @@ async def _reconcile(
         unverified=unverified,
         cleared=cleared,
     )
+
+
+def _capture_authority(metadata: Mapping[str, Any] | None) -> str:
+    fields = metadata or {}
+    memory_id = fields.get("raw_memory_id")
+    if isinstance(memory_id, str) and memory_id.strip():
+        return f"capture:{memory_id.strip()}"
+    source_id = fields.get("raw_source_id")
+    if isinstance(source_id, str) and source_id.strip():
+        return f"capture-source:{source_id.strip()}"
+    return "capture:unbound"
 
 
 async def prewrite_capture_stamp(
@@ -445,7 +511,16 @@ async def prewrite_capture_stamp(
         )
 
     stamp, verified = await _with_retries("capture_prewrite", read)
-    return dict(stamp or {}), verified
+    verdict = dict(stamp or {})
+    if not verified or (metadata or {}).get("raw_memory_id"):
+        # The insert is not source-validated until its post-write check lands.
+        # A row read failure must leave durable exclusion, not a servable row.
+        verdict[RECONCILE_PENDING_KEY] = True
+    authority = _capture_authority(metadata)
+    return {
+        **{key: value for key, value in verdict.items() if key not in PENDING_KEYS},
+        **inherited_pending(verdict, authority),
+    }, verified
 
 
 async def reconcile_with_capture(
@@ -454,20 +529,41 @@ async def reconcile_with_capture(
     organization_id: str,
     metadata: Mapping[str, Any] | None,
     row_ids: Sequence[str],
+    expected_signature: str | None = None,
 ) -> ReconcileOutcome:
     """Re-check written rows against the capture they were projected from."""
 
     from sibyl_core.services.memory import projected_row_lifecycle_stamp
 
-    async def read() -> dict[str, Any]:
+    authority = _capture_authority(metadata)
+    if expected_signature is not None:
+        if (
+            not authority.startswith("capture:")
+            or authority == "capture:unbound"
+            or len(expected_signature) != 64
+            or any(char not in "0123456789abcdef" for char in expected_signature)
+        ):
+            raise ValueError("signature reconciliation requires a capture ID and SHA256 digest")
+        authority = (
+            f"capture-signature-v1:{authority.removeprefix('capture:')}:{expected_signature}"
+        )
+
+    async def read(row_metadata: Mapping[str, Any]) -> dict[str, Any]:
         return await projected_row_lifecycle_stamp(
             organization_id=organization_id,
-            metadata=metadata,
+            metadata={
+                **(metadata or {}),
+                SOURCE_BINDINGS_KEY: row_metadata.get(SOURCE_BINDINGS_KEY, {}),
+            },
+            **(
+                {"expected_signature": expected_signature} if expected_signature is not None else {}
+            ),
         )
 
     return await _reconcile(
         entity_manager,
         operation="capture",
+        authority=authority,
         organization_id=organization_id,
         read_verdict=read,
         row_ids=row_ids,
@@ -483,19 +579,24 @@ async def reconcile_with_parent(
 ) -> ReconcileOutcome:
     """Re-check written derived rows against the parent they were derived from."""
 
-    async def read() -> dict[str, Any]:
+    async def read(_row_metadata: Mapping[str, Any]) -> dict[str, Any]:
         get = getattr(entity_manager, "get", None)
         if not callable(get):
-            return {}
+            return dict(_UNVERIFIED_STAMP)
         try:
             stored = await get(str(source_id))
         except KeyError:
-            return {}
+            stored = None
+        if stored is None:
+            # Absence supplies no lifecycle verdict. Keep this parent's check
+            # pending so a later read can recover it without retiring the child.
+            return dict(_UNVERIFIED_STAMP)
         return inherited_lifecycle_metadata(getattr(stored, "metadata", None))
 
     return await _reconcile(
         entity_manager,
         operation="parent",
+        authority=f"parent:{source_id}",
         organization_id=organization_id,
         read_verdict=read,
         row_ids=row_ids,

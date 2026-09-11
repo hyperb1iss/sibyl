@@ -89,6 +89,7 @@ class FakeClient:
         self._responses = list(responses)
         self.calls: list[tuple[str, dict[str, object]]] = []
         self.closed = 0
+        self._raw_records: dict[str, dict[str, object]] = {}
 
     async def execute_query(
         self, query: str, params: dict[str, object] | None = None, **kwargs: object
@@ -96,9 +97,26 @@ class FakeClient:
         merged = dict(params or {})
         merged.update(kwargs)
         self.calls.append((query, merged))
+        if "LET $publications =" in query:
+            # Ordinary capture fixtures have no admitted publication rows.
+            return _query_result([{"publications": [], "captures": [], "attempts": []}])
+        if "associations: (SELECT * FROM memory_derivations" in query:
+            return _query_result(
+                [
+                    {
+                        "targets": [
+                            self._raw_records[key]
+                            for key in merged["ids"]
+                            if key in self._raw_records
+                        ],
+                        "associations": [],
+                    }
+                ]
+            )
         response = self._responses.pop(0)
         if isinstance(response, BaseException):
             raise response
+        self._observe_response(response)
         return response
 
     async def execute_query_raw(
@@ -107,10 +125,25 @@ class FakeClient:
         merged = dict(params or {})
         merged.update(kwargs)
         self.calls.append((query, merged))
+        if "LET $publications =" in query:
+            # Ordinary capture fixtures have no admitted publication rows.
+            return _query_result([{"publications": [], "captures": [], "attempts": []}])
         response = self._responses.pop(0)
         if isinstance(response, BaseException):
             raise response
+        self._observe_response(response)
         return response
+
+    def _observe_response(self, value: object) -> None:
+        if isinstance(value, list):
+            for item in value:
+                self._observe_response(item)
+        elif isinstance(value, dict):
+            if isinstance(value.get("uuid"), str) and "raw_content" in value:
+                self._raw_records[value["uuid"]] = {"revision": 1, **value}
+            else:
+                for item in value.values():
+                    self._observe_response(item)
 
     async def close(self) -> None:
         self.closed += 1
@@ -313,7 +346,7 @@ class TestSurrealContentHelpers:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_raw_memory_save_returns_saved_record_after_commit(
+    async def test_raw_memory_save_returns_saved_record(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -351,8 +384,6 @@ class TestSurrealContentHelpers:
             embedding_provider=None,
         )
 
-        transaction = client.calls[1][0]
-        assert transaction.index("COMMIT TRANSACTION;") < transaction.index("RETURN $saved;")
         assert saved.raw_content == "Updated"
         assert saved.revision == 2
 
@@ -1596,7 +1627,7 @@ class TestSurrealContentHelpers:
         assert memory.principal_id == "user-bliss"
         assert memory.memory_scope is MemoryScope.PRIVATE
         assert memory.provenance == {"message_id": "msg-1"}
-        saved_record = fake_client.calls[0][1]["record"]
+        saved_record = fake_client.calls[0][1]["rows"][0]
         assert saved_record["source_id"] == "source-email-1"
         assert saved_record["principal_id"] == "user-bliss"
         assert saved_record["memory_scope"] == "private"
@@ -1799,7 +1830,7 @@ class TestSurrealContentHelpers:
                 embedding_provider=provider,
             )
 
-        saved_record = fake_client.calls[0][1]["record"]
+        saved_record = fake_client.calls[0][1]["rows"][0]
         assert provider.input_kinds == ["document"]
         assert provider.texts == [
             "Title: Architecture note\n\nSurreal stores raw memory before extraction."
@@ -1987,7 +2018,7 @@ class TestSurrealContentHelpers:
                 raw_content="Surreal stores raw memory before extraction.",
             )
 
-        saved_record = fake_client.calls[0][1]["record"]
+        saved_record = fake_client.calls[0][1]["rows"][0]
         assert provider.input_kinds == ["document"]
         assert saved_record["embedding"] == embedding
 
@@ -2053,7 +2084,8 @@ class TestSurrealContentHelpers:
         assert provider.input_kinds == ["document"]
         assert provider.texts == ["Title: First\n\nfirst body", "Title: Second\n\nsecond body"]
         query, params = fake_client.calls[0]
-        assert "INSERT INTO raw_captures $rows" in query
+        assert "BEGIN TRANSACTION" in query
+        assert "INSERT INTO raw_captures" in query
         assert len(params["rows"]) == 2
         assert [row["source_id"] for row in params["rows"]] == [
             "source-email-1",
@@ -2187,7 +2219,7 @@ class TestSurrealContentHelpers:
                 extraction_prompt_metadata={"extractor": "test"},
             )
 
-        saved_record = fake_client.calls[0][1]["record"]
+        saved_record = fake_client.calls[0][1]["rows"][0]
         assert memory.entity_type == "decision"
         assert memory.capture_surface == "reflection_candidate"
         assert memory.review_state == "pending"
@@ -2262,11 +2294,10 @@ class TestSurrealContentHelpers:
             )
 
         query, params = fake_client.calls[0]
-        assert "capture_surface != $reflection_surface" in query
-        assert "capture_surface != $synthesis_surface" in query
-        assert params["reflection_surface"] == "reflection"
-        assert params["synthesis_surface"] == "synthesis_artifact"
-        assert [memory.id for memory in memories] == ["valid-cli"]
+        assert "capture_surface NOT IN $excluded" in query
+        assert "reflection" in params["excluded"]
+        assert "synthesis_artifact" in params["excluded"]
+        assert [memory.id for memory in memories] == ["valid-cli", "processed"]
 
     @pytest.mark.asyncio
     async def test_recall_raw_memory_scopes_private_memories_to_principal(self) -> None:
@@ -2594,9 +2625,9 @@ class TestSurrealContentHelpers:
 
         assert [memory.id for memory in memories] == ["memory-vector", "memory-lexical"]
         assert memories[1].snippet == "<mark>SurrealDB</mark> appears in the exact text."
-        assert "search::rrf($lists, $limit, $k)" in fake_client.calls[2][0]
-        fulltext_query, _fulltext_params = fake_client.calls[0]
-        vector_query, vector_params = fake_client.calls[1]
+        assert "search::rrf($lists, $limit, $k)" in _recall_source_calls(fake_client)[2][0]
+        fulltext_query, _fulltext_params = _recall_source_calls(fake_client)[0]
+        vector_query, vector_params = _recall_source_calls(fake_client)[1]
         assert "SELECT * FROM raw_captures" not in fulltext_query
         assert "SELECT *, math::max" not in fulltext_query
         assert "id AS record_id, uuid" in fulltext_query
@@ -2679,7 +2710,7 @@ class TestSurrealContentHelpers:
                 limit=2,
             )
 
-        assert len(fake_client.calls) == 2
+        assert len(_recall_source_calls(fake_client)) == 2
         assert [memory.id for memory in memories] == ["memory-lexical"]
         assert fake_log.warnings == [
             (
@@ -2692,7 +2723,7 @@ class TestSurrealContentHelpers:
                 },
             )
         ]
-        vector_query, _vector_params = fake_client.calls[1]
+        vector_query, _vector_params = _recall_source_calls(fake_client)[1]
         assert "embedding <|8, 40|> $query_embedding" in vector_query
 
     @pytest.mark.asyncio
@@ -2796,7 +2827,7 @@ class TestSurrealContentHelpers:
             "raw_recall_failure_count": 1,
             "raw_recall_failures": [{"source": "raw_vector", "error_type": "RuntimeError"}],
         }
-        assert len(fake_client.calls) == 2
+        assert len(_recall_source_calls(fake_client)) == 2
 
     @pytest.mark.asyncio
     async def test_recall_raw_memory_falls_back_when_query_embedding_fails(self) -> None:
@@ -2853,7 +2884,7 @@ class TestSurrealContentHelpers:
             )
 
         assert [memory.id for memory in memories] == ["memory-lexical"]
-        assert len(fake_client.calls) == 1
+        assert len(_recall_source_calls(fake_client)) == 1
         assert fake_log.warnings == [
             (
                 "raw_memory_query_embedding_failed",
@@ -2866,7 +2897,7 @@ class TestSurrealContentHelpers:
                 },
             )
         ]
-        fulltext_query, fulltext_params = fake_client.calls[0]
+        fulltext_query, fulltext_params = _recall_source_calls(fake_client)[0]
         assert "title @0@ $ft_term0" in fulltext_query
         assert "raw_content @" in fulltext_query
         assert fulltext_params["ft_term0"] == "surrealdb"
@@ -2920,7 +2951,7 @@ class TestSurrealContentHelpers:
             )
 
         assert [memory.id for memory in memories] == ["memory-lexical"]
-        assert len(fake_client.calls) == 1
+        assert len(_recall_source_calls(fake_client)) == 1
         assert fake_log.warnings == [
             (
                 "raw_memory_query_embedding_failed",
@@ -3249,3 +3280,13 @@ class TestGetRawMemoryByDedupeKey:
 @asynccontextmanager
 async def _yield_client(fake_client: FakeClient):
     yield fake_client
+
+
+def _recall_source_calls(client):
+    """Source and fusion queries, excluding the independent publication check."""
+    return [
+        (query, params)
+        for query, params in client.calls
+        if "LET $publications =" not in query
+        and "associations: (SELECT * FROM memory_derivations" not in query
+    ]

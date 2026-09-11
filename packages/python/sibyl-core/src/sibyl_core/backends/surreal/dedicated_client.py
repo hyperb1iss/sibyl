@@ -9,12 +9,13 @@ import random
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from sibyl_core.backends.surreal.connection import (
     _can_retry_query,
     _can_retry_raw_query,
     _is_transient_connection_error,
+    _query_tokens,
 )
 from sibyl_core.backends.surreal.observability import (
     elapsed_ms,
@@ -22,6 +23,9 @@ from sibyl_core.backends.surreal.observability import (
     query_start,
 )
 from sibyl_core.backends.surreal.protocols import QueryParams, SurrealClient
+
+if TYPE_CHECKING:
+    from sibyl_core.backends.surreal.schema_version import SurrealExecute
 
 logger = logging.getLogger(__name__)
 _MAX_CLOSED_CONNECTION_RETRIES = 2
@@ -40,9 +44,75 @@ def _is_embedded_url(url: str) -> bool:
     return url.startswith(_EMBEDDED_URL_SCHEMES)
 
 
-def _is_retryable_transaction_conflict(exc: BaseException) -> bool:
+def _checked_query_result(response: object, *, all_results: bool = False) -> object:
+    """Validate every statement before selecting the requested result shape."""
+    from surrealdb.errors import SurrealError, parse_query_error, parse_rpc_error
+
+    if not isinstance(response, dict):
+        raise SurrealError("Invalid SurrealDB query response envelope")
+    if (error := response.get("error")) is not None:
+        if not isinstance(error, dict):
+            raise SurrealError("Invalid SurrealDB RPC error envelope")
+        raise parse_rpc_error(error)
+    statements = response.get("result")
+    if not isinstance(statements, list) or not statements:
+        raise SurrealError("Missing SurrealDB query statement results")
+    errors: list[dict[str, object]] = []
+    for statement in statements:
+        if not isinstance(statement, dict) or statement.get("status") not in {"OK", "ERR"}:
+            raise SurrealError("Invalid SurrealDB query statement envelope")
+        if "result" not in statement:
+            raise SurrealError("Missing SurrealDB query statement result")
+        if statement["status"] == "ERR":
+            errors.append(statement)
+    if errors:
+        # An aborted transaction marks preceding statements NotExecuted. Surface
+        # the causal error so callers retain its structured type and retry signal.
+        for error in errors:
+            details = error.get("details")
+            message = error.get("result")
+            if isinstance(message, str) and _is_retryable_transaction_conflict(message):
+                raise parse_query_error(error)
+            if isinstance(message, str) and message in {
+                "The query was not executed due to a failed transaction",
+                "The query was not executed due to a cancelled transaction",
+            }:
+                continue
+            if not isinstance(details, dict) or details.get("kind") not in {
+                "NotExecuted",
+                "Cancelled",
+            }:
+                raise parse_query_error(error)
+        raise parse_query_error(errors[0])
+    if all_results:
+        return [statement["result"] for statement in statements]
+    return statements[0]["result"]
+
+
+def _is_retryable_transaction_conflict(exc: BaseException | str) -> bool:
     message = str(exc).lower()
     return "transaction conflict" in message and "can be retried" in message
+
+
+def _can_replay_query(query: str, response: object = None) -> bool:
+    """Require one atomic unit before replaying a conflict."""
+    if isinstance(response, dict):
+        results = response.get("result")
+        # The server emits one result per statement. This also recognizes an
+        # implicit transaction containing semicolons inside strings or blocks.
+        if isinstance(results, list) and len(results) == 1:
+            return True
+    statements = [part.strip().upper() for part in query.split(";") if part.strip()]
+    if len(statements) == 1:
+        return True
+    if not statements or statements[0] not in {"BEGIN", "BEGIN TRANSACTION"}:
+        return False
+    if statements[-1] not in {"COMMIT", "COMMIT TRANSACTION"}:
+        return False
+    # Count conservatively, including comments and strings: extra transaction
+    # words may suppress a retry, but cannot hide an intervening commit.
+    tokens = _query_tokens(query)
+    return tokens.count("BEGIN") == 1 and tokens.count("COMMIT") == 1 and "CANCEL" not in tokens
 
 
 def _transaction_conflict_retry_delay(retry_count: int) -> float:
@@ -180,6 +250,27 @@ class DedicatedSurrealClient:
             database=self._database,
         )
 
+    @asynccontextmanager
+    async def schema_lease_executor(self) -> AsyncIterator[SurrealExecute]:
+        """Reserve renewal capacity without competing with graph query sockets."""
+        if _is_embedded_url(self._url):
+            yield self.execute_query
+            return
+        control = DedicatedSurrealClient(
+            url=self._url,
+            username=self._username,
+            password=self._password,
+            token=self._token,
+            namespace=self._namespace,
+            database=self._database,
+            client_kind=self._client_kind,
+            pool_size=1,
+        )
+        try:
+            yield control.execute_query
+        finally:
+            await control.close()
+
     async def connect(self) -> SurrealClient:
         connection = await self._available.get()
         try:
@@ -187,12 +278,29 @@ class DedicatedSurrealClient:
         finally:
             self._available.put_nowait(connection)
 
+    @property
+    def pool_size(self) -> int:
+        """Return the existing query capacity, including embedded-mode clamping."""
+        return self._pool_size
+
     async def execute_query(self, query: str, **params: object) -> object:
         query_label = _pop_query_label(params)
         return await self._execute(
             query,
             params=params,
             raw=False,
+            query_label=query_label,
+            query_origin=_caller_origin(),
+        )
+
+    async def execute_query_batch(self, query: str, **params: object) -> object:
+        """Return every statement result after checking the complete response."""
+        query_label = _pop_query_label(params)
+        return await self._execute(
+            query,
+            params=params,
+            raw=False,
+            all_results=True,
             query_label=query_label,
             query_origin=_caller_origin(),
         )
@@ -272,6 +380,7 @@ class DedicatedSurrealClient:
         *,
         params: QueryParams,
         raw: bool,
+        all_results: bool = False,
         query_label: str | None,
         query_origin: str | None,
     ) -> object:
@@ -283,6 +392,7 @@ class DedicatedSurrealClient:
         connection = await self._available.get()
         try:
             while True:
+                transaction_retry_allowed = _can_replay_query(query)
                 try:
                     if not can_retry:
                         while True:
@@ -309,10 +419,15 @@ class DedicatedSurrealClient:
                                     exc,
                                 )
                     client = await connection.connect()
-                    result = await self._send_query(client, query, params=params, raw=raw)
+                    response = await self._send_query(client, query, params=params, raw=True)
+                    if raw:
+                        result = response
+                    else:
+                        transaction_retry_allowed = _can_replay_query(query, response)
+                        result = _checked_query_result(response, all_results=all_results)
                     break
                 except Exception as exc:
-                    if _is_retryable_transaction_conflict(exc):
+                    if transaction_retry_allowed and _is_retryable_transaction_conflict(exc):
                         if transaction_retry_count >= _MAX_TRANSACTION_CONFLICT_RETRIES:
                             raise
                         transaction_retry_count += 1
@@ -380,7 +495,7 @@ class DedicatedSurrealClient:
         bound_params = params if params else None
         if raw:
             return await client.query_raw(query, bound_params)
-        return await client.query(query, bound_params)
+        return _checked_query_result(await client.query_raw(query, bound_params))
 
 
 def _caller_origin() -> str | None:

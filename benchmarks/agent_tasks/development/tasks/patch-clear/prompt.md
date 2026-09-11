@@ -1,0 +1,3 @@
+A profile patch endpoint cannot clear optional fields. Fix apply_patch in app.py. This endpoint uses a flat merge-patch contract: None removes a key, an omitted key stays unchanged, and all other values replace or add the key. False, zero and empty containers are valid values. Removing an absent key is harmless. Return a new dictionary and preserve both inputs. Unlike an options resolver, None is a deletion here.
+
+Edit app.py. Run `python -m unittest discover -s tests -v` from the repository root. Python 3.13 and the standard library are sufficient; no installation or network access is needed.

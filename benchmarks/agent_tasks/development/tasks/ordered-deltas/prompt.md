@@ -1,0 +1,3 @@
+A replay job loses counter increments. Fix replay(initial, events) in app.py. Events are ordered deltas, not full snapshots: process every event in input order. A set operation stores its value, increment adds its numeric value to the current number (default zero for an absent key), and remove deletes a key if present. A set may store None. Increment inputs and existing values at increment time are numbers. Operations can repeat for the same key. Return a fresh dictionary without changing initial or the events.
+
+Edit app.py. Run `python -m unittest discover -s tests -v` from the repository root. Python 3.13 and the standard library are sufficient; no installation or network access is needed.

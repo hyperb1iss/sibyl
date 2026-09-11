@@ -29,7 +29,7 @@ from sibyl.mcp_tools.memory import (
 )
 from sibyl.mcp_tools.observability import require_owner_context as _require_owner_mcp_context
 from sibyl.mcp_tools.policy import (
-    authorize_memory_write_request as _authorize_mcp_memory_write,
+    authorize_memory_request as _authorize_mcp_memory_write,
     resolve_capture_links as _resolve_mcp_capture_links,
 )
 from sibyl.mcp_tools.retrieval import compile_context_pack as _compile_mcp_context_pack
@@ -91,9 +91,9 @@ async def test_accessible_projects_intersects_with_api_key_scope() -> None:
         scopes=["api:read"],
         api_key_project_ids=["project-a", "project-b"],
     )
-    resolve_projects = AsyncMock(return_value={"project-b"})
+    resolve_projects = AsyncMock(return_value=(frozenset({"project-b"}), frozenset()))
 
-    with patch("sibyl.mcp_tools.context.resolve_accessible_project_graph_ids", resolve_projects):
+    with patch("sibyl.mcp_tools.context.resolve_project_graph_grants", resolve_projects):
         result = await _get_accessible_projects(ctx)
 
     assert result == {"project-b"}
@@ -109,8 +109,8 @@ async def test_accessible_projects_intersects_with_api_key_scope() -> None:
 async def test_accessible_projects_returns_empty_when_user_disappears() -> None:
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["api:read"])
     with patch(
-        "sibyl.mcp_tools.context.resolve_accessible_project_graph_ids",
-        AsyncMock(return_value=set()),
+        "sibyl.mcp_tools.context.resolve_project_graph_grants",
+        AsyncMock(return_value=(frozenset(), frozenset())),
     ):
         result = await _get_accessible_projects(ctx)
 
@@ -366,7 +366,10 @@ async def test_synthesis_mcp_verify_returns_verified_run() -> None:
 
 
 @pytest.mark.asyncio
-async def test_synthesis_mcp_draft_authorizes_remembered_artifact() -> None:
+async def test_synthesis_mcp_draft_authorizes_remembered_artifact(monkeypatch) -> None:
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-a"})
+    )
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
     synthesis_draft = AsyncMock(
         return_value={"artifact": {"remembered_memory_id": "memory:artifact"}}
@@ -425,11 +428,16 @@ async def test_synthesis_mcp_draft_denies_inaccessible_remember_scope() -> None:
 
 
 @pytest.mark.asyncio
-async def test_remember_mcp_memory_scopes_project_metadata() -> None:
+async def test_remember_mcp_memory_scopes_project_metadata(monkeypatch) -> None:
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-a"})
+    )
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
     add = AsyncMock(return_value={"success": True, "id": "decision_123"})
     remember_raw = AsyncMock(
-        return_value=SimpleNamespace(id="raw_123", source_id="mcp:remember:decision")
+        return_value=SimpleNamespace(
+            id="raw_123", source_id="mcp:remember:decision", revision=1, metadata={}
+        )
     )
 
     with (
@@ -510,6 +518,7 @@ async def test_remember_mcp_memory_scopes_project_metadata() -> None:
             "memory_scope": "project",
             "scope_key": "project-a",
             "principal_id": ctx.user_id,
+            "source_bindings": {"raw_123": 1},
             "raw_memory_id": "raw_123",
             "raw_source_id": "mcp:remember:decision",
         },
@@ -518,6 +527,7 @@ async def test_remember_mcp_memory_scopes_project_metadata() -> None:
         # argument the row reaches the graph naming no capture, and a later
         # correction on this memory can neither find it nor retire it.
         capture_provenance={
+            "source_bindings": {"raw_123": 1},
             "raw_memory_id": "raw_123",
             "raw_source_id": "mcp:remember:decision",
         },
@@ -540,7 +550,10 @@ async def test_remember_mcp_memory_scopes_project_metadata() -> None:
 
 
 @pytest.mark.asyncio
-async def test_remember_mcp_memory_replays_idempotent_receipt() -> None:
+async def test_remember_mcp_memory_replays_idempotent_receipt(monkeypatch) -> None:
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-a"})
+    )
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
     add = AsyncMock(return_value={"success": True, "id": "decision_123"})
     remember_raw = AsyncMock(
@@ -548,6 +561,7 @@ async def test_remember_mcp_memory_replays_idempotent_receipt() -> None:
             id="raw_123",
             source_id="mcp:remember:decision",
             revision=3,
+            metadata={},
         )
     )
     get_idempotency = AsyncMock(return_value=None)
@@ -620,14 +634,17 @@ async def test_remember_mcp_memory_replays_idempotent_receipt() -> None:
     remember_raw.assert_not_awaited()
 
 
-def test_authorize_mcp_memory_write_returns_policy_reason() -> None:
+async def test_authorize_mcp_memory_write_returns_policy_reason(monkeypatch) -> None:
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-a"})
+    )
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
 
-    decision = _authorize_mcp_memory_write(
+    decision = await _authorize_mcp_memory_write(
         ctx=ctx,
+        write=True,
         memory_scope="project",
         scope_key="project-a",
-        accessible_projects={"project-a"},
         surface="mcp_remember",
     )
 
@@ -642,20 +659,26 @@ def test_authorize_mcp_memory_write_returns_policy_reason() -> None:
     assert decision.policy_context.source_surface == "mcp_remember"
 
 
-def test_authorize_mcp_memory_write_denies_unverified_project() -> None:
+async def test_authorize_mcp_memory_write_denies_unverified_project(monkeypatch) -> None:
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-a"})
+    )
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
 
     with pytest.raises(ValueError, match="unverified_membership"):
-        _authorize_mcp_memory_write(
+        await _authorize_mcp_memory_write(
             ctx=ctx,
+            write=True,
             memory_scope="project",
             scope_key="project-b",
-            accessible_projects={"project-a"},
             surface="mcp_remember",
         )
 
 
-def test_authorize_mcp_memory_write_allows_matching_api_key_memory_space() -> None:
+async def test_authorize_mcp_memory_write_allows_matching_api_key_memory_space(monkeypatch) -> None:
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-a"})
+    )
     ctx = McpContext(
         org_id=str(uuid4()),
         user_id=str(uuid4()),
@@ -663,11 +686,11 @@ def test_authorize_mcp_memory_write_allows_matching_api_key_memory_space() -> No
         api_key_memory_scope_keys=[api_key_memory_scope_key("project", "project-a")],
     )
 
-    decision = _authorize_mcp_memory_write(
+    decision = await _authorize_mcp_memory_write(
         ctx=ctx,
+        write=True,
         memory_scope="project",
         scope_key="project-a",
-        accessible_projects={"project-a"},
         surface="mcp_remember",
     )
 
@@ -675,7 +698,10 @@ def test_authorize_mcp_memory_write_allows_matching_api_key_memory_space() -> No
     assert decision.reason == "same_scope_write_allowed"
 
 
-def test_authorize_mcp_memory_write_denies_api_key_memory_space_mismatch() -> None:
+async def test_authorize_mcp_memory_write_denies_api_key_memory_space_mismatch(monkeypatch) -> None:
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-b"})
+    )
     ctx = McpContext(
         org_id=str(uuid4()),
         user_id=str(uuid4()),
@@ -684,11 +710,11 @@ def test_authorize_mcp_memory_write_denies_api_key_memory_space_mismatch() -> No
     )
 
     with pytest.raises(ValueError, match="api_key_memory_space_denied"):
-        _authorize_mcp_memory_write(
+        await _authorize_mcp_memory_write(
             ctx=ctx,
+            write=True,
             memory_scope="project",
             scope_key="project-b",
-            accessible_projects={"project-b"},
             surface="mcp_remember",
         )
 
@@ -717,7 +743,6 @@ async def test_authorize_mcp_team_correction_resolves_team_scope_from_ids() -> N
             ctx=ctx,
             action="correct_memory",
             entity_id="raw-1",
-            accessible_projects=None,
         )
 
     assert decision is not None
@@ -754,7 +779,10 @@ def test_mcp_policy_context_preserves_delegated_identity() -> None:
 
 
 @pytest.mark.asyncio
-async def test_add_mcp_entity_scopes_project_metadata() -> None:
+async def test_add_mcp_entity_scopes_project_metadata(monkeypatch) -> None:
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-a"})
+    )
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
     add = AsyncMock(return_value={"success": True, "id": "task_123"})
     metadata = {"source": "test"}
@@ -900,7 +928,10 @@ async def test_add_mcp_entity_requires_project_for_restricted_credentials() -> N
 
 
 @pytest.mark.asyncio
-async def test_add_mcp_entity_clamps_conflict_threshold_floor_for_mcp_callers() -> None:
+async def test_add_mcp_entity_clamps_conflict_threshold_floor_for_mcp_callers(monkeypatch) -> None:
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-a"})
+    )
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
     add = AsyncMock(return_value={"success": True, "id": "task_123"})
 
@@ -970,10 +1001,13 @@ async def test_add_mcp_entity_denies_missing_actor_with_policy_reason() -> None:
 
 
 @pytest.mark.asyncio
-async def test_manage_mcp_complete_task_routes_through_workflow_service() -> None:
+async def test_manage_mcp_complete_task_routes_through_workflow_service(monkeypatch) -> None:
     """H8 regression guard: an MCP complete_task now goes through the shared
     workflow service (lock + broadcast + project-activity) and enqueues the
     learning jobs, instead of the old broadcast-less core manage() body."""
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-a"})
+    )
     from sibyl.services.work_item_workflow import WorkItemAction, WorkItemTransition
     from sibyl_core.models.entities import EntityType
 
@@ -1111,7 +1145,10 @@ async def test_manage_mcp_complete_task_routes_through_workflow_service() -> Non
 
 
 @pytest.mark.asyncio
-async def test_manage_memory_correction_returns_audited_receipt() -> None:
+async def test_manage_memory_correction_returns_audited_receipt(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "sibyl.mcp_tools.context.get_writable_projects", AsyncMock(return_value=set())
+    )
     ctx = McpContext(org_id="org-1", user_id="user-1", scopes=["mcp"])
     memory = SimpleNamespace(
         id="raw-1",
@@ -1174,17 +1211,22 @@ async def test_manage_memory_correction_returns_audited_receipt() -> None:
         reason="Incorrect",
         accessible_projects={"project-a"},
         accessible_teams=None,
+        writable_projects=set(),
         replacement_source_id=None,
         duplicate_of_source_id=None,
         revised_content=None,
         expected_revision=1,
+        allowed_memory_scope_keys=None,
     )
     audit.assert_awaited_once()
     assert audit.await_args.kwargs["action"] == "memory.correction.mark_wrong"
 
 
 @pytest.mark.asyncio
-async def test_manage_mcp_complete_task_records_cited_memories() -> None:
+async def test_manage_mcp_complete_task_records_cited_memories(monkeypatch) -> None:
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-a"})
+    )
     from sibyl.services.work_item_workflow import WorkItemAction, WorkItemTransition
     from sibyl_core.models.entities import EntityType
 
@@ -1277,13 +1319,18 @@ async def test_manage_workflow_transition_errors_return_structured_response() ->
 
 
 @pytest.mark.asyncio
-async def test_manage_mcp_project_id_action_allows_admin_scope() -> None:
-    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
+async def test_manage_mcp_project_analysis_uses_registered_read_grants(monkeypatch) -> None:
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-a"})
+    )
+    ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"], org_role="owner")
     manage = AsyncMock(return_value={"success": True, "action": "prioritize"})
 
     with (
         patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
-        patch("sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value=None)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects", AsyncMock(return_value={"project-a"})
+        ),
         patch("sibyl_core.services.graph.get_surreal_graph_runtime", AsyncMock()) as runtime,
         patch("sibyl_core.tools.manage.manage", manage),
     ):
@@ -1296,7 +1343,7 @@ async def test_manage_mcp_project_id_action_allows_admin_scope() -> None:
     assert result == {
         "success": True,
         "action": "prioritize",
-        "policy_reason": "same_scope_write_allowed",
+        "policy_reason": "project_access_verified",
     }
     runtime.assert_not_awaited()
     manage.assert_awaited_once_with(
@@ -1308,13 +1355,16 @@ async def test_manage_mcp_project_id_action_allows_admin_scope() -> None:
         },
         organization_id=ctx.org_id,
         principal_id=ctx.user_id,
-        accessible_projects=None,
+        accessible_projects={"project-a"},
         allowed_memory_scope_keys=None,
     )
 
 
 @pytest.mark.asyncio
-async def test_manage_mcp_action_denies_inaccessible_task_project() -> None:
+async def test_manage_mcp_action_denies_inaccessible_task_project(monkeypatch) -> None:
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-a"})
+    )
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
     manage = AsyncMock()
     entity_manager = SimpleNamespace(
@@ -1376,11 +1426,16 @@ async def test_manage_mcp_action_denies_missing_actor_with_policy_reason() -> No
 
 
 @pytest.mark.asyncio
-async def test_remember_mcp_memory_links_single_active_project_task() -> None:
+async def test_remember_mcp_memory_links_single_active_project_task(monkeypatch) -> None:
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-a"})
+    )
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
     add = AsyncMock(return_value={"success": True, "id": "decision_123"})
     remember_raw = AsyncMock(
-        return_value=SimpleNamespace(id="raw_123", source_id="mcp:remember:decision")
+        return_value=SimpleNamespace(
+            id="raw_123", source_id="mcp:remember:decision", revision=1, metadata={}
+        )
     )
     explore = AsyncMock(return_value=SimpleNamespace(entities=[SimpleNamespace(id="task_active")]))
 
@@ -1510,7 +1565,10 @@ async def test_resolve_mcp_capture_links_falls_back_when_lookup_fails() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reflect_mcp_memory_links_single_active_task_when_persisting() -> None:
+async def test_reflect_mcp_memory_links_single_active_task_when_persisting(monkeypatch) -> None:
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-a"})
+    )
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
     pack = ReflectionPack(
         source_title="Planning",
@@ -1626,7 +1684,10 @@ async def test_reflect_mcp_memory_records_cited_memories() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reflect_mcp_memory_persist_enforces_api_key_memory_scope() -> None:
+async def test_reflect_mcp_memory_persist_enforces_api_key_memory_scope(monkeypatch) -> None:
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-b"})
+    )
     ctx = McpContext(
         org_id=str(uuid4()),
         user_id=str(uuid4()),
@@ -1723,7 +1784,12 @@ async def test_require_mcp_context_denies_non_writer_roles(role: str | None) -> 
     ],
 )
 @pytest.mark.asyncio
-async def test_remember_refuses_hidden_target_before_reservation_or_write(target: object) -> None:
+async def test_remember_refuses_hidden_target_before_reservation_or_write(
+    monkeypatch, target: object
+) -> None:
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-a"})
+    )
     ctx = McpContext(
         org_id=str(uuid4()),
         user_id="current-user",
@@ -1931,12 +1997,15 @@ async def test_add_mcp_entity_leaves_work_items_unscoped() -> None:
 
 
 @pytest.mark.asyncio
-async def test_add_mcp_entity_leaves_a_project_task_unscoped() -> None:
+async def test_add_mcp_entity_leaves_a_project_task_unscoped(monkeypatch) -> None:
     """A work item is addressed by project_id, not by a memory scope.
 
     Scoping it as well would hide it from the internal lookups that resolve a
     capture's active task, which carry project access but no reader identity.
     """
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-a"})
+    )
     ctx = McpContext(org_id=str(uuid4()), user_id=str(uuid4()), scopes=["mcp"])
     add = AsyncMock(return_value={"success": True, "id": "task_123"})
 
@@ -2014,7 +2083,7 @@ async def test_mcp_explore_authorizes_graph_navigation_as_the_caller() -> None:
 
 
 @pytest.mark.asyncio
-async def test_manage_refuses_a_private_target_owned_by_another_principal() -> None:
+async def test_manage_refuses_a_private_target_owned_by_another_principal(monkeypatch) -> None:
     """Project membership is not authorization to mutate a private row.
 
     Entity-targeted manage actions resolved only the target's project id and
@@ -2022,6 +2091,9 @@ async def test_manage_refuses_a_private_target_owned_by_another_principal() -> N
     project write. A contributor on a shared project could complete, block or
     archive another principal's private task by id.
     """
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-shared"})
+    )
     bob = str(uuid4())
     ctx = McpContext(org_id=str(uuid4()), user_id=bob, scopes=["mcp"])
 
@@ -2051,7 +2123,6 @@ async def test_manage_refuses_a_private_target_owned_by_another_principal() -> N
                 ctx=ctx,
                 action="complete_task",
                 entity_id="task_target",
-                accessible_projects={"project-shared"},
             )
 
     others_private = await _decide(_target("private", "alice"))
@@ -2067,7 +2138,7 @@ async def test_manage_refuses_a_private_target_owned_by_another_principal() -> N
 
 
 @pytest.mark.asyncio
-async def test_manage_dispatch_does_not_mutate_a_foreign_private_target() -> None:
+async def test_manage_dispatch_does_not_mutate_a_foreign_private_target(monkeypatch) -> None:
     """Asserts the effect, not the decision.
 
     The previous test called the resolver directly and checked what it
@@ -2081,6 +2152,9 @@ async def test_manage_dispatch_does_not_mutate_a_foreign_private_target() -> Non
     transition ran, no idempotency reservation was taken, and the owner is
     still able to act on their own row.
     """
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-shared"})
+    )
     bob = str(uuid4())
     transitions: list[str] = []
     reservations: list[str] = []
@@ -2153,3 +2227,66 @@ async def test_manage_dispatch_does_not_mutate_a_foreign_private_target() -> Non
     transitions.clear()
     assert await _dispatch(_target(None, None), bob) == "executed"
     assert transitions == ["complete_task"]
+
+
+@pytest.mark.asyncio
+async def test_remember_mcp_resolves_source_access_beyond_the_target_project(monkeypatch) -> None:
+    monkeypatch.setattr(
+        mcp_context_module, "get_writable_projects", AsyncMock(return_value={"project-a"})
+    )
+    grants = [api_key_memory_scope_key("project", "project-a")]
+    ctx = McpContext(
+        org_id=str(uuid4()),
+        user_id=str(uuid4()),
+        scopes=["mcp"],
+        api_key_memory_scope_keys=grants,
+    )
+    remember = AsyncMock(
+        return_value=SimpleNamespace(
+            id="raw_123",
+            source_id="mcp:remember:decision",
+            revision=3,
+            metadata={
+                "raw_source_ids": ["source-capture"],
+                "source_bindings": {"source-capture": 2},
+            },
+        )
+    )
+    with (
+        patch("sibyl.mcp_tools.context.require_context", AsyncMock(return_value=ctx)),
+        patch(
+            "sibyl.mcp_tools.context.get_accessible_projects",
+            AsyncMock(return_value={"project-a", "source-project"}),
+        ),
+        patch(
+            "sibyl.mcp_tools.memory.resolve_accessible_team_scope_keys",
+            AsyncMock(return_value={"source-team"}),
+        ) as teams,
+        patch(
+            "sibyl_core.tools.core.add", AsyncMock(return_value={"success": True, "id": "row"})
+        ) as add,
+        patch("sibyl_core.services.surreal_content.remember_raw_memory", remember),
+        patch(
+            "sibyl_core.tools.core.explore", AsyncMock(return_value=SimpleNamespace(entities=[]))
+        ),
+        patch("sibyl.mcp_tools.policy.validate_relationship_targets_for_caller", AsyncMock()),
+    ):
+        await _remember_mcp_memory(
+            title="Derived memory",
+            content="A note citing another project.",
+            kind="decision",
+            domain="sibyl",
+            project="project-a",
+            tags=None,
+            related_to=None,
+            metadata={"raw_source_ids": ["source-capture"]},
+        )
+    assert remember.await_args.kwargs["accessible_projects"] == {"project-a", "source-project"}
+    assert remember.await_args.kwargs["accessible_teams"] == {"source-team"}
+    assert remember.await_args.kwargs["allowed_memory_scope_keys"] == grants
+    teams.assert_awaited_once_with(user_id=ctx.user_id, org_id=ctx.org_id, scopes=ctx.scopes)
+
+    assert add.await_args.kwargs["capture_provenance"]["source_bindings"] == {
+        "raw_123": 3,
+        "source-capture": 2,
+    }

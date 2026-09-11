@@ -79,6 +79,7 @@ async def preview_memory_share_route(
         surface="memory_share_preview",
     )
     result = await preview_memory_share(
+        allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
         source_ids=request.source_ids,
         organization_id=str(org.id),
         principal_id=principal_id,
@@ -86,6 +87,7 @@ async def preview_memory_share_route(
         target_scope_key=request.target_scope_key,
         recipient_organization_id=request.recipient_organization_id,
         accessible_projects=accessible_projects,
+        writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
         accessible_teams=accessible_teams,
     )
     await memory_auth.log_memory_audit(
@@ -150,6 +152,7 @@ async def share_memory_route(
         request.target_scope_key if request.target_scope == "project" else None
     )
     result = await share_memory(
+        allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
         source_ids=request.source_ids,
         organization_id=str(org.id),
         principal_id=principal_id,
@@ -158,6 +161,7 @@ async def share_memory_route(
         recipient_organization_id=request.recipient_organization_id,
         project=project_id,
         accessible_projects=accessible_projects,
+        writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
         accessible_teams=accessible_teams,
     )
     promoted_ids = [

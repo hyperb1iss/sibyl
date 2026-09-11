@@ -238,3 +238,35 @@ class TestSessionBundleRoute:
             "private",
             "project",
         ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selected_projects", [[], ["proj_1"]])
+async def test_session_keeps_ancestry_authority_outside_discovery_selection(selected_projects):
+    org = SimpleNamespace(id=UUID("00000000-0000-0000-0000-000000000111"))
+    with (
+        patch(
+            "sibyl.api.routes.session.list_accessible_project_graph_ids",
+            AsyncMock(return_value=["proj_1", "proj_2"]),
+        ),
+        patch(
+            "sibyl_core.tools.core.explore", AsyncMock(return_value=SimpleNamespace(entities=[]))
+        ),
+        patch("sibyl_core.tools.core.search", AsyncMock(return_value=SimpleNamespace(results=[]))),
+        patch("sibyl.api.routes.session.recall_raw_memory", AsyncMock(return_value=[])) as recall,
+    ):
+        await get_session_bundle(
+            query="deployment",
+            task_limit=5,
+            memory_limit=3,
+            project_ids=selected_projects,
+            org=org,
+            ctx=_ctx(),
+        )
+    assert [call.kwargs["memory_scope"] for call in recall.await_args_list] == (
+        ["private", "project"] if selected_projects else ["private"]
+    )
+    assert all(
+        call.kwargs["source_authority"].projects == frozenset({"proj_1", "proj_2"})
+        for call in recall.await_args_list
+    )

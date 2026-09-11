@@ -468,6 +468,9 @@ async def manage(
     organization_id: str | None = None,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    writable_projects: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
 ) -> ManageResponse:
     """Manage operations that modify state in the knowledge graph.
@@ -552,6 +555,9 @@ async def manage(
             organization_id=organization_id,
             principal_id=principal_id,
             accessible_projects=accessible_projects,
+            writable_projects=writable_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
             allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
     except Exception as e:
@@ -576,6 +582,9 @@ async def _dispatch(
     organization_id: str,
     principal_id: str | None = None,
     accessible_projects: set[str] | None = None,
+    writable_projects: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
     allowed_memory_scope_keys: set[str] | None = None,
 ) -> ManageResponse:
     """Route a validated action to its category handler (exhaustive)."""
@@ -589,7 +598,16 @@ async def _dispatch(
         )
     if action in SOURCE_ACTIONS:
         return await _handle_source_action(
-            cast("SourceAction", action), entity_id, data, organization_id=organization_id
+            cast("SourceAction", action),
+            entity_id,
+            data,
+            organization_id=organization_id,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            writable_projects=writable_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
         )
     return await _handle_analysis_action(
         cast("AnalysisAction", action),
@@ -1295,6 +1313,12 @@ async def _handle_source_action(
     data: dict[str, Any],
     *,
     organization_id: str | None,
+    principal_id: str | None = None,
+    accessible_projects: set[str] | None = None,
+    writable_projects: set[str] | None = None,
+    accessible_teams: set[str] | None = None,
+    accessible_delegations: set[str] | None = None,
+    allowed_memory_scope_keys: set[str] | None = None,
 ) -> ManageResponse:
     """Handle source operations (crawl, sync, refresh)."""
     # Validate inputs BEFORE connecting to database
@@ -1382,12 +1406,14 @@ async def _handle_source_action(
         result = await apply_memory_correction(
             organization_id=organization_id,
             source_id=entity_id,
-            principal_id=str(data["user_id"]) if data.get("user_id") else None,
+            principal_id=principal_id,
             action=correction_action,
             reason=reason.strip(),
-            accessible_projects=data.get("accessible_projects"),
-            accessible_teams=data.get("accessible_teams"),
-            accessible_delegations=data.get("accessible_delegations"),
+            accessible_projects=accessible_projects,
+            writable_projects=writable_projects or set(),
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
             replacement_source_id=(
                 str(data["replacement_source_id"]) if data.get("replacement_source_id") else None
             ),

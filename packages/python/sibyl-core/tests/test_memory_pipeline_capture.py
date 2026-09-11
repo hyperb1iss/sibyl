@@ -9,6 +9,30 @@ from sibyl_core.memory_pipeline.capture import MemoryCaptureRequest, MemoryCaptu
 
 
 @pytest.mark.asyncio
+async def test_capture_preserves_observed_bindings_over_caller_claims() -> None:
+    observed = {"capture": 5, "ancestor": 2}
+
+    async def remember_raw(_request):
+        return {"id": "capture", "source_bindings": observed}
+
+    async def create_graph(_request, metadata):
+        # A later source revision must not relabel the text already captured.
+        observed["capture"] = 6
+        assert metadata["source_bindings"] == {"capture": 5, "ancestor": 2}
+        return {"id": "derived"}
+
+    await MemoryCaptureService(
+        remember_raw_memory=remember_raw, create_graph_entity=create_graph
+    ).capture(
+        MemoryCaptureRequest(
+            title="Evidence",
+            content="The observed text",
+            metadata={"source_bindings": {"capture": 999, "forged": 999}},
+        )
+    )
+
+
+@pytest.mark.asyncio
 async def test_memory_capture_service_writes_raw_source_before_graph_entity() -> None:
     events: list[tuple[str, object]] = []
 

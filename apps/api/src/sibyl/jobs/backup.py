@@ -60,6 +60,7 @@ class BackupMetadata:
     graph_entities: int
     graph_relationships: int
     files: dict[str, str] = field(default_factory=dict)  # filename -> sha256
+    lineage_validation: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -352,6 +353,30 @@ async def run_backup(  # noqa: PLR0915
                     log.exception("backup_graph_failed", backup_id=backup_id, error=str(e))
                     raise
 
+            from sibyl_core.migrate.archive_lineage import seal_archive_lineage
+
+            captured_graph = (
+                await asyncio.to_thread(lambda: json.loads(graph_file.read_text()))
+                if graph_file.exists()
+                else None
+            )
+            captured_content = (
+                await asyncio.to_thread(lambda: json.loads(content_file.read_text()))
+                if content_file.exists()
+                else None
+            )
+            sealed_graph, sealed_content, lineage_report = seal_archive_lineage(
+                captured_graph, captured_content
+            )
+            if sealed_graph is not None:
+                graph_size = await _write_json_file_async(graph_file, sealed_graph, default=str)
+                file_checksums["graph.json"] = await _sha256_file_async(graph_file)
+            if sealed_content is not None:
+                content_size = await _write_json_file_async(
+                    content_file, sealed_content, default=str
+                )
+                file_checksums["content.json"] = await _sha256_file_async(content_file)
+
             # Step 4: Create metadata
             metadata = BackupMetadata(
                 version=BACKUP_VERSION,
@@ -362,6 +387,7 @@ async def run_backup(  # noqa: PLR0915
                 graph_entities=entity_count,
                 graph_relationships=relationship_count,
                 files=file_checksums,
+                lineage_validation=lineage_report,
             )
             await _write_json_file_async(metadata_file, asdict(metadata))
 

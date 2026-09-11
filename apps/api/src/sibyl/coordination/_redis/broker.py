@@ -904,7 +904,6 @@ class RedisQueueBroker:
         dry_run: bool = False,
         source_limit: int = 20,
         candidate_limit: int = 50,
-        archive_exceptions: bool = True,
         confidence_threshold: float | None = None,
     ) -> str:
         """Enqueue an org-scoped reflection dream-cycle run."""
@@ -917,7 +916,6 @@ class RedisQueueBroker:
             dry_run=dry_run,
             source_limit=source_limit,
             candidate_limit=candidate_limit,
-            archive_exceptions=archive_exceptions,
             confidence_threshold=confidence_threshold,
         )
 

@@ -1006,3 +1006,238 @@ async def test_live_auth_replay_identity_migration_preserves_data_lineage() -> N
         await client.close()
         await replacement.close()
         await _drop_surreal_namespace(namespace)
+
+
+@pytest.mark.asyncio
+async def test_live_eval_admission_returns_memory_and_rolls_back_failed_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from sibyl_core.services import content_client, eval_admission
+    from sibyl_core.tasks.eval_receipts import TaskAssignment, sign_outcome
+
+    namespace = f"eval_admission_live_{uuid4().hex}"
+    client = SurrealContentClient(
+        url=_live_surreal_url(),
+        username=_surreal_username(),
+        password=_surreal_password(),
+        namespace=namespace,
+        database="content",
+    )
+
+    @asynccontextmanager
+    async def live_content_session():
+        yield client
+
+    monkeypatch.setattr(content_client, "surreal_content_client", live_content_session)
+    key = Ed25519PrivateKey.generate()
+    assignment = TaskAssignment(
+        organization_id=str(uuid4()),
+        owner_principal_id="live-owner",
+        experiment_id="live-experiment",
+        experiment_revision="1",
+        task_id="live-task",
+        task_revision="1",
+        task_sha256="a" * 64,
+        family_id="live-family",
+        split="learning",
+        arm_id="raw",
+        checkpoint=0,
+        seed=1,
+        memory_pack_sha256="b" * 64,
+        controller_policy_sha256="c" * 64,
+        checker_sha256="d" * 64,
+        oracle_sha256="e" * 64,
+        evaluator_sha256="f" * 64,
+        runtime_sha256="0" * 64,
+        image="sha256:" + "1" * 64,
+        attempt_id=uuid4().hex,
+    )
+
+    async def admit(task: TaskAssignment) -> eval_admission.EvalAdmissionResult:
+        outcome = {
+            "schema_version": "sibyl-json-cli-outcome-v1",
+            "attempt_id": task.attempt_id,
+            "snapshot_sha256": "2" * 64,
+            "status": "passed",
+            "passed": True,
+            **{
+                field: getattr(task, field)
+                for field in (
+                    "checker_sha256",
+                    "oracle_sha256",
+                    "evaluator_sha256",
+                    "runtime_sha256",
+                    "image",
+                )
+            },
+        }
+        evidence = {
+            "outcome_bytes": json.dumps(outcome).encode(),
+            "transcript_bytes": b'{"action":"check"}\n',
+            "episode_bytes": b"Live admission preserves these exact episode bytes.",
+        }
+        receipt = sign_outcome(
+            assignment=task, issuer_id="live-issuer", private_key=key, **evidence
+        )
+        return await eval_admission.admit_eval_outcome(
+            organization_id=task.organization_id,
+            experiment_id=task.experiment_id,
+            attempt_id=task.attempt_id,
+            principal_id=task.owner_principal_id,
+            issuer_id="live-issuer",
+            trusted_public_key=key.public_key(),
+            expected_controller_policy_sha256=task.controller_policy_sha256,
+            receipt_bytes=receipt,
+            **evidence,
+        )
+
+    async def stored_state():
+        return (
+            await client.execute_query("SELECT * FROM eval_attempts ORDER BY uuid;"),
+            await client.execute_query("SELECT * FROM raw_captures ORDER BY uuid;"),
+        )
+
+    try:
+        await bootstrap_content_schema(client, reset=True)
+        assert (
+            await eval_admission.register_eval_assignment(
+                organization_id=assignment.organization_id, assignment=assignment
+            )
+            == assignment
+        )
+        first = await admit(assignment)
+        assert first.memory.raw_content == "Live admission preserves these exact episode bytes."
+        assert first.memory.revision == 1
+        before_retry = await stored_state()
+        replay = await admit(assignment)
+        assert replay.memory.id == first.memory.id
+        assert replay.receipt_sha256 == first.receipt_sha256
+        assert await stored_state() == before_retry
+        assert len(before_retry[0]) == len(before_retry[1]) == 1
+
+        second = assignment.model_copy(update={"attempt_id": uuid4().hex})
+        await eval_admission.register_eval_assignment(
+            organization_id=second.organization_id, assignment=second
+        )
+        before_failure = await stored_state()
+        with monkeypatch.context() as patch:
+            marker = "LET $memory ="
+            assert eval_admission._ADMIT.count(marker) == 1
+            patch.setattr(
+                eval_admission,
+                "_ADMIT",
+                eval_admission._ADMIT.replace(
+                    marker, "THROW 'eval admission conflict: injected after writes';\n" + marker
+                ),
+            )
+            with pytest.raises(eval_admission.EvalAdmissionConflict, match="injected after writes"):
+                await admit(second)
+        assert await stored_state() == before_failure
+
+        third = assignment.model_copy(update={"attempt_id": uuid4().hex})
+        with monkeypatch.context() as patch:
+            marker = "RETURN (SELECT * FROM eval_attempts"
+            assert eval_admission._REGISTER.count(marker) == 1
+            patch.setattr(
+                eval_admission,
+                "_REGISTER",
+                eval_admission._REGISTER.replace(
+                    marker,
+                    "THROW 'eval admission conflict: injected after registration';\n" + marker,
+                ),
+            )
+            with pytest.raises(
+                eval_admission.EvalAdmissionConflict, match="injected after registration"
+            ):
+                await eval_admission.register_eval_assignment(
+                    organization_id=third.organization_id, assignment=third
+                )
+        assert await stored_state() == before_failure
+    finally:
+        await client.close()
+        await _drop_surreal_namespace(namespace)
+
+
+@pytest.mark.parametrize("operation", ["read", "mutation", "takeover"])
+async def test_live_surreal_schema_renewal_and_takeover(monkeypatch, operation):
+    import asyncio
+
+    from sibyl_core.backends.surreal import schema
+    from sibyl_core.backends.surreal.schema_ownership import (
+        SchemaOwnershipLost,
+        try_acquire_schema_ownership,
+    )
+
+    group_id = str(uuid4())
+    clients = [
+        SurrealGraphClient(
+            group_id=group_id,
+            url=_live_surreal_url(),
+            username=_surreal_username(),
+            password=_surreal_password(),
+            pool_size=1,
+        )
+        for _ in range(2)
+    ]
+    client, observer = clients
+    successor = None
+
+    async def short_claim(execute, **kwargs):
+        return await try_acquire_schema_ownership(execute, lease_seconds=1, **kwargs)
+
+    async def stopped_renewal(ownership):
+        await asyncio.Event().wait()
+
+    try:
+        await prepare_graph_schema(client)
+        await client.execute_query("DEFINE TABLE schema_renewal_probe SCHEMALESS;")
+        monkeypatch.setattr(schema, "try_acquire_schema_ownership", short_claim)
+        if operation == "takeover":
+            monkeypatch.setattr(schema, "_renew_schema_ownership", stopped_renewal)
+        async with schema._graph_schema_ownership(client) as ownership:
+            work = asyncio.create_task(
+                ownership.read("SLEEP 3s; RETURN 1;")
+                if operation == "read"
+                else ownership.mutate("SLEEP 3s; CREATE schema_renewal_probe:body SET value = 1;")
+            )
+            try:
+                await asyncio.sleep(1.3)
+                assert not work.done()
+                successor = await try_acquire_schema_ownership(
+                    observer.execute_query, initialize=False
+                )
+                assert not work.done(), "the contender must claim while the body is in flight"
+                if operation == "takeover":
+                    assert successor is not None
+                    with pytest.raises(SchemaOwnershipLost):
+                        await work
+                    assert await observer.execute_query("SELECT * FROM schema_renewal_probe;") == []
+                else:
+                    assert successor is None
+                    await work
+                    assert await observer.execute_query(
+                        "SELECT VALUE deadline > time::now() FROM schema_lease:graph;"
+                    ) == [True]
+                    if operation == "mutation":
+                        assert await observer.execute_query(
+                            "SELECT VALUE value FROM schema_renewal_probe:body;"
+                        ) == [1]
+            finally:
+                if not work.done():
+                    work.cancel()
+                await asyncio.gather(work, return_exceptions=True)
+        if successor is None:
+            successor = await try_acquire_schema_ownership(observer.execute_query, initialize=False)
+        assert successor is not None
+        await successor.mutate("CREATE schema_renewal_probe:successor SET value = 2;")
+        assert await observer.execute_query(
+            "SELECT VALUE value FROM schema_renewal_probe:successor;"
+        ) == [2]
+    finally:
+        if successor is not None:
+            await successor.release()
+        await asyncio.gather(*(connection.close() for connection in clients))
+        with suppress(Exception):
+            await _drop_surreal_namespace(client.namespace)

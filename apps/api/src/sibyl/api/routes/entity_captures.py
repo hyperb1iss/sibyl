@@ -51,13 +51,13 @@ async def archive_raw_capture(
     entity_type: str,
     tags: list[str],
     metadata: dict[str, object],
+    source_capture_id: str | None = None,
 ) -> None:
     """Persist the write-once capture sidecar.
 
-    When the entity is the projection of a raw memory (metadata carries
-    raw_memory_id), the raw row is stamped with this capture's id so the
-    review queue lists the memory once instead of raw and projection side
-    by side.
+    The optional source capture requests queue folding under the writer's
+    identity. The identifier is queue bookkeeping, not evidence provenance,
+    and is never stored in this sidecar's metadata.
     """
     capture_surface_value = metadata.get("capture_surface")
     capture = RawCaptureRecord(
@@ -80,12 +80,11 @@ async def archive_raw_capture(
         created_by_user_id=user_id,
     )
     await save_raw_capture_record(session, capture=capture)
-    raw_memory_id = metadata.get("raw_memory_id")
-    if raw_memory_id:
+    if source_capture_id:
         await content_runtime.mark_raw_capture_projected(
             session,
             organization_id=organization_id,
-            raw_capture_id=str(raw_memory_id),
+            raw_capture_id=source_capture_id,
             projected_capture_id=capture.id,
             principal_id=capture.principal_id,
         )

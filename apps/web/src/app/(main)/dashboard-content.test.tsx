@@ -273,12 +273,12 @@ describe('DashboardContent', () => {
     expect(openCaptureMemory).toHaveBeenCalledWith('dashboard');
   });
 
-  it('links the dashboard to the memory review queue', () => {
+  it('links the dashboard to optional memory inspection', () => {
     render(<DashboardContent initialStats={initialStats} />);
 
-    expect(screen.getByRole('link', { name: /review memory/i })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /inspect memory/i })).toHaveAttribute(
       'href',
-      '/memory/captures?link=unlinked'
+      '/memory/captures'
     );
   });
 

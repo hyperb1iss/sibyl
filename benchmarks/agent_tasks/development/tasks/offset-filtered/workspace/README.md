@@ -1,0 +1,11 @@
+# Offset Filtered
+
+A filtered inventory export loses records. Fix collect_pages(fetch, page_size) in app.py. The API takes an offset into its unfiltered inventory and a positive page_size. Its response contains items (filtered matches in that window) and total (the fixed unfiltered inventory size). Advance by page_size even when a response has fewer matches or none. Stop when the next offset is at least total. Fetch offset zero once even for an empty inventory. Reject nonpositive page_size with ValueError. Preserve order and duplicates.
+
+Run the local checks with:
+
+```sh
+python -m unittest discover -s tests -v
+```
+
+The repository needs Python 3.13 and no external dependencies.

@@ -1,5 +1,6 @@
 """Configuration management for Sibyl MCP Server."""
 
+import base64
 import os
 import secrets
 from datetime import UTC, datetime
@@ -98,6 +99,28 @@ class OIDCSettings(BaseModel):
         if len(names) != len(set(names)):
             raise ValueError("OIDC provider names must be unique")
         return self
+
+
+class EvalIssuerSettings(BaseModel):
+    """Server-owned trust for one experiment's outcome issuer."""
+
+    issuer_id: str = Field(min_length=1)
+    organization_id: str = Field(min_length=1)
+    experiment_id: str = Field(min_length=1)
+    experiment_revision: str = Field(min_length=1)
+    public_key_base64: str
+    controller_policy_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("public_key_base64")
+    @classmethod
+    def validate_public_key(cls, value: str) -> str:
+        try:
+            decoded = base64.b64decode(value, validate=True)
+        except ValueError as exc:
+            raise ValueError("eval issuer public key must be base64") from exc
+        if len(decoded) != 32:
+            raise ValueError("eval issuer requires a 32-byte Ed25519 public key")
+        return value
 
 
 def _get_or_create_jwt_secret() -> str:
@@ -307,6 +330,10 @@ class Settings(BaseSettings):
         description="JWT signing secret (required for auth)",
     )
     jwt_algorithm: str = Field(default="HS256", description="JWT signing algorithm")
+    eval_issuers: list[EvalIssuerSettings] = Field(
+        default_factory=list,
+        description="Trusted outcome issuers scoped to registered eval experiments",
+    )
     access_token_expire_minutes: int = Field(
         default=60, ge=5, le=1440, description="Access token TTL (minutes, default 1 hour)"
     )

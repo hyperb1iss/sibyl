@@ -126,7 +126,7 @@ def model(monkeypatch):
 
     async def local_agent(extractor):
         assert extractor.surface is LLMSurface.MEMORY
-        assert extractor.output_retries == 0
+        assert extractor.output_retries == c.OUTPUT_RETRIES == 2
         return Agent(
             FunctionModel(respond),
             output_type=c.ProcedureProposal,
@@ -337,7 +337,11 @@ async def test_proposal_preserves_usage_bytes_sources_and_native_steps(group, pr
         )
         assert span["artifact_sha256"] == episode.artifact_sha256
     assert "inferred" in candidate.content
-    assert "capture-success" in candidate.content
+    assert "capture-success" in candidate.raw_source_ids
+    assert "capture-success" not in candidate.content
+    assert "```json" not in candidate.content
+    assert "evidence: /goal" in candidate.content
+    assert payload["render_version"] == c.RENDER_VERSION
     assert str(len(group.episodes[0].artifact)) in result.prompt
     assert c.validate_candidate_content_agreement(candidate, group=group) == []
     entity = Entity(
@@ -505,3 +509,104 @@ async def test_declared_cross_family_contrast_can_include_a_preventive_action(
     result = await propose(group, c.DraftConditionalProcedure.model_validate(draft), model)
     assert result.candidate is not None
     assert result.receipt["entailment"] == "pending"
+
+
+async def test_complete_input_budget_includes_schema_and_accepts_exact_boundary(group, model):
+    model[0]["proposal"] = c.ProcedureProposal(abstention_reason="No supported procedure")
+    actual = (
+        len(c.SYSTEM_PROMPT)
+        + len(c._prompt(group))
+        + len(c._canonical(c.ProcedureProposal.model_json_schema()).decode("utf-8"))
+    )
+    with pytest.raises(c.ConsolidationInputBudgetExceeded) as raised:
+        await c.propose_conditional_procedure(group, max_input_chars=actual - 1)
+    assert raised.value.actual_chars == actual
+    assert raised.value.max_input_chars == actual - 1
+    assert model[1] == []
+    result = await c.propose_conditional_procedure(group, max_input_chars=actual)
+    assert len(model[1]) == 1
+    assert result.receipt["input_chars"] == actual
+    assert result.receipt["max_input_chars"] == actual
+
+
+async def test_build_receipt_records_output_validation_policy(group, procedure, model):
+    result = await propose(group, procedure, model)
+    assert result.receipt["output_retries"] == c.OUTPUT_RETRIES == 2
+
+
+async def test_native_build_counts_transformed_schema_and_records_policy(group, monkeypatch):
+    from types import SimpleNamespace
+
+    from sibyl_core.ai.llm.extractor import extraction_schema
+
+    calls = []
+
+    class NativeFixture:
+        def __init__(self, output_type, **kwargs):
+            self.output_type = output_type
+            self.kwargs = kwargs
+
+        async def output_schema(self):
+            return extraction_schema(self.output_type, "native_strict")
+
+        async def extract_with_usage(self, prompt):
+            calls.append(self.kwargs)
+            return SimpleNamespace(
+                output=c.ProcedureProposal(abstention_reason="No supported procedure"),
+                usage=SimpleNamespace(model_dump=lambda **_: {}),
+            )
+
+    monkeypatch.setattr(c, "Extractor", NativeFixture)
+    schema = extraction_schema(c.ProcedureProposal, "native_strict")
+    actual = len(c.SYSTEM_PROMPT) + len(c._prompt(group)) + len(c._canonical(schema).decode())
+    with pytest.raises(c.ConsolidationInputBudgetExceeded):
+        await c.propose_conditional_procedure(
+            group, output_mode="native_strict", max_input_chars=actual - 1
+        )
+    assert calls == []
+    result = await c.propose_conditional_procedure(
+        group,
+        output_mode="native_strict",
+        openrouter_provider="parasail/bf16",
+        max_input_chars=actual,
+    )
+    assert calls[0]["output_mode"] == "native_strict"
+    assert calls[0]["openrouter_provider"] == "parasail/bf16"
+    assert result.receipt["wire_schema_sha256"] == c._digest(c._canonical(schema))
+    assert result.receipt["input_chars"] == actual
+    assert result.receipt["output_mode"] == "native_strict"
+    assert result.receipt["openrouter_provider"] == "parasail/bf16"
+
+
+async def test_compact_render_keeps_full_audit_without_growing_readable_body(
+    group, procedure, model
+):
+    result = await propose(group, procedure, model)
+    receipt = copy.deepcopy(result.receipt)
+    receipt["diagnostic"] = "retained audit detail " * 10000
+    expanded = c._candidate(group, procedure, receipt)
+    assert len(expanded.content) == len(result.candidate.content)
+    assert expanded.metadata[c.METADATA_KEY]["build_receipt"] == receipt
+    assert expanded.content != result.candidate.content
+    assert "retained audit detail" not in expanded.content
+    assert (
+        expanded.metadata[c.METADATA_KEY]["spans"]
+        == result.candidate.metadata[c.METADATA_KEY]["spans"]
+    )
+
+
+async def test_historical_render_remains_verifiable_and_rejects_version_mismatch(
+    group, procedure, model
+):
+    result = await propose(group, procedure, model)
+    receipt = copy.deepcopy(result.receipt)
+    receipt.pop("render_version")
+    historical = c._candidate(group, procedure, receipt, render_version=None)
+    assert "```json" in historical.content
+    assert c.validate_candidate_content_agreement(historical, group=group) == []
+    historical.metadata[c.METADATA_KEY]["render_version"] = c.RENDER_VERSION
+    assert c.validate_candidate_content_agreement(historical, group=group)
+    current = copy.deepcopy(result.candidate)
+    current.metadata[c.METADATA_KEY]["render_version"] = "unknown"
+    current.metadata[c.METADATA_KEY]["build_receipt"]["render_version"] = "unknown"
+    assert c.validate_candidate_content_agreement(current, group=group)

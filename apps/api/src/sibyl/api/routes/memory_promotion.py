@@ -79,6 +79,7 @@ async def preview_reflection_promotion(
         domain=request.domain,
         project=request.project,
         accessible_projects=accessible_projects,
+        writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
     )
     await memory_auth.log_memory_audit(
         action="memory.reflect.promote.preview",
@@ -139,6 +140,7 @@ async def preview_memory_promotion(
         domain=request.domain,
         project=request.project,
         accessible_projects=accessible_projects,
+        writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
     )
     if result.reason == "not_reflection_candidate":
         await memory_auth.authorize_raw_promotion_api_key_scopes(
@@ -158,6 +160,7 @@ async def preview_memory_promotion(
             domain=request.domain,
             project=request.project,
             accessible_projects=accessible_projects,
+            writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
         )
     await memory_auth.log_memory_audit(
         action="memory.promote.preview",
@@ -210,6 +213,7 @@ async def promote_reflection_candidate(
             http_request=http_request,
         )
         result = await promote_reflection_candidate_review(
+            allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
             candidate_id=request.candidate_id,
             organization_id=str(org.id),
             principal_id=principal_id,
@@ -219,6 +223,7 @@ async def promote_reflection_candidate(
             project=request.project,
             related_to=request.related_to,
             accessible_projects=accessible_projects,
+            writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
         )
         await memory_auth.log_memory_audit(
             action="memory.reflect.promote",
@@ -286,6 +291,7 @@ async def promote_memory(
             http_request=http_request,
         )
         result = await promote_reflection_candidate_review(
+            allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
             candidate_id=request.candidate_id,
             organization_id=str(org.id),
             principal_id=principal_id,
@@ -295,6 +301,7 @@ async def promote_memory(
             project=request.project,
             related_to=request.related_to,
             accessible_projects=accessible_projects,
+            writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
         )
         if result.reason == "not_reflection_candidate":
             await memory_auth.authorize_raw_promotion_api_key_scopes(
@@ -306,6 +313,7 @@ async def promote_memory(
                 surface="memory_promote",
             )
             result = await promote_raw_memory(
+                allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
                 raw_memory_id=request.candidate_id,
                 organization_id=str(org.id),
                 principal_id=principal_id,
@@ -315,6 +323,7 @@ async def promote_memory(
                 project=request.project,
                 related_to=request.related_to,
                 accessible_projects=accessible_projects,
+                writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
             )
         await memory_auth.log_memory_audit(
             action="memory.promote",

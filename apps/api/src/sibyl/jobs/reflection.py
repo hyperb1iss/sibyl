@@ -14,7 +14,17 @@ from sibyl.persistence.auth_runtime import (
     log_memory_audit_event,
     resolve_accessible_project_graph_ids,
 )
+from sibyl_core.auth import ProjectRole
+from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind
 from sibyl_core.models.reflection import ReflectionPack
+from sibyl_core.services.dream_checkpoints import (
+    CheckpointReflectionExtractor,
+    DreamSourceWork,
+    advance_dream_cursor,
+    complete_dream_stage,
+    load_dream_cursor,
+    load_dream_stage,
+)
 from sibyl_core.services.memory import (
     ReflectionPromotionResult,
     preview_reflection_candidate_promotion,
@@ -25,6 +35,10 @@ from sibyl_core.services.memory_autonomy import (
     ReflectionAutonomyPolicy,
     decide_reflection_candidate_autonomy,
 )
+from sibyl_core.services.memory_source_validation import SourceReadAuthority
+from sibyl_core.services.observed_sources import load_authorized_source_snapshot
+from sibyl_core.services.source_observations import SourceUnavailableError
+from sibyl_core.services.source_state_store import RawSourceSnapshot
 from sibyl_core.services.surreal_content import (
     MemoryScope,
     RawMemory,
@@ -36,8 +50,6 @@ from sibyl_core.tools.reflect import reflect_memory
 
 log = structlog.get_logger()
 
-_ARCHIVEABLE_EXCEPTION_REASONS = frozenset({"duplicate_candidate", "stale_candidate"})
-
 
 async def run_reflection_dream_cycle_all_orgs(
     ctx: dict[str, Any],
@@ -45,7 +57,7 @@ async def run_reflection_dream_cycle_all_orgs(
     dry_run: bool = False,
     source_limit: int = 20,
     candidate_limit: int = 50,
-    archive_exceptions: bool = True,
+    archive_exceptions: bool = True,  # noqa: ARG001 - retained queued-job compatibility
     confidence_threshold: float | None = None,
 ) -> dict[str, Any]:
     org_ids = await _list_organization_ids()
@@ -59,7 +71,6 @@ async def run_reflection_dream_cycle_all_orgs(
                     dry_run=dry_run,
                     source_limit=source_limit,
                     candidate_limit=candidate_limit,
-                    archive_exceptions=archive_exceptions,
                     confidence_threshold=confidence_threshold,
                 )
             )
@@ -93,8 +104,8 @@ async def run_reflection_dream_cycle(
     dry_run: bool = False,
     source_limit: int = 20,
     candidate_limit: int = 50,
-    archive_exceptions: bool = True,
-    archive_exception_reasons: list[str] | None = None,
+    archive_exceptions: bool = True,  # noqa: ARG001 - retained queued-job compatibility
+    archive_exception_reasons: list[str] | None = None,  # noqa: ARG001 - queued-job compatibility
     confidence_threshold: float | None = None,
 ) -> dict[str, Any]:
     started = datetime.now(UTC)
@@ -102,11 +113,6 @@ async def run_reflection_dream_cycle(
     run_id = f"reflection_dream:{group_id}:{uuid4()}"
     source_budget = max(0, min(source_limit, 100))
     candidate_budget = max(0, min(candidate_limit, 200))
-    archive_reasons = {
-        reason
-        for reason in (archive_exception_reasons or sorted(_ARCHIVEABLE_EXCEPTION_REASONS))
-        if reason in _ARCHIVEABLE_EXCEPTION_REASONS
-    }
 
     log.info(
         "reflection_dream_cycle_started",
@@ -128,8 +134,6 @@ async def run_reflection_dream_cycle(
         run_id=run_id,
         dry_run=dry_run,
         limit=candidate_budget,
-        archive_exceptions=archive_exceptions,
-        archive_reasons=archive_reasons,
         confidence_threshold=confidence_threshold,
     )
 
@@ -172,16 +176,45 @@ async def _reflect_dream_sources(
 ) -> list[dict[str, Any]]:
     if limit <= 0:
         return []
+    selected: dict[str, DreamSourceWork] = {}
+    selection_errors: dict[str, Exception] = {}
+    after_source_id, cursor_revision = await load_dream_cursor(group_id)
+    cursor_owned = not dry_run
+
+    async def pending(source: RawMemory) -> bool:
+        try:
+            work = await _load_dream_work(group_id, source)
+            if work is None:
+                return False
+            stage = await load_dream_stage(work)
+            if stage is not None and stage.get("completion_json") is not None:
+                return False
+        except SourceUnavailableError:
+            return False
+        except Exception as exc:
+            selection_errors[source.id] = exc
+            return True
+        selected[source.id] = work
+        return True
+
     sources = await list_reflection_dream_source_memories(
         organization_id=group_id,
         limit=limit,
+        is_pending=pending,
+        after_source_id=after_source_id,
     )
     results: list[dict[str, Any]] = []
     for source in sources:
+        if cursor_owned:
+            cursor_owned = await advance_dream_cursor(group_id, source.id, cursor_revision)
+            cursor_revision += int(cursor_owned)
         try:
+            if source.id in selection_errors:
+                raise selection_errors[source.id]
             results.append(
                 await _reflect_dream_source(
                     source=source,
+                    work=selected.get(source.id),
                     group_id=group_id,
                     run_id=run_id,
                     dry_run=dry_run,
@@ -204,9 +237,33 @@ async def _reflect_dream_sources(
     return results
 
 
+async def _load_dream_work(group_id: str, source: RawMemory) -> DreamSourceWork | None:
+    if not source.principal_id or not source.raw_content.strip():
+        return None
+    readable = frozenset(await _accessible_projects_for_source(group_id=group_id, source=source))
+    writable = frozenset(
+        await _resolve_accessible_projects(
+            group_id=group_id,
+            principal_id=source.principal_id,
+            required_role=ProjectRole.CONTRIBUTOR,
+        )
+    )
+    snapshot = await load_authorized_source_snapshot(
+        SourceIdentity(group_id, SourceKind.RAW_CAPTURE, source.id),
+        SourceReadAuthority(source.principal_id, projects=readable),
+        organization_id=group_id,
+    )
+    if not isinstance(snapshot, RawSourceSnapshot):
+        raise SourceUnavailableError
+    if snapshot.memory.principal_id != source.principal_id:
+        raise SourceUnavailableError
+    return DreamSourceWork(snapshot, readable, writable)
+
+
 async def _reflect_dream_source(
     *,
     source: RawMemory,
+    work: DreamSourceWork | None = None,
     group_id: str,
     run_id: str,
     dry_run: bool,
@@ -228,9 +285,15 @@ async def _reflect_dream_source(
             reason="empty_source",
         )
 
+    if work is not None:
+        source = work.snapshot.memory
     accessible_projects = await _accessible_projects_for_source(group_id=group_id, source=source)
+    dream_kwargs = {}
+    if work is not None and not dry_run:
+        dream_kwargs = {"extractor": CheckpointReflectionExtractor(work), "dream_work": work}
     pack = await reflect_memory(
         source.raw_content,
+        **dream_kwargs,
         source_title=source.title or source.source_id or source.id,
         intent="maintenance",
         domain=_metadata_str(source.metadata, "domain"),
@@ -239,6 +302,11 @@ async def _reflect_dream_source(
         organization_id=group_id,
         principal_id=source.principal_id,
         accessible_projects=accessible_projects,
+        writable_projects=await _resolve_accessible_projects(
+            group_id=group_id,
+            principal_id=source.principal_id,
+            required_role=ProjectRole.CONTRIBUTOR,
+        ),
         memory_scope=source.memory_scope,
         scope_key=source.scope_key,
         suggested_memory_scope=_metadata_str(source.metadata, "suggested_memory_scope"),
@@ -248,7 +316,20 @@ async def _reflect_dream_source(
         persist_review=not dry_run,
         existing_source_id=source.id,
     )
-    return await _mark_source_reflected(source, pack=pack, run_id=run_id, dry_run=dry_run)
+    if work is None or dry_run:
+        return await _mark_source_reflected(source, pack=pack, run_id=run_id, dry_run=dry_run)
+    result = {
+        "source_id": source.id,
+        "outcome": "reflected",
+        "candidate_count": len(pack.candidates),
+        "persisted_count": pack.persisted_count,
+        "operation_id": work.key,
+        "candidate_ids": [candidate.persisted_id for candidate in pack.candidates],
+    }
+    current = await _load_dream_work(group_id, source)
+    if current is None or current.key != work.key or not await complete_dream_stage(work, result):
+        raise SourceUnavailableError
+    return result
 
 
 async def _drain_dream_candidates(
@@ -257,8 +338,6 @@ async def _drain_dream_candidates(
     run_id: str,
     dry_run: bool,
     limit: int,
-    archive_exceptions: bool,
-    archive_reasons: set[str],
     confidence_threshold: float | None,
 ) -> list[dict[str, Any]]:
     if limit <= 0:
@@ -277,8 +356,6 @@ async def _drain_dream_candidates(
                     group_id=group_id,
                     run_id=run_id,
                     dry_run=dry_run,
-                    archive_exceptions=archive_exceptions,
-                    archive_reasons=archive_reasons,
                     confidence_threshold=confidence_threshold,
                 )
             )
@@ -306,10 +383,35 @@ async def _drain_dream_candidate(
     group_id: str,
     run_id: str,
     dry_run: bool,
-    archive_exceptions: bool,
-    archive_reasons: set[str],
     confidence_threshold: float | None,
 ) -> dict[str, Any]:
+    automatic_executions: list[str] = []
+    if not dry_run:
+        from sibyl.jobs.lifecycle_repair import resolve_source_authority
+        from sibyl_core.services.automatic_reflection import automatically_review_reflection
+
+        automatic = await automatically_review_reflection(
+            group_id, str(candidate.principal_id or ""), candidate.id, resolve_source_authority
+        )
+        automatic_executions = list(automatic.executions)
+        if automatic.candidate is None:
+            return {
+                "candidate_id": candidate.id,
+                "outcome": "abstained",
+                "recommended_action": "abstain",
+                "applied": False,
+                "archived": True,
+                "dry_run": False,
+                "reason": automatic.reason,
+                "review_state": "archived",
+                "promoted_id": None,
+                "raw_source_ids": [],
+                "policy_reasons": [],
+                "exception_reasons": [],
+                "confidence": None,
+                "validation_executions": automatic_executions,
+            }
+        candidate = automatic.candidate
     target_scope = _candidate_target_scope(candidate)
     target_scope_key = _candidate_target_scope_key(candidate, target_scope)
     project = _candidate_project(
@@ -328,6 +430,11 @@ async def _drain_dream_candidate(
         domain=_metadata_str(candidate.metadata, "domain"),
         project=project,
         accessible_projects=accessible_projects,
+        writable_projects=await _resolve_accessible_projects(
+            group_id=group_id,
+            principal_id=candidate.principal_id,
+            required_role=ProjectRole.CONTRIBUTOR,
+        ),
     )
     policy = ReflectionAutonomyPolicy(
         confidence_threshold=confidence_threshold
@@ -343,6 +450,7 @@ async def _drain_dream_candidate(
     if decision.should_promote:
         promotion = await promote_reflection_candidate_review(
             candidate_id=candidate.id,
+            expected_candidate_revision=candidate.revision,
             organization_id=group_id,
             principal_id=candidate.principal_id,
             promote_to_scope=target_scope,
@@ -351,16 +459,16 @@ async def _drain_dream_candidate(
             project=project,
             related_to=_metadata_str_list(candidate.metadata.get("related_to")),
             accessible_projects=accessible_projects,
+            writable_projects=await _resolve_accessible_projects(
+                group_id=group_id,
+                principal_id=candidate.principal_id,
+                required_role=ProjectRole.CONTRIBUTOR,
+            ),
         )
 
     archived = False
     review_state = promotion.review_state if promotion else decision.review_state
-    if (
-        decision.outcome is ReflectionAutonomyOutcome.EXCEPTION
-        and archive_exceptions
-        and not dry_run
-        and _archiveable_exception(decision.exception_reasons, archive_reasons=archive_reasons)
-    ):
+    if decision.outcome is ReflectionAutonomyOutcome.EXCEPTION and not dry_run:
         archived_memory = await _archive_dream_exception_candidate(
             candidate=candidate,
             decision_reason=decision.reason,
@@ -377,8 +485,8 @@ async def _drain_dream_candidate(
         dry_run=dry_run,
         preview_allowed=preview.allowed,
         decision_reason=decision.reason,
-        outcome=decision.outcome.value,
-        recommended_action=decision.recommended_action.value,
+        outcome="abstained" if archived else decision.outcome.value,
+        recommended_action="abstain" if archived else decision.recommended_action.value,
         memory_scope=decision.memory_scope.value if decision.memory_scope else target_scope,
         scope_key=decision.scope_key or target_scope_key,
         project=project,
@@ -388,9 +496,10 @@ async def _drain_dream_candidate(
         review_state=review_state,
     )
     return {
+        "validation_executions": automatic_executions,
         "candidate_id": candidate.id,
-        "outcome": decision.outcome.value,
-        "recommended_action": decision.recommended_action.value,
+        "outcome": "abstained" if archived else decision.outcome.value,
+        "recommended_action": "abstain" if archived else decision.recommended_action.value,
         "applied": promotion is not None and promotion.success,
         "archived": archived,
         "dry_run": dry_run,
@@ -472,7 +581,7 @@ async def _archive_dream_exception_candidate(
         "archive_reason": decision_reason,
         "archive_reasons": list(exception_reasons),
         "autonomy_outcome": "exception",
-        "autonomy_recommended_action": "route_to_review",
+        "autonomy_recommended_action": "abstain",
         "reflection_dream_run_id": run_id,
     }
     return await save_raw_memory(
@@ -507,6 +616,7 @@ async def _resolve_accessible_projects(
     *,
     group_id: str,
     principal_id: str | None,
+    required_role: ProjectRole = ProjectRole.VIEWER,
 ) -> set[str]:
     if not principal_id:
         return set()
@@ -514,6 +624,7 @@ async def _resolve_accessible_projects(
         project_ids = await resolve_accessible_project_graph_ids(
             user_id=principal_id,
             org_id=group_id,
+            required_role=required_role,
         )
     except Exception as exc:
         log.warning(
@@ -579,15 +690,6 @@ async def _log_dream_candidate_audit(
             error=str(exc),
             exc_info=True,
         )
-
-
-def _archiveable_exception(
-    exception_reasons: list[str],
-    *,
-    archive_reasons: set[str],
-) -> bool:
-    reasons = {str(reason) for reason in exception_reasons if str(reason)}
-    return bool(reasons & archive_reasons) and reasons <= archive_reasons
 
 
 def _candidate_target_scope(candidate: RawMemory) -> str:

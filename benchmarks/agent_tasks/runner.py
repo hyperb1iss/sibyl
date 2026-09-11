@@ -7,6 +7,7 @@ access. Receipts explicitly make no sealed-isolation or learning-benefit claim.
 from __future__ import annotations
 
 import os
+import re
 import signal
 import stat
 import subprocess
@@ -24,10 +25,12 @@ from benchmarks.agent_tasks.manifest import (
     Arm,
     ControllerBudget,
     FrozenModel,
+    JsonOracleChecker,
     Manifest,
     ManifestError,
     Task,
     canonical_bytes,
+    checker_artifacts,
     digest,
     identity,
     load_manifest,
@@ -389,6 +392,31 @@ def _process_failure(process: dict[str, Any], role: str) -> str | None:
 
 
 def _check_task(manifest: Manifest, task: Task, output: Path, receipt: dict[str, Any]) -> None:
+    if isinstance(task.checker, JsonOracleChecker):
+        from benchmarks.agent_tasks.json_oracle import evaluate_json_oracle  # noqa: PLC0415
+
+        result = evaluate_json_oracle(
+            task.checker,
+            inputs={
+                item.path: (output / "inputs" / item.path).read_bytes()
+                for item in checker_artifacts(task.checker)
+            },
+            workspace=output / "checker-workspace",
+            snapshot_sha256=receipt["checker_input_snapshot_sha256"],
+            attempt_id=receipt["attempt_id"],
+            timeout_seconds=manifest.checker_timeout_seconds,
+        )
+        _write_json(output / "oracle-outcome.json", result)
+        receipt["checker"] = {
+            "kind": task.checker.schema_version,
+            "outcome_sha256": identity(result),
+        }
+        receipt["outcome"] = result
+        receipt["status"] = result["status"]
+        receipt["success"] = result["passed"] and receipt["budget_status"] != "exceeded"
+        if receipt["budget_status"] == "exceeded":
+            receipt["status"] = "controller_budget_exceeded"
+        return
     checker = _execute(
         program=output / "inputs" / task.checker.script.path,
         program_sha256=task.checker.script.sha256,
@@ -428,7 +456,7 @@ def _perform_attempt(
         manifest.dependency_lock.path,
         manifest.controller.script.path,
         task.prompt.path,
-        task.checker.script.path,
+        *(item.path for item in checker_artifacts(task.checker)),
         arm.memory_pack.path,
         *(item.artifact.path for item in task.workspace),
     }
@@ -438,6 +466,8 @@ def _perform_attempt(
         _put(output / "inputs" / name, inputs[name], 292)
     workspace = output / "controller-workspace"
     workspace.mkdir()
+    # Shared parents can propagate setgid into otherwise ordinary task folders.
+    workspace.chmod(stat.S_IMODE(workspace.stat().st_mode) & ~stat.S_ISGID)
     for item in task.workspace:
         _put(workspace / item.destination, inputs[item.artifact.path], item.mode)
     initial, _ = snapshot(workspace)
@@ -495,8 +525,12 @@ def _perform_attempt(
     _check_task(manifest, task, output, receipt)
 
 
-def run_task(manifest_path: Path, *, task_id: str, arm_id: str, output: Path) -> dict[str, Any]:
+def run_task(
+    manifest_path: Path, *, task_id: str, arm_id: str, output: Path, attempt_id: str | None = None
+) -> dict[str, Any]:
     """Validate first; create one exclusive attempt with durable partial receipts."""
+    if attempt_id is not None and re.fullmatch(r"[0-9a-f]{32}", attempt_id) is None:
+        raise ManifestError("attempt_id must be 32 lowercase hexadecimal characters")
     if os.name != "posix":
         raise ManifestError("the trusted development adapter requires POSIX process groups")
     manifest, inputs = load_manifest(manifest_path)
@@ -522,6 +556,8 @@ def run_task(manifest_path: Path, *, task_id: str, arm_id: str, output: Path) ->
         raise ManifestError("attempt output must be outside the frozen input directory")
     output.mkdir(parents=False, exist_ok=False)
     receipt = _receipt(manifest, task, arm, inputs)
+    if attempt_id is not None:
+        receipt["attempt_id"] = attempt_id
     _write_json(output / "receipt.json", receipt)
     try:
         _perform_attempt(manifest, task, arm, inputs, output, receipt, api_key)

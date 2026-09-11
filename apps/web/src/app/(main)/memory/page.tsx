@@ -6,7 +6,8 @@ import { MemoryContent } from './memory-content';
 
 export const metadata: Metadata = {
   title: 'Memory',
-  description: 'Memory workspace for captures, review actions, recalls, and agent access',
+  description:
+    'Memory workspace for saved captures, optional inspection, recalls, and agent access',
 };
 
 export default function MemoryPage() {

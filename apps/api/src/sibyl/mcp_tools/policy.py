@@ -8,6 +8,7 @@ from sibyl.auth.memory_targets import RelationshipReaderScope, validate_relation
 from sibyl_core.auth.memory_policy import (
     MemoryPolicyAction,
     MemoryPolicyDecision,
+    authorize_memory_read,
     authorize_memory_write,
 )
 from sibyl_core.services.surreal_content import MemoryScope
@@ -89,33 +90,46 @@ def deny_api_key_memory_scope(
     raise ValueError(decision.reason)
 
 
-def authorize_memory_write_request(
+async def authorize_memory_request(
     *,
     ctx: mcp_context.McpContext,
     memory_scope: str,
     scope_key: str | None,
-    accessible_projects: set[str] | None,
     surface: str,
+    write: bool,
     accessible_teams: set[str] | None = None,
 ) -> MemoryPolicyDecision:
+    action = MemoryPolicyAction.WRITE if write else MemoryPolicyAction.READ
+    projects = None
+    if memory_scope == "project":
+        projects = (
+            await mcp_context.get_writable_projects(ctx)
+            if write
+            else await mcp_context.get_accessible_projects(ctx)
+        )
     policy_context = ctx.to_memory_policy_context(
         memory_space=memory_scope,
         scope_key=scope_key,
         project_id=scope_key,
-        accessible_projects=accessible_projects,
+        accessible_projects=projects,
         accessible_teams=accessible_teams,
         source_surface=surface,
     )
-    decision = authorize_memory_write(
-        policy_context=policy_context,
-    )
+    authorize = authorize_memory_write if write else authorize_memory_read
+    decision = authorize(policy_context=policy_context)
     log_policy_decision(ctx=ctx, decision=decision, surface=surface)
     if not decision.allowed:
+        if write and memory_scope == "project" and decision.reason == "unverified_membership":
+            raise ValueError(
+                "unverified_membership: project writes require contributor access; "
+                "ask a project owner or organization admin to grant it. "
+                "API-key project restrictions also apply."
+            )
         raise ValueError(decision.reason)
     if not memory_scope_allowed(ctx, memory_scope=memory_scope, scope_key=scope_key):
         deny_api_key_memory_scope(
             ctx=ctx,
-            action=MemoryPolicyAction.WRITE,
+            action=action,
             memory_scope=memory_scope,
             scope_key=scope_key,
             surface=surface,

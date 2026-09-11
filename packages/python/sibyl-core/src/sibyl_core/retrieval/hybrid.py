@@ -42,6 +42,9 @@ from sibyl_core.retrieval.temporal import (
     temporal_boost,
     temporal_proximity_boost,
 )
+from sibyl_core.services.eval_publication_guards import (
+    unavailable_publication_ids,
+)
 from sibyl_core.utils.log_safety import query_log_fields
 
 log = structlog.get_logger()
@@ -330,7 +333,22 @@ async def _apply_current_entity_gate(
 ) -> tuple[list[tuple[Any, float]], dict[str, Any]]:
     """Filter authorized entities by metadata and incoming supersession edges."""
 
-    metadata_filtered = _filter_recallable_entity_results(results)
+    unavailable = await unavailable_publication_ids(
+        group_id,
+        {
+            _entity_id(entity): (
+                entity.get("metadata")
+                if isinstance(entity, dict)
+                else getattr(entity, "metadata", None)
+            )
+            for entity, _score in results
+        },
+    )
+    metadata_filtered = [
+        (entity, score)
+        for entity, score in _filter_recallable_entity_results(results)
+        if _entity_id(entity) not in unavailable
+    ]
     lifecycle_dropped = len(results) - len(metadata_filtered)
     superseded: set[str] = set()
     edge_rows = 0

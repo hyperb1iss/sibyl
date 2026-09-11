@@ -18,25 +18,7 @@ from sibyl_core.migrate.legacy_graph_archive import (
     episode_from_payload as _episode_from_payload,
 )
 from sibyl_core.migrate.legacy_graph_archive import (
-    list_native_backup_episodes as _list_native_backup_episodes,
-)
-from sibyl_core.migrate.legacy_graph_archive import (
-    list_native_backup_mentions as _list_native_backup_mentions,
-)
-from sibyl_core.migrate.legacy_graph_archive import (
-    mention_exists as _mention_exists,
-)
-from sibyl_core.migrate.legacy_graph_archive import (
     mention_from_payload as _mention_from_payload,
-)
-from sibyl_core.migrate.legacy_graph_archive import (
-    record_id as _record_id,
-)
-from sibyl_core.migrate.legacy_graph_archive import (
-    save_native_episode as _save_native_episode,
-)
-from sibyl_core.migrate.legacy_graph_archive import (
-    save_native_mention as _save_native_mention,
 )
 from sibyl_core.models.entities import (
     ConfigFile,
@@ -304,6 +286,8 @@ class BackupData:
     mention_count: int = 0
     episodes: list[dict] = field(default_factory=list)
     mentions: list[dict] = field(default_factory=list)
+    source_integrity: dict[str, Any] | None = None
+    lineage_validation: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -335,6 +319,8 @@ class RestoreResult:
     episodes_skipped: int = 0
     mentions_restored: int = 0
     mentions_skipped: int = 0
+    integrity_conflicts: list[dict[str, str]] = field(default_factory=list)
+    quarantined: list[dict[str, str]] = field(default_factory=list)
 
 
 # Export every entity type that can participate in graph edges.
@@ -426,52 +412,6 @@ def _entity_from_backup_data(entity_data: dict[str, Any]) -> Entity:
         return Entity.model_validate(payload)
 
 
-async def _list_backup_episodes(
-    *,
-    organization_id: str,
-    client: Any,
-) -> list[dict[str, Any]]:
-    return await _list_native_backup_episodes(
-        organization_id=organization_id,
-        client=client,
-        page_size=BACKFILL_PAGE_SIZE,
-    )
-
-
-async def _list_backup_mentions(
-    *,
-    organization_id: str,
-    client: Any,
-) -> list[dict[str, Any]]:
-    return await _list_native_backup_mentions(
-        organization_id=organization_id,
-        client=client,
-        page_size=BACKFILL_PAGE_SIZE,
-    )
-
-
-async def _list_backup_relationships(
-    *,
-    organization_id: str,
-    client: Any,
-    relationship_manager: Any,
-) -> list[Relationship]:
-    relationships: list[Relationship] = []
-    offset = 0
-    while True:
-        batch = await relationship_manager.list_all(
-            limit=BACKFILL_PAGE_SIZE,
-            offset=offset,
-        )
-        if not batch:
-            break
-        relationships.extend(batch)
-        if len(batch) < BACKFILL_PAGE_SIZE:
-            break
-        offset += len(batch)
-    return relationships
-
-
 async def _list_backup_entities(
     *,
     organization_id: str,
@@ -509,39 +449,58 @@ async def create_backup(*, organization_id: str) -> BackupResult:
 
     try:
         runtime = await get_graph_runtime(organization_id)
-        entity_manager = runtime.entity_manager
-        relationship_manager = runtime.relationship_manager
         client = runtime.client
 
-        all_entities = await _list_backup_entities(
-            organization_id=organization_id,
-            client=client,
-            entity_manager=entity_manager,
+        from sibyl_core.memory_pipeline.observations import SourceKind
+        from sibyl_core.migrate.graph_companions import companion_payloads
+        from sibyl_core.migrate.source_integrity import (
+            build_integrity_archive,
+            validate_integrity_archive,
         )
+        from sibyl_core.services.graph_records import entity_from_surreal_row
+        from sibyl_core.services.source_archive_store import read_source_archive_snapshot
 
-        relationships = await _list_backup_relationships(
-            organization_id=organization_id,
-            client=client,
-            relationship_manager=relationship_manager,
+        snapshot = await read_source_archive_snapshot(
+            client.execute_query,
+            kind=SourceKind.GRAPH_ENTITY,
+            organizations=[organization_id],
+            include_graph_auxiliary=True,
         )
-        episodes = await _list_backup_episodes(
-            organization_id=organization_id,
-            client=client,
+        source_integrity = build_integrity_archive(
+            kind=SourceKind.GRAPH_ENTITY,
+            organizations=[organization_id],
+            source_rows=snapshot["source_rows"],
+            source_states=snapshot["source_states"],
+            derivations=snapshot["derivations"],
         )
-        mentions = await _list_backup_mentions(
+        from sibyl_core.migrate.archive_lineage import seal_archive_lineage
+
+        sealed, _, lineage_validation = seal_archive_lineage(
+            {"version": "3.0", "source_integrity": source_integrity}, None
+        )
+        assert sealed is not None
+        source_integrity = sealed["source_integrity"]
+        source_rows, _, _ = validate_integrity_archive(
+            source_integrity, kind=SourceKind.GRAPH_ENTITY, organizations=[organization_id]
+        )
+        all_entities = [entity_from_surreal_row(row) for row in source_rows]
+
+        relationships, episodes, mentions = companion_payloads(
+            snapshot,
             organization_id=organization_id,
-            client=client,
         )
 
         # Build backup data
         backup_data = BackupData(
-            version="2.0",
+            version="3.0",
+            source_integrity=source_integrity,
+            lineage_validation=lineage_validation,
             created_at=datetime.now(UTC).isoformat(),
             organization_id=organization_id,
             entity_count=len(all_entities),
             relationship_count=len(relationships),
             entities=[e.model_dump(mode="json") for e in all_entities],
-            relationships=[r.model_dump(mode="json") for r in relationships],
+            relationships=relationships,
             episode_count=len(episodes),
             mention_count=len(mentions),
             episodes=episodes,
@@ -594,6 +553,7 @@ async def restore_backup(
     *,
     organization_id: str,
     skip_existing: bool = True,
+    clean: bool = False,
 ) -> RestoreResult:
     """Restore graph data from a backup.
 
@@ -624,147 +584,97 @@ async def restore_backup(
     episodes_skipped = 0
     mentions_restored = 0
     mentions_skipped = 0
+    integrity_conflicts: list[dict[str, str]] = []
+    quarantined: list[dict[str, str]] = []
 
     try:
+        from dataclasses import asdict
+
+        from sibyl_core.memory_pipeline.observations import SourceKind
         from sibyl_core.migrate.archive import (
             normalize_mention_payloads,
             normalize_relationship_payloads,
         )
+        from sibyl_core.migrate.archive_lineage import seal_archive_lineage
+        from sibyl_core.migrate.graph_companion_restore import prepare_companion_restore
+        from sibyl_core.migrate.graph_companions import relationship_from_archive
+        from sibyl_core.migrate.legacy_source_archive import build_legacy_source_archive
+        from sibyl_core.services.graph_entity_store import _entity_record
+        from sibyl_core.services.source_archive_store import restore_source_integrity
 
-        runtime = await get_graph_runtime(organization_id)
-        entity_manager = runtime.entity_manager
-        relationship_manager = runtime.relationship_manager
-        driver = runtime.client
-
-        entities_to_restore: list[Entity] = []
-        for entity_data in backup_data.entities:
-            try:
-                entity = _entity_from_backup_data(entity_data)
-                # Check if entity exists (get() raises on missing)
-                if skip_existing:
-                    try:
-                        existing = await entity_manager.get(entity.id)
-                        if existing:
-                            entities_skipped += 1
-                            continue
-                    except Exception:
-                        pass  # Entity doesn't exist — proceed to create
-
-                entities_to_restore.append(entity)
-            except Exception as e:
-                error_msg = f"Entity {entity_data.get('id', 'unknown')}: {e}"
-                errors.append(error_msg)
-                if len(errors) <= 10:
-                    log.warning("Entity restore failed", error=error_msg)
-
-        create_direct_bulk = getattr(entity_manager, "create_direct_bulk", None)
-        create_direct = getattr(entity_manager, "create_direct", None)
-
-        if entities_to_restore and callable(create_direct_bulk):
-            created_ids = await create_direct_bulk(
-                entities_to_restore,
-                generate_embeddings=False,
+        # Validate the entire payload before any source or companion can change.
+        episodes = [
+            _episode_from_payload(row, organization_id=organization_id)
+            for row in backup_data.episodes
+        ]
+        relationships = [
+            relationship_from_archive(row)
+            for row in normalize_relationship_payloads(backup_data.relationships)
+        ]
+        mentions = [
+            _mention_from_payload(row, organization_id=organization_id)
+            for row in normalize_mention_payloads(backup_data.mentions)
+        ]
+        unavailable_ids: set[str] = set()
+        if backup_data.version == "3.0":
+            sealed, _, _ = seal_archive_lineage(asdict(backup_data), None)
+            assert sealed is not None
+            backup_data = BackupData(**sealed)
+            integrity = backup_data.source_integrity
+            quarantined = [
+                row for row in backup_data.lineage_validation if row.get("status") == "quarantined"
+            ]
+        else:
+            if backup_data.source_integrity is not None:
+                raise ValueError("legacy graph payload cannot carry unrecognized integrity")
+            records = [
+                dict(_entity_record(_entity_from_backup_data(row), group_id=organization_id))
+                for row in backup_data.entities
+            ]
+            integrity, unavailable_ids = build_legacy_source_archive(
+                records, kind=SourceKind.GRAPH_ENTITY, organizations=[organization_id]
             )
-            entities_restored += len(created_ids)
-            failed_count = len(entities_to_restore) - len(created_ids)
-            if failed_count:
-                error_msg = f"Bulk entity restore failed for {failed_count} entities"
-                errors.append(error_msg)
-                log.warning("Bulk entity restore reported failures", failed=failed_count)
-        else:
-            for entity in entities_to_restore:
-                try:
-                    if callable(create_direct):
-                        await create_direct(entity, generate_embedding=False)
-                    else:
-                        await entity_manager.create(entity)
-                    entities_restored += 1
-                except Exception as e:
-                    error_msg = f"Entity {entity.id}: {e}"
-                    errors.append(error_msg)
-                    if len(errors) <= 10:
-                        log.warning("Entity restore failed", error=error_msg)
-
-        episodes_to_restore: list[Any] = []
-        for episode_data in backup_data.episodes:
-            try:
-                episode = _episode_from_payload(episode_data, organization_id=organization_id)
-                if skip_existing:
-                    existing = await _record_id(driver, "episode", episode.uuid)
-                    if existing:
-                        episodes_skipped += 1
-                        continue
-
-                episodes_to_restore.append(episode)
-            except Exception as e:
-                error_msg = f"Episode {episode_data.get('uuid', 'unknown')}: {e}"
-                errors.append(error_msg)
-                if len(errors) <= 10:
-                    log.warning("Episode restore failed", error=error_msg)
-
-        for episode in episodes_to_restore:
-            try:
-                await _save_native_episode(driver, episode)
-                episodes_restored += 1
-            except Exception as e:
-                error_msg = f"Episode {episode.uuid}: {e}"
-                errors.append(error_msg)
-                if len(errors) <= 10:
-                    log.warning("Episode restore failed", error=error_msg)
-
-        relationships_to_restore: list[Relationship] = []
-        for rel_data in normalize_relationship_payloads(backup_data.relationships):
-            try:
-                relationship = Relationship.model_validate(rel_data)
-                relationships_to_restore.append(relationship)
-            except Exception as e:
-                error_msg = f"Relationship {rel_data.get('id', 'unknown')}: {e}"
-                errors.append(error_msg)
-                if len(errors) <= 10:
-                    log.warning("Relationship restore failed", error=error_msg)
-
-        create_bulk = getattr(relationship_manager, "create_bulk", None)
-        if relationships_to_restore and callable(create_bulk):
-            created_count, failed_count = await create_bulk(relationships_to_restore)
-            relationships_restored += created_count
-            if failed_count:
-                error_msg = f"Bulk relationship restore failed for {failed_count} relationships"
-                errors.append(error_msg)
-                log.warning("Bulk relationship restore reported failures", failed=failed_count)
-        else:
-            for relationship in relationships_to_restore:
-                try:
-                    await relationship_manager.create(relationship)
-                    relationships_restored += 1
-                except Exception as e:
-                    error_msg = f"Relationship {relationship.id}: {e}"
-                    errors.append(error_msg)
-                    if len(errors) <= 10:
-                        log.warning("Relationship restore failed", error=error_msg)
-
-        mentions_to_restore: list[Any] = []
-        for mention_data in normalize_mention_payloads(backup_data.mentions):
-            try:
-                mention = _mention_from_payload(mention_data, organization_id=organization_id)
-                if skip_existing and await _mention_exists(driver, mention.uuid):
-                    mentions_skipped += 1
-                    continue
-                mentions_to_restore.append(mention)
-            except Exception as e:
-                error_msg = f"Mention {mention_data.get('uuid', 'unknown')}: {e}"
-                errors.append(error_msg)
-                if len(errors) <= 10:
-                    log.warning("Mention restore failed", error=error_msg)
-
-        for mention in mentions_to_restore:
-            try:
-                await _save_native_mention(driver, mention)
-                mentions_restored += 1
-            except Exception as e:
-                error_msg = f"Mention {mention.uuid}: {e}"
-                errors.append(error_msg)
-                if len(errors) <= 10:
-                    log.warning("Mention restore failed", error=error_msg)
+        runtime = await get_graph_runtime(organization_id)
+        driver = runtime.client
+        companions = await prepare_companion_restore(
+            driver,
+            organization_id=organization_id,
+            episodes=episodes,
+            relationships=relationships,
+            mentions=mentions,
+            skip_existing=skip_existing,
+            clean=clean,
+        )
+        restored = await restore_source_integrity(
+            driver.execute_query,
+            integrity,
+            kind=SourceKind.GRAPH_ENTITY,
+            organizations=[organization_id],
+            skip_existing=skip_existing,
+            clean=clean,
+            clean_graph_auxiliary=clean,
+            auxiliary_preconditions=companions.preconditions,
+            auxiliary_statements=companions.statements,
+            auxiliary_parameters=companions.parameters,
+        )
+        restored_ids = restored["restored_source_ids"]
+        entities_restored = len(restored_ids)
+        entities_skipped = backup_data.entity_count - entities_restored
+        integrity_conflicts = restored["conflicts"]
+        quarantined.extend(
+            {
+                "source_id": identity,
+                "reason": "unverifiable_legacy_lineage",
+                "repair": "reauthor_under_new_capture_identity",
+            }
+            for identity in restored_ids
+            if identity in unavailable_ids
+        )
+        episodes_restored = companions.episodes_restored
+        episodes_skipped = companions.episodes_skipped
+        relationships_restored = companions.relationships_restored
+        mentions_restored = companions.mentions_restored
+        mentions_skipped = companions.mentions_skipped
 
         duration = time.time() - start_time
         log.info(
@@ -793,6 +703,8 @@ async def restore_backup(
             episodes_skipped=episodes_skipped,
             mentions_restored=mentions_restored,
             mentions_skipped=mentions_skipped,
+            integrity_conflicts=integrity_conflicts,
+            quarantined=quarantined,
         )
 
     except Exception as e:
@@ -809,6 +721,8 @@ async def restore_backup(
             episodes_skipped=episodes_skipped,
             mentions_restored=mentions_restored,
             mentions_skipped=mentions_skipped,
+            integrity_conflicts=integrity_conflicts,
+            quarantined=quarantined,
         )
 
 

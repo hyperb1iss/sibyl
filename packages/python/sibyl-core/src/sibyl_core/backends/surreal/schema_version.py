@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import Awaitable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from time import monotonic
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from sibyl_core.backends.surreal.schema_helpers import execute_schema_statement, split_statements
 
-GRAPH_SCHEMA_CURRENT_VERSION = 20
+if TYPE_CHECKING:
+    from sibyl_core.backends.surreal.schema_ownership import SchemaOwnership
+
+GRAPH_SCHEMA_CURRENT_VERSION = 27
 GRAPH_SCHEMA_NAME = "graph"
 SCHEMA_VERSION_TABLE = "schema_version"
 
@@ -21,6 +24,7 @@ ALTER TABLE IF EXISTS schema_version SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS name ON schema_version TYPE string;
 DEFINE FIELD IF NOT EXISTS version ON schema_version TYPE int;
 DEFINE FIELD IF NOT EXISTS embedding_dimension ON schema_version TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS embedding_rebuild_dimension ON schema_version TYPE option<int>;
 DEFINE FIELD IF NOT EXISTS migrations ON schema_version TYPE array<object> DEFAULT [];
 DEFINE FIELD IF NOT EXISTS migrations.*.version ON schema_version TYPE int;
 DEFINE FIELD IF NOT EXISTS migrations.*.name ON schema_version TYPE string;
@@ -41,6 +45,7 @@ class SchemaMigration:
     version: int
     name: str
     statements: tuple[str, ...] = ()
+    action: Callable[[SurrealExecute], Awaitable[None]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +61,14 @@ class IndexBuildStatus:
     initial: int | None = None
     pending: int | None = None
     updated: int | None = None
+
+
+class IndexBuildStalledError(TimeoutError):
+    """An index has shown no build progress within its observation window."""
+
+
+class IndexBuildFailedError(RuntimeError):
+    """The server explicitly reported a failed index build."""
 
 
 async def ensure_schema_version_table(
@@ -107,6 +120,8 @@ async def record_schema_version(
             name = $name,
             version = $version,
             embedding_dimension = $embedding_dimension ?? embedding_dimension,
+            embedding_rebuild_dimension = IF $embedding_dimension IS NOT NONE
+                THEN NONE ELSE embedding_rebuild_dimension END,
             migrations = $migrations,
             created_at = created_at ?? time::now(),
             updated_at = time::now();
@@ -134,6 +149,13 @@ async def get_schema_embedding_dimension(
     return int(raw_dimension) if isinstance(raw_dimension, int | float | str) else None
 
 
+async def get_schema_embedding_rebuild_dimension(execute_query: SurrealExecute) -> int | None:
+    result = await execute_query("SELECT embedding_rebuild_dimension FROM schema_version:graph;")
+    first = _first_record(result)
+    dimension = first.get("embedding_rebuild_dimension") if first is not None else None
+    return int(dimension) if isinstance(dimension, int | float | str) else None
+
+
 async def apply_schema_migrations(
     execute_query: SurrealExecute,
     migrations: Sequence[SchemaMigration],
@@ -141,9 +163,11 @@ async def apply_schema_migrations(
     name: str = GRAPH_SCHEMA_NAME,
     group_id: str | None = None,
     scope: str = "schema_migration",
+    ownership: SchemaOwnership | None = None,
 ) -> list[SchemaMigration]:
+    mutate = ownership.mutate if ownership is not None else execute_query
     await ensure_schema_version_table(
-        execute_query,
+        mutate,
         group_id=group_id,
         scope=f"{scope}_version",
     )
@@ -155,17 +179,19 @@ async def apply_schema_migrations(
             continue
         for statement in migration.statements:
             await execute_schema_statement(
-                execute_query,
+                mutate,
                 statement,
                 scope=scope,
                 group_id=group_id,
             )
+        if migration.action is not None:
+            await migration.action(execute_query)
         applied.append(migration)
         migration_history = [
             item for item in sorted_migrations if item.version <= migration.version
         ]
         await record_schema_version(
-            execute_query,
+            mutate,
             version=migration.version,
             migrations=migration_history,
             name=name,
@@ -215,20 +241,54 @@ async def wait_for_index_ready(
     table: str,
     timeout_seconds: float = 300.0,
     poll_interval_seconds: float = 1.0,
+    require_status: bool = False,
+    ownership: SchemaOwnership | None = None,
+    track_progress: bool = False,
 ) -> IndexBuildStatus | None:
+    """Wait for readiness, optionally measuring timeout since observed progress.
+
+    Initial rows scanned, updates applied, and pending work consumed establish
+    progress independently; none is a completion fraction. Stage transitions
+    also renew the observation window. A growing pending queue alone does not.
+    """
     deadline = monotonic() + timeout_seconds
     last_status: IndexBuildStatus | None = None
     while monotonic() < deadline:
+        if ownership is not None:
+            await ownership.heartbeat()
         status = await get_index_build_status(execute_query, name=name, table=table)
+        if status is None and require_status:
+            raise RuntimeError(f"index {name} on {table} returned no build status")
         if status is None or status.status in {"ready", "built"}:
             return status
         if status.status == "error":
             msg = f"index {name} on {table} failed to build"
-            raise RuntimeError(msg)
+            raise IndexBuildFailedError(msg)
+        if track_progress and _index_build_progressed(last_status, status):
+            deadline = monotonic() + timeout_seconds
         last_status = status
-        await asyncio.sleep(poll_interval_seconds)
+        sleep_seconds = poll_interval_seconds
+        if ownership is not None:
+            sleep_seconds = min(sleep_seconds, ownership.lease_seconds / 3)
+        await asyncio.sleep(sleep_seconds)
     msg = f"timed out waiting for index {name} on {table}: {last_status}"
+    if track_progress:
+        raise IndexBuildStalledError(msg)
     raise TimeoutError(msg)
+
+
+def _index_build_progressed(previous: IndexBuildStatus | None, current: IndexBuildStatus) -> bool:
+    if previous is None or current.status != previous.status:
+        return True
+    for field in ("initial", "updated"):
+        before, after = getattr(previous, field), getattr(current, field)
+        if after is not None and (before is None or after > before):
+            return True
+    return (
+        previous.pending is not None
+        and current.pending is not None
+        and current.pending < previous.pending
+    )
 
 
 def _with_concurrently(definition: str) -> str:

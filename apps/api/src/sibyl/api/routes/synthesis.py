@@ -20,6 +20,7 @@ from sibyl_core.auth.memory_policy import authorize_memory_write
 from sibyl_core.models.synthesis import SynthesisRequest, SynthesisRun, SynthesisSectionRequest
 from sibyl_core.services import synthesis as synthesis_service
 from sibyl_core.services.handbook import handbook_synthesis_request, render_handbook_markdown
+from sibyl_core.services.observed_sources import load_authorized_source_snapshot
 
 log = structlog.get_logger()
 _READ_ROLES = (
@@ -109,6 +110,7 @@ async def _planned_materialized_run(
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
         context_fn=synthesis_service.default_context_pack,
+        source_loader=load_authorized_source_snapshot,
     )
     return run, accessible_projects
 

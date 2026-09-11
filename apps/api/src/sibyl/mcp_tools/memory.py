@@ -1,5 +1,6 @@
 """Knowledge capture and reflection MCP tools."""
 
+import asyncio
 from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any, Literal, cast
@@ -20,10 +21,14 @@ from sibyl.api.idempotency import (
 )
 from sibyl.mcp_tools import serialization
 from sibyl.mcp_tools.contracts import DeclaredRelatedTo, MemoryKind
-from sibyl.persistence.auth_runtime import create_project_record
+from sibyl.persistence.auth_runtime import create_project_record, resolve_accessible_team_scope_keys
 from sibyl.persistence.content_common import ApiIdempotencyRecord
 from sibyl_core.auth.memory_policy import server_provenance_metadata, stamp_memory_scope_metadata
 from sibyl_core.memory_pipeline.capture import MemoryCaptureRequest, MemoryCaptureService
+from sibyl_core.memory_pipeline.source_lifecycle import (
+    SOURCE_BINDINGS_KEY,
+    source_revision_bindings,
+)
 
 log = structlog.get_logger()
 
@@ -107,11 +112,11 @@ async def _remember_mcp_memory(
     build_memory_structure(content.strip(), spans=spans, atomic=atomic, probes=probes)
 
     memory_scope = "project" if project else "private"
-    write_decision = mcp_policy.authorize_memory_write_request(
+    write_decision = await mcp_policy.authorize_memory_request(
         ctx=ctx,
+        write=True,
         memory_scope=memory_scope,
         scope_key=project,
-        accessible_projects=accessible_projects,
         surface="mcp_remember",
     )
     resolved_links = await mcp_policy.resolve_capture_links(
@@ -127,6 +132,20 @@ async def _remember_mcp_memory(
         related_to=resolved_links,
         accessible_projects=accessible_projects,
     )
+
+    source_context: dict[str, Any] = {}
+    if metadata and metadata.get("raw_source_ids"):
+        source_projects, source_teams = await asyncio.gather(
+            mcp_context.get_accessible_projects(ctx),
+            resolve_accessible_team_scope_keys(
+                user_id=principal_id, org_id=ctx.org_id, scopes=ctx.scopes
+            ),
+        )
+        source_context = {
+            "accessible_projects": source_projects,
+            "accessible_teams": source_teams,
+            "allowed_memory_scope_keys": ctx.api_key_memory_scope_keys,
+        }
 
     idempotency_payload = {
         "title": title,
@@ -200,9 +219,14 @@ async def _remember_mcp_memory(
             metadata=dict(request.metadata),
             provenance=dict(request.provenance),
             capture_surface=request.capture_surface,
+            **source_context,
         )
         raw_revision = getattr(raw_memory, "revision", 1)
-        return {"id": raw_memory.id, "source_id": raw_memory.source_id}
+        return {
+            "id": raw_memory.id,
+            "source_id": raw_memory.source_id,
+            SOURCE_BINDINGS_KEY: source_revision_bindings([raw_memory]),
+        }
 
     async def create_graph_entity(
         request: MemoryCaptureRequest,
@@ -307,11 +331,11 @@ async def _reflect_mcp_memory(
     memory_scope = "project" if project else "private"
     scope_key = project
     if persist:
-        mcp_policy.authorize_memory_write_request(
+        await mcp_policy.authorize_memory_request(
             ctx=ctx,
+            write=True,
             memory_scope=memory_scope,
             scope_key=scope_key,
-            accessible_projects=accessible_projects,
             surface="mcp_reflect",
         )
         await mcp_policy.validate_relationship_targets_for_caller(
@@ -320,6 +344,7 @@ async def _reflect_mcp_memory(
             accessible_projects=accessible_projects,
         )
     pack = await reflect_memory(
+        allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
         content=content,
         source_title=source_title,
         intent=intent,
@@ -329,6 +354,7 @@ async def _reflect_mcp_memory(
         organization_id=ctx.org_id,
         principal_id=ctx.user_id,
         accessible_projects=accessible_projects,
+        writable_projects=await mcp_context.get_writable_projects(ctx) if persist else set(),
         memory_scope=memory_scope,
         scope_key=scope_key,
         persist=persist,
@@ -419,11 +445,11 @@ async def _add_mcp_entity(
     )
     memory_scope = "project" if project else "private"
     scope_key = project
-    write_decision = mcp_policy.authorize_memory_write_request(
+    write_decision = await mcp_policy.authorize_memory_request(
         ctx=ctx,
+        write=True,
         memory_scope=memory_scope,
         scope_key=scope_key,
-        accessible_projects=accessible_projects,
         surface="mcp_add",
     )
     await mcp_policy.validate_relationship_targets_for_caller(

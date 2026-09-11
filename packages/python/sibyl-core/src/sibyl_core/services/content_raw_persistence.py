@@ -2,19 +2,32 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import asyncio
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
+from sibyl_core.auth.memory_policy import (
+    EVAL_CONSOLIDATION_METADATA_KEY,
+    MEMORY_PROVENANCE_METADATA_KEYS,
+)
 from sibyl_core.backends.surreal import SurrealContentClient
+from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.embeddings.providers import (
     EmbeddingProvider,
 )
-from sibyl_core.errors import RevisionConflictError
+from sibyl_core.errors import RevisionConflictError, SourceObservationConflictError
 from sibyl_core.memory_pipeline.quality import (
+    expand_memory_quality_storage_metadata,
     normalize_memory_quality_metadata,
+)
+from sibyl_core.memory_pipeline.source_lifecycle import (
+    SOURCE_BINDINGS_KEY,
+    SOURCE_VALIDATION_PENDING_KEY,
+    declared_source_ids,
+    source_revision_bindings,
 )
 from sibyl_core.models.memory_scope import MemoryScope
 from sibyl_core.models.reflection import (
@@ -27,11 +40,26 @@ from sibyl_core.services import content_client
 from sibyl_core.services import content_lineage as lineage
 from sibyl_core.services import content_models as models
 from sibyl_core.services.content_models import RawMemory, RawMemoryWrite
+from sibyl_core.services.eval_publication_guards import PUBLICATION_ADMISSION_GUARD
+
+if TYPE_CHECKING:
+    from sibyl_core.memory_pipeline.observations import SourceObservation
+    from sibyl_core.services.dream_checkpoints import DreamCandidateWrite
+    from sibyl_core.services.validation_candidate import ValidationCandidateWrite
+    from sibyl_core.services.validation_promotion import ValidatedPromotion
 
 _RAW_MEMORY_EMBEDDING_AUTO = object()
 
 _RAW_MEMORY_BULK_UPSERT_QUERY = """
-INSERT INTO raw_captures $rows ON DUPLICATE KEY UPDATE
+BEGIN TRANSACTION;
+LET $ids = $rows.map(|$row| $row.uuid);
+LET $organizations = object::from_entries($rows.map(|$row| [$row.uuid, $row.organization_id]));
+LET $foreign = (SELECT VALUE uuid FROM raw_captures WHERE uuid IN $ids
+    AND organization_id != $organizations[uuid]);
+IF array::len($foreign) > 0 {
+    THROW 'raw capture organization cannot change';
+};
+LET $saved = (INSERT INTO raw_captures $rows ON DUPLICATE KEY UPDATE
     uuid = $input.uuid,
     organization_id = $input.organization_id,
     source_id = $input.source_id,
@@ -65,7 +93,9 @@ INSERT INTO raw_captures $rows ON DUPLICATE KEY UPDATE
     retrieval_count = $input.retrieval_count ?? retrieval_count ?? 0,
     citation_count = $input.citation_count ?? citation_count ?? 0,
     misled_count = $input.misled_count ?? misled_count ?? 0,
-    created_at = $input.created_at;
+    created_at = $input.created_at RETURN AFTER);
+COMMIT TRANSACTION;
+RETURN $saved;
 """
 
 _RAW_PROMOTION_VISIBLE_SCOPES = (
@@ -77,17 +107,38 @@ _RAW_PROMOTION_VISIBLE_SCOPES = (
 async def replace_raw_memory_records_bulk(
     client: SurrealContentClient,
     records: Sequence[models.SurrealRecord],
+    *,
+    derivations: Sequence[models.SurrealRecord] = (),
 ) -> list[models.SurrealRecord]:
     if not records:
         return []
+    identities = [record.get("uuid") for record in records]
+    if any(not isinstance(value, str) or not value for value in identities):
+        raise ValueError("raw capture batch requires non-empty UUID strings")
+    if len(set(identities)) != len(identities):
+        raise ValueError("raw capture batch requires distinct UUIDs")
     for record in records:
         if record.get("organization_id") is None:
             uuid = record.get("uuid") or "<unknown>"
             raise RuntimeError(f"raw_captures record {uuid} requires organization_id")
-    rows = await content_client.select_many(
+    query = _RAW_MEMORY_BULK_UPSERT_QUERY
+    if derivations:
+        from sibyl_core.backends.surreal.schema_derivations import STORE_RAW_DERIVATIONS
+
+        query = query.replace("COMMIT TRANSACTION;", STORE_RAW_DERIVATIONS + "COMMIT TRANSACTION;")
+    protected_targets = {derivation["target_id"] for derivation in derivations}
+    rows = await content_client.select_many_raw(
         client,
-        _RAW_MEMORY_BULK_UPSERT_QUERY,
-        rows=list(records),
+        query,
+        rows=[
+            {
+                **record,
+                "revision": 1,
+                **({"derivation_required": True} if record["uuid"] in protected_targets else {}),
+            }
+            for record in records
+        ],
+        derivations=list(derivations),
     )
     if len(rows) != len(records):
         raise RuntimeError(
@@ -122,6 +173,12 @@ def _raw_memory_from_write(write: RawMemoryWrite, *, captured_at: datetime) -> R
     normalized_scope = models.coerce_memory_scope(write.memory_scope)
     models.validate_raw_memory_scope(normalized_scope, write.scope_key)
     metadata = normalize_memory_quality_metadata(write.metadata or {})
+    for key in MEMORY_PROVENANCE_METADATA_KEYS:
+        metadata.pop(key, None)
+    sources = declared_source_ids(metadata)
+    if sources:
+        metadata["raw_source_ids"] = list(sources)
+        metadata[SOURCE_VALIDATION_PENDING_KEY] = True
     return RawMemory(
         id=str(uuid4()),
         organization_id=write.organization_id,
@@ -148,7 +205,11 @@ async def _raw_memory_with_embedding(
     memory: RawMemory,
     embedding_provider: EmbeddingProvider | None,
 ) -> RawMemory:
-    if embedding_provider is None or memory.embedding is not None:
+    if (
+        embedding_provider is None
+        or memory.embedding is not None
+        or not models.raw_memory_recallable(memory)
+    ):
         return memory
     embeddings = await embedding_provider.embed_texts(
         [
@@ -177,10 +238,16 @@ async def _raw_memories_with_embeddings(
 ) -> list[RawMemory]:
     if embedding_provider is None:
         return list(memories)
-    pending = [memory for memory in memories if memory.embedding is None]
+    pending = [
+        memory
+        for memory in memories
+        if memory.embedding is None and models.raw_memory_recallable(memory)
+    ]
     if not pending:
         return list(memories)
 
+    if not pending:
+        return list(memories)
     embeddings = await embedding_provider.embed_texts(
         [
             models.raw_memory_embedding_text(
@@ -305,7 +372,26 @@ async def remember_raw_memory(
     capture_surface: str | None = None,
     entity_type: str = "raw_memory",
     embedding_provider: EmbeddingProvider | object | None = _RAW_MEMORY_EMBEDDING_AUTO,
+    source_memories: Sequence[RawMemory] = (),
+    dream_write: DreamCandidateWrite | None = None,
+    validation_write: ValidationCandidateWrite | None = None,
+    source_observations: Sequence[SourceObservation] = (),
+    accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
 ) -> RawMemory:
+    from sibyl_core.services.memory_source_validation import (
+        SOURCE_VALIDATION_CONTEXT_KEY,
+        SourceReadAuthority,
+    )
+
+    accessible_projects = tuple(accessible_projects or ())
+    accessible_teams = tuple(accessible_teams or ())
+    accessible_delegations = tuple(accessible_delegations or ())
+    allowed_memory_scope_keys = (
+        None if allowed_memory_scope_keys is None else frozenset(allowed_memory_scope_keys)
+    )
     memory = _raw_memory_from_write(
         RawMemoryWrite(
             organization_id=organization_id,
@@ -323,6 +409,34 @@ async def remember_raw_memory(
         ),
         captured_at=models.utcnow(),
     )
+    if validation_write is not None:
+        if dream_write is not None or not source_observations:
+            raise ValueError("Corrected review requires observed original sources")
+        memory.id = validation_write.id
+    if dream_write is not None:
+        if source_observations or len(source_memories) != 1:
+            raise ValueError("Dream review requires its single captured source")
+        if source_memories[0] != dream_write.work.snapshot.memory:
+            raise ValueError("Dream review source snapshot differs")
+        memory.id = dream_write.id
+    if source_memories:
+        memory.metadata[SOURCE_BINDINGS_KEY] = source_revision_bindings(source_memories)
+        memory.metadata["raw_source_ids"] = list(
+            dict.fromkeys(
+                [*declared_source_ids(memory.metadata), *(source.id for source in source_memories)]
+            )
+        )
+        memory.metadata[SOURCE_VALIDATION_PENDING_KEY] = True
+    if source_observations:
+        memory.metadata[SOURCE_VALIDATION_PENDING_KEY] = True
+    if memory.metadata.get(SOURCE_VALIDATION_PENDING_KEY):
+        memory.metadata[SOURCE_VALIDATION_CONTEXT_KEY] = SourceReadAuthority(
+            principal_id=principal_id,
+            projects=frozenset(accessible_projects),
+            teams=frozenset(accessible_teams),
+            delegations=frozenset(accessible_delegations),
+            scope_keys=allowed_memory_scope_keys,
+        ).ceiling_metadata()
     provider = (
         models.configured_raw_memory_embedding_provider()
         if embedding_provider is _RAW_MEMORY_EMBEDDING_AUTO
@@ -330,24 +444,104 @@ async def remember_raw_memory(
     )
     memory = await _raw_memory_with_embedding(memory, provider)
     async with content_client.surreal_content_client() as client:
-        record = await content_client.replace_record(
-            client,
-            "raw_captures",
-            uuid=memory.id,
-            record=models.raw_memory_record(memory),
+        if validation_write is not None:
+            from sibyl_core.services.memory_derivations import raw_derivation_record
+            from sibyl_core.services.validation_candidate import insert_validation_candidate
+
+            authority = SourceReadAuthority(
+                principal_id=principal_id,
+                projects=frozenset(accessible_projects),
+                teams=frozenset(accessible_teams),
+                delegations=frozenset(accessible_delegations),
+                scope_keys=allowed_memory_scope_keys,
+            )
+            record = await insert_validation_candidate(
+                client,
+                models.raw_memory_record(memory),
+                validation_write,
+                raw_derivation_record(memory, source_observations, authority),
+            )
+        elif dream_write is not None:
+            from sibyl_core.services.dream_checkpoints import insert_dream_candidate
+
+            record = await insert_dream_candidate(
+                client, models.raw_memory_record(memory), dream_write
+            )
+        elif source_observations:
+            from sibyl_core.services.memory_derivations import raw_derivation_record
+
+            authority = SourceReadAuthority(
+                principal_id=principal_id,
+                projects=frozenset(accessible_projects),
+                teams=frozenset(accessible_teams),
+                delegations=frozenset(accessible_delegations),
+                scope_keys=allowed_memory_scope_keys,
+            )
+            record = (
+                await replace_raw_memory_records_bulk(
+                    client,
+                    [models.raw_memory_record(memory)],
+                    derivations=[raw_derivation_record(memory, source_observations, authority)],
+                )
+            )[0]
+        else:
+            record = await content_client.replace_record(
+                client,
+                "raw_captures",
+                uuid=memory.id,
+                record=models.raw_memory_record(memory),
+            )
+    stored = models.raw_memory_from_record(record)
+    if stored.metadata.get(SOURCE_VALIDATION_PENDING_KEY):
+        from sibyl_core.services.memory_source_validation import reconcile_raw_source_lifecycle
+
+        stored = await reconcile_raw_source_lifecycle(
+            stored,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            accessible_teams=accessible_teams,
+            accessible_delegations=accessible_delegations,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+            embedding_provider=provider,
         )
-    return models.raw_memory_from_record(record)
+    return stored
 
 
 async def remember_raw_memories(
     writes: Sequence[RawMemoryWrite],
     *,
     embedding_provider: EmbeddingProvider | object | None = _RAW_MEMORY_EMBEDDING_AUTO,
+    accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
 ) -> list[RawMemory]:
+    from sibyl_core.services.memory_source_validation import (
+        SOURCE_VALIDATION_CONTEXT_KEY,
+        SourceReadAuthority,
+    )
+
     if not writes:
         return []
+    accessible_projects = None if accessible_projects is None else tuple(accessible_projects)
+    accessible_teams = None if accessible_teams is None else tuple(accessible_teams)
+    accessible_delegations = (
+        None if accessible_delegations is None else tuple(accessible_delegations)
+    )
+    allowed_memory_scope_keys = (
+        None if allowed_memory_scope_keys is None else frozenset(allowed_memory_scope_keys)
+    )
     now = models.utcnow()
     memories = [_raw_memory_from_write(write, captured_at=now) for write in writes]
+    for memory in memories:
+        if memory.metadata.get(SOURCE_VALIDATION_PENDING_KEY):
+            memory.metadata[SOURCE_VALIDATION_CONTEXT_KEY] = SourceReadAuthority(
+                principal_id=memory.principal_id,
+                projects=frozenset(accessible_projects or ()),
+                teams=frozenset(accessible_teams or ()),
+                delegations=frozenset(accessible_delegations or ()),
+                scope_keys=allowed_memory_scope_keys,
+            ).ceiling_metadata()
     provider = (
         models.configured_raw_memory_embedding_provider()
         if embedding_provider is _RAW_MEMORY_EMBEDDING_AUTO
@@ -360,22 +554,45 @@ async def remember_raw_memories(
             [models.raw_memory_record(memory) for memory in memories],
         )
     ordered_records = _order_raw_memory_records_by_input(memories, records)
-    return [models.raw_memory_from_record(record) for record in ordered_records]
+    stored = [models.raw_memory_from_record(record) for record in ordered_records]
+    if any(memory.metadata.get(SOURCE_VALIDATION_PENDING_KEY) for memory in stored):
+        from sibyl_core.services.memory_source_validation import reconcile_raw_source_lifecycle
+
+        pending = [
+            (index, memory)
+            for index, memory in enumerate(stored)
+            if memory.metadata.get(SOURCE_VALIDATION_PENDING_KEY)
+        ]
+        checked = await asyncio.gather(
+            *(
+                reconcile_raw_source_lifecycle(
+                    memory,
+                    principal_id=memory.principal_id,
+                    accessible_projects=accessible_projects,
+                    accessible_teams=accessible_teams,
+                    accessible_delegations=accessible_delegations,
+                    allowed_memory_scope_keys=allowed_memory_scope_keys,
+                    embedding_provider=provider,
+                )
+                for _, memory in pending
+            )
+        )
+        for (index, _), memory in zip(pending, checked, strict=True):
+            stored[index] = memory
+    return stored
 
 
-async def remember_reflection_candidate_review(
+def reflection_candidate_metadata(
     *,
-    organization_id: str,
-    principal_id: str,
     candidate: ReflectionCandidate,
-    raw_source_ids: list[str],
+    raw_source_ids: Sequence[str],
+    memory_scope: MemoryScope | str,
     source_id: str | None = None,
-    memory_scope: MemoryScope | str = MemoryScope.PRIVATE,
-    scope_key: str | None = None,
     suggested_memory_scope: MemoryScope | str | None = None,
     suggested_scope_key: str | None = None,
     extraction_prompt_metadata: dict[str, object] | None = None,
-) -> RawMemory:
+) -> dict[str, object]:
+    """Build review metadata for both ordinary and atomic candidate persistence."""
     normalized_scope = models.coerce_memory_scope(memory_scope)
     suggested_scope = (
         models.coerce_memory_scope(suggested_memory_scope)
@@ -407,6 +624,42 @@ async def remember_reflection_candidate_review(
             reason="reflection_candidate_pending",
         ),
     )
+    return metadata
+
+
+async def remember_reflection_candidate_review(
+    *,
+    organization_id: str,
+    principal_id: str,
+    candidate: ReflectionCandidate,
+    raw_source_ids: list[str],
+    source_id: str | None = None,
+    memory_scope: MemoryScope | str = MemoryScope.PRIVATE,
+    scope_key: str | None = None,
+    suggested_memory_scope: MemoryScope | str | None = None,
+    suggested_scope_key: str | None = None,
+    extraction_prompt_metadata: dict[str, object] | None = None,
+    source_memories: Sequence[RawMemory] = (),
+    source_observations: Sequence[SourceObservation] = (),
+    dream_write: DreamCandidateWrite | None = None,
+    validation_write: ValidationCandidateWrite | None = None,
+    accessible_projects: Iterable[str] | None = None,
+    accessible_teams: Iterable[str] | None = None,
+    accessible_delegations: Iterable[str] | None = None,
+    allowed_memory_scope_keys: Iterable[str] | None = None,
+) -> RawMemory:
+    normalized_scope = models.coerce_memory_scope(memory_scope)
+    source_ids = list(dict.fromkeys(raw_source_ids))
+    resolved_source_id = source_id or (source_ids[0] if source_ids else "reflection:manual")
+    metadata = reflection_candidate_metadata(
+        candidate=candidate,
+        raw_source_ids=source_ids,
+        memory_scope=normalized_scope,
+        source_id=resolved_source_id,
+        suggested_memory_scope=suggested_memory_scope,
+        suggested_scope_key=suggested_scope_key,
+        extraction_prompt_metadata=extraction_prompt_metadata,
+    )
     return await remember_raw_memory(
         organization_id=organization_id,
         principal_id=principal_id,
@@ -420,6 +673,14 @@ async def remember_reflection_candidate_review(
         provenance={"raw_source_ids": source_ids},
         capture_surface="reflection_candidate",
         entity_type=candidate.kind,
+        source_memories=source_memories,
+        dream_write=dream_write,
+        validation_write=validation_write,
+        source_observations=source_observations,
+        accessible_projects=accessible_projects,
+        accessible_teams=accessible_teams,
+        accessible_delegations=accessible_delegations,
+        allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
 
 
@@ -629,9 +890,33 @@ async def save_raw_memory(
     embedding_provider: EmbeddingProvider | object | None = _RAW_MEMORY_EMBEDDING_AUTO,
     expected_revision: int | None = None,
     superseded_by_memory_id: str | None = None,
+    source_observations: Sequence[RawMemory] = (),
+    publication_operation_id: str | None = None,
+    validation_promotion: ValidatedPromotion | None = None,
+    validation_derivation: dict[str, object] | None = None,
 ) -> RawMemory:
+    from sibyl_core.services.procedure_artifact import publication_build_receipt_json
+    from sibyl_core.services.validation_promotion import VALIDATION_PROMOTION_GUARD
+    from sibyl_core.tasks._evidence_json import canonical
+
+    validation_guard, validation_params = "", {}
+    if validation_promotion is not None:
+        if (memory.organization_id, memory.principal_id, memory.id) != (
+            validation_promotion.organization_id,
+            validation_promotion.principal_id,
+            validation_promotion.candidate_id,
+        ):
+            raise ValueError("Validation promotion owner differs")
+        validation_guard, validation_params = await validation_promotion.current_guard()
+
     if expected_revision is not None and expected_revision < 1:
         raise ValueError("expected_revision must be at least 1")
+    if (
+        source_observations or publication_operation_id or validation_promotion
+    ) and expected_revision is None:
+        raise ValueError("source-observed publication requires a revision fence")
+    if any(source.organization_id != memory.organization_id for source in source_observations):
+        raise ValueError("source observations must belong to the publication organization")
     async with content_client.surreal_content_client() as client:
         existing_record = await content_client.select_one(
             client,
@@ -676,59 +961,152 @@ async def save_raw_memory(
                     "organization_id": memory.organization_id,
                     "created_at": models.utcnow(),
                 }
-            rows = await content_client.select_many_raw(
-                client,
-                """
-                    BEGIN TRANSACTION;
-                    LET $updated = (
-                        UPDATE raw_captures MERGE $record
-                        WHERE organization_id = $organization_id
-                            AND uuid = $uuid
-                            AND ($expected_revision = NONE OR revision = $expected_revision)
-                        RETURN AFTER
-                    );
-                    LET $saved = (UPDATE $updated SET revision += 1 RETURN AFTER);
-                    IF $supersession != NONE AND array::len($saved) > 0 {
-                        LET $replacement = (
-                            SELECT id, source_id FROM raw_captures
-                            WHERE organization_id = $organization_id
-                                AND uuid = $supersession.raw_memory_id
-                            LIMIT 1
-                        )[0];
-                        LET $superseded = (
-                            SELECT VALUE id FROM raw_captures
-                            WHERE organization_id = $organization_id
-                                AND uuid = $supersession.superseded_raw_memory_id
-                            LIMIT 1
-                        )[0];
-                        IF $replacement = NONE OR $superseded = NONE {
-                            THROW "supersession_reference_missing";
-                        };
-                        LET $replacement_id = $replacement.id;
-                        LET $edge = type::record($supersession.edge_ref);
-                        LET $existing_edge = (
-                            SELECT VALUE id FROM supersedes WHERE id = $edge LIMIT 1
-                        )[0];
-                        IF $existing_edge = NONE {
-                            RELATE $replacement_id->$edge->$superseded CONTENT {
-                                uuid: $supersession.uuid,
-                                organization_id: $organization_id,
-                                raw_memory_id: $supersession.raw_memory_id,
-                                superseded_raw_memory_id: $supersession.superseded_raw_memory_id,
-                                source_id: $replacement.source_id,
-                                created_at: $supersession.created_at
+            # One atomic statement preserves the actual guard error instead
+            # of an earlier statement's transaction-aborted sentinel.
+            try:
+                rows = await content_client.select_many_raw(
+                    client,
+                    """
+                        RETURN {
+                        __VALIDATION_SOURCE_GUARD__
+                        __VALIDATION_PROMOTION_GUARD__
+                        __PUBLICATION_ADMISSION_GUARD__
+                        FOR $source IN $source_observations {
+                            LET $observed = (SELECT * FROM raw_captures
+                                WHERE organization_id = $organization_id AND uuid = $source.uuid LIMIT 1)[0];
+                            IF $observed = NONE OR $observed.deleted_at != NONE
+                                OR $observed.revision != $source.revision
+                                OR $observed.raw_content != $source.raw_content
+                                OR $observed.title != $source.title
+                                OR $observed.principal_id != $source.principal_id
+                                OR $observed.memory_scope != $source.memory_scope
+                                OR $observed.scope_key != $source.scope_key
+                                OR $observed.review_state != $source.review_state
+                                OR ($observed.metadata != $source.metadata
+                                    AND $observed.metadata != $source.legacy_metadata) {
+                                THROW 'publication_source_observation_changed';
                             };
                         };
-                    };
-                    COMMIT TRANSACTION;
-                    RETURN $saved;
-                """,
-                organization_id=memory.organization_id,
-                uuid=memory.id,
-                expected_revision=expected_revision,
-                record=update_record,
-                supersession=supersession,
-            )
+                        LET $observed_ids = array::distinct($source_observations.map(|$s| $s.uuid));
+                        LET $source_states_to_fence = (SELECT * FROM source_states
+                            WHERE organization_id=$organization_id AND source_kind='raw_capture'
+                                AND source_id IN $observed_ids);
+                        IF array::len($source_states_to_fence) != array::len($observed_ids) {
+                            THROW 'publication_source_observation_changed';
+                        };
+                        __SOURCE_STATE_WRITE_WITNESS__
+                        LET $current = (SELECT revision FROM raw_captures
+                            WHERE organization_id = $organization_id AND uuid = $uuid LIMIT 1)[0];
+                        LET $next = object::from_entries(array::concat(
+                            object::entries($record), [['revision', $current.revision + 1]]));
+                        LET $saved = (
+                            UPDATE raw_captures MERGE $next
+                            WHERE organization_id = $organization_id
+                                AND uuid = $uuid
+                                AND ($expected_revision = NONE OR revision = $expected_revision)
+                            RETURN AFTER
+                        );
+                        IF $publication_operation_id != NONE AND array::len($saved) > 0 {
+                            LET $ledger = (SELECT * FROM eval_consolidations WHERE uuid = $publication_operation_id
+                                AND organization_id = $organization_id LIMIT 1)[0];
+                            IF $ledger.promoted_entity_id != NONE
+                                AND $ledger.promoted_entity_id != $record.metadata.promoted_entity_id {
+                                THROW 'publication_source_observation_changed';
+                            };
+                            UPDATE eval_consolidations SET promoted_entity_id = $record.metadata.promoted_entity_id
+                                WHERE uuid = $publication_operation_id AND organization_id = $organization_id;
+                        };
+                        IF $supersession != NONE AND array::len($saved) > 0 {
+                            LET $replacement = (
+                                SELECT id, source_id FROM raw_captures
+                                WHERE organization_id = $organization_id
+                                    AND uuid = $supersession.raw_memory_id
+                                LIMIT 1
+                            )[0];
+                            LET $superseded = (
+                                SELECT VALUE id FROM raw_captures
+                                WHERE organization_id = $organization_id
+                                    AND uuid = $supersession.superseded_raw_memory_id
+                                LIMIT 1
+                            )[0];
+                            IF $replacement = NONE OR $superseded = NONE {
+                                THROW "supersession_reference_missing";
+                            };
+                            LET $replacement_id = $replacement.id;
+                            LET $edge = type::record($supersession.edge_ref);
+                            LET $existing_edge = (
+                                SELECT VALUE id FROM supersedes WHERE id = $edge LIMIT 1
+                            )[0];
+                            IF $existing_edge = NONE {
+                                RELATE $replacement_id->$edge->$superseded CONTENT {
+                                    uuid: $supersession.uuid,
+                                    organization_id: $organization_id,
+                                    raw_memory_id: $supersession.raw_memory_id,
+                                    superseded_raw_memory_id: $supersession.superseded_raw_memory_id,
+                                    source_id: $replacement.source_id,
+                                    created_at: $supersession.created_at
+                                };
+                            };
+                        };
+                        RETURN $saved;
+                        };
+                    """.replace("__PUBLICATION_ADMISSION_GUARD__", PUBLICATION_ADMISSION_GUARD)
+                    .replace("__SOURCE_STATE_WRITE_WITNESS__", SOURCE_STATE_WRITE_WITNESS)
+                    .replace("__VALIDATION_SOURCE_GUARD__", validation_guard)
+                    .replace("__VALIDATION_PROMOTION_GUARD__", VALIDATION_PROMOTION_GUARD),
+                    **validation_params,
+                    validation_binding=validation_promotion.binding.model_dump()
+                    if validation_promotion
+                    else None,
+                    validation_binding_json=canonical(validation_promotion.binding.model_dump())
+                    if validation_promotion
+                    else None,
+                    validation_principal=memory.principal_id,
+                    validation_entity_id=memory.metadata.get("promoted_entity_id")
+                    if validation_promotion
+                    else None,
+                    validation_derivation={
+                        **validation_derivation,
+                        "validation_entity_id": memory.metadata.get("promoted_entity_id"),
+                        "validation_binding_json": canonical(
+                            validation_promotion.binding.model_dump()
+                        ),
+                    }
+                    if validation_derivation and validation_promotion
+                    else None,
+                    organization_id=memory.organization_id,
+                    publication_operation_id=publication_operation_id
+                    or (
+                        memory.metadata.get(EVAL_CONSOLIDATION_METADATA_KEY)
+                        if source_observations
+                        else None
+                    ),
+                    publication_principal_id=memory.principal_id,
+                    publication_build_receipt_json=(
+                        publication_build_receipt_json(memory)
+                        if publication_operation_id or source_observations
+                        else None
+                    ),
+                    uuid=memory.id,
+                    expected_revision=expected_revision,
+                    record=update_record,
+                    supersession=supersession,
+                    source_observations=[
+                        {
+                            **models.raw_memory_record(source),
+                            "legacy_metadata": expand_memory_quality_storage_metadata(
+                                source.metadata
+                            ),
+                        }
+                        for source in source_observations
+                    ],
+                )
+            except Exception as exc:
+                if "publication_source_observation_changed" in str(exc):
+                    raise SourceObservationConflictError(
+                        "publication source changed before commit"
+                    ) from exc
+                raise
             if not rows and expected_revision is not None:
                 current = await content_client.select_one(
                     client,

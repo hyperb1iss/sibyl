@@ -1,7 +1,9 @@
 """Authenticated MCP caller context and project-scope resolution."""
 
+import asyncio
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import cached_property
 
 import structlog
 from mcp.server.auth.middleware.auth_context import get_access_token
@@ -13,8 +15,8 @@ from sibyl.auth.mcp_auth import (
 )
 from sibyl.persistence.auth_runtime import (
     authenticate_api_key,
-    resolve_accessible_project_graph_ids,
     resolve_org_role,
+    resolve_project_graph_grants,
 )
 from sibyl_core.auth.context import MemoryPolicyContext
 
@@ -39,6 +41,18 @@ class McpContext:
     # an API-key concern on both surfaces: user sessions carry no scope claim,
     # and REST gates scopes only on its own API-key branch.
     is_api_key: bool = False
+
+    @cached_property
+    def project_grants(self) -> asyncio.Task[tuple[frozenset[str], frozenset[str]]]:
+        """Share one authorization read among consumers of this request context."""
+        return asyncio.create_task(
+            resolve_project_graph_grants(
+                user_id=self.user_id or "",
+                org_id=self.org_id,
+                scopes=self.scopes,
+                api_key_project_ids=self.api_key_project_ids,
+            )
+        )
 
     def to_memory_policy_context(
         self,
@@ -220,12 +234,8 @@ async def get_accessible_projects(ctx: McpContext) -> set[str] | None:
             return set(ctx.api_key_project_ids)
         return None
 
-    return await resolve_accessible_project_graph_ids(
-        user_id=ctx.user_id,
-        org_id=ctx.org_id,
-        scopes=ctx.scopes,
-        api_key_project_ids=ctx.api_key_project_ids,
-    )
+    readable, _ = await ctx.project_grants
+    return set(readable)
 
 
 async def resolve_project_scope(
@@ -260,3 +270,11 @@ async def require_org_id() -> str:
     """
     ctx = await require_context()
     return ctx.org_id
+
+
+async def get_writable_projects(ctx: McpContext) -> set[str]:
+    """Resolve project write roles within the credential project restriction."""
+    if not ctx.user_id:
+        return set()
+    _, writable = await ctx.project_grants
+    return set(writable)

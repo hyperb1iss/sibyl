@@ -176,6 +176,10 @@ async def replace_record(
     organization_id = record.get("organization_id")
     if organization_id is None:
         raise RuntimeError(f"{table} record {uuid} requires organization_id")
+    if table == "raw_captures":
+        from sibyl_core.services.content_raw_persistence import replace_raw_memory_records_bulk
+
+        return (await replace_raw_memory_records_bulk(client, [record]))[0]
     rows = await select_many(
         client,
         _UPSERT_RECORD[table],

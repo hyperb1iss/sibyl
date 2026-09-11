@@ -3331,3 +3331,137 @@ async def test_server_instance_id_fails_closed_if_missing_or_invalid(monkeypatch
     monkeypatch.setattr(auth_common, "_auth_client_scope", lambda: _StaticAuthClientScope(client))
     with pytest.raises((RuntimeError, ValueError)):
         await auth_common.get_server_instance_id()
+
+
+@pytest.mark.parametrize("binding", [None, {"direct-editor", "team-viewer"}, {"owned"}])
+@pytest.mark.parametrize("required_role", ["viewer", "contributor"])
+async def test_project_listing_uses_effective_roles_and_key_binding(
+    monkeypatch, binding, required_role
+):
+    from sibyl_core.auth import ProjectRole
+
+    owner_id = uuid4()
+    projects = [
+        {"uuid": name, "graph_project_id": name, "visibility": "private"}
+        for name in ("direct-editor", "direct-viewer", "team-editor", "team-viewer", "owned")
+    ]
+    projects[-1]["owner_user_id"] = str(owner_id)
+    projects.extend(
+        [
+            {
+                "uuid": "org-editor",
+                "graph_project_id": "org-editor",
+                "visibility": "org",
+                "default_role": ProjectRole.CONTRIBUTOR.value,
+            },
+            {
+                "uuid": "org-viewer",
+                "graph_project_id": "org-viewer",
+                "visibility": "org",
+                "default_role": ProjectRole.VIEWER.value,
+            },
+        ]
+    )
+    client = _RecordingAuthClient(
+        {
+            "projects": projects,
+            "direct_memberships": [
+                {"project_id": "direct-editor", "role": ProjectRole.CONTRIBUTOR.value},
+                {"project_id": "direct-viewer", "role": ProjectRole.VIEWER.value},
+            ],
+            "team_projects": [
+                {"project_id": "team-editor", "role": ProjectRole.MAINTAINER.value},
+                {"project_id": "team-viewer", "role": ProjectRole.VIEWER.value},
+            ],
+        }
+    )
+    ctx = SimpleNamespace(
+        organization=SimpleNamespace(id=uuid4()),
+        user=SimpleNamespace(id=owner_id),
+        org_role="member",
+        api_key_project_ids=binding,
+    )
+    monkeypatch.setattr(
+        surreal_auth_runtime, "_auth_client_scope", lambda: _StaticAuthClientScope(client)
+    )
+    actual = await surreal_auth_runtime.list_accessible_project_graph_ids(
+        ctx, required_role=ProjectRole[required_role.upper()]
+    )
+    expected = {"direct-editor", "team-editor", "owned", "org-editor"}
+    if required_role == "viewer":
+        expected.update({"direct-viewer", "team-viewer", "org-viewer"})
+    assert actual == (expected if binding is None else expected & binding)
+    assert len(client.calls) == 1
+
+
+@pytest.mark.parametrize("org_role", ["member", "admin"])
+async def test_project_read_write_snapshot_resolves_auth_and_rows_once(monkeypatch, org_role):
+    from sibyl.persistence.surreal.auth_runtime import projects as project_runtime
+    from sibyl_core.auth import ProjectRole
+
+    ctx = SimpleNamespace(
+        organization=SimpleNamespace(id=uuid4()),
+        user=SimpleNamespace(id=uuid4()),
+        org_role=org_role,
+        api_key_project_ids=None,
+    )
+    records = [
+        {
+            "uuid": "read",
+            "graph_project_id": "read",
+            "visibility": "org",
+            "default_role": ProjectRole.VIEWER.value,
+        },
+        {
+            "uuid": "write",
+            "graph_project_id": "write",
+            "visibility": "org",
+            "default_role": ProjectRole.CONTRIBUTOR.value,
+        },
+        {
+            "uuid": "outside",
+            "graph_project_id": "outside",
+            "visibility": "org",
+            "default_role": ProjectRole.CONTRIBUTOR.value,
+        },
+    ]
+    client = _RecordingAuthClient(records if org_role == "admin" else {"projects": records})
+    resolve = AsyncMock(return_value=ctx)
+    monkeypatch.setattr(project_runtime, "_resolve_auth_context_from_claims", resolve)
+    monkeypatch.setattr(
+        project_runtime, "_auth_client_scope", lambda: _StaticAuthClientScope(client)
+    )
+    readable, writable = await project_runtime.resolve_project_graph_grants(
+        user_id=str(ctx.user.id),
+        org_id=str(ctx.organization.id),
+        api_key_project_ids=["read", "write"],
+    )
+    assert readable == {"read", "write"}
+    assert writable == ({"read", "write"} if org_role == "admin" else {"write"})
+    resolve.assert_awaited_once()
+    assert len(client.calls) == 1
+
+
+@pytest.mark.parametrize("grant_kind", ["visibility", "direct", "team"])
+@pytest.mark.parametrize("missing_role", [None, ""])
+def test_legacy_project_grant_without_role_remains_read_only(grant_kind, missing_role):
+    from sibyl.persistence.surreal.auth_runtime import projects as project_runtime
+    from sibyl_core.auth import ProjectRole
+
+    ctx = SimpleNamespace(
+        user=SimpleNamespace(id=uuid4()), org_role="member", api_key_project_ids=None
+    )
+    project = {
+        "uuid": "legacy",
+        "graph_project_id": "legacy",
+        "visibility": "org" if grant_kind == "visibility" else "private",
+        "default_role": missing_role,
+    }
+    membership = {"project_id": "legacy", "role": missing_role}
+    payload = {
+        "direct_memberships": [membership] if grant_kind == "direct" else [],
+        "team_projects": [membership] if grant_kind == "team" else [],
+    }
+    for required_role in ProjectRole:
+        granted = project_runtime._project_ids_for_role(ctx, [project], payload, required_role)
+        assert granted == ({"legacy"} if required_role is ProjectRole.VIEWER else set())

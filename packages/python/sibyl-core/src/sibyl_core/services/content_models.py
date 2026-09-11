@@ -16,6 +16,7 @@ from sibyl_core.embeddings.providers import (
     EmbeddingProvider,
     create_embedding_provider,
 )
+from sibyl_core.memory_pipeline.audit import decode_audit_metadata, encode_audit_metadata
 from sibyl_core.memory_pipeline.lifecycle import raw_memory_lifecycle_recallable
 from sibyl_core.memory_pipeline.quality import (
     expand_memory_quality_storage_metadata,
@@ -138,6 +139,8 @@ class RawMemory:
     score: float = 0.0
     snippet: str | None = None
 
+    legacy_content_checkpoint: dict[str, object] | None = field(default=None, repr=False)
+    derivation_required: bool = field(default=False, repr=False, compare=False)
     observed_revision: int | None = field(default=None, repr=False, compare=False)
 
 
@@ -600,7 +603,9 @@ def chunk_from_record(record: Mapping[str, object]) -> ContentChunk:
 
 def raw_memory_from_record(record: Mapping[str, object]) -> RawMemory:
     observed_revision = record.get("revision")
-    metadata = normalize_memory_quality_metadata(coerce_dict(record.get("metadata")))
+    metadata = normalize_memory_quality_metadata(
+        decode_audit_metadata(coerce_dict(record.get("metadata")))
+    )
     return RawMemory(
         id=coerce_str(record.get("uuid")),
         organization_id=coerce_str(record.get("organization_id")),
@@ -626,6 +631,8 @@ def raw_memory_from_record(record: Mapping[str, object]) -> RawMemory:
         capture_surface=coerce_optional_str(record.get("capture_surface")),
         created_by_user_id=coerce_optional_str(record.get("created_by_user_id")),
         revision=max(coerce_int(record.get("revision")), 1),
+        derivation_required=record.get("derivation_required") is True,
+        legacy_content_checkpoint=coerce_dict(record.get("legacy_content_checkpoint")) or None,
         observed_revision=observed_revision
         if type(observed_revision) is int and observed_revision > 0
         else None,
@@ -670,7 +677,7 @@ def source_record(source: ContentSource) -> SurrealRecord:
 
 
 def raw_memory_record(memory: RawMemory) -> SurrealRecord:
-    metadata = expand_memory_quality_storage_metadata(memory.metadata)
+    metadata = encode_audit_metadata(expand_memory_quality_storage_metadata(memory.metadata))
     record: SurrealRecord = {
         "uuid": memory.id,
         "organization_id": memory.organization_id,
@@ -692,6 +699,7 @@ def raw_memory_record(memory: RawMemory) -> SurrealRecord:
         "capture_surface": memory.capture_surface,
         "created_by_user_id": memory.created_by_user_id or memory.principal_id,
         "revision": memory.revision,
+        "legacy_content_checkpoint": memory.legacy_content_checkpoint,
         "captured_at": memory.captured_at,
         "deleted_at": memory.deleted_at,
         "purge_after": memory.purge_after,

@@ -5,6 +5,7 @@ Server-specific settings (HTTP and auth middleware) remain in sibyl-server.
 """
 
 import os
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, SecretStr, model_validator
@@ -51,6 +52,11 @@ class CoreConfig(BaseSettings):
     store: Literal["surreal"] = Field(
         default="surreal",
         description="Active persistence runtime for this process",
+    )
+
+    validation_receipt_dir: str = Field(
+        default_factory=lambda: str(Path.home() / ".sibyl" / "validation-receipts"),
+        description="Persistent private receipt directory; share across validation replicas",
     )
 
     # SurrealDB configuration
@@ -129,6 +135,15 @@ class CoreConfig(BaseSettings):
     llm_model: str = Field(
         default="claude-haiku-4-5",
         description="LLM model for entity extraction",
+    )
+
+    consolidation_output_mode: Literal["tool", "native_strict"] = "tool"
+    consolidation_openrouter_provider: str | None = None
+
+    consolidation_max_input_chars: int = Field(
+        default=40_000,
+        gt=0,
+        description="Complete consolidation system, user, and output-schema character budget",
     )
 
     # Anthropic configuration

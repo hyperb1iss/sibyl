@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from sibyl.api.routes import (
+    memory_evals,
     memory_promotion,
     memory_raw,
     memory_review,
@@ -12,6 +13,7 @@ from sibyl.api.routes import (
 )
 
 router = APIRouter(prefix="/memory", tags=["memory"])
+router.routes.extend(memory_evals.router.routes)
 router.routes.extend(memory_spaces.router.routes)
 router.routes.extend(memory_raw.router.routes)
 router.routes.extend(memory_sources.router.routes)

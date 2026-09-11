@@ -376,7 +376,15 @@ async def _resolve_background_job_recovery_entities(
                 detail="Entity is not a recoverable operational embedding manifest",
             )
         if manifest_state == MANIFEST_STATE_COMPLETE:
-            return [manifest], True
+            coverage = await runtime.entity_manager.complete_embedding_manifest(
+                manifest, complete=False
+            )
+            if coverage == "complete":
+                return [manifest], True
+            if coverage != "incomplete":
+                raise HTTPException(
+                    status_code=409, detail="Operational embedding manifest changed"
+                )
         entities = await runtime.entity_manager.get_many(expected_ids)
         for entity in entities:
             if entity.id != manifest.id:
@@ -439,7 +447,8 @@ async def requeue_entity_background_jobs(
             for entity in entities
             if entity.entity_type is EntityType.ARTIFACT
             and entity.metadata.get("projection_kind") == "manifest"
-            and entity.metadata.get("operational_projection_state") == "embedding_pending"
+            and entity.metadata.get("operational_projection_state")
+            in {"embedding_pending", MANIFEST_STATE_COMPLETE}
         ]
         if pending_manifests:
             if len(pending_manifests) != 1:

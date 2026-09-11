@@ -192,6 +192,7 @@ async def _auto_review_reflection_candidate(
         domain=request.domain,
         project=request.project,
         accessible_projects=accessible_projects,
+        writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
     )
     confidence_threshold = (
         request.confidence_threshold
@@ -206,6 +207,7 @@ async def _auto_review_reflection_candidate(
     promotion: ReflectionPromotionResult | None = None
     if decision.should_promote:
         promotion = await promote_reflection_candidate_review(
+            allowed_memory_scope_keys=ctx.api_key_memory_scope_keys,
             candidate_id=request.candidate_id,
             organization_id=str(org.id),
             principal_id=principal_id,
@@ -215,6 +217,7 @@ async def _auto_review_reflection_candidate(
             project=request.project,
             related_to=request.related_to,
             accessible_projects=accessible_projects,
+            writable_projects=await memory_auth.writable_projects_for_memory(ctx=ctx),
         )
 
     audit_action = (

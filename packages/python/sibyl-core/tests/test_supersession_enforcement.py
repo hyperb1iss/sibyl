@@ -21,7 +21,6 @@ import sibyl_core.retrieval.search as search_module
 import sibyl_core.tools.context as context_module
 from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
 from sibyl_core.models.context import ContextFacet
-from sibyl_core.models.entities import RelationshipType
 from sibyl_core.retrieval import _search_database as database_module
 from sibyl_core.retrieval import _search_expansion as expansion_module
 from sibyl_core.retrieval import _search_lifecycle as lifecycle_module
@@ -429,10 +428,14 @@ class _CorrectionGraphRuntime:
         return SimpleNamespace(
             id=entity_id,
             created_by=owner,
+            revision=1,
+            observed_revision=1,
             metadata={"memory_scope": "private", "principal_id": owner},
         )
 
-    async def update(self, entity_id: str, updates: dict[str, Any]) -> object | None:
+    async def update(
+        self, entity_id: str, updates: dict[str, Any], **_kwargs: object
+    ) -> object | None:
         if entity_id in self.missing:
             return None
         self.updates.append((entity_id, dict(updates["metadata"])))
@@ -446,6 +449,8 @@ class _CorrectionGraphRuntime:
 def _raw_capture(**overrides: Any) -> RawMemory:
     values: dict[str, Any] = {
         "id": "candidate-1",
+        "revision": 1,
+        "observed_revision": 1,
         "organization_id": "org-1",
         "source_id": "source-1",
         "principal_id": "user-1",
@@ -499,8 +504,7 @@ async def test_correction_stamps_the_graph_row_so_recall_stops_serving_it(
     assert result.affected_entity_ids == ["entity-old"]
     entity_id, stamped = runtime.updates[0]
     assert entity_id == "entity-old"
-    assert stamped["lifecycle_state"] == "contested"
-    assert stamped["excluded_from_recall"] is True
+    assert stamped["correction_blockers"][memory.id]["blocking"] is True
 
     # The stamp is exactly what the retrieval gate reads, so the same query
     # that ranked this row first now refuses it admission.
@@ -508,10 +512,10 @@ async def test_correction_stamps_the_graph_row_so_recall_stops_serving_it(
 
 
 @pytest.mark.asyncio
-async def test_supersede_writes_the_replacement_edge_in_the_direction_retrieval_reads(
+async def test_supersede_retires_graph_through_ordered_source_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Source is the survivor, target is the retired row."""
+    """The source verdict retires graph rows without a second exclusion writer."""
 
     memory = _raw_capture(id="source-1")
     replacement = _raw_capture(id="replacement-1", title="Deploy to Hetzner")
@@ -519,6 +523,8 @@ async def test_supersede_writes_the_replacement_edge_in_the_direction_retrieval_
     seen_uuids = iter(["entity-old", "entity-new"])
 
     async def execute_query(query: str, **_params: object) -> list[dict[str, object]]:
+        if "source_ids" in _params:
+            return []
         if "parent_entity_id" in query:
             # This capture projected no passages, so the lineage cascade finds
             # nothing. Answering it with a provenance row would hand the test a
@@ -563,11 +569,9 @@ async def test_supersede_writes_the_replacement_edge_in_the_direction_retrieval_
 
     assert result.applied
     assert result.affected_entity_ids == ["entity-old"]
-    assert len(runtime.relationships) == 1
-    edge = runtime.relationships[0]
-    assert edge.source_id == "entity-new"
-    assert edge.target_id == "entity-old"
-    assert edge.relationship_type is RelationshipType.SUPERSEDES
+    assert runtime.relationships == []
+    assert result.updated_memory.metadata["superseded_by_source_id"] == replacement.id
+    assert graph_metadata_recallable(runtime.updates[0][1]) is False
 
 
 @pytest.mark.asyncio
@@ -588,6 +592,8 @@ async def test_a_span_takes_the_stamp_but_never_the_supersession_edge(
     seen_uuids = iter(["entity-old", "entity-new"])
 
     async def execute_query(query: str, **_params: object) -> list[dict[str, object]]:
+        if "source_ids" in _params:
+            return []
         if "parent_entity_id" in query:
             return [{"uuid": "passage-of-entity-old"}]
         return [{"uuid": next(seen_uuids)}]
@@ -631,7 +637,7 @@ async def test_a_span_takes_the_stamp_but_never_the_supersession_edge(
     assert result.affected_entity_ids == ["entity-old", "passage-of-entity-old"]
     stamped = {entity_id for entity_id, _updates in runtime.updates}
     assert stamped == {"entity-old", "passage-of-entity-old"}
-    assert [edge.target_id for edge in runtime.relationships] == ["entity-old"]
+    assert runtime.relationships == []
 
 
 @pytest.mark.asyncio
@@ -671,8 +677,7 @@ async def test_restore_clears_the_graph_stamp_it_wrote(
 
     assert result.applied
     _entity_id, stamped = runtime.updates[0]
-    assert stamped["excluded_from_recall"] is False
-    assert stamped["superseded_by_source_id"] == ""
+    assert stamped["correction_blockers"][memory.id]["blocking"] is False
     assert graph_metadata_recallable(stamped) is True
 
 
@@ -1052,25 +1057,12 @@ def test_an_active_state_never_rescues_a_flagged_or_genuinely_duplicate_row() ->
     ],
 )
 @pytest.mark.asyncio
-async def test_a_correction_retires_only_projected_rows_it_can_still_see(
+async def test_correction_stamps_projections_but_discloses_only_readable_rows(
     monkeypatch: pytest.MonkeyPatch,
     scope_metadata: dict[str, Any],
     reachable: bool,
 ) -> None:
-    """Provenance is server-owned now, but rows written before that are not.
-
-    `raw_memory_id` was patchable until this branch, so a row can carry a
-    planted capture id. The attack is to plant it on a row you can write, lose
-    access, then correct your own capture to retire it. Requiring that the
-    projected row still be readable by the correcting principal closes that
-    without refusing anything legitimate, because a genuine projection
-    inherits its capture's audience.
-
-    The reachable cases are the ones that can actually be served: read
-    authorization admits private, project, and the legacy fail-open, while
-    organization, shared, and public all reach `scope_not_enabled`
-    (`migrate/scope_backfill.py:70-79`), so no servable row carries them.
-    """
+    """Source ownership authorizes invalidation; row visibility controls the receipt."""
 
     memory = _raw_capture(id="source-1")
     runtime = _CorrectionGraphRuntime()
@@ -1079,7 +1071,9 @@ async def test_a_correction_retires_only_projected_rows_it_can_still_see(
         return [{"uuid": "entity-projected"}]
 
     async def get(entity_id: str) -> Any:
-        return SimpleNamespace(id=entity_id, created_by=None, metadata=dict(scope_metadata))
+        return SimpleNamespace(
+            id=entity_id, created_by=None, observed_revision=1, metadata=dict(scope_metadata)
+        )
 
     runtime.execute_query = execute_query  # type: ignore[method-assign]
     runtime.get = get  # type: ignore[method-assign]
@@ -1105,13 +1099,10 @@ async def test_a_correction_retires_only_projected_rows_it_can_still_see(
     )
 
     assert result.applied
-    if reachable:
-        assert result.affected_entity_ids == ["entity-projected"]
-        _entity_id, stamped = runtime.updates[0]
-        assert graph_metadata_recallable(stamped) is False
-    else:
-        assert result.affected_entity_ids == []
-        assert runtime.updates == []
+    assert result.affected_entity_ids == (["entity-projected"] if reachable else [])
+    assert len(runtime.updates) == 1
+    _entity_id, stamped = runtime.updates[0]
+    assert graph_metadata_recallable(stamped) is False
 
 
 @pytest.mark.asyncio
@@ -1154,7 +1145,8 @@ async def test_a_refused_target_is_reported_rather_than_silently_skipped(
     )
 
     assert result.affected_entity_ids == ["entity-own"]
-    assert result.refused_entity_ids == ["entity-victim"]
+    assert result.refused_entity_ids == []
+    assert not result.propagation_complete
 
 
 @pytest.mark.asyncio
@@ -1389,13 +1381,13 @@ async def test_a_missing_id_and_a_denied_id_are_reported_identically(
         )
         assert result.applied
         assert result.affected_entity_ids == []
+        assert not result.propagation_complete
         return result.refused_entity_ids
 
     denied = await run("entity-exists-denied", exists=True)
     missing = await run("entity-does-not-exist", exists=False)
 
-    assert denied == ["entity-exists-denied"]
-    assert missing == ["entity-does-not-exist"]
+    assert denied == missing == []
 
 
 @pytest.mark.asyncio
@@ -1449,9 +1441,8 @@ async def test_a_synchronous_create_reconciles_the_capture_before_writing_the_ro
     )
 
     assert created_id == "sync-row"
-    assert written[0].metadata["excluded_from_recall"] is True
-    assert written[0].metadata["lifecycle_state"] == "contested"
     assert graph_metadata_recallable(written[0].metadata) is False
+    assert written[0].metadata["correction_blockers"]["raw-corrected"]["blocking"] is True
 
 
 @pytest.mark.asyncio
@@ -1629,7 +1620,7 @@ async def test_an_unreadable_verdict_retires_the_row_instead_of_poisoning_the_jo
 
     class _Manager:
         async def get(self, entity_id: str) -> Any:
-            return SimpleNamespace(id=entity_id, metadata={}, revision=1)
+            return SimpleNamespace(id=entity_id, metadata={}, revision=1, observed_revision=1)
 
         async def update(
             self,
@@ -1637,6 +1628,7 @@ async def test_an_unreadable_verdict_retires_the_row_instead_of_poisoning_the_jo
             updates: dict[str, Any],
             *,
             expected_revision: int | None = None,
+            replace_metadata_keys: tuple[str, ...] = (),
         ) -> object:
             stamped.append((entity_id, dict(updates["metadata"])))
             return object()
@@ -1650,7 +1642,7 @@ async def test_an_unreadable_verdict_retires_the_row_instead_of_poisoning_the_jo
 
     assert len(attempts) == RECONCILE_MAX_ATTEMPTS, "transient failures are retried, bounded"
     assert outcome.unverified == 1
-    assert stamped == [("row-1", {"excluded_from_recall": True, RECONCILE_PENDING_KEY: True})]
+    assert stamped == [("row-1", {RECONCILE_PENDING_KEY: {"capture:raw-1": True}})]
     assert graph_metadata_recallable(stamped[0][1]) is False
 
 
@@ -1757,7 +1749,9 @@ async def test_failed_row_reads_never_produce_an_unfenced_write(
                 msg = "graph unreachable"
                 raise ConnectionError(msg)
             # The correction landed while the reads were failing.
-            return SimpleNamespace(id=entity_id, metadata=dict(newer), revision=7)
+            return SimpleNamespace(
+                id=entity_id, metadata=dict(newer), revision=7, observed_revision=7
+            )
 
         async def update(
             self,
@@ -1765,6 +1759,7 @@ async def test_failed_row_reads_never_produce_an_unfenced_write(
             updates: dict[str, Any],
             *,
             expected_revision: int | None = None,
+            replace_metadata_keys: tuple[str, ...] = (),
         ) -> object:
             writes.append({"revision": expected_revision, **dict(updates["metadata"])})
             return object()
@@ -1782,7 +1777,8 @@ async def test_failed_row_reads_never_produce_an_unfenced_write(
         row_ids=["row-1"],
     )
 
-    assert writes == [], "a pass that could not read the row must not write to it"
+    assert writes == [{"revision": 7, "lifecycle_reconciliation_pending": {"capture:raw-1": True}}]
+    assert "excluded_from_recall" not in writes[0], "an unread verdict cannot replace a correction"
 
 
 @pytest.mark.asyncio
@@ -1802,7 +1798,7 @@ async def test_a_transient_write_failure_is_retried_rather_than_escaping(
 
     class _Manager:
         async def get(self, entity_id: str) -> Any:
-            return SimpleNamespace(id=entity_id, metadata={}, revision=3)
+            return SimpleNamespace(id=entity_id, metadata={}, revision=3, observed_revision=3)
 
         async def update(
             self,
@@ -1810,6 +1806,7 @@ async def test_a_transient_write_failure_is_retried_rather_than_escaping(
             updates: dict[str, Any],
             *,
             expected_revision: int | None = None,
+            replace_metadata_keys: tuple[str, ...] = (),
         ) -> object:
             attempts.append(expected_revision)
             if len(attempts) == 1:

@@ -34,6 +34,9 @@ from sibyl_core.services.synthesis import (
     remembered_artifact_source_id,
 )
 from sibyl_core.tools.responses import SearchResponse, SearchResult
+from tests.test_reflection_identity import runtime as _synthesis_runtime
+
+synthesis_runtime = _synthesis_runtime
 
 
 def _result(
@@ -1200,7 +1203,25 @@ async def test_draft_synthesis_artifact_reports_unresolved_and_freshness_gaps() 
 
 
 @pytest.mark.asyncio
-async def test_remember_synthesis_artifact_persists_source_link_metadata() -> None:
+async def test_remember_synthesis_artifact_persists_source_link_metadata(
+    synthesis_runtime, monkeypatch
+) -> None:
+    from sibyl_core.models.entities import Entity, EntityType
+    from sibyl_core.services.observed_sources import load_authorized_source_snapshot
+
+    await synthesis_runtime.entity_manager.create_direct(
+        Entity(
+            id="artifact:allowed",
+            entity_type=EntityType.ARTIFACT,
+            name="Allowed artifact",
+            content="Remembered artifact text.",
+        )
+    )
+    monkeypatch.setattr(
+        "sibyl_core.services.graph_runtime.get_surreal_graph_runtime",
+        AsyncMock(return_value=synthesis_runtime),
+    )
+
     async def fake_search(**kwargs: Any) -> SearchResponse:
         return SearchResponse(results=[], total=0, query=kwargs["query"], filters={})
 
@@ -1210,7 +1231,7 @@ async def test_remember_synthesis_artifact_persists_source_link_metadata() -> No
             output_type=SynthesisOutputType.REPORT,
             required_sections=[SynthesisSectionRequest(title="Evidence")],
         ),
-        organization_id="org-123",
+        organization_id=synthesis_runtime.client.group_id,
         search_fn=fake_search,
         related_fn=_empty_related,
     )
@@ -1247,9 +1268,10 @@ async def test_remember_synthesis_artifact_persists_source_link_metadata() -> No
 
     materialized = await materialize_synthesis_section_packs(
         run,
-        organization_id="org-123",
+        organization_id=synthesis_runtime.client.group_id,
         principal_id="user-123",
         context_fn=fake_context,
+        source_loader=load_authorized_source_snapshot,
         allowed_memory_scope_keys=None,
     )
     artifact = draft_synthesis_artifact(
@@ -1265,7 +1287,7 @@ async def test_remember_synthesis_artifact_persists_source_link_metadata() -> No
     remembered = await remember_synthesis_artifact(
         artifact,
         materialized,
-        organization_id="org-123",
+        organization_id=synthesis_runtime.client.group_id,
         principal_id="user-123",
         memory_scope="project",
         scope_key="project-sibyl",
@@ -1280,8 +1302,8 @@ async def test_remember_synthesis_artifact_persists_source_link_metadata() -> No
     assert payload["capture_surface"] == "synthesis_artifact"
     assert payload["memory_scope"] == "project"
     assert payload["scope_key"] == "project-sibyl"
-    assert payload["metadata"]["source_ids"] == ["source:allowed"]
+    assert payload["metadata"]["source_ids"] == ["graph_entity:artifact:allowed"]
     assert payload["metadata"]["generated_text_hash"] == artifact.generated_text_hash
     assert payload["provenance"]["section_source_ids"] == artifact.section_source_ids
     assert payload["tags"] == ["synthesis", "report", "roadmap"]
-    assert '"source:allowed"' in payload["raw_content"]
+    assert '"graph_entity:artifact:allowed"' in payload["raw_content"]
