@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from sibyl_core.tasks.memory_progress import ProgressCriticOutput
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -68,7 +71,12 @@ class PreparedMemoryValidation:
 
     @property
     def prompt(self) -> str:
-        return VALIDATION_INSTRUCTIONS + "\n\n" + self.payload_json
+        from sibyl_core.tasks.memory_progress import PROGRESS_INSTRUCTIONS, PROGRESS_VERSION
+
+        instructions = VALIDATION_INSTRUCTIONS
+        if json.loads(self.payload_json)["version"] == PROGRESS_VERSION:
+            instructions += "\n\n" + PROGRESS_INSTRUCTIONS
+        return instructions + "\n\n" + self.payload_json
 
     @property
     def input_sha256(self) -> str:
@@ -194,6 +202,24 @@ def _prepare(
     )
 
 
+def validation_assertion_index(kind: str, candidate: object) -> dict[str, dict[str, object]]:
+    """Index the exact candidate view through the adapter's shared assertion owner."""
+    if kind == "conditional_procedure":
+        return assertion_index(DraftConditionalProcedure.model_validate(candidate))
+    if kind != "reflection" or not isinstance(candidate, dict):
+        raise ValueError("invalid validation candidate view")
+    content = candidate.get("content")
+    claims = candidate.get("claim_records")
+    if not isinstance(content, str) or not isinstance(claims, list):
+        raise ValueError("invalid reflection candidate view")
+    assertions: dict[str, dict[str, object]] = {"/content": {"statement": content}}
+    for index, claim in enumerate(claims):
+        if not isinstance(claim, dict) or not isinstance(claim.get("content"), str):
+            raise ValueError("invalid reflection claim view")
+        assertions[f"/claim_records/{index}/content"] = {"statement": claim["content"]}
+    return assertions
+
+
 def prepare_reflection_validation(
     candidate: ReflectionCandidate,
     *,
@@ -204,9 +230,7 @@ def prepare_reflection_validation(
 ) -> PreparedMemoryValidation:
     """Index ordinary content and claims without inventing signed task outcomes."""
     snapshot = candidate.to_dict()
-    assertions: dict[str, dict[str, object]] = {"/content": {"statement": candidate.content}}
-    for index, claim in enumerate(candidate.claim_records):
-        assertions[f"/claim_records/{index}/content"] = {"statement": claim.content}
+    assertions = validation_assertion_index("reflection", snapshot)
     return _prepare(
         parent_operation_id=parent_operation_id,
         parent_candidate_sha256=parent_candidate_sha256,
@@ -249,21 +273,34 @@ def prepare_procedure_validation(
 
 async def run_memory_validation(
     prepared: PreparedMemoryValidation,
-    extractor: Extractor[CriticOutput],
+    extractor: Extractor[CriticOutput] | Extractor[ProgressCriticOutput],
 ) -> MemoryValidationResult:
     """Return actual usage even for invalid critique; extraction errors retain SDK receipts.
 
     The caller owns model configuration, durable dispatch/outcome recording and
     current-authority fences. Cancellation propagates with extraction_usage.
     """
-    if extractor.output_type is not CriticOutput:
-        raise ValueError("validation requires the shared critic output contract")
+    from sibyl_core.tasks.memory_progress import (
+        PROGRESS_VERSION,
+        ProgressCriticOutput,
+        ProgressDecision,
+        ProgressMemoryValidationResult,
+        assess_progress,
+        validate_progress_context,
+    )
+
     payload = json.loads(prepared.payload_json)
-    if payload["version"] != VALIDATION_VERSION:
+    version = payload["version"]
+    if version not in (VALIDATION_VERSION, PROGRESS_VERSION):
         raise ValueError("unsupported validation version")
+    if version == PROGRESS_VERSION:
+        validate_progress_context(payload)
+    output_type = ProgressCriticOutput if version == PROGRESS_VERSION else CriticOutput
+    if extractor.output_type is not output_type:
+        raise ValueError("validation requires the shared critic output contract")
     policy = canonical(
         {
-            "version": VALIDATION_VERSION,
+            "version": version,
             "surface": extractor.surface.value,
             "model_override": extractor.model_override,
             "output_mode": extractor.output_mode,
@@ -271,15 +308,17 @@ async def run_memory_validation(
             "max_tokens": extractor.max_tokens,
             "openrouter_provider": extractor.openrouter_provider,
             "system_prompt": extractor.system_prompt,
-            "output_schema": CriticOutput.model_json_schema(),
+            "output_schema": output_type.model_json_schema(),
         }
     )
     result = await extractor.extract_with_usage(prepared.prompt)
     submission = None
     reason = None
     status: Literal["no_findings", "reconsider", "abstain"] = "no_findings"
+    progress: ProgressDecision = "abstain"
+    assessments = ()
     try:
-        output = CriticOutput.model_validate(result.output.model_dump())
+        output = output_type.model_validate(result.output.model_dump())
         for finding in output.findings:
             assertion = payload["assertions"].get(finding.claim_path)
             if assertion is None or review_digest(assertion) != finding.claim_sha256:
@@ -299,14 +338,30 @@ async def run_memory_validation(
                 parent_candidate_sha256=payload["parent_candidate_sha256"],
                 findings=output.findings,
             )
+        if isinstance(output, ProgressCriticOutput):
+            progress = assess_progress(payload, output, status)
+            assessments = tuple(output.prior_assessments)
     except ValueError:
         status, reason = "abstain", "critic_output_failed_mechanical_validation"
-    return MemoryValidationResult(
+    except BaseException as error:
+        error.__dict__["extraction_usage"] = result.usage
+        raise
+    validation = MemoryValidationResult(
         status,
         submission,
         reason,
         prepared.input_sha256,
-        review_digest(CriticOutput.model_json_schema()),
+        review_digest(output_type.model_json_schema()),
         result.usage,
         policy,
     )
+
+    if version == PROGRESS_VERSION:
+        values = asdict(validation)
+        values["submission"] = validation.submission
+        values["usage"] = validation.usage
+        values["version"] = PROGRESS_VERSION
+        return ProgressMemoryValidationResult(
+            **values, prior_assessments=assessments, progress=progress
+        )
+    return validation
