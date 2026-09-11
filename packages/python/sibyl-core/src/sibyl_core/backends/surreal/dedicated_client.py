@@ -420,10 +420,22 @@ class DedicatedSurrealClient:
                                 )
                     client = await connection.connect()
                     response = await self._send_query(client, query, params=params, raw=True)
+                    transaction_retry_allowed = _can_replay_query(query, response)
                     if raw:
+                        # Raw callers retain statement envelopes, but an atomic
+                        # server-declared conflict still belongs to this owner.
+                        if transaction_retry_allowed and isinstance(response, dict):
+                            statements = response.get("result")
+                            if isinstance(statements, list) and any(
+                                isinstance(statement, dict)
+                                and statement.get("status") == "ERR"
+                                and isinstance(statement.get("result"), str)
+                                and _is_retryable_transaction_conflict(statement["result"])
+                                for statement in statements
+                            ):
+                                _checked_query_result(response)
                         result = response
                     else:
-                        transaction_retry_allowed = _can_replay_query(query, response)
                         result = _checked_query_result(response, all_results=all_results)
                     break
                 except Exception as exc:
