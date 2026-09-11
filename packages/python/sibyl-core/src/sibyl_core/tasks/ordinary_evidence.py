@@ -82,13 +82,14 @@ class OrdinarySource(c.FrozenModel):
         return self
 
 
-class OrdinaryEpisode(c.FrozenModel):
-    schema_version: Literal["sibyl-ordinary-episode-v1"] = "sibyl-ordinary-episode-v1"
+class SourceEpisode(c.FrozenModel):
+    """Exact retained evidence shared by complete and partial ordinary contracts."""
+
     episode_id: c.Text
     artifact: bytes = Field(min_length=1)
     source: OrdinarySource
     outcome: ReportedOutcome
-    environment: dict[c.Text, EnvironmentFact] = Field(min_length=1)
+    environment: dict[c.Text, EnvironmentFact] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def exact_source(self) -> Self:
@@ -105,20 +106,21 @@ class OrdinaryEpisode(c.FrozenModel):
         return self
 
 
-class OrdinaryCohort(c.FrozenModel):
-    schema_version: Literal["sibyl-ordinary-procedure-evidence-v1"] = VERSION
+class SourceCohort(c.FrozenModel):
+    """Source independence and scope checks, without claiming compatibility."""
+
     group_id: c.Text
     mechanism: c.Text
     organization_id: c.Text
     owner_principal_id: c.Text
     memory_scope: MemoryScope = Field(strict=False)
     scope_key: c.Text | None = None
-    environment_compatibility_keys: tuple[c.Text, ...] = Field(min_length=1)
-    episodes: tuple[OrdinaryEpisode | c.ConsolidationEpisode, ...] = Field(min_length=2)
+    environment_compatibility_keys: tuple[c.Text, ...] = ()
+    episodes: tuple[SourceEpisode | c.ConsolidationEpisode, ...] = Field(min_length=2)
 
     @model_validator(mode="after")
     def compatible_sources(self) -> Self:
-        ordinary = [e for e in self.episodes if isinstance(e, OrdinaryEpisode)]
+        ordinary = [e for e in self.episodes if isinstance(e, SourceEpisode)]
         if not ordinary:
             raise ValueError("task-only cohorts must use the existing contrast contract")
         tasks = [e for e in self.episodes if isinstance(e, c.ConsolidationEpisode)]
@@ -137,7 +139,7 @@ class OrdinaryCohort(c.FrozenModel):
         for episode in self.episodes:
             identifiers = (
                 [episode.source.source_id]
-                if isinstance(episode, OrdinaryEpisode)
+                if isinstance(episode, SourceEpisode)
                 else [source.source_id for source in episode.stored_sources]
             )
             for identifier in identifiers:
@@ -164,6 +166,17 @@ class OrdinaryCohort(c.FrozenModel):
         ):
             raise ValueError("the declared scope requires a scope key")
         return self
+
+
+class OrdinaryEpisode(SourceEpisode):
+    schema_version: Literal["sibyl-ordinary-episode-v1"] = "sibyl-ordinary-episode-v1"
+    environment: dict[c.Text, EnvironmentFact] = Field(min_length=1)
+
+
+class OrdinaryCohort(SourceCohort):
+    schema_version: Literal["sibyl-ordinary-procedure-evidence-v1"] = VERSION
+    environment_compatibility_keys: tuple[c.Text, ...] = Field(min_length=1)
+    episodes: tuple[OrdinaryEpisode | c.ConsolidationEpisode, ...] = Field(min_length=2)
 
 
 @dataclass(frozen=True)
