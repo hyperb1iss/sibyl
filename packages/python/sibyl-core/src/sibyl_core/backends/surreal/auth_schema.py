@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sibyl_core.auth import OrganizationRole, ProjectRole, ProjectVisibility
+from sibyl_core.backends.surreal.schema import render_surreal_compatible_sql
 from sibyl_core.backends.surreal.schema_helpers import is_missing_table_error, split_statements
 from sibyl_core.backends.surreal.schema_invariants import (
     SchemaInvariantPlan,
@@ -671,13 +672,13 @@ UPDATE api_keys SET project_scope_restricted = true WHERE (uuid IN
     OR [uuid, organization_id, user_id] IN
     (SELECT VALUE [details.api_key_id, organization_id, user_id] FROM audit_logs
      WHERE action = 'auth.api_key.create'
-     AND type::is_int(details.project_scope_count) AND details.project_scope_count > 0));
+     AND type::is::int(details.project_scope_count) AND details.project_scope_count > 0));
 UPDATE api_keys SET memory_scope_restricted = true WHERE (uuid IN
     (SELECT VALUE api_key_id FROM api_key_memory_space_scopes)
     OR [uuid, organization_id, user_id] IN
     (SELECT VALUE [details.api_key_id, organization_id, user_id] FROM audit_logs
      WHERE action = 'auth.api_key.create'
-     AND type::is_int(details.memory_space_scope_count) AND details.memory_space_scope_count > 0));
+     AND type::is::int(details.memory_space_scope_count) AND details.memory_space_scope_count > 0));
 """
 
 AUTH_SCHEMA_MIGRATIONS = (
@@ -767,7 +768,10 @@ async def backfill_api_key_scope_restrictions(
         return
     for statement in split_statements(AUTH_KEY_SCOPE_BACKFILL_DEFINITIONS):
         scoped_statement = statement.replace(" WHERE (", " WHERE uuid IN $api_key_ids AND (", 1)
-        await client.execute_query(scoped_statement, api_key_ids=api_key_ids)
+        await client.execute_query(
+            render_surreal_compatible_sql(scoped_statement, url=getattr(client, "_url", "")),
+            api_key_ids=api_key_ids,
+        )
 
 
 async def bootstrap_auth_schema(client: SurrealAuthClient, *, reset: bool = False) -> None:
@@ -778,7 +782,11 @@ async def bootstrap_auth_schema(client: SurrealAuthClient, *, reset: bool = Fals
     await _assert_auth_migrations_safe(client)
 
     async def execute_query(statement: str, **params: object) -> object:
-        return await _execute_auth_schema_query(client.execute_query, statement, **params)
+        return await _execute_auth_schema_query(
+            client.execute_query,
+            render_surreal_compatible_sql(statement, url=getattr(client, "_url", "")),
+            **params,
+        )
 
     await apply_schema_migrations(
         execute_query,
