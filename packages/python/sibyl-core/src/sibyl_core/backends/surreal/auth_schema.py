@@ -50,7 +50,7 @@ EXTENDED_AUTH_TABLES = (
     "server_identity",
 )
 AUTH_TABLES = (*CORE_AUTH_TABLES, *EXTENDED_AUTH_TABLES)
-AUTH_SCHEMA_CURRENT_VERSION = 7
+AUTH_SCHEMA_CURRENT_VERSION = 8
 AUTH_SCHEMA_NAME = "auth"
 _AUTH_ORGANIZATION_ROLE_VALUES = tuple(role.value for role in OrganizationRole)
 _AUTH_PROJECT_ROLE_VALUES = tuple(role.value for role in ProjectRole)
@@ -658,6 +658,28 @@ INSERT IGNORE INTO server_identity {
 };
 """
 
+# Only retained positive evidence establishes historical restrictions. Missing
+# audit rows cannot distinguish an unrestricted key from an erased declaration.
+AUTH_KEY_SCOPE_RETENTION_DEFINITIONS = """
+DEFINE FIELD IF NOT EXISTS project_scope_restricted ON api_keys TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS memory_scope_restricted ON api_keys TYPE option<bool>;
+"""
+
+AUTH_KEY_SCOPE_BACKFILL_DEFINITIONS = """
+UPDATE api_keys SET project_scope_restricted = true WHERE (uuid IN
+    (SELECT VALUE api_key_id FROM api_key_project_scopes)
+    OR [uuid, organization_id, user_id] IN
+    (SELECT VALUE [details.api_key_id, organization_id, user_id] FROM audit_logs
+     WHERE action = 'auth.api_key.create'
+     AND type::is_int(details.project_scope_count) AND details.project_scope_count > 0));
+UPDATE api_keys SET memory_scope_restricted = true WHERE (uuid IN
+    (SELECT VALUE api_key_id FROM api_key_memory_space_scopes)
+    OR [uuid, organization_id, user_id] IN
+    (SELECT VALUE [details.api_key_id, organization_id, user_id] FROM audit_logs
+     WHERE action = 'auth.api_key.create'
+     AND type::is_int(details.memory_space_scope_count) AND details.memory_space_scope_count > 0));
+"""
+
 AUTH_SCHEMA_MIGRATIONS = (
     SchemaMigration(
         version=1,
@@ -694,6 +716,15 @@ AUTH_SCHEMA_MIGRATIONS = (
         name="auth_replay_identity",
         statements=tuple(split_statements(AUTH_REPLAY_IDENTITY_MIGRATION_DEFINITIONS)),
     ),
+    SchemaMigration(
+        version=8,
+        name="auth_key_scope_retention",
+        statements=tuple(
+            split_statements(
+                AUTH_KEY_SCOPE_RETENTION_DEFINITIONS + AUTH_KEY_SCOPE_BACKFILL_DEFINITIONS
+            )
+        ),
+    ),
 )
 
 
@@ -726,6 +757,17 @@ async def _execute_auth_schema_query(
             raise
         UUID(str(rows[0]["instance_id"]))
         return rows
+
+
+async def backfill_api_key_scope_restrictions(
+    client: SurrealAuthClient, *, api_key_ids: list[str]
+) -> None:
+    """Retain positive legacy evidence only for newly imported credentials."""
+    if not api_key_ids:
+        return
+    for statement in split_statements(AUTH_KEY_SCOPE_BACKFILL_DEFINITIONS):
+        scoped_statement = statement.replace(" WHERE (", " WHERE uuid IN $api_key_ids AND (", 1)
+        await client.execute_query(scoped_statement, api_key_ids=api_key_ids)
 
 
 async def bootstrap_auth_schema(client: SurrealAuthClient, *, reset: bool = False) -> None:

@@ -408,7 +408,6 @@ async def delete_project_record(
             client,
             """
                 BEGIN TRANSACTION;
-                DELETE FROM api_key_project_scopes WHERE project_id = $project_id;
                 DELETE FROM team_projects WHERE project_id = $project_id;
                 DELETE FROM project_members WHERE project_id = $project_id;
                 DELETE FROM projects WHERE uuid = $uuid AND organization_id = $organization_id;

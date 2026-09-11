@@ -1939,10 +1939,10 @@ async def test_delete_project_record_batches_dependent_deletes(
     assert deleted is True
     assert len(client.calls) == 2
     delete_query, delete_params = client.calls[1]
-    assert delete_query.count("DELETE FROM") == 4
+    assert delete_query.count("DELETE FROM") == 3
     assert "BEGIN TRANSACTION;" in delete_query
     assert "COMMIT TRANSACTION;" in delete_query
-    assert "DELETE FROM api_key_project_scopes" in delete_query
+    assert "DELETE FROM api_key_project_scopes" not in delete_query
     assert "DELETE FROM team_projects" in delete_query
     assert "DELETE FROM project_members" in delete_query
     assert "DELETE FROM projects" in delete_query
