@@ -56,6 +56,11 @@ class OperationalProjectionSource:
             raise SourceUnavailableError()
         return snapshot, await asyncio.to_thread(_experience, snapshot)
 
+    async def legacy_adoption_proof(self, client):
+        from sibyl_core.services.operational_legacy import legacy_adoption_proof
+
+        return await legacy_adoption_proof(client, self)
+
     async def projection(self) -> OperationalExperienceProjection:
         _, experience = await self.current()
         projection = await asyncio.to_thread(
