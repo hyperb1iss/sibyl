@@ -17,6 +17,9 @@ from sibyl_core.services.surreal_content import MemoryScope, RawMemory
 
 @pytest.fixture(autouse=True)
 def dispatch_cursor(monkeypatch):
+    # Load the consumer before patching its dependency so cached imports stay real.
+    from sibyl_core.services import automatic_reflection  # noqa: F401
+
     monkeypatch.setattr("sibyl.jobs.reflection.load_dream_cursor", AsyncMock(return_value=("", 0)))
     monkeypatch.setattr("sibyl.jobs.reflection.advance_dream_cursor", AsyncMock(return_value=True))
     # These orchestration tests stub the validator; the public cohort tests
