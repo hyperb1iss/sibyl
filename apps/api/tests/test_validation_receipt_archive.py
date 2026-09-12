@@ -378,3 +378,89 @@ async def test_current_receipt_format_preserves_structured_row_rejection(history
     assert result.rows_restored == 0
     assert result.errors == ["memory_validation_executions invalid archive row (ValueError)"]
     assert await client.execute_query("SELECT * FROM memory_validation_executions;") == before
+
+
+async def test_dependency_archive_reversed_rows_restore_and_replay(history, monkeypatch):
+    from sibyl_core.services.validation_dependencies import dependency_reference
+    from sibyl_core.tasks.procedure_review import review_digest
+
+    _client, root = history
+    result = completed_result()
+    await root.record_result(result)
+    recorded = await root.load()
+    await run_validation_stage(
+        execution=root,
+        parent_id=recorded["parent_id"],
+        source_ids=recorded["source_ids"],
+        request=json.loads(recorded["request_json"]),
+        policy="{}",
+        check_current=AsyncMock(),
+        run=AsyncMock(side_effect=AssertionError("recorded result redispatched")),
+    )
+    prior = await root.load()
+    identities = [root.id]
+    for index in range(2):
+        request = json.loads(prior["request_json"])
+        request.update(
+            execution_dependencies=[dependency_reference(prior).model_dump(mode="json")],
+            ordinal=index,
+        )
+        child = ValidationExecution(review_digest(request), "org", "owner")
+        await run_validation_stage(
+            execution=child,
+            parent_id=prior["parent_id"],
+            source_ids=prior["source_ids"],
+            request=request,
+            policy="{}",
+            check_current=AsyncMock(),
+            run=AsyncMock(return_value=result),
+        )
+        identities.append(child.id)
+        prior = await child.load()
+    archive = await content_archive.export_content_archive_payload("org")
+    archive["tables"]["memory_validation_executions"].sort(
+        key=lambda row: len(row["dependency_ids"]), reverse=True
+    )
+    destination = SurrealContentClient(url="memory://")
+    await bootstrap_content_schema(destination)
+    close = destination.close
+    monkeypatch.setattr(destination, "close", AsyncMock())
+    monkeypatch.setattr(content_archive, "build_surreal_content_client", lambda: destination)
+
+    @asynccontextmanager
+    async def session():
+        yield destination
+
+    monkeypatch.setattr(content_client, "surreal_content_client", session)
+    try:
+        restored = await content_archive.restore_content_archive_payload(archive, clean=True)
+        assert restored.success, restored.errors
+        for identity in identities:
+            assert (await ValidationExecution(identity, "org", "owner").result())[
+                "status"
+            ] == "no_findings"
+        before = [
+            await ValidationExecution(identity, "org", "owner").load() for identity in identities
+        ]
+        repeated = await content_archive.restore_content_archive_payload(archive, clean=True)
+        assert repeated.success, repeated.errors
+        after = [
+            await ValidationExecution(identity, "org", "owner").load() for identity in identities
+        ]
+        for old, current in zip(before, after, strict=True):
+            assert current.pop("promotion_write_witness", 0) >= old.pop(
+                "promotion_write_witness", 0
+            )
+            assert current == old
+        malformed = copy.deepcopy(archive)
+        malformed["tables"]["memory_validation_executions"][0]["dependency_ids"] = []
+        denied = await content_archive.restore_content_archive_payload(malformed, clean=True)
+        assert not denied.success
+        unchanged = [
+            await ValidationExecution(identity, "org", "owner").load() for identity in identities
+        ]
+        for old, current in zip(after, unchanged, strict=True):
+            current.pop("promotion_write_witness", None)
+            assert current == old
+    finally:
+        await close()

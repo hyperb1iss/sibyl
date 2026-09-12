@@ -152,6 +152,8 @@ class _RecordingSchemaClient:
                 self.missing_tables.discard(table)
             if stripped.startswith(f"DEFINE TABLE OVERWRITE {table}"):
                 self.missing_tables.discard(table)
+        if stripped.startswith("RETURN { LET $rows=(SELECT * FROM memory_validation_executions"):
+            return [{"rows": [], "fingerprint": "empty-validation-history"}]
         if statement.startswith(
             ("SELECT id, uuid FROM entity", "SELECT id, uuid FROM raw_captures")
         ):
@@ -163,6 +165,23 @@ class _RecordingSchemaClient:
                 f"Database index `{self.duplicate_index_name}` already contains 'dirty-row'"
             )
         return None
+
+
+@pytest.mark.asyncio
+async def test_recording_schema_validation_snapshot_requires_existing_table() -> None:
+    client = _RecordingSchemaClient(missing_tables={"memory_validation_executions"})
+    query = (
+        "RETURN { LET $rows=(SELECT * FROM memory_validation_executions ORDER BY uuid); "
+        "RETURN {rows:$rows, fingerprint:crypto::sha256(type::string($rows))}; };"
+    )
+    with pytest.raises(RuntimeError, match=r"memory_validation_executions.*does not exist"):
+        await client.execute_query(query)
+
+    await client.execute_query("DEFINE TABLE IF NOT EXISTS memory_validation_executions;")
+
+    assert await client.execute_query(query) == [
+        {"rows": [], "fingerprint": "empty-validation-history"}
+    ]
 
 
 _ACCESS_SECRET = "s" * 64

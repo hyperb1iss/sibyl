@@ -21,7 +21,7 @@ DEFINE FIELD IF NOT EXISTS error_type ON memory_validation_executions TYPE optio
 DEFINE FIELD IF NOT EXISTS purged ON memory_validation_executions TYPE bool DEFAULT false;
 DEFINE FIELD IF NOT EXISTS created_at ON memory_validation_executions TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS memory_validation_execution_uuid ON memory_validation_executions FIELDS uuid UNIQUE;
-DEFINE INDEX IF NOT EXISTS memory_validation_execution_owner ON memory_validation_executions FIELDS organization_id, principal_id, parent_id;
+DEFINE INDEX IF NOT EXISTS memory_validation_execution_owner ON memory_validation_executions FIELDS parent_id;
 DEFINE TABLE IF NOT EXISTS memory_validation_attempts SCHEMAFULL;
 ALTER TABLE IF EXISTS memory_validation_attempts SCHEMAFULL;
 ALTER TABLE IF EXISTS memory_validation_attempts PERMISSIONS NONE;
@@ -68,4 +68,56 @@ THEN {
         WHERE organization_id = $before.organization_id
             AND (parent_id = $before.uuid OR $before.uuid IN source_ids);
 };
+"""
+
+
+VALIDATION_DEPENDENCY_SCHEMA = """
+DEFINE FIELD IF NOT EXISTS dependency_ids ON memory_validation_executions TYPE array<string> DEFAULT [];
+DEFINE INDEX IF NOT EXISTS memory_validation_dependencies ON memory_validation_executions FIELDS dependency_ids;
+"""
+
+VALIDATION_DEPENDENCY_RETAIN_EVENT = """
+DEFINE EVENT IF NOT EXISTS retain_validation_dependencies ON memory_validation_executions
+    WHEN $event='UPDATE' AND ($before.dependency_ids ?? [])!=($after.dependency_ids ?? [])
+    THEN { THROW 'Validation dependencies are immutable'; };
+"""
+
+VALIDATION_DEPENDENCY_PURGE_EVENT = """
+DEFINE EVENT IF NOT EXISTS purge_validation_dependents ON memory_validation_executions
+    WHEN $event='DELETE' OR ($event='UPDATE' AND $before.purged=false AND $after.purged=true)
+    THEN {
+        LET $dependent_records=(SELECT id, uuid, array::len(dependency_ids) AS depth FROM memory_validation_executions
+            WHERE organization_id=$before.organization_id AND principal_id=$before.principal_id
+                AND $before.uuid IN dependency_ids AND purged=false ORDER BY depth DESC, uuid);
+        FOR $dependent IN $dependent_records {
+            UPDATE $dependent.id SET result_json=NONE, recovery_key=NONE, purged=true;
+        };
+    };
+"""
+
+
+VALIDATION_OWNER_INDEX_REPAIR = """
+DEFINE INDEX OVERWRITE memory_validation_execution_owner ON memory_validation_executions FIELDS parent_id;
+"""
+
+
+VALIDATION_DEPENDENCY_SOURCE_PURGE_EVENT = """
+DEFINE EVENT OVERWRITE memory_validation_purge ON raw_captures WHEN $event='DELETE'
+THEN {
+    LET $source_records=(SELECT id, uuid, array::len(dependency_ids) AS depth
+        FROM memory_validation_executions WHERE organization_id=$before.organization_id
+            AND (parent_id=$before.uuid OR $before.uuid IN source_ids)
+        ORDER BY depth DESC, uuid);
+    FOR $source_record IN $source_records {
+        UPDATE $source_record.id SET result_json=NONE, recovery_key=NONE, purged=true;
+    };
+};
+"""
+
+
+VALIDATION_DEPENDENCY_UPGRADE = """
+DEFINE FIELD IF NOT EXISTS dependency_ids ON memory_validation_executions TYPE option<array<string>> DEFAULT [];
+UPDATE memory_validation_executions SET dependency_ids=[] WHERE dependency_ids=NONE;
+DEFINE FIELD OVERWRITE dependency_ids ON memory_validation_executions TYPE array<string> DEFAULT [];
+DEFINE INDEX IF NOT EXISTS memory_validation_dependencies ON memory_validation_executions FIELDS dependency_ids;
 """

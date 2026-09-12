@@ -1,11 +1,14 @@
 """Automatically validate, correct and abstain ordinary reflection candidates."""
 
-from dataclasses import dataclass, replace
+import json
+from dataclasses import dataclass, field, replace
 from typing import Any
+from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import TypeAdapter
 
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
+from sibyl_core.services.automatic_correction import advance_correction
 from sibyl_core.services.content_models import RawMemory
 from sibyl_core.services.content_raw_persistence import (
     remember_reflection_candidate_review,
@@ -20,7 +23,9 @@ from sibyl_core.services.reflection_validation import (
 )
 from sibyl_core.services.source_observations import SourceUnavailableError
 from sibyl_core.services.validation_candidate import ValidationCandidateWrite
-from sibyl_core.services.validation_execution import ValidationExecution
+from sibyl_core.services.validation_execution import ValidationExecution, _query
+from sibyl_core.services.validation_progress import ProgressContext
+from sibyl_core.tasks.memory_validation import PreparedMemoryValidation
 from sibyl_core.tasks.procedure_review import ReviewSubmission
 from sibyl_core.tasks.reflection_correction import ReflectionCorrectionResult
 
@@ -31,6 +36,7 @@ class AutomaticReflectionResult:
     status: str
     executions: tuple[str, ...]
     reason: str | None = None
+    candidate_ids: tuple[str, ...] = ()
 
 
 async def _current(
@@ -75,7 +81,11 @@ async def _abstain(
 
 
 async def _persist_corrected(
-    original: AuthorizedReflection, resolver: SourceAuthorityResolver, outcome: dict[str, Any]
+    original: AuthorizedReflection,
+    resolver: SourceAuthorityResolver,
+    outcome: dict[str, Any],
+    *,
+    review_execution_id: str | None = None,
 ) -> RawMemory:
     execution_id = str(outcome["execution_id"])
     current = await _current(original, resolver)
@@ -89,10 +99,43 @@ async def _persist_corrected(
         raise SourceUnavailableError()
     if correction.parent_candidate_sha256 != current.snapshot_sha256:
         raise SourceUnavailableError()
+    await execution._check_progress_history(json.loads(row["request_json"]))
+    prior_guard = ""
+    if review_execution_id is not None:
+        from sibyl_core.services.validation_dependencies import (
+            dependency_reference,
+            resolve_dependencies,
+        )
+
+        async def load(identity):
+            return await ValidationExecution(
+                identity, parent.organization_id, parent.principal_id
+            ).load()
+
+        prior = await load(review_execution_id)
+        if prior is None:
+            raise SourceUnavailableError()
+        value = await ValidationExecution(
+            review_execution_id, parent.organization_id, parent.principal_id
+        ).result()
+        if (
+            prior["parent_id"] != parent.id
+            or ReviewSubmission.model_validate(value["submission"]) != correction.submission
+        ):
+            raise SourceUnavailableError()
+        _, prior_guard = await resolve_dependencies(
+            {"execution_dependencies": [dependency_reference(prior).model_dump(mode="json")]},
+            execution_id=execution.id,
+            org=parent.organization_id,
+            principal=parent.principal_id,
+            load=load,
+        )
     write = ValidationCandidateWrite(
         execution.id,
         row["result_json"],
-        ORDINARY_SNAPSHOT
+        prior_guard
+        + execution.dispatch_guard
+        + ORDINARY_SNAPSHOT
         + "IF $snapshot_digest != $expected { THROW 'Correction source changed'; };"
         + "LET $source_states_to_fence=$snapshot.states;"
         + SOURCE_STATE_WRITE_WITNESS,
@@ -136,38 +179,157 @@ async def _persist_corrected(
     )
 
 
+async def _reflection_root(org: str, principal: str, candidate_id: str, resolver) -> str:
+    seen = set()
+    while True:
+        if candidate_id in seen:
+            raise SourceUnavailableError()
+        seen.add(candidate_id)
+        current = await prepare_stored_reflection(
+            org, principal, candidate_id, resolver, publication=True
+        )
+        marker = current.memory.metadata.get("automatic_correction")
+        if marker is None:
+            return candidate_id
+        if not isinstance(marker, dict) or not isinstance(marker.get("execution_id"), str):
+            raise SourceUnavailableError()
+        stage = ValidationExecution(marker["execution_id"], org, principal)
+        await stage.result()
+        row = await stage.load()
+        if row is None or row["parent_id"] != marker.get("parent_id"):
+            raise SourceUnavailableError()
+        if candidate_id != str(uuid5(NAMESPACE_URL, "sibyl:validation-correction:" + stage.id)):
+            raise SourceUnavailableError()
+        correction = TypeAdapter(ReflectionCorrectionResult).validate_json(row["result_json"])
+        if correction.status != "corrected" or correction.content != current.memory.raw_content:
+            raise SourceUnavailableError()
+        parent = await prepare_stored_reflection(org, principal, row["parent_id"], resolver)
+        if correction.parent_candidate_sha256 != parent.snapshot_sha256:
+            raise SourceUnavailableError()
+        if current.observations != parent.observations:
+            raise SourceUnavailableError()
+        candidate_id = row["parent_id"]
+
+
+@dataclass
+class _ReflectionAdapter:
+    organization_id: str
+    principal_id: str
+    resolver: SourceAuthorityResolver
+    visited: dict[str, AuthorizedReflection] = field(default_factory=dict)
+
+    async def resolve(self, candidate_id: str) -> AuthorizedReflection:
+        current = await prepare_stored_reflection(
+            self.organization_id, self.principal_id, candidate_id, self.resolver, publication=True
+        )
+        self.visited[candidate_id] = current
+        return current
+
+    def prepared(self, candidate: AuthorizedReflection) -> PreparedMemoryValidation:
+        return candidate.prepared
+
+    async def critique(
+        self, candidate: AuthorizedReflection, context: ProgressContext | None
+    ) -> dict[str, Any]:
+        if candidate.memory.review_state == "promoted":
+            from sibyl_core.services.ordinary_publication import ordinary_promotion_binding
+            from sibyl_core.services.validation_promotion import ValidationBinding
+
+            rows = await _query(
+                "SELECT * FROM memory_derivations WHERE organization_id=$org "
+                "AND target_id=$parent AND validation_binding_json!=NONE;",
+                org=self.organization_id,
+                parent=candidate.memory.id,
+            )
+            if len(rows) != 1:
+                raise SourceUnavailableError()
+            binding = ValidationBinding.model_validate_json(rows[0]["validation_binding_json"])
+
+            async def authorize():
+                await prepare_stored_reflection(
+                    self.organization_id,
+                    self.principal_id,
+                    candidate.memory.id,
+                    self.resolver,
+                    publication=True,
+                )
+
+            await ordinary_promotion_binding(
+                self.organization_id,
+                self.principal_id,
+                candidate.memory.id,
+                binding.execution_id,
+                self.resolver,
+                authorize,
+            )
+            return await ValidationExecution(
+                binding.execution_id, self.organization_id, self.principal_id
+            ).result()
+        return await validate_reflection_stage(candidate, self.resolver, progress_context=context)
+
+    async def correct(
+        self, candidate: AuthorizedReflection, critique: dict[str, Any]
+    ) -> tuple[str | None, str, str | None]:
+        review = ReviewSubmission.model_validate(critique["submission"])
+        outcome = await validate_reflection_stage(
+            candidate, self.resolver, review, review_execution_id=str(critique["execution_id"])
+        )
+        execution_id = str(outcome["execution_id"])
+        if outcome["status"] == "abstain":
+            return None, execution_id, str(outcome["reason"])
+        from sibyl_core.services.surreal_content import get_raw_memory
+
+        child_id = str(uuid5(NAMESPACE_URL, "sibyl:validation-correction:" + execution_id))
+        existing = await get_raw_memory(organization_id=self.organization_id, memory_id=child_id)
+        if existing is not None and existing.review_state == "promoted":
+            child_root = await _reflection_root(
+                self.organization_id, self.principal_id, child_id, self.resolver
+            )
+            parent_root = await _reflection_root(
+                self.organization_id, self.principal_id, candidate.memory.id, self.resolver
+            )
+            if child_root != parent_root:
+                raise SourceUnavailableError()
+            published = await prepare_stored_reflection(
+                self.organization_id, self.principal_id, child_id, self.resolver, publication=True
+            )
+            await self.critique(published, None)
+            return child_id, execution_id, None
+        child = await _persist_corrected(
+            candidate, self.resolver, outcome, review_execution_id=str(critique["execution_id"])
+        )
+        return child.id, execution_id, None
+
+    async def current(self, candidate: AuthorizedReflection) -> None:
+        if candidate.memory.review_state == "promoted":
+            await self.critique(candidate, None)
+        else:
+            await _current(candidate, self.resolver)
+
+
 async def automatically_review_reflection(
     organization_id: str, principal_id: str, candidate_id: str, resolver: SourceAuthorityResolver
 ) -> AutomaticReflectionResult:
-    """One correction plus independent recheck; unresolved evidence abstains automatically."""
-    original = await prepare_stored_reflection(
-        organization_id, principal_id, candidate_id, resolver
+    """Advance verified children; unresolved progress remains pending without redispatch."""
+    root = await _reflection_root(organization_id, principal_id, candidate_id, resolver)
+    adapter = _ReflectionAdapter(organization_id, principal_id, resolver)
+    frontier = await advance_correction(adapter, root)
+    if frontier.status == "abstained":
+        for original in adapter.visited.values():
+            await _abstain(
+                original,
+                resolver,
+                frontier.reason or "evidence_abstention",
+                list(frontier.executions),
+            )
+        return AutomaticReflectionResult(None, "abstained", frontier.executions, frontier.reason)
+    if frontier.status == "pending":
+        return AutomaticReflectionResult(None, "pending", frontier.executions, frontier.reason)
+    assert frontier.candidate is not None
+    memory = frontier.candidate.memory
+    return AutomaticReflectionResult(
+        memory,
+        "validated" if memory.id == root else "corrected",
+        frontier.executions,
+        candidate_ids=tuple(adapter.visited),
     )
-    validation = await validate_reflection_stage(original, resolver)
-    executions = [str(validation["execution_id"])]
-    if validation["status"] == "no_findings":
-        await _current(original, resolver)
-        return AutomaticReflectionResult(original.memory, "validated", tuple(executions))
-    if validation["status"] == "abstain" or original.memory.metadata.get("automatic_correction"):
-        reason = str(validation.get("reason") or "corrected_claims_remain_unsupported")
-        await _abstain(original, resolver, reason, executions)
-        return AutomaticReflectionResult(None, "abstained", tuple(executions), reason)
-    review = ReviewSubmission.model_validate(validation["submission"])
-    correction = await validate_reflection_stage(original, resolver, review)
-    executions.append(str(correction["execution_id"]))
-    if correction["status"] == "abstain":
-        reason = str(correction["reason"])
-        await _abstain(original, resolver, reason, executions)
-        return AutomaticReflectionResult(None, "abstained", tuple(executions), reason)
-    corrected = await _persist_corrected(original, resolver, correction)
-    child = await prepare_stored_reflection(organization_id, principal_id, corrected.id, resolver)
-    recheck = await validate_reflection_stage(child, resolver)
-    executions.append(str(recheck["execution_id"]))
-    if recheck["status"] != "no_findings":
-        reason = str(recheck.get("reason") or "corrected_claims_remain_unsupported")
-        await _abstain(child, resolver, reason, executions)
-        await _abstain(original, resolver, reason, executions)
-        return AutomaticReflectionResult(None, "abstained", tuple(executions), reason)
-    await _current(child, resolver)
-    await _abstain(original, resolver, "replaced_by_validated_correction", executions)
-    return AutomaticReflectionResult(corrected, "corrected", tuple(executions))

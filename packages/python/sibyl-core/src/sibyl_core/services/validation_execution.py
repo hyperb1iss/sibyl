@@ -54,6 +54,8 @@ class ValidationExecution:
         self.dispatch_guard = dispatch_guard
         self.guard_params = guard_params or {}
         self._source_dispatch_guard = dispatch_guard
+        self._dependency_guard = ""
+        self._dependency_ids: list[str] = []
 
     @property
     def params(self) -> dict[str, str]:
@@ -78,7 +80,9 @@ class ValidationExecution:
         if review_digest(request) != self.id:
             raise ValidationExecutionUnavailable("Execution request identity differs")
         rows = await _query(
-            """RETURN {
+            "RETURN {"
+            + self._dependency_guard
+            + """
                 LET $key = type::record(string::concat('memory_validation_executions:', $uuid));
                 LET $previous = (SELECT * FROM memory_validation_executions WHERE uuid = $uuid);
                 IF array::len($previous) = 0 AND record::exists($key) = false { CREATE $key CONTENT $row; };
@@ -91,6 +95,7 @@ class ValidationExecution:
                 "principal_id": self.principal,
                 "parent_id": parent_id,
                 "source_ids": source_ids,
+                "dependency_ids": self._dependency_ids,
                 "request_sha256": self.id,
                 "policy_json": policy,
                 "state": "running",
@@ -114,11 +119,23 @@ class ValidationExecution:
     async def _check_progress_history(
         self, request: dict[str, Any]
     ) -> MemoryValidationResult | None:
+        from sibyl_core.services.validation_dependencies import resolve_dependencies
         from sibyl_core.services.validation_progress_history import (
             ProgressHistoryBinding,
             progress_history_guard,
             validate_history_row,
         )
+
+        async def load(identity: str) -> dict[str, Any] | None:
+            return await ValidationExecution(identity, self.org, self.principal).load()
+
+        self._dependency_ids, self._dependency_guard = await resolve_dependencies(
+            request, execution_id=self.id, org=self.org, principal=self.principal, load=load
+        )
+        stored = await self.load()
+        if stored is not None and stored.get("dependency_ids", []) != self._dependency_ids:
+            raise ValidationExecutionUnavailable("Execution dependency inventory differs")
+        self.dispatch_guard = self._source_dispatch_guard + self._dependency_guard
 
         value = request.get("progress_history")
         if value is None:
@@ -130,9 +147,7 @@ class ValidationExecution:
         if row is None:
             raise ValidationExecutionUnavailable("Progress prior execution disappeared")
         prior = validate_history_row(row, binding, self.org, self.principal)
-        self.dispatch_guard = self._source_dispatch_guard + progress_history_guard(
-            binding, self.org, self.principal
-        )
+        self.dispatch_guard += progress_history_guard(binding, self.org, self.principal)
         return prior
 
     async def before_dispatch(self) -> str:
@@ -434,7 +449,9 @@ def validation_archive_guard(table: str, record: dict[str, Any]) -> str:
         validate_result_request(decoded, request)
         if record.get("purged"):
             raise ValueError("Purged validation cannot retain readable output")
-    clauses = []
+    from sibyl_core.services.validation_dependencies import archive_dependency_guard
+
+    clauses = [archive_dependency_guard(request)]
     for binding in bindings:
         if (
             not isinstance(binding["incarnation"], str)

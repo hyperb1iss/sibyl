@@ -29,7 +29,13 @@ from sibyl_core.backends.surreal.schema_source_states import (
 )
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WITNESS_DEFINITION
 from sibyl_core.backends.surreal.schema_validation_execution import (
+    VALIDATION_DEPENDENCY_PURGE_EVENT,
+    VALIDATION_DEPENDENCY_RETAIN_EVENT,
+    VALIDATION_DEPENDENCY_SCHEMA,
+    VALIDATION_DEPENDENCY_SOURCE_PURGE_EVENT,
+    VALIDATION_DEPENDENCY_UPGRADE,
     VALIDATION_EXECUTION_SCHEMA,
+    VALIDATION_OWNER_INDEX_REPAIR,
     VALIDATION_PROMOTION_SCHEMA,
     VALIDATION_PURGE_EVENT,
     VALIDATION_RECEIPT_PURGE_EVENT,
@@ -89,7 +95,7 @@ CONTENT_TABLES = (
     "backup_settings",
     "backups",
 )
-CONTENT_SCHEMA_CURRENT_VERSION = 40
+CONTENT_SCHEMA_CURRENT_VERSION = 41
 CONTENT_SCHEMA_NAME = "content"
 _SCHEMA_CHECK_BATCH_SIZE = 128
 _CONTENT_MEMORY_SCOPE_VALUES = tuple(scope.value for scope in MemoryScope)
@@ -138,6 +144,7 @@ CONTENT_SCHEMA_DEFINITIONS = (
     + "\n"
     + CONTENT_DREAM_CHECKPOINT_DEFINITIONS
     + VALIDATION_EXECUTION_SCHEMA
+    + VALIDATION_DEPENDENCY_SCHEMA
 )
 
 
@@ -1034,7 +1041,52 @@ def _content_schema_migrations(*, url: str) -> tuple[SchemaMigration, ...]:
             name="content_validation_receipt_recovery",
             statements=(VALIDATION_RECEIPT_RECOVERY_SCHEMA, VALIDATION_RECEIPT_PURGE_EVENT),
         ),
+        SchemaMigration(
+            version=41,
+            name="content_validation_dependencies",
+            statements=(
+                *split_statements(VALIDATION_DEPENDENCY_UPGRADE),
+                VALIDATION_OWNER_INDEX_REPAIR,
+            ),
+            action=_migrate_validation_dependencies,
+        ),
     )
+
+
+async def _migrate_validation_dependencies(execute_query) -> None:
+    from sibyl_core.backends.surreal.records import normalize_records
+    from sibyl_core.services.validation_dependencies import normalize_legacy_dependencies
+
+    captured = normalize_records(
+        await execute_query(
+            "RETURN { LET $rows=(SELECT * FROM memory_validation_executions ORDER BY uuid); RETURN {rows:$rows, fingerprint:crypto::sha256(type::string($rows))}; };"
+        )
+    )[0]
+    snapshot = normalize_records(captured["rows"])
+    legacy = []
+    for original in snapshot:
+        row = dict(original)
+        if not row.get("dependency_ids"):
+            row.pop("dependency_ids", None)
+        legacy.append(row)
+    normalized = normalize_legacy_dependencies(legacy)
+    updates = [
+        {"uuid": row["uuid"], "dependency_ids": row.get("dependency_ids", [])}
+        for row, previous in zip(normalized, snapshot, strict=True)
+        if row.get("dependency_ids", []) != previous.get("dependency_ids", [])
+    ]
+    if updates:
+        await execute_query(
+            "RETURN { IF crypto::sha256(type::string((SELECT * FROM memory_validation_executions ORDER BY uuid))) != $snapshot { THROW 'Validation history changed during migration'; }; UPDATE memory_validation_executions SET promotion_write_witness=(promotion_write_witness ?? 0)+1; FOR $update IN $updates { UPDATE memory_validation_executions SET dependency_ids=$update.dependency_ids WHERE uuid=$update.uuid; }; };",
+            snapshot=captured["fingerprint"],
+            updates=updates,
+        )
+    for statement in (
+        VALIDATION_DEPENDENCY_RETAIN_EVENT,
+        VALIDATION_DEPENDENCY_PURGE_EVENT,
+        VALIDATION_DEPENDENCY_SOURCE_PURGE_EVENT,
+    ):
+        await execute_query(statement)
 
 
 def content_schema_invariant_plan(*, url: str = "") -> SchemaInvariantPlan:

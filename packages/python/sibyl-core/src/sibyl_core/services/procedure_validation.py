@@ -29,6 +29,7 @@ from sibyl_core.services.validation_execution import (
     ValidationExecutionUnavailable,
     _query,
 )
+from sibyl_core.services.validation_progress import ProgressContext
 from sibyl_core.tasks._evidence_json import canonical
 from sibyl_core.tasks.consolidation import (
     METADATA_KEY,
@@ -200,11 +201,15 @@ async def _close_resources(resources: AsyncExitStack) -> None:
         raise cancelled
 
 
-class _OwnedValidationExtractor(Extractor[CriticOutput]):
+class _OwnedValidationExtractor[T](Extractor[T]):
     resources: AsyncExitStack
 
 
 async def validation_extractor() -> tuple[Extractor[CriticOutput], str]:
+    return await _validation_extractor(CriticOutput)
+
+
+async def _validation_extractor[T](output_type: type[T]) -> tuple[Extractor[T], str]:
     """Freeze one resolved model and whitelist its effective policy, never repr/key."""
     resolved = await resolve_llm_config(LLMSurface.MEMORY)
     config = resolved.to_llm_config()
@@ -216,13 +221,13 @@ async def validation_extractor() -> tuple[Extractor[CriticOutput], str]:
         mode = settings.consolidation_output_mode
         agent = Agent(
             model,
-            output_type=NativeOutput(CriticOutput, strict=True)
+            output_type=NativeOutput(output_type, strict=True)
             if mode == "native_strict"
-            else CriticOutput,
+            else output_type,
             retries={"output": 2},
         )
         extractor = _OwnedValidationExtractor(
-            CriticOutput,
+            output_type,
             agent=agent,
             surface=LLMSurface.MEMORY,
             model_override=model.model_name,
@@ -264,14 +269,28 @@ async def validate_stored_procedure(
     principal_id: str,
     parent_id: str,
     authorize: Callable[[], Awaitable[None]],
+    progress_context: ProgressContext | None = None,
 ) -> dict[str, Any]:
     """Run actual shared validation; callbacks reauthenticate, never supply evidence."""
     await authorize()
     original = await prepare_stored_procedure_validation(organization_id, principal_id, parent_id)
+    extensions: dict[str, Any] = {}
+    if progress_context is not None:
+        base_input = original.prepared.input_sha256
+        prepared, extensions = await progress_context.prepare(
+            original.prepared, organization_id, principal_id
+        )
+        original = replace(original, prepared=prepared)
+        extensions["base_input"] = base_input
     prompt_chars = len(original.prepared.prompt)
     if prompt_chars > settings.consolidation_max_input_chars:
         raise ConsolidationInputBudgetExceeded(prompt_chars, settings.consolidation_max_input_chars)
-    extractor, policy = await validation_extractor()
+    if progress_context is None:
+        extractor, policy = await validation_extractor()
+    else:
+        from sibyl_core.tasks.memory_progress import ProgressCriticOutput
+
+        extractor, policy = await _validation_extractor(ProgressCriticOutput)
     try:
         return await _validate_prepared_procedure(
             original,
@@ -281,6 +300,7 @@ async def validate_stored_procedure(
             principal_id=principal_id,
             parent_id=parent_id,
             authorize=authorize,
+            request_extensions=extensions,
         )
     finally:
         if isinstance(extractor, _OwnedValidationExtractor):
@@ -289,13 +309,14 @@ async def validate_stored_procedure(
 
 async def _validate_prepared_procedure(
     original: AuthorizedProcedureValidation,
-    extractor: Extractor[CriticOutput],
+    extractor,
     policy: str,
     *,
     organization_id: str,
     principal_id: str,
     parent_id: str,
     authorize: Callable[[], Awaitable[None]],
+    request_extensions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     actual_chars = len(original.prepared.prompt) + len(canonical(await extractor.output_schema()))
     if actual_chars > settings.consolidation_max_input_chars:
@@ -308,6 +329,7 @@ async def _validate_prepared_procedure(
         "snapshot": original.snapshot_sha256,
         "source_bindings": original.source_bindings,
         "policy": policy,
+        **(request_extensions or {}),
     }
     identity = review_digest(request)
     execution = ValidationExecution(

@@ -366,38 +366,54 @@ async def _drain_dream_candidates(
 ) -> list[dict[str, Any]]:
     if limit <= 0:
         return []
-    candidates = await list_reflection_candidate_reviews(
-        organization_id=group_id,
-        review_state="pending",
-        limit=limit,
-    )
     results: list[dict[str, Any]] = []
-    for candidate in candidates:
-        try:
-            results.append(
-                await _drain_dream_candidate(
+    handled_frontiers: set[str] = set()
+    remaining = limit
+    cursor = None
+    while remaining > 0:
+        page_size = remaining
+        candidates = await list_reflection_candidate_reviews(
+            organization_id=group_id,
+            review_state="pending",
+            limit=page_size,
+            after=cursor,
+        )
+        if not candidates:
+            break
+        for candidate in candidates:
+            cursor = (candidate.captured_at or candidate.created_at, candidate.id)
+            if candidate.id in handled_frontiers:
+                continue
+            try:
+                result = await _drain_dream_candidate(
                     candidate=candidate,
                     group_id=group_id,
                     run_id=run_id,
                     dry_run=dry_run,
                     confidence_threshold=confidence_threshold,
+                    handled_frontiers=handled_frontiers,
                 )
-            )
-        except Exception as exc:
-            log.warning(
-                "reflection_dream_candidate_failed",
-                candidate_id=candidate.id,
-                error=str(exc),
-                exc_info=True,
-            )
-            results.append(
-                {
-                    "candidate_id": candidate.id,
-                    "outcome": "error",
-                    "reason": str(exc),
-                    "dry_run": dry_run,
-                }
-            )
+                results.append(result)
+                if result["outcome"] != "skip":
+                    remaining -= 1
+            except Exception as exc:
+                remaining -= 1
+                log.warning(
+                    "reflection_dream_candidate_failed",
+                    candidate_id=candidate.id,
+                    error=str(exc),
+                    exc_info=True,
+                )
+                results.append(
+                    {
+                        "candidate_id": candidate.id,
+                        "outcome": "error",
+                        "reason": str(exc),
+                        "dry_run": dry_run,
+                    }
+                )
+        if len(candidates) < page_size:
+            break
     return results
 
 
@@ -408,6 +424,7 @@ async def _drain_dream_candidate(
     run_id: str,
     dry_run: bool,
     confidence_threshold: float | None,
+    handled_frontiers: set[str] | None = None,
 ) -> dict[str, Any]:
     automatic_executions: list[str] = []
     validation_promotion = None
@@ -420,15 +437,16 @@ async def _drain_dream_candidate(
         )
         automatic_executions = list(automatic.executions)
         if automatic.candidate is None:
+            pending = automatic.status == "pending"
             return {
                 "candidate_id": candidate.id,
-                "outcome": "abstained",
-                "recommended_action": "abstain",
+                "outcome": "pending" if pending else "abstained",
+                "recommended_action": "retain" if pending else "abstain",
                 "applied": False,
-                "archived": True,
+                "archived": not pending,
                 "dry_run": False,
                 "reason": automatic.reason,
-                "review_state": "archived",
+                "review_state": "pending" if pending else "archived",
                 "promoted_id": None,
                 "raw_source_ids": [],
                 "policy_reasons": [],
@@ -437,6 +455,8 @@ async def _drain_dream_candidate(
                 "validation_executions": automatic_executions,
             }
         candidate = automatic.candidate
+        if handled_frontiers is not None:
+            handled_frontiers.update(automatic.candidate_ids or (candidate.id,))
         from sibyl_core.services.ordinary_publication import ordinary_promotion_binding
 
         async def authorize_publication():
@@ -479,13 +499,21 @@ async def _drain_dream_candidate(
         from sibyl_core.services.reflection_validation import prepare_stored_reflection
 
         current = await prepare_stored_reflection(
-            group_id, str(candidate.principal_id or ""), candidate.id, writable_source_authority
+            group_id,
+            str(candidate.principal_id or ""),
+            candidate.id,
+            writable_source_authority,
+            publication=True,
         )
         flags = set((preview.metadata or {}).get("sensitivity_flags", []))
         for source in current.sources:
             flags.update(reflection_autonomy_candidate_metadata(source)["sensitivity_flags"])
         preview = replace(
-            preview, metadata={**(preview.metadata or {}), "sensitivity_flags": sorted(flags)}
+            preview,
+            reason="candidate_already_promoted"
+            if current.memory.review_state == "promoted"
+            else preview.reason,
+            metadata={**(preview.metadata or {}), "sensitivity_flags": sorted(flags)},
         )
     policy = ReflectionAutonomyPolicy(
         confidence_threshold=confidence_threshold

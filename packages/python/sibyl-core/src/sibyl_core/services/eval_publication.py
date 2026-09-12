@@ -339,6 +339,9 @@ async def store_consolidation(
             AND organization_id=$organization_id AND principal_id=$principal_id)[0];
         IF $stage=NONE OR $stage.state!='returned' OR $stage.purged
             OR $stage.result_json!=$correction_result { THROW 'consolidation conflict: correction changed'; };
+        UPDATE memory_validation_executions
+            SET promotion_write_witness=(promotion_write_witness ?? 0)+1
+            WHERE id=$stage.id;
         """
         )
         guard_params = {

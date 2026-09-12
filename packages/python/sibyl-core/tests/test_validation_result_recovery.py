@@ -82,10 +82,12 @@ async def test_persistent_outage_retains_original_error_and_known_usage(candidat
 
     async def write_failure(self, result):
         completed.append(result)
+        monkeypatch.setattr(
+            ValidationExecution, "load", AsyncMock(side_effect=OSError("still down"))
+        )
         raise error
 
     monkeypatch.setattr(ValidationExecution, "record_result", write_failure)
-    monkeypatch.setattr(ValidationExecution, "load", AsyncMock(side_effect=OSError("still down")))
     with pytest.raises(OSError) as caught:
         await validation.validate_stored_procedure(**arguments(candidate))
     assert caught.value is error

@@ -708,10 +708,17 @@ def _auxiliary_restore_statement(
         )
         conversion = f"LET $record = (SELECT *, {converted} FROM ONLY $record);\n"  # noqa: S608
         comparison = "$existing != [$record]"
+        omitted = []
+        if spec.name == "memory_validation_executions":
+            # Dependency guards advance the destination's conflict witness.
+            omitted.append("promotion_write_witness")
         if legacy and "created_at" not in record:
+            omitted.append("created_at")
+        if omitted:
+            fields_to_omit = ", ".join(omitted)
             comparison = (
-                "(SELECT * OMIT created_at FROM $existing) "
-                "!= (SELECT * OMIT created_at FROM [$record])"
+                f"(SELECT * OMIT {fields_to_omit} FROM $existing) "  # noqa: S608
+                f"!= (SELECT * OMIT {fields_to_omit} FROM [$record])"
             )
         write = (
             f"IF array::len($existing) = 0 {{ {spec.create_sql} }} ELSE {{ "
@@ -725,6 +732,18 @@ def _auxiliary_restore_statement(
 
         conversion += validation_archive_guard(spec.name, record)
     return f"{conversion}{existing}{ownership_guard}{write}"
+
+
+def _ordered_validation_history(rows):
+    from sibyl_core.services.validation_dependencies import normalize_legacy_dependencies
+    from sibyl_core.services.validation_execution import validation_archive_guard
+
+    for row in rows:
+        validation_archive_guard("memory_validation_executions", row)
+    return sorted(
+        normalize_legacy_dependencies(rows),
+        key=lambda row: (len(row.get("dependency_ids", [])), row["uuid"]),
+    )
 
 
 async def _prepare_auxiliary_content_restore(client, tables, organization_id, *, legacy=False):
@@ -746,6 +765,12 @@ async def _prepare_auxiliary_content_restore(client, tables, organization_id, *,
         if not rows:
             continue
 
+        if spec.name == "memory_validation_executions":
+            try:
+                rows = _ordered_validation_history(rows)
+            except ValueError as exc:
+                errors.append(f"{spec.name} invalid archive row ({type(exc).__name__})")
+                continue
         declared = await fetch_declared_fields(client.execute_query, spec.name)
         tables_restored += 1
         for row in rows:

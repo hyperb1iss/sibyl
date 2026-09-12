@@ -263,6 +263,7 @@ async def test_progress_archive_history_and_exact_roundtrip(historical):
         "principal_id": "owner",
         "parent_id": "child",
         "source_ids": ["child"],
+        "dependency_ids": [prior["uuid"]],
         "policy_json": "{}",
         "request_json": canonical(request),
         "result_json": canonical(encode_validation_result(result)),
@@ -339,6 +340,7 @@ async def test_progress_history_native_conflict(
     assert (
         "conflict" in str(failure.value).lower()
         or "prior receipt changed" in str(failure.value).lower()
+        or "dependency changed" in str(failure.value).lower()
     )
     assert not await original_query("SELECT * FROM memory_validation_attempts;")
     assert (
