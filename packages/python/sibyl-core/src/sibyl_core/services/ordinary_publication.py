@@ -73,9 +73,11 @@ class OrdinaryValidatedPromotion(ValidatedPromotion):
             self.resolver,
             publication=True,
         )
-        row = await ValidationExecution(
+        execution = ValidationExecution(
             self.binding.execution_id, self.organization_id, self.principal_id
-        ).load()
+        )
+        await execution.result()
+        row = await execution.load()
         if row is None:
             raise ValidationExecutionUnavailable("Ordinary validation disappeared")
         validated_result(
@@ -97,7 +99,8 @@ class OrdinaryValidatedPromotion(ValidatedPromotion):
         ):
             raise ValidationExecutionUnavailable("Ordinary validated source identity changed")
         return (
-            "LET $org=$organization_id; LET $parent=$uuid; LET $source_ids=$ordinary_source_ids;"
+            execution.dispatch_guard
+            + "LET $org=$organization_id; LET $parent=$uuid; LET $source_ids=$ordinary_source_ids;"
             + ORDINARY_SNAPSHOT
             + "IF $snapshot_digest!=$ordinary_snapshot { THROW 'publication_source_observation_changed'; };"
             + "LET $source_states_to_fence=$snapshot.states;"

@@ -12,6 +12,7 @@ from sibyl_core.ai.llm.extractor import Extractor
 from sibyl_core.services import automatic_procedure as automatic
 from sibyl_core.services import eval_publication as publication
 from sibyl_core.services import procedure_validation as validation
+from sibyl_core.tasks.memory_progress import ProgressCriticOutput
 from sibyl_core.tasks.memory_validation import CriticOutput
 from sibyl_core.tasks.procedure_review import ReviewSubmission, review_digest
 from tests.test_eval_publication import admitted_pair as admitted_pair
@@ -19,6 +20,7 @@ from tests.test_eval_publication import content_store as content_store
 from tests.test_eval_publication import evidence as evidence
 from tests.test_eval_publication import proposal as proposal
 from tests.test_eval_publication import rows
+from tests.test_eval_publication_promotion import runtime as runtime
 from tests.test_validation_execution import candidate as candidate
 
 
@@ -42,14 +44,24 @@ async def correction_model(candidate, proposal, monkeypatch):
     calls = []
     controls = {"recheck_abstain": False, "correction_abstain": False}
 
-    async def critic():
+    async def critic(output_type=CriticOutput):
         calls.append("critic")
         output = {"findings": [finding] if len(calls) == 1 else []}
         if len(calls) > 1 and controls["recheck_abstain"]:
             output["abstention_reason"] = "Original evidence remains insufficient."
+        if output_type is ProgressCriticOutput:
+            output["prior_assessments"] = [
+                {
+                    "finding_id": review.finding_ids()[0],
+                    "disposition": "resolved",
+                    "supported_reduction": "The original qualification is sufficient.",
+                    "remaining_concern": None,
+                    "evidence_refs": [{"evidence_id": "episode:0"}],
+                }
+            ]
         return Extractor(
-            CriticOutput,
-            agent=Agent(TestModel(custom_output_args=output), output_type=CriticOutput),
+            output_type,
+            agent=Agent(TestModel(custom_output_args=output), output_type=output_type),
         ), '{"model":"offline"}'
 
     async def agent(extractor):
@@ -71,6 +83,7 @@ async def correction_model(candidate, proposal, monkeypatch):
         return Agent(TestModel(custom_output_args=output), output_type=extractor.output_type)
 
     monkeypatch.setattr(validation, "validation_extractor", critic)
+    monkeypatch.setattr(validation, "_validation_extractor", critic)
     monkeypatch.setattr(Extractor, "_get_agent", agent)
     monkeypatch.setattr(
         automatic,
@@ -89,7 +102,7 @@ async def correction_model(candidate, proposal, monkeypatch):
 
     # Critic agents are explicit. Preserve them while substituting the correction factory.
     async def get_agent(extractor):
-        if extractor.output_type is CriticOutput:
+        if extractor.output_type in (CriticOutput, ProgressCriticOutput):
             return extractor._agent
         return await agent(extractor)
 
@@ -365,3 +378,233 @@ async def test_stored_procedure_validation_prepares_evidence_off_event_loop(cand
     result = await validation.prepare_stored_procedure_validation("org", "owner", candidate.id)
     assert result.prepared.input_sha256
     assert len(threads) == 1 and threads[0] != event_loop_thread
+
+
+@pytest.mark.parametrize("interrupt", [False, True])
+async def test_signed_two_repairs_preserve_edits_and_reenter_from_child(
+    candidate, monkeypatch, runtime, interrupt
+):
+    from sibyl_core.tasks.procedure_edits import ProcedureEdits
+
+    original_extract = Extractor.extract_with_usage
+    calls = []
+    final_goal = "Use the observed replay condition and retain its original source boundary."
+    partial_goal = (
+        "Use the observed replay condition, with an unsupported universal source boundary."
+    )
+
+    async def factory(output_type=CriticOutput):
+        return Extractor(output_type), '{"model":"offline"}'
+
+    async def extract(reader, prompt):
+        payload = json.loads(prompt.splitlines()[-1])
+        calls.append(reader.output_type.__name__)
+        if reader.output_type in (CriticOutput, ProgressCriticOutput):
+            statement = payload["assertions"]["/goal"]["statement"]
+            resolved = statement == final_goal
+            output = {
+                "findings": []
+                if resolved
+                else [
+                    {
+                        "claim_path": "/goal",
+                        "claim_sha256": payload["assertion_hashes"]["/goal"],
+                        "evidence_refs": [{"evidence_id": "episode:0"}],
+                        "basis": "unsupported_generalization",
+                        "disposition": "qualify",
+                        "critique": "Limit both the replay condition and source boundary to observed evidence.",
+                    }
+                ]
+            }
+            if reader.output_type is ProgressCriticOutput:
+                review = ReviewSubmission.model_validate(payload["prior_progress"]["review"])
+                output["prior_assessments"] = [
+                    {
+                        "finding_id": identity,
+                        "disposition": "resolved" if resolved else "partially_resolved",
+                        "supported_reduction": "The replay condition now matches the trace."
+                        if not resolved
+                        else "Both restrictions now match the trace.",
+                        "remaining_concern": None
+                        if resolved
+                        else "The universal source boundary remains unsupported.",
+                        "evidence_refs": [{"evidence_id": "episode:0"}],
+                    }
+                    for identity in review.finding_ids()
+                ]
+        else:
+            assert reader.output_type is ProcedureEdits
+            goal = payload["parent_procedure"]["goal"]["statement"]
+            output = {
+                "outcome": {
+                    "kind": "edits",
+                    "edits": [
+                        {
+                            "claim_path": "/goal",
+                            "claim_sha256": payload["claim_sha256_by_path"]["/goal"],
+                            "replacement": {
+                                "statement": final_goal if goal == partial_goal else partial_goal,
+                                "label": "inferred",
+                                "support": [{"evidence_id": "episode:0"}],
+                            },
+                        }
+                    ],
+                },
+                "assessments": [
+                    {
+                        "finding_id": finding["finding_id"],
+                        "disposition": "accepted",
+                        "explanation": "Apply the evidence-supported restriction while preserving other assertions.",
+                        "evidence_refs": [{"evidence_id": "episode:0"}],
+                    }
+                    for finding in payload["findings"]
+                ],
+            }
+        reader._agent = Agent(TestModel(custom_output_args=output), output_type=reader.output_type)
+        return await original_extract(reader, prompt)
+
+    monkeypatch.setattr(validation, "validation_extractor", factory)
+    monkeypatch.setattr(validation, "_validation_extractor", factory)
+    monkeypatch.setattr(Extractor, "extract_with_usage", extract)
+    monkeypatch.setattr(
+        automatic,
+        "_extractor_policy",
+        AsyncMock(
+            return_value=publication._ExtractorPolicy("test", "r", 100000, 2048, "tool", None)
+        ),
+    )
+    args = dict(
+        organization_id="org", principal_id="owner", parent_id=candidate.id, authorize=AsyncMock()
+    )
+    original = await validation.prepare_stored_procedure_validation("org", "owner", candidate.id)
+    if interrupt:
+        import asyncio
+
+        store = automatic.store_consolidation
+        interrupted = False
+
+        async def after_child(*args, **kwargs):
+            nonlocal interrupted
+            stored = await store(*args, **kwargs)
+            if not interrupted:
+                interrupted = True
+                raise asyncio.CancelledError()
+            return stored
+
+        monkeypatch.setattr(automatic, "store_consolidation", after_child)
+        with pytest.raises(asyncio.CancelledError):
+            await automatic.automatically_reconsider_procedure(**args)
+        assert len(await rows("eval_consolidations")) == 2
+    result = await automatic.automatically_reconsider_procedure(**args)
+    assert result.status == "corrected" and len(result.executions) == 5
+    assert calls == [
+        "CriticOutput",
+        "ProcedureEdits",
+        "ProgressCriticOutput",
+        "ProcedureEdits",
+        "ProgressCriticOutput",
+    ]
+    final = await validation.prepare_stored_procedure_validation(
+        "org", "owner", result.candidate_id
+    )
+    before = json.loads(original.prepared.payload_json)["assertions"]
+    after = json.loads(final.prepared.payload_json)["assertions"]
+    assert after["/goal"]["statement"] == final_goal
+    assert {k: v for k, v in before.items() if k != "/goal"} == {
+        k: v for k, v in after.items() if k != "/goal"
+    }
+    monkeypatch.setattr(
+        Extractor,
+        "extract_with_usage",
+        AsyncMock(side_effect=AssertionError("completed frontier redispatched")),
+    )
+    assert await automatic.automatically_reconsider_procedure(**args) == result
+    assert (
+        await automatic.automatically_reconsider_procedure(
+            **{**args, "parent_id": result.candidate_id}
+        )
+        == result
+    )
+    stages = await rows("memory_validation_executions")
+    assert len(stages) == 5
+    assert all(json.loads(row["usage_json"])["requests"] == 1 for row in stages)
+    assert max(len(row["dependency_ids"]) for row in stages) == 4
+    from sibyl_core.services.content_raw_recall import recall_raw_memory
+    from sibyl_core.services.validation_promotion import promote_validated_procedure
+
+    promoted = await promote_validated_procedure(
+        organization_id="org",
+        principal_id="owner",
+        candidate_id=result.candidate_id,
+        execution_id=result.executions[-1],
+        authorize=AsyncMock(),
+    )
+    assert promoted.success, promoted
+    assert result.candidate_id in {
+        memory.id
+        for memory in await recall_raw_memory(
+            organization_id="org", principal_id="owner", query="observed replay condition"
+        )
+    }
+    replay = await automatic.automatically_reconsider_procedure(**args)
+    assert replay.candidate_id == result.candidate_id and replay.executions == result.executions
+    replay_child = await automatic.automatically_reconsider_procedure(
+        **{**args, "parent_id": result.candidate_id}
+    )
+    assert (
+        replay_child.candidate_id == result.candidate_id
+        and replay_child.executions == result.executions
+    )
+    assert len(await rows("memory_validation_executions")) == 5
+    from sibyl_core.services.content_client import surreal_content_client
+
+    async with surreal_content_client() as replay_client:
+        native_client = replay_client
+
+    import os
+
+    if os.environ.get("SIBYL_OPERATIONAL_TEST_URL"):
+        import asyncio
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        import sibyl_core
+
+        payload = dict(
+            kind="procedure",
+            org="org",
+            root=candidate.id,
+            candidate=result.candidate_id,
+            executions=list(result.executions),
+            url=os.environ["SIBYL_OPERATIONAL_TEST_URL"],
+            namespace=native_client._namespace,
+        )
+        worker = Path(sibyl_core.__file__).resolve().parents[2] / "tests" / "frontier_replay.py"
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            [sys.executable, str(worker)],
+            input=json.dumps(payload),
+            text=True,
+            capture_output=True,
+        )
+        assert completed.returncode == 0, completed.stdout[-3000:] + completed.stderr[-3000:]
+        assert "FRESH_PROCESS_ROOT_CHILD_REPLAY_PASS" in completed.stdout
+
+    from sibyl_core.services.validation_execution import _query
+
+    await _query(
+        "UPDATE memory_validation_executions SET purged=true, result_json=NONE, recovery_key=NONE WHERE uuid=$uuid;",
+        uuid=result.executions[0],
+    )
+    assert result.candidate_id not in {
+        memory.id
+        for memory in await recall_raw_memory(
+            organization_id="org", principal_id="owner", query="observed replay condition"
+        )
+    }
+    with pytest.raises(ValueError):
+        await automatic.automatically_reconsider_procedure(**args)
+    retired = await rows("memory_validation_executions")
+    assert len(retired) == 5 and all(row["purged"] for row in retired)
+    assert all(json.loads(row["usage_json"])["requests"] == 1 for row in retired)

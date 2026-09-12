@@ -8,6 +8,10 @@ from typing import Any
 from cryptography.fernet import InvalidToken
 
 from sibyl_core.services import validation_receipts
+from sibyl_core.services.validation_dependencies import (
+    dependency_closure,
+    normalize_legacy_dependencies,
+)
 from sibyl_core.services.validation_execution import validation_archive_guard
 from sibyl_core.services.validation_progress_history import (
     ProgressHistoryBinding,
@@ -29,7 +33,20 @@ def _rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         if identity in result:
             raise ValueError("Duplicate validation archive execution")
         result[identity] = row
+    result = {row["uuid"]: row for row in normalize_legacy_dependencies(list(result.values()))}
+    validated: dict[str, list[str]] = {}
     for row in result.values():
+        if not row["purged"]:
+            expected = dependency_closure(
+                json.loads(row["request_json"]),
+                result,
+                execution_id=row["uuid"],
+                org=row["organization_id"],
+                principal=row["principal_id"],
+                validated=validated,
+            )
+            if row.get("dependency_ids", []) != expected:
+                raise ValueError("Validation archive dependency inventory differs")
         history = json.loads(row["request_json"]).get("progress_history")
         if history is not None and not row["purged"]:
             binding = ProgressHistoryBinding.model_validate(history)

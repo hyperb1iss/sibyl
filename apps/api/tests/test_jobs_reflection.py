@@ -27,7 +27,9 @@ def dispatch_cursor(monkeypatch):
     )
     monkeypatch.setattr(
         "sibyl_core.services.reflection_validation.prepare_stored_reflection",
-        AsyncMock(return_value=SimpleNamespace(sources=[])),
+        AsyncMock(
+            return_value=SimpleNamespace(sources=[], memory=SimpleNamespace(review_state="pending"))
+        ),
     )
 
 
@@ -131,7 +133,9 @@ async def test_reflection_dream_cycle_reflects_sources_and_promotes_candidates()
         patch(
             "sibyl_core.services.automatic_reflection.automatically_review_reflection",
             AsyncMock(
-                return_value=SimpleNamespace(candidate=candidate, executions=("critic-fixture",))
+                return_value=SimpleNamespace(
+                    candidate=candidate, executions=("critic-fixture",), candidate_ids=()
+                )
             ),
         ),
         patch(
@@ -197,7 +201,9 @@ async def test_reflection_dream_cycle_dry_run_writes_no_memory() -> None:
         patch(
             "sibyl_core.services.automatic_reflection.automatically_review_reflection",
             AsyncMock(
-                return_value=SimpleNamespace(candidate=candidate, executions=("critic-fixture",))
+                return_value=SimpleNamespace(
+                    candidate=candidate, executions=("critic-fixture",), candidate_ids=()
+                )
             ),
         ),
         patch(
@@ -263,7 +269,9 @@ async def test_reflection_dream_cycle_archives_terminal_exception_candidates() -
         patch(
             "sibyl_core.services.automatic_reflection.automatically_review_reflection",
             AsyncMock(
-                return_value=SimpleNamespace(candidate=candidate, executions=("critic-fixture",))
+                return_value=SimpleNamespace(
+                    candidate=candidate, executions=("critic-fixture",), candidate_ids=()
+                )
             ),
         ),
         patch(

@@ -61,6 +61,60 @@ class AuthorizedReflection:
         return sorted([self.memory.id, *(source.id for source in self.sources)])
 
 
+async def _published_checkpoint_fingerprints(memory, derivation) -> list[str]:
+    """Undo only the publisher's terminal finding for the original checkpoint check."""
+    from sibyl_core.models.reflection import ReflectionFinding
+
+    findings = memory.metadata.get("reflection_findings")
+    entity_id = derivation.get("validation_entity_id")
+    if (
+        not isinstance(findings, list)
+        or not findings
+        or not isinstance(findings[-1], dict)
+        or not isinstance(entity_id, str)
+        or memory.metadata.get("promoted_entity_id") != entity_id
+        or not isinstance(derivation.get("validation_binding_json"), str)
+    ):
+        raise SourceUnavailableError()
+    finding = findings[-1]
+    if not isinstance(finding.get("id"), str) or not isinstance(finding.get("created_at"), str):
+        raise SourceUnavailableError()
+    expected = ReflectionFinding(
+        kind="promotion",
+        target_source_id=memory.id,
+        reason="accepted_reflection_candidate",
+        id=finding["id"],
+        created_at=finding["created_at"],
+        action="promote",
+        lifecycle_state="active",
+        source_ids=[
+            observation_from_record(value).source.id for value in derivation["observations"]
+        ],
+        related_source_ids=[entity_id],
+        policy_reasons=memory.metadata.get("policy_reasons", []),
+        metadata={"promoted_entity_id": entity_id},
+    ).to_dict()
+    if finding != expected:
+        raise SourceUnavailableError()
+    projection = _IMMUTABLE_CANDIDATE.replace(
+        "$memory.metadata.reflection_findings", "$original_findings"
+    )
+    rows = await _query(
+        "RETURN { LET $memory=(SELECT * FROM raw_captures WHERE organization_id=$org AND uuid=$parent)[0];"
+        "IF $memory.metadata.reflection_findings != $findings { THROW 'Publication finding changed'; };"
+        "LET $original_findings=array::slice($findings,0,array::len($findings)-1);"
+        "LET $present=crypto::sha256(type::string(" + projection + "));"
+        "LET $original_findings=IF array::len($findings)=1 { NONE } ELSE { $original_findings };"
+        "RETURN {fingerprints:[$present,crypto::sha256(type::string(" + projection + "))]}; };",
+        org=memory.organization_id,
+        parent=memory.id,
+        findings=findings,
+    )
+    if len(rows) != 1 or not isinstance(rows[0].get("fingerprints"), list):
+        raise SourceUnavailableError()
+    return rows[0]["fingerprints"]
+
+
 async def prepare_stored_reflection(
     organization_id: str,
     principal_id: str,
@@ -96,14 +150,31 @@ async def prepare_stored_reflection(
         ).allowed
     ):
         raise SourceUnavailableError()
+    checkpoints = await _query(
+        "RETURN { LET $memory=(SELECT * FROM raw_captures WHERE organization_id=$org AND uuid=$parent)[0];"
+        "LET $stage=(SELECT * FROM dream_source_checkpoints WHERE organization_id=$org AND candidate_fingerprints[$parent] != NONE);"
+        "RETURN {stages:$stage, fingerprint:crypto::sha256(type::string("
+        + _IMMUTABLE_CANDIDATE
+        + "))}; };",
+        org=organization_id,
+        parent=parent_id,
+    )
+    if len(checkpoints) != 1:
+        raise SourceUnavailableError()
     derivation = await load_raw_derivation(organization_id, parent_id)
+    derived_observations = None
     if derivation is not None:
         if not await raw_derivation_current(memory, authority):
             raise SourceUnavailableError()
         values = derivation["observations"]
         if not isinstance(values, list):
             raise SourceUnavailableError()
-        observations = [observation_from_record(value) for value in values]
+        derived_observations = [observation_from_record(value) for value in values]
+    # Publication adds a derivation to a checkpoint-backed candidate. Keep the
+    # original operation identity while requiring both source views to agree.
+    if derivation is not None and not checkpoints[0]["stages"]:
+        assert derived_observations is not None
+        observations = derived_observations
         parent_operation = review_digest(
             {
                 "parent": parent_id,
@@ -112,20 +183,15 @@ async def prepare_stored_reflection(
             }
         )
     else:
-        checkpoints = await _query(
-            "RETURN { LET $memory=(SELECT * FROM raw_captures WHERE organization_id=$org AND uuid=$parent)[0];"
-            "LET $stage=(SELECT * FROM dream_source_checkpoints WHERE organization_id=$org AND candidate_fingerprints[$parent] != NONE);"
-            "RETURN {stages:$stage, fingerprint:crypto::sha256(type::string("
-            + _IMMUTABLE_CANDIDATE
-            + "))}; };",
-            org=organization_id,
-            parent=parent_id,
-        )
-        if len(checkpoints) != 1 or len(checkpoints[0]["stages"]) != 1:
+        if len(checkpoints[0]["stages"]) != 1:
             raise SourceUnavailableError()
         stage = checkpoints[0]["stages"][0]
         if stage["candidate_fingerprints"][parent_id]["stored"] != checkpoints[0]["fingerprint"]:
-            raise SourceUnavailableError()
+            if not publication or memory.review_state != "promoted" or derivation is None:
+                raise SourceUnavailableError()
+            fingerprints = await _published_checkpoint_fingerprints(memory, derivation)
+            if stage["candidate_fingerprints"][parent_id]["stored"] not in fingerprints:
+                raise SourceUnavailableError()
         import json
 
         request = json.loads(stage["request_json"])
@@ -142,6 +208,8 @@ async def prepare_stored_reflection(
         ):
             raise SourceUnavailableError()
         observations = [observation]
+        if derived_observations is not None and derived_observations != observations:
+            raise SourceUnavailableError()
         parent_operation = stage["uuid"]
     sources = []
     evidence = []
@@ -225,18 +293,37 @@ async def prepare_stored_reflection(
 
 
 async def validate_reflection_stage(
-    original: AuthorizedReflection, resolver: SourceAuthorityResolver, review=None
+    original: AuthorizedReflection,
+    resolver: SourceAuthorityResolver,
+    review=None,
+    *,
+    progress_context=None,
+    review_execution_id: str | None = None,
 ) -> dict[str, object]:
     """Run the shared semantic critic as a replayable, source-fenced stage."""
     from sibyl_core.services.procedure_validation import (
         _close_resources,
         _OwnedValidationExtractor,
+        _validation_extractor,
         validation_extractor,
     )
 
-    extractor, policy = await validation_extractor()
+    if progress_context is None:
+        extractor, policy = await validation_extractor()
+    else:
+        from sibyl_core.tasks.memory_progress import ProgressCriticOutput
+
+        extractor, policy = await _validation_extractor(ProgressCriticOutput)
     try:
-        return await _validate_prepared_reflection(original, resolver, extractor, policy, review)
+        return await _validate_prepared_reflection(
+            original,
+            resolver,
+            extractor,
+            policy,
+            review,
+            progress_context=progress_context,
+            review_execution_id=review_execution_id,
+        )
     finally:
         if isinstance(extractor, _OwnedValidationExtractor):
             await _close_resources(extractor.resources)
@@ -248,6 +335,9 @@ async def _validate_prepared_reflection(
     extractor,
     policy: str,
     review=None,
+    *,
+    progress_context=None,
+    review_execution_id: str | None = None,
 ) -> dict[str, object]:
     from sibyl_core.config import settings
     from sibyl_core.services.validation_execution import ValidationExecution
@@ -257,7 +347,16 @@ async def _validate_prepared_reflection(
     from sibyl_core.tasks.memory_validation import run_memory_validation
 
     memory = original.memory
-    prompt = original.prepared.prompt
+    correction_prior = None
+    prepared = original.prepared
+    extensions = {}
+    if progress_context is not None:
+        if review is not None:
+            raise ValueError("Correction and progress critique are separate stages")
+        prepared, extensions = await progress_context.prepare(
+            prepared, memory.organization_id, memory.principal_id
+        )
+    prompt = prepared.prompt
     schema = await extractor.output_schema()
     if review is not None:
         import json
@@ -271,6 +370,22 @@ async def _validate_prepared_reflection(
             prepare_reflection_correction,
             reconsider_reflection,
         )
+
+        if review_execution_id is not None:
+            from sibyl_core.services.validation_result_codec import decode_validation_result
+            from sibyl_core.tasks.memory_validation import MemoryValidationResult
+
+            prior = ValidationExecution(
+                review_execution_id, memory.organization_id, memory.principal_id
+            )
+            await prior.result()
+            row = await prior.load()
+            if row is None or row["parent_id"] != memory.id:
+                raise SourceUnavailableError()
+            critique = decode_validation_result(json.loads(row["result_json"]))
+            if not isinstance(critique, MemoryValidationResult) or critique.submission != review:
+                raise SourceUnavailableError()
+            correction_prior = row
 
         model = (await extractor._get_agent()).model
         if not isinstance(model, Model):
@@ -301,7 +416,7 @@ async def _validate_prepared_reflection(
     else:
 
         async def run():
-            return await run_memory_validation(original.prepared, extractor)
+            return await run_memory_validation(prepared, extractor)
 
     chars = len(prompt) + len(canonical(schema))
     if chars > settings.consolidation_max_input_chars:
@@ -315,12 +430,18 @@ async def _validate_prepared_reflection(
         "org": memory.organization_id,
         "principal": memory.principal_id,
         "parent": memory.id,
-        "input": original.prepared.input_sha256 if review is None else review_digest(prompt),
+        "input": prepared.input_sha256 if review is None else review_digest(prompt),
         "prompt_sha256": review_digest(prompt),
         "snapshot": original.snapshot_sha256,
         "source_bindings": original.source_bindings,
         "policy": policy,
+        **extensions,
     }
+    prior_guard = ""
+    if correction_prior is not None:
+        from sibyl_core.services.validation_progress import correction_request
+
+        request, prior_guard = await correction_request(request, correction_prior)
 
     async def current():
         refreshed = await prepare_stored_reflection(
@@ -337,7 +458,8 @@ async def _validate_prepared_reflection(
         memory.organization_id,
         memory.principal_id,
         authorize=current,
-        dispatch_guard=ORDINARY_SNAPSHOT
+        dispatch_guard=prior_guard
+        + ORDINARY_SNAPSHOT
         + "IF $snapshot_digest != $expected { THROW 'Ordinary validation source changed'; };"
         + "LET $source_states_to_fence=$snapshot.states;"
         + SOURCE_STATE_WRITE_WITNESS,

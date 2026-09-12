@@ -4,11 +4,13 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
+from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import TypeAdapter
 
 from sibyl_core.ai.llm.extractor import ExtractionUsage
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
+from sibyl_core.services.automatic_correction import advance_correction
 from sibyl_core.services.eval_publication import (
     ConsolidationOperation,
     StoredConsolidation,
@@ -24,7 +26,9 @@ from sibyl_core.services.validation_candidate import ValidationCandidateWrite
 from sibyl_core.services.validation_execution import (
     ValidationExecution,
     ValidationExecutionUnavailable,
+    _query,
 )
+from sibyl_core.services.validation_result_codec import decode_validation_result
 from sibyl_core.services.validation_stages import run_validation_stage
 from sibyl_core.tasks._evidence_json import canonical
 from sibyl_core.tasks.consolidation import (
@@ -48,30 +52,10 @@ class AutomaticProcedureResult:
     stored: StoredConsolidation | None = None
 
 
-async def automatically_reconsider_procedure(
-    *,
-    organization_id: str,
-    principal_id: str,
-    parent_id: str,
-    authorize: Callable[[], Awaitable[None]],
-) -> AutomaticProcedureResult:
-    """Critique, correct and recheck; publication still requires its existing guards."""
-    critique = await validate_stored_procedure(
-        organization_id=organization_id,
-        principal_id=principal_id,
-        parent_id=parent_id,
-        authorize=authorize,
-    )
+async def _correct_procedure(
+    original, critique, *, organization_id, principal_id, parent_id, authorize
+):
     executions = [str(critique["execution_id"])]
-    if critique["status"] != "reconsider":
-        return AutomaticProcedureResult(
-            "validated" if critique["status"] == "no_findings" else "abstained",
-            parent_id if critique["status"] == "no_findings" else None,
-            tuple(executions),
-            critique.get("reason"),
-        )
-    await authorize()
-    original = await prepare_stored_procedure_validation(organization_id, principal_id, parent_id)
     review = ReviewSubmission.model_validate(critique["submission"])
     prepared = json.loads(original.prepared.payload_json)
     if (
@@ -96,6 +80,9 @@ async def automatically_reconsider_procedure(
             "declared_schema_sha256": review_digest(evidence.output_type.model_json_schema()),
         }
     )
+    prior_row = await ValidationExecution(executions[0], organization_id, principal_id).load()
+    if prior_row is None:
+        raise ValidationExecutionUnavailable("Stored critique disappeared")
     request = {
         "kind": "signed_procedure_correction",
         "org": organization_id,
@@ -107,6 +94,9 @@ async def automatically_reconsider_procedure(
         "source_bindings": original.source_bindings,
         "policy": policy,
     }
+    from sibyl_core.services.validation_progress import correction_request
+
+    request, prior_guard = await correction_request(request, prior_row)
 
     async def current():
         await authorize()
@@ -123,7 +113,8 @@ async def automatically_reconsider_procedure(
             raise ValidationExecutionUnavailable("Stored critique changed")
 
     guard = (
-        _SNAPSHOT
+        prior_guard
+        + _SNAPSHOT
         + "IF $snapshot_digest!=$expected { THROW 'Correction sources changed'; };"
         + "LET $source_states_to_fence=$states;"
         + SOURCE_STATE_WRITE_WITNESS
@@ -204,7 +195,7 @@ async def automatically_reconsider_procedure(
         validation_write=ValidationCandidateWrite(
             execution.id,
             row["result_json"],
-            guard,
+            execution.dispatch_guard,
             {**params, "org": organization_id, "principal": principal_id},
         ),
     )
@@ -216,19 +207,195 @@ async def automatically_reconsider_procedure(
             (stored.build_receipt or {}).get("reason"),
             stored,
         )
-    recheck = await validate_stored_procedure(
-        organization_id=organization_id,
-        principal_id=principal_id,
-        parent_id=stored.memory.id,
-        authorize=authorize,
-    )
-    executions.append(str(recheck["execution_id"]))
+    return AutomaticProcedureResult("corrected", stored.memory.id, tuple(executions), stored=stored)
+
+
+async def _procedure_root(org, principal, candidate_id, authorize):
+    seen = set()
+    while True:
+        await authorize()
+        if candidate_id in seen:
+            raise ValidationExecutionUnavailable("Correction candidate cycle")
+        seen.add(candidate_id)
+        current = await prepare_stored_procedure_validation(org, principal, candidate_id)
+        audit = current.artifact.candidate.metadata[METADATA_KEY]
+        reconsideration = audit["build_receipt"].get("reconsideration")
+        if reconsideration is None:
+            return candidate_id
+        review = ReviewSubmission.model_validate(reconsideration["submission"])
+        parents = await _query(
+            "SELECT * FROM eval_consolidations WHERE organization_id=$org AND principal_id=$principal AND uuid=$parent_identity LIMIT 1;",
+            org=org,
+            principal=principal,
+            parent_identity=review.parent_operation_id,
+        )
+        if len(parents) != 1 or not parents[0].get("candidate_id"):
+            raise ValidationExecutionUnavailable("Correction parent ledger disappeared")
+        parent_id = parents[0]["candidate_id"]
+        parent = await prepare_stored_procedure_validation(org, principal, parent_id)
+        if review.parent_candidate_sha256 != review_digest(
+            parent.artifact.candidate.metadata[METADATA_KEY]
+        ):
+            raise ValidationExecutionUnavailable("Correction parent artifact changed")
+        rows = await _query(
+            "SELECT * FROM memory_validation_executions WHERE organization_id=$org AND principal_id=$principal AND parent_id=$parent_identity;",
+            org=org,
+            principal=principal,
+            parent_identity=parent_id,
+        )
+        matches = []
+        for row in rows:
+            if row.get("state") != "returned" or row.get("purged") or not row.get("result_json"):
+                continue
+            value = decode_validation_result(json.loads(row["result_json"]))
+            if not isinstance(value, ProcedureCorrectionResult) or value.result.candidate is None:
+                continue
+            if value.result.candidate.metadata.get(METADATA_KEY) != audit:
+                continue
+            await ValidationExecution(row["uuid"], org, principal).result()
+            assignment = parent.assignments[0]
+            operation = ConsolidationOperation(
+                org,
+                principal,
+                assignment["experiment_id"],
+                assignment["experiment_revision"],
+                assignment["arm_id"],
+                max(item["checkpoint"] for item in parent.assignments),
+                parent.artifact.group.group_id,
+                tuple(episode.session_id for episode in parent.artifact.group.episodes),
+                parent.artifact.group.mechanism,
+                assignment["controller_policy_sha256"],
+                review_digest(row["policy_json"]),
+                row["uuid"],
+                review.parent_operation_id,
+                review.parent_candidate_sha256,
+            )
+            if str(uuid5(NAMESPACE_URL, "sibyl-consolidation:" + operation.key)) == candidate_id:
+                matches.append(row)
+        if len(matches) != 1:
+            raise ValidationExecutionUnavailable(
+                "Correction child execution is ambiguous or unavailable"
+            )
+        candidate_id = parent_id
+
+
+@dataclass
+class _ProcedureAdapter:
+    organization_id: str
+    principal_id: str
+    authorize: Callable[[], Awaitable[None]]
+    stored: StoredConsolidation | None = None
+
+    async def resolve(self, candidate_id):
+        await self.authorize()
+        return await prepare_stored_procedure_validation(
+            self.organization_id, self.principal_id, candidate_id
+        )
+
+    def prepared(self, candidate):
+        return candidate.prepared
+
+    async def critique(self, candidate, context):
+        from sibyl_core.services.surreal_content import get_raw_memory
+        from sibyl_core.services.validation_promotion import ValidatedPromotion, ValidationBinding
+
+        candidate_id = str(
+            uuid5(
+                NAMESPACE_URL,
+                "sibyl-consolidation:"
+                + json.loads(candidate.prepared.payload_json)["parent_operation_id"],
+            )
+        )
+        memory = await get_raw_memory(organization_id=self.organization_id, memory_id=candidate_id)
+        if memory is not None and memory.review_state == "promoted":
+            associations = await _query(
+                "SELECT * FROM memory_derivations WHERE organization_id=$org AND target_id=$candidate_id AND validation_binding_json!=NONE;",
+                org=self.organization_id,
+                candidate_id=candidate_id,
+            )
+            if len(associations) != 1:
+                raise ValidationExecutionUnavailable(
+                    "Published correction validation is unavailable"
+                )
+            binding = ValidationBinding.model_validate_json(
+                associations[0]["validation_binding_json"]
+            )
+            await ValidatedPromotion(
+                self.organization_id, self.principal_id, candidate_id, binding, self.authorize
+            ).current_guard()
+            return await ValidationExecution(
+                binding.execution_id, self.organization_id, self.principal_id
+            ).result()
+        return await validate_stored_procedure(
+            organization_id=self.organization_id,
+            principal_id=self.principal_id,
+            parent_id=str(
+                uuid5(
+                    NAMESPACE_URL,
+                    "sibyl-consolidation:"
+                    + json.loads(candidate.prepared.payload_json)["parent_operation_id"],
+                )
+            ),
+            authorize=self.authorize,
+            progress_context=context,
+        )
+
+    async def correct(self, candidate, critique):
+        outcome = await _correct_procedure(
+            candidate,
+            critique,
+            organization_id=self.organization_id,
+            principal_id=self.principal_id,
+            parent_id=str(
+                uuid5(
+                    NAMESPACE_URL,
+                    "sibyl-consolidation:"
+                    + json.loads(candidate.prepared.payload_json)["parent_operation_id"],
+                )
+            ),
+            authorize=self.authorize,
+        )
+        self.stored = outcome.stored
+        return outcome.candidate_id, outcome.executions[-1], outcome.reason
+
+    async def current(self, candidate):
+        await self.authorize()
+        parent_id = str(
+            uuid5(
+                NAMESPACE_URL,
+                "sibyl-consolidation:"
+                + json.loads(candidate.prepared.payload_json)["parent_operation_id"],
+            )
+        )
+        current = await self.resolve(parent_id)
+        if current.snapshot_sha256 != candidate.snapshot_sha256:
+            raise ValidationExecutionUnavailable("Correction frontier changed")
+
+
+async def automatically_reconsider_procedure(
+    *,
+    organization_id: str,
+    principal_id: str,
+    parent_id: str,
+    authorize: Callable[[], Awaitable[None]],
+) -> AutomaticProcedureResult:
+    """Advance preserved signed edits through independently critiqued children."""
+    root = await _procedure_root(organization_id, principal_id, parent_id, authorize)
+    adapter = _ProcedureAdapter(organization_id, principal_id, authorize)
+    frontier = await advance_correction(adapter, root)
+    accepted = frontier.status == "validated" and frontier.candidate is not None
+    candidate_id = None
+    if accepted:
+        operation_id = json.loads(frontier.candidate.prepared.payload_json)["parent_operation_id"]
+        candidate_id = str(uuid5(NAMESPACE_URL, "sibyl-consolidation:" + operation_id))
     return AutomaticProcedureResult(
-        "corrected" if recheck["status"] == "no_findings" else "abstained",
-        stored.memory.id if recheck["status"] == "no_findings" else None,
-        tuple(executions),
-        None
-        if recheck["status"] == "no_findings"
-        else str(recheck.get("reason") or "corrected_claims_remain_unsupported"),
-        stored,
+        "validated"
+        if accepted and candidate_id == root
+        else "corrected"
+        if accepted
+        else frontier.status,
+        candidate_id,
+        frontier.executions,
+        frontier.reason,
+        adapter.stored,
     )

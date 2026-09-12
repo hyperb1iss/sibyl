@@ -47,6 +47,9 @@ async def insert_validation_candidate(
             AND organization_id=$org AND principal_id=$principal)[0];
         IF $stage=NONE OR $stage.state!='returned' OR $stage.purged
             OR $stage.result_json!=$result { THROW 'Correction stage changed'; };
+        UPDATE memory_validation_executions
+            SET promotion_write_witness=(promotion_write_witness ?? 0)+1
+            WHERE uuid=$execution AND organization_id=$org AND principal_id=$principal;
         LET $existing=(SELECT * FROM raw_captures WHERE uuid=$candidate)[0];
         LET $memory=$row;
         LET $expected="""

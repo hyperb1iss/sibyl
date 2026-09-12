@@ -133,6 +133,8 @@ class _RecordingSchemaClient:
             return {"indexes": {}}
         if stripped.startswith("SELECT version FROM schema_version"):
             return [{"version": self.schema_version}]
+        if stripped.startswith("RETURN { LET $rows=(SELECT * FROM memory_validation_executions"):
+            return [{"rows": [], "fingerprint": "empty-validation-history"}]
         if stripped.startswith("SELECT count() AS count FROM "):
             table = stripped.removeprefix("SELECT count() AS count FROM ").split()[0]
             if table in self.missing_tables:

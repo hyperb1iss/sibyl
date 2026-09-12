@@ -787,6 +787,7 @@ async def list_reflection_candidate_reviews(
     organization_id: str,
     review_state: str = "pending",
     limit: int = 50,
+    after: tuple[datetime, str] | None = None,
 ) -> list[RawMemory]:
     if limit <= 0:
         return []
@@ -798,11 +799,15 @@ async def list_reflection_candidate_reviews(
             "WHERE organization_id = $organization_id "
             "AND capture_surface = $capture_surface "
             "AND review_state = $review_state "
-            "ORDER BY captured_at ASC LIMIT $limit;",
+            "AND ($after_time = NONE OR captured_at > $after_time "
+            "OR (captured_at = $after_time AND uuid > $after_id)) "
+            "ORDER BY captured_at ASC, uuid ASC LIMIT $limit;",
             organization_id=organization_id,
             capture_surface="reflection_candidate",
             review_state=target_review_state,
             limit=limit,
+            after_time=after[0] if after else None,
+            after_id=after[1] if after else "",
         )
     memories = [models.raw_memory_from_record(row) for row in rows]
     memories = [
@@ -813,7 +818,8 @@ async def list_reflection_candidate_reviews(
     memories = sorted(
         memories,
         key=lambda memory: (
-            memory.captured_at or memory.created_at or datetime.min.replace(tzinfo=UTC)
+            memory.captured_at or memory.created_at or datetime.min.replace(tzinfo=UTC),
+            memory.id,
         ),
     )
     return memories[:limit]

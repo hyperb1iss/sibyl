@@ -12,7 +12,12 @@ from sibyl_core.services.validation_execution import (
     ValidationExecution,
     ValidationExecutionUnavailable,
 )
+from sibyl_core.services.validation_result_codec import (
+    decode_validation_result,
+    validate_result_request,
+)
 from sibyl_core.tasks._evidence_json import canonical
+from sibyl_core.tasks.memory_progress import ProgressCriticOutput, ProgressMemoryValidationResult
 from sibyl_core.tasks.memory_validation import (
     VALIDATION_VERSION,
     CriticOutput,
@@ -65,10 +70,16 @@ def validated_result(
         or request.get("input") != binding.input_sha256
     ):
         raise ValidationExecutionUnavailable("Promotion validation identity differs")
-    result = TypeAdapter(MemoryValidationResult).validate_json(row["result_json"])
+    result = decode_validation_result(json.loads(row["result_json"]))
+    if not isinstance(result, MemoryValidationResult):
+        raise ValidationExecutionUnavailable("Promotion requires a critic result")
+    validate_result_request(result, request)
+    progress = isinstance(result, ProgressMemoryValidationResult)
     if (
-        result.version != VALIDATION_VERSION
-        or result.schema_sha256 != review_digest(CriticOutput.model_json_schema())
+        (not progress and result.version != VALIDATION_VERSION)
+        or (progress and result.progress != "accepted")
+        or result.schema_sha256
+        != review_digest((ProgressCriticOutput if progress else CriticOutput).model_json_schema())
         or result.status != "no_findings"
         or result.submission is not None
         or result.reason is not None
@@ -90,6 +101,9 @@ async def validation_binding_current(memory, association) -> bool:
         if row is None:
             return False
         validated_result(row, binding, memory.organization_id, memory.principal_id, memory.id)
+        await ValidationExecution(
+            binding.execution_id, memory.organization_id, memory.principal_id
+        ).result()
     except (ValueError, TypeError, KeyError):
         return False
     return True
@@ -113,9 +127,11 @@ class ValidatedPromotion:
         current = await prepare_stored_procedure_validation(
             self.organization_id, self.principal_id, self.candidate_id
         )
-        row = await ValidationExecution(
+        execution = ValidationExecution(
             self.binding.execution_id, self.organization_id, self.principal_id
-        ).load()
+        )
+        await execution.result()
+        row = await execution.load()
         if row is None:
             raise ValidationExecutionUnavailable("Promotion validation disappeared")
         validated_result(
@@ -130,10 +146,16 @@ class ValidatedPromotion:
             for key in prior
         ):
             raise ValidationExecutionUnavailable("Validated source identity changed")
-        if current.prepared.input_sha256 != self.binding.input_sha256:
+        expected_input = (
+            request.get("base_input")
+            if request.get("progress_history") is not None
+            else self.binding.input_sha256
+        )
+        if current.prepared.input_sha256 != expected_input:
             raise ValidationExecutionUnavailable("Validated source evidence changed")
         return (
-            "LET $org=$organization_id; LET $parent=$uuid;"
+            execution.dispatch_guard
+            + "LET $org=$organization_id; LET $parent=$uuid;"
             + _SNAPSHOT
             + "IF $snapshot_digest!=$validation_snapshot { THROW 'publication_source_observation_changed'; };",
             {"validation_snapshot": current.snapshot_sha256},
