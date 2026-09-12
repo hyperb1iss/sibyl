@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from surrealdb import RecordID
 
@@ -45,6 +46,10 @@ from sibyl_core.services.graph_records import (
     _relationship_from_row,
 )
 
+if TYPE_CHECKING:
+    from sibyl_core.services.operational_projection import OperationalProjectionSource
+
+
 _RELATIONSHIP_BULK_UPSERT_STATEMENTS = """
 -- The planner never serves `uuid IN $list` from idx_relates_uuid (TableScan
 -- for every statement type, seconds per capture batch once the table is
@@ -67,11 +72,36 @@ INSERT RELATION INTO relates_to $rows ON DUPLICATE KEY UPDATE
     created_at = $input.created_at,
     expired_at = $input.expired_at,
     valid_at = $input.valid_at,
-    invalid_at = $input.invalid_at;
+    invalid_at = $input.invalid_at,
+    operational_derivation_required = $input.operational_derivation_required ?? false,
+    operational_source_binding = $input.operational_source_binding;
+"""
+_PROTECTED_RELATIONSHIP_WRITE_GUARD = """
+IF array::len(SELECT VALUE uuid FROM relates_to WHERE uuid IN $relationship_ids
+    AND (operational_derivation_required = true OR operational_source_binding != NONE)) > 0 {
+    THROW 'protected operational relationship requires source writer';
+};
 """
 _RELATIONSHIP_BULK_UPSERT_QUERY = (
-    "BEGIN TRANSACTION;\n" + _RELATIONSHIP_BULK_UPSERT_STATEMENTS + "COMMIT TRANSACTION;"
+    "BEGIN TRANSACTION;\n"
+    + _PROTECTED_RELATIONSHIP_WRITE_GUARD
+    + _RELATIONSHIP_BULK_UPSERT_STATEMENTS
+    + "COMMIT TRANSACTION;"
 )
+
+
+_RETIRE_OR_DELETE_RELATIONSHIPS = """
+UPDATE array::filter($edge_targets, |$t| $t != NONE)
+    SET invalid_at = time::now(), expired_at = time::now()
+    WHERE group_id = $group_id
+      AND (operational_derivation_required = true OR operational_source_binding != NONE)
+      AND invalid_at = NONE AND expired_at = NONE
+    RETURN BEFORE;
+DELETE array::filter($edge_targets, |$t| $t != NONE)
+    WHERE group_id = $group_id
+      AND operational_derivation_required != true AND operational_source_binding = NONE
+    RETURN BEFORE;
+"""
 
 
 class RelationshipManager:
@@ -85,6 +115,24 @@ class RelationshipManager:
         self._client = client
         self._group_id = group_id
         self._embedding_provider = embedding_provider
+
+    async def publish_operational_relationships(
+        self,
+        source: OperationalProjectionSource,
+        *,
+        generate_embeddings: bool = False,
+        embedding_batch_size: int = 64,
+    ) -> list[str]:
+        """Publish the deterministic relationship inventory of retained evidence."""
+        from sibyl_core.services.operational_relationships import publish_operational_relationships
+
+        return await publish_operational_relationships(
+            self._client,
+            source,
+            group_id=self._group_id,
+            embedding_provider=self._embedding_provider if generate_embeddings else None,
+            embedding_batch_size=embedding_batch_size,
+        )
 
     async def create_bulk(self, relationships: Sequence[Relationship]) -> tuple[int, int]:
         prepared = list(relationships)
@@ -134,22 +182,7 @@ class RelationshipManager:
         return relationship.id
 
     async def delete(self, relationship_id: str) -> bool:
-        rows = await _execute_graph_transaction(
-            self._client,
-            """
-            BEGIN TRANSACTION;
-            DELETE FROM relates_to
-            WHERE group_id = $group_id AND uuid = $uuid
-            RETURN BEFORE;
-            DELETE FROM mentions
-            WHERE group_id = $group_id AND uuid = $uuid
-            RETURN BEFORE;
-            COMMIT TRANSACTION;
-            """,
-            group_id=self._group_id,
-            uuid=relationship_id,
-        )
-        return any(row.get("uuid") == relationship_id for row in rows)
+        return bool(await self.delete_bulk([relationship_id]))
 
     async def delete_bulk(self, relationship_ids: Sequence[str]) -> int:
         unique_ids = list(
@@ -172,8 +205,9 @@ class RelationshipManager:
             BEGIN TRANSACTION;
             LET $edge_targets = $uuids.map(|$u|
                 (SELECT VALUE id FROM relates_to WHERE uuid = $u LIMIT 1)[0]);
-            DELETE array::filter($edge_targets, |$t| $t != NONE)
-                WHERE group_id = $group_id RETURN BEFORE;
+            """
+            + _RETIRE_OR_DELETE_RELATIONSHIPS
+            + """
             LET $mention_targets = $uuids.map(|$u|
                 (SELECT VALUE id FROM mentions WHERE uuid = $u LIMIT 1)[0]);
             DELETE array::filter($mention_targets, |$t| $t != NONE)
@@ -540,22 +574,21 @@ class RelationshipManager:
         target_id: str,
         relationship_type: RelationshipType,
     ) -> int:
-        rows = normalize_records(
-            await self._client.execute_query(
-                """
-                DELETE FROM relates_to
+        rows = await _execute_graph_transaction(
+            self._client,
+            """
+            BEGIN TRANSACTION;
+            LET $edge_targets = SELECT VALUE id FROM relates_to
                 WHERE group_id = $group_id
-                  AND (
-                    (source_id = $source_id AND target_id = $target_id)
-                  )
-                  AND name = $relationship_type
-                RETURN BEFORE;
-                """,
-                group_id=self._group_id,
-                source_id=source_id,
-                target_id=target_id,
-                relationship_type=relationship_type.value,
-            )
+                  AND source_id = $source_id AND target_id = $target_id
+                  AND name = $relationship_type;
+            """
+            + _RETIRE_OR_DELETE_RELATIONSHIPS
+            + "COMMIT TRANSACTION;",
+            group_id=self._group_id,
+            source_id=source_id,
+            target_id=target_id,
+            relationship_type=relationship_type.value,
         )
         return len(rows)
 
@@ -575,7 +608,9 @@ async def _replace_relationship(
         )
     payload = _relationship_record(relationship, group_id=group_id)
     await client.execute_query(
-        """
+        "BEGIN TRANSACTION;"
+        + _PROTECTED_RELATIONSHIP_WRITE_GUARD
+        + """
         DELETE FROM relates_to WHERE uuid = $uuid AND (in != $src OR out != $tgt);
         LET $updated = (UPDATE relates_to SET
             in = $src,
@@ -610,7 +645,9 @@ async def _replace_relationship(
                 valid_at = $valid_at,
                 invalid_at = $invalid_at;
         END;
+        COMMIT TRANSACTION;
         """,
+        relationship_ids=[relationship.id],
         src=src,
         tgt=tgt,
         rel=RecordID("relates_to", relationship.id),
@@ -700,6 +737,7 @@ async def _replace_relationships_bulk(
             _RELATIONSHIP_BULK_UPSERT_QUERY,
             rows=native_archive_parameters(rows),
             edges=edges,
+            relationship_ids=written_ids,
         )
     except Exception as exc:
         if not _is_transient_connection_error(exc):
@@ -710,6 +748,7 @@ async def _replace_relationships_bulk(
             _RELATIONSHIP_BULK_UPSERT_QUERY,
             rows=native_archive_parameters(rows),
             edges=edges,
+            relationship_ids=written_ids,
         )
     return written_ids
 
@@ -722,7 +761,14 @@ def _relationship_datetime(value: object) -> datetime | None:
     return parsed
 
 
-def _relationship_record(relationship: Relationship, *, group_id: str) -> SurrealRecord:
+def _relationship_record(
+    relationship: Relationship, *, group_id: str, archive_binding: bool = False
+) -> SurrealRecord:
+    if not archive_binding and (
+        relationship.operational_derivation_required
+        or relationship.operational_source_binding is not None
+    ):
+        raise ValueError("protected operational relationship requires source writer")
     metadata = expand_memory_quality_storage_metadata(relationship.metadata or {})
     fact = _metadata_str(metadata, "fact") or _relationship_fact(relationship)
     fact_embedding = _metadata_float_list(
@@ -732,6 +778,8 @@ def _relationship_record(relationship: Relationship, *, group_id: str) -> Surrea
         key: value for key, value in metadata.items() if key not in {"fact_embedding", "embedding"}
     }
     return {
+        "operational_derivation_required": relationship.operational_derivation_required,
+        "operational_source_binding": relationship.operational_source_binding,
         "uuid": relationship.id,
         "name": relationship.relationship_type.value,
         "fact": fact,

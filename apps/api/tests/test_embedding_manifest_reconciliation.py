@@ -292,7 +292,10 @@ async def test_manifest_missing_source_ledger_cannot_complete(projection):
 
 
 async def test_graph_witness_upgrade_preserves_sources_and_retained_identity(projection):
-    from sibyl_core.backends.surreal.schema_version import get_schema_version
+    from sibyl_core.backends.surreal.schema_version import (
+        GRAPH_SCHEMA_CURRENT_VERSION,
+        get_schema_version,
+    )
     from sibyl_core.services.graph_client import mark_graph_schema_dirty
 
     p = projection
@@ -303,7 +306,7 @@ async def test_graph_witness_upgrade_preserves_sources_and_retained_identity(pro
     await p.client.execute_query("UPDATE schema_version SET version=26 WHERE name='graph';")
     mark_graph_schema_dirty(p.client.group_id)
     await prepare_graph_schema(p.client)
-    assert await get_schema_version(p.client.execute_query) == 27
+    assert await get_schema_version(p.client.execute_query) == GRAPH_SCHEMA_CURRENT_VERSION
     assert await p.manager._get_many_rows([p.source.id]) == source_before
     assert await p.client.execute_query("SELECT * FROM source_states ORDER BY id;") == ledger_before
     assert await p.manager.complete_embedding_manifest(p.complete) == "completed"

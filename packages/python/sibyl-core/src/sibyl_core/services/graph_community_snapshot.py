@@ -256,21 +256,27 @@ async def _current_graph_snapshot(
     what can be rendered; a replacement using the same ID cannot revive an
     older cached label or relationship fact.
     """
-    from sibyl_core.services.graph_common import normalize_graph_records
-    from sibyl_core.services.graph_records import relationship_from_surreal_row
+    from sibyl_core.services.graph_community_managers import (
+        _entity_manager_for_client,
+        _relationship_manager_for_client,
+    )
+    from sibyl_core.services.graph_read_availability import available_graph_relationships
+    from sibyl_core.services.graph_runtime import GraphRuntime
 
     entities = await _current_graph_entities(client, organization_id, list(snapshot.entity_by_id))
-    edge_ids = [relationship.id for relationship in snapshot.relationships]
-    relationships = []
-    if edge_ids:
-        rows = normalize_graph_records(
-            await client.execute_query(
-                "SELECT * FROM relates_to WHERE group_id=$group_id AND uuid IN $ids;",
-                group_id=organization_id,
-                ids=edge_ids,
-            )
-        )
-        relationships = [relationship_from_surreal_row(row) for row in rows]
+    runtime = GraphRuntime(
+        client=client,
+        entity_manager=_entity_manager_for_client(client, organization_id),
+        relationship_manager=_relationship_manager_for_client(client, organization_id),
+    )
+    current_relationships = await available_graph_relationships(
+        organization_id,
+        [r.id for r in snapshot.relationships],
+        runtime=runtime,
+    )
+    relationships = [
+        current_relationships[r.id] for r in snapshot.relationships if r.id in current_relationships
+    ]
     return GraphSnapshot(
         entities=list(entities.values()),
         relationships=[

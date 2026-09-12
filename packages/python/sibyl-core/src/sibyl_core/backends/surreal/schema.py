@@ -18,6 +18,9 @@ from sibyl_core.backends.surreal.schema_lifecycle_repair import (
     LIFECYCLE_REPAIR_FIELDS,
     migrate_lifecycle_repair,
 )
+from sibyl_core.backends.surreal.schema_operational_relationships import (
+    OPERATIONAL_RELATIONSHIP_DEFINITIONS,
+)
 from sibyl_core.backends.surreal.schema_ownership import (
     SchemaOwnership,
     try_acquire_schema_ownership,
@@ -862,6 +865,11 @@ GRAPH_SCHEMA_MIGRATIONS = (
         version=27,
         name="graph_source_write_witness",
         statements=tuple(split_statements(SOURCE_STATE_WITNESS_DEFINITION)),
+    ),
+    SchemaMigration(
+        version=28,
+        name="graph_operational_relationship_sources",
+        statements=tuple(split_statements(OPERATIONAL_RELATIONSHIP_DEFINITIONS)),
     ),
 )
 

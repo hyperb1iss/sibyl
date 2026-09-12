@@ -50,8 +50,54 @@ def stored_graph_rows(monkeypatch):
 
     monkeypatch.setattr(graph_routes, "available_graph_entities", available)
 
+    async def current_relationships(runtime, org, rows):
+        return rows
+
+    original_current_relationships = graph_routes._current_relationships
+    monkeypatch.setattr(graph_routes, "_current_relationships", current_relationships)
+    return original_current_relationships
+
 
 class TestGraphRoutes:
+    @pytest.mark.asyncio
+    async def test_get_all_edges_filters_unavailable_relationships(
+        self, monkeypatch, stored_graph_rows
+    ) -> None:
+        relationships = [
+            SimpleNamespace(
+                id=identity,
+                source_id="task-1",
+                target_id="project-1",
+                relationship_type=RelationshipType.BELONGS_TO,
+            )
+            for identity in ("current", "unavailable")
+        ]
+        runtime = SimpleNamespace(
+            client=object(),
+            relationship_manager=SimpleNamespace(list_all=AsyncMock(return_value=relationships)),
+            entity_manager=SimpleNamespace(
+                get_many=AsyncMock(
+                    return_value=[
+                        SimpleNamespace(id="task-1", metadata={}),
+                        SimpleNamespace(id="project-1", metadata={}),
+                    ]
+                )
+            ),
+        )
+        available = AsyncMock(return_value={"current": relationships[0]})
+        monkeypatch.setattr(graph_routes, "_current_relationships", stored_graph_rows)
+        monkeypatch.setattr(graph_routes, "available_graph_relationships", available)
+        monkeypatch.setattr(
+            graph_routes, "get_entity_graph_runtime", AsyncMock(return_value=runtime)
+        )
+        with _accessible_projects():
+            edges = await graph_routes.get_all_edges(
+                org=_org(), ctx=_ctx(), relationship_types=None, limit=25, offset=0
+            )
+
+        assert [edge.id for edge in edges] == ["current"]
+        available.assert_awaited_once_with(str(_org().id), ["current", "unavailable"], runtime=ANY)
+
     @pytest.mark.asyncio
     async def test_debug_graph_uses_entity_graph_runtime(self) -> None:
         runtime = SimpleNamespace(

@@ -542,6 +542,13 @@ def relationship_from_surreal_row(row: Mapping[str, object]) -> Relationship:
     metadata = normalize_memory_quality_metadata(decode_audit_metadata(metadata))
 
     return Relationship(
+        operational_derivation_required=normalized_row.get("operational_derivation_required")
+        is True,
+        operational_source_binding=(
+            binding
+            if isinstance(binding := normalized_row.get("operational_source_binding"), dict)
+            else None
+        ),
         id=relationship_id,
         relationship_type=_relationship_type_from_row(normalized_row, metadata=metadata),
         source_id=source_id,
