@@ -393,7 +393,65 @@ class TestGraphRoutes:
         adapter.list_relationships_for_entities.assert_awaited_once_with(
             {"task-1", "project-1"},
             limit=75,
+            offset=0,
         )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("live_count", [0, 1, 2])
+    async def test_full_graph_fills_budget_after_current_and_scope_filters(
+        self, monkeypatch, stored_graph_rows, live_count
+    ) -> None:
+        def relationship(identity, **metadata):
+            return SimpleNamespace(
+                id=identity,
+                source_id="task-1",
+                target_id="project-1",
+                relationship_type=RelationshipType.BELONGS_TO,
+                metadata=metadata,
+            )
+
+        stale = relationship("stale")
+        hidden = relationship("hidden", project_id="hidden-project")
+        first = relationship("first")
+        second = relationship("second")
+        runtime = SimpleNamespace(
+            client=object(),
+            relationship_manager=object(),
+            entity_manager=SimpleNamespace(
+                list_all=AsyncMock(
+                    return_value=[
+                        SimpleNamespace(id="task-1", entity_type=EntityType.TASK, name="Task"),
+                        SimpleNamespace(
+                            id="project-1", entity_type=EntityType.PROJECT, name="Project"
+                        ),
+                    ]
+                )
+            ),
+        )
+        live = [first, second][:live_count]
+        adapter = SimpleNamespace(
+            list_relationships_for_entities=AsyncMock(side_effect=[[stale, hidden], live])
+        )
+        current = AsyncMock(side_effect=[{"hidden": hidden}, {row.id: row for row in live}])
+        monkeypatch.setattr(graph_routes, "_current_relationships", stored_graph_rows)
+        monkeypatch.setattr(graph_routes, "available_graph_relationships", current)
+        monkeypatch.setattr(
+            graph_routes, "get_entity_graph_runtime", AsyncMock(return_value=runtime)
+        )
+        monkeypatch.setattr(
+            graph_routes, "get_graph_query_adapter", AsyncMock(return_value=adapter)
+        )
+        with _accessible_projects("project-1"):
+            result = await graph_routes.get_full_graph(
+                org=_org(), ctx=_ctx(), types=None, max_nodes=50, max_edges=2
+            )
+        assert [edge.id for edge in result.edges] == [row.id for row in live]
+        assert adapter.list_relationships_for_entities.await_count == 2
+        assert [
+            call.kwargs.get("offset", 0)
+            for call in adapter.list_relationships_for_entities.await_args_list
+        ] == [0, 2]
+        assert current.await_count == (2 if live_count else 1)
 
     @pytest.mark.asyncio
     async def test_get_hierarchical_graph_data_uses_runtime_client(self) -> None:

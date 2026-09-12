@@ -250,8 +250,12 @@ async def _available_edge_endpoints(
         row
         for row in rows
         if str(row.get("uuid")) in current_relationships
-        and relationship_from_surreal_row(row).model_dump(mode="json")
-        == current_relationships[str(row["uuid"])].model_dump(mode="json")
+        and relationship_from_surreal_row(row).model_dump(
+            mode="json", exclude={"metadata": {"operational_write_witness"}}
+        )
+        == current_relationships[str(row["uuid"])].model_dump(
+            mode="json", exclude={"metadata": {"operational_write_witness"}}
+        )
         and row.get("operational_source_binding")
         == current_relationships[str(row["uuid"])].operational_source_binding
     ]
