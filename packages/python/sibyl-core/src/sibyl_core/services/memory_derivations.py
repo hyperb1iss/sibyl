@@ -6,6 +6,10 @@ import asyncio
 import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, replace
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sibyl_core.services.graph_read_validation import GraphReadValidation
 
 from sibyl_core.auth.memory_policy import memory_scope_policy_key
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind, SourceObservation
@@ -72,13 +76,48 @@ async def validate_observations(
     *,
     organization_id: str,
     ancestors: frozenset[SourceIdentity] = frozenset(),
+    read: GraphReadValidation | None = None,
+) -> bool:
+    if read is not None:
+        if organization_id != read.organization_id or any(
+            observation.source.organization_id != organization_id for observation in observations
+        ):
+            return False
+        return await read.observation_proof(
+            observations,
+            authority,
+            ancestors,
+            lambda: _validate_observations(
+                observations,
+                authority,
+                organization_id=organization_id,
+                ancestors=ancestors,
+                read=read,
+            ),
+        )
+    return await _validate_observations(
+        observations, authority, organization_id=organization_id, ancestors=ancestors
+    )
+
+
+async def _validate_observations(
+    observations: Sequence[SourceObservation],
+    authority: SourceReadAuthority,
+    *,
+    organization_id: str,
+    ancestors: frozenset[SourceIdentity],
+    read: GraphReadValidation | None = None,
 ) -> bool:
     async def current(observation: SourceObservation) -> bool:
         if observation.source in ancestors or not observation.durable:
             return False
         try:
-            snapshot = await load_authorized_source_snapshot(
-                observation.source, authority, organization_id=organization_id
+            snapshot = (
+                await read.source_snapshot(observation.source, authority)
+                if read is not None
+                else await load_authorized_source_snapshot(
+                    observation.source, authority, organization_id=organization_id
+                )
             )
         except SourceUnavailableError:
             return False
@@ -86,26 +125,41 @@ async def validate_observations(
             return False
         if isinstance(snapshot, RawSourceSnapshot):
             return await raw_derivation_current(
-                snapshot.memory, authority, ancestors=ancestors | {observation.source}
+                snapshot.memory, authority, ancestors=ancestors | {observation.source}, read=read
             )
         from sibyl_core.services.graph_derivations import graph_derivation_current
 
         return await graph_derivation_current(
-            snapshot.entity, ancestors=ancestors | {observation.source}
+            snapshot.entity, ancestors=ancestors | {observation.source}, read=read
         )
 
     return all(await asyncio.gather(*(current(observation) for observation in observations)))
 
 
 async def raw_derivation_current(
-    memory, authority: SourceReadAuthority, *, ancestors: frozenset[SourceIdentity] = frozenset()
+    memory,
+    authority: SourceReadAuthority,
+    *,
+    ancestors: frozenset[SourceIdentity] = frozenset(),
+    read: GraphReadValidation | None = None,
 ) -> bool:
-    association = await load_raw_derivation(memory.organization_id, memory.id)
-    return await _raw_association_current(memory, association, authority, ancestors=ancestors)
+    association = (
+        await read.raw_association(memory.organization_id, memory.id)
+        if read is not None
+        else await load_raw_derivation(memory.organization_id, memory.id)
+    )
+    return await _raw_association_current(
+        memory, association, authority, ancestors=ancestors, read=read
+    )
 
 
 async def _raw_association_current(
-    memory, association, authority: SourceReadAuthority, *, ancestors: frozenset[SourceIdentity]
+    memory,
+    association,
+    authority: SourceReadAuthority,
+    *,
+    ancestors: frozenset[SourceIdentity],
+    read: GraphReadValidation | None = None,
 ) -> bool:
     if association is None:
         return not memory.derivation_required and memory.capture_surface != "synthesis_artifact"
@@ -148,7 +202,11 @@ async def _raw_association_current(
     except SourceUnavailableError:
         return False
     return await validate_observations(
-        observations, authority, organization_id=memory.organization_id, ancestors=ancestors
+        observations,
+        authority,
+        organization_id=memory.organization_id,
+        ancestors=ancestors,
+        read=read,
     )
 
 
