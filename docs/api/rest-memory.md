@@ -304,8 +304,8 @@ POST /api/memory/experience
 ```
 
 Retains the validated `OperationalExperience` as canonical JSON before publishing its typed graph
-projections. The retained bytes preserve submitted observation strings and reported outcomes;
-they are a serialization of the validated payload, not the original HTTP wire bytes. Requires a
+projections. The retained bytes preserve submitted observation strings and reported outcomes; they
+are a serialization of the validated payload, not the original HTTP wire bytes. Requires a
 Member-or-higher org role plus `project_contributor` on the experience's `project_id`.
 
 Publication can resume after interruption. Retained source observations and current authorization
@@ -315,26 +315,26 @@ verified success evidence.
 
 **Request Body:**
 
-| Field              | Type    | Required | Default | Description                                             |
-| ------------------ | ------- | -------- | ------- | ------------------------------------------------------- |
-| `experience`       | object  | Yes      | -       | The `OperationalExperience` payload to persist          |
-| `defer_embeddings` | boolean | No       | true    | Persist lexical records first, queue embedding backfill |
-| `note_distillation` | boolean | No       | true    | Queue operational note distillation |
+| Field               | Type    | Required | Default | Description                                             |
+| ------------------- | ------- | -------- | ------- | ------------------------------------------------------- |
+| `experience`        | object  | Yes      | -       | The `OperationalExperience` payload to persist          |
+| `defer_embeddings`  | boolean | No       | true    | Persist lexical records first, queue embedding backfill |
+| `note_distillation` | boolean | No       | true    | Queue operational note distillation                     |
 
 **Response:** `201 Created` with a write receipt: `source_id`, `manifest_id`, `content_hash`,
 `written_entities`, `written_relationships`, `deleted_entities`, `deleted_relationships`,
-`retired_entities`, `retired_relationships`, `entity_ids`, `relationship_ids`, and `background_jobs` (queued embedding-backfill and
-note-distillation jobs with their job IDs).
+`retired_entities`, `retired_relationships`, `entity_ids`, `relationship_ids`, and `background_jobs`
+(queued embedding-backfill and note-distillation jobs with their job IDs).
 
 Re-submitting a `source_id` bound to another project, or one currently being modified, returns
 `409 Conflict`. Rewriting an existing experience created by someone else requires
 `project_maintainer`.
 
 Source revisions retain omitted projections as unavailable and report their inventory counts in
-`retired_entities` and `retired_relationships`. Owner omission permits later authorized regeneration;
-physical deletion or source reincarnation does not. Existing graph-only history gains retained
-source provenance only through an authorized matching resubmission, never by reconstructing missing
-original evidence.
+`retired_entities` and `retired_relationships`. Owner omission permits later authorized
+regeneration; physical deletion or source reincarnation does not. Existing graph-only history gains
+retained source provenance only through an authorized matching resubmission, never by reconstructing
+missing original evidence.
 
 An optional `Idempotency-Key` binds an exact request retry. Without a key, resubmitting the same
 source after an intervening change is a new update. The raw source and graph use separate stores;
