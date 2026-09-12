@@ -19,6 +19,7 @@ from sibyl_core.models.entities import Relationship
 from sibyl_core.services.graph_common import normalize_graph_records
 from sibyl_core.services.graph_relationships import (
     _RELATIONSHIP_BULK_UPSERT_STATEMENTS,
+    _relationship_bulk_payloads,
     _relationship_record,
 )
 from sibyl_core.services.source_archive_store import _graph_auxiliary_snapshot_sql
@@ -91,6 +92,7 @@ async def prepare_companion_restore(
         _relationship_record(row, group_id=organization_id, archive_binding=True)
         for row in selected_relationships
     ]
+    relationship_payloads = _relationship_bulk_payloads(relationship_records)
     mention_records = [
         {
             "uuid": row.uuid,
@@ -132,7 +134,9 @@ async def prepare_companion_restore(
                 THROW 'archive relationship identity belongs to another organization';
             }};
         }};
-        LET $edges = $rows.map(|$edge| {{uuid: $edge.uuid, src: $edge.in, tgt: $edge.out}});
+        LET $edges = SELECT uuid, in AS src, out AS tgt, group_id,
+            $archive_relationship_indexes[uuid] AS index FROM $rows;
+        LET $updates = $archive_relationship_updates;
         IF array::len($rows) > 0 {{ {_RELATIONSHIP_BULK_UPSERT_STATEMENTS} }};
         FOR $mention IN $archive_mentions {{
             LET $uuid = $mention.uuid;
@@ -161,7 +165,11 @@ async def prepare_companion_restore(
         parameters={
             "archive_companion_fingerprint": rows[0]["fingerprint"],
             "archive_episodes": native_archive_parameters(episode_records),
-            "archive_relationships": native_archive_parameters(relationship_records),
+            "archive_relationships": relationship_payloads["rows"],
+            "archive_relationship_updates": relationship_payloads["updates"],
+            "archive_relationship_indexes": {
+                row["uuid"]: index for index, row in enumerate(relationship_payloads["rows"])
+            },
             "archive_mentions": native_archive_parameters(mention_records),
         },
         episodes_restored=len(selected_episodes),

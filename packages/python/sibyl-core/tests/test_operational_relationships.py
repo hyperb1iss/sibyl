@@ -333,7 +333,7 @@ async def test_operational_relationship_completion_witness_fences_edges(
             "RETURN {"
             + _SNAPSHOT
             + """
-        IF crypto::sha256(type::string([$targets,$associations,$states,$relationships])) != $fingerprint {
+        IF $operational_snapshot_fingerprint != $fingerprint {
             THROW 'completion support changed';
         };
         SLEEP 1s;
@@ -707,3 +707,38 @@ async def test_operational_relationship_eager_embedding_is_source_fenced(
         assert before == await runtime.client.execute_query(
             "SELECT * FROM relates_to ORDER BY uuid;"
         )
+
+
+@pytest.mark.parametrize("field", ["operational_write_witness", "fact"])
+async def test_operational_publication_snapshot_distinguishes_bookkeeping(
+    runtime, content_store, authority, monkeypatch, field
+):
+    from sibyl_core.services import operational_relationships as owner
+
+    _, source = await capture(runtime, authority)
+    await runtime.entity_manager.publish_operational_entities(source)
+    ids = await runtime.relationship_manager.publish_operational_relationships(source)
+    original = owner._snapshot
+
+    async def changed_after_snapshot(*args, **kwargs):
+        snapshot = await original(*args, **kwargs)
+        column = (
+            "attributes.operational_write_witness"
+            if field == "operational_write_witness"
+            else "fact"
+        )
+        await runtime.client.execute_query(
+            f"UPDATE relates_to SET {column}='after snapshot' WHERE uuid=$id;", id=ids[0]
+        )
+        return snapshot
+
+    monkeypatch.setattr(owner, "_snapshot", changed_after_snapshot)
+    if field == "fact":
+        with pytest.raises(Exception, match="source changed before publication"):
+            await runtime.relationship_manager.publish_operational_relationships(source)
+        rows = await runtime.client.execute_query(
+            "SELECT fact FROM relates_to WHERE uuid=$id;", id=ids[0]
+        )
+        assert rows[0]["fact"] == "after snapshot"
+    else:
+        assert await runtime.relationship_manager.publish_operational_relationships(source) == ids

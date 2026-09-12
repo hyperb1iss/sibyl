@@ -9,7 +9,7 @@ from sibyl_core.backends.surreal.records import normalize_records
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.embeddings.providers import EmbeddingProvider
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind, evidence_hash
-from sibyl_core.migrate.source_integrity import encode_record, native_archive_parameters
+from sibyl_core.migrate.source_integrity import encode_record
 from sibyl_core.runtime_ports import RuntimePortUnavailable, get_source_authority_resolver
 from sibyl_core.services.graph_derivations import graph_association_current, graph_target_digest
 from sibyl_core.services.memory_derivations import observation_from_record, validate_observations
@@ -33,6 +33,8 @@ LET $states = SELECT * OMIT validation_write_witness FROM source_states
     WHERE organization_id=$org AND source_kind='graph_entity' AND source_id IN $ids ORDER BY source_id;
 LET $relationships = SELECT *, in.uuid AS source_uuid, out.uuid AS target_uuid FROM relates_to
     WHERE group_id=$org AND uuid IN $relationship_ids ORDER BY uuid;
+LET $relationship_evidence = SELECT * OMIT attributes.operational_write_witness FROM $relationships;
+LET $operational_snapshot_fingerprint = crypto::sha256(type::string([$targets,$associations,$states,$relationship_evidence]));
 """
 
 _ENDPOINT_WRITE_WITNESS = (
@@ -109,7 +111,7 @@ async def _snapshot(client, *, organization_id, ids, relationship_ids):
             + """
         RETURN {targets:$targets, associations:$associations, states:$states,
             relationships:$relationships,
-            fingerprint:crypto::sha256(type::string([$targets,$associations,$states,$relationships]))};
+            fingerprint:$operational_snapshot_fingerprint};
         };""",
             org=organization_id,
             ids=sorted(ids),
@@ -133,6 +135,7 @@ async def publish_operational_relationships(
     """Write only the recomputed deterministic inventory and protected binding."""
     from sibyl_core.services.graph_relationships import (
         _RELATIONSHIP_BULK_UPSERT_STATEMENTS,
+        _relationship_bulk_parameters,
         _relationship_record,
     )
 
@@ -282,7 +285,7 @@ async def publish_operational_relationships(
         "RETURN {"
         + _SNAPSHOT
         + """
-        IF crypto::sha256(type::string([$targets,$associations,$states,$relationships])) != $fingerprint {
+        IF $operational_snapshot_fingerprint != $fingerprint {
             THROW 'operational relationship source changed before publication';
         };
         """
@@ -294,8 +297,7 @@ async def publish_operational_relationships(
         relationship_ids=captured_relationship_ids,
         retirements=retirements,
         fingerprint=snapshot["fingerprint"],
-        rows=native_archive_parameters(rows),
-        edges=[{"uuid": row["uuid"], "src": row["in"], "tgt": row["out"]} for row in rows],
+        **_relationship_bulk_parameters(rows),
     )
     await source.current()
     return relationship_ids

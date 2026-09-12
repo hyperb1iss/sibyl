@@ -652,7 +652,7 @@ async def _complete_embedding_manifest(
         source_prefix = (
             _SNAPSHOT
             + """
-            IF crypto::sha256(type::string([$targets,$associations,$states,$relationships])) != $operational_fingerprint {
+            IF $operational_snapshot_fingerprint != $operational_fingerprint {
                 THROW 'operational inventory changed before completion';
             };
         """
