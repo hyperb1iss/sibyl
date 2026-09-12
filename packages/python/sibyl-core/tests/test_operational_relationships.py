@@ -621,8 +621,9 @@ async def test_operational_relationship_retraction_retains_protected_identity(
 
 
 @pytest.mark.parametrize("clean", [False, True])
+@pytest.mark.parametrize("active", [False, True])
 async def test_operational_relationship_restore_respects_mode(
-    runtime, content_store, authority, monkeypatch, clean
+    runtime, content_store, authority, monkeypatch, clean, active
 ):
     from sibyl_core.services.graph_read_availability import available_graph_relationships
     from sibyl_core.tools import admin
@@ -634,7 +635,13 @@ async def test_operational_relationship_restore_respects_mode(
     backup = await admin.create_backup(organization_id=runtime.client.group_id)
     assert backup.success
     edge = projection.relationships[0]
-    assert await runtime.relationship_manager.delete(edge.id)
+    if active:
+        await runtime.client.execute_query(
+            "UPDATE relates_to SET attributes.operational_write_witness='retained' WHERE uuid=$id;",
+            id=edge.id,
+        )
+    else:
+        assert await runtime.relationship_manager.delete(edge.id)
     before = await runtime.client.execute_query(
         "SELECT * FROM relates_to WHERE uuid=$id;", id=edge.id
     )
@@ -652,11 +659,12 @@ async def test_operational_relationship_restore_respects_mode(
             runtime.client.group_id, [edge.id], runtime=runtime
         )
     else:
-        assert restored.relationships_skipped == 1
+        assert restored.relationships_skipped == len(projection.relationships)
         assert after == before
-        assert not await available_graph_relationships(
+        current = await available_graph_relationships(
             runtime.client.group_id, [edge.id], runtime=runtime
         )
+        assert bool(current) is active
 
 
 @pytest.mark.parametrize("race", [False, True])
@@ -705,3 +713,33 @@ async def test_operational_relationship_eager_embedding_is_source_fenced(
         assert before == await runtime.client.execute_query(
             "SELECT * FROM relates_to ORDER BY uuid;"
         )
+
+
+@pytest.mark.parametrize("mutation", ["witness", "body", "binding", "retired", "endpoint"])
+async def test_operational_relationship_retrieval_ignores_only_witness(
+    runtime, content_store, authority, monkeypatch, mutation
+):
+    from sibyl_core.retrieval import _search_lifecycle
+
+    _, source = await capture(runtime, authority)
+    projection = await runtime.entity_manager.publish_operational_entities(source)
+    await runtime.relationship_manager.publish_operational_relationships(source)
+    edge = projection.relationships[0]
+    current = _search_lifecycle.available_graph_relationships
+
+    async def changed(*args, **kwargs):
+        updates = {
+            "witness": "attributes.operational_write_witness='new-witness'",
+            "body": "fact='changed evidence'",
+            "binding": "operational_source_binding=NONE",
+            "retired": "invalid_at=time::now()",
+            "endpoint": "source_id='different-endpoint'",
+        }
+        await runtime.client.execute_query(
+            "UPDATE relates_to SET " + updates[mutation] + " WHERE uuid=$id;",
+            id=edge.id,
+        )
+        return await current(*args, **kwargs)
+
+    monkeypatch.setattr(_search_lifecycle, "available_graph_relationships", changed)
+    assert bool(await edge_results(runtime, edge)) is (mutation == "witness")
