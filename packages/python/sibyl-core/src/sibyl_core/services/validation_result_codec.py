@@ -26,6 +26,9 @@ LegacyValidationStageResult = (
 )
 ValidationStageResult = LegacyValidationStageResult | ProgressMemoryValidationResult
 
+_LEGACY_RESULT_ADAPTER = TypeAdapter(LegacyValidationStageResult)
+_PROGRESS_RESULT_ADAPTER = TypeAdapter(ProgressMemoryValidationResult)
+
 
 def decode_validation_result(value: Any) -> ValidationStageResult:
     """Select explicit progress before the permissive historical dataclass union."""
@@ -35,7 +38,7 @@ def decode_validation_result(value: Any) -> ValidationStageResult:
     if version == PROGRESS_VERSION:
         if set(value) != {field.name for field in fields(ProgressMemoryValidationResult)}:
             raise ValueError("Progress result fields differ")
-        result = TypeAdapter(ProgressMemoryValidationResult).validate_json(canonical(value))
+        result = _PROGRESS_RESULT_ADAPTER.validate_json(canonical(value))
         policy = json.loads(result.configured_policy_json)
         expected_status = {
             "accepted": "no_findings",
@@ -72,14 +75,14 @@ def decode_validation_result(value: Any) -> ValidationStageResult:
         raise ValueError("Progress result cannot downgrade to legacy")
     if version is not None and version not in (VALIDATION_VERSION, CORRECTION_VERSION):
         raise ValueError("Unsupported validation result version")
-    return TypeAdapter(LegacyValidationStageResult).validate_json(canonical(value))
+    return _LEGACY_RESULT_ADAPTER.validate_json(canonical(value))
 
 
 def encode_validation_result(result: ValidationStageResult) -> dict[str, Any]:
     if isinstance(result, ProgressMemoryValidationResult):
-        value = TypeAdapter(ProgressMemoryValidationResult).dump_python(result, mode="json")
+        value = _PROGRESS_RESULT_ADAPTER.dump_python(result, mode="json")
     else:
-        value = TypeAdapter(LegacyValidationStageResult).dump_python(result, mode="json")
+        value = _LEGACY_RESULT_ADAPTER.dump_python(result, mode="json")
     decode_validation_result(value)
     return value
 
