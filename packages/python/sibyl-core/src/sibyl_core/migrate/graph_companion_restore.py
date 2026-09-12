@@ -32,6 +32,7 @@ class CompanionRestorePlan:
     episodes_restored: int
     episodes_skipped: int
     relationships_restored: int
+    relationships_skipped: int
     mentions_restored: int
     mentions_skipped: int
 
@@ -72,8 +73,23 @@ async def prepare_companion_restore(
         row for row in mentions if clean or not skip_existing or row.uuid not in existing_mentions
     ]
     episode_records = [episode_record(row) for row in selected_episodes]
+    # Merge imports retain current protected retractions. Clean restoration
+    # intentionally reconstructs the archived historical state instead.
+    retired_relationships = {
+        row["uuid"]
+        for row in snapshot["relates_to"]
+        if (
+            row.get("operational_derivation_required") is True
+            or row.get("operational_source_binding") is not None
+        )
+        and (row.get("invalid_at") is not None or row.get("expired_at") is not None)
+    }
+    selected_relationships = [
+        row for row in relationships if clean or row.id not in retired_relationships
+    ]
     relationship_records = [
-        _relationship_record(row, group_id=organization_id) for row in relationships
+        _relationship_record(row, group_id=organization_id, archive_binding=True)
+        for row in selected_relationships
     ]
     mention_records = [
         {
@@ -150,7 +166,8 @@ async def prepare_companion_restore(
         },
         episodes_restored=len(selected_episodes),
         episodes_skipped=len(episodes) - len(selected_episodes),
-        relationships_restored=len(relationships),
+        relationships_restored=len(selected_relationships),
+        relationships_skipped=len(relationships) - len(selected_relationships),
         mentions_restored=len(selected_mentions),
         mentions_skipped=len(mentions) - len(selected_mentions),
     )

@@ -50,6 +50,11 @@ def stored_graph_rows(monkeypatch):
 
     monkeypatch.setattr(graph_routes, "available_graph_entities", available)
 
+    async def current_relationships(runtime, org, rows):
+        return rows
+
+    monkeypatch.setattr(graph_routes, "_current_relationships", current_relationships)
+
 
 class TestGraphRoutes:
     @pytest.mark.asyncio

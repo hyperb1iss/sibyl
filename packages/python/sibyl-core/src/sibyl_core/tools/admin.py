@@ -673,6 +673,7 @@ async def restore_backup(
         episodes_restored = companions.episodes_restored
         episodes_skipped = companions.episodes_skipped
         relationships_restored = companions.relationships_restored
+        relationships_skipped = companions.relationships_skipped
         mentions_restored = companions.mentions_restored
         mentions_skipped = companions.mentions_skipped
 
