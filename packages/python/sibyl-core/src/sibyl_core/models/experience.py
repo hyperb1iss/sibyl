@@ -125,3 +125,5 @@ class OperationalExperienceWriteResult(BaseModel):
     deleted_entity_ids: tuple[str, ...]
     deleted_relationship_ids: tuple[str, ...]
     embedding_backfill_required: bool = False
+    retired_entity_ids: tuple[str, ...] = ()
+    retired_relationship_ids: tuple[str, ...] = ()

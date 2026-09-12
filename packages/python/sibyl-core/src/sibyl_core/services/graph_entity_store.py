@@ -580,12 +580,96 @@ async def _complete_embedding_manifest(
     group_id: str,
     embedding_metadata: Mapping[str, object],
     complete: bool,
+    operational_source: OperationalProjectionSource | None = None,
+    embedding_pending: bool = False,
 ) -> str:
     """Fence completion against the current inventory and embedding coverage."""
+    source_prefix = ""
+    source_parameters: dict[str, object] = {}
+    if embedding_pending and operational_source is None:
+        raise ValueError("pending completion requires a retained operational source")
+    if operational_source is not None:
+        from sibyl_core.services.operational_relationships import (
+            _SNAPSHOT,
+            OPERATIONAL_SNAPSHOT_WRITE_WITNESS,
+            _snapshot,
+            operational_relationship_inventory_current,
+        )
+        from sibyl_core.services.source_observations import SourceUnavailableError
+
+        if operational_source.observation.source.organization_id != group_id:
+            raise SourceUnavailableError()
+        projection = await operational_source.projection()
+        supporting_ids = sorted(
+            set(expected.metadata["expected_entity_ids"])
+            | {
+                endpoint
+                for edge in projection.relationships
+                for endpoint in (edge.source_id, edge.target_id)
+            }
+        )
+        snapshot = await _snapshot(
+            client,
+            organization_id=group_id,
+            ids=supporting_ids,
+            relationship_ids=expected.metadata["expected_relationship_ids"],
+        )
+        if not await operational_relationship_inventory_current(operational_source, snapshot):
+            raise SourceUnavailableError()
+        from sibyl_core.services.graph_derivations import graph_target_digest
+        from sibyl_core.services.graph_records import entity_from_surreal_row
+        from sibyl_core.services.memory_derivations import observation_from_record
+
+        desired = {entity.id: entity for entity in projection.entities}
+        targets = [row for row in snapshot["targets"] if row["uuid"] in desired]
+        associations = {row["target_id"]: row for row in snapshot["associations"]}
+        if {row["uuid"] for row in targets} != set(desired):
+            raise SourceUnavailableError()
+        for row in targets:
+            binding = associations.get(row["uuid"])
+            actual = entity_from_surreal_row(row)
+            expected_entity = entity_from_surreal_row(
+                _entity_record(desired[row["uuid"]], group_id=group_id)
+            )
+            observations = binding.get("observations") if isinstance(binding, dict) else None
+            if (
+                row.get("derivation_required") is not True
+                or actual.created_by != operational_source.creator_id
+                or graph_target_digest(actual) != graph_target_digest(expected_entity)
+                or not isinstance(binding, dict)
+                or binding.get("active") is not True
+                or binding.get("body_sha256") != graph_target_digest(actual)
+                or binding.get("principal_id") != operational_source.authority.principal_id
+                or binding.get("authority_ceiling")
+                != operational_source.authority.ceiling_metadata()
+                or not isinstance(observations, list)
+                or len(observations) != 1
+                or not observation_from_record(observations[0]).same_evidence(
+                    operational_source.observation
+                )
+            ):
+                raise SourceUnavailableError()
+        source_prefix = (
+            _SNAPSHOT
+            + """
+            IF crypto::sha256(type::string([$targets,$associations,$states,$relationships])) != $operational_fingerprint {
+                THROW 'operational inventory changed before completion';
+            };
+        """
+            + OPERATIONAL_SNAPSHOT_WRITE_WITNESS
+        )
+        source_parameters = {
+            "org": group_id,
+            "ids": supporting_ids,
+            "relationship_ids": sorted(expected.metadata["expected_relationship_ids"]),
+            "operational_fingerprint": snapshot["fingerprint"],
+        }
+        await operational_source.current()
     rows = normalize_records(
         await client.execute_query(
             """
             RETURN {
+                __OPERATIONAL_SNAPSHOT__
                 LET $manifest = (SELECT * FROM entity
                     WHERE group_id = $group_id AND uuid = $uuid LIMIT 1)[0];
                 IF $manifest = NONE { RETURN {state: 'missing'}; };
@@ -595,9 +679,10 @@ async def _complete_embedding_manifest(
                     OR $manifest.attributes.operational_schema_version != $expected.operational_schema_version
                     OR $manifest.attributes.operational_content_hash != $expected.operational_content_hash
                     OR $manifest.attributes.project_id != $expected.project_id
-                    OR $manifest.attributes.expected_entity_ids != $expected.expected_entity_ids
-                    OR $manifest.attributes.expected_relationship_ids != $expected.expected_relationship_ids
-                    OR $manifest.attributes.operational_projection_state NOT IN ['embedding_pending', 'complete']
+                    OR ($operational = false AND $manifest.attributes.expected_entity_ids != $expected.expected_entity_ids)
+                    OR ($operational = false AND $manifest.attributes.expected_relationship_ids != $expected.expected_relationship_ids)
+                    OR ($manifest.attributes.operational_projection_state NOT IN ['embedding_pending', 'complete']
+                        AND NOT ($operational AND $manifest.attributes.operational_projection_state = 'pending'))
                 { RETURN {state: 'stale'}; };
                 LET $witnesses = $source_identities.map(|$identity|
                     type::record(string::concat('source_states:',
@@ -614,27 +699,37 @@ async def _complete_embedding_manifest(
                 IF array::len($sources.filter(|$source| $source = NONE)) > 0
                     { RETURN {state: 'incomplete'}; };
                 LET $missing = SELECT uuid FROM $sources WHERE group_id != $group_id
-                    OR (entity_type != 'artifact' AND (
+                    OR ($embedding_pending = false AND entity_type != 'artifact' AND (
                         name_embedding = NONE OR name_embedding = NULL
                         OR array::len(name_embedding ?? []) != $dimensions
                         OR embedding_metadata != $embedding_metadata));
                 IF array::len($missing) > 0 { RETURN {state: 'incomplete'}; };
                 IF $manifest.attributes.operational_projection_state = 'complete'
                     { RETURN {state: 'complete'}; };
+                IF $embedding_pending AND $manifest.attributes.operational_projection_state = 'embedding_pending'
+                    { RETURN {state: 'embedding_pending'}; };
                 IF $complete = false { RETURN {state: 'ready'}; };
                 __SOURCE_STATE_WRITE_WITNESS__
-                UPDATE $manifest.id SET attributes.operational_projection_state = 'complete',
+                UPDATE $manifest.id SET
+                    attributes.operational_projection_state = IF $embedding_pending { 'embedding_pending' } ELSE { 'complete' },
+                    attributes.expected_entity_ids = $expected.expected_entity_ids,
+                    attributes.expected_relationship_ids = $expected.expected_relationship_ids,
                     revision = (revision ?? 0) + 1,
                     attributes.updated_at = time::now(), updated_at = time::now();
-                RETURN {state: 'completed'};
+                RETURN {state: IF $embedding_pending { 'embedding_pending' } ELSE { 'completed' }};
             };
-            """.replace("__SOURCE_STATE_WRITE_WITNESS__", SOURCE_STATE_WRITE_WITNESS),
+            """.replace("__SOURCE_STATE_WRITE_WITNESS__", SOURCE_STATE_WRITE_WITNESS).replace(
+                "__OPERATIONAL_SNAPSHOT__", source_prefix
+            ),
             group_id=group_id,
             uuid=expected.id,
             expected=expected.metadata,
             dimensions=embedding_metadata["dimensions"],
             embedding_metadata=dict(embedding_metadata),
             complete=complete,
+            operational=operational_source is not None,
+            embedding_pending=embedding_pending,
+            **source_parameters,
             source_identities=[
                 [group_id, "graph_entity", identity]
                 for identity in dict.fromkeys(expected.metadata["expected_entity_ids"])
@@ -643,6 +738,8 @@ async def _complete_embedding_manifest(
     )
     if len(rows) != 1 or not isinstance(rows[0].get("state"), str):
         raise RuntimeError("invalid embedding manifest completion result")
+    if operational_source is not None:
+        await operational_source.current()
     return str(rows[0]["state"])
 
 
@@ -980,22 +1077,47 @@ if TYPE_CHECKING:
 
 
 async def _publish_operational_entities(
-    client: SurrealGraphClient, source: OperationalProjectionSource, *, group_id: str
+    client: SurrealGraphClient,
+    source: OperationalProjectionSource,
+    *,
+    group_id: str,
+    retired_ids: tuple[str, ...] = (),
 ) -> OperationalExperienceProjection:
     """Publish only the deterministic pending projection of retained raw evidence."""
+    projection = await source.projection()
+    return await _publish_operational_inventory(
+        client, source, projection, group_id=group_id, retired_ids=retired_ids
+    )
+
+
+async def _publish_operational_inventory(
+    client: SurrealGraphClient,
+    source: OperationalProjectionSource,
+    projection: OperationalExperienceProjection,
+    *,
+    group_id: str,
+    retired_ids: tuple[str, ...] = (),
+) -> OperationalExperienceProjection:
+    """Commit a source-owned inventory through the shared snapshot transaction."""
     from dataclasses import asdict
 
     from sibyl_core.services.graph_derivations import graph_target_digest
     from sibyl_core.services.graph_records import entity_from_surreal_row
     from sibyl_core.services.memory_derivations import observation_from_record
+    from sibyl_core.services.operational_omission import (
+        omission_allows_regeneration,
+        omission_receipt,
+    )
     from sibyl_core.services.source_observations import SourceUnavailableError
 
     if source.observation.source.organization_id != group_id:
         raise SourceUnavailableError()
-    projection = await source.projection()
+    await source.current()
     _enforce_entity_content_limit(projection.entities)
     records = [_entity_record(entity, group_id=group_id) for entity in projection.entities]
-    ids = [record["uuid"] for record in records]
+    ids = sorted({entity.id for entity in projection.entities} | set(retired_ids))
+    if set(retired_ids) & {record["uuid"] for record in records}:
+        raise SourceUnavailableError()
     snapshots = normalize_records(
         await client.execute_query(
             """RETURN {
@@ -1029,6 +1151,44 @@ async def _publish_operational_entities(
         if any(row.get("derivation_required") is not True for row in targets.values())
         else None
     )
+    retirements = []
+    for target_id in retired_ids:
+        old = targets.get(target_id)
+        if old is None:
+            continue
+        binding = associations.get(target_id)
+        state = states.get(target_id)
+        observations = binding.get("observations") if isinstance(binding, dict) else None
+        if (
+            old.get("group_id") != group_id
+            or not isinstance(state, dict)
+            or state.get("deleted") is not False
+            or state.get("revision") != old.get("revision")
+            or not old.get("derivation_required")
+            or old.get("created_by") != source.creator_id
+            or not isinstance(binding, dict)
+            or binding.get("organization_id") != group_id
+            or binding.get("target_kind") != "graph_entity"
+            or binding.get("target_id") != target_id
+            or (
+                binding.get("active") is not True
+                and not omission_allows_regeneration(source, binding)
+            )
+            or binding.get("body_sha256") != graph_target_digest(entity_from_surreal_row(old))
+            or not isinstance(observations, list)
+            or len(observations) != 1
+            or observation_from_record(observations[0]).source != source.observation.source
+        ):
+            raise SourceUnavailableError()
+        previous_source = observation_from_record(observations[0])
+        if (
+            previous_source.effective_incarnation != source.observation.effective_incarnation
+            or previous_source.generation > source.observation.generation
+        ):
+            raise SourceUnavailableError()
+        receipt = omission_receipt(source, binding)
+        if binding.get("active") is not False or binding.get("operational_omission") != receipt:
+            retirements.append({"uuid": target_id, "receipt": receipt})
     entries = []
     for record in records:
         old = targets.get(record["uuid"])
@@ -1053,7 +1213,10 @@ async def _publish_operational_entities(
                     or state.get("deleted") is not False
                     or state.get("revision") != old.get("revision")
                     or not isinstance(association, dict)
-                    or association.get("active") is not True
+                    or (
+                        association.get("active") is not True
+                        and not omission_allows_regeneration(source, association)
+                    )
                     or association.get("target_id") != record["uuid"]
                     or association.get("body_sha256")
                     != graph_target_digest(entity_from_surreal_row(old))
@@ -1080,8 +1243,27 @@ async def _publish_operational_entities(
         desired_attributes = record.get("attributes")
         if not isinstance(desired_attributes, dict):
             raise SourceUnavailableError()
+        if (
+            record["uuid"] == projection.manifest.manifest_entity_id
+            and isinstance(old_attributes, dict)
+            and previous is not None
+            and not previous.same_evidence(source.observation)
+        ):
+            # Pending publication retains the outstanding inventory across a
+            # crash before omitted rows and relationships have been retired.
+            for key, expected_ids in (
+                ("expected_entity_ids", projection.manifest.entity_ids),
+                ("expected_relationship_ids", projection.manifest.relationship_ids),
+            ):
+                retained = old_attributes.get(key, [])
+                if not isinstance(retained, list) or not all(
+                    isinstance(value, str) for value in retained
+                ):
+                    raise SourceUnavailableError()
+                desired_attributes[key] = sorted(set(retained).union(expected_ids))
         replay = (
             association is not None
+            and association.get("active") is True
             and all(
                 association.get(key) == desired[key]
                 for key in ("body_sha256", "principal_id", "authority_ceiling")
@@ -1089,6 +1271,15 @@ async def _publish_operational_entities(
             and previous is not None
             and previous.same_evidence(source.observation)
             and isinstance(old_attributes, dict)
+            and (
+                record.get("name_embedding") is None
+                or (
+                    old is not None
+                    and old.get("name_embedding") == record.get("name_embedding")
+                    and old_attributes.get("embedding_metadata")
+                    == desired_attributes.get("embedding_metadata")
+                )
+            )
             and all(
                 old_attributes.get(key) == desired_attributes.get(key)
                 for key in ("operational_schema_version", "operational_content_hash")
@@ -1156,9 +1347,18 @@ async def _publish_operational_entities(
                 };
             };
         };
+        FOR $retirement IN $retirements {
+            UPDATE entity SET attributes.operational_write_witness = type::string(rand::uuid())
+                WHERE group_id=$org AND uuid=$retirement.uuid;
+            UPDATE memory_derivations SET active=false, operational_omission=$retirement.receipt
+                WHERE organization_id=$org AND target_kind='graph_entity' AND target_id=$retirement.uuid;
+            UPDATE source_states SET generation += 1
+                WHERE organization_id=$org AND source_kind='graph_entity' AND source_id=$retirement.uuid;
+        };
         RETURN {applied:true};
         };""",
         entries=entries,
+        retirements=retirements,
         ids=ids,
         fingerprint=snapshot["fingerprint"],
         org=group_id,

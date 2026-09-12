@@ -438,7 +438,9 @@ async def test_operational_relationship_schema_upgrade_retains_ordinary_edges(
     await execute("UPDATE schema_version:graph SET version=27;")
     before = await execute("SELECT * FROM relates_to WHERE uuid=$id;", id=edge.id)
     await schema.bootstrap_schema(runtime.client)
-    assert await execute("SELECT VALUE version FROM schema_version:graph;") == [28]
+    assert await execute("SELECT VALUE version FROM schema_version:graph;") == [
+        schema.GRAPH_SCHEMA_CURRENT_VERSION
+    ]
     info = await execute("INFO FOR TABLE relates_to;")
     assert "operational_source_binding" in info["fields"]
     associations = await execute("INFO FOR TABLE memory_derivations;")

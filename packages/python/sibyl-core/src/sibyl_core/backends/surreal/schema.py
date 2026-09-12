@@ -18,6 +18,7 @@ from sibyl_core.backends.surreal.schema_lifecycle_repair import (
     LIFECYCLE_REPAIR_FIELDS,
     migrate_lifecycle_repair,
 )
+from sibyl_core.backends.surreal.schema_operational_omission import OPERATIONAL_OMISSION_STATEMENTS
 from sibyl_core.backends.surreal.schema_operational_relationships import (
     OPERATIONAL_RELATIONSHIP_DEFINITIONS,
 )
@@ -870,6 +871,11 @@ GRAPH_SCHEMA_MIGRATIONS = (
         version=28,
         name="graph_operational_relationship_sources",
         statements=tuple(split_statements(OPERATIONAL_RELATIONSHIP_DEFINITIONS)),
+    ),
+    SchemaMigration(
+        version=29,
+        name="graph_operational_omission_receipts",
+        statements=OPERATIONAL_OMISSION_STATEMENTS,
     ),
 )
 

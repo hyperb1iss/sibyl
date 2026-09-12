@@ -122,6 +122,7 @@ class RelationshipManager:
         *,
         generate_embeddings: bool = False,
         embedding_batch_size: int = 64,
+        retired_ids: tuple[str, ...] = (),
     ) -> list[str]:
         """Publish the deterministic relationship inventory of retained evidence."""
         from sibyl_core.services.operational_relationships import publish_operational_relationships
@@ -132,6 +133,7 @@ class RelationshipManager:
             group_id=self._group_id,
             embedding_provider=self._embedding_provider if generate_embeddings else None,
             embedding_batch_size=embedding_batch_size,
+            retired_ids=retired_ids,
         )
 
     async def create_bulk(self, relationships: Sequence[Relationship]) -> tuple[int, int]:

@@ -106,11 +106,15 @@ def operational_note_distillation_job_id(
     group_id: str,
     *,
     content_hash: str,
+    operational_source: dict[str, Any] | None = None,
 ) -> str:
     source_id = str(experience_data.get("source_id") or "")
     payload = json.dumps(
         {
             "group_id": group_id,
+            **(
+                {"operational_source": operational_source} if operational_source is not None else {}
+            ),
             "source_id": source_id,
             "content_hash": content_hash,
         },
@@ -127,6 +131,7 @@ def entity_embedding_job_id(
     *,
     relationships: list[dict[str, Any]] | None = None,
     completion_manifest: dict[str, Any] | None = None,
+    operational_source: dict[str, Any] | None = None,
 ) -> str:
     manifest_metadata: dict[str, Any] = {}
     if isinstance(completion_manifest, dict):
@@ -167,6 +172,9 @@ def entity_embedding_job_id(
     payload = json.dumps(
         {
             "group_id": group_id,
+            **(
+                {"operational_source": operational_source} if operational_source is not None else {}
+            ),
             "entities": sorted(entity_inputs, key=lambda item: item["id"]),
             "relationships": sorted(relationship_inputs, key=lambda item: item["id"]),
             "completion_manifest": {
@@ -279,6 +287,7 @@ class QueueBroker(Protocol):
         content_hash: str,
         created_by: str | None,
         max_tokens: int = 2_048,
+        operational_source: dict[str, Any] | None = None,
     ) -> str: ...
 
     async def enqueue_entity_embedding_backfill(
@@ -288,6 +297,7 @@ class QueueBroker(Protocol):
         *,
         relationships: list[dict[str, Any]] | None = None,
         completion_manifest: dict[str, Any] | None = None,
+        operational_source: dict[str, Any] | None = None,
     ) -> str: ...
 
     async def enqueue_create_learning_episode(

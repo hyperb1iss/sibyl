@@ -128,6 +128,7 @@ async def publish_operational_relationships(
     group_id: str,
     embedding_provider: EmbeddingProvider | None = None,
     embedding_batch_size: int = 64,
+    retired_ids: tuple[str, ...] = (),
 ) -> list[str]:
     """Write only the recomputed deterministic inventory and protected binding."""
     from sibyl_core.services.graph_relationships import (
@@ -139,13 +140,34 @@ async def publish_operational_relationships(
         raise SourceUnavailableError()
     projection = await source.projection()
     relationships = projection.relationships
-    if not relationships:
+    if not relationships and not retired_ids:
         return []
     ids = {endpoint for row in relationships for endpoint in (row.source_id, row.target_id)}
     relationship_ids = [row.id for row in relationships]
+    if set(retired_ids).intersection(relationship_ids):
+        raise SourceUnavailableError()
+    captured_relationship_ids = sorted(set(relationship_ids).union(retired_ids))
     snapshot = await _snapshot(
-        client, organization_id=group_id, ids=ids, relationship_ids=relationship_ids
+        client, organization_id=group_id, ids=ids, relationship_ids=captured_relationship_ids
     )
+    retirements = []
+    for old in snapshot["relationships"]:
+        if old["uuid"] not in retired_ids:
+            continue
+        binding = old.get("operational_source_binding")
+        if old.get("operational_derivation_required") is not True or not isinstance(binding, dict):
+            raise SourceUnavailableError()
+        previous = observation_from_record(binding.get("source"))
+        if (
+            old.get("group_id") != group_id
+            or binding.get("body_sha256") != relationship_body_digest(old)
+            or previous.source != source.observation.source
+            or previous.effective_incarnation != source.observation.effective_incarnation
+            or previous.generation > source.observation.generation
+        ):
+            raise SourceUnavailableError()
+        if old.get("invalid_at") is None and old.get("expired_at") is None:
+            retirements.append(old["uuid"])
     targets = {r["uuid"]: r for r in snapshot["targets"]}
     associations = {r["target_id"]: r for r in snapshot["associations"]}
     states = {r["source_id"]: r for r in snapshot["states"]}
@@ -266,10 +288,11 @@ async def publish_operational_relationships(
         """
         + _ENDPOINT_WRITE_WITNESS
         + _RELATIONSHIP_BULK_UPSERT_STATEMENTS
-        + "RETURN true; };",
+        + "UPDATE relates_to SET invalid_at=time::now(),expired_at=time::now() WHERE group_id=$org AND uuid IN $retirements; RETURN true; };",
         org=group_id,
         ids=sorted(ids),
-        relationship_ids=sorted(relationship_ids),
+        relationship_ids=captured_relationship_ids,
+        retirements=retirements,
         fingerprint=snapshot["fingerprint"],
         rows=native_archive_parameters(rows),
         edges=[{"uuid": row["uuid"], "src": row["in"], "tgt": row["out"]} for row in rows],
