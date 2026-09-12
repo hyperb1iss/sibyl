@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from surrealdb import RecordID
 
@@ -50,32 +50,33 @@ if TYPE_CHECKING:
     from sibyl_core.services.operational_projection import OperationalProjectionSource
 
 
-_RELATIONSHIP_BULK_UPSERT_STATEMENTS = """
--- The planner never serves `uuid IN $list` from idx_relates_uuid (TableScan
--- for every statement type, seconds per capture batch once the table is
--- large), so the endpoint-move cleanup iterates the batch and addresses each
--- row through the unique index instead. The endpoint guard stays on the
--- DELETE itself so it evaluates atomically on the addressed record.
-FOR $edge IN $edges {
-    DELETE (SELECT VALUE id FROM relates_to WHERE uuid = $edge.uuid LIMIT 1)
-    WHERE in != $edge.src OR out != $edge.tgt;
-};
-INSERT RELATION INTO relates_to $rows ON DUPLICATE KEY UPDATE
-    name = $input.name,
-    fact = $input.fact,
-    fact_embedding = $input.fact_embedding,
-    group_id = $input.group_id,
-    source_id = $input.source_id,
-    target_id = $input.target_id,
-    episodes = $input.episodes ?? [],
-    attributes = $input.attributes ?? {},
-    created_at = $input.created_at,
-    expired_at = $input.expired_at,
-    valid_at = $input.valid_at,
-    invalid_at = $input.invalid_at,
-    operational_derivation_required = $input.operational_derivation_required ?? false,
-    operational_source_binding = $input.operational_source_binding;
+# Keep vectors out of indexed lookup closures. Re-evaluating full payloads
+# inside each UPDATE scales poorly even when no vector value changes.
+_RELATIONSHIP_BULK_LOOKUP = """
+LET $existing = $edges.map(|$edge| {
+    edge: $edge,
+    stored: (SELECT id, in, out, group_id FROM relates_to WHERE uuid=$edge.uuid LIMIT 1)[0]
+});
+IF array::len($existing.filter(|$entry|
+    $entry.stored != NONE AND $entry.stored.group_id != $entry.edge.group_id
+)) > 0 { THROW 'relationship identity conflicts with current scope'; };
 """
+_RELATIONSHIP_BULK_MUTATIONS = """
+LET $matching = $existing.filter(|$entry| $entry.stored != NONE
+    AND $entry.stored.in = $entry.edge.src AND $entry.stored.out = $entry.edge.tgt);
+LET $remaining = $existing.filter(|$entry| $entry.stored = NONE
+    OR $entry.stored.in != $entry.edge.src OR $entry.stored.out != $entry.edge.tgt);
+LET $targets = $matching.map(|$entry| $entry.stored.id);
+UPDATE $targets CONTENT object::from_entries(array::concat(
+    object::entries($this), object::entries($updates[uuid])
+));
+FOR $entry IN $remaining {
+    IF $entry.stored != NONE { DELETE $entry.stored.id; };
+};
+LET $inserts = SELECT VALUE $rows[edge.index] FROM $remaining;
+IF array::len($inserts) > 0 { INSERT RELATION INTO relates_to $inserts; };
+"""
+_RELATIONSHIP_BULK_UPSERT_STATEMENTS = _RELATIONSHIP_BULK_LOOKUP + _RELATIONSHIP_BULK_MUTATIONS
 _PROTECTED_RELATIONSHIP_WRITE_GUARD = """
 IF array::len(SELECT VALUE uuid FROM relates_to WHERE uuid IN $relationship_ids
     AND (operational_derivation_required = true OR operational_source_binding != NONE)) > 0 {
@@ -84,8 +85,9 @@ IF array::len(SELECT VALUE uuid FROM relates_to WHERE uuid IN $relationship_ids
 """
 _RELATIONSHIP_BULK_UPSERT_QUERY = (
     "BEGIN TRANSACTION;\n"
+    + _RELATIONSHIP_BULK_LOOKUP
     + _PROTECTED_RELATIONSHIP_WRITE_GUARD
-    + _RELATIONSHIP_BULK_UPSERT_STATEMENTS
+    + _RELATIONSHIP_BULK_MUTATIONS
     + "COMMIT TRANSACTION;"
 )
 
@@ -122,6 +124,7 @@ class RelationshipManager:
         *,
         generate_embeddings: bool = False,
         embedding_batch_size: int = 64,
+        retired_ids: tuple[str, ...] = (),
     ) -> list[str]:
         """Publish the deterministic relationship inventory of retained evidence."""
         from sibyl_core.services.operational_relationships import publish_operational_relationships
@@ -132,6 +135,7 @@ class RelationshipManager:
             group_id=self._group_id,
             embedding_provider=self._embedding_provider if generate_embeddings else None,
             embedding_batch_size=embedding_batch_size,
+            retired_ids=retired_ids,
         )
 
     async def create_bulk(self, relationships: Sequence[Relationship]) -> tuple[int, int]:
@@ -731,12 +735,10 @@ async def _replace_relationships_bulk(
     if not rows:
         return []
 
-    edges = [{"uuid": str(row["uuid"]), "src": row["in"], "tgt": row["out"]} for row in rows]
     try:
         await client.execute_query(
             _RELATIONSHIP_BULK_UPSERT_QUERY,
-            rows=native_archive_parameters(rows),
-            edges=edges,
+            **_relationship_bulk_parameters(rows),
             relationship_ids=written_ids,
         )
     except Exception as exc:
@@ -746,8 +748,7 @@ async def _replace_relationships_bulk(
         await prepare_graph_schema(client)
         await client.execute_query(
             _RELATIONSHIP_BULK_UPSERT_QUERY,
-            rows=native_archive_parameters(rows),
-            edges=edges,
+            **_relationship_bulk_parameters(rows),
             relationship_ids=written_ids,
         )
     return written_ids
@@ -759,6 +760,64 @@ def _relationship_datetime(value: object) -> datetime | None:
     if parsed is not None and isinstance(value, str):
         return ArchiveDatetime.parse(value)
     return parsed
+
+
+def _relationship_bulk_payloads(rows: Sequence[SurrealRecord]) -> dict[str, Any]:
+    """Prepare one indexed batch, preserving last-body-wins duplicate updates."""
+    unique: dict[str, SurrealRecord] = {}
+    for row in rows:
+        uuid = str(row["uuid"])
+        previous = unique.get(uuid)
+        if previous is not None and any(
+            previous.get(key) != row.get(key)
+            for key in ("in", "out", "group_id", "source_id", "target_id")
+        ):
+            raise ValueError("conflicting relationship endpoints in one batch")
+        unique[uuid] = row
+    selected = list(unique.values())
+    fields = (
+        "name",
+        "fact",
+        "fact_embedding",
+        "group_id",
+        "source_id",
+        "target_id",
+        "episodes",
+        "attributes",
+        "created_at",
+        "expired_at",
+        "valid_at",
+        "invalid_at",
+        "operational_derivation_required",
+        "operational_source_binding",
+    )
+    updates = {}
+    for uuid, row in unique.items():
+        update = {key: row.get(key) for key in fields}
+        for key, default in (
+            ("episodes", []),
+            ("attributes", {}),
+            ("operational_derivation_required", False),
+        ):
+            if update[key] is None:
+                update[key] = default
+        updates[uuid] = update
+    return native_archive_parameters({"rows": selected, "updates": updates})
+
+
+def _relationship_bulk_parameters(rows: Sequence[SurrealRecord]) -> dict[str, Any]:
+    payloads = _relationship_bulk_payloads(rows)
+    payloads["edges"] = [
+        {
+            "uuid": row["uuid"],
+            "src": row["in"],
+            "tgt": row["out"],
+            "group_id": row["group_id"],
+            "index": index,
+        }
+        for index, row in enumerate(payloads["rows"])
+    ]
+    return payloads
 
 
 def _relationship_record(

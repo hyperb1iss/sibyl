@@ -31,6 +31,12 @@ class OperationalExperienceCaptureResponse(BaseModel):
     written_relationships: int
     deleted_entities: int
     deleted_relationships: int
+    retired_entities: int = Field(
+        default=0, description="Omitted source-owned entity IDs retained as unavailable"
+    )
+    retired_relationships: int = Field(
+        default=0, description="Omitted source-owned relationships retained as unavailable"
+    )
     entity_ids: list[str] = Field(default_factory=list)
     relationship_ids: list[str] = Field(default_factory=list)
     background_jobs: dict[str, Any] = Field(default_factory=dict)

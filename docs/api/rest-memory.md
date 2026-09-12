@@ -303,25 +303,42 @@ require Member-or-higher role.
 POST /api/memory/experience
 ```
 
-Persists raw operational evidence (an `OperationalExperience` payload) and its deterministic typed
-projections in one replay-safe write. Requires Member-or-higher org role plus `project_contributor`
-on the experience's project; the experience must carry a `project_id`.
+Retains the validated `OperationalExperience` as canonical JSON before publishing its typed graph
+projections. The retained bytes preserve submitted observation strings and reported outcomes; they
+are a serialization of the validated payload, not the original HTTP wire bytes. Requires a
+Member-or-higher org role plus `project_contributor` on the experience's `project_id`.
+
+Publication can resume after interruption. Retained source observations and current authorization
+gate graph reads and deferred writes. Deferred jobs retain the original actor and API-key limits;
+revocation or a newer source prevents an older job from publishing. Reported outcomes do not become
+verified success evidence.
 
 **Request Body:**
 
-| Field              | Type    | Required | Default | Description                                             |
-| ------------------ | ------- | -------- | ------- | ------------------------------------------------------- |
-| `experience`       | object  | Yes      | -       | The `OperationalExperience` payload to persist          |
-| `defer_embeddings` | boolean | No       | true    | Persist lexical records first, queue embedding backfill |
+| Field               | Type    | Required | Default | Description                                             |
+| ------------------- | ------- | -------- | ------- | ------------------------------------------------------- |
+| `experience`        | object  | Yes      | -       | The `OperationalExperience` payload to persist          |
+| `defer_embeddings`  | boolean | No       | true    | Persist lexical records first, queue embedding backfill |
+| `note_distillation` | boolean | No       | true    | Queue operational note distillation                     |
 
 **Response:** `201 Created` with a write receipt: `source_id`, `manifest_id`, `content_hash`,
 `written_entities`, `written_relationships`, `deleted_entities`, `deleted_relationships`,
-`entity_ids`, `relationship_ids`, and `background_jobs` (queued embedding-backfill and
-note-distillation jobs with their job IDs).
+`retired_entities`, `retired_relationships`, `entity_ids`, `relationship_ids`, and `background_jobs`
+(queued embedding-backfill and note-distillation jobs with their job IDs).
 
 Re-submitting a `source_id` bound to another project, or one currently being modified, returns
 `409 Conflict`. Rewriting an existing experience created by someone else requires
 `project_maintainer`.
+
+Source revisions retain omitted projections as unavailable and report their inventory counts in
+`retired_entities` and `retired_relationships`. Owner omission permits later authorized
+regeneration; physical deletion or source reincarnation does not. Existing graph-only history gains
+retained source provenance only through an authorized matching resubmission, never by reconstructing
+missing original evidence.
+
+An optional `Idempotency-Key` binds an exact request retry. Without a key, resubmitting the same
+source after an intervening change is a new update. The raw source and graph use separate stores;
+source checks prevent partial publication from being treated as current evidence.
 
 ### Batch Job Status
 

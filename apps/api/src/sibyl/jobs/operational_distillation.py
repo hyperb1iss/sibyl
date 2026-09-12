@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Any, cast
 
@@ -41,10 +42,25 @@ async def distill_operational_experience_notes(
     created_by: str | None,
     max_tokens: int = 2_048,
     operational_note_distillation_profile: OperationalNoteDistillationProfile | None = None,
+    operational_source: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Distill one current operational capture into deterministic note entities."""
     started_at = time.perf_counter()
     experience = OperationalExperience.model_validate(experience_data)
+    source = None
+    if operational_source is not None:
+        from sibyl.services.operational_capture import OperationalPublicationJob
+        from sibyl_core.services.source_observations import SourceUnavailableError
+
+        binding = OperationalPublicationJob.model_validate_json(json.dumps(operational_source))
+        source = await binding.source()
+        _, retained = await source.current()
+        if retained != experience or source.observation.source.organization_id != group_id:
+            raise SourceUnavailableError
+        projection = await source.projection()
+        if projection.manifest.content_hash != content_hash:
+            raise SourceUnavailableError
+        created_by = source.creator_id
     profile = _resolve_distillation_profile(
         operational_note_distillation_profile,
         experience=experience,
@@ -57,6 +73,7 @@ async def distill_operational_experience_notes(
         source_id=experience.source_id,
         project_id=experience.project_id,
         content_hash=content_hash,
+        retained=source is not None,
     )
     if state != "current":
         return _skipped_result(
@@ -75,7 +92,12 @@ async def distill_operational_experience_notes(
         profile=profile,
     )
     extractor = operational_note_distiller(max_tokens=max_tokens, profile=profile)
-    with llm_budget_context(user_id=created_by, organization_id=group_id):
+    if source is not None:
+        await source.current()
+    with llm_budget_context(
+        user_id=binding.authority.actor_id if source is not None else created_by,
+        organization_id=group_id,
+    ):
         extraction = await extractor.extract_with_usage(prompt)
     notes = extraction.output
     admitted_absence, absence_receipt = admit_observed_operational_absence(
@@ -102,6 +124,7 @@ async def distill_operational_experience_notes(
             source_id=experience.source_id,
             project_id=experience.project_id,
             content_hash=content_hash,
+            retained=source is not None,
         )
         if state != "current":
             return _skipped_result(
@@ -109,27 +132,56 @@ async def distill_operational_experience_notes(
                 group_id=group_id,
                 state=state,
                 started_at=started_at,
+                usage=extraction.usage.model_dump(mode="json"),
             )
-        written_ids = (
-            await runtime.entity_manager.create_direct_bulk(
-                entities,
-                generate_embeddings=True,
+        if source is not None:
+            from sibyl_core.services.operational_notes import publish_operational_notes
+
+            try:
+                entities, bound_receipt = await publish_operational_notes(
+                    runtime.entity_manager,
+                    source,
+                    notes,
+                    provider=extraction.usage.provider,
+                    model=extraction.usage.model,
+                    profile=profile,
+                )
+            except SourceUnavailableError:
+                return _skipped_result(
+                    experience=experience,
+                    group_id=group_id,
+                    state="source_unavailable",
+                    started_at=started_at,
+                    usage=extraction.usage.model_dump(mode="json"),
+                )
+            except BaseException as exc:
+                exc.__dict__["extraction_usage"] = extraction.usage
+                raise
+            written_ids = [entity.id for entity in entities]
+            retired_ids = bound_receipt["retired_note_ids"]
+            deleted_ids = []
+            render_receipt = bound_receipt["render"]
+        else:
+            written_ids = (
+                await runtime.entity_manager.create_direct_bulk(
+                    entities,
+                    generate_embeddings=True,
+                )
+                if entities
+                else []
             )
-            if entities
-            else []
-        )
-        expected_ids = {entity.id for entity in entities}
-        if set(written_ids) != expected_ids:
-            raise RuntimeError("failed to persist every distilled operational note")
-        emitted_kinds = {str(entity.metadata["note_kind"]) for entity in entities}
-        note_kinds = _RENDER_V1_NOTE_KINDS if profile == "render_v1" else _NOTE_KINDS
-        stale_ids = [
-            operational_distilled_note_id(experience.source_id, note_kind)
-            for note_kind in sorted(note_kinds - emitted_kinds)
-        ]
-        deleted_ids = [
-            note_id for note_id in stale_ids if await runtime.entity_manager.delete(note_id)
-        ]
+            expected_ids = {entity.id for entity in entities}
+            if set(written_ids) != expected_ids:
+                raise RuntimeError("failed to persist every distilled operational note")
+            emitted_kinds = {str(entity.metadata["note_kind"]) for entity in entities}
+            note_kinds = _RENDER_V1_NOTE_KINDS if profile == "render_v1" else _NOTE_KINDS
+            stale_ids = [
+                operational_distilled_note_id(experience.source_id, note_kind)
+                for note_kind in sorted(note_kinds - emitted_kinds)
+            ]
+            deleted_ids = [
+                note_id for note_id in stale_ids if await runtime.entity_manager.delete(note_id)
+            ]
 
     result = {
         "group_id": group_id,
@@ -138,6 +190,7 @@ async def distill_operational_experience_notes(
         "status": "complete",
         "written_note_ids": sorted(written_ids),
         "deleted_note_ids": deleted_ids,
+        "retired_note_ids": retired_ids if source is not None else [],
         "provider": extraction.usage.provider,
         "model": extraction.usage.model,
         "requests": extraction.usage.requests,
@@ -179,11 +232,14 @@ async def _manifest_state(
     source_id: str,
     project_id: str | None,
     content_hash: str,
+    retained: bool = False,
 ) -> str:
     try:
         manifest = await entity_manager.get(manifest_id)
     except KeyError:
         return "missing"
+    if manifest.derivation_required and not retained:
+        return "authority_required"
     metadata = manifest.metadata
     if (
         metadata.get("operational_source_id") != source_id
@@ -206,6 +262,7 @@ def _skipped_result(
     group_id: str,
     state: str,
     started_at: float,
+    usage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     result = {
         "group_id": group_id,
@@ -216,6 +273,8 @@ def _skipped_result(
         "deleted_note_ids": [],
         "duration_ms": elapsed_ms(started_at),
     }
+    if usage is not None:
+        result["extraction_usage"] = usage
     log.info("operational_note_distillation_skipped", **result)
     return result
 

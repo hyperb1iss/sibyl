@@ -172,12 +172,14 @@ async def enqueue_operational_note_distillation(
     content_hash: str,
     created_by: str | None,
     max_tokens: int = 2_048,
+    operational_source: dict[str, Any] | None = None,
 ) -> str:
     """Enqueue distilled-note generation for an operational capture."""
     return await get_queue().enqueue_operational_note_distillation(
         experience_data,
         group_id,
         content_hash=content_hash,
+        **({"operational_source": operational_source} if operational_source is not None else {}),
         created_by=created_by,
         max_tokens=max_tokens,
     )
@@ -189,6 +191,7 @@ async def enqueue_entity_embedding_backfill(
     *,
     relationships: list[dict[str, Any]] | None = None,
     completion_manifest: dict[str, Any] | None = None,
+    operational_source: dict[str, Any] | None = None,
 ) -> str:
     """Enqueue embedding backfill for lexically-created graph records."""
     return await get_queue().enqueue_entity_embedding_backfill(
@@ -196,6 +199,7 @@ async def enqueue_entity_embedding_backfill(
         group_id,
         relationships=relationships,
         completion_manifest=completion_manifest,
+        **({"operational_source": operational_source} if operational_source is not None else {}),
     )
 
 

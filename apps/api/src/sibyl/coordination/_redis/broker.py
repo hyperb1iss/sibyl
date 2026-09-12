@@ -331,12 +331,16 @@ class RedisQueueBroker:
         content_hash: str,
         created_by: str | None,
         max_tokens: int = 2_048,
+        operational_source: dict[str, Any] | None = None,
     ) -> str:
         """Enqueue LLM distillation for one operational experience."""
         job_id = operational_note_distillation_job_id(
             experience_data,
             group_id,
             content_hash=content_hash,
+            **(
+                {"operational_source": operational_source} if operational_source is not None else {}
+            ),
         )
         result = await self._enqueue_unique(
             "distill_operational_experience_notes",
@@ -344,6 +348,9 @@ class RedisQueueBroker:
             group_id,
             job_id=job_id,
             content_hash=content_hash,
+            **(
+                {"operational_source": operational_source} if operational_source is not None else {}
+            ),
             created_by=created_by,
             max_tokens=max_tokens,
         )
@@ -364,6 +371,7 @@ class RedisQueueBroker:
         *,
         relationships: list[dict[str, Any]] | None = None,
         completion_manifest: dict[str, Any] | None = None,
+        operational_source: dict[str, Any] | None = None,
     ) -> str:
         """Enqueue embedding backfill for lexically-created graph records."""
         job_id = entity_embedding_job_id(
@@ -371,8 +379,13 @@ class RedisQueueBroker:
             group_id,
             relationships=relationships,
             completion_manifest=completion_manifest,
+            **(
+                {"operational_source": operational_source} if operational_source is not None else {}
+            ),
         )
         job_kwargs: dict[str, Any] = {"relationships": relationships}
+        if operational_source is not None:
+            job_kwargs["operational_source"] = operational_source
         if completion_manifest is not None:
             job_kwargs["completion_manifest"] = completion_manifest
         result = await self._enqueue_unique(

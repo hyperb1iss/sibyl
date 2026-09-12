@@ -40,6 +40,8 @@ _EMBEDDING_BACKFILL_RETRY_BASE_SECONDS = 0.25
 def _operational_manifest_state(current: Any, expected: Any) -> str:
     if current is None:
         return "missing"
+    if current.derivation_required:
+        return "stale"
     current_metadata = current.metadata
     expected_metadata = expected.metadata
     identity_keys = (
@@ -942,133 +944,152 @@ async def backfill_entity_embeddings(
     *,
     relationships: list[dict[str, Any]] | None = None,
     completion_manifest: dict[str, Any] | None = None,
+    operational_source: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Generate native graph embeddings after a lexical-first write."""
-    from sibyl_core.models.entities import Entity, Relationship
-
     embedding_provider = configured_embedding_provider()
     with capture_embedding_usage(embedding_provider) as embedding_usage:
         runtime = await get_surreal_graph_runtime(
             group_id,
             embedding_provider=embedding_provider,
         )
-        expected_manifest = (
-            Entity.model_validate(completion_manifest) if completion_manifest else None
+        if operational_source is not None:
+            return await _backfill_operational_embeddings(
+                runtime,
+                entities_data,
+                group_id,
+                binding=operational_source,
+                relationships=relationships,
+                completion_manifest=completion_manifest,
+                embedding_usage=embedding_usage,
+            )
+        return await _backfill_unbound_embeddings(
+            runtime,
+            entities_data,
+            group_id,
+            relationships=relationships,
+            completion_manifest=completion_manifest,
+            embedding_usage=embedding_usage,
         )
+
+
+async def _backfill_unbound_embeddings(
+    runtime, entities_data, group_id, *, relationships, completion_manifest, embedding_usage
+):
+    from sibyl_core.models.entities import Entity, Relationship
+
+    expected_manifest = Entity.model_validate(completion_manifest) if completion_manifest else None
+    if expected_manifest is not None:
+        manifest_state = await _load_operational_manifest_state(
+            runtime.entity_manager,
+            expected_manifest,
+        )
+        if manifest_state == "missing":
+            raise RuntimeError("operational embedding manifest is missing")
+        if manifest_state == "complete":
+            manifest_state = await runtime.entity_manager.complete_embedding_manifest(
+                expected_manifest, complete=False
+            )
+        if manifest_state in {"complete", "stale"}:
+            return {
+                "entities": 0,
+                "relationships": 0,
+                "entity_ids": [],
+                "relationship_ids": [],
+                "embedding_usage": embedding_usage,
+                "manifest_state": manifest_state,
+            }
+    entities = [Entity.model_validate(entity_data) for entity_data in entities_data]
+    created_ids = await _retry_surreal_write_conflict(
+        "entity_embedding_backfill_entities",
+        lambda: runtime.entity_manager.backfill_embeddings_if_current(entities),
+    )
+    expected_entity_ids = {entity.id for entity in entities}
+    stale_entity_ids: list[str] = []
+    if set(created_ids) != expected_entity_ids:
         if expected_manifest is not None:
             manifest_state = await _load_operational_manifest_state(
                 runtime.entity_manager,
                 expected_manifest,
             )
-            if manifest_state == "missing":
-                raise RuntimeError("operational embedding manifest is missing")
             if manifest_state == "complete":
                 manifest_state = await runtime.entity_manager.complete_embedding_manifest(
                     expected_manifest, complete=False
                 )
             if manifest_state in {"complete", "stale"}:
                 return {
-                    "entities": 0,
+                    "entities": len(created_ids),
                     "relationships": 0,
-                    "entity_ids": [],
+                    "entity_ids": list(created_ids),
                     "relationship_ids": [],
                     "embedding_usage": embedding_usage,
                     "manifest_state": manifest_state,
                 }
-        entities = [Entity.model_validate(entity_data) for entity_data in entities_data]
-        created_ids = await _retry_surreal_write_conflict(
-            "entity_embedding_backfill_entities",
-            lambda: runtime.entity_manager.backfill_embeddings_if_current(entities),
+        missing_ids = sorted(expected_entity_ids - set(created_ids))
+        present = await runtime.entity_manager.get_many(missing_ids)
+        present_ids = {entity.id for entity in present}
+        stale_entity_ids = [entity_id for entity_id in missing_ids if entity_id in present_ids]
+        absent_ids = [entity_id for entity_id in missing_ids if entity_id not in present_ids]
+        if absent_ids:
+            raise RuntimeError(
+                "partial entity embedding backfill; "
+                f"missing current entities: {', '.join(absent_ids)}"
+            )
+        log.warning(
+            "entity_embedding_backfill_stale_expectations",
+            entity_ids=stale_entity_ids,
+            group_id=group_id,
         )
-        expected_entity_ids = {entity.id for entity in entities}
-        stale_entity_ids: list[str] = []
-        if set(created_ids) != expected_entity_ids:
-            if expected_manifest is not None:
-                manifest_state = await _load_operational_manifest_state(
-                    runtime.entity_manager,
-                    expected_manifest,
-                )
-                if manifest_state == "complete":
-                    manifest_state = await runtime.entity_manager.complete_embedding_manifest(
-                        expected_manifest, complete=False
-                    )
-                if manifest_state in {"complete", "stale"}:
-                    return {
-                        "entities": len(created_ids),
-                        "relationships": 0,
-                        "entity_ids": list(created_ids),
-                        "relationship_ids": [],
-                        "embedding_usage": embedding_usage,
-                        "manifest_state": manifest_state,
-                    }
-            missing_ids = sorted(expected_entity_ids - set(created_ids))
-            present = await runtime.entity_manager.get_many(missing_ids)
-            present_ids = {entity.id for entity in present}
-            stale_entity_ids = [entity_id for entity_id in missing_ids if entity_id in present_ids]
-            absent_ids = [entity_id for entity_id in missing_ids if entity_id not in present_ids]
-            if absent_ids:
-                raise RuntimeError(
-                    "partial entity embedding backfill; "
-                    f"missing current entities: {', '.join(absent_ids)}"
-                )
-            log.warning(
-                "entity_embedding_backfill_stale_expectations",
-                entity_ids=stale_entity_ids,
-                group_id=group_id,
-            )
-            # Reconcile current evidence through the same text-fenced writer.
-            # A second change leaves the manifest incomplete for a later drain.
-            refreshed_ids = await _retry_surreal_write_conflict(
-                "entity_embedding_backfill_current_entities",
-                lambda: runtime.entity_manager.backfill_embeddings_if_current(present),
-            )
-            created_ids = list(dict.fromkeys([*created_ids, *refreshed_ids]))
-            if expected_entity_ids - set(created_ids):
-                raise RuntimeError("entity embedding evidence changed during reconciliation")
+        # Reconcile current evidence through the same text-fenced writer.
+        # A second change leaves the manifest incomplete for a later drain.
+        refreshed_ids = await _retry_surreal_write_conflict(
+            "entity_embedding_backfill_current_entities",
+            lambda: runtime.entity_manager.backfill_embeddings_if_current(present),
+        )
+        created_ids = list(dict.fromkeys([*created_ids, *refreshed_ids]))
+        if expected_entity_ids - set(created_ids):
+            raise RuntimeError("entity embedding evidence changed during reconciliation")
 
-        relationship_ids: list[str] = []
-        if relationships:
-            relationship_models = [
-                Relationship.model_validate(relationship_data)
-                for relationship_data in relationships
+    relationship_ids: list[str] = []
+    if relationships:
+        relationship_models = [
+            Relationship.model_validate(relationship_data) for relationship_data in relationships
+        ]
+        create_direct_bulk = getattr(runtime.relationship_manager, "create_direct_bulk", None)
+        if callable(create_direct_bulk):
+            relationship_ids = list(
+                await _retry_surreal_write_conflict(
+                    "entity_embedding_backfill_relationships",
+                    lambda: create_direct_bulk(
+                        relationship_models,
+                        generate_embeddings=True,
+                    ),
+                )
+            )
+        else:
+            relationship_ids = [
+                await runtime.relationship_manager.create(relationship)
+                for relationship in relationship_models
             ]
-            create_direct_bulk = getattr(runtime.relationship_manager, "create_direct_bulk", None)
-            if callable(create_direct_bulk):
-                relationship_ids = list(
-                    await _retry_surreal_write_conflict(
-                        "entity_embedding_backfill_relationships",
-                        lambda: create_direct_bulk(
-                            relationship_models,
-                            generate_embeddings=True,
-                        ),
-                    )
-                )
-            else:
-                relationship_ids = [
-                    await runtime.relationship_manager.create(relationship)
-                    for relationship in relationship_models
-                ]
-            expected_relationship_ids = {relationship.id for relationship in relationship_models}
-            if set(relationship_ids) != expected_relationship_ids:
-                missing_ids = sorted(expected_relationship_ids - set(relationship_ids))
-                raise RuntimeError(
-                    "partial relationship embedding backfill; "
-                    f"missing current relationships: {', '.join(missing_ids)}"
-                )
-
-        manifest_state = None
-        if expected_manifest is not None:
-            manifest_state = await _complete_operational_manifest(
-                runtime.entity_manager,
-                expected_manifest,
-                group_id=group_id,
+        expected_relationship_ids = {relationship.id for relationship in relationship_models}
+        if set(relationship_ids) != expected_relationship_ids:
+            missing_ids = sorted(expected_relationship_ids - set(relationship_ids))
+            raise RuntimeError(
+                "partial relationship embedding backfill; "
+                f"missing current relationships: {', '.join(missing_ids)}"
             )
-            if manifest_state == "missing":
-                raise RuntimeError("operational embedding manifest disappeared")
-            if manifest_state == "incomplete":
-                raise RuntimeError(
-                    "operational embedding manifest has incomplete current embeddings"
-                )
+
+    manifest_state = None
+    if expected_manifest is not None:
+        manifest_state = await _complete_operational_manifest(
+            runtime.entity_manager,
+            expected_manifest,
+            group_id=group_id,
+        )
+        if manifest_state == "missing":
+            raise RuntimeError("operational embedding manifest disappeared")
+        if manifest_state == "incomplete":
+            raise RuntimeError("operational embedding manifest has incomplete current embeddings")
 
     result = {
         "entities": len(created_ids),
@@ -1597,3 +1618,82 @@ async def update_entity(
             error=str(e),
         )
         raise
+
+
+async def _backfill_operational_embeddings(
+    runtime,
+    entities_data,
+    group_id,
+    *,
+    binding,
+    relationships,
+    completion_manifest,
+    embedding_usage,
+):
+    import json
+
+    from sibyl.services.operational_capture import OperationalPublicationJob
+    from sibyl_core.models.entities import EntityType
+    from sibyl_core.projection.experience import operational_experience_manifest_with_state
+    from sibyl_core.services.source_observations import SourceUnavailableError
+
+    result = {
+        "entities": 0,
+        "relationships": 0,
+        "entity_ids": [],
+        "relationship_ids": [],
+        "embedding_usage": embedding_usage,
+    }
+    try:
+        job = OperationalPublicationJob.model_validate_json(json.dumps(binding, allow_nan=False))
+        source = await job.source()
+        if source.observation.source.organization_id != group_id or relationships:
+            raise SourceUnavailableError
+        projection = await source.projection()
+        expected = [
+            entity
+            for entity in projection.entities
+            if entity.entity_type is not EntityType.ARTIFACT
+        ]
+        from sibyl_core.models.entities import Entity
+
+        queued_entities = [Entity.model_validate(item) for item in entities_data]
+        bookkeeping = {"created_at", "updated_at"}
+        if [entity.model_dump(mode="json", exclude=bookkeeping) for entity in queued_entities] != [
+            entity.model_dump(mode="json", exclude=bookkeeping) for entity in expected
+        ]:
+            raise SourceUnavailableError
+        manifest = operational_experience_manifest_with_state(projection, "complete")
+        if completion_manifest != manifest.model_dump(mode="json"):
+            # Entity model timestamps are projection bookkeeping; the retained
+            # source and semantic manifest identity are checked independently.
+            queued = Entity.model_validate(completion_manifest)
+            if (
+                queued.id != manifest.id
+                or queued.metadata != manifest.metadata
+                or queued.content != manifest.content
+                or queued.created_by != manifest.created_by
+            ):
+                raise SourceUnavailableError
+        ids = await runtime.entity_manager.backfill_embeddings_if_current(
+            expected,
+            operational_source=source,
+        )
+        result.update(entities=len(ids), entity_ids=ids)
+        if set(ids) != {entity.id for entity in expected}:
+            raise SourceUnavailableError
+        relationship_ids = await runtime.relationship_manager.publish_operational_relationships(
+            source, generate_embeddings=True
+        )
+        result.update(relationships=len(relationship_ids), relationship_ids=relationship_ids)
+        if set(relationship_ids) != set(projection.manifest.relationship_ids):
+            raise SourceUnavailableError
+        result["manifest_state"] = await runtime.entity_manager.publish_operational_manifest(
+            source,
+            embedding_pending=False,
+        )
+        if result["manifest_state"] not in {"completed", "complete"}:
+            raise SourceUnavailableError
+    except SourceUnavailableError:
+        result["manifest_state"] = "stale"
+    return result

@@ -18,7 +18,7 @@ from sibyl_core.backends.surreal.schema_helpers import (
 if TYPE_CHECKING:
     from sibyl_core.backends.surreal.schema_ownership import SchemaOwnership
 
-GRAPH_SCHEMA_CURRENT_VERSION = 28
+GRAPH_SCHEMA_CURRENT_VERSION = 29
 GRAPH_SCHEMA_NAME = "graph"
 SCHEMA_VERSION_TABLE = "schema_version"
 
