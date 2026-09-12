@@ -246,6 +246,7 @@ async def test_ordinary_cohort_does_not_hide_source_sensitivity(cohort_runtime, 
 
 async def test_ordinary_cohort_correction_recheck_and_publication(cohort_runtime, monkeypatch):
     from sibyl_core.services.reflection_validation import prepare_stored_reflection
+    from sibyl_core.tasks.memory_progress import ProgressCriticOutput
     from sibyl_core.tasks.ordinary_proposals import QUALIFICATION
     from sibyl_core.tasks.procedure_review import ReviewSubmission, review_digest
 
@@ -257,7 +258,7 @@ async def test_ordinary_cohort_correction_recheck_and_publication(cohort_runtime
     submission = None
     corrected_text = None
 
-    async def factory():
+    async def factory(output_type=CriticOutput):
         nonlocal count, submission, corrected_text
         count += 1
         if count <= 2:
@@ -308,13 +309,26 @@ async def test_ordinary_cohort_correction_recheck_and_publication(cohort_runtime
             }
         else:
             assert count == 5
-            output = {"findings": []}
+            assert output_type is ProgressCriticOutput
+            output = {
+                "findings": [],
+                "prior_assessments": [
+                    {
+                        "finding_id": submission.finding_ids()[0],
+                        "disposition": "resolved",
+                        "supported_reduction": "The claim now requires checking the recorded logs.",
+                        "remaining_concern": None,
+                        "evidence_refs": [{"evidence_id": "s0"}],
+                    }
+                ],
+            }
         return Extractor(
-            CriticOutput,
-            agent=Agent(TestModel(custom_output_args=output), output_type=CriticOutput),
+            output_type,
+            agent=Agent(TestModel(custom_output_args=output), output_type=output_type),
         ), '{"model":"offline"}'
 
     monkeypatch.setattr(procedure_validation, "validation_extractor", factory)
+    monkeypatch.setattr(procedure_validation, "_validation_extractor", factory)
     receipt = await reflection.run_reflection_dream_cycle({}, str(org.id))
     assert receipt["failed"] == 0, receipt
     assert receipt["promoted"] == 1, receipt
@@ -325,7 +339,7 @@ async def test_ordinary_cohort_correction_recheck_and_publication(cohort_runtime
     rows = await client.execute_query(
         "SELECT * FROM raw_captures WHERE capture_surface='reflection_candidate';"
     )
-    assert {r["review_state"] for r in rows} == {"promoted", "archived"}
+    assert {r["review_state"] for r in rows} == {"promoted", "pending"}
     child = next(r for r in rows if r["review_state"] == "promoted")
     assert child["raw_content"] == corrected_text
     assert QUALIFICATION in child["raw_content"]
