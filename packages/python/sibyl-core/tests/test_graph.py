@@ -3700,7 +3700,7 @@ async def test_native_relationship_bulk_writes_in_one_surreal_query() -> None:
     assert created_ids == [relationship.id for relationship in relationships]
 
     write_calls = [
-        call for call in client.calls if "INSERT RELATION INTO relates_to $rows" in call[0]
+        call for call in client.calls if "INSERT RELATION INTO relates_to $inserts" in call[0]
     ]
     endpoint_lookups = [
         call for call in client.calls if "AS record_id" in call[0] and "FROM entity" in call[0]
@@ -3716,13 +3716,14 @@ async def test_native_relationship_bulk_writes_in_one_surreal_query() -> None:
     write_query, write_params = write_calls[0]
     # The endpoint-move cleanup iterates the batch through the unique index
     # instead of scanning the table with an IN-list DELETE.
-    assert "FOR $edge IN $edges" in write_query
+    assert "$edges.map" in write_query
+    assert "WHERE uuid=$edge.uuid LIMIT 1" in write_query
+    assert (
+        "$entry.stored.in = $entry.edge.src AND $entry.stored.out = $entry.edge.tgt" in write_query
+    )
     assert "DELETE FROM relates_to" not in write_query
     rows = cast("list[dict[str, object]]", write_params["rows"])
     assert len(rows) == len(relationships)
-    edges = cast("list[dict[str, object]]", write_params["edges"])
-    assert [edge["uuid"] for edge in edges] == [relationship.id for relationship in relationships]
-    assert all(edge["src"] is not None and edge["tgt"] is not None for edge in edges)
     assert all(row["group_id"] == client.group_id for row in rows)
     assert all("in" in row and "out" in row for row in rows)
     assert {str(row["uuid"]) for row in rows} == {relationship.id for relationship in relationships}

@@ -3,9 +3,15 @@
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from sibyl.api.errors import entity_locked
+from sibyl.api.idempotency import (
+    replay_idempotent_response,
+    save_idempotent_response,
+    serialize_idempotent_request,
+)
+from sibyl.api.routes.memory_auth import REQUEST_AUTO_INJECT_SENTINEL
 from sibyl.api.schemas import (
     OperationalExperienceCaptureRequest,
     OperationalExperienceCaptureResponse,
@@ -15,6 +21,11 @@ from sibyl.auth.context import AuthContext
 from sibyl.auth.dependencies import get_auth_context, get_current_organization, require_org_role
 from sibyl.config import settings
 from sibyl.locks import LockAcquisitionError, entity_lock
+from sibyl.services.operational_authority import OperationalWriteAuthority
+from sibyl.services.operational_capture import (
+    OperationalPublicationJob,
+    retain_operational_experience,
+)
 from sibyl_core.auth import AuthOrganization, OrganizationRole, ProjectRole
 from sibyl_core.models.entities import EntityType
 from sibyl_core.projection import (
@@ -23,6 +34,7 @@ from sibyl_core.projection import (
     operational_experience_manifest_with_state,
     persist_operational_experience,
 )
+from sibyl_core.services.source_observations import SourceUnavailableError
 
 log = structlog.get_logger()
 _WRITE_ROLES = (
@@ -44,13 +56,26 @@ async def get_experience_graph_runtime(group_id: str):
     return await get_entity_graph_runtime(group_id)
 
 
+async def _current_publication_authority(ctx, project_id, group_id, manifest):
+    authority = OperationalWriteAuthority.from_context(ctx, project_id)
+    if authority.organization_id != group_id:
+        raise SourceUnavailableError
+    creator = (
+        manifest.created_by if manifest is not None and manifest.created_by else authority.actor_id
+    )
+    await authority.current(creator_id=creator)
+    return authority
+
+
 @router.post(
     "/experience",
     response_model=OperationalExperienceCaptureResponse,
     status_code=201,
 )
+@serialize_idempotent_request
 async def capture_operational_experience(
     payload: OperationalExperienceCaptureRequest,
+    http_request: Request = REQUEST_AUTO_INJECT_SENTINEL,
     org: AuthOrganization = Depends(get_current_organization),
     ctx: AuthContext = Depends(get_auth_context),
 ) -> OperationalExperienceCaptureResponse:
@@ -96,15 +121,41 @@ async def capture_operational_experience(
                         require_existing_project=True,
                     )
             try:
+                authority = await _current_publication_authority(
+                    ctx, experience.project_id, group_id, existing_manifest
+                )
+                replayed = await replay_idempotent_response(
+                    http_request,
+                    organization_id=org.id,
+                    principal_id=authority.actor_id,
+                    method="POST",
+                    path="/memory/experience",
+                    payload={"body": payload.model_dump(mode="json")},
+                    response_model=OperationalExperienceCaptureResponse,
+                    content_session=None,
+                )
+                if replayed is not None:
+                    return replayed
+                source = await retain_operational_experience(
+                    experience, authority, existing_manifest=existing_manifest
+                )
+                job_binding = OperationalPublicationJob(
+                    observation=source.observation, authority=authority
+                ).model_dump(mode="json")
                 result = await persist_operational_experience(
                     entity_manager=runtime.entity_manager,
                     relationship_manager=runtime.relationship_manager,
                     experience=experience,
                     organization_id=group_id,
-                    created_by=ctx.user_id,
+                    created_by=source.creator_id,
+                    source=source,
                     generate_embeddings=not payload.defer_embeddings,
                     commit_manifest=not payload.defer_embeddings,
                 )
+            except SourceUnavailableError as exc:
+                raise HTTPException(
+                    status_code=403, detail="Operational source or write authority is unavailable"
+                ) from exc
             except ValueError as exc:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -126,6 +177,7 @@ async def capture_operational_experience(
                     job_id = await enqueue_entity_embedding_backfill(
                         [entity.model_dump(mode="json") for entity in embeddable],
                         group_id,
+                        operational_source=job_binding,
                         completion_manifest=operational_experience_manifest_with_state(
                             result.projection,
                             MANIFEST_STATE_COMPLETE,
@@ -162,6 +214,7 @@ async def capture_operational_experience(
                         experience.model_dump(mode="json"),
                         group_id,
                         content_hash=result.projection.manifest.content_hash,
+                        operational_source=job_binding,
                         created_by=ctx.user_id,
                         max_tokens=settings.operational_note_distillation_max_tokens,
                     )
@@ -186,7 +239,7 @@ async def capture_operational_experience(
     except LockAcquisitionError as exc:
         raise entity_locked() from exc
 
-    return OperationalExperienceCaptureResponse(
+    response = OperationalExperienceCaptureResponse(
         source_id=experience.source_id,
         manifest_id=result.projection.manifest.manifest_entity_id,
         content_hash=result.projection.manifest.content_hash,
@@ -194,7 +247,22 @@ async def capture_operational_experience(
         written_relationships=len(result.written_relationship_ids),
         deleted_entities=len(result.deleted_entity_ids),
         deleted_relationships=len(result.deleted_relationship_ids),
+        retired_entities=len(result.retired_entity_ids),
+        retired_relationships=len(result.retired_relationship_ids),
         entity_ids=list(result.projection.manifest.entity_ids),
         relationship_ids=list(result.projection.manifest.relationship_ids),
         background_jobs=background_jobs,
     )
+
+    await save_idempotent_response(
+        http_request,
+        organization_id=org.id,
+        principal_id=authority.actor_id,
+        method="POST",
+        path="/memory/experience",
+        payload={"body": payload.model_dump(mode="json")},
+        response=response,
+        status_code=201,
+        content_session=None,
+    )
+    return response

@@ -42,6 +42,28 @@ def queue_note_distillation(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     return enqueue
 
 
+@pytest.fixture(autouse=True)
+def _retained_service_boundary(monkeypatch):
+    """These routing controls inject the retained service; native tests execute it."""
+
+    async def authority(ctx, project_id, group_id, manifest):
+        return SimpleNamespace(actor_id=ctx.user_id)
+
+    async def retain(experience, authority, *, existing_manifest):
+        return SimpleNamespace(
+            creator_id=existing_manifest.created_by if existing_manifest else authority.actor_id,
+            observation="retained",
+        )
+
+    monkeypatch.setattr(experience_routes, "_current_publication_authority", authority)
+    monkeypatch.setattr(experience_routes, "retain_operational_experience", retain)
+    monkeypatch.setattr(
+        experience_routes,
+        "OperationalPublicationJob",
+        lambda **_: SimpleNamespace(model_dump=lambda **_: {"retained": True}),
+    )
+
+
 def _runtime(existing_manifest: object | None = None) -> SimpleNamespace:
     get = (
         AsyncMock(return_value=existing_manifest)
@@ -110,6 +132,8 @@ async def test_capture_persists_authorized_experience_and_queues_embeddings(
         written_relationship_ids=projection.manifest.relationship_ids,
         deleted_entity_ids=("session-old",),
         deleted_relationship_ids=("rel-old",),
+        retired_entity_ids=(),
+        retired_relationship_ids=(),
         embedding_backfill_required=True,
     )
     runtime = _runtime()
@@ -185,6 +209,8 @@ async def test_capture_can_disable_provider_backed_note_distillation(
         written_relationship_ids=projection.manifest.relationship_ids,
         deleted_entity_ids=(),
         deleted_relationship_ids=(),
+        retired_entity_ids=(),
+        retired_relationship_ids=(),
         embedding_backfill_required=False,
     )
 
@@ -224,6 +250,8 @@ async def test_capture_can_embed_synchronously_without_background_job() -> None:
         written_relationship_ids=projection.manifest.relationship_ids,
         deleted_entity_ids=(),
         deleted_relationship_ids=(),
+        retired_entity_ids=(),
+        retired_relationship_ids=(),
         embedding_backfill_required=False,
     )
 
@@ -268,6 +296,8 @@ async def test_capture_unchanged_replay_does_not_requeue_embeddings() -> None:
         written_relationship_ids=(),
         deleted_entity_ids=(),
         deleted_relationship_ids=(),
+        retired_entity_ids=(),
+        retired_relationship_ids=(),
         embedding_backfill_required=False,
     )
 
@@ -312,6 +342,8 @@ async def test_capture_reuses_pending_projection_and_resumes_embedding_job() -> 
         written_relationship_ids=(),
         deleted_entity_ids=(),
         deleted_relationship_ids=(),
+        retired_entity_ids=(),
+        retired_relationship_ids=(),
         embedding_backfill_required=True,
     )
     runtime = _runtime()
@@ -376,6 +408,8 @@ async def test_capture_requires_maintainer_to_replace_another_authors_source() -
         written_relationship_ids=(),
         deleted_entity_ids=(),
         deleted_relationship_ids=(),
+        retired_entity_ids=(),
+        retired_relationship_ids=(),
         embedding_backfill_required=False,
     )
 
@@ -444,6 +478,8 @@ async def test_capture_reports_degraded_embedding_enqueue() -> None:
         written_relationship_ids=projection.manifest.relationship_ids,
         deleted_entity_ids=(),
         deleted_relationship_ids=(),
+        retired_entity_ids=(),
+        retired_relationship_ids=(),
         embedding_backfill_required=True,
     )
 
@@ -488,6 +524,8 @@ async def test_capture_delegates_manifest_completion_to_embedding_job() -> None:
         written_relationship_ids=projection.manifest.relationship_ids,
         deleted_entity_ids=(),
         deleted_relationship_ids=(),
+        retired_entity_ids=(),
+        retired_relationship_ids=(),
         embedding_backfill_required=True,
     )
     runtime = _runtime()

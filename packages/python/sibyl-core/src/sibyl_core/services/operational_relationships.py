@@ -9,7 +9,7 @@ from sibyl_core.backends.surreal.records import normalize_records
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.embeddings.providers import EmbeddingProvider
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind, evidence_hash
-from sibyl_core.migrate.source_integrity import encode_record, native_archive_parameters
+from sibyl_core.migrate.source_integrity import encode_record
 from sibyl_core.runtime_ports import RuntimePortUnavailable, get_source_authority_resolver
 from sibyl_core.services.graph_derivations import graph_association_current, graph_target_digest
 from sibyl_core.services.memory_derivations import observation_from_record, validate_observations
@@ -33,6 +33,8 @@ LET $states = SELECT * OMIT validation_write_witness FROM source_states
     WHERE organization_id=$org AND source_kind='graph_entity' AND source_id IN $ids ORDER BY source_id;
 LET $relationships = SELECT *, in.uuid AS source_uuid, out.uuid AS target_uuid FROM relates_to
     WHERE group_id=$org AND uuid IN $relationship_ids ORDER BY uuid;
+LET $relationship_evidence = SELECT * OMIT attributes.operational_write_witness FROM $relationships;
+LET $operational_snapshot_fingerprint = crypto::sha256(type::string([$targets,$associations,$states,$relationship_evidence]));
 """
 
 _ENDPOINT_WRITE_WITNESS = (
@@ -109,7 +111,7 @@ async def _snapshot(client, *, organization_id, ids, relationship_ids):
             + """
         RETURN {targets:$targets, associations:$associations, states:$states,
             relationships:$relationships,
-            fingerprint:crypto::sha256(type::string([$targets,$associations,$states,$relationships]))};
+            fingerprint:$operational_snapshot_fingerprint};
         };""",
             org=organization_id,
             ids=sorted(ids),
@@ -128,10 +130,12 @@ async def publish_operational_relationships(
     group_id: str,
     embedding_provider: EmbeddingProvider | None = None,
     embedding_batch_size: int = 64,
+    retired_ids: tuple[str, ...] = (),
 ) -> list[str]:
     """Write only the recomputed deterministic inventory and protected binding."""
     from sibyl_core.services.graph_relationships import (
         _RELATIONSHIP_BULK_UPSERT_STATEMENTS,
+        _relationship_bulk_parameters,
         _relationship_record,
     )
 
@@ -139,13 +143,34 @@ async def publish_operational_relationships(
         raise SourceUnavailableError()
     projection = await source.projection()
     relationships = projection.relationships
-    if not relationships:
+    if not relationships and not retired_ids:
         return []
     ids = {endpoint for row in relationships for endpoint in (row.source_id, row.target_id)}
     relationship_ids = [row.id for row in relationships]
+    if set(retired_ids).intersection(relationship_ids):
+        raise SourceUnavailableError()
+    captured_relationship_ids = sorted(set(relationship_ids).union(retired_ids))
     snapshot = await _snapshot(
-        client, organization_id=group_id, ids=ids, relationship_ids=relationship_ids
+        client, organization_id=group_id, ids=ids, relationship_ids=captured_relationship_ids
     )
+    retirements = []
+    for old in snapshot["relationships"]:
+        if old["uuid"] not in retired_ids:
+            continue
+        binding = old.get("operational_source_binding")
+        if old.get("operational_derivation_required") is not True or not isinstance(binding, dict):
+            raise SourceUnavailableError()
+        previous = observation_from_record(binding.get("source"))
+        if (
+            old.get("group_id") != group_id
+            or binding.get("body_sha256") != relationship_body_digest(old)
+            or previous.source != source.observation.source
+            or previous.effective_incarnation != source.observation.effective_incarnation
+            or previous.generation > source.observation.generation
+        ):
+            raise SourceUnavailableError()
+        if old.get("invalid_at") is None and old.get("expired_at") is None:
+            retirements.append(old["uuid"])
     targets = {r["uuid"]: r for r in snapshot["targets"]}
     associations = {r["target_id"]: r for r in snapshot["associations"]}
     states = {r["source_id"]: r for r in snapshot["states"]}
@@ -260,19 +285,19 @@ async def publish_operational_relationships(
         "RETURN {"
         + _SNAPSHOT
         + """
-        IF crypto::sha256(type::string([$targets,$associations,$states,$relationships])) != $fingerprint {
+        IF $operational_snapshot_fingerprint != $fingerprint {
             THROW 'operational relationship source changed before publication';
         };
         """
         + _ENDPOINT_WRITE_WITNESS
         + _RELATIONSHIP_BULK_UPSERT_STATEMENTS
-        + "RETURN true; };",
+        + "UPDATE relates_to SET invalid_at=time::now(),expired_at=time::now() WHERE group_id=$org AND uuid IN $retirements; RETURN true; };",
         org=group_id,
         ids=sorted(ids),
-        relationship_ids=sorted(relationship_ids),
+        relationship_ids=captured_relationship_ids,
+        retirements=retirements,
         fingerprint=snapshot["fingerprint"],
-        rows=native_archive_parameters(rows),
-        edges=[{"uuid": row["uuid"], "src": row["in"], "tgt": row["out"]} for row in rows],
+        **_relationship_bulk_parameters(rows),
     )
     await source.current()
     return relationship_ids

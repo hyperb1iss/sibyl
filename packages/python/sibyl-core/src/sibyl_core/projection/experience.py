@@ -7,7 +7,7 @@ import json
 import unicodedata
 from collections.abc import Iterable, Iterator
 from itertools import pairwise
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from sibyl_core.auth.memory_policy import stamp_memory_scope_metadata
 from sibyl_core.models.entities import Entity, EntityType, Relationship, RelationshipType
@@ -31,6 +31,9 @@ from sibyl_core.projection.slicing import (
     slice_header,
 )
 
+if TYPE_CHECKING:
+    from sibyl_core.services.operational_projection import OperationalProjectionSource
+
 OPERATIONAL_EXPERIENCE_SCHEMA_VERSION = 7
 MAX_TYPED_ENTITY_CONTENT_CHARS = 18_000
 MAX_PASSAGE_DESCRIPTION_CHARS = 500
@@ -47,6 +50,18 @@ type OperationalManifestState = Literal["pending", "embedding_pending", "complet
 
 
 class OperationalEntityManager(Protocol):
+    async def publish_operational_entities(
+        self, source: OperationalProjectionSource, *, retired_ids: tuple[str, ...] = ()
+    ) -> OperationalExperienceProjection: ...
+
+    async def publish_operational_manifest(
+        self, source: OperationalProjectionSource, *, embedding_pending: bool
+    ) -> str: ...
+
+    async def backfill_embeddings_if_current(
+        self, entities: list[Entity], *, operational_source: OperationalProjectionSource
+    ) -> list[str]: ...
+
     async def get(self, entity_id: str) -> Entity: ...
 
     async def create_direct_bulk(
@@ -60,6 +75,14 @@ class OperationalEntityManager(Protocol):
 
 
 class OperationalRelationshipManager(Protocol):
+    async def publish_operational_relationships(
+        self,
+        source: OperationalProjectionSource,
+        *,
+        generate_embeddings: bool = False,
+        retired_ids: tuple[str, ...] = (),
+    ) -> list[str]: ...
+
     async def create_direct_bulk(
         self,
         relationships: Iterable[Relationship],
@@ -951,6 +974,9 @@ def operational_experience_manifest_with_state(
     elif state == MANIFEST_STATE_PENDING:
         metadata["expected_entity_ids"] = []
         metadata["expected_relationship_ids"] = []
+    else:
+        metadata["expected_entity_ids"] = list(projection.manifest.entity_ids)
+        metadata["expected_relationship_ids"] = list(projection.manifest.relationship_ids)
     return manifest_entity.model_copy(update={"metadata": metadata})
 
 
@@ -979,8 +1005,77 @@ async def persist_operational_experience(
     created_by: str | None = None,
     generate_embeddings: bool = False,
     commit_manifest: bool = True,
+    source: OperationalProjectionSource | None = None,
 ) -> OperationalExperienceWriteResult:
     """Replay a projection and remove only records owned by its prior manifest."""
+    if source is not None:
+        _, current_experience = await source.current()
+        if (
+            source.observation.source.organization_id != organization_id
+            or source.creator_id != created_by
+            or current_experience != experience
+        ):
+            raise ValueError("operational publication differs from retained source")
+        expected_projection = await source.projection()
+        try:
+            previous_manifest = await entity_manager.get(
+                expected_projection.manifest.manifest_entity_id
+            )
+        except KeyError:
+            previous_manifest = None
+        retired_entity_ids = tuple(
+            sorted(
+                _manifest_inventory(previous_manifest, "expected_entity_ids")
+                - set(expected_projection.manifest.entity_ids)
+            )
+        )
+        retired_relationship_ids = tuple(
+            sorted(
+                _manifest_inventory(previous_manifest, "expected_relationship_ids")
+                - set(expected_projection.manifest.relationship_ids)
+            )
+        )
+        projection = await entity_manager.publish_operational_entities(
+            source, retired_ids=retired_entity_ids
+        )
+        relationship_ids = _require_complete_write(
+            expected_ids=projection.manifest.relationship_ids,
+            written_ids=await relationship_manager.publish_operational_relationships(
+                source,
+                generate_embeddings=generate_embeddings,
+                retired_ids=retired_relationship_ids,
+            ),
+            record_kind="source-bound relationships",
+        )
+        if generate_embeddings:
+            embeddable = [
+                entity
+                for entity in projection.entities
+                if entity.entity_type is not EntityType.ARTIFACT
+            ]
+            _require_complete_write(
+                expected_ids=(entity.id for entity in embeddable),
+                written_ids=await entity_manager.backfill_embeddings_if_current(
+                    embeddable, operational_source=source
+                ),
+                record_kind="source-bound embeddings",
+            )
+        state = await entity_manager.publish_operational_manifest(
+            source,
+            embedding_pending=not commit_manifest,
+        )
+        if state not in {"completed", "complete", "embedding_pending"}:
+            raise RuntimeError("operational source inventory is not complete")
+        return OperationalExperienceWriteResult(
+            projection=projection,
+            written_entity_ids=projection.manifest.entity_ids,
+            written_relationship_ids=relationship_ids,
+            deleted_entity_ids=(),
+            deleted_relationship_ids=(),
+            embedding_backfill_required=state == "embedding_pending",
+            retired_entity_ids=retired_entity_ids,
+            retired_relationship_ids=retired_relationship_ids,
+        )
     projection = project_operational_experience(
         experience,
         organization_id=organization_id,

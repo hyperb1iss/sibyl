@@ -40,12 +40,38 @@ class EntityManager(_EntityWorkItemManager):
     supports_lightweight_entity_list = True
 
     async def publish_operational_entities(
-        self, source: OperationalProjectionSource
+        self, source: OperationalProjectionSource, *, retired_ids: tuple[str, ...] = ()
     ) -> OperationalExperienceProjection:
         """Write source-bound entities with a pending manifest, without edges."""
         from sibyl_core.services.graph_entity_store import _publish_operational_entities
 
-        return await _publish_operational_entities(self._client, source, group_id=self._group_id)
+        return await _publish_operational_entities(
+            self._client, source, group_id=self._group_id, retired_ids=retired_ids
+        )
+
+    async def publish_operational_manifest(
+        self, source: OperationalProjectionSource, *, embedding_pending: bool
+    ) -> str:
+        """Commit the source-bound inventory after its entity and edge writes."""
+        from sibyl_core.projection.experience import operational_experience_manifest_with_state
+
+        projection = await source.projection()
+        expected = operational_experience_manifest_with_state(projection, "complete")
+        if not embedding_pending and self._embedding_provider is None:
+            raise RuntimeError("embedding manifest requires a configured provider")
+        return await _complete_embedding_manifest(
+            self._client,
+            expected,
+            group_id=self._group_id,
+            embedding_metadata=(
+                self._embedding_provider.metadata.to_dict()
+                if self._embedding_provider
+                else {"dimensions": 0}
+            ),
+            complete=True,
+            operational_source=source,
+            embedding_pending=embedding_pending,
+        )
 
     async def create_direct_if_absent(
         self, entity: Entity, *, derivation: Mapping[str, object] | None = None
@@ -120,7 +146,17 @@ class EntityManager(_EntityWorkItemManager):
         entities: Sequence[Entity],
         *,
         embedding_batch_size: int = 64,
+        operational_source: OperationalProjectionSource | None = None,
     ) -> list[str]:
+        if operational_source is not None:
+            projection = await operational_source.projection()
+            expected = {entity.id: entity for entity in projection.entities}
+            if any(
+                entity.id not in expected
+                or entity_embedding_text(entity) != entity_embedding_text(expected[entity.id])
+                for entity in entities
+            ):
+                raise ValueError("operational embedding input differs from retained source")
         rows_by_id = {
             str(row["uuid"]): row
             for row in await self._get_many_rows([entity.id for entity in entities])
@@ -131,6 +167,12 @@ class EntityManager(_EntityWorkItemManager):
             if row is None:
                 return None
             hydrated = entity_from_surreal_row(row)
+            if (
+                operational_source is None
+                and hydrated.derivation_required
+                and hydrated.metadata.get("operational_source_id")
+            ):
+                return None
             hydrated_text = entity_embedding_text(hydrated)
             if hydrated_text not in {
                 entity_embedding_text(expected),
@@ -165,6 +207,8 @@ class EntityManager(_EntityWorkItemManager):
             for entity in current_entities
             if entity.id not in ready_ids
         ]
+        if operational_source is not None:
+            await operational_source.current()
         prepared = await self.prepare_entities_for_write(
             pending_entities,
             generate_embeddings=True,
@@ -173,6 +217,8 @@ class EntityManager(_EntityWorkItemManager):
         written_ids: set[str] = set()
         batch_size = max(int(embedding_batch_size), 1)
         for index in range(0, len(prepared), batch_size):
+            if operational_source is not None:
+                await operational_source.current()
             written_ids.update(
                 await _update_entity_embeddings_if_current(
                     self._client,
@@ -180,6 +226,8 @@ class EntityManager(_EntityWorkItemManager):
                     group_id=self._group_id,
                 )
             )
+        if operational_source is not None:
+            await operational_source.current()
         ready_ids.update(written_ids)
         return [entity.id for entity in current_entities if entity.id in ready_ids]
 
