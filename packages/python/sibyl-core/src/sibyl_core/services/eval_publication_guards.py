@@ -13,6 +13,7 @@ from sibyl_core.services.content_models import RawMemory
 if TYPE_CHECKING:
     from sibyl_core.models.entities import Entity
     from sibyl_core.services.graph_client import SurrealGraphClient
+    from sibyl_core.services.graph_read_validation import GraphReadValidation
     from sibyl_core.services.memory_source_validation import SourceReadAuthority
 
 # These hash-only observations live in the server-only consolidation ledger.
@@ -119,6 +120,7 @@ async def unavailable_publication_ids(
     source_authority: SourceReadAuthority | None = None,
     graph_entities: Mapping[str, Entity] | None = None,
     graph_client: SurrealGraphClient | None = None,
+    read: GraphReadValidation | None = None,
 ) -> set[str]:
     """Resolve stable row IDs against the protected ledger before retrieval.
 
@@ -184,7 +186,11 @@ async def unavailable_publication_ids(
 
         unavailable.update(
             await unavailable_graph_derivation_ids(
-                organization_id, list(rows), expected_entities=graph_entities, client=graph_client
+                organization_id,
+                list(rows),
+                expected_entities=graph_entities,
+                client=graph_client,
+                read=read,
             )
         )
     return unavailable
