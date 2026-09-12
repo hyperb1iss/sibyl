@@ -251,7 +251,7 @@ async def test_graph_read_batch_endpoint_retarget_between_reader_batches(
     async def snapshot(*args, **kwargs):
         if not captured:
             await runtime.client.execute_query(
-                "LET $saved=(SELECT * FROM relates_to WHERE uuid=$edge)[0]; DELETE relates_to WHERE uuid=$edge; INSERT RELATION INTO relates_to object::extend($saved,{out:(SELECT VALUE id FROM entity WHERE uuid=$target)[0]});",
+                "LET $saved=(SELECT * FROM relates_to WHERE uuid=$edge)[0]; DELETE relates_to WHERE uuid=$edge; INSERT RELATION INTO relates_to object::from_entries(array::concat(object::entries($saved),object::entries({out:(SELECT VALUE id FROM entity WHERE uuid=$target)[0]})));",
                 target=new_target,
                 edge=first["uuid"],
             )
