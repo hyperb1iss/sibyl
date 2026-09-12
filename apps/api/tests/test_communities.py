@@ -30,6 +30,31 @@ from sibyl_core.services.graph_communities import (
 TEST_ORG_ID = "test-org-communities"
 
 
+@pytest.fixture(autouse=True)
+def current_rendering_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The graph fixtures supply current rows; these tests isolate rendering policy.
+
+    Native source retirement and cached-row replacement are exercised by the
+    graph community ancestry and source-retirement integration suites.
+    """
+
+    async def current(_client, _organization_id, snapshot):
+        return snapshot
+
+    async def current_entities(client, organization_id, ids):
+        from sibyl_core.services.graph_community_snapshot import _get_graph_snapshot
+
+        snapshot = await _get_graph_snapshot(client, organization_id)
+        return {entity.id: entity for entity in snapshot.entities if entity.id in ids}
+
+    monkeypatch.setattr(
+        "sibyl_core.services.graph_community_snapshot._current_graph_snapshot", current
+    )
+    monkeypatch.setattr(
+        "sibyl_core.services.graph_community_clusters._current_graph_entities", current_entities
+    )
+
+
 def _make_entity(entity_id: str, name: str, entity_type: EntityType) -> Entity:
     return Entity(
         id=entity_id,

@@ -35,16 +35,17 @@ from sibyl_core.services.graph_community_selection import (
 from sibyl_core.services.graph_community_snapshot import (
     _get_visible_graph_snapshot,
     _reader_cache_key,
+    _snapshot_fingerprint,
 )
 
 log = structlog.get_logger()
 
 HIERARCHICAL_CACHE: dict[
     tuple[str, tuple[str, tuple[str, ...], tuple[str, ...] | None]],
-    tuple[datetime, dict[str, str], list[dict[str, Any]]],
+    tuple[datetime, str, dict[str, str], list[dict[str, Any]]],
 ] = {}
 HIERARCHICAL_CACHE_TTL = timedelta(minutes=5)
-GRAPH_LOD_CACHE: dict[tuple[Any, ...], tuple[datetime, HierarchicalGraphData]] = {}
+GRAPH_LOD_CACHE: dict[tuple[Any, ...], tuple[datetime, str, HierarchicalGraphData]] = {}
 GRAPH_LOD_CACHE_TTL = timedelta(minutes=2)
 
 
@@ -183,18 +184,6 @@ async def get_hierarchical_graph(
         accessible_projects=accessible_projects,
         allowed_memory_scope_keys=allowed_memory_scope_keys,
     )
-    cached_lod = GRAPH_LOD_CACHE.get(cache_key)
-    if cached_lod is not None:
-        cached_at, data = cached_lod
-        if datetime.now(UTC) - cached_at < GRAPH_LOD_CACHE_TTL:
-            log.info(
-                "graph_lod_cache_hit",
-                org_id=organization_id,
-                resolution=resolution,
-                cluster_id=cluster_id,
-            )
-            return data
-
     # Load the whole graph (within analytic caps) for detection and selection.
     # max_nodes/max_edges are render budgets applied later, never here — capping
     # the snapshot is what produced the disconnected starfield.
@@ -207,6 +196,22 @@ async def get_hierarchical_graph(
         max_entities=DETECTION_MAX_ENTITIES,
         max_relationships=DETECTION_MAX_RELATIONSHIPS,
     )
+    fingerprint = _snapshot_fingerprint(snapshot)
+    cached_lod = GRAPH_LOD_CACHE.get(cache_key)
+    if cached_lod is not None:
+        cached_at, cached_fingerprint, data = cached_lod
+        if (
+            cached_fingerprint == fingerprint
+            and datetime.now(UTC) - cached_at < GRAPH_LOD_CACHE_TTL
+        ):
+            log.info(
+                "graph_lod_cache_hit",
+                org_id=organization_id,
+                resolution=resolution,
+                cluster_id=cluster_id,
+            )
+            return data
+
     entities = snapshot.entities
     # Build from structural edges only — drop the MENTIONS hairball so projects
     # and their tasks/memory are the visible structure. Totals reflect this
@@ -247,8 +252,13 @@ async def get_hierarchical_graph(
     clusters_meta: list[dict[str, Any]] = []
 
     if community_cache_key in HIERARCHICAL_CACHE:
-        cached_at, cached_clusters, cached_meta = HIERARCHICAL_CACHE[community_cache_key]
-        if datetime.now(UTC) - cached_at < HIERARCHICAL_CACHE_TTL:
+        cached_at, cached_fingerprint, cached_clusters, cached_meta = HIERARCHICAL_CACHE[
+            community_cache_key
+        ]
+        if (
+            cached_fingerprint == fingerprint
+            and datetime.now(UTC) - cached_at < HIERARCHICAL_CACHE_TTL
+        ):
             log.info("hierarchical_cache_hit", org_id=organization_id)
             node_to_cluster = cached_clusters
             clusters_meta = cached_meta
@@ -280,6 +290,7 @@ async def get_hierarchical_graph(
                 # Cache the result
                 HIERARCHICAL_CACHE[community_cache_key] = (
                     datetime.now(UTC),
+                    fingerprint,
                     node_to_cluster,
                     clusters_meta,
                 )
@@ -355,5 +366,5 @@ async def get_hierarchical_graph(
         cluster_id=cluster_id,
     )
 
-    GRAPH_LOD_CACHE[cache_key] = (datetime.now(UTC), data)
+    GRAPH_LOD_CACHE[cache_key] = (datetime.now(UTC), fingerprint, data)
     return data

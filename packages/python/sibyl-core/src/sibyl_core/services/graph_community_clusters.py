@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import Any
 
 import structlog
@@ -13,7 +15,7 @@ from sibyl_core.auth.memory_policy import (
     memory_row_project_id,
     private_scope_granted_for,
 )
-from sibyl_core.models.entities import Entity, RelationshipType
+from sibyl_core.models.entities import Entity, Relationship, RelationshipType
 from sibyl_core.services.graph_community_detection import _detect_communities_from_graph
 from sibyl_core.services.graph_community_managers import _entity_summary
 from sibyl_core.services.graph_community_models import (
@@ -32,17 +34,20 @@ from sibyl_core.services.graph_community_selection import (
 )
 from sibyl_core.services.graph_community_snapshot import (
     _count_int,
+    _current_graph_entities,
     _get_graph_snapshot,
     _get_visible_graph_snapshot,
     _native_rows,
     _reader_cache_key,
+    _snapshot_fingerprint,
 )
+from sibyl_core.services.graph_visibility import graph_row_read_allowed
 
 log = structlog.get_logger()
 
 CLUSTER_CACHE: dict[
     tuple[str, tuple[str, tuple[str, ...], tuple[str, ...] | None]],
-    tuple[datetime, list[ClusterSummary]],
+    tuple[datetime, str, list[ClusterSummary]],
 ] = {}
 CLUSTER_CACHE_TTL = timedelta(minutes=5)
 
@@ -173,6 +178,7 @@ async def _native_relationship_edges_between_ids(
     member_ids: list[str],
     *,
     max_edges: int,
+    relationship_visible: Callable[[Relationship], bool],
 ) -> list[dict[str, Any]] | None:
     if not member_ids:
         return []
@@ -181,7 +187,7 @@ async def _native_relationship_edges_between_ids(
         client,
         organization_id,
         """
-        SELECT source_id, target_id, name
+        SELECT *
         FROM relates_to
         WHERE group_id = $group_id
           AND source_id IN $member_ids
@@ -194,11 +200,17 @@ async def _native_relationship_edges_between_ids(
     if rows is None:
         return None
 
+    from sibyl_core.services.graph_records import relationship_from_surreal_row
+
     edges: list[dict[str, Any]] = []
     for row in rows:
         source_id = str(row.get("source_id") or "")
         target_id = str(row.get("target_id") or "")
-        if not source_id or not target_id:
+        if (
+            not source_id
+            or not target_id
+            or not relationship_visible(relationship_from_surreal_row(row))
+        ):
             continue
         edges.append(
             {
@@ -238,15 +250,6 @@ async def get_clusters_for_visualization(
         _reader_cache_key(principal_id, accessible_projects, allowed_memory_scope_keys),
     )
 
-    # Check cache
-    if not force_refresh and cache_key in CLUSTER_CACHE:
-        cached_at, clusters = CLUSTER_CACHE[cache_key]
-        if datetime.now(UTC) - cached_at < CLUSTER_CACHE_TTL:
-            log.debug("cluster_cache_hit", org_id=organization_id, count=len(clusters))
-            return clusters
-
-    log.info("cluster_cache_miss", org_id=organization_id)
-
     snapshot = await _get_visible_graph_snapshot(
         client,
         organization_id,
@@ -256,6 +259,16 @@ async def get_clusters_for_visualization(
         max_entities=DETECTION_MAX_ENTITIES,
         max_relationships=DETECTION_MAX_RELATIONSHIPS,
     )
+    fingerprint = _snapshot_fingerprint(snapshot)
+
+    # Check cache
+    if not force_refresh and cache_key in CLUSTER_CACHE:
+        cached_at, cached_fingerprint, clusters = CLUSTER_CACHE[cache_key]
+        if cached_fingerprint == fingerprint and datetime.now(UTC) - cached_at < CLUSTER_CACHE_TTL:
+            log.debug("cluster_cache_hit", org_id=organization_id, count=len(clusters))
+            return clusters
+
+    log.info("cluster_cache_miss", org_id=organization_id)
 
     try:
         detected = _detect_communities_from_graph(
@@ -286,7 +299,7 @@ async def get_clusters_for_visualization(
         )
 
     # Cache result
-    CLUSTER_CACHE[cache_key] = (datetime.now(UTC), clusters)
+    CLUSTER_CACHE[cache_key] = (datetime.now(UTC), fingerprint, clusters)
     log.info("cluster_cache_updated", org_id=organization_id, count=len(clusters))
 
     return clusters
@@ -429,24 +442,19 @@ async def get_cluster_nodes(
 
     member_ids = cluster.member_ids[:max_nodes]
     member_id_set = set(member_ids)
-    entity_by_id = await _native_entities_by_ids(client, organization_id, member_ids)
-    if entity_by_id is None:
-        snapshot = await _get_visible_graph_snapshot(
-            client,
-            organization_id,
-            principal_id=principal_id,
-            accessible_projects=accessible_projects,
-            allowed_memory_scope_keys=allowed_memory_scope_keys,
-            max_entities=DETECTION_MAX_ENTITIES,
-            max_relationships=DETECTION_MAX_RELATIONSHIPS,
-        )
-        entity_by_id = snapshot.entity_by_id
+    entity_by_id = await _current_graph_entities(client, organization_id, member_ids)
 
     edges = await _native_relationship_edges_between_ids(
         client,
         organization_id,
         member_ids,
         max_edges=max_edges,
+        relationship_visible=partial(
+            graph_row_read_allowed,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
+        ),
     )
 
     # This is the surface that emits an entity's name and description text, so
@@ -486,9 +494,12 @@ async def get_cluster_nodes(
         ]
 
     if edges is None:
-        snapshot = await _get_graph_snapshot(
+        snapshot = await _get_visible_graph_snapshot(
             client,
             organization_id,
+            principal_id=principal_id,
+            accessible_projects=accessible_projects,
+            allowed_memory_scope_keys=allowed_memory_scope_keys,
             max_entities=DETECTION_MAX_ENTITIES,
             max_relationships=DETECTION_MAX_RELATIONSHIPS,
         )

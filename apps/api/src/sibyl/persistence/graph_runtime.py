@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, Self
 
@@ -575,6 +575,7 @@ class GraphQueryAdapter:
     """Thin graph query surface for routes that still need runtime reads."""
 
     def __init__(self, runtime: GraphRuntime, group_id: str) -> None:
+        self._runtime = runtime
         self._client = runtime.client
         self._group_id = group_id
         self._entities = runtime.entity_manager
@@ -718,6 +719,7 @@ class GraphQueryAdapter:
         self,
         entity_ids: Sequence[str],
         *,
+        entity_visible: Callable[[Entity | Relationship], bool],
         relationship_types: list[RelationshipType] | None = None,
     ) -> dict[str, int]:
         scoped_entity_ids = {entity_id for entity_id in entity_ids if entity_id}
@@ -729,7 +731,7 @@ class GraphQueryAdapter:
         rows = _normalize_result(
             await self._client.execute_query(
                 f"""
-                SELECT source_id, target_id
+                SELECT *
                 FROM relates_to
                 WHERE group_id = $group_id
                   AND (source_id IN $entity_ids OR target_id IN $entity_ids)
@@ -740,9 +742,24 @@ class GraphQueryAdapter:
                 relationship_types=[rel.value for rel in relationship_types or []],
             )
         )
+        from sibyl_core.services.graph_read_availability import available_graph_entities
+
+        endpoints = {
+            str(row[key]) for row in rows for key in ("source_id", "target_id") if row.get(key)
+        }
+        current = await available_graph_entities(
+            self._group_id, sorted(endpoints), runtime=self._runtime
+        )
+        visible = {identity for identity, entity in current.items() if entity_visible(entity)}
         for row in rows:
             source_id = str(row.get("source_id") or "")
             target_id = str(row.get("target_id") or "")
+            if (
+                source_id not in visible
+                or target_id not in visible
+                or not entity_visible(relationship_from_surreal_row(row))
+            ):
+                continue
             if source_id in counts:
                 counts[source_id] += 1
             if target_id in counts and target_id != source_id:
