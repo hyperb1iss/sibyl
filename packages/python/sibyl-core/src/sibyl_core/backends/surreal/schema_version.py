@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from time import monotonic
 from typing import TYPE_CHECKING, Protocol, cast
 
-from sibyl_core.backends.surreal.schema_helpers import execute_schema_statement, split_statements
+from sibyl_core.backends.surreal.schema_helpers import (
+    execute_schema_statement,
+    execute_schema_statements,
+    split_statements,
+)
 
 if TYPE_CHECKING:
     from sibyl_core.backends.surreal.schema_ownership import SchemaOwnership
@@ -177,13 +181,13 @@ async def apply_schema_migrations(
     for migration in sorted_migrations:
         if migration.version <= current_version:
             continue
-        for statement in migration.statements:
-            await execute_schema_statement(
-                mutate,
-                statement,
-                scope=scope,
-                group_id=group_id,
-            )
+        await execute_schema_statements(
+            mutate,
+            migration.statements,
+            scope=scope,
+            group_id=group_id,
+            batch_execute=ownership.mutate if ownership is not None else None,
+        )
         if migration.action is not None:
             await migration.action(execute_query)
         applied.append(migration)

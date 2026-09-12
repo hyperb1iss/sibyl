@@ -12,7 +12,11 @@ from typing import TYPE_CHECKING, cast
 import structlog
 
 from sibyl_core.backends.surreal.schema_derivations import DERIVATION_DEFINITIONS
-from sibyl_core.backends.surreal.schema_helpers import execute_schema_statement, split_statements
+from sibyl_core.backends.surreal.schema_helpers import (
+    execute_schema_statement,
+    execute_schema_statements,
+    split_statements,
+)
 from sibyl_core.backends.surreal.schema_index_recovery import ensure_owned_concurrent_index
 from sibyl_core.backends.surreal.schema_lifecycle_repair import (
     LIFECYCLE_REPAIR_FIELDS,
@@ -1377,6 +1381,15 @@ async def _execute_graph_schema_block(
     ownership: SchemaOwnership | None = None,
 ) -> bool:
     skipped_missing_relation_table = False
+    if ownership is not None and not ignore_missing_relation_tables:
+        await execute_schema_statements(
+            ownership.mutate,
+            split_statements(block),
+            scope="graph",
+            group_id=driver.group_id,
+            batch_execute=ownership.mutate,
+        )
+        return False
     for statement in split_statements(block):
         try:
             await execute_schema_statement(

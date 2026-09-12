@@ -74,19 +74,18 @@ async def prepare_companion_restore(
         row for row in mentions if clean or not skip_existing or row.uuid not in existing_mentions
     ]
     episode_records = [episode_record(row) for row in selected_episodes]
-    # Merge imports retain current protected retractions. Clean restoration
+    # Merge imports retain all protected destination edges. Clean restoration
     # intentionally reconstructs the archived historical state instead.
-    retired_relationships = {
+    protected_relationships = {
         row["uuid"]
         for row in snapshot["relates_to"]
         if (
             row.get("operational_derivation_required") is True
             or row.get("operational_source_binding") is not None
         )
-        and (row.get("invalid_at") is not None or row.get("expired_at") is not None)
     }
     selected_relationships = [
-        row for row in relationships if clean or row.id not in retired_relationships
+        row for row in relationships if clean or row.id not in protected_relationships
     ]
     relationship_records = [
         _relationship_record(row, group_id=organization_id, archive_binding=True)
