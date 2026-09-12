@@ -108,7 +108,10 @@ async def available_graph_relationships(
             states = {r["source_id"]: r for r in snapshot["states"]}
             associations = {r["target_id"]: r for r in snapshot["associations"]}
             for row in snapshot["relationships"]:
-                if row.get("source_uuid") not in current or row.get("target_uuid") not in current:
+                if any(
+                    row.get(key) not in current or row.get(key) not in targets
+                    for key in ("source_uuid", "target_uuid")
+                ):
                     continue
                 if any(
                     current[endpoint].model_dump(mode="json")

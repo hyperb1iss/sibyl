@@ -224,3 +224,47 @@ async def test_graph_read_batch_final_phase_covers_all_storage_batches(
     monkeypatch.setattr(operational_relationships, "_snapshot", boundary)
     assert not await available_graph_relationships(runtime.client.group_id, ids, runtime=runtime)
     assert calls == 2 * batches
+
+
+async def test_graph_read_batch_endpoint_retarget_between_reader_batches(
+    runtime, content_store, authority, relationship_authority, monkeypatch
+):
+    from sibyl_core.services import graph_read_availability as availability
+    from sibyl_core.services import operational_relationships
+
+    _, source = await capture(runtime, authority)
+    await runtime.entity_manager.publish_operational_entities(source)
+    ids = await runtime.relationship_manager.publish_operational_relationships(source)
+    rows = await runtime.client.execute_query(
+        "SELECT uuid,in.uuid AS source_uuid,out.uuid AS target_uuid FROM relates_to WHERE uuid IN $ids;",
+        ids=ids,
+    )
+    first = rows[0]
+    endpoints = {first["source_uuid"], first["target_uuid"]}
+    second = next(row for row in rows[1:] if row["target_uuid"] not in endpoints)
+    new_target = second["target_uuid"]
+    ordered = [first["uuid"], second["uuid"]]
+    monkeypatch.setattr(availability, "_READ_BATCH_SIZE", 1)
+    original = operational_relationships._snapshot
+    captured = []
+
+    async def snapshot(*args, **kwargs):
+        if not captured:
+            await runtime.client.execute_query(
+                "LET $saved=(SELECT * FROM relates_to WHERE uuid=$edge)[0]; DELETE relates_to WHERE uuid=$edge; INSERT RELATION INTO relates_to object::extend($saved,{out:(SELECT VALUE id FROM entity WHERE uuid=$target)[0]});",
+                target=new_target,
+                edge=first["uuid"],
+            )
+        result = await original(*args, **kwargs)
+        captured.append(result)
+        if len(captured) == 1:
+            assert result["relationships"][0]["target_uuid"] == new_target
+            assert new_target not in {r["uuid"] for r in result["targets"]}
+        return result
+
+    monkeypatch.setattr(operational_relationships, "_snapshot", snapshot)
+    result = await availability.available_graph_relationships(
+        runtime.client.group_id, ordered, runtime=runtime
+    )
+    assert first["uuid"] not in result
+    assert second["uuid"] in result

@@ -22,6 +22,7 @@ class GraphReadValidation:
         self.organization_id = organization_id
         self._inputs: dict[Hashable, asyncio.Task[Any]] = {}
         self._validated_graph: dict[str, bool] = {}
+        self._graph_loads: dict[str, asyncio.Task[dict[str, bool]]] = {}
 
     async def _once[T](self, key: Hashable, load: Callable[[], Coroutine[Any, Any, T]]) -> T:
         task = self._inputs.get(key)
@@ -64,13 +65,15 @@ class GraphReadValidation:
     async def prepare_graph(self, entity_ids: Sequence[str]) -> None:
         from sibyl_core.services.validation_promotion import validated_graph_currents
 
-        missing = [
-            identifier for identifier in set(entity_ids) if identifier not in self._validated_graph
-        ]
+        identifiers = set(entity_ids)
+        missing = sorted(identifiers - self._graph_loads.keys())
         if missing:
-            self._validated_graph.update(
-                await validated_graph_currents(self.organization_id, missing)
-            )
+            # Reserve every key before yielding, so overlapping batches share
+            # the same snapshot without serializing unrelated graph inputs.
+            task = asyncio.create_task(validated_graph_currents(self.organization_id, missing))
+            self._graph_loads.update(dict.fromkeys(missing, task))
+        for task in {self._graph_loads[identifier] for identifier in identifiers}:
+            self._validated_graph.update(await asyncio.shield(task))
 
     async def graph_validated(self, organization_id: str, entity_id: str) -> bool:
         self._check_org(organization_id)
