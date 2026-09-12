@@ -40,6 +40,7 @@ async def test_graph_availability_refreshes_actual_rows_and_denies_unavailable(m
         {"ordinary": {}, "protected": {}},
         graph_entities={"ordinary": rows[0], "protected": rows[1]},
         graph_client="owned",
+        read=None,
     )
     rows[0].name = "current source name"
     again = await availability.available_graph_entities(

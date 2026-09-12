@@ -1,5 +1,6 @@
 """Consume a stored critic result through the existing promotion transaction."""
 
+import asyncio
 import hashlib
 import json
 from collections.abc import Awaitable, Callable
@@ -205,49 +206,70 @@ IF $validation_binding != NONE {
 
 async def validated_graph_current(organization_id: str, entity_id: str) -> bool:
     """Follow protected reverse references, including legacy publication ledgers."""
+    return (await validated_graph_currents(organization_id, [entity_id]))[entity_id]
+
+
+async def validated_graph_currents(organization_id: str, entity_ids: list[str]) -> dict[str, bool]:
+    """Read the same reverse-reference contract for a scoped endpoint batch."""
     from sibyl_core.services.content_models import raw_memory_from_record
     from sibyl_core.services.validation_execution import _query
 
+    if not entity_ids:
+        return {}
     rows = await _query(
         """RETURN {
         LET $direct=(SELECT * FROM memory_derivations WHERE organization_id=$org
-            AND validation_entity_id=$entity);
-        LET $published=(SELECT candidate_id FROM eval_consolidations WHERE organization_id=$org
-            AND promoted_entity_id=$entity);
+            AND validation_entity_id IN $entities);
+        LET $published=(SELECT candidate_id,promoted_entity_id FROM eval_consolidations
+            WHERE organization_id=$org AND promoted_entity_id IN $entities);
         LET $ids=array::distinct(array::concat($direct.map(|$a| $a.target_id),$published.map(|$p| $p.candidate_id)));
         RETURN {
             captures:(SELECT * FROM raw_captures WHERE organization_id=$org AND uuid IN $ids),
             associations:(SELECT * FROM memory_derivations WHERE organization_id=$org
                 AND target_kind='raw_capture' AND target_id IN $ids),
-            ids:$ids
+            direct:$direct, published:$published
         };
     };""",
         org=organization_id,
-        entity=entity_id,
+        entities=list(dict.fromkeys(entity_ids)),
     )
     if len(rows) != 1:
         raise ValidationExecutionUnavailable("Validation recall snapshot unavailable")
     captures = {row["uuid"]: row for row in rows[0]["captures"]}
     associations = {row["target_id"]: row for row in rows[0]["associations"]}
-    for identifier in rows[0]["ids"]:
-        record = captures.get(identifier)
-        if record is None:
-            return False
-        memory = raw_memory_from_record(record)
-        association = associations.get(identifier)
-        if association is None:
-            if memory.derivation_required:
+
+    async def current(entity_id: str) -> bool:
+        ids = {
+            r["target_id"] for r in rows[0]["direct"] if r.get("validation_entity_id") == entity_id
+        }
+        ids.update(
+            r["candidate_id"]
+            for r in rows[0]["published"]
+            if r.get("promoted_entity_id") == entity_id
+        )
+        for identifier in ids:
+            record = captures.get(identifier)
+            if record is None:
                 return False
-            continue
-        if association.get("validation_binding_json") is None:
-            if association.get("validation_entity_id") is not None:
+            memory = raw_memory_from_record(record)
+            association = associations.get(identifier)
+            if association is None:
+                if memory.derivation_required:
+                    return False
+                continue
+            if association.get("validation_binding_json") is None:
+                if association.get("validation_entity_id") is not None:
+                    return False
+                continue
+            if (
+                association.get("active") is not True
+                or association.get("validation_entity_id") != entity_id
+                or association.get("body_sha256") != _sha(memory.raw_content)
+                or not await validation_binding_current(memory, association)
+            ):
                 return False
-            continue
-        if (
-            association.get("active") is not True
-            or association.get("validation_entity_id") != entity_id
-            or association.get("body_sha256") != _sha(memory.raw_content)
-            or not await validation_binding_current(memory, association)
-        ):
-            return False
-    return True
+        return True
+
+    ids = list(dict.fromkeys(entity_ids))
+    results = await asyncio.gather(*(current(identifier) for identifier in ids))
+    return dict(zip(ids, results, strict=True))

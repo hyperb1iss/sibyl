@@ -279,7 +279,7 @@ async def publish_operational_relationships(
 
 
 async def operational_relationship_current(
-    row, *, targets, states, associations, organization_id
+    row, *, targets, states, associations, organization_id, read=None
 ) -> bool:
     """Validate native provenance without accepting caller metadata as authority."""
     binding = row.get("operational_source_binding")
@@ -306,7 +306,13 @@ async def operational_relationship_current(
         resolver = get_source_authority_resolver()
     except RuntimePortUnavailable:
         return False
-    authority = await resolve_current_source_authority(ceiling, organization_id, resolver)
+    authority = await resolve_current_source_authority(
+        ceiling,
+        organization_id,
+        (lambda org, principal: read.resolve_authority(org, principal, resolver))
+        if read is not None
+        else resolver,
+    )
     if authority is None:
         return False
     try:
@@ -343,13 +349,15 @@ async def operational_relationship_current(
                 or association.get("organization_id") != organization_id
                 or association.get("target_kind") != SourceKind.GRAPH_ENTITY.value
                 or association.get("target_id") != observation.source.id
-                or not await graph_association_current(current.entity, association)
+                or not await graph_association_current(current.entity, association, read=read)
                 or not isinstance(association.get("observations"), list)
                 or len(association["observations"]) != 1
                 or not observation_from_record(association["observations"][0]).same_evidence(source)
             ):
                 return False
-        return await validate_observations([source], authority, organization_id=organization_id)
+        return await validate_observations(
+            [source], authority, organization_id=organization_id, read=read
+        )
     except (SourceUnavailableError, ValueError, TypeError):
         return False
 

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sibyl_core.services.graph_read_validation import GraphReadValidation
 
 from sibyl_core.backends.surreal.records import normalize_records
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind, evidence_hash
@@ -29,7 +33,22 @@ def graph_target_digest(entity) -> str:
     )
 
 
-async def graph_association_current(entity, association, *, ancestors=frozenset()) -> bool:
+async def graph_association_current(
+    entity, association, *, ancestors=frozenset(), read: GraphReadValidation | None = None
+) -> bool:
+    if read is not None:
+        return await read.association_proof(
+            entity,
+            association,
+            ancestors,
+            lambda: _graph_association_current(entity, association, ancestors=ancestors, read=read),
+        )
+    return await _graph_association_current(entity, association, ancestors=ancestors)
+
+
+async def _graph_association_current(
+    entity, association, *, ancestors=frozenset(), read: GraphReadValidation | None = None
+) -> bool:
     if association is None:
         return not entity.derivation_required
     if association.get("active") is not True or association.get(
@@ -46,7 +65,11 @@ async def graph_association_current(entity, association, *, ancestors=frozenset(
         resolver = get_source_authority_resolver()
     except RuntimePortUnavailable:
         return False
-    authority = await resolver(entity.organization_id, principal_id)
+    authority = (
+        await read.resolve_authority(entity.organization_id, principal_id, resolver)
+        if read is not None
+        else await resolver(entity.organization_id, principal_id)
+    )
     if authority is None or authority.principal_id != principal_id:
         return False
     scopes = ceiling.scope_keys
@@ -73,16 +96,26 @@ async def graph_association_current(entity, association, *, ancestors=frozenset(
         from sibyl_core.services.validation_promotion import validated_graph_current
 
         try:
-            if not await validated_graph_current(entity.organization_id, entity.id):
+            if not (
+                await read.graph_validated(entity.organization_id, entity.id)
+                if read is not None
+                else await validated_graph_current(entity.organization_id, entity.id)
+            ):
                 return False
         except ValidationExecutionUnavailable:
             return False
     return await validate_observations(
-        observations, authority, organization_id=entity.organization_id, ancestors=ancestors
+        observations,
+        authority,
+        organization_id=entity.organization_id,
+        ancestors=ancestors,
+        read=read,
     )
 
 
-async def graph_derivation_current(entity, *, ancestors=frozenset()) -> bool:
+async def graph_derivation_current(
+    entity, *, ancestors=frozenset(), read: GraphReadValidation | None = None
+) -> bool:
     from sibyl_core.services.graph_runtime import get_surreal_graph_runtime
 
     runtime = await get_surreal_graph_runtime(entity.organization_id)
@@ -93,7 +126,9 @@ async def graph_derivation_current(entity, *, ancestors=frozenset()) -> bool:
             id=entity.id,
         )
     )
-    return await graph_association_current(entity, rows[0] if rows else None, ancestors=ancestors)
+    return await graph_association_current(
+        entity, rows[0] if rows else None, ancestors=ancestors, read=read
+    )
 
 
 async def unavailable_graph_derivation_ids(
@@ -102,6 +137,7 @@ async def unavailable_graph_derivation_ids(
     *,
     expected_entities: Mapping[str, Entity] | None = None,
     client: SurrealGraphClient | None = None,
+    read: GraphReadValidation | None = None,
 ) -> set[str]:
     from sibyl_core.services.graph_records import entity_from_surreal_row
 
@@ -133,6 +169,8 @@ async def unavailable_graph_derivation_ids(
     targets = {row["uuid"]: entity_from_surreal_row(row) for row in target_rows}
 
     associations = {row["target_id"]: row for row in association_rows}
+    if read is not None:
+        await read.prepare_graph(list(targets))
 
     async def current(target_id):
         association = associations.get(target_id)
@@ -151,7 +189,7 @@ async def unavailable_graph_derivation_ids(
             ):
                 return target_id
         if entity is None or not await graph_association_current(
-            entity, association, ancestors=frozenset({identity})
+            entity, association, ancestors=frozenset({identity}), read=read
         ):
             return target_id
         return None
