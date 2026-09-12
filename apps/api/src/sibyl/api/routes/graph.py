@@ -16,7 +16,11 @@ from sibyl.auth.dependencies import (
 from sibyl.persistence.auth_runtime import list_accessible_project_graph_ids
 from sibyl_core.auth import AuthOrganization, OrganizationRole
 from sibyl_core.models.entities import Entity, EntityType, RelationshipType
-from sibyl_core.services.graph_read_availability import available_graph_entities
+from sibyl_core.services.graph_read_availability import (
+    available_graph_entities,
+    available_graph_relationships,
+)
+from sibyl_core.services.graph_runtime import GraphRuntime
 from sibyl_core.services.graph_visibility import graph_row_read_allowed as _graph_entity_visible
 
 log = structlog.get_logger()
@@ -115,6 +119,21 @@ router = APIRouter(
 )
 
 
+async def _current_relationships(runtime, organization_id, relationships):
+    if not relationships:
+        return []
+    current = await available_graph_relationships(
+        organization_id,
+        [r.id for r in relationships],
+        runtime=GraphRuntime(
+            client=runtime.client,
+            entity_manager=runtime.entity_manager,
+            relationship_manager=runtime.relationship_manager,
+        ),
+    )
+    return [current[r.id] for r in relationships if r.id in current]
+
+
 @router.get("/debug", dependencies=[Depends(require_org_role(*_ADMIN_ROLES))])
 async def debug_graph(
     org: AuthOrganization = Depends(get_current_organization),
@@ -136,6 +155,7 @@ async def debug_graph(
     )
     node_ids = {entity.id for entity in nodes if entity.id}
     relationships = await runtime.relationship_manager.list_all(limit=1000)
+    relationships = await _current_relationships(runtime, group_id, relationships)
 
     relationships = [
         relationship
@@ -392,6 +412,8 @@ async def get_all_edges(
         offset=offset,
     )
 
+    all_relationships = await _current_relationships(runtime, group_id, all_relationships)
+
     # An edge names both of its endpoints, so an unfiltered list discloses that
     # a hidden row exists and what it connects to. Resolving only the endpoints
     # of the page being returned keeps the lookup bounded by the edge budget.
@@ -478,10 +500,29 @@ async def get_full_graph(
             )
         )
 
-    relationships = await adapter.list_relationships_for_entities(
-        node_ids,
-        limit=max_edges,
-    )
+    relationships = []
+    offset = 0
+    while node_ids and len(relationships) < max_edges:
+        stored = await adapter.list_relationships_for_entities(
+            node_ids, limit=max_edges, offset=offset
+        )
+        current = await _current_relationships(runtime, group_id, stored)
+        relationships.extend(
+            relationship
+            for relationship in current
+            if relationship.source_id in node_ids
+            and relationship.target_id in node_ids
+            and _graph_entity_visible(
+                relationship,
+                principal_id=principal_id,
+                accessible_projects=accessible_projects,
+                allowed_memory_scope_keys=memory_grants,
+            )
+        )
+        offset += len(stored)
+        if len(stored) < max_edges:
+            break
+    relationships = relationships[:max_edges]
 
     log.info(
         "graph_full_raw",
@@ -490,29 +531,17 @@ async def get_full_graph(
         node_ids_sample=list(node_ids)[:3],
     )
 
-    edges = []
-    for relationship in relationships:
-        if (
-            relationship.source_id not in node_ids
-            or relationship.target_id not in node_ids
-            or not _graph_entity_visible(
-                relationship,
-                principal_id=principal_id,
-                accessible_projects=accessible_projects,
-                allowed_memory_scope_keys=memory_grants,
-            )
-        ):
-            continue
-        edges.append(
-            GraphEdge(
-                id=relationship.id or f"{relationship.source_id}-{relationship.target_id}",
-                source=relationship.source_id,
-                target=relationship.target_id,
-                type=relationship.relationship_type.value,
-                label=relationship.relationship_type.value.replace("_", " ").title(),
-                weight=1.0,
-            )
+    edges = [
+        GraphEdge(
+            id=relationship.id or f"{relationship.source_id}-{relationship.target_id}",
+            source=relationship.source_id,
+            target=relationship.target_id,
+            type=relationship.relationship_type.value,
+            label=relationship.relationship_type.value.replace("_", " ").title(),
+            weight=1.0,
         )
+        for relationship in relationships
+    ]
 
     log.info("graph_full_filtered", edges_after_filter=len(edges))
 
@@ -593,7 +622,18 @@ async def get_subgraph(
         current_neighbors = await available_graph_entities(
             group_id, [entity.id for entity, _relationship in related]
         )
-        for listed_entity, relationship in related:
+        current_edges = {
+            r.id: r
+            for r in await _current_relationships(
+                runtime,
+                group_id,
+                [r for _, r in related],
+            )
+        }
+        for listed_entity, listed_relationship in related:
+            relationship = current_edges.get(listed_relationship.id)
+            if relationship is None:
+                continue
             related_entity = current_neighbors.get(listed_entity.id)
             if related_entity is None:
                 continue

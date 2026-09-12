@@ -60,11 +60,24 @@ async def load_source_snapshot(
     )
     if len(rows) != 1:
         return None
-    row, state = rows[0].get("source_row"), rows[0].get("source_state")
+    return source_snapshot_from_records(
+        source, rows[0].get("source_row"), rows[0].get("source_state")
+    )
+
+
+def source_snapshot_from_records(
+    source: SourceIdentity, row: object, state: object
+) -> GraphSourceSnapshot | RawSourceSnapshot | None:
+    """Decode a source and ledger captured together by a scoped snapshot owner."""
+    if source.kind not in (SourceKind.GRAPH_ENTITY, SourceKind.RAW_CAPTURE):
+        return None
     if not isinstance(row, dict) or not isinstance(state, dict):
         return None
     if (
-        state.get("organization_id") != source.organization_id
+        row.get("uuid") != source.id
+        or row.get("group_id" if source.kind is SourceKind.GRAPH_ENTITY else "organization_id")
+        != source.organization_id
+        or state.get("organization_id") != source.organization_id
         or state.get("source_kind") != source.kind.value
         or state.get("source_id") != source.id
         or state.get("deleted") is not False

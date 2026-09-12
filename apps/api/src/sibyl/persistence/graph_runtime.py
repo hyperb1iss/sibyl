@@ -742,22 +742,32 @@ class GraphQueryAdapter:
                 relationship_types=[rel.value for rel in relationship_types or []],
             )
         )
-        from sibyl_core.services.graph_read_availability import available_graph_entities
+        from sibyl_core.services.graph_read_availability import (
+            available_graph_entities,
+            available_graph_relationships,
+        )
 
+        relationships = await available_graph_relationships(
+            self._group_id,
+            [str(row["uuid"]) for row in rows],
+            runtime=self._runtime,
+        )
         endpoints = {
-            str(row[key]) for row in rows for key in ("source_id", "target_id") if row.get(key)
+            endpoint
+            for edge in relationships.values()
+            for endpoint in (edge.source_id, edge.target_id)
         }
         current = await available_graph_entities(
             self._group_id, sorted(endpoints), runtime=self._runtime
         )
         visible = {identity for identity, entity in current.items() if entity_visible(entity)}
-        for row in rows:
-            source_id = str(row.get("source_id") or "")
-            target_id = str(row.get("target_id") or "")
+        for relationship in relationships.values():
+            source_id = relationship.source_id
+            target_id = relationship.target_id
             if (
                 source_id not in visible
                 or target_id not in visible
-                or not entity_visible(relationship_from_surreal_row(row))
+                or not entity_visible(relationship)
             ):
                 continue
             if source_id in counts:

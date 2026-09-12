@@ -3281,14 +3281,19 @@ class TestExploreTool:
         assert mock_entity_manager.list_by_type.await_args.kwargs["project_id"] is None
 
     @pytest.mark.asyncio
-    async def test_explore_related_filters_project_entities_by_own_id(self) -> None:
+    @pytest.mark.parametrize("visible_edge_current", [True, False])
+    async def test_explore_related_filters_project_entities_by_own_id(
+        self, visible_edge_current: bool
+    ) -> None:
+        from sibyl_core.models.entities import Relationship, RelationshipType
         from sibyl_core.tools.explore import explore
 
-        def relationship(target_id: str) -> SimpleNamespace:
-            return SimpleNamespace(
+        def relationship(target_id: str) -> Relationship:
+            return Relationship(
+                id=f"rel_{target_id}",
                 source_id="task_visible",
                 target_id=target_id,
-                relationship_type=MockEnum("RELATED_TO"),
+                relationship_type=RelationshipType.RELATED_TO,
             )
 
         visible = MockEntity(
@@ -3316,6 +3321,13 @@ class TestExploreTool:
             )
         )
 
+        current_relationships = {
+            edge.id: edge
+            for _, edge in relationship_manager.get_related_entities.return_value
+            if visible_edge_current or edge.target_id != "project_visible"
+        }
+        available_relationships = AsyncMock(return_value=current_relationships)
+
         seed = MockEntity(
             id="task_visible",
             entity_type=EntityType.TASK,
@@ -3329,6 +3341,9 @@ class TestExploreTool:
 
         with (
             patch("sibyl_core.tools.explore.available_graph_entities", side_effect=available),
+            patch(
+                "sibyl_core.tools.explore.available_graph_relationships", available_relationships
+            ),
             patch(
                 "sibyl_core.tools.explore.get_graph_runtime",
                 AsyncMock(
@@ -3345,10 +3360,16 @@ class TestExploreTool:
                 organization_id="org_123",
             )
 
-        assert [entity.id for entity in response.entities] == [
-            "project_visible",
-            "pattern_unassigned",
-        ]
+        assert [entity.id for entity in response.entities] == (
+            ["project_visible", "pattern_unassigned"]
+            if visible_edge_current
+            else ["pattern_unassigned"]
+        )
+        available_relationships.assert_awaited_once()
+        assert available_relationships.await_args.args == (
+            "org_123",
+            ["rel_project_hidden", "rel_project_visible", "rel_pattern_unassigned"],
+        )
 
     @pytest.mark.asyncio
     async def test_explore_related_requires_entity_id(self) -> None:

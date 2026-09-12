@@ -362,8 +362,14 @@ async def main():
         assert task_runtime.entity_manager is runtime.entity_manager
 
         graph_adapter = await graph_runtime_module.get_graph_query_adapter(group_id)
-        connection_counts = await graph_adapter.get_connection_counts([task_a.id, task_b.id])
+        connection_counts = await graph_adapter.get_connection_counts(
+            [task_a.id, task_b.id], entity_visible=lambda _entity: True
+        )
         assert connection_counts[task_a.id] >= 1
+        hidden_counts = await graph_adapter.get_connection_counts(
+            [task_a.id, task_b.id], entity_visible=lambda _entity: False
+        )
+        assert hidden_counts == {task_a.id: 0, task_b.id: 0}
 
         graph_store = await api_dependencies.get_graph_store(
             org=SimpleNamespace(id=group_id),

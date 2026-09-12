@@ -276,6 +276,9 @@ class SlashCommand(Entity):
 class Relationship(BaseModel):
     """A relationship between two entities."""
 
+    operational_derivation_required: bool = Field(default=False, exclude=True)
+    operational_source_binding: dict[str, Any] | None = Field(default=None, exclude=True)
+
     id: str = Field(description="Unique identifier for the relationship")
     relationship_type: RelationshipType = Field(description="Type of relationship")
     source_id: str = Field(description="Source entity ID")

@@ -39,7 +39,11 @@ def companion_payloads(
         relationship = relationship_from_surreal_row(
             {**row, "record_id": row["archive_record_key"]}
         )
-        encoded = encode_record(relationship.model_dump(mode="python"))
+        record = relationship.model_dump(mode="python")
+        if relationship.operational_derivation_required or relationship.operational_source_binding:
+            record["operational_derivation_required"] = relationship.operational_derivation_required
+            record["operational_source_binding"] = relationship.operational_source_binding
+        encoded = encode_record(record)
         relationships.append({**encoded["record"], DATETIME_PATHS: encoded["datetimes"]})
     episodes = [
         episode_payload_from_node(

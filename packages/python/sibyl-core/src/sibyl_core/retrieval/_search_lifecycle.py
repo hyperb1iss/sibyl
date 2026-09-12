@@ -20,7 +20,10 @@ from sibyl_core.retrieval._search_plan import RetrievalPlan, RetrievalSignal
 from sibyl_core.retrieval.candidates import CandidateKind, RetrievalCandidate
 from sibyl_core.services.eval_publication_guards import unavailable_publication_ids
 from sibyl_core.services.graph_entities import EntityManager
-from sibyl_core.services.graph_read_availability import available_graph_entities
+from sibyl_core.services.graph_read_availability import (
+    available_graph_entities,
+    available_graph_relationships,
+)
 from sibyl_core.services.graph_relationships import RelationshipManager
 from sibyl_core.services.graph_runtime import GraphRuntime
 
@@ -232,6 +235,30 @@ async def _available_edge_endpoints(
                 ids=edge_ids[offset : offset + 512],
             )
         )
+    from sibyl_core.services.graph_records import relationship_from_surreal_row
+
+    current_relationships = await available_graph_relationships(
+        group_id,
+        edge_ids,
+        runtime=GraphRuntime(
+            client,
+            EntityManager(client, group_id=group_id),
+            RelationshipManager(client, group_id=group_id),
+        ),
+    )
+    rows = [
+        row
+        for row in rows
+        if str(row.get("uuid")) in current_relationships
+        and relationship_from_surreal_row(row).model_dump(
+            mode="json", exclude={"metadata": {"operational_write_witness"}}
+        )
+        == current_relationships[str(row["uuid"])].model_dump(
+            mode="json", exclude={"metadata": {"operational_write_witness"}}
+        )
+        and row.get("operational_source_binding")
+        == current_relationships[str(row["uuid"])].operational_source_binding
+    ]
     endpoints = {
         str(row["uuid"]): (str(row["source_uuid"]), str(row["target_uuid"]))
         for row in rows

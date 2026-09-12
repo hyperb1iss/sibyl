@@ -169,7 +169,8 @@ class _EntityUpdatePatchClient:
 class _TransactionDeleteClient:
     group_id = "org-native"
 
-    def __init__(self) -> None:
+    def __init__(self, *, retire_relationship: bool = False) -> None:
+        self.retire_relationship = retire_relationship
         self.calls: list[tuple[str, dict[str, object]]] = []
 
     async def execute_query(self, query: str, **params: object) -> object:
@@ -178,6 +179,19 @@ class _TransactionDeleteClient:
 
     async def execute_query_raw(self, query: str, **params: object) -> object:
         self.calls.append((query, params))
+        if "uuids" in params:
+            deleted = [{"uuid": identity} for identity in cast(list[str], params["uuids"])]
+            return {
+                "result": [
+                    {"status": "OK", "result": None},
+                    {"status": "OK", "result": None},
+                    {"status": "OK", "result": deleted if self.retire_relationship else []},
+                    {"status": "OK", "result": [] if self.retire_relationship else deleted},
+                    {"status": "OK", "result": None},
+                    {"status": "OK", "result": []},
+                    {"status": "OK", "result": None},
+                ]
+            }
         deleted = [{"uuid": params["uuid"]}]
         return {
             "result": [
@@ -2658,8 +2672,9 @@ async def test_native_relationship_manager_generates_fact_embeddings() -> None:
 
 
 @pytest.mark.asyncio
-async def test_native_relationship_delete_runs_raw_transaction() -> None:
-    client = _TransactionDeleteClient()
+@pytest.mark.parametrize("retire_relationship", [False, True])
+async def test_native_relationship_delete_runs_raw_transaction(retire_relationship: bool) -> None:
+    client = _TransactionDeleteClient(retire_relationship=retire_relationship)
     manager = RelationshipManager(
         cast("SurrealGraphClient", client),
         group_id=client.group_id,
@@ -2671,11 +2686,17 @@ async def test_native_relationship_delete_runs_raw_transaction() -> None:
     assert len(client.calls) == 1
     query, params = client.calls[0]
     assert "BEGIN TRANSACTION;" in query
-    assert "DELETE FROM relates_to" in query
-    assert "DELETE FROM mentions" in query
+    assert "UPDATE array::filter($edge_targets" in query
+    assert "SET invalid_at = time::now(), expired_at = time::now()" in query
+    assert "operational_derivation_required = true OR operational_source_binding != NONE" in query
+    assert "AND invalid_at = NONE AND expired_at = NONE" in query
+    assert "DELETE array::filter($edge_targets" in query
+    assert "operational_derivation_required != true AND operational_source_binding = NONE" in query
+    assert "DELETE array::filter($mention_targets" in query
+    assert "WHERE group_id = $group_id RETURN BEFORE;" in query
     assert "DELETE FROM entity" not in query
     assert "COMMIT TRANSACTION;" in query
-    assert params == {"group_id": client.group_id, "uuid": "rel_delete"}
+    assert params == {"group_id": client.group_id, "uuids": ["rel_delete"]}
 
 
 def test_entity_from_surreal_row_hydrates_legacy_shaped_rows() -> None:
