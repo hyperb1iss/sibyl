@@ -194,8 +194,8 @@ missing root and synchronizes new cell directory entries before grading.
 The library does not provision isolated solver/evaluator machines, authenticate
 live isolation, construct checkpoint packs, broker provider requests, schedule
 sealed tasks, or produce the final paired report. Its receipts explicitly retain
-`sealed_execution_qualified: false`. The development manifest still refuses
-sealed tasks. Synthetic local container tests qualify only this evaluator boundary.
+`sealed_execution_qualified: false`. The development runner still refuses
+sealed execution. Synthetic local container tests qualify only this evaluator boundary.
 
 ## Collect authenticated learning episodes
 
