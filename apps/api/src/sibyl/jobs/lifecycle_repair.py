@@ -16,6 +16,7 @@ from sibyl.persistence.auth_runtime import (
 from sibyl.persistence.organization_runtime import list_org_ids
 from sibyl_core.projection.repair import repair_graph_lifecycle
 from sibyl_core.services.graph_runtime import background_graph_runtime
+from sibyl_core.services.memory_embedding import repair_promoted_embeddings
 from sibyl_core.services.memory_source_validation import (
     SourceReadAuthority,
     repair_raw_source_lifecycle,
@@ -53,7 +54,11 @@ async def resolve_source_authority(
 
 async def _repair_graph(organization_id: str):
     async with background_graph_runtime(organization_id) as runtime:
-        return await repair_graph_lifecycle(runtime)
+        lifecycle = await repair_graph_lifecycle(runtime)
+        embeddings = await repair_promoted_embeddings(runtime)
+        return type(lifecycle)(
+            **{key: value + asdict(embeddings)[key] for key, value in asdict(lifecycle).items()}
+        )
 
 
 async def repair_lifecycle_all_orgs(ctx: dict[str, Any]) -> dict[str, int]:  # noqa: ARG001

@@ -190,6 +190,19 @@ class EntityManager(_EntityWorkItemManager):
         loaded = [load_matching_entity(entity) for entity in entities]
         rows_by_id.clear()
         current_entities = [entity for entity in loaded if entity is not None]
+        initial_snapshot = None
+        if operational_source is None:
+            protected_ids = [entity.id for entity in current_entities if entity.derivation_required]
+            if protected_ids:
+                from sibyl_core.services.operational_relationships import _snapshot
+
+                initial_snapshot = await _snapshot(
+                    self._client,
+                    organization_id=self._group_id,
+                    ids=protected_ids,
+                    relationship_ids=[],
+                )
+            current_entities = await self._available_embedding_targets(current_entities)
         provider_metadata = (
             self._embedding_provider.metadata.to_dict() if self._embedding_provider else None
         )
@@ -219,17 +232,87 @@ class EntityManager(_EntityWorkItemManager):
         for index in range(0, len(prepared), batch_size):
             if operational_source is not None:
                 await operational_source.current()
+            batch = prepared[index : index + batch_size]
+            snapshot = None
+            if operational_source is None and any(entity.derivation_required for entity in batch):
+                from sibyl_core.services.operational_relationships import _snapshot
+
+                protected_ids = [entity.id for entity in batch if entity.derivation_required]
+                snapshot = await _snapshot(
+                    self._client,
+                    organization_id=self._group_id,
+                    ids=protected_ids,
+                    relationship_ids=[],
+                )
+                if initial_snapshot is None:
+                    raise RuntimeError("protected embedding lacks its initial source snapshot")
+                unchanged = {
+                    entity_id
+                    for entity_id in protected_ids
+                    if all(
+                        [row for row in initial_snapshot[kind] if row[id_key] == entity_id]
+                        == [row for row in snapshot[kind] if row[id_key] == entity_id]
+                        for kind, id_key in (("associations", "target_id"), ("states", "source_id"))
+                    )
+                }
+                batch = [
+                    entity
+                    for entity in batch
+                    if not entity.derivation_required or entity.id in unchanged
+                ]
+                batch = await self._available_embedding_targets(batch)
+                # Bind exactly the graph snapshot whose current ancestry was checked.
+                captured = {
+                    row["uuid"]: entity_from_surreal_row(row) for row in snapshot["targets"]
+                }
+                batch = [
+                    entity
+                    for entity in batch
+                    if not entity.derivation_required
+                    or (
+                        entity.id in captured
+                        and entity_embedding_text(entity)
+                        == entity_embedding_text(captured[entity.id])
+                    )
+                ]
             written_ids.update(
                 await _update_entity_embeddings_if_current(
                     self._client,
-                    prepared[index : index + batch_size],
+                    batch,
                     group_id=self._group_id,
+                    **({"derivation_snapshot": snapshot} if snapshot is not None else {}),
                 )
             )
         if operational_source is not None:
             await operational_source.current()
         ready_ids.update(written_ids)
         return [entity.id for entity in current_entities if entity.id in ready_ids]
+
+    async def _available_embedding_targets(self, entities: Sequence[Entity]) -> list[Entity]:
+        """Revalidate protected publications without adopting changed queued evidence."""
+        from sibyl_core.services.graph_derivations import graph_target_digest
+        from sibyl_core.services.graph_read_availability import available_graph_entities
+        from sibyl_core.services.graph_relationships import RelationshipManager
+        from sibyl_core.services.graph_runtime import GraphRuntime
+
+        protected = [entity for entity in entities if entity.derivation_required]
+        if not protected:
+            return list(entities)
+        runtime = GraphRuntime(
+            self._client, self, RelationshipManager(self._client, group_id=self._group_id)
+        )
+        available = await available_graph_entities(
+            self._group_id, [entity.id for entity in protected], runtime=runtime
+        )
+        return [
+            entity
+            for entity in entities
+            if not entity.derivation_required
+            or (
+                entity.id in available
+                and graph_target_digest(entity) == graph_target_digest(available[entity.id])
+            )
+        ]
 
     async def complete_embedding_manifest(self, expected: Entity, *, complete: bool = True) -> str:
         if self._embedding_provider is None:

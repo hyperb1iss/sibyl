@@ -48,6 +48,9 @@ from sibyl_core.services.memory_contract import (
     _ReflectionPromotionPlan,
     _RelationshipWriteReceipt,
 )
+from sibyl_core.services.memory_embedding import (
+    enqueue_promoted_embedding as _enqueue_promoted_embedding,
+)
 from sibyl_core.services.memory_identity import (
     IDENTITY_KEY,
     reflection_entity_id,
@@ -675,7 +678,7 @@ async def promote_reflection_candidate_review(
         accessible_delegations=accessible_delegations,
     )
     if isinstance(plan, ReflectionPromotionResult):
-        return plan
+        return await _enqueue_promoted_embedding(plan, organization_id)
 
     if (
         expected_candidate_revision is not None
@@ -690,7 +693,7 @@ async def promote_reflection_candidate_review(
             raw_source_ids=plan.raw_source_ids,
         )
 
-    return await _apply_promotion_plan(
+    result = await _apply_promotion_plan(
         plan=plan,
         organization_id=organization_id,
         principal_id=principal_id,
@@ -705,6 +708,8 @@ async def promote_reflection_candidate_review(
         lifecycle_reason="accepted_reflection_candidate",
         validation_promotion=validation_promotion,
     )
+
+    return await _enqueue_promoted_embedding(result, organization_id)
 
 
 async def promote_raw_memory(
