@@ -881,6 +881,14 @@ GRAPH_SCHEMA_MIGRATIONS = (
         name="graph_operational_omission_receipts",
         statements=OPERATIONAL_OMISSION_STATEMENTS,
     ),
+    SchemaMigration(
+        version=30,
+        name="graph_reflection_embedding_candidates",
+        statements=(
+            "DEFINE INDEX IF NOT EXISTS idx_entity_reflection_candidate_uuid ON entity "
+            "FIELDS attributes.reflection_identity.purpose, derivation_required, uuid;",
+        ),
+    ),
 )
 
 
