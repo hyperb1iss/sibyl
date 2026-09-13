@@ -78,7 +78,7 @@ def decode_validation_result(value: Any) -> ValidationStageResult:
             for assessment in diagnostic.rejected_assessments or ():
                 if (
                     assessment.unknown_evidence_count > assessment.evidence_count
-                    or assessment.duplicate_evidence_count > assessment.evidence_count
+                    or assessment.duplicate_evidence_count >= assessment.evidence_count
                 ):
                     raise ValueError("Progress diagnostic evidence counts differ")
         ids = [assessment.finding_id for assessment in result.prior_assessments]

@@ -433,6 +433,21 @@ async def test_progress_old_mechanical_receipt_roundtrip_does_not_invent_output(
     assert old.prior_assessments == ()
 
 
+@pytest.mark.parametrize("evidence_count", [0, 1])
+async def test_progress_diagnostic_rejects_impossible_duplicate_counts(progress, evidence_count):
+    invalid = output(progress)
+    invalid["prior_assessments"][0]["supported_reduction"] = None
+    value = encode_validation_result(await execute(progress, invalid))
+    assessment = value["diagnostic"]["rejected_assessments"][0]
+    assessment.update(
+        evidence_count=evidence_count,
+        unknown_evidence_count=0,
+        duplicate_evidence_count=evidence_count,
+    )
+    with pytest.raises(ValueError, match="evidence counts differ"):
+        decode_validation_result(value)
+
+
 async def test_progress_successful_receipt_omits_absent_diagnostic(progress):
     value = encode_validation_result(await execute(progress, output(progress)))
     assert "diagnostic" not in value
