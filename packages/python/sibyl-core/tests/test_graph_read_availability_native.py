@@ -2,6 +2,7 @@
 
 import pytest
 
+from sibyl_core.services import eval_publication_guards as guards
 from sibyl_core.services import graph_read_availability as availability
 from sibyl_core.services.graph_derivations import graph_target_digest
 from tests.test_graph_passage_derivations import published_passages
@@ -19,7 +20,7 @@ async def test_graph_availability_binds_the_returned_target_to_its_association(
     _source, target, _projection, _passage = await published_passages(
         runtime, content_store, monkeypatch
     )
-    guard = availability.unavailable_publication_ids
+    guard = guards.unavailable_publication_ids
 
     async def replace_between_reads(org, rows, **kwargs):
         if changed:
@@ -34,7 +35,7 @@ async def test_graph_availability_binds_the_returned_target_to_its_association(
             assert not await guard(org, {replacement.id: replacement.metadata})
         return await guard(org, rows, **kwargs)
 
-    monkeypatch.setattr(availability, "unavailable_publication_ids", replace_between_reads)
+    monkeypatch.setattr(guards, "unavailable_publication_ids", replace_between_reads)
     current = await availability.available_graph_entities(
         runtime.client.group_id, [target.id], runtime=runtime
     )

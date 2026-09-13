@@ -290,19 +290,18 @@ class EntityManager(_EntityWorkItemManager):
 
     async def _available_embedding_targets(self, entities: Sequence[Entity]) -> list[Entity]:
         """Revalidate protected publications without adopting changed queued evidence."""
+        from sibyl_core.services.eval_publication_guards import available_graph_entity_rows
         from sibyl_core.services.graph_derivations import graph_target_digest
-        from sibyl_core.services.graph_read_availability import available_graph_entities
-        from sibyl_core.services.graph_relationships import RelationshipManager
-        from sibyl_core.services.graph_runtime import GraphRuntime
 
         protected = [entity for entity in entities if entity.derivation_required]
         if not protected:
             return list(entities)
-        runtime = GraphRuntime(
-            self._client, self, RelationshipManager(self._client, group_id=self._group_id)
-        )
-        available = await available_graph_entities(
-            self._group_id, [entity.id for entity in protected], runtime=runtime
+        ids = {entity.id for entity in protected}
+        current = {
+            entity.id: entity for entity in await self.get_many(list(ids)) if entity.id in ids
+        }
+        available = await available_graph_entity_rows(
+            self._group_id, current, graph_client=self._client
         )
         return [
             entity

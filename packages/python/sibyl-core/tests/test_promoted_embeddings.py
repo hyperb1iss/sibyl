@@ -230,3 +230,25 @@ async def test_promoted_embedding_native_association_write_fence(
     assert observed
     assert ids == ([entity.id] if phase == "unchanged" else [])
     assert bool((await runtime.entity_manager.get(entity.id)).embedding) == (phase == "unchanged")
+
+
+async def test_promoted_embedding_manager_retains_explicit_client(
+    publication, runtime, cohort_sources, content_store, monkeypatch
+):
+    kwargs, provider, _queue = publication
+    result = await promote_reflection_candidate_review(**kwargs)
+    assert result.success
+    entity = await runtime.entity_manager.get(result.promoted_id)
+    factory = AsyncMock(side_effect=AssertionError("manager must retain its scoped client"))
+    monkeypatch.setattr(
+        "sibyl_core.services.graph_read_availability.get_surreal_graph_runtime", factory
+    )
+    runtime.entity_manager._embedding_provider = provider
+    assert await runtime.entity_manager.backfill_embeddings_if_current([entity]) == [entity.id]
+    current = await runtime.entity_manager.get(entity.id)
+    assert current.embedding
+    await content_store.execute_query(
+        "UPDATE raw_captures SET deleted_at=time::now() WHERE uuid=$id;", id=cohort_sources[0].id
+    )
+    assert await runtime.entity_manager.backfill_embeddings_if_current([current]) == []
+    factory.assert_not_awaited()
