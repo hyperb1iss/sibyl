@@ -520,7 +520,33 @@ jobs:
         run: cd apps/web && pnpm install --frozen-lockfile
 
       - name: Run test suite
+        if: matrix.suite != 'core'
         run: ${{ matrix.command }}
+
+      - name: Install core diagnostic tools
+        if: matrix.suite == 'core'
+        run: sudo apt-get install -y procps time
+
+      - name: Profile core test suite
+        if: matrix.suite == 'core'
+        env:
+          MOON_OUTPUT_STYLE: stream
+          PYTHONUNBUFFERED: "1"
+        run: |
+          command -v vmstat >/dev/null
+          test -x /usr/bin/time
+          vmstat -w -t 15 &
+          sampler_pid=$!
+          cleanup() {
+            test_status=$?
+            trap - EXIT
+            kill "$sampler_pid" 2>/dev/null || true
+            wait "$sampler_pid" 2>/dev/null || true
+            exit "$test_status"
+          }
+          trap cleanup EXIT
+          /usr/bin/time -v ${{ matrix.command }} -- \
+            --durations=40 --durations-min=0.05 -o faulthandler_timeout=120
 
       - name: Upload coverage
         if: matrix.coverage != ''

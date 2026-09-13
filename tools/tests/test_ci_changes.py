@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 
 import pytest
 import yaml
@@ -186,6 +187,68 @@ def test_test_suites_use_independent_runners_without_losing_coverage() -> None:
     upload = next(step for step in job["steps"] if step.get("name") == "Upload coverage")
     assert upload["with"]["files"] == "${{ matrix.coverage }}"
     assert upload["if"] == "matrix.coverage != ''"
+
+
+def test_core_diagnostics_preserve_test_policy_and_other_suites() -> None:
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text())
+    job = workflow["jobs"]["test-suites"]
+    assert job["timeout-minutes"] == 30  # noqa: PLR2004
+    regular = next(step for step in job["steps"] if step.get("name") == "Run test suite")
+    assert regular["if"] == "matrix.suite != 'core'"
+    assert regular["run"] == "${{ matrix.command }}"
+    profile = next(step for step in job["steps"] if step.get("name") == "Profile core test suite")
+    setup = next(
+        step for step in job["steps"] if step.get("name") == "Install core diagnostic tools"
+    )
+    assert setup["if"] == "matrix.suite == 'core'"
+    assert setup["run"] == "sudo apt-get install -y procps time"
+    assert profile["if"] == "matrix.suite == 'core'"
+    assert profile["env"] == {"MOON_OUTPUT_STYLE": "stream", "PYTHONUNBUFFERED": "1"}
+    assert "/usr/bin/time -v ${{ matrix.command }} --" in profile["run"]
+    assert "--durations=40 --durations-min=0.05 -o faulthandler_timeout=120" in profile["run"]
+
+
+@pytest.mark.parametrize("test_exit", [0, 7])
+def test_core_diagnostics_stop_sampler_and_preserve_test_exit(tmp_path, test_exit) -> None:
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text())
+    job = workflow["jobs"]["test-suites"]
+    profile = next(step for step in job["steps"] if step.get("name") == "Profile core test suite")
+    sampler = tmp_path / "vmstat"
+    sampler.write_text(
+        f"#!{sys.executable}\n"
+        "import pathlib, signal\n"
+        "def stop(*_):\n"
+        "    pathlib.Path('sampler-stopped').touch()\n"
+        "    raise SystemExit(0)\n"
+        "signal.signal(signal.SIGTERM, stop)\n"
+        "pathlib.Path('sampler-ready').touch()\n"
+        "while True: signal.pause()\n"
+    )
+    sampler.chmod(0o755)
+    test_command = tmp_path / "run-test"
+    test_command.write_text(
+        f"#!{sys.executable}\n"
+        "import pathlib, sys, time\n"
+        "deadline = time.monotonic() + 5\n"
+        "while not pathlib.Path('sampler-ready').exists():\n"
+        "    if time.monotonic() >= deadline: raise SystemExit(99)\n"
+        "    time.sleep(0.01)\n"
+        f"sys.exit({test_exit})\n"
+    )
+    test_command.chmod(0o755)
+    # macOS has BSD time; exercise the actual cleanup script with shell timing.
+    script = profile["run"].replace("/usr/bin/time -v", "time")
+    script = script.replace("${{ matrix.command }}", str(test_command))
+    completed = subprocess.run(  # noqa: S603 - execute the checked-in workflow cleanup
+        ["/bin/bash", "-e", "-o", "pipefail", "-c", script],
+        cwd=tmp_path,
+        env={"PATH": str(tmp_path), **profile["env"]},
+        capture_output=True,
+        check=False,
+        timeout=10,
+    )
+    assert completed.returncode == test_exit, completed.stderr.decode()
+    assert (tmp_path / "sampler-stopped").exists()
 
 
 @pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped"])
