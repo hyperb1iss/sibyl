@@ -172,6 +172,31 @@ authenticated outcomes, and split-aware learning admission remain required for
 sealed evaluation. The private artifact and result files share the trusted host
 user's storage. Their hashes do not authenticate the worker or prove learning.
 
+## Sealed evaluator foundation
+
+The `sealed_evaluator.SealedEvaluator` library authenticates a trusted sender's
+submission against a registered sealed assignment. Its private persistent state
+binds the first candidate snapshot and transcript before grading. Exact retries
+replay the signed receipt; a changed submission is refused. The evaluator uses
+the existing JSON oracle, disposable candidate containers, and outcome signatures.
+Sealed receipts remain ineligible for learning admission.
+
+An interrupted grade is never rerun. A retained complete outcome can be signed
+on recovery. Without an outcome, recovery records an unknown result and verifies
+cleanup against the recorded container identity, image, mount, and network policy.
+An unavailable original evaluator instance or a mismatched container leaves the
+cell operationally unfinalized. Replacing the evaluator process does not prove
+that the old candidate stopped. Keep the evaluator state outside disposable
+workspaces and retain it across instance replacement. Provision the private
+state root durably before constructing the evaluator; the evaluator refuses a
+missing root and synchronizes new cell directory entries before grading.
+
+The library does not provision isolated solver/evaluator machines, authenticate
+live isolation, construct checkpoint packs, broker provider requests, schedule
+sealed tasks, or produce the final paired report. Its receipts explicitly retain
+`sealed_execution_qualified: false`. The development manifest still refuses
+sealed tasks. Synthetic local container tests qualify only this evaluator boundary.
+
 ## Collect authenticated learning episodes
 
 The trusted learning harness registers an immutable assignment before running the
