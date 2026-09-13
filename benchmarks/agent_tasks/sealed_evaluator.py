@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import fcntl
 import os
+import re
 import stat
 import subprocess
 import tempfile
@@ -431,10 +432,24 @@ class SealedEvaluator:
                     if "no such container" in text or "no such object" in text
                     else "unavailable"
                 ), None
-            rows = strict_json(result.stdout)
-            if not isinstance(rows, list) or len(rows) != 1:
+            try:
+                rows = strict_json(result.stdout)
+            except (ValueError, RecursionError):
                 return "unavailable", None
-            return "present", rows[0]
+            if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+                return "unavailable", None
+            row = rows[0]
+            mounts = row.get("Mounts")
+            container_id = row.get("Id")
+            if (
+                not isinstance(mounts, list)
+                or any(not isinstance(mount, dict) for mount in mounts)
+                or not isinstance(row.get("HostConfig"), dict)
+                or not isinstance(container_id, str)
+                or re.fullmatch(r"[0-9a-f]{64}", container_id) is None
+            ):
+                return "unavailable", None
+            return "present", row
 
         verified = True
         for path in sorted(cell.glob("case-*.json")):

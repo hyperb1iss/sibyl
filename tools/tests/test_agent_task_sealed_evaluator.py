@@ -396,14 +396,19 @@ def test_sealed_terminal_replay_revalidates_retained_evidence(
     not os.environ.get("SIBYL_NATIVE_ORACLE_IMAGE"), reason="explicit owned native image required"
 )
 @pytest.mark.parametrize("boundary", ["grading-started.json", "outcome.json"])
-def test_sealed_native_fresh_process_recovery(evaluator_case, boundary):
+def test_sealed_native_fresh_process_recovery(evaluator_case, boundary, monkeypatch):
+    monkeypatch.delenv("PYTHONPATH", raising=False)
     owner, sender, bundle, work = evaluator_case
+    root = Path(__file__).resolve().parents[2]
+    core_source = root / "packages/python/sibyl-core/src"
     config = work.parent / "private-synthetic-config.json"
     config.write_bytes(
         canonical_bytes(
             {
                 "state": str(owner.state_root),
                 "work": str(work),
+                "source_root": str(root),
+                "core_source": str(core_source),
                 "assignment": owner.assignment.model_dump(mode="json"),
                 "checker": owner.checker.model_dump(mode="json"),
                 "inputs": {key: value.hex() for key, value in owner.inputs.items()},
@@ -423,6 +428,8 @@ from benchmarks.agent_tasks import sealed_evaluator as s
 from benchmarks.agent_tasks.manifest import JsonOracleChecker
 from sibyl_core.tasks.eval_receipts import TaskAssignment
 v=json.loads(Path(sys.argv[1]).read_bytes())
+assert Path(s.__file__).resolve()==Path(v['source_root'])/'benchmarks/agent_tasks/sealed_evaluator.py'
+assert Path(sys.modules[TaskAssignment.__module__].__file__).resolve().is_relative_to(Path(v['core_source']))
 sender=Ed25519PrivateKey.from_private_bytes(bytes.fromhex(v['sender']))
 owner=s.SealedEvaluator(Path(v['state']),TaskAssignment.model_validate(v['assignment']),
  JsonOracleChecker.model_validate(v['checker']),{k:bytes.fromhex(x) for k,x in v['inputs'].items()},
@@ -443,11 +450,16 @@ Path(sys.argv[3]).write_bytes(result)
 """)
     result_path = work.parent / "recovered.json"
     argv = [sys.executable, str(script), str(config), boundary, str(result_path)]
-    crashed = subprocess.run(argv, capture_output=True, check=False)  # noqa: S603 - owned synthetic helper
+    environment = {**os.environ, "PYTHONPATH": os.pathsep.join((str(root), str(core_source)))}
+    crashed = subprocess.run(  # noqa: S603 - owned synthetic helper
+        argv, capture_output=True, check=False, cwd=root, env=environment
+    )
     expected_exit = 17
     assert crashed.returncode == expected_exit, crashed.stderr.decode()
     argv[-2] = "resume"
-    resumed = subprocess.run(argv, capture_output=True, check=False)  # noqa: S603 - owned synthetic helper
+    resumed = subprocess.run(  # noqa: S603 - owned synthetic helper
+        argv, capture_output=True, check=False, cwd=root, env=environment
+    )
     assert resumed.returncode == 0, resumed.stderr.decode()
     result = json.loads(result_path.read_bytes())["payload"]
     scored = boundary == "outcome.json"
@@ -491,3 +503,97 @@ def test_sealed_cell_directory_sync_precedes_grade(evaluator_case, fake_oracle, 
     monkeypatch.setattr(os, "fsync", sync)
     monkeypatch.setattr(json_oracle, "evaluate_json_oracle", grade)
     evaluate(evaluator_case)
+
+
+@pytest.mark.parametrize(
+    "stdout",
+    [b"not JSON", b"\xff", b"[1]", b'[{"Mounts":null}]', b'[{"Mounts":[null]}]'],
+)
+def test_sealed_malformed_inspection_preserves_uncertainty(
+    evaluator_case, fake_oracle, monkeypatch, stdout
+):
+    original = sealed_evaluator._write
+
+    def interrupt(path, data):
+        original(path, data)
+        if path.name.startswith("case-"):
+            raise KeyboardInterrupt
+
+    with monkeypatch.context() as patch:
+        patch.setattr(sealed_evaluator, "_write", interrupt)
+        with pytest.raises(KeyboardInterrupt):
+            evaluate(evaluator_case)
+    calls = []
+
+    def inspect(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout, b"")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(subprocess, "run", inspect)
+        result = json.loads(evaluate(evaluator_case))["payload"]
+    assert result["status"] == "grading_unknown"
+    assert result["operationally_finalized"] is False
+    assert result["cleanup_status"] == "unverified"
+    assert not fake_oracle
+    assert not list(evaluator_case[0].state_root.glob("*/terminal.json"))
+    assert all(argv[1:3] == ["container", "inspect"] for argv in calls)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("Mounts", None),
+        ("Mounts", 1),
+        ("Mounts", [None]),
+        ("HostConfig", None),
+        ("HostConfig", "none"),
+        ("Id", None),
+        ("Id", 1),
+        ("Id", "--force"),
+    ],
+)
+def test_sealed_inspection_shape_cannot_authorize_cleanup(
+    evaluator_case, fake_oracle, monkeypatch, field, value
+):
+    owner = evaluator_case[0]
+    original = sealed_evaluator._write
+
+    def interrupt(path, data):
+        original(path, data)
+        if path.name.startswith("case-"):
+            raise KeyboardInterrupt
+
+    with monkeypatch.context() as patch:
+        patch.setattr(sealed_evaluator, "_write", interrupt)
+        with pytest.raises(KeyboardInterrupt):
+            evaluate(evaluator_case)
+    witness = json.loads(next(owner.state_root.glob("*/case-*.json")).read_bytes())
+    row = {
+        "Id": "a" * 64,
+        "Name": "/" + witness["container"],
+        "Image": witness["image"],
+        "HostConfig": {"NetworkMode": "none"},
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": witness["workspace"],
+                "Destination": "/workspace",
+                "RW": False,
+            }
+        ],
+    }
+    row[field] = value
+    calls = []
+
+    def inspect(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, canonical_bytes([row]), b"")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(subprocess, "run", inspect)
+        result = json.loads(evaluate(evaluator_case))["payload"]
+    assert result["operationally_finalized"] is False
+    assert not list(owner.state_root.glob("*/terminal.json"))
+    assert all(argv[1:3] == ["container", "inspect"] for argv in calls)
+    assert not fake_oracle
