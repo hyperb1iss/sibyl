@@ -423,6 +423,8 @@ def test_the_request_body_declares_the_fixed_call_shape(harness, monkeypatch, ca
     body = provider.body(0)
     assert body["model"] == REQUEST["controller_model"]
     assert body["seed"] == REQUEST["seed"]
+    assert "provider" not in body
+    assert "provider" not in harness.payload("start")["options"]
     assert body["stream"] is False
     assert body["max_tokens"] == BUDGET["output_tokens"]
     assert body["tool_choice"] == "auto"
@@ -1905,3 +1907,55 @@ def test_zero_tool_finalization_still_enforces_reported_limits(
     assert provider.body(0)["tool_choice"] == "none"
     assert docker.calls == []
     assert result_of(capsys)["tool_calls"] == 0
+
+
+@pytest.mark.parametrize("memory", [MEMORY, ""])
+def test_provider_allowlist_survives_tool_exhaustion(harness, monkeypatch, capsys, memory):
+    provider = Provider(calls_tool("echo 42 > answer.txt"), replies())
+    provider.install(monkeypatch)
+    Docker(container(edit_answer)).install(monkeypatch)
+    argv = [*ARGV, "--provider-only", "parasail/bf16", "--provider-only", "novita/fp8"]
+    request = {
+        **REQUEST,
+        "controller_model": "qwen/qwen3-coder-next",
+        "seed": 0,
+        "controller_budget": {**BUDGET, "tool_calls": 1},
+        "memory_pack": memory,
+        "memory_pack_sha256": hashlib.sha256(memory.encode()).hexdigest(),
+        "pack_id": hashlib.sha256(memory.encode()).hexdigest(),
+    }
+    assert controller.main(argv, io.StringIO(json.dumps(request))) == 0
+    expected = {
+        "only": ["parasail/bf16", "novita/fp8"],
+        "allow_fallbacks": True,
+        "require_parameters": True,
+    }
+    assert len(provider.requests) == SECOND_CALL
+    assert [provider.body(i)["tool_choice"] for i in range(2)] == ["auto", "none"]
+    for index in range(2):
+        body = provider.body(index)
+        assert body["provider"] == expected
+        assert body["model"] == request["controller_model"]
+        assert body["seed"] == 0
+        assert "temperature" not in body
+        assert body["tools"] == [controller.SHELL_TOOL]
+        assert harness.payloads("model_request")[index]["body"] == body
+    assert harness.payload("start")["options"]["provider"] == expected
+    assert result_of(capsys)["tool_calls"] == 1
+    assert (harness.workspace / "answer.txt").read_text() == "42\n"
+
+
+@pytest.mark.parametrize(
+    "slugs",
+    [[], [""], ["Novita"], ["novita\n"], ["/novita"], ["novita//fp8"], ["novita", "novita"]],
+)
+def test_invalid_provider_allowlist_is_refused_before_dispatch(harness, monkeypatch, capsys, slugs):
+    provider = Provider()
+    provider.install(monkeypatch)
+    argv = [*ARGV, *(arg for slug in slugs for arg in ("--provider-only", slug))]
+    if not slugs:
+        argv.append("--provider-only")
+    assert harness.run_argv(argv) == controller.EXIT_CODES["invalid_request"]
+    assert provider.requests == []
+    assert harness.kinds() == ["terminal"]
+    assert result_of(capsys)["input_tokens"] == 0

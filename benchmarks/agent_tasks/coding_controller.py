@@ -48,6 +48,7 @@ ALREADY_GONE = "no such container"
 # an outgoing header value.
 DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}\Z")
 IMAGE_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}\Z")
+PROVIDER_PATTERN = re.compile(r"^[a-z0-9]+(?:[-_/][a-z0-9]+)*\Z")
 KEY_PATTERN = re.compile(r"^[!-~]+\Z")
 CONTAINER_PREFIX = "sibyl-coding-"
 STAGE_PREFIX = "coding-stage-"
@@ -246,6 +247,16 @@ class Options:
     docker: str
     container_user: str
     docker_host: str | None
+    provider_only: tuple[str, ...] = ()
+
+    @property
+    def provider(self) -> dict[str, Any]:
+        """Confine fallback to the declared endpoints; catalog checks qualify their enums."""
+        return {
+            "only": list(self.provider_only),
+            "allow_fallbacks": True,
+            "require_parameters": True,
+        }
 
 
 class _Parser(argparse.ArgumentParser):
@@ -261,6 +272,7 @@ def _parse_options(argv: list[str]) -> Options:
     parser.add_argument("--memory-mb", required=True, type=int)
     parser.add_argument("--docker")
     parser.add_argument("--docker-host")
+    parser.add_argument("--provider-only", action="append", default=[])
     parsed = parser.parse_args(argv)
     if not IMAGE_PATTERN.match(parsed.image):
         raise ControllerError("invalid_request", "--image must be sha256:<64 hex>, not a tag")
@@ -277,6 +289,12 @@ def _parse_options(argv: list[str]) -> Options:
         raise ControllerError(
             "invalid_request", "--docker-host must be an absolute Unix socket URL"
         )
+    if any(not PROVIDER_PATTERN.fullmatch(slug) for slug in parsed.provider_only):
+        raise ControllerError(
+            "invalid_request", "--provider-only requires a canonical provider slug"
+        )
+    if len(set(parsed.provider_only)) != len(parsed.provider_only):
+        raise ControllerError("invalid_request", "--provider-only must not repeat a provider slug")
     docker = (
         shutil.which(parsed.docker)
         if parsed.docker
@@ -291,6 +309,7 @@ def _parse_options(argv: list[str]) -> Options:
         docker,
         _container_user(docker, parsed.docker_host),
         parsed.docker_host,
+        tuple(parsed.provider_only),
     )
 
 
@@ -863,6 +882,7 @@ class Controller:
                 "client_environment": sorted(self.environment),
                 "retries": 0,
                 "redirects": False,
+                **({"provider": self.options.provider} if self.options.provider_only else {}),
             },
             "interpreter": {
                 "version": sys.version,
@@ -936,7 +956,7 @@ class Controller:
         return {"role": "system", "content": instruction}
 
     def _body(self, messages: list[dict[str, Any]], max_tokens: int) -> dict[str, Any]:
-        return {
+        body = {
             "model": self.request["controller_model"],
             "messages": [messages[0], self._budget_message(), *messages[1:]],
             "tools": [SHELL_TOOL],
@@ -945,6 +965,9 @@ class Controller:
             "max_tokens": max_tokens,
             "stream": False,
         }
+        if self.options.provider_only:
+            body["provider"] = self.options.provider
+        return body
 
     def _failure(self, error_class: str, status: int | None) -> ControllerError:
         """Log the class and status only: a failure body may quote the request."""

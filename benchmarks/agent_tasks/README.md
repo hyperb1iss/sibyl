@@ -52,6 +52,21 @@ process a fresh home and an isolated PATH; it does not inherit Docker contexts,
 registry credentials, or arbitrary environment variables. An explicit absolute
 `--docker` path also supports installations outside the system PATH.
 
+To confine routing to reviewed endpoints, repeat `--provider-only` in the
+controller arguments, for example `--provider-only parasail/bf16 --provider-only
+novita/fp8`. The controller sends OpenRouter's `provider.only` allowlist with
+fallbacks enabled inside that list and `require_parameters=true`. Omitting the
+flags preserves default routing. The manifest already hashes these arguments
+and the controller script, so changing the route creates a different policy.
+
+Before freezing the list, check the current model endpoint catalog for every
+parameter and tool-choice value the controller sends: `seed`, `max_tokens`,
+`tools`, and `tool_choice` (`auto` and `none`). Parameter-name filtering alone does
+not establish enum support. Full endpoint slugs avoid including unreviewed
+variants of a provider. Retain the catalog and actual response provider; a seed
+request does not guarantee deterministic output or the same provider in each arm.
+See [OpenRouter's routing contract](https://openrouter.ai/docs/guides/routing/provider-selection).
+
 Run as an unprivileged host user. The controller checks the daemon's namespace
 mode: ordinary Docker uses the caller's UID/GID; rootless Docker uses container
 UID/GID `0:0` (mapped to the daemon's unprivileged host user). Docker documents
