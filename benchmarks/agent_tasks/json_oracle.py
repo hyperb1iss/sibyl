@@ -19,6 +19,8 @@ from benchmarks.agent_tasks.manifest import ManifestError
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from benchmarks.agent_tasks.manifest import JsonOracleChecker
 
 # These helpers live in the frozen runtime, not an unbound manifest module.
@@ -104,6 +106,7 @@ def evaluate_json_oracle(
     snapshot_sha256: str,
     attempt_id: str,
     timeout_seconds: float,
+    before_case: Callable[[str, str], None] | None = None,
 ) -> dict[str, Any]:
     """Run each case against the frozen read-only submission and compare on the host."""
     oracle = validate_oracle_inputs(checker, inputs)
@@ -143,6 +146,8 @@ def evaluate_json_oracle(
                 return receipt
             case_options = replace(options, tool_timeout=min(options.tool_timeout, remaining))
             name = f"sibyl-oracle-{uuid4().hex}"
+            if before_case is not None:
+                before_case(case.id, name)
             stdin = canonical_bytes(case.input) + b"\n"
             expected_bytes = canonical_bytes(case.expected)
             execution = runtime.execute_container(
