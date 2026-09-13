@@ -107,7 +107,17 @@ async def test_progress_remaining_old_finding_is_not_automatic_no_progress(progr
 
 
 @pytest.mark.parametrize(
-    "change", ["missing", "duplicate", "finding", "evidence", "reduction", "remaining", "accepted"]
+    "change",
+    [
+        "missing",
+        "duplicate",
+        "finding",
+        "evidence",
+        "duplicate_evidence",
+        "reduction",
+        "remaining",
+        "accepted",
+    ],
 )
 async def test_progress_mechanical_refusal_preserves_usage(progress, change):
     value = output(progress)
@@ -119,6 +129,8 @@ async def test_progress_mechanical_refusal_preserves_usage(progress, change):
         value["prior_assessments"][0]["finding_id"] = "a" * 64
     elif change == "evidence":
         value["prior_assessments"][0]["evidence_refs"] = [{"evidence_id": "invented"}]
+    elif change == "duplicate_evidence":
+        value["prior_assessments"][0]["evidence_refs"] *= 2
     elif change == "reduction":
         value["prior_assessments"][0]["supported_reduction"] = None
     elif change == "remaining":
@@ -130,6 +142,25 @@ async def test_progress_mechanical_refusal_preserves_usage(progress, change):
     assert (
         result.reason == "critic_output_failed_mechanical_validation" and result.usage.requests == 1
     )
+    expected = {
+        "missing": "assessment_inventory_mismatch",
+        "duplicate": "assessment_inventory_mismatch",
+        "finding": "assessment_inventory_mismatch",
+        "evidence": "assessment_evidence_invalid",
+        "duplicate_evidence": "assessment_evidence_invalid",
+        "reduction": "assessment_reduction_inconsistent",
+        "remaining": "assessment_remaining_concern_inconsistent",
+        "accepted": "accepted_with_unresolved_assessment",
+    }
+    assert result.prior_assessments == ()
+    assert result.diagnostic.code == expected[change]
+    summaries = result.diagnostic.rejected_assessments
+    assert summaries is not None
+    assert len(summaries) == len(value["prior_assessments"])
+    if change == "evidence":
+        assert summaries[0].unknown_evidence_count == 1
+    if change == "duplicate_evidence":
+        assert summaries[0].duplicate_evidence_count == 1
 
 
 async def test_progress_no_findings_requires_complete_resolved_assessments(progress):
@@ -419,3 +450,124 @@ async def test_progress_false_positive_can_resolve_without_candidate_rewrite(sou
     )
     result = await execute(unchanged, value)
     assert result.status == "no_findings" and result.progress == "accepted"
+
+
+async def test_progress_diagnostic_never_retains_exception_or_assessment_prose(
+    progress, monkeypatch
+):
+    from sibyl_core.services.validation_result_codec import encode_validation_result
+    from sibyl_core.tasks import memory_progress
+
+    secret = "private-model-output-canary"
+    value = output(progress)
+    value["prior_assessments"][0]["supported_reduction"] = secret
+
+    def reject(*args):
+        raise ValueError(secret)
+
+    monkeypatch.setattr(memory_progress, "assess_progress", reject)
+    result = await execute(progress, value)
+    assert result.diagnostic.code == "mechanical_validation_failed"
+    assert secret not in json.dumps(encode_validation_result(result))
+    assert result.prior_assessments == ()
+    assert result.submission is not None
+    assert result.status == result.progress == "abstain"
+
+
+async def test_progress_schema_diagnostic_distinguishes_unparsed_assessments(progress, monkeypatch):
+    from types import SimpleNamespace
+
+    from sibyl_core.ai.llm.extractor import ExtractionUsage
+    from sibyl_core.services.validation_result_codec import encode_validation_result
+
+    async def malformed(*args, **kwargs):
+        return SimpleNamespace(
+            output=SimpleNamespace(model_dump=lambda: {"prior_assessments": "private-malformed"}),
+            usage=ExtractionUsage(requests=1, input_tokens=2, output_tokens=1, total_tokens=3),
+        )
+
+    monkeypatch.setattr(Extractor, "extract_with_usage", malformed)
+    result = await execute(progress, output(progress))
+    assert result.diagnostic.code == "critic_schema_invalid"
+    assert result.diagnostic.rejected_assessments is None
+    assert result.prior_assessments == ()
+    assert result.usage.requests == 1
+    assert "private-malformed" not in json.dumps(encode_validation_result(result))
+
+
+@pytest.mark.parametrize(
+    ("change", "code"),
+    [
+        ("parent", "parent_assertion_invalid"),
+        ("evidence", "original_evidence_invalid"),
+        ("empty_abstention", "abstention_empty"),
+    ],
+)
+async def test_progress_shared_critic_refusals_have_safe_codes(progress, change, code):
+    value = output(progress)
+    if change == "parent":
+        value["findings"][0]["claim_sha256"] = "a" * 64
+    elif change == "evidence":
+        value["findings"][0]["evidence_refs"] = [{"evidence_id": "unknown"}]
+    else:
+        value["abstention_reason"] = " "
+    result = await execute(progress, value)
+    assert result.diagnostic.code == code
+    assert result.status == result.progress == "abstain"
+    assert result.usage.requests == 1
+
+
+@pytest.mark.parametrize(
+    ("change", "code"),
+    [
+        ("missing", "context_missing"),
+        ("incomplete", "context_incomplete"),
+        ("shape", "context_shape_invalid"),
+        ("input", "previous_input_invalid"),
+        ("candidate", "previous_candidate_mismatch"),
+        ("evidence", "context_evidence_mismatch"),
+        ("ancestor", "ancestor_identity_invalid"),
+        ("identity", "context_identity_mismatch"),
+        ("assertion", "context_assertion_mismatch"),
+        ("citation", "context_citation_mismatch"),
+    ],
+)
+async def test_progress_context_failure_codes_remain_predispatch(
+    progress, monkeypatch, change, code
+):
+    from unittest.mock import AsyncMock
+
+    from sibyl_core.tasks.memory_progress import ProgressValidationError
+    from sibyl_core.tasks.memory_validation import PreparedMemoryValidation
+
+    payload = json.loads(progress.payload_json)
+    context = payload["prior_progress"]
+    if change == "missing":
+        del payload["prior_progress"]
+    elif change == "incomplete":
+        del context["previous_input_sha256"]
+    elif change == "shape":
+        context["previous_assertions"] = []
+    elif change == "input":
+        context["previous_input_sha256"] = "bad"
+    elif change == "candidate":
+        context["previous_candidate_view_sha256"] = "a" * 64
+    elif change == "evidence":
+        context["evidence_sha256"] = "a" * 64
+    elif change == "ancestor":
+        context["ancestor_candidate_digests"] = ["bad"]
+    elif change == "identity":
+        context["previous_candidate_digest"] = "a" * 64
+    else:
+        finding = context["review"]["findings"][0]
+        if change == "assertion":
+            finding["claim_sha256"] = "a" * 64
+        else:
+            finding["evidence_refs"] = [{"evidence_id": "unknown"}]
+        context["finding_ids"] = ReviewSubmission.model_validate(context["review"]).finding_ids()
+    call = AsyncMock(side_effect=AssertionError("unexpected physical extraction"))
+    monkeypatch.setattr(Extractor, "extract_with_usage", call)
+    with pytest.raises(ProgressValidationError) as caught:
+        await execute(PreparedMemoryValidation(json.dumps(payload)), output(progress))
+    assert caught.value.code == code
+    call.assert_not_awaited()
