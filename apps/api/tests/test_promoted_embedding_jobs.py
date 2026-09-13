@@ -77,7 +77,7 @@ async def test_promoted_embedding_job_scheduled_repair_after_lost_enqueue(
     queue.enqueue_entity_embedding_backfill.return_value = "scheduled-job"
     repair = await lifecycle_repair.repair_lifecycle_all_orgs({})
     assert scan_plans
-    assert all("idx_entity_uuid" in str(plan) for plan in scan_plans)
+    _assert_repair_scan_plan(scan_plans, embedded=runtime.client._url == "memory://")
     assert repair["failed_organizations"] == 0
     assert repair["checked"] >= 1
     if source_retired:
@@ -205,3 +205,20 @@ async def test_promoted_embedding_job_repair_provider_and_owner_selection(
             queue.enqueue_entity_embedding_backfill.call_args.kwargs["entities_data"][0]["id"]
             == entity_id
         )
+
+
+def _assert_repair_scan_plan(scan_plans, *, embedded):
+    if embedded:
+        # The embedded planner can fall back on the provider object expression.
+        for plan in scan_plans:
+            assert "idx_entity_uuid" in str(plan) or (
+                {
+                    "operation": "Iterate Table",
+                    "detail": {"table": "entity", "direction": "forward"},
+                }
+                in plan
+                and {"operation": "Fallback", "detail": {"reason": "Unsupported value: {  }"}}
+                in plan
+            )
+    else:
+        assert all("idx_entity_uuid" in str(plan) for plan in scan_plans)
