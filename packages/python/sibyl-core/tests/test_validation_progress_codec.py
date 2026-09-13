@@ -171,8 +171,9 @@ async def test_progress_history_exact_prior_binding(historical, progress, change
 
 
 @pytest.mark.parametrize("mode", ["recorded", "journal"])
+@pytest.mark.parametrize("mechanical_failure", [False, True])
 async def test_progress_durable_recorded_resume(
-    historical, content_store, monkeypatch, private_journal, mode
+    historical, progress, content_store, monkeypatch, private_journal, mode, mechanical_failure
 ):
     from sibyl_core.services import validation_execution as owner
     from sibyl_core.services.validation_execution import ValidationExecution
@@ -181,6 +182,10 @@ async def test_progress_durable_recorded_resume(
     from sibyl_core.tasks.procedure_review import review_digest
 
     prior, binding, result, _ = historical
+    if mechanical_failure:
+        invalid = output(progress)
+        invalid["prior_assessments"][0]["supported_reduction"] = None
+        result = await execute(progress, invalid)
     await owner._query(
         "CREATE memory_validation_executions CONTENT $row;",
         row={
@@ -232,8 +237,25 @@ async def test_progress_durable_recorded_resume(
         run=forbidden,
     )
     assert resumed["prior_assessments"] == encode_validation_result(result)["prior_assessments"]
-    assert resumed["progress"] == "advance"
+    assert resumed["progress"] == ("abstain" if mechanical_failure else "advance")
+    assert resumed.get("diagnostic") == encode_validation_result(result).get("diagnostic")
+    assert resumed["usage"] == encode_validation_result(result)["usage"]
     assert not list(private_journal.glob("*.receipt"))
+    if mechanical_failure:
+        import hashlib
+
+        from sibyl_core.services.validation_execution import ValidationExecutionUnavailable
+        from sibyl_core.services.validation_promotion import ValidationBinding, validated_result
+
+        row = await execution.load()
+        publication = ValidationBinding(
+            execution_id=execution.id,
+            request_sha256=row["request_sha256"],
+            result_sha256=hashlib.sha256(row["result_json"].encode()).hexdigest(),
+            input_sha256=result.input_sha256,
+        )
+        with pytest.raises(ValidationExecutionUnavailable, match="did not validate"):
+            validated_result(row, publication, "org", "owner", "child")
 
 
 async def test_progress_archive_history_and_exact_roundtrip(historical):
@@ -370,3 +392,66 @@ async def test_progress_codec_legacy_signed_tuple_roundtrip(proposal):
     assert isinstance(decoded, ProcedureCorrectionResult)
     assert isinstance(decoded.result.group.episodes, tuple)
     assert encode_validation_result(decoded) == historical
+
+
+@pytest.mark.parametrize(
+    "mutation", ["success", "accepted", "legacy", "code", "prose", "index", "counts"]
+)
+async def test_progress_diagnostic_cannot_grant_authority_or_expand_payload(progress, mutation):
+    invalid = output(progress)
+    invalid["prior_assessments"][0]["supported_reduction"] = None
+    failed = encode_validation_result(await execute(progress, invalid))
+    if mutation in ("success", "accepted"):
+        valid = output(progress, "resolved") if mutation == "accepted" else output(progress)
+        if mutation == "accepted":
+            valid["findings"] = []
+        successful = encode_validation_result(await execute(progress, valid))
+        successful["diagnostic"] = failed["diagnostic"]
+        failed = successful
+    elif mutation == "legacy":
+        failed.pop("version")
+    elif mutation == "code":
+        failed["diagnostic"]["code"] = "arbitrary-private-text"
+    elif mutation == "prose":
+        failed["diagnostic"]["rejected_assessments"][0]["supported_reduction"] = "private-text"
+    elif mutation == "index":
+        failed["diagnostic"]["assessment_index"] = 10
+    else:
+        failed["diagnostic"]["rejected_assessments"][0]["unknown_evidence_count"] = 10
+    with pytest.raises(ValueError):
+        decode_validation_result(failed)
+
+
+async def test_progress_old_mechanical_receipt_roundtrip_does_not_invent_output(progress):
+    invalid = output(progress)
+    invalid["prior_assessments"] = []
+    value = encode_validation_result(await execute(progress, invalid))
+    value.pop("diagnostic")
+    old = decode_validation_result(value)
+    assert old.diagnostic is None
+    assert encode_validation_result(old) == value
+    assert old.prior_assessments == ()
+
+
+@pytest.mark.parametrize("evidence_count", [0, 1])
+async def test_progress_diagnostic_rejects_impossible_duplicate_counts(progress, evidence_count):
+    invalid = output(progress)
+    invalid["prior_assessments"][0]["supported_reduction"] = None
+    value = encode_validation_result(await execute(progress, invalid))
+    assessment = value["diagnostic"]["rejected_assessments"][0]
+    assessment.update(
+        evidence_count=evidence_count,
+        unknown_evidence_count=0,
+        duplicate_evidence_count=evidence_count,
+    )
+    with pytest.raises(ValueError, match="evidence counts differ"):
+        decode_validation_result(value)
+
+
+async def test_progress_successful_receipt_omits_absent_diagnostic(progress):
+    value = encode_validation_result(await execute(progress, output(progress)))
+    assert "diagnostic" not in value
+    assert encode_validation_result(decode_validation_result(value)) == value
+    value["diagnostic"] = None
+    with pytest.raises(ValueError, match="must be omitted"):
+        decode_validation_result(value)

@@ -36,8 +36,11 @@ def decode_validation_result(value: Any) -> ValidationStageResult:
         raise ValueError("Validation result must be an object")
     version = value.get("version")
     if version == PROGRESS_VERSION:
-        if set(value) != {field.name for field in fields(ProgressMemoryValidationResult)}:
+        required = {field.name for field in fields(ProgressMemoryValidationResult)} - {"diagnostic"}
+        if set(value) not in (required, required | {"diagnostic"}):
             raise ValueError("Progress result fields differ")
+        if "diagnostic" in value and value["diagnostic"] is None:
+            raise ValueError("Absent progress diagnostic must be omitted")
         result = _PROGRESS_RESULT_ADAPTER.validate_json(canonical(value))
         policy = json.loads(result.configured_policy_json)
         expected_status = {
@@ -59,6 +62,25 @@ def decode_validation_result(value: Any) -> ValidationStageResult:
             or (result.status == "reconsider" and result.submission is None)
         ):
             raise ValueError("Progress result contract differs")
+        if result.diagnostic is not None:
+            if (
+                result.progress != "abstain"
+                or result.reason != "critic_output_failed_mechanical_validation"
+                or result.prior_assessments
+            ):
+                raise ValueError("Progress diagnostic requires mechanical abstention")
+            diagnostic = result.diagnostic
+            if diagnostic.assessment_index is not None and (
+                diagnostic.rejected_assessments is None
+                or diagnostic.assessment_index >= len(diagnostic.rejected_assessments)
+            ):
+                raise ValueError("Progress diagnostic assessment index differs")
+            for assessment in diagnostic.rejected_assessments or ():
+                if (
+                    assessment.unknown_evidence_count > assessment.evidence_count
+                    or assessment.duplicate_evidence_count >= assessment.evidence_count
+                ):
+                    raise ValueError("Progress diagnostic evidence counts differ")
         ids = [assessment.finding_id for assessment in result.prior_assessments]
         if len(ids) != len(set(ids)):
             raise ValueError("Progress assessment identities are duplicated")
@@ -71,7 +93,7 @@ def decode_validation_result(value: Any) -> ValidationStageResult:
             ):
                 raise ValueError("Progress assessment outcome differs")
         return result
-    if "progress" in value or "prior_assessments" in value:
+    if "progress" in value or "prior_assessments" in value or "diagnostic" in value:
         raise ValueError("Progress result cannot downgrade to legacy")
     if version is not None and version not in (VALIDATION_VERSION, CORRECTION_VERSION):
         raise ValueError("Unsupported validation result version")
@@ -80,7 +102,9 @@ def decode_validation_result(value: Any) -> ValidationStageResult:
 
 def encode_validation_result(result: ValidationStageResult) -> dict[str, Any]:
     if isinstance(result, ProgressMemoryValidationResult):
-        value = _PROGRESS_RESULT_ADAPTER.dump_python(result, mode="json")
+        value = _PROGRESS_RESULT_ADAPTER.dump_python(
+            result, mode="json", exclude={"diagnostic"} if result.diagnostic is None else set()
+        )
     else:
         value = _LEGACY_RESULT_ADAPTER.dump_python(result, mode="json")
     decode_validation_result(value)

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from sibyl_core.tasks.memory_progress import ProgressCriticOutput
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from sibyl_core.ai.llm.extractor import ExtractionUsage, Extractor
 from sibyl_core.models.reflection import ReflectionCandidate
@@ -285,7 +285,10 @@ async def run_memory_validation(
         ProgressCriticOutput,
         ProgressDecision,
         ProgressMemoryValidationResult,
+        ProgressValidationDiagnostic,
+        ProgressValidationError,
         assess_progress,
+        rejected_assessment_diagnostics,
         validate_progress_context,
     )
 
@@ -317,18 +320,24 @@ async def run_memory_validation(
     status: Literal["no_findings", "reconsider", "abstain"] = "no_findings"
     progress: ProgressDecision = "abstain"
     assessments = ()
+    output = None
+    diagnostic = None
     try:
         output = output_type.model_validate(result.output.model_dump())
         for finding in output.findings:
             assertion = payload["assertions"].get(finding.claim_path)
             if assertion is None or review_digest(assertion) != finding.claim_sha256:
-                raise ValueError("invalid parent assertion")
+                raise ProgressValidationError(
+                    "parent_assertion_invalid", "invalid parent assertion"
+                )
             refs = [ref.evidence_id for ref in finding.evidence_refs]
             if len(refs) != len(set(refs)) or any(ref not in payload["citations"] for ref in refs):
-                raise ValueError("invalid original evidence reference")
+                raise ProgressValidationError(
+                    "original_evidence_invalid", "invalid original evidence reference"
+                )
         if output.abstention_reason is not None:
             if not output.abstention_reason.strip():
-                raise ValueError("empty abstention")
+                raise ProgressValidationError("abstention_empty", "empty abstention")
             status, reason = "abstain", output.abstention_reason
         elif output.findings:
             status = "reconsider"
@@ -341,8 +350,22 @@ async def run_memory_validation(
         if isinstance(output, ProgressCriticOutput):
             progress = assess_progress(payload, output, status)
             assessments = tuple(output.prior_assessments)
-    except ValueError:
+    except ValueError as error:
         status, reason = "abstain", "critic_output_failed_mechanical_validation"
+        if version == PROGRESS_VERSION:
+            diagnostic = ProgressValidationDiagnostic(
+                code=error.code
+                if isinstance(error, ProgressValidationError)
+                else "critic_schema_invalid"
+                if isinstance(error, ValidationError)
+                else "mechanical_validation_failed",
+                assessment_index=error.assessment_index
+                if isinstance(error, ProgressValidationError)
+                else None,
+                rejected_assessments=rejected_assessment_diagnostics(
+                    payload, output if isinstance(output, ProgressCriticOutput) else None
+                ),
+            )
     except BaseException as error:
         error.__dict__["extraction_usage"] = result.usage
         raise
@@ -362,6 +385,6 @@ async def run_memory_validation(
         values["usage"] = validation.usage
         values["version"] = PROGRESS_VERSION
         return ProgressMemoryValidationResult(
-            **values, prior_assessments=assessments, progress=progress
+            **values, prior_assessments=assessments, progress=progress, diagnostic=diagnostic
         )
     return validation

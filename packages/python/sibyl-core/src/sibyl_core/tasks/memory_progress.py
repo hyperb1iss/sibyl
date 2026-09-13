@@ -49,11 +49,88 @@ class ProgressCriticOutput(CriticOutput):
     prior_assessments: list[PriorFindingAssessment]
 
 
+ProgressValidationCode = Literal[
+    "critic_schema_invalid",
+    "parent_assertion_invalid",
+    "original_evidence_invalid",
+    "abstention_empty",
+    "context_missing",
+    "context_incomplete",
+    "context_shape_invalid",
+    "previous_input_invalid",
+    "previous_candidate_mismatch",
+    "context_evidence_mismatch",
+    "ancestor_identity_invalid",
+    "context_identity_mismatch",
+    "context_assertion_mismatch",
+    "context_citation_mismatch",
+    "assessment_inventory_mismatch",
+    "assessment_evidence_invalid",
+    "assessment_reduction_inconsistent",
+    "assessment_remaining_concern_inconsistent",
+    "accepted_with_unresolved_assessment",
+    "mechanical_validation_failed",
+]
+
+
+class ProgressValidationError(ValueError):
+    """A closed diagnostic code accompanies the existing refusal boundary."""
+
+    def __init__(
+        self, code: ProgressValidationCode, message: str, *, assessment_index: int | None = None
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.assessment_index = assessment_index
+
+
+class RejectedAssessmentDiagnostic(_StrictModel):
+    """Untrusted output structure only; no model prose or evidence authority."""
+
+    finding_id: _Digest
+    disposition: Literal["resolved", "partially_resolved", "unresolved", "unassessable"]
+    supported_reduction_present: bool
+    remaining_concern_present: bool
+    evidence_count: int = Field(ge=0)
+    unknown_evidence_count: int = Field(ge=0)
+    duplicate_evidence_count: int = Field(ge=0)
+
+
+class ProgressValidationDiagnostic(_StrictModel):
+    code: ProgressValidationCode
+    assessment_index: int | None = Field(default=None, ge=0)
+    # None means output validation failed before assessments could be decoded.
+    rejected_assessments: tuple[RejectedAssessmentDiagnostic, ...] | None
+
+
+def rejected_assessment_diagnostics(
+    payload: dict[str, Any], output: ProgressCriticOutput | None
+) -> tuple[RejectedAssessmentDiagnostic, ...] | None:
+    if output is None:
+        return None
+    summaries = []
+    for item in output.prior_assessments:
+        refs = [ref.evidence_id for ref in item.evidence_refs]
+        summaries.append(
+            RejectedAssessmentDiagnostic(
+                finding_id=item.finding_id,
+                disposition=item.disposition,
+                supported_reduction_present=item.supported_reduction is not None,
+                remaining_concern_present=item.remaining_concern is not None,
+                evidence_count=len(refs),
+                unknown_evidence_count=sum(ref not in payload["citations"] for ref in refs),
+                duplicate_evidence_count=len(refs) - len(set(refs)),
+            )
+        )
+    return tuple(summaries)
+
+
 @dataclass(frozen=True, kw_only=True)
 class ProgressMemoryValidationResult(MemoryValidationResult):
     prior_assessments: tuple[PriorFindingAssessment, ...]
     progress: Literal["accepted", "advance", "no_progress", "abstain", "unresolved"]
     version: str = PROGRESS_VERSION
+    diagnostic: ProgressValidationDiagnostic | None = None
 
 
 def semantic_candidate_digest(payload: dict[str, Any]) -> str:
@@ -113,7 +190,7 @@ ProgressDecision = Literal["accepted", "advance", "no_progress", "abstain", "unr
 def validate_progress_context(payload: dict[str, Any]) -> None:
     """Reject malformed context before any physical model dispatch."""
     if not isinstance(payload.get("prior_progress"), dict):
-        raise ValueError("missing progress context")
+        raise ProgressValidationError("context_missing", "missing progress context")
     context = payload["prior_progress"]
     required = {
         "review",
@@ -129,33 +206,39 @@ def validate_progress_context(payload: dict[str, Any]) -> None:
         "evidence_sha256",
     }
     if not required <= context.keys():
-        raise ValueError("incomplete progress context")
+        raise ProgressValidationError("context_incomplete", "incomplete progress context")
     if not isinstance(context["previous_assertions"], dict) or not isinstance(
         context["ancestor_candidate_digests"], list
     ):
-        raise ValueError("invalid progress context shape")
+        raise ProgressValidationError("context_shape_invalid", "invalid progress context shape")
     digest = context["previous_input_sha256"]
     if (
         not isinstance(digest, str)
         or len(digest) != 64
         or any(c not in "0123456789abcdef" for c in digest)
     ):
-        raise ValueError("invalid previous input identity")
+        raise ProgressValidationError("previous_input_invalid", "invalid previous input identity")
     if (
         review_digest(context["previous_candidate"]) != context["previous_candidate_view_sha256"]
         or validation_assertion_index(payload["kind"], context["previous_candidate"])
         != context["previous_assertions"]
     ):
-        raise ValueError("previous candidate view differs from assertions")
+        raise ProgressValidationError(
+            "previous_candidate_mismatch", "previous candidate view differs from assertions"
+        )
     if context["evidence_sha256"] != review_digest([payload["sources"], payload["citations"]]):
-        raise ValueError("progress context evidence differs")
+        raise ProgressValidationError(
+            "context_evidence_mismatch", "progress context evidence differs"
+        )
     for digest in context["ancestor_candidate_digests"]:
         if (
             not isinstance(digest, str)
             or len(digest) != 64
             or any(c not in "0123456789abcdef" for c in digest)
         ):
-            raise ValueError("invalid progress ancestor identity")
+            raise ProgressValidationError(
+                "ancestor_identity_invalid", "invalid progress ancestor identity"
+            )
     review = ReviewSubmission.model_validate(context["review"])
     if (
         review.parent_operation_id != context["previous_parent_operation_id"]
@@ -163,14 +246,20 @@ def validate_progress_context(payload: dict[str, Any]) -> None:
         or review.finding_ids() != context["finding_ids"]
         or review_digest(context["previous_assertions"]) != context["previous_candidate_digest"]
     ):
-        raise ValueError("progress context identity differs")
+        raise ProgressValidationError(
+            "context_identity_mismatch", "progress context identity differs"
+        )
     for finding in review.findings:
         assertion = context["previous_assertions"].get(finding.claim_path)
         if assertion is None or review_digest(assertion) != finding.claim_sha256:
-            raise ValueError("progress context assertion differs")
+            raise ProgressValidationError(
+                "context_assertion_mismatch", "progress context assertion differs"
+            )
         refs = [ref.evidence_id for ref in finding.evidence_refs]
         if len(refs) != len(set(refs)) or any(ref not in payload["citations"] for ref in refs):
-            raise ValueError("progress context citation differs")
+            raise ProgressValidationError(
+                "context_citation_mismatch", "progress context citation differs"
+            )
 
 
 def assess_progress(
@@ -182,21 +271,38 @@ def assess_progress(
     expected = context["finding_ids"]
     actual = [item.finding_id for item in output.prior_assessments]
     if len(actual) != len(set(actual)) or set(actual) != set(expected):
-        raise ValueError("progress assessments incomplete or duplicated")
-    for assessment in output.prior_assessments:
+        raise ProgressValidationError(
+            "assessment_inventory_mismatch", "progress assessments incomplete or duplicated"
+        )
+    for index, assessment in enumerate(output.prior_assessments):
         refs = [ref.evidence_id for ref in assessment.evidence_refs]
         if len(refs) != len(set(refs)) or any(ref not in payload["citations"] for ref in refs):
-            raise ValueError("progress assessment evidence differs")
+            raise ProgressValidationError(
+                "assessment_evidence_invalid",
+                "progress assessment evidence differs",
+                assessment_index=index,
+            )
         improved = assessment.disposition in ("resolved", "partially_resolved")
         if improved != (assessment.supported_reduction is not None):
-            raise ValueError("progress assessment reduction differs")
+            raise ProgressValidationError(
+                "assessment_reduction_inconsistent",
+                "progress assessment reduction differs",
+                assessment_index=index,
+            )
         if (assessment.disposition == "resolved") != (assessment.remaining_concern is None):
-            raise ValueError("progress assessment remaining concern differs")
+            raise ProgressValidationError(
+                "assessment_remaining_concern_inconsistent",
+                "progress assessment remaining concern differs",
+                assessment_index=index,
+            )
     if status == "abstain":
         return "abstain"
     if status == "no_findings":
         if any(item.disposition != "resolved" for item in output.prior_assessments):
-            raise ValueError("accepted critic leaves prior concerns unresolved")
+            raise ProgressValidationError(
+                "accepted_with_unresolved_assessment",
+                "accepted critic leaves prior concerns unresolved",
+            )
         return "accepted"
     current = semantic_candidate_digest(payload)
     if current in [context["previous_candidate_digest"], *context["ancestor_candidate_digests"]]:
