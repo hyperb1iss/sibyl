@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from sibyl_core.auth.memory_policy import EVAL_CONSOLIDATION_METADATA_KEY
+from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
 from sibyl_core.services import content_client
 from sibyl_core.services.content_models import RawMemory
 
@@ -110,6 +111,31 @@ async def verify_publication_admissions(memory: RawMemory) -> bool:
 
     artifact = await asyncio.to_thread(resolve_procedure_artifact, memory, ledger, captures)
     return artifact is not None
+
+
+async def available_graph_entity_rows(
+    organization_id: str,
+    rows: Mapping[str, Entity],
+    *,
+    graph_client: SurrealGraphClient,
+    read: GraphReadValidation | None = None,
+) -> dict[str, Entity]:
+    """Validate current stored rows through their existing scoped graph client."""
+    current = {
+        key: row
+        for key, row in rows.items()
+        if key == row.id
+        and row.organization_id == organization_id
+        and graph_metadata_recallable(row.metadata)
+    }
+    unavailable = await unavailable_publication_ids(
+        organization_id,
+        {key: row.metadata for key, row in current.items()},
+        graph_entities=current,
+        graph_client=graph_client,
+        read=read,
+    )
+    return {key: row for key, row in current.items() if key not in unavailable}
 
 
 async def unavailable_publication_ids(

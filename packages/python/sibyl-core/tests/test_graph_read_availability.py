@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from sibyl_core.models.entities import Entity, EntityType
+from sibyl_core.services import eval_publication_guards as guards
 from sibyl_core.services import graph_read_availability as availability
 
 
@@ -28,7 +29,7 @@ async def test_graph_availability_refreshes_actual_rows_and_denies_unavailable(m
     ]
     manager = SimpleNamespace(get_many=AsyncMock(return_value=rows))
     guard = AsyncMock(return_value={"protected"})
-    monkeypatch.setattr(availability, "unavailable_publication_ids", guard)
+    monkeypatch.setattr(guards, "unavailable_publication_ids", guard)
     result = await availability.available_graph_entities(
         "org",
         ["ordinary", "protected", "retired", "foreign", "missing"],
@@ -55,7 +56,7 @@ async def test_graph_availability_batches_deduplicates_and_uses_checked_owner(mo
         get_many=AsyncMock(side_effect=lambda batch: [entity(i) for i in batch])
     )
     guard = AsyncMock(return_value=set())
-    monkeypatch.setattr(availability, "unavailable_publication_ids", guard)
+    monkeypatch.setattr(guards, "unavailable_publication_ids", guard)
     result = await availability.available_graph_entities(
         "org", ids + ids, runtime=SimpleNamespace(entity_manager=manager, client="owned")
     )
@@ -74,7 +75,7 @@ async def test_graph_availability_empty_does_not_allocate_runtime(monkeypatch):
 async def test_graph_availability_propagates_owner_failure(monkeypatch):
     manager = SimpleNamespace(get_many=AsyncMock(return_value=[entity("protected")]))
     monkeypatch.setattr(
-        availability,
+        guards,
         "unavailable_publication_ids",
         AsyncMock(side_effect=RuntimeError("unavailable")),
     )

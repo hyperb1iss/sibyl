@@ -748,6 +748,7 @@ async def _update_entity_embeddings_if_current(
     entities: Sequence[Entity],
     *,
     group_id: str,
+    derivation_snapshot: Mapping[str, Any] | None = None,
 ) -> set[str]:
     rows = [
         {
@@ -767,16 +768,40 @@ async def _update_entity_embeddings_if_current(
     if not rows:
         return set()
     rows_by_uuid = {str(row["uuid"]): row for row in rows}
+    query = _ENTITY_EMBEDDING_BACKFILL_QUERY
+    parameters: dict[str, object] = {}
+    if derivation_snapshot is not None:
+        from sibyl_core.services.operational_relationships import (
+            _ENDPOINT_WRITE_WITNESS,
+            _SNAPSHOT,
+        )
+
+        query = (
+            "RETURN {"
+            + _SNAPSHOT
+            + "IF $operational_snapshot_fingerprint != $expected_fingerprint { RETURN []; };"
+            + _ENDPOINT_WRITE_WITNESS
+            + "RETURN ("
+            + query.strip().removesuffix(";")
+            + "); };"
+        )
+        parameters = {
+            "org": group_id,
+            "ids": [row["uuid"] for row in derivation_snapshot["targets"]],
+            "relationship_ids": [],
+            "expected_fingerprint": derivation_snapshot["fingerprint"],
+        }
     rows = normalize_records(
         await client.execute_query(
             # Each row is still addressed through idx_entity_uuid and fenced
             # atomically against its current text. Sending the batch as one
             # query keeps HNSW writes on one database request instead of
             # flooding every pool socket with an independent indexed UPDATE.
-            _ENTITY_EMBEDDING_BACKFILL_QUERY,
+            query,
             group_id=group_id,
             uuids=list(rows_by_uuid),
             rows_by_uuid=rows_by_uuid,
+            **parameters,
         )
     )
     return {str(row["uuid"]) for row in rows if str(row.get("uuid") or "")}

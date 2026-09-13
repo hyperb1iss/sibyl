@@ -1040,6 +1040,10 @@ async def _backfill_unbound_embeddings(
             entity_ids=stale_entity_ids,
             group_id=group_id,
         )
+        protected_ids = {entity.id for entity in entities if entity.derivation_required}
+        protected_ids.update(entity.id for entity in present if entity.derivation_required)
+        # A protected publication cannot adopt newer ancestry from an old queue item.
+        present = [entity for entity in present if entity.id not in protected_ids]
         # Reconcile current evidence through the same text-fenced writer.
         # A second change leaves the manifest incomplete for a later drain.
         refreshed_ids = await _retry_surreal_write_conflict(
@@ -1047,7 +1051,7 @@ async def _backfill_unbound_embeddings(
             lambda: runtime.entity_manager.backfill_embeddings_if_current(present),
         )
         created_ids = list(dict.fromkeys([*created_ids, *refreshed_ids]))
-        if expected_entity_ids - set(created_ids):
+        if expected_entity_ids - set(created_ids) - protected_ids:
             raise RuntimeError("entity embedding evidence changed during reconciliation")
 
     relationship_ids: list[str] = []

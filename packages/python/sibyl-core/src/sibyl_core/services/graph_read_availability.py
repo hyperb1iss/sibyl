@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from sibyl_core.memory_pipeline.lifecycle import graph_metadata_recallable
 from sibyl_core.models.entities import Entity, Relationship
-from sibyl_core.services.eval_publication_guards import unavailable_publication_ids
+from sibyl_core.services.eval_publication_guards import available_graph_entity_rows
 from sibyl_core.services.graph_read_validation import GraphReadValidation
 from sibyl_core.services.graph_runtime import GraphRuntime, get_surreal_graph_runtime
 
@@ -35,20 +34,11 @@ async def available_graph_entities(
         batch = ids[offset : offset + _READ_BATCH_SIZE]
         rows = await graph.entity_manager.get_many(batch)
         for row in rows:
-            if (
-                row.id in batch
-                and row.organization_id == organization_id
-                and graph_metadata_recallable(row.metadata)
-            ):
+            if row.id in batch:
                 current[row.id] = row
-    unavailable = await unavailable_publication_ids(
-        organization_id,
-        {key: row.metadata for key, row in current.items()},
-        graph_entities=current,
-        graph_client=graph.client,
-        read=read,
+    return await available_graph_entity_rows(
+        organization_id, current, graph_client=graph.client, read=read
     )
-    return {key: row for key, row in current.items() if key not in unavailable}
 
 
 async def available_graph_relationships(
