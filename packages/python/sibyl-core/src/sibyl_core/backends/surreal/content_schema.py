@@ -1098,6 +1098,9 @@ def content_schema_invariant_plan(*, url: str = "") -> SchemaInvariantPlan:
 
 
 async def bootstrap_content_schema(client: SurrealContentClient, *, reset: bool = False) -> None:
+    async def execute_definition_batch(statement: str) -> object:
+        return await client.execute_query(f"BEGIN TRANSACTION;\n{statement}\nCOMMIT TRANSACTION;")
+
     await prepare_source_integrity_upgrade(client.execute_query)
     if reset:
         await retire_source_states(client.execute_query, kind=SourceKind.RAW_CAPTURE)
@@ -1110,6 +1113,7 @@ async def bootstrap_content_schema(client: SurrealContentClient, *, reset: bool 
         _content_schema_migrations(url=getattr(client, "_url", "")),
         name=CONTENT_SCHEMA_NAME,
         scope="content_schema_migration",
+        batch_execute=execute_definition_batch,
     )
 
 

@@ -131,3 +131,32 @@ async def test_lease_loss_before_batch_transaction_cannot_define_schema(client):
         assert "rejected" not in info["tables"]
     finally:
         await owner.release()
+
+
+async def test_migration_batch_callback_cannot_replace_graph_ownership(client):
+    from sibyl_core.backends.surreal.schema_ownership import try_acquire_schema_ownership
+    from sibyl_core.backends.surreal.schema_version import SchemaMigration, apply_schema_migrations
+
+    owner = await try_acquire_schema_ownership(client.execute_query)
+    assert owner is not None
+    unowned_batch = AsyncMock(side_effect=AssertionError("ownership bypassed"))
+    try:
+        await apply_schema_migrations(
+            owner.read,
+            (
+                SchemaMigration(
+                    1,
+                    "initial",
+                    (
+                        "DEFINE TABLE retained SCHEMAFULL;",
+                        "DEFINE FIELD name ON retained TYPE string;",
+                    ),
+                ),
+            ),
+            ownership=owner,
+            batch_execute=unowned_batch,
+        )
+        unowned_batch.assert_not_awaited()
+        assert "retained" in (await owner.read("INFO FOR DB;"))["tables"]
+    finally:
+        await owner.release()
