@@ -18,7 +18,7 @@ from sibyl_core.backends.surreal.schema_helpers import (
 if TYPE_CHECKING:
     from sibyl_core.backends.surreal.schema_ownership import SchemaOwnership
 
-GRAPH_SCHEMA_CURRENT_VERSION = 29
+GRAPH_SCHEMA_CURRENT_VERSION = 30
 GRAPH_SCHEMA_NAME = "graph"
 SCHEMA_VERSION_TABLE = "schema_version"
 
@@ -168,6 +168,7 @@ async def apply_schema_migrations(
     group_id: str | None = None,
     scope: str = "schema_migration",
     ownership: SchemaOwnership | None = None,
+    batch_execute: Callable[[str], Awaitable[object]] | None = None,
 ) -> list[SchemaMigration]:
     mutate = ownership.mutate if ownership is not None else execute_query
     await ensure_schema_version_table(
@@ -186,7 +187,7 @@ async def apply_schema_migrations(
             migration.statements,
             scope=scope,
             group_id=group_id,
-            batch_execute=ownership.mutate if ownership is not None else None,
+            batch_execute=ownership.mutate if ownership is not None else batch_execute,
         )
         if migration.action is not None:
             await migration.action(execute_query)

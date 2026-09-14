@@ -208,17 +208,9 @@ async def test_promoted_embedding_job_repair_provider_and_owner_selection(
 
 
 def _assert_repair_scan_plan(scan_plans, *, embedded):
+    assert all("idx_entity_reflection_candidate_uuid" in str(plan) for plan in scan_plans)
+    assert all(
+        "Iterate Table" not in str(plan) and "Fallback" not in str(plan) for plan in scan_plans
+    )
     if embedded:
-        # The embedded planner can fall back on the provider object expression.
-        for plan in scan_plans:
-            assert "idx_entity_uuid" in str(plan) or (
-                {
-                    "operation": "Iterate Table",
-                    "detail": {"table": "entity", "direction": "forward"},
-                }
-                in plan
-                and {"operation": "Fallback", "detail": {"reason": "Unsupported value: {  }"}}
-                in plan
-            )
-    else:
-        assert all("idx_entity_uuid" in str(plan) for plan in scan_plans)
+        assert all("'prefix': ['candidate', True]" in str(plan) for plan in scan_plans)

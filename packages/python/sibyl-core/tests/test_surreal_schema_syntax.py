@@ -119,6 +119,11 @@ class _RecordingSchemaClient:
         # exercised separately against embedded and server stores.
         if stripped.startswith("BEGIN TRANSACTION;") and "$sibyl_schema_owned" in stripped:
             stripped = stripped.split("}; ", 1)[1].rsplit("\n;\nCOMMIT TRANSACTION;", 1)[0].strip()
+        elif stripped.startswith("BEGIN TRANSACTION;"):
+            body = stripped.removeprefix("BEGIN TRANSACTION;").removesuffix("COMMIT TRANSACTION;")
+            for definition in split_statements(body):
+                await self.execute_query(definition, **params)
+            return None
         if "$sibyl_schema_claimed" in stripped:
             return None
         if stripped.startswith("SELECT owner FROM schema_lease:graph") and "owner" in params:
