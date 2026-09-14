@@ -114,14 +114,16 @@ async def reflect_cohorts(org: str, sources: list[RawMemory], *, dry_run: bool):
                     }
                 )
             except Exception as exc:
-                results.append(
-                    {
-                        "source_ids": identifiers,
-                        "outcome": "error",
-                        "reason": str(exc),
-                        "stage_kind": "ordinary_cohort",
-                    }
-                )
+                failure = {
+                    "source_ids": identifiers,
+                    "outcome": "error",
+                    "reason": str(exc),
+                    "stage_kind": "ordinary_cohort",
+                    "execution_state": getattr(exc, "execution_state", None),
+                }
+                if execution_id := getattr(exc, "execution_id", None):
+                    failure["operation_id"] = execution_id
+                results.append(failure)
     return results, consumed
 
 
