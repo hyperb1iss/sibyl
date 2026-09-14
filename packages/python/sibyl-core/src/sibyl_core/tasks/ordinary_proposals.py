@@ -30,6 +30,7 @@ from sibyl_core.tasks.ordinary_projection import (
 )
 from sibyl_core.tasks.ordinary_projection import (
     OrdinaryEvidenceProjection,
+    ProjectionReuse,
     reconstruct_ordinary_projection,
 )
 
@@ -287,6 +288,7 @@ def prepare_partial_proposal(
     *,
     packet: OrdinaryEvidencePacket | None = None,
     projection: OrdinaryEvidenceProjection | None = None,
+    projection_reuse: ProjectionReuse | None = None,
 ) -> PreparedPartialProposal:
     """Prepare one extraction input directly from complete retained source bytes."""
     frozen = PartialCohort.model_validate(cohort.model_dump())
@@ -314,7 +316,7 @@ def prepare_partial_proposal(
         prompt = partial_packet_prompt(frozen, packet)
         input_sha256 = c._digest(c._canonical({"source": input_sha256, "packet": packet.binding}))
     elif projection is not None:
-        checked = _projection_for_cohort(frozen, projection.binding_json)
+        checked = _projection_for_cohort(frozen, projection.binding_json, reuse=projection_reuse)
         if checked != projection:
             raise ValueError("ordinary projection preparation differs from original evidence")
         projection_json = projection.binding_json
@@ -346,7 +348,7 @@ def prepare_partial_proposal(
 
 
 def _projection_for_cohort(
-    cohort: PartialCohort, binding_json: str | None
+    cohort: PartialCohort, binding_json: str | None, *, reuse: ProjectionReuse | None = None
 ) -> OrdinaryEvidenceProjection | None:
     if binding_json is None:
         return None
@@ -364,7 +366,9 @@ def _projection_for_cohort(
     if binding.get("source_observations") != observations:
         raise ValueError("ordinary projection source observations differ")
     return reconstruct_ordinary_projection(
-        [(episode.episode_id, episode.artifact) for episode in cohort.episodes], binding
+        [(episode.episode_id, episode.artifact) for episode in cohort.episodes],
+        binding,
+        reuse=reuse,
     )
 
 
