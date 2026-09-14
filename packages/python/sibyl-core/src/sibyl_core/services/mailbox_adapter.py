@@ -1256,7 +1256,7 @@ def _resolve_imap_host_addresses(host: str) -> list[str]:
     addresses: list[str] = []
     for result in results:
         sockaddr = result[4]
-        if isinstance(sockaddr, tuple) and sockaddr:
+        if isinstance(sockaddr, tuple):
             addresses.append(str(sockaddr[0]))
     return list(dict.fromkeys(addresses))
 

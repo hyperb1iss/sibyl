@@ -28,6 +28,10 @@ def create_mcp_server() -> MCPServer:
         auth_settings = AuthSettings(
             issuer_url=server_url,
             resource_server_url=f"{server_url}/mcp",
+            # First-party keys and session JWTs also serve REST and have no
+            # resource metadata. The provider verifies them; audience-bound
+            # JWTs are rejected by Sibyl's JWT verifier.
+            validate_token_resource=False,
             required_scopes=["mcp"],
             client_registration_options=ClientRegistrationOptions(
                 enabled=True,
