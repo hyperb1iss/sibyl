@@ -199,7 +199,7 @@ def _execute(
         (output / f"{role}-stderr.txt").open("xb") as stderr,
     ):
         process = subprocess.Popen(  # noqa: S603
-            [sys.executable, "-I", str(program), *args],
+            [sys.executable, "-I", "-B", str(program), *args],
             cwd=workspace,
             env=environment,
             stdin=stdin,
