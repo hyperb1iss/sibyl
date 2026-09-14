@@ -40,7 +40,7 @@ from sibyl_core.tasks.ordinary_packets import OrdinaryEvidencePacket, prepare_or
 from sibyl_core.tasks.ordinary_projection import (
     VERSION as COMPLETE_PROJECTION,
 )
-from sibyl_core.tasks.ordinary_projection import prepare_ordinary_projection
+from sibyl_core.tasks.ordinary_projection import ProjectionReuse, prepare_ordinary_projection
 from sibyl_core.tasks.ordinary_proposal_result import OrdinaryProposalResult
 from sibyl_core.tasks.ordinary_proposals import (
     VERSION,
@@ -205,6 +205,7 @@ def _prepare_cohort_input(
     packet: OrdinaryEvidencePacket | None = None,
     evidence_mode: str = "auto",
     projection_binding: dict | None = None,
+    projection_reuse: ProjectionReuse | None = None,
 ) -> PreparedPartialProposal:
     if evidence_mode not in {"auto", "raw_v1", COMPLETE_PROJECTION}:
         raise ValueError("unsupported ordinary evidence representation")
@@ -224,16 +225,21 @@ def _prepare_cohort_input(
         projection = prepare_ordinary_projection(
             [(e.episode_id, e.artifact) for e in group.episodes],
             [e.source for e in group.episodes if isinstance(e, PartialEpisode)],
+            reuse=projection_reuse,
         )
         if projection_binding is not None and projection.binding_json != canonical(
             projection_binding
         ):
             raise ValueError("ordinary projection differs from protected execution")
-    return prepare_partial_proposal(group, projection=projection)
+    return prepare_partial_proposal(group, projection=projection, projection_reuse=projection_reuse)
 
 
 def _cohort_input_chars(
-    prepared: PreparedPartialProposal, proposal_schema_chars: int, critic_schema_chars: int
+    prepared: PreparedPartialProposal,
+    proposal_schema_chars: int,
+    critic_schema_chars: int,
+    *,
+    projection_reuse: ProjectionReuse | None = None,
 ) -> int:
     """Fit both stages; candidate headroom never replaces the actual critic guard."""
     actual = len(prepared.system) + len(prepared.prompt) + proposal_schema_chars
@@ -242,7 +248,9 @@ def _cohort_input_chars(
         from sibyl_core.tasks.ordinary_proposals import _projection_for_cohort
 
         projection = _projection_for_cohort(
-            PartialCohort.model_validate_json(prepared.input_json), prepared.projection_json
+            PartialCohort.model_validate_json(prepared.input_json),
+            prepared.projection_json,
+            reuse=projection_reuse,
         )
         assert projection is not None
         actual = max(
@@ -522,6 +530,7 @@ def _partition_prepared_cohort(
     """Keep pure evidence preparation off the event loop and stop cancelled work."""
     group = PartialCohort.model_validate_json(original.input_json)
     cohort_fields = group.model_dump(exclude={"episodes"})
+    projection_reuse = ProjectionReuse()
     bins = []
 
     def fits(episodes):
@@ -536,9 +545,12 @@ def _partition_prepared_cohort(
         prepared = _prepare_cohort_input(
             partial,
             evidence_mode=COMPLETE_PROJECTION if original.projection_json else "raw_v1",
+            projection_reuse=projection_reuse,
         )
         return (
-            _cohort_input_chars(prepared, schema_chars, critic_schema_chars)
+            _cohort_input_chars(
+                prepared, schema_chars, critic_schema_chars, projection_reuse=projection_reuse
+            )
             <= settings.consolidation_max_input_chars
         )
 
