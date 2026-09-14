@@ -147,6 +147,25 @@ async def test_signed_automatic_correction_rechecks_and_replays(candidate, corre
     assert len(stages) == 3
     stage = next(row for row in stages if row["uuid"] == first.executions[1])
     retained = TypeAdapter(ProcedureCorrectionResult).validate_json(stage["result_json"])
+    from sibyl_core.memory_pipeline.observations import SourceKind
+    from sibyl_core.migrate.validation_receipt_archive import capture, prepare_payload
+    from sibyl_core.services.content_client import surreal_content_client
+    from sibyl_core.services.source_archive_store import export_source_integrity
+
+    async with surreal_content_client() as client:
+        integrity = await export_source_integrity(
+            client.execute_query, kind=SourceKind.RAW_CAPTURE, organizations=["org"]
+        )
+    # The signed procedure owner persists its correction in eval_consolidations,
+    # independently of the ordinary candidate writer's derivation origin.
+    assert not any(item["target_id"] == first.candidate_id for item in integrity["derivations"])
+    archive = {
+        "version": "2.3",
+        "tables": {"memory_validation_executions": stages},
+        "source_integrity": integrity,
+        "validation_receipts": capture(stages),
+    }
+    prepare_payload(json.loads(json.dumps(archive, default=str)))
     assert retained.result.group == original.artifact.group
     assert (
         retained.parent_candidate_sha256

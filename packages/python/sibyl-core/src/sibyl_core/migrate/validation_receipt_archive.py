@@ -170,7 +170,52 @@ def prepare_payload(payload: dict[str, Any]) -> list[tuple[str, str, bytes]]:
         rows = tables.get("memory_validation_executions") if isinstance(tables, dict) else None
         if not isinstance(rows, list):
             raise ValueError("Validation receipt archive execution table is missing")
+        integrity = payload.get("source_integrity", {})
+        if isinstance(integrity, dict):
+            from uuid import NAMESPACE_URL, uuid5
+
+            from sibyl_core.services.validation_origin import validate_origin_row
+
+            executions = {row["uuid"]: row for row in rows}
+            derivations = integrity.get("derivations", [])
+            for derivation in derivations:
+                if derivation.get("origin_execution_id") is not None:
+                    validate_origin_row(
+                        derivation,
+                        executions.get(derivation["origin_execution_id"]),
+                        historical=True,
+                    )
+            # A retained packet-producing execution proves this candidate is not
+            # legacy, even when its mutable metadata and origin field were erased.
+            packet_executions = set()
+            requests = {
+                identity: json.loads(row["request_json"]) for identity, row in executions.items()
+            }
+            while True:
+                previous = set(packet_executions)
+                for identity, request in requests.items():
+                    if request.get("evidence_packet") is not None or any(
+                        dependency.get("execution_id") in packet_executions
+                        for dependency in request.get("execution_dependencies", [])
+                    ):
+                        packet_executions.add(identity)
+                if previous == packet_executions:
+                    break
+            by_target = {item["target_id"]: item for item in derivations}
+            captures = {item["record"]["uuid"] for item in integrity.get("source_rows", [])}
+            for identity in packet_executions:
+                target = str(uuid5(NAMESPACE_URL, "sibyl:validation-correction:" + identity))
+                if (
+                    target in captures
+                    and by_target.get(target, {}).get("origin_execution_id") != identity
+                ):
+                    raise ValueError("Packet archive candidate omitted its protected origin")
         return prepare(payload.get("validation_receipts"), rows)
     if "validation_receipts" in payload:
         raise ValueError("Legacy content archive cannot carry validation receipts")
+    integrity = payload.get("source_integrity", {})
+    if isinstance(integrity, dict) and any(
+        row.get("origin_execution_id") is not None for row in integrity.get("derivations", [])
+    ):
+        raise ValueError("Derived execution origins require the validation receipt archive")
     return []

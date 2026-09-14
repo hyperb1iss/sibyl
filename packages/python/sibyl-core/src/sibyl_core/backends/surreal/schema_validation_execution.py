@@ -61,6 +61,13 @@ VALIDATION_RECEIPT_RECOVERY_SCHEMA = """
 DEFINE FIELD IF NOT EXISTS recovery_key ON memory_validation_executions TYPE option<string>;
 """
 
+VALIDATION_ORIGIN_SCHEMA = """
+DEFINE FIELD IF NOT EXISTS origin_execution_id ON memory_derivations TYPE option<string>;
+DEFINE EVENT IF NOT EXISTS retain_derivation_origin ON memory_derivations WHEN $event='UPDATE'
+    AND $before.origin_execution_id!=$after.origin_execution_id
+    THEN { THROW 'Derivation origin is immutable'; };
+"""
+
 VALIDATION_RECEIPT_PURGE_EVENT = """
 DEFINE EVENT OVERWRITE memory_validation_purge ON raw_captures WHEN $event = 'DELETE'
 THEN {
