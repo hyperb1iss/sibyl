@@ -4,15 +4,20 @@ from dataclasses import replace
 
 import pytest
 from benchmarks.agent_tasks.manifest import ManifestError, identity
-from benchmarks.agent_tasks.transfer_report import ARMS, ScheduledAttempt, summarize_transfer
+from benchmarks.agent_tasks.transfer_report import (
+    ARMS,
+    STRONG_SUMMARY_ARMS,
+    ScheduledAttempt,
+    summarize_transfer,
+)
 
 
-def experiment():
+def experiment(arms=ARMS):
     schedule = []
     receipts = {}
     for family in ("first", "second"):
         for repetition in range(2):
-            for arm in ARMS:
+            for arm in arms:
                 attempt = f"{family}-{repetition}-{arm}"
                 expected = {
                     "experiment_id": "pilot",
@@ -161,3 +166,77 @@ def test_transfer_paired_experiment_identity_must_agree():
     )
     with pytest.raises(ManifestError, match="execution identity"):
         summarize_transfer(schedule, {})
+
+
+def test_transfer_strong_summary_requires_explicit_arm_selection():
+    schedule, receipts = experiment(STRONG_SUMMARY_ARMS)
+    with pytest.raises(ManifestError, match="invalid scheduled transfer identity"):
+        summarize_transfer(schedule, receipts)
+
+    report = summarize_transfer(schedule, receipts, arms=STRONG_SUMMARY_ARMS)
+    related = report["categories"]["related_transfer"]
+    assert related["comparisons"]["strong_summary"]["family_effects"] == {
+        "first": 1.0,
+        "second": 0.0,
+    }
+    for key in ("statuses", "budget_statuses", "execution_costs"):
+        assert tuple(report[key]) == STRONG_SUMMARY_ARMS
+    assert tuple(related["arm_rates"]) == STRONG_SUMMARY_ARMS
+    assert tuple(related["comparisons"]) == STRONG_SUMMARY_ARMS[:-1]
+    assert report["complete"] is True
+    assert report["learning_benefit_established"] is False
+
+
+def test_transfer_strong_summary_missing_cell_remains_in_denominator():
+    schedule, receipts = experiment(STRONG_SUMMARY_ARMS)
+    passing = receipts["first-1-strong_summary"]
+    passing.update(status="passed", success=True, outcome={"passed": True})
+    passing["receipt_sha256"] = identity(
+        {key: value for key, value in passing.items() if key != "receipt_sha256"}
+    )
+    missing = "first-0-strong_summary"
+    del receipts[missing]
+    report = summarize_transfer(schedule, receipts, arms=STRONG_SUMMARY_ARMS)
+    assert report["scheduled_attempts"] == len(schedule)
+    assert report["missing_attempt_ids"] == [missing]
+    assert report["statuses"]["strong_summary"] == {"missing": 1, "passed": 1, "task_failed": 2}
+    expected_rate = 0.25
+    assert report["categories"]["related_transfer"]["arm_rates"]["strong_summary"] == expected_rate
+    assert report["execution_costs"]["strong_summary"]["unknown_attempts"] == 1
+    assert report["complete"] is False
+
+
+@pytest.mark.parametrize(
+    "arms",
+    [
+        (),
+        STRONG_SUMMARY_ARMS[:-1],
+        (*STRONG_SUMMARY_ARMS, "simple_summary"),
+        ("no_memory", "strong_summary", "strong_summary", "sibyl_consolidation"),
+        ("no_memory", "raw_retrieval", "unreviewed_control", "sibyl_consolidation"),
+        tuple(reversed(STRONG_SUMMARY_ARMS)),
+    ],
+)
+def test_transfer_rejects_unreviewed_arm_sets(arms):
+    schedule, receipts = experiment(STRONG_SUMMARY_ARMS)
+    with pytest.raises(ManifestError, match="unsupported transfer arm set"):
+        summarize_transfer(schedule, receipts, arms=arms)
+
+
+@pytest.mark.parametrize("mutation", ["missing_arm", "duplicate_arm", "mixed_summary"])
+def test_transfer_strong_summary_requires_exactly_four_selected_arms(mutation):
+    schedule, _ = experiment(STRONG_SUMMARY_ARMS)
+    if mutation == "missing_arm":
+        schedule.pop()
+    else:
+        replacement = "no_memory" if mutation == "duplicate_arm" else "simple_summary"
+        schedule[2] = replace(schedule[2], expected={**schedule[2].expected, "arm_id": replacement})
+    with pytest.raises(ManifestError):
+        summarize_transfer(schedule, {}, arms=STRONG_SUMMARY_ARMS)
+
+
+def test_transfer_default_and_explicit_historical_arm_selection_agree():
+    schedule, receipts = experiment()
+    assert summarize_transfer(schedule, receipts) == summarize_transfer(
+        schedule, receipts, arms=ARMS
+    )

@@ -13,6 +13,7 @@ from benchmarks.agent_tasks.manifest import ManifestError, identity
 from benchmarks.longmemeval_v2_reader_replication_report import cluster_bootstrap
 
 ARMS = ("no_memory", "raw_retrieval", "simple_summary", "sibyl_consolidation")
+STRONG_SUMMARY_ARMS = ("no_memory", "raw_retrieval", "strong_summary", "sibyl_consolidation")
 
 
 @dataclass(frozen=True)
@@ -51,7 +52,9 @@ COMMON_FIELDS = (
 )
 
 
-def _validate_schedule(schedule: Sequence[ScheduledAttempt]) -> None:
+def _validate_schedule(schedule: Sequence[ScheduledAttempt], arms: tuple[str, ...]) -> None:
+    if arms not in (ARMS, STRONG_SUMMARY_ARMS):
+        raise ManifestError("unsupported transfer arm set")
     if not schedule or len({row.attempt_id for row in schedule}) != len(schedule):
         raise ManifestError("transfer schedule is empty or repeats an attempt")
     paired: dict[tuple[str, str, int], list[ScheduledAttempt]] = defaultdict(list)
@@ -66,7 +69,7 @@ def _validate_schedule(schedule: Sequence[ScheduledAttempt]) -> None:
             or row.repetition < 0
             or row.category not in {"related_transfer", "applicability_contrast"}
             or set(row.expected) != set(IDENTITY_FIELDS)
-            or row.expected["arm_id"] not in ARMS
+            or row.expected["arm_id"] not in arms
         ):
             raise ManifestError("invalid scheduled transfer identity")
         task_key = row.expected["task_id"]
@@ -88,7 +91,7 @@ def _validate_schedule(schedule: Sequence[ScheduledAttempt]) -> None:
     if len({tuple(sorted(values)) for values in repetitions.values()}) != 1:
         raise ManifestError("transfer tasks have unequal repetition sets")
     for rows in paired.values():
-        if Counter(row.expected["arm_id"] for row in rows) != Counter(ARMS):
+        if Counter(row.expected["arm_id"] for row in rows) != Counter(arms):
             raise ManifestError("every task repetition requires exactly four arms")
         for key in ("experiment_id", "task_sha256", "task_family_id", "seed", "manifest_sha256"):
             if len({row.expected[key] for row in rows}) != 1:
@@ -124,23 +127,28 @@ def _validate_receipt(row: ScheduledAttempt, receipt: Mapping[str, Any]) -> None
 
 
 def summarize_transfer(
-    schedule: Sequence[ScheduledAttempt], receipts: Mapping[str, Mapping[str, Any]]
+    schedule: Sequence[ScheduledAttempt],
+    receipts: Mapping[str, Mapping[str, Any]],
+    *,
+    arms: tuple[str, ...] = ARMS,
 ) -> dict[str, Any]:
     """Keep missing cells in the denominator and resample whole family effects.
 
     Receipt hashes establish consistency, not hostile-host authentication. The
     caller retains the frozen manifests and oracle evidence with this report.
     Preparation costs belong to the separate memory-pack preparation receipts.
+    Select STRONG_SUMMARY_ARMS explicitly for a strong-summary control; the
+    default preserves historical simple-summary schedules and report output.
     """
-    _validate_schedule(schedule)
+    _validate_schedule(schedule, arms)
     if set(receipts) - {row.attempt_id for row in schedule}:
         raise ManifestError("unscheduled transfer receipts cannot enter the analysis")
     grouped: dict[tuple[str, str, str], list[float]] = defaultdict(list)
-    statuses: dict[str, Counter[str]] = {arm: Counter() for arm in ARMS}
-    costs = {arm: {"known_usd": 0.0, "unknown_attempts": 0} for arm in ARMS}
+    statuses: dict[str, Counter[str]] = {arm: Counter() for arm in arms}
+    costs = {arm: {"known_usd": 0.0, "unknown_attempts": 0} for arm in arms}
     missing = []
     unqualified_passes = []
-    budget_statuses: dict[str, Counter[str]] = {arm: Counter() for arm in ARMS}
+    budget_statuses: dict[str, Counter[str]] = {arm: Counter() for arm in arms}
     for row in schedule:
         arm = row.expected["arm_id"]
         receipt = receipts.get(row.attempt_id)
@@ -169,11 +177,11 @@ def summarize_transfer(
     for category in sorted({row.category for row in schedule}):
         families = sorted({row.family for row in schedule if row.category == category})
         family_rates = {
-            family: {arm: mean(grouped[(category, family, arm)]) for arm in ARMS}
+            family: {arm: mean(grouped[(category, family, arm)]) for arm in arms}
             for family in families
         }
         comparisons = {}
-        for control in ARMS[:-1]:
+        for control in arms[:-1]:
             effects = {
                 family: rates["sibyl_consolidation"] - rates[control]
                 for family, rates in family_rates.items()
@@ -183,7 +191,7 @@ def summarize_transfer(
             comparisons[control] = {"family_effects": effects, "uncertainty": interval}
         categories[category] = {
             "family_rates": family_rates,
-            "arm_rates": {arm: mean(rates[arm] for rates in family_rates.values()) for arm in ARMS},
+            "arm_rates": {arm: mean(rates[arm] for rates in family_rates.values()) for arm in arms},
             "comparisons": comparisons,
         }
     return {
