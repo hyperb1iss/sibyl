@@ -81,6 +81,7 @@ _RAW_MEMORY_RECALL_FIELDS = ", ".join(
 @dataclass(frozen=True, slots=True)
 class _RawMemoryRecallFilters:
     source_ids: tuple[str, ...] = ()
+    capture_ids: tuple[str, ...] | None = None
     participants: tuple[str, ...] = ()
     labels: tuple[str, ...] = ()
     thread_id: str | None = None
@@ -88,6 +89,14 @@ class _RawMemoryRecallFilters:
     occurred_before: str | None = None
     as_of: datetime | None = None
     as_of_text: str | None = None
+
+
+def _raw_memory_disjunction(*branches: str) -> str:
+    if settings.resolved_surreal_url.startswith(_EMBEDDED_SURREAL_SCHEMES):
+        # Embedded KNN cannot prefilter grouped subqueries, including boolean
+        # parentheses. Function arguments retain the same ungrouped predicates.
+        return f"array::any([{', '.join(branches)}])"
+    return "(" + " OR ".join(f"({b})" if " AND " in b else b for b in branches) + ")"
 
 
 def _memory_scope_where(
@@ -118,7 +127,11 @@ def _memory_scope_where(
         clauses.append("agent_id = $agent_id")
         params["agent_id"] = agent_id
     else:
-        clauses.append("(capture_surface != $agent_diary_surface OR capture_surface = NONE)")
+        clauses.append(
+            _raw_memory_disjunction(
+                "capture_surface != $agent_diary_surface", "capture_surface = NONE"
+            )
+        )
         params["agent_diary_surface"] = models.AGENT_DIARY_CAPTURE_SURFACE
     if project_id:
         clauses.append("project_id = $project_id")
@@ -161,16 +174,25 @@ def _raw_memory_recall_where(
     if filters.source_ids:
         clauses.append("source_id IN $source_ids")
         params["source_ids"] = list(filters.source_ids)
+    if filters.capture_ids is not None:
+        clauses.append("uuid IN $capture_ids")
+        params["capture_ids"] = list(filters.capture_ids)
     if filters.participants:
         clauses.append("metadata.participants CONTAINSANY $participants")
         params["participants"] = list(filters.participants)
     if filters.labels:
-        clauses.append("(tags CONTAINSANY $labels OR metadata.labels CONTAINSANY $labels)")
+        clauses.append(
+            _raw_memory_disjunction(
+                "tags CONTAINSANY $labels", "metadata.labels CONTAINSANY $labels"
+            )
+        )
         params["labels"] = list(filters.labels)
     if filters.thread_id:
         clauses.append(
-            "(metadata.thread_id = $thread_id "
-            "OR metadata.source_record_metadata.thread_id = $thread_id)"
+            _raw_memory_disjunction(
+                "metadata.thread_id = $thread_id",
+                "metadata.source_record_metadata.thread_id = $thread_id",
+            )
         )
         params["thread_id"] = filters.thread_id
     if filters.occurred_after:
@@ -180,40 +202,21 @@ def _raw_memory_recall_where(
         clauses.append("metadata.occurred_at <= $occurred_before")
         params["occurred_before"] = filters.occurred_before
     if filters.as_of:
-        created_at_is_string = _surreal_type_is_string("created_at")
-        created_at_is_datetime = _surreal_type_is_datetime("created_at")
-        captured_at_is_string = _surreal_type_is_string("captured_at")
-        captured_at_is_datetime = _surreal_type_is_datetime("captured_at")
-        valid_at_is_string = _surreal_type_is_string("metadata.valid_at")
-        valid_at_is_datetime = _surreal_type_is_datetime("metadata.valid_at")
-        valid_from_is_string = _surreal_type_is_string("metadata.valid_from")
-        valid_from_is_datetime = _surreal_type_is_datetime("metadata.valid_from")
-        invalid_at_is_string = _surreal_type_is_string("metadata.invalid_at")
-        invalid_at_is_datetime = _surreal_type_is_datetime("metadata.invalid_at")
-        valid_to_is_string = _surreal_type_is_string("metadata.valid_to")
-        valid_to_is_datetime = _surreal_type_is_datetime("metadata.valid_to")
-        clauses.extend(
-            [
-                "(created_at = NONE "
-                f"OR ({created_at_is_datetime} AND created_at <= $as_of) "
-                f"OR ({created_at_is_string} AND created_at <= $as_of_text))",
-                "(captured_at = NONE "
-                f"OR ({captured_at_is_datetime} AND captured_at <= $as_of) "
-                f"OR ({captured_at_is_string} AND captured_at <= $as_of_text))",
-                "(metadata.valid_at = NONE "
-                f"OR ({valid_at_is_datetime} AND metadata.valid_at <= $as_of) "
-                f"OR ({valid_at_is_string} AND metadata.valid_at <= $as_of_text))",
-                "(metadata.valid_from = NONE "
-                f"OR ({valid_from_is_datetime} AND metadata.valid_from <= $as_of) "
-                f"OR ({valid_from_is_string} AND metadata.valid_from <= $as_of_text))",
-                "(metadata.invalid_at = NONE "
-                f"OR ({invalid_at_is_datetime} AND metadata.invalid_at > $as_of) "
-                f"OR ({invalid_at_is_string} AND metadata.invalid_at > $as_of_text))",
-                "(metadata.valid_to = NONE "
-                f"OR ({valid_to_is_datetime} AND metadata.valid_to > $as_of) "
-                f"OR ({valid_to_is_string} AND metadata.valid_to > $as_of_text))",
-            ]
-        )
+        for field, comparison in (
+            ("created_at", "<="),
+            ("captured_at", "<="),
+            ("metadata.valid_at", "<="),
+            ("metadata.valid_from", "<="),
+            ("metadata.invalid_at", ">"),
+            ("metadata.valid_to", ">"),
+        ):
+            clauses.append(
+                _raw_memory_disjunction(
+                    f"{field} = NONE",
+                    f"{_surreal_type_is_datetime(field)} AND {field} {comparison} $as_of",
+                    f"{_surreal_type_is_string(field)} AND {field} {comparison} $as_of_text",
+                )
+            )
         params["as_of"] = filters.as_of
         params["as_of_text"] = filters.as_of_text or filters.as_of.isoformat()
     return " AND ".join(clauses), params
@@ -320,7 +323,8 @@ async def _recall_raw_memory_vector(
             "SELECT * FROM ("
             f"SELECT {_RAW_MEMORY_RECALL_FIELDS}, "
             "(1 - vector::distance::knn()) AS score "
-            f"FROM raw_captures WHERE {where_clause} "
+            "FROM raw_captures WITH INDEX idx_raw_captures_embedding "
+            f"WHERE {where_clause} "
             f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
             ") ORDER BY score DESC, captured_at DESC LIMIT $candidate_limit;",
             **params,
@@ -448,6 +452,7 @@ async def _fuse_raw_memory_results(
 def _raw_recall_filters(
     *,
     source_ids: Sequence[str] | None,
+    capture_ids: Sequence[str] | None = None,
     participants: Sequence[str] | None,
     labels: Sequence[str] | None,
     thread_id: str | None,
@@ -458,6 +463,11 @@ def _raw_recall_filters(
     as_of_datetime = _as_of_filter_value(as_of)
     return _RawMemoryRecallFilters(
         source_ids=tuple(_normalized_filter_values(source_ids)),
+        capture_ids=(
+            tuple(dict.fromkeys(_normalized_filter_values(capture_ids)))
+            if capture_ids is not None
+            else None
+        ),
         participants=tuple(_normalized_filter_values(participants)),
         labels=tuple(_normalized_filter_values(labels)),
         thread_id=models.coerce_optional_str(thread_id),
@@ -501,6 +511,7 @@ async def _recall_raw_memory_result(
     agent_id: str | None = None,
     project_id: str | None = None,
     source_ids: Sequence[str] | None = None,
+    capture_ids: Sequence[str] | None = None,
     participants: Sequence[str] | None = None,
     labels: Sequence[str] | None = None,
     thread_id: str | None = None,
@@ -519,6 +530,7 @@ async def _recall_raw_memory_result(
     normalized_scope = models.coerce_memory_scope(memory_scope)
     filters = _raw_recall_filters(
         source_ids=source_ids,
+        capture_ids=capture_ids,
         participants=participants,
         labels=labels,
         thread_id=thread_id,
@@ -541,6 +553,9 @@ async def _recall_raw_memory_result(
         project_id=project_id,
         filters=filters,
     )
+    if filters.capture_ids == ():
+        return RawMemoryRecallResult(())
+
     source_results: list[CandidateSourceResult[RawMemory]] = []
     query_embedding: list[float] | None = None
     try:
@@ -671,6 +686,7 @@ async def recall_raw_memory_with_sources(
     agent_id: str | None = None,
     project_id: str | None = None,
     source_ids: Sequence[str] | None = None,
+    capture_ids: Sequence[str] | None = None,
     participants: Sequence[str] | None = None,
     labels: Sequence[str] | None = None,
     thread_id: str | None = None,
@@ -679,6 +695,11 @@ async def recall_raw_memory_with_sources(
     as_of: datetime | str | None = None,
     limit: int = 10,
 ) -> RawMemoryRecallResult:
+    """Recall with source receipts; capture IDs restrict UUIDs before source limits.
+
+    An explicit empty capture collection returns no memories. Capture IDs are
+    distinct from ingestion source IDs and do not grant access to a capture.
+    """
     return await _recall_raw_memory_result(
         organization_id=organization_id,
         principal_id=principal_id,
@@ -688,6 +709,7 @@ async def recall_raw_memory_with_sources(
         agent_id=agent_id,
         project_id=project_id,
         source_ids=source_ids,
+        capture_ids=capture_ids,
         participants=participants,
         labels=labels,
         thread_id=thread_id,
@@ -711,6 +733,7 @@ async def recall_raw_memory(
     agent_id: str | None = None,
     project_id: str | None = None,
     source_ids: Sequence[str] | None = None,
+    capture_ids: Sequence[str] | None = None,
     participants: Sequence[str] | None = None,
     labels: Sequence[str] | None = None,
     thread_id: str | None = None,
@@ -719,6 +742,11 @@ async def recall_raw_memory(
     as_of: datetime | str | None = None,
     limit: int = 10,
 ) -> list[RawMemory]:
+    """Recall authorized captures, optionally restricted to exact capture UUIDs.
+
+    ``capture_ids=None`` leaves membership unrestricted; an empty collection
+    returns no memories. Existing scope and publication checks still apply.
+    """
     result = await _recall_raw_memory_result(
         organization_id=organization_id,
         principal_id=principal_id,
@@ -728,6 +756,7 @@ async def recall_raw_memory(
         agent_id=agent_id,
         project_id=project_id,
         source_ids=source_ids,
+        capture_ids=capture_ids,
         participants=participants,
         labels=labels,
         thread_id=thread_id,
