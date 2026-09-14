@@ -165,6 +165,35 @@ def test_controller_final_state_is_independently_checked(experiment, monkeypatch
     assert checksum == identity(saved)
 
 
+@pytest.mark.parametrize("role", ["controller", "checker"])
+def test_child_imports_leave_dependency_runtime_unchanged(experiment, monkeypatch, role):
+    manifest, freeze, output = experiment
+    dependency = output.parent / "dependency-runtime"
+    dependency.mkdir()
+    module = dependency / "runtime_probe.py"
+    module.write_text("VALUE = 42\n")
+    before = inventory(dependency)
+    program = manifest["controller"] if role == "controller" else manifest["tasks"][0]["checker"]
+    path = freeze().parent / program["script"]["path"]
+    path.write_text(
+        "import importlib.util\n"
+        f"spec = importlib.util.spec_from_file_location('runtime_probe', {str(module)!r})\n"
+        "probe = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(probe)\n"
+        "assert probe.VALUE == 42\n" + path.read_text()
+    )
+    program["script"]["sha256"] = digest(path.read_bytes())
+    # Isolated Python ignores PYTHON* variables, including this parent's policy.
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+
+    receipt = execute(experiment)
+
+    assert inventory(dependency) == before
+    assert receipt["success"], receipt
+    assert receipt["controller"]["process_group_quiescent"]
+    assert receipt["checker"]["process_group_quiescent"]
+
+
 @pytest.mark.parametrize(
     ("role", "mode", "status"),
     [
