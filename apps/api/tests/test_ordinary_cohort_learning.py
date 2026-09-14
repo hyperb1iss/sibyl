@@ -485,7 +485,12 @@ async def test_ordinary_cohort_native_final_policy_race(cohort_runtime, monkeypa
     receipt = await reflection.run_reflection_dream_cycle({}, str(org.id))
     assert delayed_once
     assert receipt["promoted"] == (0 if raced else 1), receipt
+    assert receipt["failed"] == (1 if raced else 0), receipt
+    assert receipt["candidates"][0]["applied"] is not raced
+    assert receipt["candidates"][0]["outcome"] == ("error" if raced else "auto_promote")
     if raced:
+        assert receipt["candidates"][0]["reason"] == "retired"
+        assert receipt["candidates"][0]["promoted_id"] is None
         assert not await execute("SELECT * FROM raw_captures WHERE review_state='promoted';")
         row = await execute(
             "SELECT metadata FROM raw_captures WHERE uuid=$id;", id=sources[0]["uuid"]

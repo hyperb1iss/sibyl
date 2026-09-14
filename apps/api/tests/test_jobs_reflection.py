@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -120,7 +121,8 @@ def test_team_scope_nomination_does_not_reuse_project_scope_key() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reflection_dream_cycle_reflects_sources_and_promotes_candidates() -> None:
+@pytest.mark.parametrize("denial_reason", [None, "retired", "promotion_incomplete"])
+async def test_reflection_dream_cycle_reports_actual_promotion(denial_reason) -> None:
     source = _raw_memory(
         id="source-1",
         metadata={"suggested_memory_scope": "team"},
@@ -164,7 +166,13 @@ async def test_reflection_dream_cycle_reflects_sources_and_promotes_candidates()
         ),
         patch(
             "sibyl.jobs.reflection.promote_reflection_candidate_review",
-            AsyncMock(return_value=_promotion()),
+            AsyncMock(
+                return_value=replace(
+                    _promotion(), success=False, reason=denial_reason, review_state="pending"
+                )
+                if denial_reason
+                else _promotion()
+            ),
         ) as promote,
         patch("sibyl.jobs.reflection.log_memory_audit_event", AsyncMock()) as audit,
     ):
@@ -187,8 +195,22 @@ async def test_reflection_dream_cycle_reflects_sources_and_promotes_candidates()
     assert save.await_count == 1
     assert audit.await_count == 1
     assert receipt["sources_reflected"] == 1
-    assert receipt["promoted"] == 1
-    assert receipt["failed"] == 0
+    assert receipt["promoted"] == (0 if denial_reason else 1)
+    assert receipt["failed"] == (1 if denial_reason else 0)
+    reported = receipt["candidates"][0]
+    assert reported["applied"] is (denial_reason is None)
+    assert reported["outcome"] == ("error" if denial_reason else "auto_promote")
+    assert reported["promoted_id"] == (None if denial_reason else "promoted-1")
+    assert reported["recommended_action"] == "promote"
+    if denial_reason:
+        assert reported["reason"] == denial_reason
+    audit_kwargs = audit.await_args.kwargs
+    assert audit_kwargs["action"] == (
+        "memory.reflect.dream_review" if denial_reason else "memory.reflect.dream_promote"
+    )
+    assert audit_kwargs["details"]["outcome"] == reported["outcome"]
+    assert audit_kwargs["policy_reason"] == reported["reason"]
+    assert audit_kwargs["derived_ids"] == ([] if denial_reason else ["promoted-1"])
 
 
 @pytest.mark.asyncio
@@ -231,7 +253,7 @@ async def test_reflection_dream_cycle_dry_run_writes_no_memory() -> None:
             AsyncMock(return_value=_preview()),
         ),
         patch("sibyl.jobs.reflection.promote_reflection_candidate_review", AsyncMock()) as promote,
-        patch("sibyl.jobs.reflection.log_memory_audit_event", AsyncMock()),
+        patch("sibyl.jobs.reflection.log_memory_audit_event", AsyncMock()) as audit,
     ):
         receipt = await run_reflection_dream_cycle(
             {},
@@ -247,8 +269,15 @@ async def test_reflection_dream_cycle_dry_run_writes_no_memory() -> None:
     save.assert_not_awaited()
     promote.assert_not_awaited()
     assert receipt["dry_run"] is True
-    assert receipt["promoted"] == 1
+    assert receipt["promoted"] == 0
+    assert receipt["failed"] == 0
+    assert receipt["candidates"][0]["outcome"] == "auto_promote"
+    assert receipt["candidates"][0]["recommended_action"] == "promote"
+    assert receipt["candidates"][0]["applied"] is False
     assert receipt["archived"] == 0
+
+    assert audit.await_args.kwargs["action"] == "memory.reflect.dream_review"
+    assert audit.await_args.kwargs["derived_ids"] == []
 
 
 @pytest.mark.asyncio
