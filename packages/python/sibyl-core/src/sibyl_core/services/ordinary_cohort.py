@@ -521,6 +521,7 @@ def _partition_prepared_cohort(
 ) -> list[list[str]]:
     """Keep pure evidence preparation off the event loop and stop cancelled work."""
     group = PartialCohort.model_validate_json(original.input_json)
+    cohort_fields = group.model_dump(exclude={"episodes"})
     bins = []
 
     def fits(episodes):
@@ -530,7 +531,7 @@ def _partition_prepared_cohort(
             return True
         ids = [e.episode_id for e in episodes]
         partial = PartialCohort.model_validate(
-            {**group.model_dump(), "episodes": tuple(episodes), "group_id": review_digest(ids)}
+            {**cohort_fields, "episodes": tuple(episodes), "group_id": review_digest(ids)}
         )
         prepared = _prepare_cohort_input(
             partial,
