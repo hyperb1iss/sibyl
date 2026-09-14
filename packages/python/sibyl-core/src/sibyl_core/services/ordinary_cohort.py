@@ -7,6 +7,7 @@ import hashlib
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from threading import Event
 
 from pydantic import TypeAdapter
 from pydantic_ai import Agent, NativeOutput
@@ -499,10 +500,32 @@ async def partition_stored_cohort(org, principal, source_ids, resolver):
     finally:
         if isinstance(owned, _OwnedValidationExtractor):
             await _close_resources(owned.resources)
-    group = PartialCohort.model_validate_json(original.prepared.input_json)
+    cancelled = Event()
+    try:
+        return await asyncio.to_thread(
+            _partition_prepared_cohort,
+            original.prepared,
+            schema_chars,
+            critic_schema_chars,
+            cancelled,
+        )
+    finally:
+        cancelled.set()
+
+
+def _partition_prepared_cohort(
+    original: PreparedPartialProposal,
+    schema_chars: int,
+    critic_schema_chars: int,
+    cancelled: Event,
+) -> list[list[str]]:
+    """Keep pure evidence preparation off the event loop and stop cancelled work."""
+    group = PartialCohort.model_validate_json(original.input_json)
     bins = []
 
     def fits(episodes):
+        if cancelled.is_set():
+            raise asyncio.CancelledError
         if len(episodes) < 2:
             return True
         ids = [e.episode_id for e in episodes]
@@ -511,7 +534,7 @@ async def partition_stored_cohort(org, principal, source_ids, resolver):
         )
         prepared = _prepare_cohort_input(
             partial,
-            evidence_mode=COMPLETE_PROJECTION if original.prepared.projection_json else "raw_v1",
+            evidence_mode=COMPLETE_PROJECTION if original.projection_json else "raw_v1",
         )
         return (
             _cohort_input_chars(prepared, schema_chars, critic_schema_chars)
@@ -519,6 +542,8 @@ async def partition_stored_cohort(org, principal, source_ids, resolver):
         )
 
     for episode in group.episodes:
+        if cancelled.is_set():
+            raise asyncio.CancelledError
         for bucket in bins:
             if fits([*bucket, episode]):
                 bucket.append(episode)

@@ -1,8 +1,10 @@
 """Durable ordinary proposals use real retained sources and existing stage owners."""
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from dataclasses import replace
+from threading import Event
 from unittest.mock import AsyncMock
 
 import pytest
@@ -368,3 +370,94 @@ async def test_ordinary_cohort_budget_partition_keeps_all_source_bytes(
         for source in sources:
             if source.id in bucket:
                 assert source.raw_content in prepared.prepared.prompt
+
+
+async def test_cohort_partition_keeps_event_loop_responsive(cohort_sources, monkeypatch):
+    install_proposal(monkeypatch, cohort_sources)
+    loop = asyncio.get_running_loop()
+    responsive = Event()
+    original = service._cohort_input_chars
+
+    def count_input(*args, **kwargs):
+        loop.call_soon_threadsafe(responsive.set)
+        assert responsive.wait(2), "cohort partition blocked its event loop"
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(service, "_cohort_input_chars", count_input)
+    ids = sorted(source.id for source in cohort_sources)
+    result = await service.partition_stored_cohort(
+        "org", "owner", ids, AsyncMock(return_value=SourceReadAuthority("owner"))
+    )
+    assert responsive.is_set()
+    assert result == [ids]
+
+
+async def test_cancelled_partition_stops_before_preparing_another_fit(cohort_sources, monkeypatch):
+    sources = [
+        await remember_raw_memory(
+            organization_id="org",
+            principal_id="owner",
+            source_id=f"cancel-{index}",
+            raw_content=f"Capture {index}: preserve source evidence.",
+            embedding_provider=None,
+        )
+        for index in range(4)
+    ]
+    install_proposal(monkeypatch, sources)
+    loop = asyncio.get_running_loop()
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+    release = Event()
+    calls = []
+    original_count = service._cohort_input_chars
+    original_partition = service._partition_prepared_cohort
+
+    def count_input(*args, **kwargs):
+        calls.append(True)
+        loop.call_soon_threadsafe(started.set)
+        assert release.wait(5), "partition control was not released"
+        return original_count(*args, **kwargs)
+
+    def partition(*args):
+        try:
+            return original_partition(*args)
+        finally:
+            loop.call_soon_threadsafe(stopped.set)
+
+    monkeypatch.setattr(service, "_cohort_input_chars", count_input)
+    monkeypatch.setattr(service, "_partition_prepared_cohort", partition)
+    task = asyncio.create_task(
+        service.partition_stored_cohort(
+            "org",
+            "owner",
+            [source.id for source in sources],
+            AsyncMock(return_value=SourceReadAuthority("owner")),
+        )
+    )
+    try:
+        await asyncio.wait_for(started.wait(), timeout=5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+    await asyncio.wait_for(stopped.wait(), timeout=5)
+    assert len(calls) == 1
+
+
+async def test_partition_worker_preserves_preparation_failure(cohort_sources, monkeypatch):
+    install_proposal(monkeypatch, cohort_sources)
+
+    def fail_preparation(*args, **kwargs):
+        raise ValueError("source evidence cannot be prepared")
+
+    monkeypatch.setattr(service, "_cohort_input_chars", fail_preparation)
+    with pytest.raises(ValueError, match="source evidence cannot be prepared"):
+        await service.partition_stored_cohort(
+            "org",
+            "owner",
+            [source.id for source in cohort_sources],
+            AsyncMock(return_value=SourceReadAuthority("owner")),
+        )
