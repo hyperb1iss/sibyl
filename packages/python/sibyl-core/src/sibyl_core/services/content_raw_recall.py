@@ -81,6 +81,7 @@ _RAW_MEMORY_RECALL_FIELDS = ", ".join(
 @dataclass(frozen=True, slots=True)
 class _RawMemoryRecallFilters:
     source_ids: tuple[str, ...] = ()
+    capture_ids: tuple[str, ...] | None = None
     participants: tuple[str, ...] = ()
     labels: tuple[str, ...] = ()
     thread_id: str | None = None
@@ -161,6 +162,9 @@ def _raw_memory_recall_where(
     if filters.source_ids:
         clauses.append("source_id IN $source_ids")
         params["source_ids"] = list(filters.source_ids)
+    if filters.capture_ids is not None:
+        clauses.append("uuid IN $capture_ids")
+        params["capture_ids"] = list(filters.capture_ids)
     if filters.participants:
         clauses.append("metadata.participants CONTAINSANY $participants")
         params["participants"] = list(filters.participants)
@@ -448,6 +452,7 @@ async def _fuse_raw_memory_results(
 def _raw_recall_filters(
     *,
     source_ids: Sequence[str] | None,
+    capture_ids: Sequence[str] | None = None,
     participants: Sequence[str] | None,
     labels: Sequence[str] | None,
     thread_id: str | None,
@@ -458,6 +463,11 @@ def _raw_recall_filters(
     as_of_datetime = _as_of_filter_value(as_of)
     return _RawMemoryRecallFilters(
         source_ids=tuple(_normalized_filter_values(source_ids)),
+        capture_ids=(
+            tuple(dict.fromkeys(_normalized_filter_values(capture_ids)))
+            if capture_ids is not None
+            else None
+        ),
         participants=tuple(_normalized_filter_values(participants)),
         labels=tuple(_normalized_filter_values(labels)),
         thread_id=models.coerce_optional_str(thread_id),
@@ -501,6 +511,7 @@ async def _recall_raw_memory_result(
     agent_id: str | None = None,
     project_id: str | None = None,
     source_ids: Sequence[str] | None = None,
+    capture_ids: Sequence[str] | None = None,
     participants: Sequence[str] | None = None,
     labels: Sequence[str] | None = None,
     thread_id: str | None = None,
@@ -519,6 +530,7 @@ async def _recall_raw_memory_result(
     normalized_scope = models.coerce_memory_scope(memory_scope)
     filters = _raw_recall_filters(
         source_ids=source_ids,
+        capture_ids=capture_ids,
         participants=participants,
         labels=labels,
         thread_id=thread_id,
@@ -541,6 +553,9 @@ async def _recall_raw_memory_result(
         project_id=project_id,
         filters=filters,
     )
+    if filters.capture_ids == ():
+        return RawMemoryRecallResult(())
+
     source_results: list[CandidateSourceResult[RawMemory]] = []
     query_embedding: list[float] | None = None
     try:
@@ -671,6 +686,7 @@ async def recall_raw_memory_with_sources(
     agent_id: str | None = None,
     project_id: str | None = None,
     source_ids: Sequence[str] | None = None,
+    capture_ids: Sequence[str] | None = None,
     participants: Sequence[str] | None = None,
     labels: Sequence[str] | None = None,
     thread_id: str | None = None,
@@ -679,6 +695,11 @@ async def recall_raw_memory_with_sources(
     as_of: datetime | str | None = None,
     limit: int = 10,
 ) -> RawMemoryRecallResult:
+    """Recall with source receipts; capture IDs restrict UUIDs before source limits.
+
+    An explicit empty capture collection returns no memories. Capture IDs are
+    distinct from ingestion source IDs and do not grant access to a capture.
+    """
     return await _recall_raw_memory_result(
         organization_id=organization_id,
         principal_id=principal_id,
@@ -688,6 +709,7 @@ async def recall_raw_memory_with_sources(
         agent_id=agent_id,
         project_id=project_id,
         source_ids=source_ids,
+        capture_ids=capture_ids,
         participants=participants,
         labels=labels,
         thread_id=thread_id,
@@ -711,6 +733,7 @@ async def recall_raw_memory(
     agent_id: str | None = None,
     project_id: str | None = None,
     source_ids: Sequence[str] | None = None,
+    capture_ids: Sequence[str] | None = None,
     participants: Sequence[str] | None = None,
     labels: Sequence[str] | None = None,
     thread_id: str | None = None,
@@ -719,6 +742,11 @@ async def recall_raw_memory(
     as_of: datetime | str | None = None,
     limit: int = 10,
 ) -> list[RawMemory]:
+    """Recall authorized captures, optionally restricted to exact capture UUIDs.
+
+    ``capture_ids=None`` leaves membership unrestricted; an empty collection
+    returns no memories. Existing scope and publication checks still apply.
+    """
     result = await _recall_raw_memory_result(
         organization_id=organization_id,
         principal_id=principal_id,
@@ -728,6 +756,7 @@ async def recall_raw_memory(
         agent_id=agent_id,
         project_id=project_id,
         source_ids=source_ids,
+        capture_ids=capture_ids,
         participants=participants,
         labels=labels,
         thread_id=thread_id,

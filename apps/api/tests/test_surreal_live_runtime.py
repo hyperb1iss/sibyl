@@ -1241,3 +1241,74 @@ async def test_live_surreal_schema_renewal_and_takeover(monkeypatch, operation):
         await asyncio.gather(*(connection.close() for connection in clients))
         with suppress(Exception):
             await _drop_surreal_namespace(client.namespace)
+
+
+async def test_live_raw_capture_membership_precedes_vector_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sibyl_core.services import content_client, content_raw_recall
+    from sibyl_core.services.surreal_content import recall_raw_memory_with_sources
+
+    namespace = f"capture_membership_live_{uuid4().hex}"
+    organization_id = str(uuid4())
+    client = SurrealContentClient(
+        url=_live_surreal_url(),
+        username=_surreal_username(),
+        password=_surreal_password(),
+        namespace=namespace,
+        database="content",
+    )
+    near = [1.0, *([0.0] * (EMBEDDING_DIM - 1))]
+    far = [0.0, 1.0, *([0.0] * (EMBEDDING_DIM - 2))]
+
+    @asynccontextmanager
+    async def session():
+        yield client
+
+    async def query_embedding(_query: str) -> list[float]:
+        return list(near)
+
+    monkeypatch.setattr(content_client, "surreal_content_client", session)
+    monkeypatch.setattr(content_raw_recall, "raw_memory_query_embedding", query_embedding)
+    try:
+        await bootstrap_content_schema(client, reset=True)
+        retained = await remember_raw_memories(
+            [
+                RawMemoryWrite(
+                    organization_id=organization_id,
+                    principal_id="owner",
+                    source_id="retained",
+                    raw_content="An observation",
+                )
+            ],
+            embedding_provider=_StaticEmbeddingProvider(far),
+        )
+        await remember_raw_memories(
+            [
+                RawMemoryWrite(
+                    organization_id=organization_id,
+                    principal_id="owner",
+                    source_id=f"nearer-nonmember-{index}",
+                    raw_content="An observation",
+                )
+                for index in range(64)
+            ],
+            embedding_provider=_StaticEmbeddingProvider(near),
+        )
+        for capture_ids in (None, [retained[0].id]):
+            result = await recall_raw_memory_with_sources(
+                organization_id=organization_id,
+                principal_id="owner",
+                query="unmatched-query-marker",
+                capture_ids=capture_ids,
+                limit=1,
+            )
+            lanes = {source.source: source for source in result.sources}
+            assert lanes["raw_fulltext"].failure is None
+            assert lanes["raw_fulltext"].candidates == ()
+            assert lanes["raw_vector"].failure is None
+            assert len(result.memories) == 1
+            assert (result.memories[0].id == retained[0].id) is (capture_ids is not None)
+    finally:
+        await client.close()
+        await _drop_surreal_namespace(namespace)
