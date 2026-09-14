@@ -29,6 +29,25 @@ def _finite_float(value: str) -> float:
     return result
 
 
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("JSON object keys must be unique strings")
+        result[key] = value
+    return result
+
+
+def read_json_value(artifact: bytes) -> Any:
+    """Validate transport JSON without constructing unused citation byte ranges."""
+    return json.loads(
+        artifact.decode("utf-8"),
+        object_pairs_hook=_unique_object,
+        parse_constant=_reject_constant,
+        parse_float=_finite_float,
+    )
+
+
 @dataclass(frozen=True)
 class OriginalJson:
     value: Any

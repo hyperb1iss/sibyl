@@ -13,6 +13,7 @@ from sibyl_core.tasks._evidence_json import (
     ByteRange,
     JsonPath,
     canonical,
+    read_json_value,
     read_original_json,
     share_exact_values,
 )
@@ -169,7 +170,7 @@ class _EpisodeBuilder:
     def encoded_alias(self, path: JsonPath, target: JsonPath, *, json_value: bool) -> None:
         raw = base64.b64decode(self.at(path), validate=True)
         equivalent = (
-            _same(read_original_json(raw).value, self.at(target))
+            _same(read_json_value(raw), self.at(target))
             if json_value
             else raw == self.at(target).encode("utf-8")
         )
