@@ -33,8 +33,13 @@ from sibyl_core.services.validation_execution import ValidationExecution, _query
 from sibyl_core.services.validation_stages import run_validation_stage
 from sibyl_core.tasks._evidence_json import canonical
 from sibyl_core.tasks.consolidation import ConsolidationInputBudgetExceeded
+from sibyl_core.tasks.episode_evidence import is_controller_episode
 from sibyl_core.tasks.ordinary_evidence import OrdinarySource
 from sibyl_core.tasks.ordinary_packets import OrdinaryEvidencePacket, prepare_ordinary_packets
+from sibyl_core.tasks.ordinary_projection import (
+    VERSION as COMPLETE_PROJECTION,
+)
+from sibyl_core.tasks.ordinary_projection import prepare_ordinary_projection
 from sibyl_core.tasks.ordinary_proposal_result import OrdinaryProposalResult
 from sibyl_core.tasks.ordinary_proposals import (
     VERSION,
@@ -93,6 +98,8 @@ async def prepare_stored_cohort(
     *,
     packet_binding: dict | None = None,
     allow_single: bool = False,
+    evidence_mode: str = "auto",
+    projection_binding: dict | None = None,
 ) -> PreparedCohort:
     """Resolve actual retained sources; project grouping never proves environment facts."""
     ids = sorted(source_ids)
@@ -178,11 +185,73 @@ async def prepare_stored_cohort(
             reconstruct_ordinary_packet, ids[0], episodes[0].artifact, packet_binding
         )
     return PreparedCohort(
-        await asyncio.to_thread(prepare_partial_proposal, group, packet=packet),
+        await asyncio.to_thread(
+            _prepare_cohort_input,
+            group,
+            packet=packet,
+            evidence_mode=evidence_mode,
+            projection_binding=projection_binding,
+        ),
         tuple(sources),
         rows[0]["token"],
         authority,
     )
+
+
+def _prepare_cohort_input(
+    group: PartialCohort,
+    *,
+    packet: OrdinaryEvidencePacket | None = None,
+    evidence_mode: str = "auto",
+    projection_binding: dict | None = None,
+) -> PreparedPartialProposal:
+    if evidence_mode not in {"auto", "raw_v1", COMPLETE_PROJECTION}:
+        raise ValueError("unsupported ordinary evidence representation")
+    if packet is not None:
+        if projection_binding is not None or evidence_mode == COMPLETE_PROJECTION:
+            raise ValueError("ordinary evidence must select one representation")
+        return prepare_partial_proposal(group, packet=packet)
+    complete = evidence_mode == COMPLETE_PROJECTION or (
+        evidence_mode == "auto" and all(is_controller_episode(e.artifact) for e in group.episodes)
+    )
+    if projection_binding is not None and not complete:
+        raise ValueError("ordinary projection binding requires complete representation")
+    projection = None
+    if complete:
+        if not all(isinstance(e, PartialEpisode) for e in group.episodes):
+            raise ValueError("ordinary projection requires retained ordinary sources")
+        projection = prepare_ordinary_projection(
+            [(e.episode_id, e.artifact) for e in group.episodes],
+            [e.source for e in group.episodes if isinstance(e, PartialEpisode)],
+        )
+        if projection_binding is not None and projection.binding_json != canonical(
+            projection_binding
+        ):
+            raise ValueError("ordinary projection differs from protected execution")
+    return prepare_partial_proposal(group, projection=projection)
+
+
+def _cohort_input_chars(
+    prepared: PreparedPartialProposal, proposal_schema_chars: int, critic_schema_chars: int
+) -> int:
+    """Fit both stages; candidate headroom never replaces the actual critic guard."""
+    actual = len(prepared.system) + len(prepared.prompt) + proposal_schema_chars
+    if prepared.projection_json:
+        from sibyl_core.tasks.memory_validation import projection_critic_input_chars
+        from sibyl_core.tasks.ordinary_proposals import _projection_for_cohort
+
+        projection = _projection_for_cohort(
+            PartialCohort.model_validate_json(prepared.input_json), prepared.projection_json
+        )
+        assert projection is not None
+        actual = max(
+            actual,
+            projection_critic_input_chars(
+                projection, candidate_reserve_chars=settings.consolidation_max_input_chars // 4
+            )
+            + critic_schema_chars,
+        )
+    return actual
 
 
 async def propose_stored_cohort(
@@ -193,6 +262,7 @@ async def propose_stored_cohort(
     *,
     authorize: Callable[[], Awaitable[None]],
     packet_binding: dict | None = None,
+    evidence_mode: str = "auto",
 ) -> tuple[RawMemory | None, str]:
     """Reuse completed results without redispatch, then persist their protected derivation."""
     from sibyl_core.services.procedure_validation import (
@@ -203,7 +273,12 @@ async def propose_stored_cohort(
 
     await authorize()
     original = await prepare_stored_cohort(
-        org, principal, source_ids, resolver, packet_binding=packet_binding
+        org,
+        principal,
+        source_ids,
+        resolver,
+        packet_binding=packet_binding,
+        evidence_mode=evidence_mode,
     )
     if len(original.prepared.prompt) > settings.consolidation_max_input_chars:
         raise ConsolidationInputBudgetExceeded(
@@ -213,9 +288,25 @@ async def propose_stored_cohort(
     try:
         extractor = await _proposal_extractor(owned, original.prepared.system)
         schema = await extractor.output_schema()
-        policy = canonical({**json.loads(policy), "version": VERSION, "schema": schema})
-        actual = (
-            len(original.prepared.system) + len(original.prepared.prompt) + len(canonical(schema))
+        projection_policy = (
+            {
+                "evidence_representation": COMPLETE_PROJECTION,
+                "packing_policy": {
+                    "version": "ordinary_complete_dual_envelope_v1",
+                    "max_input_chars": settings.consolidation_max_input_chars,
+                    "candidate_reserve_chars": settings.consolidation_max_input_chars // 4,
+                },
+            }
+            if original.prepared.projection_json
+            else {}
+        )
+        policy = canonical(
+            {**json.loads(policy), "version": VERSION, "schema": schema, **projection_policy}
+        )
+        actual = _cohort_input_chars(
+            original.prepared,
+            len(canonical(schema)),
+            len(canonical(await owned.output_schema())) if original.prepared.projection_json else 0,
         )
         if actual > settings.consolidation_max_input_chars:
             raise ConsolidationInputBudgetExceeded(actual, settings.consolidation_max_input_chars)
@@ -236,6 +327,10 @@ async def _run_cohort(org, principal, original, resolver, extractor, policy, aut
             packet_binding=json.loads(original.prepared.packet_json)
             if original.prepared.packet_json
             else None,
+            evidence_mode=COMPLETE_PROJECTION if original.prepared.projection_json else "raw_v1",
+            projection_binding=json.loads(original.prepared.projection_json)
+            if original.prepared.projection_json
+            else None,
         )
         if (
             refreshed.snapshot_sha256 != original.snapshot_sha256
@@ -252,6 +347,11 @@ async def _run_cohort(org, principal, original, resolver, extractor, policy, aut
         "snapshot": original.snapshot_sha256,
         "input": original.prepared.input_sha256,
         "policy": policy,
+        **(
+            {"evidence_projection": json.loads(original.prepared.projection_json)}
+            if original.prepared.projection_json
+            else {}
+        ),
         **(
             {"evidence_packet": json.loads(original.prepared.packet_json)}
             if original.prepared.packet_json
@@ -393,6 +493,9 @@ async def partition_stored_cohort(org, principal, source_ids, resolver):
     try:
         extractor = await _proposal_extractor(owned, original.prepared.system)
         schema_chars = len(canonical(await extractor.output_schema()))
+        critic_schema_chars = (
+            len(canonical(await owned.output_schema())) if original.prepared.projection_json else 0
+        )
     finally:
         if isinstance(owned, _OwnedValidationExtractor):
             await _close_resources(owned.resources)
@@ -406,9 +509,12 @@ async def partition_stored_cohort(org, principal, source_ids, resolver):
         partial = PartialCohort.model_validate(
             {**group.model_dump(), "episodes": tuple(episodes), "group_id": review_digest(ids)}
         )
-        prepared = prepare_partial_proposal(partial)
+        prepared = _prepare_cohort_input(
+            partial,
+            evidence_mode=COMPLETE_PROJECTION if original.prepared.projection_json else "raw_v1",
+        )
         return (
-            len(prepared.prompt) + len(prepared.system) + schema_chars
+            _cohort_input_chars(prepared, schema_chars, critic_schema_chars)
             <= settings.consolidation_max_input_chars
         )
 

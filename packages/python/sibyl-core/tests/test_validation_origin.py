@@ -21,7 +21,7 @@ from tests.test_ordinary_cohort import (
 )
 
 
-def origin_records(*, purged=False):
+def origin_records(*, purged=False, representation="evidence_packet"):
     request = {
         "kind": "sibyl-ordinary-partial-proposal-v1",
         "org": "org",
@@ -30,7 +30,7 @@ def origin_records(*, purged=False):
         "source_bindings": [{"source_id": "source", "incarnation": "epoch", "generation": 1}],
         "policy": "{}",
         "input": "a" * 64,
-        "evidence_packet": {"manifest": "test-shape-only"},
+        representation: {"manifest": "test-shape-only"},
     }
     identity = review_digest(request)
     assertion = {
@@ -124,8 +124,11 @@ def test_validation_origin_purged_history_remains_archivable_but_unavailable_liv
 
 
 @pytest.mark.parametrize("mutation", ["omit", "wrong", "dangling", "foreign", "legacy"])
-def test_validation_origin_archive_cannot_forge_or_remove_packet_lineage(mutation):
-    derivation, row = origin_records()
+@pytest.mark.parametrize("representation", ["evidence_packet", "evidence_projection"])
+def test_validation_origin_archive_cannot_forge_or_remove_evidence_lineage(
+    mutation, representation
+):
+    derivation, row = origin_records(representation=representation)
     archive = payload(derivation, row)
     if mutation == "omit":
         del derivation["origin_execution_id"]
@@ -140,6 +143,25 @@ def test_validation_origin_archive_cannot_forge_or_remove_packet_lineage(mutatio
         archive.pop("validation_receipts")
     with pytest.raises(ValueError):
         prepare_payload(deepcopy(archive))
+
+
+@pytest.mark.parametrize("representation", ["evidence_packet", "evidence_projection"])
+def test_validation_origin_archive_protects_correction_descendants(representation):
+    derivation, row = origin_records(representation=representation)
+    archive = payload(derivation, row)
+    request = {"execution_dependencies": [{"execution_id": row["uuid"]}]}
+    identity = review_digest(request)
+    archive["tables"]["memory_validation_executions"].append(
+        {
+            "uuid": identity,
+            "request_json": canonical(request),
+        }
+    )
+    target = str(uuid5(NAMESPACE_URL, "sibyl:validation-correction:" + identity))
+    archive["source_integrity"]["source_rows"].append({"record": {"uuid": target, "metadata": {}}})
+    archive["source_integrity"]["derivations"].append({"target_id": target})
+    with pytest.raises(ValueError, match="omitted its protected origin"):
+        prepare_payload(archive)
 
 
 async def test_validation_origin_atomic_candidate_write_and_immutable_reference(

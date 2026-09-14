@@ -33,6 +33,7 @@ from sibyl_core.tasks.memory_validation import (
     prepare_reflection_validation,
 )
 from sibyl_core.tasks.ordinary_packets import OrdinaryEvidencePacket
+from sibyl_core.tasks.ordinary_projection import OrdinaryEvidenceProjection
 from sibyl_core.tasks.procedure_review import review_digest
 
 ORDINARY_SNAPSHOT = """
@@ -57,7 +58,7 @@ class AuthorizedReflection:
     source_bindings: list[dict[str, object]]
     observations: list[SourceObservation]
     publication_policy_sha256: str
-    packet: OrdinaryEvidencePacket | None = None
+    evidence: OrdinaryEvidencePacket | OrdinaryEvidenceProjection | None = None
     origin_dependencies: tuple[dict, ...] = ()
 
     @property
@@ -245,13 +246,13 @@ async def prepare_stored_reflection(
             episode_id=source.memory.id, ranges=((0, len(content)),)
         )
     confidence = memory.metadata.get("confidence", 0)
-    from sibyl_core.services.ordinary_packet_origin import packet_for_reflection
+    from sibyl_core.services.ordinary_evidence_origin import evidence_for_reflection
 
-    packet, origin_dependencies = await packet_for_reflection(
+    selected_evidence, origin_dependencies = await evidence_for_reflection(
         memory, derivation, observations, resolver, _ancestors
     )
-    if packet is not None:
-        citations = packet.citations
+    if selected_evidence is not None:
+        citations = selected_evidence.citations
     if not isinstance(confidence, int | float):
         raise SourceUnavailableError()
     candidate = ReflectionCandidate(
@@ -285,7 +286,10 @@ async def prepare_stored_reflection(
         parent_candidate_sha256=digest,
         evidence=evidence,
         citations=citations,
-        packet=packet,
+        packet=selected_evidence if isinstance(selected_evidence, OrdinaryEvidencePacket) else None,
+        projection=selected_evidence
+        if isinstance(selected_evidence, OrdinaryEvidenceProjection)
+        else None,
     )
     from sibyl_core.services.ordinary_publication import ordinary_policy_digest
 
@@ -305,7 +309,7 @@ async def prepare_stored_reflection(
         ],
         observations,
         publication_policy,
-        packet,
+        selected_evidence,
         origin_dependencies,
     )
 
