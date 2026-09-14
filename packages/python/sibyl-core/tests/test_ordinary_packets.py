@@ -275,7 +275,7 @@ async def test_packet_default_budget_actual_sdk_proposer_critic_and_replay(
             assert candidate is not None and QUALIFICATION in candidate.raw_content
             candidates.append(candidate)
             prepared = await prepare_stored_reflection("org", "owner", candidate.id, resolver)
-            assert prepared.packet == packet
+            assert prepared.evidence == packet
             assert len(prepared.sources) == 1 and prepared.sources[0].id == source.id
             payload = json.loads(prepared.prepared.payload_json)
             assert payload["sources"][source.id]["provenance"] == "reported"
@@ -305,7 +305,7 @@ async def test_packet_default_budget_actual_sdk_proposer_critic_and_replay(
         )
         await save_raw_memory(changed, expected_revision=changed.revision)
         current = await prepare_stored_reflection("org", "owner", changed.id, resolver)
-        assert current.packet == packets[0]
+        assert current.evidence == packets[0]
         await save_raw_memory(
             replace(source, title="same bytes, new revision"), expected_revision=source.revision
         )

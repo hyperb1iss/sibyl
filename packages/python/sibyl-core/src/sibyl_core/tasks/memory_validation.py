@@ -34,6 +34,12 @@ from sibyl_core.tasks.ordinary_packets import (
     OrdinaryEvidencePacket,
     reconstruct_ordinary_packet,
 )
+from sibyl_core.tasks.ordinary_projection import INSTRUCTIONS as PROJECTION_INSTRUCTIONS
+from sibyl_core.tasks.ordinary_projection import VERSION as ORDINARY_PROJECTION_VERSION
+from sibyl_core.tasks.ordinary_projection import (
+    OrdinaryEvidenceProjection,
+    reconstruct_ordinary_projection,
+)
 from sibyl_core.tasks.procedure_review import (
     ReviewFinding,
     ReviewSubmission,
@@ -117,9 +123,22 @@ def _prepare(
     citations: dict[str, EvidenceCitation],
     kind: str,
     packet: OrdinaryEvidencePacket | None = None,
+    projection: OrdinaryEvidenceProjection | None = None,
 ) -> PreparedMemoryValidation:
     _digest(parent_operation_id)
     _digest(parent_candidate_sha256)
+    if projection is not None:
+        if (
+            packet is not None
+            or kind != "reflection"
+            or any(source.provenance != "reported" for source in evidence)
+        ):
+            raise ValueError("ordinary projection validation requires reported original sources")
+        reconstructed = reconstruct_ordinary_projection(
+            [(source.source_id, source.content) for source in evidence], projection.binding
+        )
+        if reconstructed != projection or projection.citations != citations:
+            raise ValueError("ordinary projection citations differ from original evidence")
     if packet is not None:
         if kind != "reflection" or len(evidence) != 1:
             raise ValueError("Ordinary packet validation requires one original capture")
@@ -160,7 +179,11 @@ def _prepare(
         if source.provenance not in ("reported", "signed"):
             raise ValueError("invalid source provenance")
         sources[source.source_id] = {
-            **({} if projected or packet else {"text": source.content.decode("utf-8")}),
+            **(
+                {}
+                if projected or packet or projection
+                else {"text": source.content.decode("utf-8")}
+            ),
             "sha256": hashlib.sha256(source.content).hexdigest(),
             "observation_sha256": source.observation_sha256,
             "provenance": source.provenance,
@@ -189,6 +212,8 @@ def _prepare(
             "evidence_view_instructions": PACKET_INSTRUCTIONS,
             "evidence_packet": json.loads(packet.payload_json),
         }
+    if projection is not None:
+        representation = _ordinary_projection_representation(projection)
     if projected:
         view = encode_episode_views(projections)
         representation = {
@@ -274,6 +299,7 @@ def prepare_reflection_validation(
     evidence: list[OriginalValidationEvidence],
     citations: dict[str, EvidenceCitation],
     packet: OrdinaryEvidencePacket | None = None,
+    projection: OrdinaryEvidenceProjection | None = None,
 ) -> PreparedMemoryValidation:
     """Index ordinary content and claims without inventing signed task outcomes."""
     snapshot = candidate.to_dict()
@@ -287,6 +313,50 @@ def prepare_reflection_validation(
         citations=citations,
         kind="reflection",
         packet=packet,
+        projection=projection,
+    )
+
+
+def _ordinary_projection_representation(projection: OrdinaryEvidenceProjection) -> dict:
+    return {
+        "evidence_representation": ORDINARY_PROJECTION_VERSION,
+        "evidence_view_instructions": PROJECTION_INSTRUCTIONS,
+        "evidence_projection": json.loads(projection.payload_json),
+    }
+
+
+def projection_critic_input_chars(
+    projection: OrdinaryEvidenceProjection, *, candidate_reserve_chars: int
+) -> int:
+    """Count the critic template; the actual returned candidate still needs its guard."""
+    identifiers = [source["source_id"] for source in projection.binding["source_observations"]]
+    candidate = ReflectionCandidate(
+        "pattern", "", "", "stored reflection", 0, raw_source_ids=identifiers
+    ).to_dict()
+    return (
+        len(
+            _prepared_payload(
+                parent_operation_id="0" * 64,
+                parent_candidate_sha256="0" * 64,
+                candidate=candidate,
+                assertions=validation_assertion_index("reflection", candidate),
+                kind="reflection",
+                representation=_ordinary_projection_representation(projection),
+                sources={
+                    identifier: {
+                        "sha256": "0" * 64,
+                        "observation_sha256": "0" * 64,
+                        "provenance": "reported",
+                    }
+                    for identifier in identifiers
+                },
+                references={
+                    key: {"source_id": citation.episode_id, "ranges": citation.ranges}
+                    for key, citation in projection.citations.items()
+                },
+            ).prompt
+        )
+        + candidate_reserve_chars
     )
 
 

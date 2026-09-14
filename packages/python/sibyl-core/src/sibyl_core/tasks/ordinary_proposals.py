@@ -6,6 +6,7 @@ persist the exact source observations and use the ordinary critic and publisher.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Literal, Self
 
@@ -23,6 +24,13 @@ from sibyl_core.tasks.ordinary_packets import (
 from sibyl_core.tasks.ordinary_packets import (
     OrdinaryEvidencePacket,
     reconstruct_ordinary_packet,
+)
+from sibyl_core.tasks.ordinary_projection import (
+    INSTRUCTIONS as PROJECTION_INSTRUCTIONS,
+)
+from sibyl_core.tasks.ordinary_projection import (
+    OrdinaryEvidenceProjection,
+    reconstruct_ordinary_projection,
 )
 
 VERSION = "sibyl-ordinary-partial-proposal-v1"
@@ -135,12 +143,14 @@ class PreparedPartialProposal:
     prompt_sha256: str
     output_type: type[PartialProposal] = PartialProposal
     packet_json: str | None = None
+    projection_json: str | None = None
 
     def render(self, proposal: PartialProposal) -> ReflectionCandidate | None:
         """Render all semantic claims into critic-visible text, never authority metadata."""
         cohort = PartialCohort.model_validate_json(self.input_json)
         packet = _packet_for_cohort(cohort, self.packet_json)
-        if self != prepare_partial_proposal(cohort, packet=packet):
+        projection = _projection_for_cohort(cohort, self.projection_json)
+        if self != prepare_partial_proposal(cohort, packet=packet, projection=projection):
             raise ValueError("partial preparation identity differs")
         checked = PartialProposal.model_validate(proposal.model_dump())
         if checked.procedure is None:
@@ -167,6 +177,10 @@ class PreparedPartialProposal:
                     ref.episode_id, ref.start_byte, ref.end_byte
                 ):
                     raise ValueError("partial support is outside the observed evidence packet")
+                if projection is not None and not projection.permits(
+                    ref.episode_id, ref.start_byte, ref.end_byte
+                ):
+                    raise ValueError("partial support is outside the complete evidence projection")
                 excerpt = artifact[ref.start_byte : ref.end_byte]
                 if not excerpt.decode("utf-8").strip():
                     raise ValueError("partial support contains only whitespace")
@@ -246,6 +260,11 @@ class PreparedPartialProposal:
                     "unspecified_fields": missing,
                     "common_environment_keys": list(common),
                     **({"evidence_packet": packet.binding} if packet is not None else {}),
+                    **(
+                        {"evidence_projection": projection.binding}
+                        if projection is not None
+                        else {}
+                    ),
                 }
             },
         )
@@ -256,7 +275,6 @@ def _packet_for_cohort(
 ) -> OrdinaryEvidencePacket | None:
     if packet_json is None:
         return None
-    import json
 
     if len(cohort.episodes) != 1 or not isinstance(cohort.episodes[0], PartialEpisode):
         raise ValueError("an ordinary packet retains exactly one original capture")
@@ -265,10 +283,15 @@ def _packet_for_cohort(
 
 
 def prepare_partial_proposal(
-    cohort: PartialCohort, *, packet: OrdinaryEvidencePacket | None = None
+    cohort: PartialCohort,
+    *,
+    packet: OrdinaryEvidencePacket | None = None,
+    projection: OrdinaryEvidenceProjection | None = None,
 ) -> PreparedPartialProposal:
     """Prepare one extraction input directly from complete retained source bytes."""
     frozen = PartialCohort.model_validate(cohort.model_dump())
+    if packet is not None and projection is not None:
+        raise ValueError("ordinary evidence must select one representation")
     header = frozen.model_dump(
         mode="json",
         exclude={
@@ -281,6 +304,7 @@ def prepare_partial_proposal(
     prompt = ""
     encoded = c._canonical(frozen.model_dump(mode="json"))
     packet_json = None
+    projection_json = None
     input_sha256 = c._digest(encoded)
     if packet is not None:
         checked = _packet_for_cohort(frozen, packet.binding_json)
@@ -289,6 +313,23 @@ def prepare_partial_proposal(
         packet_json = packet.binding_json
         prompt = partial_packet_prompt(frozen, packet)
         input_sha256 = c._digest(c._canonical({"source": input_sha256, "packet": packet.binding}))
+    elif projection is not None:
+        checked = _projection_for_cohort(frozen, projection.binding_json)
+        if checked != projection:
+            raise ValueError("ordinary projection preparation differs from original evidence")
+        projection_json = projection.binding_json
+        prompt = (
+            PROJECTION_INSTRUCTIONS
+            + "\nSource observations:\n"
+            + c._canonical(header).decode()
+            + "\nComplete controller evidence:\n"
+            + projection.payload_json
+            + "\n"
+            + REQUEST
+        )
+        input_sha256 = c._digest(
+            c._canonical({"source": input_sha256, "projection": projection.binding})
+        )
     else:
         prompt = c._episode_prompt(
             header, [(e.episode_id, e.artifact) for e in frozen.episodes], REQUEST
@@ -300,6 +341,30 @@ def prepare_partial_proposal(
         REQUEST,
         c._digest(c._canonical({"version": VERSION, "system": REQUEST, "prompt": prompt})),
         packet_json=packet_json,
+        projection_json=projection_json,
+    )
+
+
+def _projection_for_cohort(
+    cohort: PartialCohort, binding_json: str | None
+) -> OrdinaryEvidenceProjection | None:
+    if binding_json is None:
+        return None
+    if not all(isinstance(episode, PartialEpisode) for episode in cohort.episodes):
+        raise ValueError("ordinary projection requires retained ordinary sources")
+    binding = json.loads(binding_json)
+    observations = sorted(
+        (
+            episode.source.model_dump(mode="json")
+            for episode in cohort.episodes
+            if isinstance(episode, PartialEpisode)
+        ),
+        key=lambda source: source["source_id"],
+    )
+    if binding.get("source_observations") != observations:
+        raise ValueError("ordinary projection source observations differ")
+    return reconstruct_ordinary_projection(
+        [(episode.episode_id, episode.artifact) for episode in cohort.episodes], binding
     )
 
 

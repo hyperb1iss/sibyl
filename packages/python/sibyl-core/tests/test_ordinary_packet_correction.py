@@ -46,7 +46,9 @@ def install(monkeypatch, output, output_type=CriticOutput):
     return reader
 
 
-async def create_candidate(content_store, monkeypatch, *, statement="Preserve packet scope"):
+async def create_candidate(
+    content_store, monkeypatch, *, statement="Preserve packet scope", complete=False
+):
     monkeypatch.setattr(
         "sibyl_core.services.content_models.configured_raw_memory_embedding_provider", lambda: None
     )
@@ -73,26 +75,44 @@ async def create_candidate(content_store, monkeypatch, *, statement="Preserve pa
     }
     install(monkeypatch, output)
     resolver = AsyncMock(return_value=SourceReadAuthority("owner"))
-    packets = await ordinary_cohort.prepare_stored_source_packets(
-        "org", "owner", source.id, resolver
-    )
+    ids = [source.id]
+    packet_binding = None
+    if complete:
+        other = await remember_raw_memory(
+            organization_id="org",
+            principal_id="owner",
+            source_id="second-controller",
+            raw_content=canonical({**_episode(), "goal": "second observation"}),
+            embedding_provider=None,
+        )
+        ids.append(other.id)
+    else:
+        packets = await ordinary_cohort.prepare_stored_source_packets(
+            "org", "owner", source.id, resolver
+        )
+        packet_binding = packets[0].binding
     candidate, origin = await ordinary_cohort.propose_stored_cohort(
         "org",
         "owner",
-        [source.id],
+        ids,
         resolver,
         authorize=AsyncMock(),
-        packet_binding=packets[0].binding,
+        packet_binding=packet_binding,
     )
     assert candidate is not None
     parent = await prepare_stored_reflection("org", "owner", candidate.id, resolver)
     return parent, resolver, origin
 
 
-async def test_packet_correction_progress_and_removed_marker_keep_protected_root(
-    content_store, monkeypatch
+@pytest.mark.parametrize("complete", [False, True])
+@pytest.mark.parametrize("remove_qualification", [False, True])
+async def test_ordinary_correction_progress_and_removed_marker_keep_protected_root(
+    content_store, monkeypatch, complete, remove_qualification
 ):
-    parent, resolver, origin = await create_candidate(content_store, monkeypatch)
+    from sibyl_core.tasks.ordinary_proposals import QUALIFICATION as COMPLETE_QUALIFICATION
+
+    parent, resolver, origin = await create_candidate(content_store, monkeypatch, complete=complete)
+    qualification = COMPLETE_QUALIFICATION if complete else QUALIFICATION
     payload = json.loads(parent.prepared.payload_json)
     finding = {
         "claim_path": "/content",
@@ -117,16 +137,27 @@ async def test_packet_correction_progress_and_removed_marker_keep_protected_root
             }
         ],
     }
+    if remove_qualification:
+        output["content"] = output["content"].replace(qualification, "")
     install(monkeypatch, output)
     correction = await validate_reflection_stage(
         parent, resolver, review, review_execution_id=str(critique["execution_id"])
     )
+    if remove_qualification:
+        assert correction["status"] == "abstain" and correction["content"] is None
+        assert correction["usage"]["requests"] == 1
+        assert correction["reason"] == (
+            "correction_removed_source_qualification"
+            if complete
+            else "correction_removed_packet_qualification"
+        )
+        return
     assert correction["status"] == "corrected"
     child = await _persist_corrected(
         parent, resolver, correction, review_execution_id=str(critique["execution_id"])
     )
     prepared = await prepare_stored_reflection("org", "owner", child.id, resolver)
-    assert prepared.packet == parent.packet and QUALIFICATION in prepared.candidate.content
+    assert prepared.evidence == parent.evidence and qualification in prepared.candidate.content
     assert {ref["execution_id"] for ref in prepared.origin_dependencies} == {
         origin,
         correction["execution_id"],
