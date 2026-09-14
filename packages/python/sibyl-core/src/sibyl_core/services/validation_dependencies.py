@@ -28,6 +28,21 @@ def dependency_reference(row: dict[str, Any]) -> ExecutionDependency:
     )
 
 
+def merge_dependency_references(
+    *groups: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+) -> list[dict[str, Any]]:
+    """Share an origin reached through two paths without concealing conflicting results."""
+    merged: dict[str, ExecutionDependency] = {}
+    for group in groups:
+        for value in group:
+            reference = ExecutionDependency.model_validate(value)
+            previous = merged.get(reference.execution_id)
+            if previous is not None and previous != reference:
+                raise ValueError("Conflicting execution dependency")
+            merged[reference.execution_id] = reference
+    return [reference.model_dump(mode="json") for reference in merged.values()]
+
+
 def direct_dependencies(request: dict[str, Any]) -> tuple[ExecutionDependency, ...]:
     values = request.get("execution_dependencies", [])
     if not isinstance(values, list):

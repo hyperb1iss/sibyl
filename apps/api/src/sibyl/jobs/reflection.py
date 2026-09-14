@@ -169,11 +169,7 @@ async def run_reflection_dream_cycle(
                 {
                     str(identifier)
                     for item in all_results
-                    for identifier in (
-                        [item.get("operation_id")]
-                        if item.get("stage_kind") == "ordinary_cohort"
-                        else item.get("validation_executions", [])
-                    )
+                    for identifier in _result_execution_ids(item)
                     if identifier is not None
                 }
             ),
@@ -183,6 +179,14 @@ async def run_reflection_dream_cycle(
     }
     log.info("reflection_dream_cycle_completed", **_summary_log_fields(receipt))
     return receipt
+
+
+def _result_execution_ids(item: dict[str, Any]) -> list[str | None]:
+    if item.get("stage_kind") == "ordinary_cohort":
+        return [item.get("operation_id")]
+    if item.get("stage_kind") == "ordinary_packet_manifest":
+        return [page.get("operation_id") for page in item.get("pages", [])]
+    return item.get("validation_executions", [])
 
 
 async def _reflect_dream_sources(
