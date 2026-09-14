@@ -84,6 +84,49 @@ def test_projection_cites_selected_original_values_and_classifies_audit() -> Non
     )
 
 
+@pytest.mark.parametrize(("index", "field"), [(1, "body"), (2, "raw")])
+@pytest.mark.parametrize("encoding", ["duplicate", "utf-16", "utf-32", "utf-8-sig", "trailing"])
+def test_encoded_alias_rejects_ambiguous_or_non_utf8_json(index, field, encoding) -> None:
+    episode = _episode()
+    payload = episode["trace"][index]["payload"]
+    value = payload[field]
+    text = json.dumps(value)
+    if encoding == "duplicate":
+        key = next(iter(value))
+        text = "{" + json.dumps(key) + ":" + json.dumps(value[key]) + "," + text[1:]
+        raw = text.encode()
+    elif encoding == "trailing":
+        raw = (text + "{}").encode()
+    else:
+        raw = text.encode(encoding)
+    payload["body_base64"] = base64.b64encode(raw).decode()
+    payload["body_sha256"] = hashlib.sha256(raw).hexdigest()
+    with pytest.raises(ValueError):
+        project_episode("source", json.dumps(episode).encode(), prefix="s0")
+
+
+def test_transport_json_spelling_preserves_semantics_and_original_citations() -> None:
+    episode = _episode()
+    for index, field in ((1, "body"), (2, "raw")):
+        payload = episode["trace"][index]["payload"]
+        raw = json.dumps(payload[field], indent=2, ensure_ascii=True).encode()
+        payload["body_base64"] = base64.b64encode(raw).decode()
+        payload["body_sha256"] = hashlib.sha256(raw).hexdigest()
+    artifact = json.dumps(episode, ensure_ascii=False).encode()
+    result = project_episode("source", artifact, prefix="s0")
+    original = json.dumps(_episode()).encode()
+    baseline = project_episode("source", original, prefix="s0")
+    assert result.view == baseline.view
+    assert [
+        {key: value for key, value in row.items() if key != "range"} for row in result.coverage
+    ] == [{key: value for key, value in row.items() if key != "range"} for row in baseline.coverage]
+    for key, citation in result.citations.items():
+        expected = [
+            json.loads(original[start:end]) for start, end in baseline.citations[key].ranges
+        ]
+        assert [json.loads(artifact[start:end]) for start, end in citation.ranges] == expected
+
+
 @pytest.mark.parametrize("mutation", ["encoding", "digest", "unknown", "history", "value_type"])
 def test_distinct_or_unclassified_evidence_cannot_be_dropped(mutation: str) -> None:
     episode = _episode()

@@ -4,7 +4,12 @@ import json
 
 import pytest
 
-from sibyl_core.tasks._evidence_json import read_original_json, share_exact_values
+from sibyl_core.tasks._evidence_json import (
+    canonical,
+    read_json_value,
+    read_original_json,
+    share_exact_values,
+)
 
 
 def test_original_ranges_use_utf8_bytes_and_original_string_spelling() -> None:
@@ -29,11 +34,38 @@ def test_original_ranges_use_utf8_bytes_and_original_string_spelling() -> None:
         b"-1e9999",
         b"[1,]",
         b"{}[]",
+        b'{"a":1,"\\u0061":1}',
+        b'{"a":[{"b":1,"b":1}]}',
+        b"-Infinity",
+        b'{"a":1e9999}',
+        b"{true:1}",
+        b"\xef\xbb\xbf{}",
+        b'{"a":"\xff"}',
+        "{}".encode("utf-16"),
+        "{}".encode("utf-32"),
+        b"",
     ],
 )
 def test_ambiguous_or_non_json_evidence_is_rejected(artifact: bytes) -> None:
     with pytest.raises(ValueError):
         read_original_json(artifact)
+    with pytest.raises(ValueError):
+        read_json_value(artifact)
+
+
+@pytest.mark.parametrize(
+    "artifact",
+    [
+        b' { "a": [null, true, false, 1, 1.0, -0.0, 1e-9999], "b": {} } ',
+        '{"λ":"\\u03bb", "emoji":"💜", "array":[[],{}]}'.encode(),
+        b"1.7976931348623157e308",
+        b"1234567890123456789012345678901234567890",
+        b'"\\ud800"',
+        b"null",
+    ],
+)
+def test_value_parser_preserves_original_json_values(artifact: bytes) -> None:
+    assert canonical(read_json_value(artifact)) == canonical(read_original_json(artifact).value)
 
 
 def test_shared_values_round_trip_reference_shaped_literals() -> None:
