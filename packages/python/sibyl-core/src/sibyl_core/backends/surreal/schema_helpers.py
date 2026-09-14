@@ -72,7 +72,7 @@ async def execute_schema_statements(
     group_id: str | None = None,
     batch_execute: Callable[[str], Awaitable[object]] | None = None,
 ) -> None:
-    """Group compatible definitions inside the caller's fenced transaction.
+    """Group compatible definitions inside the caller's checked transaction.
 
     Index creation retains its individual duplicate handling and readiness
     semantics. Other statements also delimit batches, including data migrations
