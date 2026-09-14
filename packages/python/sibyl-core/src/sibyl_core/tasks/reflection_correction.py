@@ -116,6 +116,11 @@ async def reconsider_reflection(
         }
         output = ReflectionCorrection.model_validate(result.output.model_dump(mode="json"))
         reason = output.abstention_reason
+        if payload.get("evidence_representation") == "ordinary_evidence_packet_v1":
+            from sibyl_core.tasks.ordinary_packets import QUALIFICATION
+
+            if output.content is not None and QUALIFICATION not in output.content:
+                reason = "correction_removed_packet_qualification"
         try:
             validate_review_assessments(submission, output.assessments, citations)
             if any(item.disposition == "insufficient_evidence" for item in output.assessments):

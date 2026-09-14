@@ -188,7 +188,19 @@ async def _reflection_root(org: str, principal: str, candidate_id: str, resolver
         current = await prepare_stored_reflection(
             org, principal, candidate_id, resolver, publication=True
         )
-        marker = current.memory.metadata.get("automatic_correction")
+        from sibyl_core.services.memory_derivations import load_raw_derivation
+        from sibyl_core.services.validation_origin import load_validation_origin
+
+        origin = await load_validation_origin(await load_raw_derivation(org, candidate_id))
+        if origin is not None:
+            value = json.loads(origin["result_json"])
+            marker = (
+                {"parent_id": origin["parent_id"], "execution_id": origin["uuid"]}
+                if value.get("version") == "ordinary-reflection-correction-v1"
+                else None
+            )
+        else:
+            marker = current.memory.metadata.get("automatic_correction")
         if marker is None:
             return candidate_id
         if not isinstance(marker, dict) or not isinstance(marker.get("execution_id"), str):

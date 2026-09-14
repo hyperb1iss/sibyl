@@ -256,6 +256,17 @@ def validate_integrity_archive(
             from sibyl_core.services.validation_promotion import ValidationBinding
 
             ValidationBinding.model_validate_json(association["validation_binding_json"])
+        if association.get("origin_execution_id") is not None:
+            from uuid import NAMESPACE_URL, uuid5
+
+            origin = association["origin_execution_id"]
+            if (
+                kind is not SourceKind.RAW_CAPTURE
+                or not isinstance(origin, str)
+                or re.fullmatch(r"[0-9a-f]{64}", origin) is None
+                or str(uuid5(NAMESPACE_URL, "sibyl:validation-correction:" + origin)) != key[1]
+            ):
+                raise ValueError("Archive derivation origin identity differs")
         from sibyl_core.services.memory_derivations import observation_from_record
 
         for value in association["observations"]:

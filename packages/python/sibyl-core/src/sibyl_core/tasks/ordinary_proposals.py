@@ -14,6 +14,16 @@ from pydantic import Field, model_validator
 from sibyl_core.models.reflection import ReflectionCandidate
 from sibyl_core.tasks import consolidation as c
 from sibyl_core.tasks import ordinary_evidence as o
+from sibyl_core.tasks.ordinary_packets import (
+    INSTRUCTIONS as PACKET_INSTRUCTIONS,
+)
+from sibyl_core.tasks.ordinary_packets import (
+    QUALIFICATION as PACKET_QUALIFICATION,
+)
+from sibyl_core.tasks.ordinary_packets import (
+    OrdinaryEvidencePacket,
+    reconstruct_ordinary_packet,
+)
 
 VERSION = "sibyl-ordinary-partial-proposal-v1"
 QUALIFICATION = (
@@ -44,7 +54,7 @@ class PartialEpisode(o.SourceEpisode):
 
 class PartialCohort(o.SourceCohort):
     schema_version: Literal["sibyl-ordinary-partial-proposal-v1"] = VERSION
-    episodes: tuple[PartialEpisode | c.ConsolidationEpisode, ...] = Field(min_length=2)
+    episodes: tuple[PartialEpisode | c.ConsolidationEpisode, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
     def no_hidden_conflicts(self) -> Self:
@@ -124,11 +134,13 @@ class PreparedPartialProposal:
     system: str
     prompt_sha256: str
     output_type: type[PartialProposal] = PartialProposal
+    packet_json: str | None = None
 
     def render(self, proposal: PartialProposal) -> ReflectionCandidate | None:
         """Render all semantic claims into critic-visible text, never authority metadata."""
         cohort = PartialCohort.model_validate_json(self.input_json)
-        if self != prepare_partial_proposal(cohort):
+        packet = _packet_for_cohort(cohort, self.packet_json)
+        if self != prepare_partial_proposal(cohort, packet=packet):
             raise ValueError("partial preparation identity differs")
         checked = PartialProposal.model_validate(proposal.model_dump())
         if checked.procedure is None:
@@ -151,6 +163,10 @@ class PreparedPartialProposal:
                 artifact = artifacts.get(ref.episode_id)
                 if artifact is None or not 0 <= ref.start_byte < ref.end_byte <= len(artifact):
                     raise ValueError("partial support is empty or outside original evidence")
+                if packet is not None and not packet.permits(
+                    ref.episode_id, ref.start_byte, ref.end_byte
+                ):
+                    raise ValueError("partial support is outside the observed evidence packet")
                 excerpt = artifact[ref.start_byte : ref.end_byte]
                 if not excerpt.decode("utf-8").strip():
                     raise ValueError("partial support contains only whitespace")
@@ -193,6 +209,8 @@ class PreparedPartialProposal:
             "Unspecified proposal fields: " + (", ".join(missing) if missing else "none") + ".",
             "Missing fields indicate incomplete proposal coverage, not absent real-world conditions.",
         ]
+        if packet is not None:
+            lines.extend(["", PACKET_QUALIFICATION])
         for path, statement in rendered.items():
             lines.extend(["", f"## {path}", statement])
         source_ids = [
@@ -227,12 +245,28 @@ class PreparedPartialProposal:
                     "spans": spans,
                     "unspecified_fields": missing,
                     "common_environment_keys": list(common),
+                    **({"evidence_packet": packet.binding} if packet is not None else {}),
                 }
             },
         )
 
 
-def prepare_partial_proposal(cohort: PartialCohort) -> PreparedPartialProposal:
+def _packet_for_cohort(
+    cohort: PartialCohort, packet_json: str | None
+) -> OrdinaryEvidencePacket | None:
+    if packet_json is None:
+        return None
+    import json
+
+    if len(cohort.episodes) != 1 or not isinstance(cohort.episodes[0], PartialEpisode):
+        raise ValueError("an ordinary packet retains exactly one original capture")
+    source = cohort.episodes[0]
+    return reconstruct_ordinary_packet(source.episode_id, source.artifact, json.loads(packet_json))
+
+
+def prepare_partial_proposal(
+    cohort: PartialCohort, *, packet: OrdinaryEvidencePacket | None = None
+) -> PreparedPartialProposal:
     """Prepare one extraction input directly from complete retained source bytes."""
     frozen = PartialCohort.model_validate(cohort.model_dump())
     header = frozen.model_dump(
@@ -244,14 +278,48 @@ def prepare_partial_proposal(cohort: PartialCohort) -> PreparedPartialProposal:
         },
     )
     header["common_environment_keys"] = list(frozen.common_environment_keys)
-    prompt = c._episode_prompt(
-        header, [(e.episode_id, e.artifact) for e in frozen.episodes], REQUEST
-    )
+    prompt = ""
     encoded = c._canonical(frozen.model_dump(mode="json"))
+    packet_json = None
+    input_sha256 = c._digest(encoded)
+    if packet is not None:
+        checked = _packet_for_cohort(frozen, packet.binding_json)
+        if checked != packet:
+            raise ValueError("ordinary packet preparation differs from original evidence")
+        packet_json = packet.binding_json
+        prompt = partial_packet_prompt(frozen, packet)
+        input_sha256 = c._digest(c._canonical({"source": input_sha256, "packet": packet.binding}))
+    else:
+        prompt = c._episode_prompt(
+            header, [(e.episode_id, e.artifact) for e in frozen.episodes], REQUEST
+        )
     return PreparedPartialProposal(
         encoded.decode(),
-        c._digest(encoded),
+        input_sha256,
         prompt,
         REQUEST,
         c._digest(c._canonical({"version": VERSION, "system": REQUEST, "prompt": prompt})),
+        packet_json=packet_json,
+    )
+
+
+def partial_packet_prompt(cohort: PartialCohort, packet: OrdinaryEvidencePacket) -> str:
+    """Render the same envelope during partitioning and validated preparation."""
+    header = cohort.model_dump(
+        mode="json",
+        exclude={
+            "organization_id": True,
+            "owner_principal_id": True,
+            "episodes": {"__all__": {"artifact"}},
+        },
+    )
+    header["common_environment_keys"] = list(cohort.common_environment_keys)
+    return (
+        PACKET_INSTRUCTIONS
+        + "\nSource observations:\n"
+        + c._canonical(header).decode()
+        + "\nEvidence packet:\n"
+        + packet.payload_json
+        + "\n"
+        + REQUEST
     )

@@ -75,7 +75,7 @@ async def insert_validation_candidate(
             result=write.result_json,
             candidate=write.id,
             row={**row, "derivation_required": True},
-            derivation=derivation,
+            derivation={**derivation, "origin_execution_id": write.execution_id},
         )
     )
     if len(result) != 1:

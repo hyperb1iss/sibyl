@@ -27,6 +27,13 @@ from sibyl_core.tasks.episode_evidence import (
     is_controller_episode,
     project_episode,
 )
+from sibyl_core.tasks.ordinary_packets import (
+    INSTRUCTIONS as PACKET_INSTRUCTIONS,
+)
+from sibyl_core.tasks.ordinary_packets import (
+    OrdinaryEvidencePacket,
+    reconstruct_ordinary_packet,
+)
 from sibyl_core.tasks.procedure_review import (
     ReviewFinding,
     ReviewSubmission,
@@ -109,9 +116,19 @@ def _prepare(
     evidence: list[OriginalValidationEvidence],
     citations: dict[str, EvidenceCitation],
     kind: str,
+    packet: OrdinaryEvidencePacket | None = None,
 ) -> PreparedMemoryValidation:
     _digest(parent_operation_id)
     _digest(parent_candidate_sha256)
+    if packet is not None:
+        if kind != "reflection" or len(evidence) != 1:
+            raise ValueError("Ordinary packet validation requires one original capture")
+        source = evidence[0]
+        reconstructed = reconstruct_ordinary_packet(
+            source.source_id, source.content, packet.binding
+        )
+        if reconstructed != packet or packet.citations != citations:
+            raise ValueError("Ordinary packet citations differ from original evidence")
     projected = (
         kind == "conditional_procedure"
         and bool(evidence)
@@ -143,7 +160,7 @@ def _prepare(
         if source.provenance not in ("reported", "signed"):
             raise ValueError("invalid source provenance")
         sources[source.source_id] = {
-            **({} if projected else {"text": source.content.decode("utf-8")}),
+            **({} if projected or packet else {"text": source.content.decode("utf-8")}),
             "sha256": hashlib.sha256(source.content).hexdigest(),
             "observation_sha256": source.observation_sha256,
             "provenance": source.provenance,
@@ -166,6 +183,12 @@ def _prepare(
     if not sources or not references or not assertions:
         raise ValueError("validation requires original evidence and assertions")
     representation: dict[str, object] = {}
+    if packet is not None:
+        representation = {
+            "evidence_representation": "ordinary_evidence_packet_v1",
+            "evidence_view_instructions": PACKET_INSTRUCTIONS,
+            "evidence_packet": json.loads(packet.payload_json),
+        }
     if projected:
         view = encode_episode_views(projections)
         representation = {
@@ -181,6 +204,29 @@ def _prepare(
                 [(source.source_id, source.content) for source in evidence], projections, view
             ),
         }
+    return _prepared_payload(
+        parent_operation_id=parent_operation_id,
+        parent_candidate_sha256=parent_candidate_sha256,
+        candidate=candidate,
+        assertions=assertions,
+        sources=sources,
+        references=references,
+        representation=representation,
+        kind=kind,
+    )
+
+
+def _prepared_payload(
+    *,
+    parent_operation_id,
+    parent_candidate_sha256,
+    candidate,
+    assertions,
+    sources,
+    references,
+    representation,
+    kind,
+):
     return PreparedMemoryValidation(
         canonical(
             {
@@ -227,6 +273,7 @@ def prepare_reflection_validation(
     parent_candidate_sha256: str,
     evidence: list[OriginalValidationEvidence],
     citations: dict[str, EvidenceCitation],
+    packet: OrdinaryEvidencePacket | None = None,
 ) -> PreparedMemoryValidation:
     """Index ordinary content and claims without inventing signed task outcomes."""
     snapshot = candidate.to_dict()
@@ -239,6 +286,56 @@ def prepare_reflection_validation(
         evidence=evidence,
         citations=citations,
         kind="reflection",
+        packet=packet,
+    )
+
+
+def packet_critic_input_chars(
+    packet: OrdinaryEvidencePacket, *, candidate_reserve_chars: int
+) -> int:
+    """Measure the actual critic envelope with disclosed candidate planning headroom.
+
+    Headroom is a packing estimate, never an output bound. The stored critic
+    preparation still measures the actual rendered candidate before dispatch.
+    """
+    source_id = packet.binding["manifest"]["source_id"]
+    candidate = ReflectionCandidate(
+        "pattern",
+        "",
+        "",
+        "stored reflection",
+        0,
+        raw_source_ids=[source_id],
+    ).to_dict()
+    assertions = validation_assertion_index("reflection", candidate)
+    representation = {
+        "evidence_representation": "ordinary_evidence_packet_v1",
+        "evidence_view_instructions": PACKET_INSTRUCTIONS,
+        "evidence_packet": json.loads(packet.payload_json),
+    }
+    return (
+        len(
+            _prepared_payload(
+                parent_operation_id="0" * 64,
+                parent_candidate_sha256="0" * 64,
+                candidate=candidate,
+                assertions=assertions,
+                kind="reflection",
+                representation=representation,
+                sources={
+                    source_id: {
+                        "sha256": "0" * 64,
+                        "observation_sha256": "0" * 64,
+                        "provenance": "reported",
+                    }
+                },
+                references={
+                    key: {"source_id": citation.episode_id, "ranges": citation.ranges}
+                    for key, citation in packet.citations.items()
+                },
+            ).prompt
+        )
+        + candidate_reserve_chars
     )
 
 

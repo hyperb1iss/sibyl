@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from collections.abc import Awaitable, Callable
@@ -33,6 +34,7 @@ from sibyl_core.services.validation_stages import run_validation_stage
 from sibyl_core.tasks._evidence_json import canonical
 from sibyl_core.tasks.consolidation import ConsolidationInputBudgetExceeded
 from sibyl_core.tasks.ordinary_evidence import OrdinarySource
+from sibyl_core.tasks.ordinary_packets import OrdinaryEvidencePacket, prepare_ordinary_packets
 from sibyl_core.tasks.ordinary_proposal_result import OrdinaryProposalResult
 from sibyl_core.tasks.ordinary_proposals import (
     VERSION,
@@ -40,6 +42,7 @@ from sibyl_core.tasks.ordinary_proposals import (
     PartialEpisode,
     PartialProposal,
     PreparedPartialProposal,
+    partial_packet_prompt,
     prepare_partial_proposal,
 )
 from sibyl_core.tasks.procedure_review import review_digest
@@ -87,10 +90,13 @@ async def prepare_stored_cohort(
     principal: str,
     source_ids: list[str],
     resolver: SourceAuthorityResolver,
+    *,
+    packet_binding: dict | None = None,
+    allow_single: bool = False,
 ) -> PreparedCohort:
     """Resolve actual retained sources; project grouping never proves environment facts."""
     ids = sorted(source_ids)
-    if len(ids) < 2 or len(ids) != len(set(ids)):
+    if len(ids) < (1 if allow_single or packet_binding else 2) or len(ids) != len(set(ids)):
         raise ValueError("An ordinary cohort requires distinct retained sources")
     authority = await resolver(org, principal)
     if authority is None or authority.principal_id != principal:
@@ -158,8 +164,24 @@ async def prepare_stored_cohort(
         scope_key=scope[1],
         episodes=tuple(episodes),
     )
+    packet = None
+    if packet_binding is not None:
+        from sibyl_core.tasks.ordinary_packets import reconstruct_ordinary_packet
+
+        if len(episodes) != 1:
+            raise SourceUnavailableError()
+        if packet_binding.get("manifest", {}).get("source_observation") != episodes[
+            0
+        ].source.model_dump(mode="json"):
+            raise SourceUnavailableError()
+        packet = await asyncio.to_thread(
+            reconstruct_ordinary_packet, ids[0], episodes[0].artifact, packet_binding
+        )
     return PreparedCohort(
-        prepare_partial_proposal(group), tuple(sources), rows[0]["token"], authority
+        await asyncio.to_thread(prepare_partial_proposal, group, packet=packet),
+        tuple(sources),
+        rows[0]["token"],
+        authority,
     )
 
 
@@ -170,6 +192,7 @@ async def propose_stored_cohort(
     resolver: SourceAuthorityResolver,
     *,
     authorize: Callable[[], Awaitable[None]],
+    packet_binding: dict | None = None,
 ) -> tuple[RawMemory | None, str]:
     """Reuse completed results without redispatch, then persist their protected derivation."""
     from sibyl_core.services.procedure_validation import (
@@ -179,7 +202,9 @@ async def propose_stored_cohort(
     )
 
     await authorize()
-    original = await prepare_stored_cohort(org, principal, source_ids, resolver)
+    original = await prepare_stored_cohort(
+        org, principal, source_ids, resolver, packet_binding=packet_binding
+    )
     if len(original.prepared.prompt) > settings.consolidation_max_input_chars:
         raise ConsolidationInputBudgetExceeded(
             len(original.prepared.prompt), settings.consolidation_max_input_chars
@@ -203,7 +228,15 @@ async def propose_stored_cohort(
 async def _run_cohort(org, principal, original, resolver, extractor, policy, authorize):
     async def current():
         await authorize()
-        refreshed = await prepare_stored_cohort(org, principal, original.ids, resolver)
+        refreshed = await prepare_stored_cohort(
+            org,
+            principal,
+            original.ids,
+            resolver,
+            packet_binding=json.loads(original.prepared.packet_json)
+            if original.prepared.packet_json
+            else None,
+        )
         if (
             refreshed.snapshot_sha256 != original.snapshot_sha256
             or refreshed.prepared != original.prepared
@@ -219,6 +252,11 @@ async def _run_cohort(org, principal, original, resolver, extractor, policy, aut
         "snapshot": original.snapshot_sha256,
         "input": original.prepared.input_sha256,
         "policy": policy,
+        **(
+            {"evidence_packet": json.loads(original.prepared.packet_json)}
+            if original.prepared.packet_json
+            else {}
+        ),
     }
     identity = review_digest(request)
     params = {
@@ -252,53 +290,69 @@ async def _run_cohort(org, principal, original, resolver, extractor, policy, aut
             error,
         )
 
-    value = await run_validation_stage(
-        execution=execution,
-        parent_id=original.ids[0],
-        source_ids=original.ids,
-        request=request,
-        policy=policy,
-        check_current=current,
-        run=run,
-    )
-    result = TypeAdapter(OrdinaryProposalResult).validate_python(
-        {k: v for k, v in value.items() if k != "execution_id"}
-    )
-    if result.input_sha256 != original.prepared.input_sha256:
-        raise SourceUnavailableError()
-    if result.validation_error is not None:
-        failure = ValueError(result.validation_error)
-        failure.__dict__["extraction_usage"] = result.usage.model_dump(mode="json")
-        raise failure
-    candidate = original.prepared.render(result.proposal)
-    if candidate is None:
-        return None, identity
-    await current()
-    row = await execution.load()
-    if row is None:
-        raise SourceUnavailableError()
-    write = ValidationCandidateWrite(identity, row["result_json"], COHORT_GUARD, params)
-    replay = await get_raw_memory(organization_id=org, memory_id=write.id)
-    embedding = {"embedding_provider": None} if replay is not None else {}
-    memory = await remember_reflection_candidate_review(
-        **embedding,
-        organization_id=org,
-        principal_id=principal,
-        candidate=candidate,
-        raw_source_ids=original.ids,
-        source_id=original.ids[0],
-        memory_scope=original.sources[0].memory.memory_scope,
-        scope_key=original.sources[0].memory.scope_key,
-        suggested_memory_scope=candidate.suggested_memory_scope,
-        suggested_scope_key=candidate.suggested_scope_key,
-        source_observations=[source.observation for source in original.sources],
-        validation_write=write,
-        accessible_projects=original.authority.projects,
-        accessible_teams=original.authority.teams,
-        accessible_delegations=original.authority.delegations,
-        allowed_memory_scope_keys=original.authority.scope_keys,
-    )
-    return memory, identity
+    try:
+        value = await run_validation_stage(
+            execution=execution,
+            parent_id=original.ids[0],
+            source_ids=original.ids,
+            request=request,
+            policy=policy,
+            check_current=current,
+            run=run,
+        )
+    except Exception as error:
+        error.__dict__["execution_id"] = identity
+        try:
+            failed_stage = await execution.load()
+        except Exception as lookup_error:
+            error.__dict__["execution_lookup_error"] = type(lookup_error).__name__
+        else:
+            error.__dict__["execution_state"] = failed_stage.get("state") if failed_stage else None
+        raise
+    try:
+        result = TypeAdapter(OrdinaryProposalResult).validate_python(
+            {k: v for k, v in value.items() if k != "execution_id"}
+        )
+        if result.input_sha256 != original.prepared.input_sha256:
+            raise SourceUnavailableError()
+        if result.validation_error is not None:
+            failure = ValueError(result.validation_error)
+            failure.__dict__["extraction_usage"] = result.usage.model_dump(mode="json")
+            failure.__dict__["execution_id"] = identity
+            raise failure
+        candidate = original.prepared.render(result.proposal)
+        if candidate is None:
+            return None, identity
+        await current()
+        row = await execution.load()
+        if row is None:
+            raise SourceUnavailableError()
+        write = ValidationCandidateWrite(identity, row["result_json"], COHORT_GUARD, params)
+        replay = await get_raw_memory(organization_id=org, memory_id=write.id)
+        embedding = {"embedding_provider": None} if replay is not None else {}
+        memory = await remember_reflection_candidate_review(
+            **embedding,
+            organization_id=org,
+            principal_id=principal,
+            candidate=candidate,
+            raw_source_ids=original.ids,
+            source_id=original.ids[0],
+            memory_scope=original.sources[0].memory.memory_scope,
+            scope_key=original.sources[0].memory.scope_key,
+            suggested_memory_scope=candidate.suggested_memory_scope,
+            suggested_scope_key=candidate.suggested_scope_key,
+            source_observations=[source.observation for source in original.sources],
+            validation_write=write,
+            accessible_projects=original.authority.projects,
+            accessible_teams=original.authority.teams,
+            accessible_delegations=original.authority.delegations,
+            allowed_memory_scope_keys=original.authority.scope_keys,
+        )
+        return memory, identity
+    except Exception as error:
+        error.__dict__["execution_id"] = identity
+        error.__dict__["execution_state"] = "returned"
+        raise
 
 
 async def _proposal_extractor(owned, system: str):
@@ -366,3 +420,56 @@ async def partition_stored_cohort(org, principal, source_ids, resolver):
         else:
             bins.append([episode])
     return [[episode.episode_id for episode in bucket] for bucket in bins]
+
+
+async def prepare_stored_source_packets(org, principal, source_id, resolver):
+    """Fit complete exchanges against proposer and critic envelopes, without a send."""
+    from sibyl_core.services.procedure_validation import (
+        _close_resources,
+        _OwnedValidationExtractor,
+        validation_extractor,
+    )
+    from sibyl_core.tasks.memory_validation import packet_critic_input_chars
+
+    original = await prepare_stored_cohort(org, principal, [source_id], resolver, allow_single=True)
+    group = PartialCohort.model_validate_json(original.prepared.input_json)
+    owned, _policy = await validation_extractor()
+    try:
+        proposer = await _proposal_extractor(owned, original.prepared.system)
+        proposal_schema = canonical(await proposer.output_schema())
+        critic_schema = canonical(await owned.output_schema())
+    finally:
+        if isinstance(owned, _OwnedValidationExtractor):
+            await _close_resources(owned.resources)
+
+    # Reserve a quarter of the total critic input for the rendered candidate,
+    # including both occurrences. Unbounded output still needs the actual guard.
+    candidate_reserve = settings.consolidation_max_input_chars // 4
+
+    def input_chars(packet: OrdinaryEvidencePacket) -> int:
+        return max(
+            len(partial_packet_prompt(group, packet))
+            + len(original.prepared.system)
+            + len(proposal_schema),
+            packet_critic_input_chars(packet, candidate_reserve_chars=candidate_reserve)
+            + len(critic_schema),
+        )
+
+    episode = group.episodes[0]
+    if not isinstance(episode, PartialEpisode):
+        raise SourceUnavailableError()
+    return await asyncio.to_thread(
+        prepare_ordinary_packets,
+        source_id,
+        group.episodes[0].artifact,
+        input_chars=input_chars,
+        max_input_chars=settings.consolidation_max_input_chars,
+        packing_policy={
+            "version": "actual_envelopes_with_candidate_headroom_v1",
+            "max_input_chars": settings.consolidation_max_input_chars,
+            "critic_candidate_reserve_chars": candidate_reserve,
+            "proposal_schema_sha256": hashlib.sha256(proposal_schema.encode()).hexdigest(),
+            "critic_schema_sha256": hashlib.sha256(critic_schema.encode()).hexdigest(),
+        },
+        source_observation=episode.source.model_dump(mode="json"),
+    )

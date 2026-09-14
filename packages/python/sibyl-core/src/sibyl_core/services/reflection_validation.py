@@ -1,6 +1,7 @@
 """Resolve ordinary stored reflection evidence for automatic semantic review."""
 
 from dataclasses import asdict, dataclass
+from typing import Any
 
 from sibyl_core.backends.surreal.schema_source_witness import SOURCE_STATE_WRITE_WITNESS
 from sibyl_core.memory_pipeline.observations import SourceIdentity, SourceKind, SourceObservation
@@ -31,6 +32,7 @@ from sibyl_core.tasks.memory_validation import (
     PreparedMemoryValidation,
     prepare_reflection_validation,
 )
+from sibyl_core.tasks.ordinary_packets import OrdinaryEvidencePacket
 from sibyl_core.tasks.procedure_review import review_digest
 
 ORDINARY_SNAPSHOT = """
@@ -55,6 +57,8 @@ class AuthorizedReflection:
     source_bindings: list[dict[str, object]]
     observations: list[SourceObservation]
     publication_policy_sha256: str
+    packet: OrdinaryEvidencePacket | None = None
+    origin_dependencies: tuple[dict, ...] = ()
 
     @property
     def source_ids(self) -> list[str]:
@@ -122,8 +126,12 @@ async def prepare_stored_reflection(
     resolver: SourceAuthorityResolver,
     *,
     publication: bool = False,
+    _ancestors: frozenset[str] = frozenset(),
 ) -> AuthorizedReflection:
     """Require protected derivation observations and freshly resolved memberships."""
+    if parent_id in _ancestors:
+        raise SourceUnavailableError()
+    _ancestors = _ancestors | {parent_id}
     authority = await resolver(organization_id, principal_id)
     if authority is None or authority.principal_id != principal_id:
         raise SourceUnavailableError()
@@ -237,6 +245,13 @@ async def prepare_stored_reflection(
             episode_id=source.memory.id, ranges=((0, len(content)),)
         )
     confidence = memory.metadata.get("confidence", 0)
+    from sibyl_core.services.ordinary_packet_origin import packet_for_reflection
+
+    packet, origin_dependencies = await packet_for_reflection(
+        memory, derivation, observations, resolver, _ancestors
+    )
+    if packet is not None:
+        citations = packet.citations
     if not isinstance(confidence, int | float):
         raise SourceUnavailableError()
     candidate = ReflectionCandidate(
@@ -270,6 +285,7 @@ async def prepare_stored_reflection(
         parent_candidate_sha256=digest,
         evidence=evidence,
         citations=citations,
+        packet=packet,
     )
     from sibyl_core.services.ordinary_publication import ordinary_policy_digest
 
@@ -289,6 +305,8 @@ async def prepare_stored_reflection(
         ],
         observations,
         publication_policy,
+        packet,
+        origin_dependencies,
     )
 
 
@@ -423,7 +441,7 @@ async def _validate_prepared_reflection(
         raise ConsolidationInputBudgetExceeded(chars, settings.consolidation_max_input_chars)
     from sibyl_core.services.ordinary_publication import ordinary_semantic_digest
 
-    request = {
+    request: dict[str, Any] = {
         "kind": "ordinary_reflection_validation-v2",
         "ordinary_semantic_input": ordinary_semantic_digest(original.prepared),
         "ordinary_publication_policy": original.publication_policy_sha256,
@@ -437,6 +455,13 @@ async def _validate_prepared_reflection(
         "policy": policy,
         **extensions,
     }
+    if original.origin_dependencies:
+        from sibyl_core.services.validation_dependencies import merge_dependency_references
+
+        request["execution_dependencies"] = merge_dependency_references(
+            request.get("execution_dependencies", []),
+            original.origin_dependencies,
+        )
     prior_guard = ""
     if correction_prior is not None:
         from sibyl_core.services.validation_progress import correction_request

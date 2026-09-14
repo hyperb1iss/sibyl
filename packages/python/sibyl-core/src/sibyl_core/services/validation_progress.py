@@ -4,7 +4,11 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from sibyl_core.services.validation_dependencies import dependency_reference, resolve_dependencies
+from sibyl_core.services.validation_dependencies import (
+    dependency_reference,
+    merge_dependency_references,
+    resolve_dependencies,
+)
 from sibyl_core.services.validation_execution import (
     ValidationExecution,
     ValidationExecutionUnavailable,
@@ -22,7 +26,11 @@ async def correction_request(
     request: dict[str, Any], prior: dict[str, Any]
 ) -> tuple[dict[str, Any], str]:
     """Keep an existing physical operation's identity, including unknown attempts."""
-    dependencies = {"execution_dependencies": [dependency_reference(prior).model_dump(mode="json")]}
+    references = merge_dependency_references(
+        request.get("execution_dependencies", []),
+        [dependency_reference(prior).model_dump(mode="json")],
+    )
+    dependencies = {"execution_dependencies": references}
     extended = {**request, **dependencies}
     original = ValidationExecution(review_digest(request), request["org"], request["principal"])
     row = await original.load()
