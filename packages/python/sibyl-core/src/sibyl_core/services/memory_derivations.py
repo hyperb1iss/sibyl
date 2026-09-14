@@ -219,6 +219,7 @@ async def unavailable_raw_derivation_ids(
     from sibyl_core.memory_pipeline.lifecycle import raw_memory_lifecycle_recallable
     from sibyl_core.services.content_models import raw_memory_from_record
     from sibyl_core.services.source_observations import observe_raw_capture
+    from sibyl_core.services.validation_promotion import validation_publication_complete
 
     if not memories:
         return set()
@@ -275,6 +276,8 @@ async def unavailable_raw_derivation_ids(
                         observe_raw_capture(memory, authority)
                     except SourceUnavailableError:
                         return memory_id
+                if not validation_publication_complete(memory, associations.get(memory_id)):
+                    return memory_id
                 if not raw_memory_lifecycle_recallable(memory):
                     return memory_id
                 # Ordinary authored captures require no source traversal.

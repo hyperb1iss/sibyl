@@ -158,7 +158,7 @@ async def run_reflection_dream_cycle(
         ),
         "sources_reflected": sum(1 for item in source_results if item["outcome"] == "reflected"),
         "candidates_scanned": len(candidate_results),
-        "promoted": sum(1 for item in candidate_results if item["outcome"] == "auto_promote"),
+        "promoted": sum(1 for item in candidate_results if item.get("applied") is True),
         "archived": sum(1 for item in candidate_results if item.get("archived") is True),
         "exceptioned": sum(1 for item in candidate_results if item["outcome"] == "exception"),
         "skipped": sum(1 for item in all_results if item["outcome"] == "skip"),
@@ -563,34 +563,42 @@ async def _drain_dream_candidate(
         archived = True
         review_state = archived_memory.review_state
 
+    outcome = "abstained" if archived else decision.outcome.value
+    reason = decision.reason
+    applied = promotion is not None and promotion.success
+    promoted_id = promotion.promoted_id if promotion is not None and applied else None
+    if promotion is not None and not promotion.success:
+        outcome = "error"
+        reason = promotion.reason
+
     await _log_dream_candidate_audit(
         candidate=candidate,
         group_id=group_id,
         run_id=run_id,
         dry_run=dry_run,
         preview_allowed=preview.allowed,
-        decision_reason=decision.reason,
-        outcome="abstained" if archived else decision.outcome.value,
+        decision_reason=reason,
+        outcome=outcome,
         recommended_action="abstain" if archived else decision.recommended_action.value,
         memory_scope=decision.memory_scope.value if decision.memory_scope else target_scope,
         scope_key=decision.scope_key or target_scope_key,
         project=project,
         raw_source_ids=decision.raw_source_ids,
-        promoted_id=promotion.promoted_id if promotion else None,
+        promoted_id=promoted_id,
         exception_reasons=decision.exception_reasons,
         review_state=review_state,
     )
     return {
         "validation_executions": automatic_executions,
         "candidate_id": candidate.id,
-        "outcome": "abstained" if archived else decision.outcome.value,
+        "outcome": outcome,
         "recommended_action": "abstain" if archived else decision.recommended_action.value,
-        "applied": promotion is not None and promotion.success,
+        "applied": applied,
         "archived": archived,
         "dry_run": dry_run,
-        "reason": decision.reason,
+        "reason": reason,
         "review_state": review_state,
-        "promoted_id": promotion.promoted_id if promotion else None,
+        "promoted_id": promoted_id,
         "raw_source_ids": list(decision.raw_source_ids),
         "policy_reasons": list(decision.policy_reasons),
         "exception_reasons": list(decision.exception_reasons),
@@ -742,7 +750,7 @@ async def _log_dream_candidate_audit(
 ) -> None:
     action = (
         "memory.reflect.dream_promote"
-        if outcome == ReflectionAutonomyOutcome.AUTO_PROMOTE.value
+        if outcome == ReflectionAutonomyOutcome.AUTO_PROMOTE.value and not dry_run
         else "memory.reflect.dream_review"
     )
     try:

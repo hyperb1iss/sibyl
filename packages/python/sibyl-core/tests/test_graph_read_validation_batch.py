@@ -142,7 +142,15 @@ async def test_graph_read_batch_reverse_references_keep_concurrent_validation(
 
     memory, _ = await capture(runtime, authority)
     captures = [
-        raw_memory_record(replace(memory, id=identifier)) for identifier in ("raw_a", "raw_b")
+        raw_memory_record(
+            replace(
+                memory,
+                id=raw_id,
+                review_state="promoted",
+                metadata={**memory.metadata, "promoted_entity_id": entity_id},
+            )
+        )
+        for raw_id, entity_id in (("raw_a", "entity_a"), ("raw_b", "entity_b"))
     ]
     associations = [
         {

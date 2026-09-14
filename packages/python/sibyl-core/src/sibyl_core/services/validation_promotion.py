@@ -226,6 +226,23 @@ IF $validation_binding != NONE {
 """
 
 
+def validation_publication_complete(memory, association) -> bool:
+    """A reserved critic binding becomes readable only after final publication."""
+    if association is None or (
+        association.get("validation_binding_json") is None
+        and association.get("validation_entity_id") is None
+    ):
+        return True
+    entity_id = association.get("validation_entity_id")
+    return (
+        isinstance(entity_id, str)
+        and bool(entity_id)
+        and isinstance(association.get("validation_binding_json"), str)
+        and memory.review_state == "promoted"
+        and memory.metadata.get("promoted_entity_id") == entity_id
+    )
+
+
 async def validated_graph_current(organization_id: str, entity_id: str) -> bool:
     """Follow protected reverse references, including legacy publication ledgers."""
     return (await validated_graph_currents(organization_id, [entity_id]))[entity_id]
@@ -284,7 +301,8 @@ async def validated_graph_currents(organization_id: str, entity_ids: list[str]) 
                     return False
                 continue
             if (
-                association.get("active") is not True
+                not validation_publication_complete(memory, association)
+                or association.get("active") is not True
                 or association.get("validation_entity_id") != entity_id
                 or association.get("body_sha256") != _sha(memory.raw_content)
                 or not await validation_binding_current(memory, association)
