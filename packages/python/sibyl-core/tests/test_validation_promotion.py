@@ -246,3 +246,63 @@ async def test_actual_automatic_result_promotes_without_reextracting(candidate, 
             organization_id="org", principal_id="owner", query="Check the actual output"
         )
     }
+
+
+async def test_reserved_validation_waits_for_final_publication(
+    approved, candidate, runtime, monkeypatch
+):
+    from sibyl_core.services.graph_read_availability import available_graph_entities
+    from sibyl_core.services.surreal_content import get_raw_memory
+
+    original = memory_reflection.save_raw_memory
+    reserved_ids = []
+
+    async def check_reserved(memory, **kwargs):
+        if memory.review_state == "promoted":
+            stored = await get_raw_memory(organization_id="org", memory_id=candidate.id)
+            assert stored is not None and stored.review_state == "pending"
+            entity_id = stored.metadata["promoted_entity_id"]
+            reserved_ids.append(entity_id)
+            assert await runtime.entity_manager.get(entity_id) is not None
+            assert not await available_graph_entities("org", [entity_id], runtime=runtime)
+            assert candidate.id not in {
+                item.id
+                for item in await recall_raw_memory(
+                    organization_id="org", principal_id="owner", query="Check the actual output"
+                )
+            }
+        return await original(memory, **kwargs)
+
+    monkeypatch.setattr(memory_reflection, "save_raw_memory", check_reserved)
+    result = await promote_validated_procedure(**approved)
+    assert result.success
+    assert reserved_ids == [result.promoted_id]
+    assert await available_graph_entities("org", reserved_ids, runtime=runtime)
+    assert candidate.id in {
+        item.id
+        for item in await recall_raw_memory(
+            organization_id="org", principal_id="owner", query="Check the actual output"
+        )
+    }
+
+
+@pytest.mark.parametrize("replacement", [None, "different-entity"])
+async def test_publication_pointer_must_match_protected_binding(
+    approved, candidate, runtime, replacement
+):
+    from sibyl_core.services.graph_read_availability import available_graph_entities
+
+    result = await promote_validated_procedure(**approved)
+    assert result.success
+    await mutate(
+        "UPDATE raw_captures SET metadata.promoted_entity_id=$replacement WHERE uuid=$id;",
+        replacement=replacement,
+        id=candidate.id,
+    )
+    assert not await available_graph_entities("org", [result.promoted_id], runtime=runtime)
+    assert candidate.id not in {
+        item.id
+        for item in await recall_raw_memory(
+            organization_id="org", principal_id="owner", query="Check the actual output"
+        )
+    }

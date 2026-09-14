@@ -502,5 +502,21 @@ async def test_ordinary_cohort_native_final_policy_race(cohort_runtime, monkeypa
         id=sources[0]["uuid"],
     )
     assert after == before
+    from sibyl_core.services.content_raw_recall import recall_raw_memory
+    from sibyl_core.services.graph_read_availability import available_graph_entities
+
+    candidates = await execute(
+        "SELECT * FROM raw_captures WHERE capture_surface='reflection_candidate';"
+    )
+    assert len(candidates) == 1
+    entity_id = candidates[0]["metadata"]["promoted_entity_id"]
+    visible = await available_graph_entities(str(org.id), [entity_id], runtime=_runtime)
+    assert bool(visible) is not raced
+    recalled = await recall_raw_memory(
+        organization_id=str(org.id),
+        principal_id=_context.user_id,
+        query="Logs reveal configuration",
+    )
+    assert (candidates[0]["uuid"] in {memory.id for memory in recalled}) is not raced
     stages = await execute("SELECT usage_json FROM memory_validation_executions;")
     assert sum(json.loads(stage["usage_json"])["requests"] for stage in stages) == 2
