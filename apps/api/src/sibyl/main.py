@@ -150,14 +150,14 @@ def create_combined_app(
         host=host,
         stateless_http=False,
         transport_security=_mcp_transport_security(host, port),
+        # Keep paused agents attached and admit sessions without a fixed quota.
+        session_idle_timeout=None,
+        max_sessions=None,
     )
 
     @asynccontextmanager
     async def lifespan(_app: Starlette) -> "AsyncGenerator[None]":
         """Combined lifespan that initializes MCP session manager."""
-        import asyncio
-        import contextlib
-
         log = structlog.get_logger()
         coordination_backend = settings.resolved_coordination_backend
 
@@ -188,8 +188,6 @@ def create_combined_app(
         runtime_services = RuntimeServices(log=log)
         await runtime_services.startup()
 
-        # Optionally start embedded arq worker (dev mode only)
-        worker_task = None
         if embed_worker:
             if coordination_backend == "local":
                 log.info("Local queue broker runs in-process; no embedded worker task needed")
@@ -202,10 +200,6 @@ def create_combined_app(
                 yield
         finally:
             await runtime_services.shutdown()
-            if worker_task:
-                worker_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await worker_task
 
     # Create combined app with both mounted
     # Note: streamable_http_app() already routes to /mcp internally

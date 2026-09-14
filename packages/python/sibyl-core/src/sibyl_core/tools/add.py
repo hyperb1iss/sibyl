@@ -787,7 +787,7 @@ async def add(
                     title=title,
                     content=content,
                     organization_id=org_id,
-                    entity_types=[entity_type] if entity_type else None,
+                    entity_types=[entity_type],
                     exclude_id=entity_id,  # Exclude self for updates
                     max_conflicts=3,
                     min_similarity=conflict_threshold,
