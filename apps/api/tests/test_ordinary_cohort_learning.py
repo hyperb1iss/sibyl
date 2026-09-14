@@ -179,6 +179,57 @@ async def test_ordinary_cohort_public_capture_scheduled_publish_recall(cohort_ru
     assert before == after
 
 
+async def test_ordinary_cohort_candidate_write_failure_retains_execution_and_replays(
+    cohort_runtime, monkeypatch
+):
+    from sibyl_core.services import ordinary_cohort
+
+    org, _context, client, _runtime = cohort_runtime
+    sources = await capture(cohort_runtime)
+    install_model(monkeypatch, sources[0])
+    remember = ordinary_cohort.remember_reflection_candidate_review
+    monkeypatch.setattr(
+        ordinary_cohort,
+        "remember_reflection_candidate_review",
+        AsyncMock(side_effect=ValueError("candidate write failed")),
+    )
+
+    receipt = await reflection.run_reflection_dream_cycle({}, str(org.id), candidate_limit=0)
+    stages = await client.execute_query("SELECT * FROM memory_validation_executions;")
+    assert len(stages) == 1
+    stage = stages[0]
+    assert stage["state"] == "returned"
+    assert json.loads(stage["usage_json"])["requests"] == 1
+    assert receipt["failed"] == 1
+    assert receipt["promoted"] == 0
+    assert receipt["sources"][0]["outcome"] == "error"
+    assert receipt["sources"][0]["reason"] == "candidate write failed"
+    assert receipt["sources"][0]["execution_state"] == "returned"
+    assert receipt["sources"][0]["operation_id"] == stage["uuid"]
+    assert receipt["model_usage"]["execution_ids"] == [stage["uuid"]]
+    assert not await client.execute_query(
+        "SELECT * FROM raw_captures WHERE capture_surface='reflection_candidate';"
+    )
+
+    monkeypatch.setattr(ordinary_cohort, "remember_reflection_candidate_review", remember)
+    extraction = AsyncMock(side_effect=AssertionError("proposal redispatch"))
+    monkeypatch.setattr(Extractor, "extract_with_usage", extraction)
+    replay = await reflection.run_reflection_dream_cycle({}, str(org.id), candidate_limit=0)
+    assert replay["failed"] == 0, replay
+    assert replay["sources"][0]["candidate_count"] == 1
+    assert replay["sources"][0]["operation_id"] == stage["uuid"]
+    assert replay["model_usage"]["execution_ids"] == [stage["uuid"]]
+    replayed_stages = await client.execute_query("SELECT * FROM memory_validation_executions;")
+    assert len(replayed_stages) == 1
+    for field in ("uuid", "state", "request_json", "result_json", "usage_json"):
+        assert replayed_stages[0][field] == stage[field]
+    candidates = await client.execute_query(
+        "SELECT * FROM raw_captures WHERE capture_surface='reflection_candidate';"
+    )
+    assert len(candidates) == 1
+    extraction.assert_not_awaited()
+
+
 @pytest.mark.parametrize("phase", ["proposal", "critic", "publication"])
 async def test_ordinary_cohort_current_role_fences_each_stage(cohort_runtime, monkeypatch, phase):
 
