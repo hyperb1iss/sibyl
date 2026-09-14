@@ -91,6 +91,14 @@ class _RawMemoryRecallFilters:
     as_of_text: str | None = None
 
 
+def _raw_memory_disjunction(*branches: str) -> str:
+    if settings.resolved_surreal_url.startswith(_EMBEDDED_SURREAL_SCHEMES):
+        # Embedded KNN cannot prefilter grouped subqueries, including boolean
+        # parentheses. Function arguments retain the same ungrouped predicates.
+        return f"array::any([{', '.join(branches)}])"
+    return "(" + " OR ".join(f"({b})" if " AND " in b else b for b in branches) + ")"
+
+
 def _memory_scope_where(
     *,
     organization_id: str,
@@ -119,7 +127,11 @@ def _memory_scope_where(
         clauses.append("agent_id = $agent_id")
         params["agent_id"] = agent_id
     else:
-        clauses.append("(capture_surface != $agent_diary_surface OR capture_surface = NONE)")
+        clauses.append(
+            _raw_memory_disjunction(
+                "capture_surface != $agent_diary_surface", "capture_surface = NONE"
+            )
+        )
         params["agent_diary_surface"] = models.AGENT_DIARY_CAPTURE_SURFACE
     if project_id:
         clauses.append("project_id = $project_id")
@@ -169,12 +181,18 @@ def _raw_memory_recall_where(
         clauses.append("metadata.participants CONTAINSANY $participants")
         params["participants"] = list(filters.participants)
     if filters.labels:
-        clauses.append("(tags CONTAINSANY $labels OR metadata.labels CONTAINSANY $labels)")
+        clauses.append(
+            _raw_memory_disjunction(
+                "tags CONTAINSANY $labels", "metadata.labels CONTAINSANY $labels"
+            )
+        )
         params["labels"] = list(filters.labels)
     if filters.thread_id:
         clauses.append(
-            "(metadata.thread_id = $thread_id "
-            "OR metadata.source_record_metadata.thread_id = $thread_id)"
+            _raw_memory_disjunction(
+                "metadata.thread_id = $thread_id",
+                "metadata.source_record_metadata.thread_id = $thread_id",
+            )
         )
         params["thread_id"] = filters.thread_id
     if filters.occurred_after:
@@ -184,40 +202,21 @@ def _raw_memory_recall_where(
         clauses.append("metadata.occurred_at <= $occurred_before")
         params["occurred_before"] = filters.occurred_before
     if filters.as_of:
-        created_at_is_string = _surreal_type_is_string("created_at")
-        created_at_is_datetime = _surreal_type_is_datetime("created_at")
-        captured_at_is_string = _surreal_type_is_string("captured_at")
-        captured_at_is_datetime = _surreal_type_is_datetime("captured_at")
-        valid_at_is_string = _surreal_type_is_string("metadata.valid_at")
-        valid_at_is_datetime = _surreal_type_is_datetime("metadata.valid_at")
-        valid_from_is_string = _surreal_type_is_string("metadata.valid_from")
-        valid_from_is_datetime = _surreal_type_is_datetime("metadata.valid_from")
-        invalid_at_is_string = _surreal_type_is_string("metadata.invalid_at")
-        invalid_at_is_datetime = _surreal_type_is_datetime("metadata.invalid_at")
-        valid_to_is_string = _surreal_type_is_string("metadata.valid_to")
-        valid_to_is_datetime = _surreal_type_is_datetime("metadata.valid_to")
-        clauses.extend(
-            [
-                "(created_at = NONE "
-                f"OR ({created_at_is_datetime} AND created_at <= $as_of) "
-                f"OR ({created_at_is_string} AND created_at <= $as_of_text))",
-                "(captured_at = NONE "
-                f"OR ({captured_at_is_datetime} AND captured_at <= $as_of) "
-                f"OR ({captured_at_is_string} AND captured_at <= $as_of_text))",
-                "(metadata.valid_at = NONE "
-                f"OR ({valid_at_is_datetime} AND metadata.valid_at <= $as_of) "
-                f"OR ({valid_at_is_string} AND metadata.valid_at <= $as_of_text))",
-                "(metadata.valid_from = NONE "
-                f"OR ({valid_from_is_datetime} AND metadata.valid_from <= $as_of) "
-                f"OR ({valid_from_is_string} AND metadata.valid_from <= $as_of_text))",
-                "(metadata.invalid_at = NONE "
-                f"OR ({invalid_at_is_datetime} AND metadata.invalid_at > $as_of) "
-                f"OR ({invalid_at_is_string} AND metadata.invalid_at > $as_of_text))",
-                "(metadata.valid_to = NONE "
-                f"OR ({valid_to_is_datetime} AND metadata.valid_to > $as_of) "
-                f"OR ({valid_to_is_string} AND metadata.valid_to > $as_of_text))",
-            ]
-        )
+        for field, comparison in (
+            ("created_at", "<="),
+            ("captured_at", "<="),
+            ("metadata.valid_at", "<="),
+            ("metadata.valid_from", "<="),
+            ("metadata.invalid_at", ">"),
+            ("metadata.valid_to", ">"),
+        ):
+            clauses.append(
+                _raw_memory_disjunction(
+                    f"{field} = NONE",
+                    f"{_surreal_type_is_datetime(field)} AND {field} {comparison} $as_of",
+                    f"{_surreal_type_is_string(field)} AND {field} {comparison} $as_of_text",
+                )
+            )
         params["as_of"] = filters.as_of
         params["as_of_text"] = filters.as_of_text or filters.as_of.isoformat()
     return " AND ".join(clauses), params
@@ -324,7 +323,8 @@ async def _recall_raw_memory_vector(
             "SELECT * FROM ("
             f"SELECT {_RAW_MEMORY_RECALL_FIELDS}, "
             "(1 - vector::distance::knn()) AS score "
-            f"FROM raw_captures WHERE {where_clause} "
+            "FROM raw_captures WITH INDEX idx_raw_captures_embedding "
+            f"WHERE {where_clause} "
             f"AND embedding <|{candidate_limit}, {knn_effort}|> $query_embedding"
             ") ORDER BY score DESC, captured_at DESC LIMIT $candidate_limit;",
             **params,
