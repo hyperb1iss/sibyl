@@ -730,3 +730,39 @@ def test_counter_protocol_is_satisfied_without_tokenizer_assets(counter):
         "memory_scope": "private",
         "scope_key": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_native_search_receives_the_configured_graph_embedding_provider(setup, monkeypatch):
+    seen: list[dict] = []
+    sentinel = object()
+
+    async def native(**kwargs):
+        seen.append(kwargs)
+        return healthy_native([], kwargs["plan"].query)
+
+    monkeypatch.setattr(a, "context_search", native)
+    monkeypatch.setattr(a, "configured_embedding_provider", lambda: sentinel)
+    result = await setup.adapter.prepare(
+        checkpoint=0, task=c.TASKS[0], arm="native", native_inventory={}
+    )
+    assert result["status"] == "prepared"
+    assert seen[0]["embedding_provider"] is sentinel
+
+
+@pytest.mark.asyncio
+async def test_native_arm_names_a_missing_graph_embedding_provider(setup, monkeypatch):
+    calls: list[dict] = []
+
+    async def native(**kwargs):
+        calls.append(kwargs)
+        return healthy_native([], kwargs["plan"].query)
+
+    monkeypatch.setattr(a, "context_search", native)
+    monkeypatch.setattr(a, "configured_embedding_provider", lambda: None)
+    result = await setup.adapter.prepare(
+        checkpoint=0, task=c.TASKS[0], arm="native", native_inventory={}
+    )
+    assert result["status"] == "missing_pack"
+    assert result["reason"] == "native_embedding_provider_unavailable"
+    assert calls == []

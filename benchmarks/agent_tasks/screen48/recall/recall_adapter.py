@@ -36,6 +36,7 @@ from benchmarks.agent_tasks.screen48.recall.whole_items import (
     summary_items,
 )
 
+from sibyl_core.embeddings.providers import configured_embedding_provider
 from sibyl_core.retrieval._search_plan import build_context_retrieval_plan
 from sibyl_core.retrieval.search import context_search
 from sibyl_core.services.content_raw_recall import recall_raw_memory_with_sources
@@ -251,8 +252,19 @@ class RecallAdapter:
                     allowed_memory_scope_keys=authority.scope_keys,
                     limit=NATIVE_LIMIT,
                 )
+                # The product's context tool hands its configured graph embedding
+                # provider to the search; without it the vector lane is never
+                # attempted and every native pack degrades to "unavailable".
+                embedding_provider = configured_embedding_provider()
+                if embedding_provider is None:
+                    raise MissingPack("native_embedding_provider_unavailable")
                 response = await context_search(
-                    plan=plan, types=None, facet=None, limit=NATIVE_LIMIT, include_content=True
+                    plan=plan,
+                    types=None,
+                    facet=None,
+                    limit=NATIVE_LIMIT,
+                    include_content=True,
+                    embedding_provider=embedding_provider,
                 )
                 diagnostics = {
                     "filters": response.filters,
