@@ -76,8 +76,24 @@ def _run_cycle_phase(output: Path, extra: Sequence[str]) -> int:
     return cycle.main(["--output", str(output), *extra])
 
 
-#: Later phases (``checkpoint0`` / ``checkpoint1``) are somebody else's lane.
-PHASES: dict[str, Callable[[Path, Sequence[str]], int]] = {"cycle": _run_cycle_phase}
+def _checkpoint_phase(checkpoint: int) -> Callable[[Path, Sequence[str]], int]:
+    """Run one checkpoint's pack preparation, passing the host's own flags through."""
+
+    def run(output: Path, extra: Sequence[str]) -> int:
+        from benchmarks.agent_tasks.screen48 import checkpoints
+
+        return checkpoints.main(["--checkpoint", str(checkpoint), "--output", str(output), *extra])
+
+    return run
+
+
+#: ``--tokenizer-assets`` and ``--prior-root`` reach the checkpoint phases as
+#: unparsed extras, the same way the cycle phase receives its own flags.
+PHASES: dict[str, Callable[[Path, Sequence[str]], int]] = {
+    "cycle": _run_cycle_phase,
+    "checkpoint0": _checkpoint_phase(0),
+    "checkpoint1": _checkpoint_phase(1),
+}
 
 
 def _source_commit() -> str:

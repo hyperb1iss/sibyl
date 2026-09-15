@@ -557,8 +557,8 @@ def test_apply_environment_stamps_the_study_allowance() -> None:
     assert "SIBYL_SURREAL_USERNAME" not in names
 
 
-def test_phase_registry_only_carries_cycle() -> None:
-    assert sorted(run_phase.PHASES) == ["cycle"]
+def test_phase_registry_carries_the_cycle_and_both_checkpoints() -> None:
+    assert sorted(run_phase.PHASES) == ["checkpoint0", "checkpoint1", "cycle"]
 
 
 def test_long_context_rows_bill_at_the_doubled_tier() -> None:
