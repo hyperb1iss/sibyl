@@ -1,0 +1,559 @@
+"""Unit cover for the screen48 consolidation-cycle driver.
+
+Every product call is monkeypatched: no database, no broker, no network. What
+is under test is the driver's own policy, which is the part that can waste a
+real run's money or hang it forever.
+"""
+
+# Expected token counts, HTTP codes and exit codes are the assertions here.
+# ruff: noqa: PLR2004
+
+from __future__ import annotations
+
+import json
+from decimal import Decimal
+from pathlib import Path
+from typing import Any
+
+import pytest
+from benchmarks.agent_tasks.screen48 import cycle
+from benchmarks.agent_tasks.screen48.devbox import owned_db, run_phase
+
+PRICES = {
+    "price_input_per_million": Decimal("5"),
+    "price_output_per_million": Decimal("25"),
+}
+
+
+def make_config(**overrides: Any) -> cycle.CycleConfig:
+    base: dict[str, Any] = {
+        "cost_ceiling_usd": Decimal("100"),
+        **PRICES,
+    }
+    base.update(overrides)
+    return cycle.CycleConfig(**base)
+
+
+class FakeProduct:
+    """A dream job that consumes sources, drains candidates, and bills tokens."""
+
+    def __init__(
+        self,
+        *,
+        sources: list[str],
+        pending: list[str] | None = None,
+        drains: bool = True,
+        input_tokens: int = 1_000,
+        output_tokens: int = 200,
+    ) -> None:
+        self.source_ids = list(sources)
+        self.index = 0
+        self.revision = 0
+        self.pending = list(pending or [])
+        self.drains = drains
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.calls: list[dict[str, int]] = []
+        self.usage: list[dict[str, Any]] = []
+        self.returned: set[str] = set()
+        self.repairs = 0
+
+    # -- the product job -------------------------------------------------
+    async def invoke(
+        self, *, group_id: str, source_limit: int, candidate_limit: int
+    ) -> dict[str, Any]:
+        assert group_id
+        self.calls.append({"source_limit": source_limit, "candidate_limit": candidate_limit})
+        consumed = self.source_ids[self.index : self.index + source_limit]
+        self.index += len(consumed)
+        self.revision += len(consumed)
+        self.returned.update(consumed)
+        drained: list[str] = []
+        if candidate_limit > 0 and self.drains:
+            drained, self.pending = self.pending, []
+        self.usage.append(
+            {
+                "state": "returned",
+                "created_at": "2026-09-15T00:00:00Z",
+                "usage_json": json.dumps(
+                    {
+                        "requests": 1,
+                        "input_tokens": self.input_tokens,
+                        "output_tokens": self.output_tokens,
+                        "total_tokens": self.input_tokens + self.output_tokens,
+                        "cost_complete": False,
+                    }
+                ),
+            }
+        )
+        return {
+            "run_id": f"run-{len(self.calls)}",
+            "sources_scanned": len(consumed),
+            "sources_reflected": len(consumed),
+            "candidates_scanned": len(drained),
+            "promoted": len(drained),
+            "archived": 0,
+            "sources": [{"source_ids": consumed, "outcome": "reflected"}],
+            "candidates": [
+                {"candidate_id": identifier, "applied": True, "archived": False}
+                for identifier in drained
+            ],
+        }
+
+    # -- the driver's read seams ------------------------------------------
+    async def load_cursor(self, group_id: str) -> tuple[str, int]:
+        assert group_id
+        cursor = self.source_ids[self.index - 1] if self.index else ""
+        return cursor, self.revision
+
+    async def count_eligible(self, group_id: str, cursor: str) -> int:
+        assert group_id
+        assert isinstance(cursor, str)
+        return len(self.source_ids) - self.index
+
+    async def list_sources(self, group_id: str) -> list[str]:
+        assert group_id
+        return list(self.source_ids)
+
+    async def pending_ids(self, group_id: str, *, limit: int = 500) -> list[str]:
+        assert group_id
+        assert limit
+        return list(self.pending)
+
+    async def usage_rows(self, group_id: str, since: Any) -> list[dict[str, Any]]:
+        assert group_id
+        assert since is not None
+        return list(self.usage)
+
+    async def returned_sources(self, group_id: str) -> set[str]:
+        assert group_id
+        return set(self.returned)
+
+    async def repair(self, group_id: str) -> dict[str, int]:
+        assert group_id
+        self.repairs += 1
+        return {"checked": 0, "recovered": 0, "pending": 0, "failed": 0}
+
+
+@pytest.fixture
+def product(monkeypatch: pytest.MonkeyPatch):
+    """Install a fake product behind every driver seam, return a factory."""
+
+    def install(fake: FakeProduct) -> FakeProduct:
+        async def noop(*_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        monkeypatch.setattr(cycle, "bootstrap_runtime", noop)
+        monkeypatch.setattr(cycle, "shutdown_runtime", noop)
+        monkeypatch.setattr(cycle, "invoke_dream_cycle", fake.invoke)
+        monkeypatch.setattr(cycle, "load_cursor", fake.load_cursor)
+        monkeypatch.setattr(cycle, "count_eligible_sources", fake.count_eligible)
+        monkeypatch.setattr(cycle, "list_eligible_source_ids", fake.list_sources)
+        monkeypatch.setattr(cycle, "pending_candidate_ids", fake.pending_ids)
+        monkeypatch.setattr(cycle, "usage_rows", fake.usage_rows)
+        monkeypatch.setattr(cycle, "returned_execution_source_ids", fake.returned_sources)
+        monkeypatch.setattr(cycle, "repair_embeddings", fake.repair)
+
+        async def surfaces(_group_id: str) -> dict[str, int]:
+            return {"agent_conversation": len(fake.source_ids)}
+
+        async def states(_group_id: str) -> dict[str, int]:
+            return {"None": len(fake.source_ids)}
+
+        async def count(_group_id: str) -> int:
+            return 0
+
+        async def empty_set(_group_id: str) -> set[str]:
+            return set()
+
+        async def empty_list(_group_id: str) -> list[str]:
+            return []
+
+        async def health() -> dict[str, Any]:
+            return {"status": "healthy", "queue_depth": 0}
+
+        monkeypatch.setattr(cycle, "capture_surface_counts", surfaces)
+        monkeypatch.setattr(cycle, "review_state_counts", states)
+        monkeypatch.setattr(cycle, "entity_count", count)
+        monkeypatch.setattr(cycle, "live_execution_count", count)
+        monkeypatch.setattr(cycle, "completed_checkpoint_source_ids", empty_set)
+        monkeypatch.setattr(cycle, "missing_embedding_candidate_ids", empty_list)
+        monkeypatch.setattr(cycle, "broker_health", health)
+        return fake
+
+    return install
+
+
+# ---------------------------------------------------------------------------
+# Page planning
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("remaining", "page", "expected"),
+    [
+        (233, 100, 100),
+        (133, 100, 100),
+        (33, 100, 33),
+        (0, 100, 0),
+        (500, 250, 100),
+        (-4, 100, 0),
+    ],
+)
+def test_plan_source_page_never_exceeds_remaining(remaining: int, page: int, expected: int) -> None:
+    assert cycle.plan_source_page(remaining, page) == expected
+
+
+async def test_proposal_passes_page_233_without_wrapping(tmp_path: Path, product: Any) -> None:
+    fake = product(FakeProduct(sources=[f"s{index:03d}" for index in range(233)]))
+
+    receipt = await cycle.run_cycle(make_config(), tmp_path)
+
+    assert [call["source_limit"] for call in fake.calls] == [100, 100, 33]
+    assert fake.index == 233
+    assert receipt["proposal"]["remaining_above_cursor"] == 0
+    assert receipt["status"] == cycle.STATUS_COMPLETE
+    assert receipt["reasons"] == []
+    assert receipt["predicates"]["d_every_source_terminal"]["satisfied"] is True
+
+
+async def test_no_eligible_sources_dispatches_nothing(tmp_path: Path, product: Any) -> None:
+    fake = product(FakeProduct(sources=[]))
+
+    receipt = await cycle.run_cycle(make_config(expected_sources=0), tmp_path)
+
+    assert fake.calls == []
+    assert receipt["status"] == cycle.STATUS_COMPLETE
+
+
+# ---------------------------------------------------------------------------
+# Stuck-pending guard
+# ---------------------------------------------------------------------------
+
+
+async def test_stuck_pending_stops_after_a_pass_with_no_transition(
+    tmp_path: Path, product: Any
+) -> None:
+    fake = product(FakeProduct(sources=[], pending=["cand-b", "cand-a"], drains=False))
+
+    receipt = await cycle.run_cycle(make_config(expected_sources=0, max_drain_passes=6), tmp_path)
+
+    assert len(fake.calls) == 1, "a second drain pass would re-pay for the same candidates"
+    assert receipt["drain"]["stuck_pending"] == ["cand-a", "cand-b"]
+    assert receipt["status"] == cycle.STATUS_INCOMPLETE
+    assert "stuck_pending_candidates" in receipt["reasons"]
+    assert "predicate_a_no_pending_candidates_unsatisfied" in receipt["reasons"]
+
+
+async def test_draining_candidates_clears_the_pending_set(tmp_path: Path, product: Any) -> None:
+    fake = product(FakeProduct(sources=[], pending=["cand-a"], drains=True))
+
+    receipt = await cycle.run_cycle(make_config(expected_sources=0), tmp_path)
+
+    assert len(fake.calls) == 1
+    assert receipt["drain"]["stuck_pending"] == []
+    assert receipt["drain"]["passes"][0]["pending_after"] == []
+    assert receipt["status"] == cycle.STATUS_COMPLETE
+
+
+# ---------------------------------------------------------------------------
+# Cost ceiling
+# ---------------------------------------------------------------------------
+
+
+async def test_cost_ceiling_stops_dispatch_and_seals_the_receipt(
+    tmp_path: Path, product: Any
+) -> None:
+    # 10M input tokens at 5/M is 50 USD per invocation, so the first pass alone
+    # clears a 10 USD ceiling.
+    fake = product(
+        FakeProduct(
+            sources=[f"s{index:03d}" for index in range(233)],
+            input_tokens=10_000_000,
+            output_tokens=0,
+        )
+    )
+
+    receipt = await cycle.run_cycle(make_config(cost_ceiling_usd=Decimal("10")), tmp_path)
+
+    assert len(fake.calls) == 1, "dispatch must stop at the ceiling, not finish the ring"
+    assert receipt["status"] == cycle.STATUS_COST_CEILING
+    assert receipt["reasons"][0] == "cost_ceiling_exceeded"
+    assert Decimal(receipt["usage"]["cost_usd_exact"]) == Decimal("50")
+    assert "drain" not in receipt
+
+
+# ---------------------------------------------------------------------------
+# Usage summation
+# ---------------------------------------------------------------------------
+
+
+def test_usage_summation_mixes_complete_costs_tokens_and_failures() -> None:
+    rows = [
+        {
+            "state": "returned",
+            "usage_json": json.dumps(
+                {
+                    "input_tokens": 1_000_000,
+                    "output_tokens": 1_000_000,
+                    "cost_usd": 3.5,
+                    "cost_complete": True,
+                }
+            ),
+        },
+        {
+            "state": "returned",
+            "usage_json": json.dumps(
+                {
+                    "input_tokens": 2_000_000,
+                    "output_tokens": 100_000,
+                    "cost_usd": None,
+                    "cost_complete": False,
+                }
+            ),
+        },
+        {
+            "state": "failed",
+            "usage_json": json.dumps(
+                {"transport_attempts": [], "usage_complete": False, "cost_complete": False}
+            ),
+        },
+        {"state": "running", "usage_json": None},
+    ]
+
+    summary = cycle.summarize_usage(rows, **PRICES)
+
+    # 3.50 for the priced row, then 2M input at 5/M plus 100K output at 25/M.
+    assert Decimal(summary["cost_usd_exact"]) == Decimal("3.5") + Decimal("10") + Decimal("2.5")
+    assert summary["rows"] == 4
+    assert summary["rows_with_usage"] == 3
+    assert summary["rows_cost_complete"] == 1
+    assert summary["rows_priced_from_tokens"] == 2
+    assert summary["input_tokens"] == 3_000_000
+    assert summary["output_tokens"] == 1_100_000
+    assert summary["states"] == {"returned": 2, "failed": 1, "running": 1}
+
+
+def test_usage_summation_ignores_cost_usd_when_cost_is_incomplete() -> None:
+    rows = [
+        {
+            "state": "returned",
+            "usage_json": json.dumps(
+                {"input_tokens": 0, "output_tokens": 0, "cost_usd": 999.0, "cost_complete": False}
+            ),
+        }
+    ]
+
+    assert Decimal(cycle.summarize_usage(rows, **PRICES)["cost_usd_exact"]) == Decimal(0)
+
+
+def test_usage_summation_counts_unparsable_rows() -> None:
+    summary = cycle.summarize_usage([{"state": "returned", "usage_json": "{"}], **PRICES)
+
+    assert summary["rows_unparsable"] == 1
+    assert summary["rows_with_usage"] == 0
+
+
+def test_archived_exception_reasons_are_counted_by_reason() -> None:
+    receipts = [
+        {
+            "candidates": [
+                {"archived": True, "exception_reasons": ["sensitive_material", "low_support"]},
+                {"archived": True, "exception_reasons": [], "reason": "policy_block"},
+                {"archived": False, "exception_reasons": ["ignored"]},
+            ]
+        },
+        {"candidates": [{"archived": True, "exception_reasons": ["sensitive_material"]}]},
+    ]
+
+    assert cycle._archived_exception_reasons(receipts) == {
+        "sensitive_material": 2,
+        "low_support": 1,
+        "policy_block": 1,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Evidence durability
+# ---------------------------------------------------------------------------
+
+
+async def test_receipt_is_created_exclusively(tmp_path: Path, product: Any) -> None:
+    product(FakeProduct(sources=[]))
+    await cycle.run_cycle(make_config(expected_sources=0), tmp_path)
+
+    with pytest.raises(cycle.CycleError, match="already exists"):
+        await cycle.run_cycle(make_config(expected_sources=0), tmp_path)
+
+
+async def test_invocations_jsonl_grows_once_per_product_invocation(
+    tmp_path: Path, product: Any
+) -> None:
+    fake = product(FakeProduct(sources=[f"s{index:03d}" for index in range(233)]))
+
+    receipt = await cycle.run_cycle(make_config(), tmp_path)
+
+    lines = (tmp_path / "invocations.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == len(fake.calls) == receipt["invocations"]
+    records = [json.loads(line) for line in lines]
+    assert [record["index"] for record in records] == list(range(len(records)))
+    assert [record["requested_source_limit"] for record in records] == [100, 100, 33]
+    assert all(record["phase"] == "proposal" for record in records)
+    assert all("receipt" in record for record in records)
+
+    written = json.loads((tmp_path / "cycle.json").read_text(encoding="utf-8"))
+    assert written["status"] == receipt["status"]
+    assert written["config"]["pricing_source"] == cycle.PRICING_SOURCE
+
+
+async def test_a_dispatch_failure_still_seals_a_receipt(
+    tmp_path: Path, product: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    product(FakeProduct(sources=["s000"]))
+
+    async def explode(**_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("provider refused")
+
+    monkeypatch.setattr(cycle, "invoke_dream_cycle", explode)
+
+    receipt = await cycle.run_cycle(make_config(), tmp_path)
+
+    assert receipt["status"] == cycle.STATUS_INCOMPLETE
+    assert any("provider refused" in reason for reason in receipt["reasons"])
+    assert (tmp_path / "cycle.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# Owned database
+# ---------------------------------------------------------------------------
+
+
+class _FakeResponse:
+    def __init__(self, status: int, body: bytes) -> None:
+        self.status = status
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+
+class _FakeConnection:
+    """Stands in for the unix-socket HTTP connection to dockerd."""
+
+    def __init__(self, responses: dict[str, tuple[int, bytes]]) -> None:
+        self.responses = responses
+        self.requests: list[tuple[str, str]] = []
+
+    def __call__(self, *_args: Any, **_kwargs: Any) -> _FakeConnection:
+        return self
+
+    def request(self, method: str, path: str, headers: dict[str, str] | None = None) -> None:
+        assert headers is not None
+        self.requests.append((method, path))
+        self._pending = self.responses[path]
+
+    def getresponse(self) -> _FakeResponse:
+        return _FakeResponse(*self._pending)
+
+    def close(self) -> None:
+        return None
+
+
+def _install_docker(monkeypatch: pytest.MonkeyPatch, name: str) -> _FakeConnection:
+    document = json.dumps({"Name": name, "Id": owned_db.DEFAULT_CONTAINER_ID}).encode()
+    connection = _FakeConnection(
+        {
+            f"/containers/{owned_db.DEFAULT_CONTAINER_ID}/json": (200, document),
+            f"/containers/{owned_db.DEFAULT_CONTAINER_ID}/start": (204, b""),
+            f"/containers/{owned_db.DEFAULT_CONTAINER_ID}/stop?t=30": (204, b""),
+        }
+    )
+    monkeypatch.setattr(owned_db, "_UnixSocketConnection", connection)
+    return connection
+
+
+def test_owned_db_refuses_a_foreign_container(monkeypatch: pytest.MonkeyPatch) -> None:
+    connection = _install_docker(monkeypatch, "/some-other-persons-database")
+
+    with pytest.raises(owned_db.ForeignContainerError, match="does not start with"):
+        owned_db.start()
+
+    assert [method for method, _ in connection.requests] == ["GET"], "no start was sent"
+
+
+def test_owned_db_starts_and_stops_the_owned_container(monkeypatch: pytest.MonkeyPatch) -> None:
+    name = f"{owned_db.OWNED_NAME_PREFIX}613f4c5caa8fd156cb56df26-restored"
+    connection = _install_docker(monkeypatch, name)
+
+    assert owned_db.start()["Name"] == name
+    assert owned_db.stop()["Name"] == name
+
+    assert [path for _, path in connection.requests] == [
+        f"/containers/{owned_db.DEFAULT_CONTAINER_ID}/json",
+        f"/containers/{owned_db.DEFAULT_CONTAINER_ID}/start",
+        f"/containers/{owned_db.DEFAULT_CONTAINER_ID}/json",
+        f"/containers/{owned_db.DEFAULT_CONTAINER_ID}/stop?t=30",
+        f"/containers/{owned_db.DEFAULT_CONTAINER_ID}/json",
+    ]
+
+
+def test_owned_db_reads_the_health_port_from_the_ws_url() -> None:
+    assert owned_db.health_port("ws://127.0.0.1:21642/rpc") == ("127.0.0.1", 21642)
+
+
+def test_wait_ready_gives_up_with_the_last_probe_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(owned_db, "probe_health", lambda *_a, **_k: 503)
+    monkeypatch.setattr(owned_db.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(owned_db.OwnedDatabaseError, match="never returned 200"):
+        owned_db.wait_ready("ws://127.0.0.1:21642/rpc", timeout=0.01)
+
+
+def test_wait_ready_returns_once_health_answers(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(owned_db, "probe_health", lambda *_a, **_k: 200)
+
+    assert owned_db.wait_ready("ws://127.0.0.1:21642/rpc", timeout=1.0)["status"] == 200
+
+
+# ---------------------------------------------------------------------------
+# Phase runner
+# ---------------------------------------------------------------------------
+
+
+def test_run_phase_refuses_when_redis_is_configured() -> None:
+    with pytest.raises(run_phase.PhaseError, match="SIBYL_REDIS_HOST"):
+        run_phase.assert_no_redis({"SIBYL_REDIS_HOST": "localhost"})
+
+
+def test_run_phase_accepts_an_environment_without_redis() -> None:
+    run_phase.assert_no_redis({"SIBYL_SURREAL_URL": "ws://127.0.0.1:21642/rpc"})
+
+
+def test_run_phase_main_refuses_redis_and_writes_a_phase_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SIBYL_REDIS_HOST", "localhost")
+
+    assert run_phase.main(["cycle", "--output", str(tmp_path)]) == 2
+
+    record = json.loads((tmp_path / "phase.json").read_text(encoding="utf-8"))
+    assert record["status"] == "error"
+    assert "SIBYL_REDIS_HOST" in record["error"]
+    assert record["container_inspect_before"] is None
+
+
+def test_apply_environment_stamps_the_study_allowance() -> None:
+    environ: dict[str, str] = {"SIBYL_SURREAL_PASSWORD": "kept"}
+
+    names = run_phase.apply_environment(environ)
+
+    assert environ["SIBYL_CONSOLIDATION_MAX_INPUT_CHARS"] == "800000"
+    assert environ["SIBYL_COORDINATION_BACKEND"] == "local"
+    assert environ["SIBYL_SURREAL_URL"] == run_phase.SURREAL_URL
+    assert environ["SIBYL_LLM_MEMORY_MODEL"] == "claude-opus-5"
+    assert "SIBYL_SURREAL_PASSWORD" in names
+    assert "SIBYL_SURREAL_USERNAME" not in names
+
+
+def test_phase_registry_only_carries_cycle() -> None:
+    assert sorted(run_phase.PHASES) == ["cycle"]
