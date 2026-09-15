@@ -58,6 +58,10 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 
 SURREAL_URL = "ws://127.0.0.1:21642/rpc"
 
+#: The checkpoint module's own environment variable, spelled here so the output
+#: guard can find a binding without importing that module.
+HOST_BINDING_ENV = "SCREEN48_HOST_BINDING"
+
 PHASE_ENVIRONMENT = {
     "SIBYL_SURREAL_URL": SURREAL_URL,
     "SIBYL_COORDINATION_BACKEND": "local",
@@ -121,6 +125,39 @@ def _checkpoint_phase(checkpoint: int) -> PhaseRunner:
     return run
 
 
+def qualified_roots(binding_path: Path | None) -> list[tuple[str, Path]]:
+    """The two manifested roots named by the host binding, or nothing.
+
+    Read as plain JSON on purpose. This runs before ``apply_environment``, and
+    importing the checkpoint module here would pull the sibyl settings objects
+    in before ``SIBYL_*`` is stamped. A binding that cannot be read yields no
+    roots: the phase itself reports that far better than a guard can.
+    """
+    location = binding_path or Path(os.environ.get(HOST_BINDING_ENV, ""))
+    try:
+        owners = json.loads(Path(location).read_bytes())["owners"]
+        return [
+            ("source", Path(owners["source"])),
+            ("runtime", Path(owners["dependency_runtime"]["root"])),
+        ]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+
+
+def assert_output_outside_qualified_trees(output: Path, binding_path: Path | None = None) -> None:
+    """Refuse an output directory inside a tree the owners will inventory.
+
+    A receipt written under the source export or the runtime root changes the
+    inventory ``CurrentOwners`` qualified, which surfaces much later as
+    ``current_source_inventory_changed`` on a reused ``verify_owners``. The
+    refusal has to land before any file is created, the phase record included,
+    or the refusal itself is the mutation.
+    """
+    for name, root in qualified_roots(binding_path):
+        if output.absolute().is_relative_to(root.absolute()):
+            raise PhaseError(f"--output may not live inside the qualified {name} tree: {output}")
+
+
 def _record_check(checks: list[dict[str, Any]], name: str, call: Callable[[], Any]) -> Any:
     """Run one preflight check and keep its outcome whether it passed or not."""
     try:
@@ -152,9 +189,10 @@ def _preflight_phase(output: Path, extra: Sequence[str], record: dict[str, Any])
     from benchmarks.agent_tasks.screen48.recall.owners.cohort_authority import archive_material
     from benchmarks.agent_tasks.screen48.recall.qualification import REQUIRED_OWNERS, CurrentOwners
 
-    parser = argparse.ArgumentParser(prog="screen48-preflight")
-    parser.add_argument("--host-binding", type=Path, default=None)
-    args = parser.parse_args(extra)
+    if extra:
+        raise PhaseError(f"preflight takes no extra flags: {' '.join(extra)}")
+    stated = record.get("host_binding")
+    binding_path = Path(stated) if stated else None
 
     checks: list[dict[str, Any]] = []
     record["checks"] = checks
@@ -174,7 +212,7 @@ def _preflight_phase(output: Path, extra: Sequence[str], record: dict[str, Any])
     detail = _record_check(
         checks,
         "host_binding",
-        lambda: _binding_detail(checkpoints, contract, args.host_binding, output, loaded),
+        lambda: _binding_detail(checkpoints, contract, binding_path, loaded),
     )
     if detail is None:
         return EXIT_PREFLIGHT_FAILED
@@ -207,10 +245,9 @@ def _binding_detail(
     checkpoints: Any,
     contract: Any,
     path: Path | None,
-    output: Path,
     loaded: dict[str, Any],
 ) -> dict[str, Any]:
-    """Load the host binding, confirm the cohort, and place the output safely."""
+    """Load the host binding and confirm it names the study's own cohort."""
     binding = checkpoints.host_binding(path)
     source = binding["source"]
     if (source["organization_id"], source["principal_id"]) != (
@@ -219,15 +256,6 @@ def _binding_detail(
     ):
         raise PhaseError("the host binding names another organization or principal")
     owners = binding["owners"]
-    # A receipt written inside either manifested tree changes the inventory the
-    # owners just qualified, which surfaces much later as
-    # current_source_inventory_changed on a reused verify_owners.
-    for name, root in (
-        ("source", owners["source"]),
-        ("runtime", owners["dependency_runtime"]["root"]),
-    ):
-        if output.resolve().is_relative_to(Path(root).resolve()):
-            raise PhaseError(f"--output may not live inside the qualified {name} tree: {output}")
     loaded["binding"] = binding
     return {
         "archive": binding["archive"],
@@ -301,6 +329,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--container-id", default=None)
     parser.add_argument("--socket-path", default=None)
     parser.add_argument("--ready-timeout", type=float, default=120.0)
+    parser.add_argument("--host-binding", type=Path, default=None)
     return parser
 
 
@@ -320,6 +349,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args, extra = parser.parse_known_args(argv)
     needs_database = args.phase not in NO_DATABASE_PHASES
+    try:
+        assert_output_outside_qualified_trees(args.output, args.host_binding)
+    except PhaseError as exc:
+        # Deliberately no phase record: writing one is the very mutation this
+        # refusal exists to prevent.
+        sys.stderr.write(f"{exc}\n")
+        return 2
     container_id = args.container_id or owned_db.DEFAULT_CONTAINER_ID
     socket_path = args.socket_path or owned_db.DEFAULT_SOCKET_PATH
 
@@ -331,6 +367,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "python_version": sys.version,
         "environment_keys_set": [],
         "container_id": container_id if needs_database else None,
+        "host_binding": str(args.host_binding) if args.host_binding else None,
         "container_inspect_before": None,
         "container_inspect_after": None,
         "status": "error",

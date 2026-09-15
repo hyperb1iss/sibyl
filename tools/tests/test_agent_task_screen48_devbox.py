@@ -706,20 +706,53 @@ def test_a_vanished_source_root_lands_as_a_named_check(
     assert "current_owners_qualification" in record["failed_checks"]
 
 
+@pytest.mark.parametrize("inside", ["source", "runtime"])
 def test_an_output_inside_a_qualified_tree_is_refused(
-    root_dir: Path, monkeypatch: pytest.MonkeyPatch
+    root_dir: Path, monkeypatch: pytest.MonkeyPatch, inside: str
 ) -> None:
+    """And refused before anything is written, because the write is the damage.
+
+    A phase record under either manifested root changes the inventory the
+    owners qualify, so a refusal that still drops a phase.json there has
+    performed the mutation it was meant to prevent.
+    """
     monkeypatch.setattr(owned_db, "start", lambda *a, **k: pytest.fail("no container"))
     for key in run_phase.PHASE_ENVIRONMENT:
         monkeypatch.setenv(key, "restored-after-this-test")
     output = root_dir / "out"
     binding = preflight_binding(root_dir, output)
+    before = source_manifest.inventory(root_dir / "source")
+    forbidden = root_dir / inside / "receipts"
 
-    record = run_preflight(root_dir, binding, root_dir / "source" / "receipts")
+    exit_code = run_phase.main(
+        ["preflight", "--output", str(forbidden), "--host-binding", str(binding)]
+    )
 
-    assert record["_exit_code"] == run_phase.EXIT_PREFLIGHT_FAILED
-    assert record["checks"][0]["check"] == "host_binding"
-    assert "may not live inside the qualified source tree" in record["checks"][0]["error"]
+    assert exit_code == 2
+    assert not forbidden.exists()
+    assert source_manifest.inventory(root_dir / "source") == before
+    runtime_pin.verify(json.loads(binding.read_bytes())["owners"]["dependency_runtime"])
+
+
+def test_the_output_guard_reads_the_binding_without_importing_the_product(
+    root_dir: Path,
+) -> None:
+    binding = preflight_binding(root_dir, root_dir / "out")
+
+    roots = run_phase.qualified_roots(binding)
+
+    assert [name for name, _ in roots] == ["source", "runtime"]
+    assert [path for _, path in roots] == [root_dir / "source", root_dir / "runtime"]
+    # An unreadable binding yields no roots rather than an error: the phase
+    # itself reports a bad binding far better than the guard can.
+    assert run_phase.qualified_roots(root_dir / "absent.json") == []
+
+
+def test_an_output_outside_both_trees_is_allowed(root_dir: Path) -> None:
+    binding = preflight_binding(root_dir, root_dir / "out")
+
+    run_phase.assert_output_outside_qualified_trees(root_dir / "preflight-utc", binding)
+    run_phase.assert_output_outside_qualified_trees(root_dir / "sourced-elsewhere", binding)
 
 
 # ---------------------------------------------------------------------------
