@@ -48,6 +48,7 @@ TRANSFER_MATERIAL = Path(a.__file__).parents[2] / "transfer_material"
 SCHEDULE = Path(c.__file__).parent / "schedule"
 GEOMETRY_SHA = "5b3267edbb7daaae0d66b763d58ac37a0e160e8a69c45266f13fc1d6fc9d7a65"
 TRANSFER_TASK_COUNT = 24
+VENDORED_MATERIAL_FILES = 241
 EXPECTED_SOURCE_COUNT = 233
 EXPECTED_FAMILY_COUNT = 20
 EXPECTED_CELL_COUNT = 48
@@ -576,6 +577,49 @@ async def test_summary_cp1_revalidates_child_receipts_without_rebuilding(setup):
     assert denied["memory"] is None
 
 
+def assert_material_freeze_pins_every_vendored_byte():
+    """The transfer material is byte-pinned by its own frozen selection receipt.
+
+    ``material-freeze.json`` is the receipt the qualification lane sealed before
+    any solver ran, copied verbatim from the retained artifact, and it carries a
+    sha256 for every authored file. That is what makes ruff.toml's refusal to
+    touch this tree checkable rather than a claim. Two files are the harness's
+    own and carry no digest: the freeze cannot pin itself, and ruff.toml
+    postdates it.
+    """
+    freeze = json.loads((TRANSFER_MATERIAL / "material-freeze.json").read_bytes())
+    assert freeze["selection_frozen_before_solver_runs"] is True
+    assert freeze["solver_runs"] == 0
+    digests = freeze["files"]
+    vendored = [
+        path
+        for path in sorted(TRANSFER_MATERIAL.rglob("*"))
+        if path.is_file()
+        and not any(
+            part.startswith(".") or part == "__pycache__"
+            for part in path.relative_to(TRANSFER_MATERIAL).parts
+        )
+    ]
+    unpinned = {"material-freeze.json", "ruff.toml"}
+    pinned = 0
+    for path in vendored:
+        relative = path.relative_to(TRANSFER_MATERIAL).as_posix()
+        if relative in unpinned:
+            continue
+        assert relative in digests, relative
+        assert c.sha(path.read_bytes()) == digests[relative], relative
+        pinned += 1
+    assert pinned == len(vendored) - len(unpinned) == VENDORED_MATERIAL_FILES
+    # Each of the 24 tasks carries its prompt, its oracle and both file trees.
+    catalog = json.loads((TRANSFER_MATERIAL / "material-catalog.json").read_bytes())
+    for task in sorted(entry["id"] for entry in catalog["tasks"]):
+        assert f"tasks/{task}/prompt.md" in digests, task
+        assert f"tasks/{task}/oracle.json" in digests, task
+        for tree in ("workspace", "reference"):
+            present = {key for key in digests if key.startswith(f"tasks/{task}/{tree}/")}
+            assert len(present) == len(c.WORKSPACE_FILES), (task, tree)
+
+
 def test_material_pins():
     """Every vendored binding the preparation lane resolves without the eval host."""
     # The source geometry is the study denominator: 233 captures, 20 families.
@@ -647,6 +691,8 @@ def test_material_pins():
         oracle = TRANSFER_MATERIAL / "tasks" / binding["task_id"] / "oracle.json"
         frozen = binding["private_oracle_metadata_only"]["sha256_from_retained_material_freeze"]
         assert c.sha(oracle.read_bytes()) == frozen, binding["task_id"]
+
+    assert_material_freeze_pins_every_vendored_byte()
 
 
 def test_transfer_task_material_is_complete():

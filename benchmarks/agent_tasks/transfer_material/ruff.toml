@@ -1,5 +1,5 @@
 # Frozen transfer-task material, not project source. The 24 authored workspaces,
-# their reference solutions and the oracles are hash-pinned in
-# material-catalog.json, so linting or formatting them would invalidate the
+# their reference solutions and the oracles carry a sha256 apiece in
+# material-freeze.json, so linting or formatting them would invalidate the
 # material. Ruff skips this tree entirely.
 exclude = ["*"]
