@@ -11,6 +11,9 @@ real run's money or hang it forever.
 from __future__ import annotations
 
 import json
+import os
+import re
+import subprocess
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -782,6 +785,40 @@ def test_owned_db_starts_and_stops_the_owned_container(monkeypatch: pytest.Monke
         f"/containers/{owned_db.DEFAULT_CONTAINER_ID}/stop?t=30",
         f"/containers/{owned_db.DEFAULT_CONTAINER_ID}/json",
     ]
+
+
+def test_owned_db_escapes_a_container_id_into_one_path_segment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An id carrying path syntax must not address a different endpoint."""
+    name = f"{owned_db.OWNED_NAME_PREFIX}613f4c5caa8fd156cb56df26-restored"
+    escaped = "..%2Fimages%2Fjson%3Fall%3D1"
+    connection = _FakeConnection(
+        {f"/containers/{escaped}/json": (200, json.dumps({"Name": name}).encode())}
+    )
+    monkeypatch.setattr(owned_db, "_UnixSocketConnection", connection)
+
+    assert owned_db.inspect("../images/json?all=1")["Name"] == name
+    assert connection.requests == [("GET", f"/containers/{escaped}/json")]
+
+
+def test_stage_refuses_a_container_id_that_is_not_hex(tmp_path: Path) -> None:
+    """stage.sh interpolates the id into a Docker path, so it validates first."""
+    assert re.fullmatch(r"[0-9a-f]{12,64}", owned_db.DEFAULT_CONTAINER_ID)
+    script = Path(owned_db.__file__).parent / "stage.sh"
+    root = tmp_path / "runtime"
+
+    result = subprocess.run(  # noqa: S603 - a fixed script path, no shell
+        ["bash", str(script), "deadbeefdead", str(root)],  # noqa: S607
+        env={**os.environ, "SCREEN48_OWNED_CONTAINER": "../images/json"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "not a hex container id" in result.stderr
+    assert not root.exists(), "the guard runs before anything is cloned"
 
 
 def test_owned_db_reads_the_health_port_from_the_ws_url() -> None:

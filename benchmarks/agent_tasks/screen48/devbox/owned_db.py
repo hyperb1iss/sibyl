@@ -19,7 +19,7 @@ import json
 import socket
 import time
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 DEFAULT_SOCKET_PATH = "/run/devbox-docker/docker.sock"
 DEFAULT_CONTAINER_ID = "4e76d720d420"
@@ -63,6 +63,18 @@ class _UnixSocketConnection(http.client.HTTPConnection):
         self.sock = sock
 
 
+def _path_segment(value: str) -> str:
+    """Escape one caller-supplied value into a single Docker API path segment.
+
+    The container id reaches these calls from an environment variable or a
+    command line. Interpolated raw, a value carrying "/" or "?" would address a
+    different endpoint than the one the code reads as written, and the
+    ownership check would be inspecting one container while the lifecycle call
+    drove another.
+    """
+    return quote(value, safe="")
+
+
 def _docker_request(
     method: str,
     path: str,
@@ -88,7 +100,7 @@ def inspect(
 ) -> dict[str, Any]:
     """Return the container's inspect document."""
     status, body = _docker_request(
-        "GET", f"/containers/{container_id}/json", socket_path=socket_path
+        "GET", f"/containers/{_path_segment(container_id)}/json", socket_path=socket_path
     )
     if status != _HTTP_OK:
         raise OwnedDatabaseError(f"inspect {container_id} returned HTTP {status}: {body[:200]!r}")
@@ -120,7 +132,7 @@ def start(
     document = inspect(container_id, socket_path=socket_path)
     assert_owned(document)
     status, body = _docker_request(
-        "POST", f"/containers/{container_id}/start", socket_path=socket_path
+        "POST", f"/containers/{_path_segment(container_id)}/start", socket_path=socket_path
     )
     if status not in {_HTTP_NO_CONTENT, _HTTP_NOT_MODIFIED}:
         raise OwnedDatabaseError(f"start {container_id} returned HTTP {status}: {body[:200]!r}")
@@ -138,7 +150,7 @@ def stop(
     assert_owned(document)
     status, body = _docker_request(
         "POST",
-        f"/containers/{container_id}/stop?t={int(timeout)}",
+        f"/containers/{_path_segment(container_id)}/stop?t={int(timeout)}",
         socket_path=socket_path,
         timeout=max(_DOCKER_TIMEOUT_SECONDS, float(timeout) + 10.0),
     )

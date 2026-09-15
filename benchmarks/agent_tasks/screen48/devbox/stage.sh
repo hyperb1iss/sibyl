@@ -15,6 +15,10 @@ ROOT="${2:-/home/dev/dev/eval-runs/sibyl14-screen48-runtime-${COMMIT:0:12}}"
 REPO_URL="${SCREEN48_REPO_URL:-https://github.com/hyperb1iss/sibyl.git}"
 SOCKET="${SCREEN48_DOCKER_SOCKET:-/run/devbox-docker/docker.sock}"
 OWNED_CONTAINER="${SCREEN48_OWNED_CONTAINER:-4e76d720d420}"
+# The id is interpolated into a Docker API path below, so it may only ever be
+# a container id: anything else addresses an endpoint this script does not read
+# as written.
+[[ "$OWNED_CONTAINER" =~ ^[0-9a-f]{12,64}$ ]] || { echo "container id $OWNED_CONTAINER is not a hex container id" >&2; exit 1; }
 OWNED_NAME_PREFIX="/sibyl14-full-cohort-restore-5c53857b"
 TOKENIZER_ASSETS="${SCREEN48_TOKENIZER_ASSETS:-/home/dev/dev/eval-runs/sibyl14-current324-preparation-inputs-ef7304c30a374ede81c0605db117aca3/assets}"
 TOKENIZER_SHA="19564a48c4f71a2a"
