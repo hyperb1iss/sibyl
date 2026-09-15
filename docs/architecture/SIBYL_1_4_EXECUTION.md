@@ -2176,7 +2176,7 @@ result belongs to a different experiment and must not be combined with these ret
 
 ## Runtime and isolation
 
-The dedicated runtime is on `devbox-stef-gradial-com-main`, under
+The dedicated runtime is on `eval-devbox`, under
 `/home/dev/.local/share/sibyl/eval-runtime/c3558c8f`. The pinned baseline checkout remains at
 `c3558c8f`. Its API uses loopback port 5334, SurrealDB uses 8018, and Valkey uses 6393. Local MiniLM
 embeddings use 384 dimensions. No paid provider generation ran in this diagnostic campaign.

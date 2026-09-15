@@ -5,13 +5,14 @@ import shlex
 import subprocess
 import sys
 import tarfile
+import os
 from pathlib import Path
 from uuid import uuid4
 
 root = Path(__file__).resolve().parents[2]
 run_id = "sibyl14-installer-" + uuid4().hex
 remote_root = "/home/dev/dev/eval-runs/" + run_id
-ssh = ["ssh", "-o", "BatchMode=yes", "devbox-stef-gradial-com-main"]
+ssh = ["ssh", "-o", "BatchMode=yes", os.environ.get("SIBYL_EVAL_DEVBOX_HOST", "eval-devbox")]
 archive = io.BytesIO()
 with tarfile.open(fileobj=archive, mode="w:gz") as tar:
     for source, target in [

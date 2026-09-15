@@ -11029,7 +11029,7 @@
         "acceptance_sha256": "4015b64cb8d86e1b02344a8973d5364b7df9f9ccc41f2fe4fdeb8b45cbd2b65d",
         "qualification_sha256": "bc867e8fd6ef77ede05aa22135a65c24f48489c16c65bf7b8a2b94fc2c93ab10",
         "native_authority_sha256": "c42624fa6f2ac7e9dfff6a0bb5225806823c7e0fac1c08fb37143fee228e3482",
-        "host": "devbox-stef-gradial-com-main",
+        "host": "eval-devbox",
         "remote_command_sha256": "3bf837652e5abb5e6d5e2554bff084332cac197100e45a95b6ae15399c9c06e1",
         "eligible_indices": [
           1,
