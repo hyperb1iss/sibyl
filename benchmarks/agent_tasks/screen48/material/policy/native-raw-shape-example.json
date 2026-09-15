@@ -1,0 +1,12 @@
+{
+  "complete_view_tokens": 64056,
+  "framed_complete_view_tokens": 64202,
+  "original_characters": 1081979,
+  "original_qwen_tokens": 571205,
+  "original_utf8_bytes": 1081979,
+  "proposed_memory_ceiling": 90000,
+  "provider_calls": 0,
+  "scope": "source-only example, not an observed native retrieval response",
+  "source_id": "9714dc2a-b97f-5b89-a1ec-ac6f8a28050a",
+  "source_sha256": "3d041e4d303036cbe54c8ea3137763d1510dfbca47e0a8f40877c329d36a5043"
+}

@@ -1,0 +1,3 @@
+Repair a tenant download planner. Input {roots:{tenant:canonical_absolute_root}, jobs:[[tenant,url],...]}. Return {files:[absolute_path_or_null,...], rejected:indexes}. Unknown tenants reject. Strip query/fragment before decoding. Decode each slash-separated segment once with strict UTF-8 and validate every percent escape. Reject embedded decoded slash, backslash or NUL; ignore empty/dot segments and resolve '..' only within the root. A double escape remains a literal after one pass. No filesystem access.
+
+Repair the existing program. Run python app.py as a JSON stdin/stdout program; public examples are in public_checks.py. Python standard library only.

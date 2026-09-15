@@ -1,0 +1,136 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "stock": {},
+        "changes": [
+          [
+            "a",
+            "x",
+            "1",
+            3
+          ]
+        ]
+      },
+      "expected": {
+        "stock": {
+          "a/x": 3
+        },
+        "verdicts": [
+          "applied"
+        ]
+      }
+    },
+    {
+      "id": "tenant-local",
+      "input": {
+        "stock": {},
+        "changes": [
+          [
+            "a",
+            "x",
+            "1",
+            3
+          ],
+          [
+            "b",
+            "x",
+            "1",
+            3
+          ]
+        ]
+      },
+      "expected": {
+        "stock": {
+          "a/x": 3,
+          "b/x": 3
+        },
+        "verdicts": [
+          "applied",
+          "applied"
+        ]
+      }
+    },
+    {
+      "id": "retry-reject",
+      "input": {
+        "stock": {},
+        "changes": [
+          [
+            "a",
+            "x",
+            "r",
+            -1
+          ],
+          [
+            "a",
+            "x",
+            "a",
+            2
+          ],
+          [
+            "a",
+            "x",
+            "r",
+            -1
+          ],
+          [
+            "a",
+            "x",
+            "r",
+            -1
+          ]
+        ]
+      },
+      "expected": {
+        "stock": {
+          "a/x": 1
+        },
+        "verdicts": [
+          "rejected",
+          "applied",
+          "applied",
+          "duplicate"
+        ]
+      }
+    },
+    {
+      "id": "conflicting-body",
+      "input": {
+        "stock": {},
+        "changes": [
+          [
+            "a",
+            "x",
+            "r",
+            2
+          ],
+          [
+            "a",
+            "y",
+            "r",
+            2
+          ],
+          [
+            "a",
+            "x",
+            "r",
+            3
+          ]
+        ]
+      },
+      "expected": {
+        "stock": {
+          "a/x": 2
+        },
+        "verdicts": [
+          "applied",
+          "conflict",
+          "conflict"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+Repair a CDN batch mapper. Input {base, requests:[{tag,url}]}. Return {mapped:[{tag,destination}]} in input order; destination is null on invalid input. Bases are absolute canonical paths without trailing slash. Strip query/fragment before decoding. Decode each slash-separated segment once with strict UTF-8 and validate every percent escape. Reject embedded decoded slash, backslash or NUL; ignore empty/dot segments and resolve '..' only within the root. A double escape remains a literal after one pass. No filesystem access.
+
+Repair the existing program. Run python app.py as a JSON stdin/stdout program; public examples are in public_checks.py. Python standard library only.

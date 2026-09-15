@@ -1,0 +1,16 @@
+{
+  "consumed_reference_fields": [
+    "text",
+    "text_sha256",
+    "source_ids",
+    "construction_receipt_sha256",
+    "child_receipts"
+  ],
+  "note": "Accepted strong_summary reference library, lifted verbatim from the construction run's terminal receipt. Only the fields summary_items() consumes are retained; the construction phase ledger stays in the source terminal receipt.",
+  "references": 20,
+  "schema": "sibyl-screen48-summary-library-provenance-v1",
+  "source_ids": 233,
+  "source_terminal_path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-summary-continuation-root-run-20260914/completed-evidence/files/construction/summaries/terminal.json",
+  "source_terminal_sha256": "a244b1f1e73b9fd8fa3b26f47622f457f17183ec463cffb32c31d3a292f22743",
+  "summary_library_sha256": "07b86cfd43bad20b5a8d584a8e5611b57cdebda3ea94dcec836b937394551c4e"
+}

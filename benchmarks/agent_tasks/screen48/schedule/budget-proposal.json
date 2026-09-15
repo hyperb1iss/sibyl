@@ -1,0 +1,33 @@
+{
+  "activation_binding": null,
+  "historical_ceiling_usd": "762.4700928",
+  "historical_cumulative_reserved_usd": "755.2186368",
+  "historical_headroom_usd": "7.2514560",
+  "historical_prior_reserved_usd": "707.2186368",
+  "historical_reservation_archive": {
+    "member": "solver-budget/c33f50261c5806d6a73db13d3646ce0126f900d299e439654b7755096efade1b.claim/reservation.json",
+    "member_sha256": "618473c8e61c4e60a1968d5646cdf67ddeea611f430760027b8c9c34d30ae2fe",
+    "path": "/Users/bliss/dev/eval-artifacts/sibyl/sibyl14-recovered-comparison-4023db51b6ff4cb699a945a43c93313e/solver-parser-recovery-v2-failed-execution.tar",
+    "sha256": "c5541183917f4fbc0f5fb332798cf4b5879f8d86c5eb602b47d90c1d74939bec"
+  },
+  "historical_solver_reservation_usd": "48",
+  "historical_terminal": {
+    "path": "/Users/bliss/dev/eval-artifacts/sibyl/learning-transfer-solver-continuation-e8c7d74264184c1ebb7329109c1cc184/concrete/root-run/root-terminal-acceptance.json",
+    "sha256": "b2d153e38ce89a26522c928d5b210b676fb03483464b3a695aec2f5d9747e0f5"
+  },
+  "known_old_controller_usage_usd": "1.08454070",
+  "known_usage_is_not_refund_or_reservation": true,
+  "maximum_per_cell_usd": "2",
+  "memory_preparation_and_dream_reservations": "Separate existing owners; not authorized by this solver-only addition. Reconcile any intervening cumulative delta before a concrete claim; never silently reset the prior total or double count an already held envelope.",
+  "new_cells": 48,
+  "new_claim_binding": null,
+  "new_reservations_now_usd": "0",
+  "old_holds_released_usd": "0",
+  "preserved_headroom_usd": "7.2514560",
+  "proposed_addition_usd": "96",
+  "proposed_cumulative_reserved_usd": "851.2186368",
+  "proposed_successor_ceiling_usd": "858.4700928",
+  "release_on_unknown": false,
+  "schema": "sibyl-screen48-budget-proposal-v1",
+  "status": "unapproved_unreserved_proposal"
+}

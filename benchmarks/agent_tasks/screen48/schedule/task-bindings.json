@@ -1,0 +1,254 @@
+[
+  {
+    "category": "related_transfer",
+    "learning_family": "half-open-capacity-sweep",
+    "lineage": "authored-v1-venue-capacity-report",
+    "plan_family": "interval_capacity",
+    "private_oracle_metadata_only": {
+      "actual_launch_validation": null,
+      "body_read_in_this_preparation": false,
+      "path": "/Users/bliss/dev/eval-artifacts/sibyl/transfer-final-launch/material/tasks/venue-capacity-report/oracle.json",
+      "sha256_from_retained_material_freeze": "e5cec71e4e132dd0306c7a67fd8a1755bf93a02d2bf89d82b39e711f770a4458"
+    },
+    "public_prompt": {
+      "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/venue-capacity-report__prompt.md",
+      "sha256": "4ce102cfe334af51eb0e78614a4c3d687dca05c8286c86ef123d8adaa7e453a8"
+    },
+    "query_sha256": "af7805a8880dee1582e0314782963f4485ca3f9d815f8d89d8f9c4a4426aad43",
+    "split": "development",
+    "task_family_id": "transfer-venue-capacity-report",
+    "task_id": "venue-capacity-report",
+    "workspace": [
+      {
+        "destination": "app.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/venue-capacity-report__workspace__app.py",
+        "sha256": "4ccc70376908bc50cc0f17bd0fa2a7f15309ff4baf7fbbd232cce04a0ff83ed6"
+      },
+      {
+        "destination": "application.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/venue-capacity-report__workspace__application.py",
+        "sha256": "e300ab39481d3cbfb79186152d08831b5eb648d1ade0be0379571e59088f27a8"
+      },
+      {
+        "destination": "resolver.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/venue-capacity-report__workspace__resolver.py",
+        "sha256": "7a12ef5a1704f39b4500dd9e1a6741ba6900ba0dc1a6f5d344523358d265fa0b"
+      },
+      {
+        "destination": "public_checks.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/venue-capacity-report__workspace__public_checks.py",
+        "sha256": "b4ee64aeaf4126865d89049a60ab0e272fd65db819f3f5a802372005f121352e"
+      }
+    ]
+  },
+  {
+    "category": "related_transfer",
+    "learning_family": "half-open-capacity-sweep",
+    "lineage": "authored-v1-rack-power-windows",
+    "plan_family": "interval_capacity",
+    "private_oracle_metadata_only": {
+      "actual_launch_validation": null,
+      "body_read_in_this_preparation": false,
+      "path": "/Users/bliss/dev/eval-artifacts/sibyl/transfer-final-launch/material/tasks/rack-power-windows/oracle.json",
+      "sha256_from_retained_material_freeze": "f1088982bd8ec1b6b59d8692549a4edf056ee125f5795f658acedc649ba77480"
+    },
+    "public_prompt": {
+      "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/rack-power-windows__prompt.md",
+      "sha256": "d38c1f0a3c485c456959f98e287cf16453698d448b16c2fadd02fb43bfa74b1d"
+    },
+    "query_sha256": "a09f48cb8a669d93f14fa4ba55ae7a7e324a1a03819bbfe47ca0608b6629312a",
+    "split": "development",
+    "task_family_id": "transfer-rack-power-windows",
+    "task_id": "rack-power-windows",
+    "workspace": [
+      {
+        "destination": "app.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/rack-power-windows__workspace__app.py",
+        "sha256": "4ccc70376908bc50cc0f17bd0fa2a7f15309ff4baf7fbbd232cce04a0ff83ed6"
+      },
+      {
+        "destination": "application.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/rack-power-windows__workspace__application.py",
+        "sha256": "61491c9526b55e2f59e582fc63f1ee627389e1c9014ce00a791b60a82901cd1a"
+      },
+      {
+        "destination": "resolver.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/rack-power-windows__workspace__resolver.py",
+        "sha256": "49f1c24bdb7ed898d6f095cda628d79e9417decb21cd7f2701d29e62f4e6e3c6"
+      },
+      {
+        "destination": "public_checks.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/rack-power-windows__workspace__public_checks.py",
+        "sha256": "a5a5c2fee77a15fd13f2c15dfd1e214d324a3608956501abec41e5fa798d40e3"
+      }
+    ]
+  },
+  {
+    "category": "applicability_contrast",
+    "learning_family": "half-open-capacity-sweep",
+    "lineage": "authored-v1-inclusive-slot-occupancy",
+    "plan_family": "interval_capacity",
+    "private_oracle_metadata_only": {
+      "actual_launch_validation": null,
+      "body_read_in_this_preparation": false,
+      "path": "/Users/bliss/dev/eval-artifacts/sibyl/transfer-final-launch/material/tasks/inclusive-slot-occupancy/oracle.json",
+      "sha256_from_retained_material_freeze": "6e8ed0f92dd89a5c16bb7f50054dc02015209f6b2ea74a7c21e413b1fc9a6b5a"
+    },
+    "public_prompt": {
+      "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/inclusive-slot-occupancy__prompt.md",
+      "sha256": "9583b1e2502c3524f47b991ce03321dc864eb43f96f57f4aab3b0fa501b89177"
+    },
+    "query_sha256": "45c0c51d5c421a52c87625762738fc4f5eee3038635e041015ffb588fb7c4b1a",
+    "split": "development",
+    "task_family_id": "transfer-inclusive-slot-occupancy",
+    "task_id": "inclusive-slot-occupancy",
+    "workspace": [
+      {
+        "destination": "app.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/inclusive-slot-occupancy__workspace__app.py",
+        "sha256": "4ccc70376908bc50cc0f17bd0fa2a7f15309ff4baf7fbbd232cce04a0ff83ed6"
+      },
+      {
+        "destination": "application.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/inclusive-slot-occupancy__workspace__application.py",
+        "sha256": "912cca74e3bda383128a4f26ffddeb97e38f48ae9c7bc021d848fe16d196d1b8"
+      },
+      {
+        "destination": "resolver.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/inclusive-slot-occupancy__workspace__resolver.py",
+        "sha256": "ff4f4cb15022a1a36305b505740e478a1bdc49f7292fc649bca6097fd7c7810e"
+      },
+      {
+        "destination": "public_checks.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/inclusive-slot-occupancy__workspace__public_checks.py",
+        "sha256": "e1c6cbba57f1de5ae39112b2e3195472226bdf207ab66d81995cdb40658f04ea"
+      }
+    ]
+  },
+  {
+    "category": "related_transfer",
+    "learning_family": "utf8-record-framing",
+    "lineage": "authored-v1-hex-stream-journal",
+    "plan_family": "utf8_framing",
+    "private_oracle_metadata_only": {
+      "actual_launch_validation": null,
+      "body_read_in_this_preparation": false,
+      "path": "/Users/bliss/dev/eval-artifacts/sibyl/transfer-final-launch/material/tasks/hex-stream-journal/oracle.json",
+      "sha256_from_retained_material_freeze": "3fbb562cf8ef0ce190a8688a740563e824baa23778373a861717c6d27b41aa0a"
+    },
+    "public_prompt": {
+      "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/hex-stream-journal__prompt.md",
+      "sha256": "c04db3c22654c0278f689e8f0199a9dd74e718a54eb34c4b26de9e894db24e37"
+    },
+    "query_sha256": "b9c3adffe9daa6b4fa67edc89a3f28f288d8812cab0f0f5a5ee95005f0275881",
+    "split": "development",
+    "task_family_id": "transfer-hex-stream-journal",
+    "task_id": "hex-stream-journal",
+    "workspace": [
+      {
+        "destination": "app.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/hex-stream-journal__workspace__app.py",
+        "sha256": "4ccc70376908bc50cc0f17bd0fa2a7f15309ff4baf7fbbd232cce04a0ff83ed6"
+      },
+      {
+        "destination": "application.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/hex-stream-journal__workspace__application.py",
+        "sha256": "d7a2ff1927388e674029714bca216507987b43349eee97e30746d8023e4a1a65"
+      },
+      {
+        "destination": "resolver.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/hex-stream-journal__workspace__resolver.py",
+        "sha256": "a1825ed733b295de9191719658071fb6410f0d0a9bf1a8724e033b421cfac986"
+      },
+      {
+        "destination": "public_checks.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/hex-stream-journal__workspace__public_checks.py",
+        "sha256": "26ab44a96733edc54dd99d7d7b07e22d4bbab00110037bf633a55dfe44cf0bea"
+      }
+    ]
+  },
+  {
+    "category": "related_transfer",
+    "learning_family": "utf8-record-framing",
+    "lineage": "authored-v1-record-separator-channel",
+    "plan_family": "utf8_framing",
+    "private_oracle_metadata_only": {
+      "actual_launch_validation": null,
+      "body_read_in_this_preparation": false,
+      "path": "/Users/bliss/dev/eval-artifacts/sibyl/transfer-final-launch/material/tasks/record-separator-channel/oracle.json",
+      "sha256_from_retained_material_freeze": "d930203d3b3eca53d90c61e4072f9b8378e02c4e4a5f7be15a6cc80dc60e1a98"
+    },
+    "public_prompt": {
+      "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/record-separator-channel__prompt.md",
+      "sha256": "a28158ed05515d4749a3fa6839ed0d7117e7b0dc28425a804212e7c7b6b77fc8"
+    },
+    "query_sha256": "f722e3e84d07d0910c4bb8817de04a346eefd3ae3b227006d41b965a0c32dd08",
+    "split": "development",
+    "task_family_id": "transfer-record-separator-channel",
+    "task_id": "record-separator-channel",
+    "workspace": [
+      {
+        "destination": "app.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/record-separator-channel__workspace__app.py",
+        "sha256": "4ccc70376908bc50cc0f17bd0fa2a7f15309ff4baf7fbbd232cce04a0ff83ed6"
+      },
+      {
+        "destination": "application.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/record-separator-channel__workspace__application.py",
+        "sha256": "3d08fa7d09813a8fefbc9d44f8495c7ce8b3c6572f79e437128e28ad0cfd2e50"
+      },
+      {
+        "destination": "resolver.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/record-separator-channel__workspace__resolver.py",
+        "sha256": "6a0085b3df188e22f23090d77bae80d19a15a0b1d7efc98bed95f7b4f4893178"
+      },
+      {
+        "destination": "public_checks.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/record-separator-channel__workspace__public_checks.py",
+        "sha256": "ea879f61e6b01c721096cbc152d518ed2da4ce33ce8ad1cce0cd068e1656b258"
+      }
+    ]
+  },
+  {
+    "category": "applicability_contrast",
+    "learning_family": "utf8-record-framing",
+    "lineage": "authored-v1-independent-message-decoder",
+    "plan_family": "utf8_framing",
+    "private_oracle_metadata_only": {
+      "actual_launch_validation": null,
+      "body_read_in_this_preparation": false,
+      "path": "/Users/bliss/dev/eval-artifacts/sibyl/transfer-final-launch/material/tasks/independent-message-decoder/oracle.json",
+      "sha256_from_retained_material_freeze": "2efe257e0002127b92f247e7ce1776378b06190090f0026996f0812f36d80ba1"
+    },
+    "public_prompt": {
+      "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/independent-message-decoder__prompt.md",
+      "sha256": "067c0a91c3f1364d43b07734987168da1fddafacd1fd3ba0442297b8639ceb9b"
+    },
+    "query_sha256": "7068e2d01d6d72e6dd3116b8ad19d3507acd9e1a1530756ee4bbaa8dfb1580ab",
+    "split": "development",
+    "task_family_id": "transfer-independent-message-decoder",
+    "task_id": "independent-message-decoder",
+    "workspace": [
+      {
+        "destination": "app.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/independent-message-decoder__workspace__app.py",
+        "sha256": "4ccc70376908bc50cc0f17bd0fa2a7f15309ff4baf7fbbd232cce04a0ff83ed6"
+      },
+      {
+        "destination": "application.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/independent-message-decoder__workspace__application.py",
+        "sha256": "bd70477a4a86adb50d882eb2006d0a5dedcafc7663dd2b1552a84b6515b72285"
+      },
+      {
+        "destination": "resolver.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/independent-message-decoder__workspace__resolver.py",
+        "sha256": "3734ce60e560a3977b0e00a29c939758b2f12f9c7a870793c0c945f00aac9d9a"
+      },
+      {
+        "destination": "public_checks.py",
+        "path": "/Users/bliss/dev/eval-artifacts/sibyl/full-cohort-recall-policy-39e877fa81804ef583c4caac990f1cac/inputs/independent-message-decoder__workspace__public_checks.py",
+        "sha256": "8d25c7ca79c28d8c6b36ce573c8486c00c0b2ba9673eddf2fa338fda3ce6d1b9"
+      }
+    ]
+  }
+]

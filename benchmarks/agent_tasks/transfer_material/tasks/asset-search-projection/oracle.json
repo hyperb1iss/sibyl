@@ -1,0 +1,132 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "updates": [
+          [
+            "a",
+            1,
+            false,
+            "Blue bolt"
+          ]
+        ],
+        "terms": [
+          "blue"
+        ]
+      },
+      "expected": {
+        "hits": [
+          [
+            "a"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "tie-last-wins",
+      "input": {
+        "updates": [
+          [
+            "a",
+            2,
+            false,
+            "red"
+          ],
+          [
+            "a",
+            2,
+            false,
+            "blue"
+          ]
+        ],
+        "terms": [
+          "red",
+          "blue"
+        ]
+      },
+      "expected": {
+        "hits": [
+          [],
+          [
+            "a"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "tombstone",
+      "input": {
+        "updates": [
+          [
+            "a",
+            4,
+            true,
+            ""
+          ],
+          [
+            "a",
+            2,
+            false,
+            "red"
+          ],
+          [
+            "b",
+            1,
+            false,
+            "red"
+          ]
+        ],
+        "terms": [
+          "red",
+          ""
+        ]
+      },
+      "expected": {
+        "hits": [
+          [
+            "b"
+          ],
+          [
+            "b"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "tokens",
+      "input": {
+        "updates": [
+          [
+            "b",
+            1,
+            false,
+            "Straße BLUE"
+          ],
+          [
+            "a",
+            1,
+            false,
+            "blue"
+          ]
+        ],
+        "terms": [
+          "STRASSE blue",
+          "blue blue"
+        ]
+      },
+      "expected": {
+        "hits": [
+          [
+            "b"
+          ],
+          [
+            "a",
+            "b"
+          ]
+        ]
+      }
+    }
+  ]
+}

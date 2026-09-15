@@ -1,0 +1,493 @@
+{
+  "schema_version": "sibyl-transfer-task-material-v1",
+  "status": "author_checks_pending_independent_review",
+  "purpose": "trusted_development_diagnostic",
+  "tasks": [
+    {
+      "id": "cdn-batch-map",
+      "family_id": "transfer-cdn-batch-map",
+      "learning_family": "decoded-root-routing",
+      "kind": "related",
+      "split": "development",
+      "lineage": "authored-v1-cdn-batch-map",
+      "shared_mechanism_with_learning": true,
+      "public_cases": 1,
+      "private_cases": 4,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/cdn-batch-map/oracle.json",
+      "reference": "tasks/cdn-batch-map/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "tenant-download-plan",
+      "family_id": "transfer-tenant-download-plan",
+      "learning_family": "decoded-root-routing",
+      "kind": "related",
+      "split": "development",
+      "lineage": "authored-v1-tenant-download-plan",
+      "shared_mechanism_with_learning": true,
+      "public_cases": 1,
+      "private_cases": 4,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/tenant-download-plan/oracle.json",
+      "reference": "tasks/tenant-download-plan/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "opaque-object-catalog",
+      "family_id": "transfer-opaque-object-catalog",
+      "learning_family": "decoded-root-routing",
+      "kind": "contrast",
+      "split": "development",
+      "lineage": "authored-v1-opaque-object-catalog",
+      "shared_mechanism_with_learning": false,
+      "public_cases": 1,
+      "private_cases": 3,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/opaque-object-catalog/oracle.json",
+      "reference": "tasks/opaque-object-catalog/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "rack-power-windows",
+      "family_id": "transfer-rack-power-windows",
+      "learning_family": "half-open-capacity-sweep",
+      "kind": "related",
+      "split": "development",
+      "lineage": "authored-v1-rack-power-windows",
+      "shared_mechanism_with_learning": true,
+      "public_cases": 1,
+      "private_cases": 3,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/rack-power-windows/oracle.json",
+      "reference": "tasks/rack-power-windows/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "venue-capacity-report",
+      "family_id": "transfer-venue-capacity-report",
+      "learning_family": "half-open-capacity-sweep",
+      "kind": "related",
+      "split": "development",
+      "lineage": "authored-v1-venue-capacity-report",
+      "shared_mechanism_with_learning": true,
+      "public_cases": 1,
+      "private_cases": 3,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/venue-capacity-report/oracle.json",
+      "reference": "tasks/venue-capacity-report/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "inclusive-slot-occupancy",
+      "family_id": "transfer-inclusive-slot-occupancy",
+      "learning_family": "half-open-capacity-sweep",
+      "kind": "contrast",
+      "split": "development",
+      "lineage": "authored-v1-inclusive-slot-occupancy",
+      "shared_mechanism_with_learning": false,
+      "public_cases": 1,
+      "private_cases": 4,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/inclusive-slot-occupancy/oracle.json",
+      "reference": "tasks/inclusive-slot-occupancy/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "stock-adjustment-log",
+      "family_id": "transfer-stock-adjustment-log",
+      "learning_family": "idempotent-commands",
+      "kind": "related",
+      "split": "development",
+      "lineage": "authored-v1-stock-adjustment-log",
+      "shared_mechanism_with_learning": true,
+      "public_cases": 1,
+      "private_cases": 3,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/stock-adjustment-log/oracle.json",
+      "reference": "tasks/stock-adjustment-log/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "checkpointed-credit-batch",
+      "family_id": "transfer-checkpointed-credit-batch",
+      "learning_family": "idempotent-commands",
+      "kind": "related",
+      "split": "development",
+      "lineage": "authored-v1-checkpointed-credit-batch",
+      "shared_mechanism_with_learning": true,
+      "public_cases": 1,
+      "private_cases": 3,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/checkpointed-credit-batch/oracle.json",
+      "reference": "tasks/checkpointed-credit-batch/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "meter-sample-accumulator",
+      "family_id": "transfer-meter-sample-accumulator",
+      "learning_family": "idempotent-commands",
+      "kind": "contrast",
+      "split": "development",
+      "lineage": "authored-v1-meter-sample-accumulator",
+      "shared_mechanism_with_learning": false,
+      "public_cases": 1,
+      "private_cases": 3,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/meter-sample-accumulator/oracle.json",
+      "reference": "tasks/meter-sample-accumulator/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "asset-search-projection",
+      "family_id": "transfer-asset-search-projection",
+      "learning_family": "incremental-index",
+      "kind": "related",
+      "split": "development",
+      "lineage": "authored-v1-asset-search-projection",
+      "shared_mechanism_with_learning": true,
+      "public_cases": 1,
+      "private_cases": 3,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/asset-search-projection/oracle.json",
+      "reference": "tasks/asset-search-projection/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "tenant-document-search",
+      "family_id": "transfer-tenant-document-search",
+      "learning_family": "incremental-index",
+      "kind": "related",
+      "split": "development",
+      "lineage": "authored-v1-tenant-document-search",
+      "shared_mechanism_with_learning": true,
+      "public_cases": 1,
+      "private_cases": 4,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/tenant-document-search/oracle.json",
+      "reference": "tasks/tenant-document-search/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "revision-audit-search",
+      "family_id": "transfer-revision-audit-search",
+      "learning_family": "incremental-index",
+      "kind": "contrast",
+      "split": "development",
+      "lineage": "authored-v1-revision-audit-search",
+      "shared_mechanism_with_learning": false,
+      "public_cases": 1,
+      "private_cases": 3,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/revision-audit-search/oracle.json",
+      "reference": "tasks/revision-audit-search/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "department-unit-budget",
+      "family_id": "transfer-department-unit-budget",
+      "learning_family": "integer-apportionment",
+      "kind": "related",
+      "split": "development",
+      "lineage": "authored-v1-department-unit-budget",
+      "shared_mechanism_with_learning": true,
+      "public_cases": 1,
+      "private_cases": 3,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/department-unit-budget/oracle.json",
+      "reference": "tasks/department-unit-budget/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "ranked-remainder-seats",
+      "family_id": "transfer-ranked-remainder-seats",
+      "learning_family": "integer-apportionment",
+      "kind": "related",
+      "split": "development",
+      "lineage": "authored-v1-ranked-remainder-seats",
+      "shared_mechanism_with_learning": true,
+      "public_cases": 1,
+      "private_cases": 4,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/ranked-remainder-seats/oracle.json",
+      "reference": "tasks/ranked-remainder-seats/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "priority-quota-fulfillment",
+      "family_id": "transfer-priority-quota-fulfillment",
+      "learning_family": "integer-apportionment",
+      "kind": "contrast",
+      "split": "development",
+      "lineage": "authored-v1-priority-quota-fulfillment",
+      "shared_mechanism_with_learning": false,
+      "public_cases": 1,
+      "private_cases": 3,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/priority-quota-fulfillment/oracle.json",
+      "reference": "tasks/priority-quota-fulfillment/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "connection-layer-plan",
+      "family_id": "transfer-connection-layer-plan",
+      "learning_family": "layered-configuration",
+      "kind": "related",
+      "split": "development",
+      "lineage": "authored-v1-connection-layer-plan",
+      "shared_mechanism_with_learning": true,
+      "public_cases": 1,
+      "private_cases": 9,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/connection-layer-plan/oracle.json",
+      "reference": "tasks/connection-layer-plan/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "fleet-profile-resolution",
+      "family_id": "transfer-fleet-profile-resolution",
+      "learning_family": "layered-configuration",
+      "kind": "related",
+      "split": "development",
+      "lineage": "authored-v1-fleet-profile-resolution",
+      "shared_mechanism_with_learning": true,
+      "public_cases": 1,
+      "private_cases": 4,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/fleet-profile-resolution/oracle.json",
+      "reference": "tasks/fleet-profile-resolution/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "nullable-overlay-records",
+      "family_id": "transfer-nullable-overlay-records",
+      "learning_family": "layered-configuration",
+      "kind": "contrast",
+      "split": "development",
+      "lineage": "authored-v1-nullable-overlay-records",
+      "shared_mechanism_with_learning": false,
+      "public_cases": 1,
+      "private_cases": 3,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/nullable-overlay-records/oracle.json",
+      "reference": "tasks/nullable-overlay-records/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "telemetry-session-ranges",
+      "family_id": "transfer-telemetry-session-ranges",
+      "learning_family": "session-watermarks",
+      "kind": "related",
+      "split": "development",
+      "lineage": "authored-v1-telemetry-session-ranges",
+      "shared_mechanism_with_learning": true,
+      "public_cases": 1,
+      "private_cases": 4,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/telemetry-session-ranges/oracle.json",
+      "reference": "tasks/telemetry-session-ranges/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "partitioned-sensor-sessions",
+      "family_id": "transfer-partitioned-sensor-sessions",
+      "learning_family": "session-watermarks",
+      "kind": "related",
+      "split": "development",
+      "lineage": "authored-v1-partitioned-sensor-sessions",
+      "shared_mechanism_with_learning": true,
+      "public_cases": 1,
+      "private_cases": 3,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/partitioned-sensor-sessions/oracle.json",
+      "reference": "tasks/partitioned-sensor-sessions/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "arrival-order-bursts",
+      "family_id": "transfer-arrival-order-bursts",
+      "learning_family": "session-watermarks",
+      "kind": "contrast",
+      "split": "development",
+      "lineage": "authored-v1-arrival-order-bursts",
+      "shared_mechanism_with_learning": false,
+      "public_cases": 1,
+      "private_cases": 3,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/arrival-order-bursts/oracle.json",
+      "reference": "tasks/arrival-order-bursts/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "hex-stream-journal",
+      "family_id": "transfer-hex-stream-journal",
+      "learning_family": "utf8-record-framing",
+      "kind": "related",
+      "split": "development",
+      "lineage": "authored-v1-hex-stream-journal",
+      "shared_mechanism_with_learning": true,
+      "public_cases": 1,
+      "private_cases": 4,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/hex-stream-journal/oracle.json",
+      "reference": "tasks/hex-stream-journal/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "record-separator-channel",
+      "family_id": "transfer-record-separator-channel",
+      "learning_family": "utf8-record-framing",
+      "kind": "related",
+      "split": "development",
+      "lineage": "authored-v1-record-separator-channel",
+      "shared_mechanism_with_learning": true,
+      "public_cases": 1,
+      "private_cases": 5,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/record-separator-channel/oracle.json",
+      "reference": "tasks/record-separator-channel/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    },
+    {
+      "id": "independent-message-decoder",
+      "family_id": "transfer-independent-message-decoder",
+      "learning_family": "utf8-record-framing",
+      "kind": "contrast",
+      "split": "development",
+      "lineage": "authored-v1-independent-message-decoder",
+      "shared_mechanism_with_learning": false,
+      "public_cases": 1,
+      "private_cases": 3,
+      "workspace_files": [
+        "app.py",
+        "application.py",
+        "resolver.py",
+        "public_checks.py"
+      ],
+      "oracle": "tasks/independent-message-decoder/oracle.json",
+      "reference": "tasks/independent-message-decoder/reference",
+      "selection": "All eight predeclared retained family blocks; two related and one contrast each; no solver outcomes used."
+    }
+  ],
+  "solver_runs": 0,
+  "limitations": [
+    "not sealed",
+    "intentional mechanism overlap",
+    "variants do not establish unseen-mechanism generalization"
+  ]
+}

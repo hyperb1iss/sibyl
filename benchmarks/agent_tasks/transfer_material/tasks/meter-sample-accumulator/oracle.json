@@ -1,0 +1,81 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "readings": [
+          {
+            "device": "a",
+            "label": "x",
+            "units": 2
+          }
+        ]
+      },
+      "expected": {
+        "totals": {
+          "a": 2
+        }
+      }
+    },
+    {
+      "id": "repeat-is-real",
+      "input": {
+        "readings": [
+          {
+            "device": "a",
+            "label": "x",
+            "units": 2
+          },
+          {
+            "device": "a",
+            "label": "x",
+            "units": 2
+          }
+        ]
+      },
+      "expected": {
+        "totals": {
+          "a": 4
+        }
+      }
+    },
+    {
+      "id": "label-not-key",
+      "input": {
+        "readings": [
+          {
+            "device": "a",
+            "label": "x",
+            "units": 4
+          },
+          {
+            "device": "a",
+            "label": "x",
+            "units": -1
+          },
+          {
+            "device": "b",
+            "label": "x",
+            "units": 7
+          }
+        ]
+      },
+      "expected": {
+        "totals": {
+          "a": 3,
+          "b": 7
+        }
+      }
+    },
+    {
+      "id": "empty",
+      "input": {
+        "readings": []
+      },
+      "expected": {
+        "totals": {}
+      }
+    }
+  ]
+}

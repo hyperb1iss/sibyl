@@ -1,0 +1,169 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "events": [
+          {
+            "tenant": "a",
+            "key": "x",
+            "rev": 1,
+            "tombstone": false,
+            "body": "red"
+          }
+        ],
+        "requests": [
+          {
+            "tenant": "a",
+            "words": "red"
+          }
+        ]
+      },
+      "expected": {
+        "answers": [
+          [
+            "x"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "tenant-scope",
+      "input": {
+        "events": [
+          {
+            "tenant": "a",
+            "key": "x",
+            "rev": 1,
+            "tombstone": false,
+            "body": "red"
+          },
+          {
+            "tenant": "b",
+            "key": "x",
+            "rev": 9,
+            "tombstone": false,
+            "body": "blue"
+          }
+        ],
+        "requests": [
+          {
+            "tenant": "a",
+            "words": "red"
+          },
+          {
+            "tenant": "b",
+            "words": "blue"
+          }
+        ]
+      },
+      "expected": {
+        "answers": [
+          [
+            "x"
+          ],
+          [
+            "x"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "deleted-newest",
+      "input": {
+        "events": [
+          {
+            "tenant": "a",
+            "key": "x",
+            "rev": 2,
+            "tombstone": true,
+            "body": ""
+          },
+          {
+            "tenant": "a",
+            "key": "x",
+            "rev": 1,
+            "tombstone": false,
+            "body": "red"
+          }
+        ],
+        "requests": [
+          {
+            "tenant": "a",
+            "words": ""
+          }
+        ]
+      },
+      "expected": {
+        "answers": [
+          []
+        ]
+      }
+    },
+    {
+      "id": "empty-tenant",
+      "input": {
+        "events": [
+          {
+            "tenant": "a",
+            "key": "x",
+            "rev": 1,
+            "tombstone": false,
+            "body": "red"
+          }
+        ],
+        "requests": [
+          {
+            "tenant": "missing",
+            "words": ""
+          }
+        ]
+      },
+      "expected": {
+        "answers": [
+          []
+        ]
+      }
+    },
+    {
+      "id": "tie-and-casefold",
+      "input": {
+        "events": [
+          {
+            "tenant": "a",
+            "key": "x",
+            "rev": 2,
+            "tombstone": false,
+            "body": "red"
+          },
+          {
+            "tenant": "a",
+            "key": "x",
+            "rev": 2,
+            "tombstone": false,
+            "body": "Straße BLUE"
+          }
+        ],
+        "requests": [
+          {
+            "tenant": "a",
+            "words": "red"
+          },
+          {
+            "tenant": "a",
+            "words": "STRASSE blue"
+          }
+        ]
+      },
+      "expected": {
+        "answers": [
+          [],
+          [
+            "x"
+          ]
+        ]
+      }
+    }
+  ]
+}

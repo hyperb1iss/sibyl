@@ -1,0 +1,186 @@
+{
+  "schema_version": "sibyl-json-cli-cases-v1",
+  "cases": [
+    {
+      "id": "public-simple",
+      "input": {
+        "layers": [
+          {
+            "endpoint": "host",
+            "retries": 2,
+            "enabled": true
+          }
+        ]
+      },
+      "expected": {
+        "settings": {
+          "endpoint": "host",
+          "retries": 2,
+          "enabled": true
+        }
+      }
+    },
+    {
+      "id": "falsy-overrides",
+      "input": {
+        "layers": [
+          {
+            "endpoint": "host",
+            "retries": 2,
+            "enabled": true,
+            "note": "x"
+          },
+          {
+            "retries": 0,
+            "enabled": false,
+            "note": ""
+          }
+        ]
+      },
+      "expected": {
+        "settings": {
+          "endpoint": "host",
+          "retries": 0,
+          "enabled": false,
+          "note": ""
+        }
+      }
+    },
+    {
+      "id": "validate-final",
+      "input": {
+        "layers": [
+          {
+            "endpoint": 3,
+            "retries": true,
+            "enabled": "yes",
+            "bad": 1
+          },
+          {
+            "endpoint": "ok",
+            "retries": 0,
+            "enabled": false,
+            "bad": null
+          }
+        ]
+      },
+      "expected": {
+        "settings": {
+          "endpoint": "ok",
+          "retries": 0,
+          "enabled": false
+        }
+      }
+    },
+    {
+      "id": "missing-required",
+      "input": {
+        "layers": [
+          {
+            "endpoint": "x",
+            "retries": 1,
+            "enabled": true
+          },
+          {
+            "endpoint": null
+          }
+        ]
+      },
+      "expected": {
+        "settings": null
+      }
+    },
+    {
+      "id": "final-invalid-endpoint-",
+      "input": {
+        "layers": [
+          {
+            "endpoint": "",
+            "retries": 0,
+            "enabled": true
+          }
+        ]
+      },
+      "expected": {
+        "settings": null
+      }
+    },
+    {
+      "id": "final-invalid-retries-True",
+      "input": {
+        "layers": [
+          {
+            "endpoint": "ok",
+            "retries": true,
+            "enabled": true
+          }
+        ]
+      },
+      "expected": {
+        "settings": null
+      }
+    },
+    {
+      "id": "final-invalid-retries--1",
+      "input": {
+        "layers": [
+          {
+            "endpoint": "ok",
+            "retries": -1,
+            "enabled": true
+          }
+        ]
+      },
+      "expected": {
+        "settings": null
+      }
+    },
+    {
+      "id": "final-invalid-enabled-1",
+      "input": {
+        "layers": [
+          {
+            "endpoint": "ok",
+            "retries": 0,
+            "enabled": 1
+          }
+        ]
+      },
+      "expected": {
+        "settings": null
+      }
+    },
+    {
+      "id": "final-invalid-note-False",
+      "input": {
+        "layers": [
+          {
+            "endpoint": "ok",
+            "retries": 0,
+            "enabled": true,
+            "note": false
+          }
+        ]
+      },
+      "expected": {
+        "settings": null
+      }
+    },
+    {
+      "id": "final-invalid-extra-1",
+      "input": {
+        "layers": [
+          {
+            "endpoint": "ok",
+            "retries": 0,
+            "enabled": true,
+            "extra": 1
+          }
+        ]
+      },
+      "expected": {
+        "settings": null
+      }
+    }
+  ]
+}
