@@ -455,6 +455,35 @@ def test_a_real_dispatch_records_the_scheduled_runner_identity(mini):
     )
 
 
+def test_a_runner_exception_seals_an_outcome_instead_of_aborting_the_ledger(mini, monkeypatch):
+    """A cell that raises anything must still end as a sealed runner_error.
+
+    An escaping exception leaves begin.json with no outcome.json, which resume
+    reads as unknown and never replays, and it takes the whole execute() call
+    down before the ledger is published for any of the other cells.
+    """
+    claimed(mini)
+
+    def explode(*_args, **_kwargs):
+        raise RuntimeError("controller socket closed")
+
+    monkeypatch.setattr(launcher.runner, "run_task", explode)
+
+    record = launcher.execute(mini["root"], workers=2)
+
+    assert record["dispatched"] == len(mini["schedule"]["cells"])
+    assert {row["status"] for row in record["outcomes"]} == {"runner_error"}
+    assert {row["error_type"] for row in record["outcomes"]} == {"RuntimeError"}
+    for outcome in record["outcomes"]:
+        assert outcome["error"] == "RuntimeError: controller socket closed"
+        assert outcome["success"] is False
+        cell_root = mini["root"] / "cells" / outcome["attempt_id"]
+        assert json.loads((cell_root / "outcome.json").read_text())["status"] == "runner_error"
+    terminal = launcher.terminal(mini["root"])
+    assert terminal["dispatch_states"]["complete"] == len(mini["schedule"]["cells"])
+    assert terminal["dispatch_states"]["unknown"] == 0
+
+
 def trusted_terminal(world) -> dict:
     """Promote a dry-run terminal into one where every prepared cell returned cleanly."""
     claimed(world)

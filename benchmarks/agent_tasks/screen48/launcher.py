@@ -223,8 +223,16 @@ def _run_cell(
                 output=cell_root / "attempt",
                 attempt_id=attempt_id,
             )
-        except (OSError, ValueError) as exc:
-            outcome["error"] = f"{type(exc).__name__}: {exc}"
+        except Exception as exc:  # a begun cell owes an outcome, whatever failed
+            # Anything the runner raises has to become a sealed outcome. An
+            # escaping exception leaves begin.json without outcome.json, which
+            # resume reads as unknown forever, and aborts execute() before the
+            # ledger is published for any cell.
+            outcome.update(
+                status="runner_error",
+                error=f"{type(exc).__name__}: {exc}",
+                error_type=type(exc).__name__,
+            )
         else:
             receipt_path = cell_root / "attempt" / "receipt.json"
             outcome.update(
