@@ -16,7 +16,7 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
@@ -807,7 +807,7 @@ def test_the_summary_library_validator_only_rebinds_the_accepted_library(
 def test_the_vendored_library_builds_items_through_the_real_item_builder() -> None:
     """The real validator, composed with the real ``summary_items``, on the real library."""
     references, validate = checkpoints.summary_library()
-    catalog = FakeSummaryCatalog(references)
+    catalog = cast(whole_items.OriginalCatalog, FakeSummaryCatalog(references))
     assert len(catalog.rows) == contract.SOURCE_COUNT
 
     items = whole_items.summary_items(references, catalog, QuarterCounter(), validate)

@@ -166,7 +166,7 @@ def build_template(root: Path, count: int = 3) -> tuple[dict, list[dict]]:
     return template, sources
 
 
-def write_packs(root: Path, cells: list[dict], *, absent: set[str] = frozenset()) -> Path:
+def write_packs(root: Path, cells: list[dict], *, absent: frozenset[str] = frozenset()) -> Path:
     """Write one preparation receipt per cell, omitting the file for absent arms."""
     for cell in cells:
         if cell["attempt_id"] in absent:
@@ -249,7 +249,7 @@ def test_a_missing_arm_stays_unprepared_and_never_gets_an_invented_pack(mini):
     packs_root = write_packs(
         mini["packs_root"].parent / "partial",
         mini["schedule"]["cells"],
-        absent={absent["attempt_id"]},
+        absent=frozenset({absent["attempt_id"]}),
     )
 
     report = run_materialize(mini, packs_root=packs_root)
