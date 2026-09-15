@@ -217,6 +217,258 @@ async def test_proposal_passes_page_233_without_wrapping(tmp_path: Path, product
     assert receipt["predicates"]["d_every_source_terminal"]["satisfied"] is True
 
 
+class RingProduct:
+    """A dream pager that keeps its budget by wrapping onto consolidated sources.
+
+    Closer to the product than ``FakeProduct``: a source the owner rejects is
+    never consolidated and never advances the cursor, and a pass asked for more
+    than remains above the cursor fills the deficit from the start of the ring,
+    which is exactly the waste the driver exists to prevent.
+    """
+
+    def __init__(
+        self,
+        *,
+        sources: list[str],
+        rejected: set[str] | None = None,
+        over_count: bool = False,
+        advances: bool = True,
+    ) -> None:
+        self.source_ids = list(sources)
+        self.rejected = set(rejected or set())
+        self.over_count = over_count
+        self.advances = advances
+        self.cursor = ""
+        self.revision = 0
+        self.calls: list[dict[str, int]] = []
+        self.consolidated: list[str] = []
+        self.wrapped: list[str] = []
+        self.returned: set[str] = set()
+        self.usage: list[dict[str, Any]] = []
+        self.repairs = 0
+
+    def _acceptable_above(self, cursor: str) -> list[str]:
+        return [
+            identifier
+            for identifier in self.source_ids
+            if identifier > cursor and identifier not in self.rejected
+        ]
+
+    async def invoke(
+        self, *, group_id: str, source_limit: int, candidate_limit: int
+    ) -> dict[str, Any]:
+        assert group_id
+        self.calls.append({"source_limit": source_limit, "candidate_limit": candidate_limit})
+        picked = self._acceptable_above(self.cursor)[:source_limit]
+        wrapped: list[str] = []
+        if len(picked) < source_limit:
+            deficit = source_limit - len(picked)
+            wrapped = [
+                identifier
+                for identifier in self.source_ids
+                if identifier <= self.cursor and identifier not in self.rejected
+            ][:deficit]
+        consolidated = [*picked, *wrapped]
+        self.consolidated.extend(consolidated)
+        self.wrapped.extend(wrapped)
+        self.returned.update(consolidated)
+        if consolidated and self.advances:
+            self.cursor = consolidated[-1]
+            self.revision += len(consolidated)
+        self.usage.append(
+            {
+                "state": "returned",
+                "created_at": "2026-09-15T00:00:00Z",
+                "usage_json": json.dumps(
+                    {"requests": 1, "input_tokens": 1_000, "output_tokens": 200}
+                ),
+            }
+        )
+        return {
+            "run_id": f"run-{len(self.calls)}",
+            "sources_scanned": len(consolidated),
+            "sources_reflected": len(consolidated),
+            "candidates_scanned": 0,
+            "promoted": 0,
+            "archived": 0,
+            "sources": [{"source_ids": consolidated, "outcome": "reflected"}],
+            "candidates": [],
+        }
+
+    async def load_cursor(self, group_id: str) -> tuple[str, int]:
+        assert group_id
+        return self.cursor, self.revision
+
+    async def count_eligible(self, group_id: str, cursor: str) -> int:
+        assert group_id
+        if self.over_count:
+            return len([identifier for identifier in self.source_ids if identifier > cursor])
+        return len(self._acceptable_above(cursor))
+
+    async def list_sources(self, group_id: str) -> list[str]:
+        assert group_id
+        return list(self.source_ids)
+
+    async def pending_ids(self, group_id: str, *, limit: int = 500) -> list[str]:
+        assert group_id
+        assert limit
+        return []
+
+    async def usage_rows(self, group_id: str, since: Any) -> list[dict[str, Any]]:
+        assert group_id
+        assert since is not None
+        return list(self.usage)
+
+    async def returned_sources(self, group_id: str) -> set[str]:
+        assert group_id
+        return set(self.returned)
+
+    async def repair(self, group_id: str) -> dict[str, int]:
+        assert group_id
+        self.repairs += 1
+        return {"checked": 0, "recovered": 0, "pending": 0, "failed": 0}
+
+
+async def test_three_owner_rejected_sources_do_not_wrap_the_last_page(
+    tmp_path: Path, product: Any
+) -> None:
+    """233 admitted captures, three the dream owner will not accept.
+
+    The naive SQL count calls the last page 33 and the pager fills the missing
+    three from the head of the ring. An exact count asks for 30 and the run
+    ends on 230 consolidations, each one paid for once.
+    """
+    sources = [f"s{index:03d}" for index in range(233)]
+    rejected = {"s101", "s150", "s232"}
+    fake = product(RingProduct(sources=sources, rejected=rejected))
+
+    receipt = await cycle.run_cycle(make_config(), tmp_path)
+
+    assert [call["source_limit"] for call in fake.calls] == [100, 100, 30]
+    assert fake.wrapped == []
+    assert len(fake.consolidated) == len(set(fake.consolidated)) == 230
+    assert receipt["proposal"]["ring_wrap"] is None
+    assert receipt["proposal"]["remaining_above_cursor"] == 0
+    assert all(item["ring_wrap"] is None for item in receipt["proposal"]["passes"])
+
+
+async def test_an_over_counted_page_that_wraps_stops_the_run(tmp_path: Path, product: Any) -> None:
+    """The residual over-count is caught after the fact, before it repeats."""
+    sources = [f"s{index:03d}" for index in range(233)]
+    fake = product(RingProduct(sources=sources, rejected={"s101", "s150", "s232"}, over_count=True))
+
+    receipt = await cycle.run_cycle(make_config(), tmp_path)
+
+    assert [call["source_limit"] for call in fake.calls] == [100, 100, 31]
+    assert fake.wrapped == ["s000"]
+    wrap = receipt["proposal"]["ring_wrap"]
+    assert wrap["reason"] == "consolidated_source_at_or_below_cursor"
+    assert wrap["wrapped_source_ids"] == ["s000"]
+    assert receipt["status"] == cycle.STATUS_RING_WRAP
+    assert receipt["reasons"][0] == "ring_wrap_detected"
+    assert "drain" not in receipt, "a wrapped run must not keep spending"
+    assert fake.repairs == 0
+
+
+def test_detect_ring_wrap_reads_both_signatures() -> None:
+    repeated = cycle.detect_ring_wrap(
+        cursor_before="s100", cursor_after="s130", source_ids=["s099", "s130"]
+    )
+    assert repeated is not None
+    assert repeated["wrapped_source_ids"] == ["s099"]
+    backwards = cycle.detect_ring_wrap(
+        cursor_before="s100", cursor_after="s004", source_ids=["s101"]
+    )
+    assert backwards is not None
+    assert backwards["reason"] == "cursor_moved_backwards"
+    assert (
+        cycle.detect_ring_wrap(cursor_before="s100", cursor_after="s130", source_ids=["s101"])
+        is None
+    )
+    # A fresh run starts below every id, so nothing it consolidates is a repeat.
+    assert (
+        cycle.detect_ring_wrap(cursor_before="", cursor_after="s100", source_ids=["s001"]) is None
+    )
+
+
+def test_receipt_source_ids_reads_cohort_and_single_source_rows() -> None:
+    receipt = {
+        "sources": [
+            {"source_ids": ["s001", "s002"]},
+            {"source_id": "s003"},
+            {"source_id": None},
+            "not-a-row",
+        ]
+    }
+
+    assert cycle.receipt_source_ids(receipt) == ["s001", "s002", "s003"]
+
+
+async def test_count_eligible_sources_drops_what_the_product_drops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The count mirrors the pager's Python filters, not just its SQL predicate."""
+    rows = [
+        {"uuid": "s001", "organization_id": "org", "principal_id": "p", "raw_content": "body"},
+        # Excluded by the SQL predicate on the column itself.
+        {
+            "uuid": "s002",
+            "organization_id": "org",
+            "principal_id": "p",
+            "raw_content": "body",
+            "capture_surface": "reflection_candidate",
+        },
+        # Not currently recallable: superseded by a later source.
+        {
+            "uuid": "s003",
+            "organization_id": "org",
+            "principal_id": "p",
+            "raw_content": "body",
+            "metadata": {"superseded_by_source_id": "s999"},
+        },
+        # Excluded surface carried only in metadata, which SQL cannot see.
+        {
+            "uuid": "s004",
+            "organization_id": "org",
+            "principal_id": "p",
+            "raw_content": "body",
+            "metadata": {"capture_surface": "reflection_candidate"},
+        },
+        # The dream owner refuses a source with no principal or no content.
+        {"uuid": "s005", "organization_id": "org", "principal_id": "", "raw_content": "body"},
+        {"uuid": "s006", "organization_id": "org", "principal_id": "p", "raw_content": "   "},
+        {"uuid": "s007", "organization_id": "org", "principal_id": "p", "raw_content": "body"},
+    ]
+
+    async def content_rows(_query: str, **params: Any) -> list[dict[str, Any]]:
+        excluded = set(params["excluded"])
+        return [
+            row
+            for row in rows
+            if row["uuid"] > params["cursor"] and row.get("capture_surface") not in excluded
+        ]
+
+    monkeypatch.setattr(cycle, "_content_rows", content_rows)
+
+    assert await cycle.eligible_source_ids_above("org", "") == ["s001", "s007"]
+    assert await cycle.count_eligible_sources("org", "") == 2
+    assert await cycle.count_eligible_sources("org", "s001") == 1
+
+
+async def test_a_cursor_that_never_advances_stops_the_proposal_loop(
+    tmp_path: Path, product: Any
+) -> None:
+    """A cursor-revision conflict must not re-dispatch the same page 233 times."""
+    fake = product(RingProduct(sources=[f"s{index:03d}" for index in range(233)], advances=False))
+
+    receipt = await cycle.run_cycle(make_config(), tmp_path)
+
+    assert len(fake.calls) == 1, "the same page must not be bought twice"
+    assert receipt["proposal"]["stopped_reason"] == cycle.STOP_CURSOR_STALLED
+    assert receipt["status"] == cycle.STATUS_INCOMPLETE
+    assert cycle.STOP_CURSOR_STALLED in receipt["reasons"]
+
+
 async def test_no_eligible_sources_dispatches_nothing(tmp_path: Path, product: Any) -> None:
     fake = product(FakeProduct(sources=[]))
 
@@ -282,6 +534,39 @@ async def test_cost_ceiling_stops_dispatch_and_seals_the_receipt(
     assert receipt["reasons"][0] == "cost_ceiling_exceeded"
     assert Decimal(receipt["usage"]["cost_usd_exact"]) == Decimal("100")
     assert "drain" not in receipt
+
+
+async def test_a_tripped_ceiling_skips_the_embedding_repair(tmp_path: Path, product: Any) -> None:
+    """Repair calls the embedding provider and writes, so the guard owns it too."""
+    fake = product(
+        FakeProduct(
+            sources=[f"s{index:03d}" for index in range(233)],
+            input_tokens=10_000_000,
+            output_tokens=0,
+        )
+    )
+
+    receipt = await cycle.run_cycle(make_config(cost_ceiling_usd=Decimal("10")), tmp_path)
+
+    assert fake.repairs == 0, "no provider calls once the ceiling has tripped"
+    assert "embedding_repair" not in receipt
+    assert receipt["broker_health"]["status"] == "healthy"
+
+
+async def test_a_run_under_the_ceiling_still_repairs_embeddings(
+    tmp_path: Path, product: Any
+) -> None:
+    fake = product(FakeProduct(sources=["s000"]))
+
+    receipt = await cycle.run_cycle(make_config(expected_sources=1), tmp_path)
+
+    assert fake.repairs == 1
+    assert receipt["embedding_repair"] == {
+        "checked": 0,
+        "recovered": 0,
+        "pending": 0,
+        "failed": 0,
+    }
 
 
 # ---------------------------------------------------------------------------

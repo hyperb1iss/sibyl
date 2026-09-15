@@ -4,7 +4,11 @@ The driver owns no memory logic. It calls the product job
 ``sibyl.jobs.reflection.run_reflection_dream_cycle`` in process, with the
 product's own runtime bootstrap (schema, runtime settings, core runtime ports,
 shared Surreal connectivity, local queue broker), and stops when every original
-source is terminal. Nothing here writes to ``raw_captures`` or ``entity``.
+source is terminal. Every query the driver issues on its own account is read
+only. The one deliberate write is the closing embedding repair, which calls the
+product's ``repair_promoted_embeddings`` and so bills the embedding provider
+and stamps ``entity.name_embedding``; it runs only when the cost guard is still
+under its ceiling and the proposal loop never wrapped.
 
 Two product behaviours shape the loop.
 
@@ -15,6 +19,20 @@ pages again from the start. On 233 sources a blind third pass of 100 would pull
 over them, and pay for the repeat. So before each proposal pass the driver reads
 the dispatch cursor and counts eligible sources above it, then asks for exactly
 ``min(source_page, 100, remaining)`` and stops when nothing remains.
+
+The count only protects the run if it matches what the product will accept. The
+pager applies three filters in Python after its own SQL page, so the driver
+hydrates the same rows and replays the same tests: lifecycle recallability, the
+excluded capture surfaces (column, else ``metadata["capture_surface"]``), a
+non-empty ``principal_id`` and non-blank ``raw_content``. The fourth product
+test, the dream owner's ``pending`` callback, resolves project access and loads
+an authorized snapshot per source, which is too many round trips to replay for
+every remaining source before every pass. That leaves one residual over-count,
+authority or visibility drift between the capture row and its snapshot, so
+every proposal pass is also checked after the fact: the cursor must not move
+backwards and no consolidated source may sit at or below the cursor the pass
+started from. A pass that fails either check stops the run as
+``stopped_ring_wrap``.
 
 A candidate whose automatic correction returns ``pending`` /
 ``unresolved_progress`` keeps ``review_state='pending'`` forever and is
@@ -86,6 +104,11 @@ _SCAN_PAGE = 512
 STATUS_COMPLETE = "complete_original_cycle"
 STATUS_INCOMPLETE = "incomplete_original_cycle"
 STATUS_COST_CEILING = "stopped_cost_ceiling"
+STATUS_RING_WRAP = "stopped_ring_wrap"
+
+#: The proposal loop stops itself when a pass leaves the cursor and the
+#: remaining count exactly where it found them.
+STOP_CURSOR_STALLED = "cursor_did_not_advance"
 
 
 class CycleError(RuntimeError):
@@ -119,6 +142,53 @@ def plan_source_page(remaining: int, source_page: int) -> int:
     already-consolidated sources and pay for them a second time.
     """
     return max(0, min(source_page, PRODUCT_SOURCE_LIMIT_CEILING, remaining))
+
+
+def receipt_source_ids(receipt: dict[str, Any]) -> list[str]:
+    """Collect every source id a product receipt says it consolidated.
+
+    Mirrors the receipt's own ``sources_scanned`` accounting: cohort rows carry
+    ``source_ids``, single-source rows carry ``source_id``.
+    """
+    identifiers: list[str] = []
+    for item in receipt.get("sources") or []:
+        if not isinstance(item, dict):
+            continue
+        values = item.get("source_ids")
+        if not isinstance(values, list | tuple):
+            values = [item.get("source_id")]
+        identifiers.extend(str(value) for value in values if value is not None)
+    return identifiers
+
+
+def detect_ring_wrap(
+    *, cursor_before: str, cursor_after: str, source_ids: Sequence[str]
+) -> dict[str, Any] | None:
+    """Prove after the fact that one proposal pass did not wrap the pager.
+
+    Two observable signatures. A consolidated source at or below the cursor the
+    pass started from is a source the run already paid for. A cursor that moved
+    backwards is the pager having reset to "" and re-walked the ring, since
+    ``advance_dream_cursor`` stamps whatever source id it is handed.
+    """
+    if not cursor_before:
+        return None
+    wrapped = sorted({identifier for identifier in source_ids if identifier <= cursor_before})
+    if wrapped:
+        return {
+            "reason": "consolidated_source_at_or_below_cursor",
+            "cursor_before": cursor_before,
+            "cursor_after": cursor_after,
+            "wrapped_source_ids": wrapped,
+        }
+    if cursor_after and cursor_after < cursor_before:
+        return {
+            "reason": "cursor_moved_backwards",
+            "cursor_before": cursor_before,
+            "cursor_after": cursor_after,
+            "wrapped_source_ids": [],
+        }
+    return None
 
 
 def _as_int(value: object) -> int:
@@ -228,8 +298,10 @@ def terminal_status(
     *,
     stuck_pending: Sequence[str],
     cost_ceiling_hit: bool,
+    ring_wrap: bool = False,
+    proposal_stop: str | None = None,
 ) -> tuple[str, list[str]]:
-    """Fold the four predicates plus the two guards into one terminal status."""
+    """Fold the four predicates plus the guards into one terminal status."""
     reasons: list[str] = [
         f"predicate_{name}_unsatisfied"
         for name in sorted(predicates)
@@ -237,6 +309,10 @@ def terminal_status(
     ]
     if stuck_pending:
         reasons.append("stuck_pending_candidates")
+    if proposal_stop:
+        reasons.append(proposal_stop)
+    if ring_wrap:
+        return STATUS_RING_WRAP, ["ring_wrap_detected", *reasons]
     if cost_ceiling_hit:
         return STATUS_COST_CEILING, ["cost_ceiling_exceeded", *reasons]
     if reasons:
@@ -331,22 +407,72 @@ async def load_cursor(group_id: str) -> tuple[str, int]:
     return await load_dream_cursor(group_id)
 
 
-async def count_eligible_sources(group_id: str, cursor: str) -> int:
-    """Count dream-eligible captures above the dispatch cursor.
+def product_accepts_source(memory: Any, *, excluded: Sequence[str]) -> bool:
+    """Replay every cheap filter the product applies after its own SQL page.
 
-    Same organization and same excluded capture surfaces as the product pager,
-    so the count and the pager agree on what a remaining source is.
+    ``list_reflection_dream_source_memories`` hydrates each row and keeps it
+    only if it is currently recallable and its resolved capture surface is not
+    excluded; the dream owner's ``pending`` callback then drops any source with
+    no principal or blank content before it ever loads a snapshot. Counting a
+    row the product will drop is what makes a pass ask for more than remains
+    and wrap the pager onto already-consolidated sources.
     """
-    rows = await _content_rows(
-        "SELECT count() AS total FROM raw_captures "
-        "WHERE organization_id = $org AND uuid > $cursor "
-        "AND (capture_surface NOT IN $excluded OR capture_surface = NONE) "
-        "GROUP ALL;",
-        org=group_id,
-        cursor=cursor,
-        excluded=_excluded_capture_surfaces(),
+    from sibyl_core.services.content_models import (
+        raw_memory_capture_surface,
+        raw_memory_currently_recallable,
     )
-    return _as_int(rows[0].get("total")) if rows else 0
+
+    return (
+        raw_memory_currently_recallable(memory)
+        and raw_memory_capture_surface(memory) not in set(excluded)
+        and bool(memory.principal_id)
+        and bool(memory.raw_content.strip())
+    )
+
+
+async def eligible_source_ids_above(group_id: str, cursor: str) -> list[str]:
+    """List the captures above the cursor the product pager would accept.
+
+    Same SQL predicate as the pager, keyset paged rather than limited, then
+    hydrated through the product's own ``raw_memory_from_record`` so the
+    Python-side filters see exactly what the pager sees.
+    """
+    from sibyl_core.services.content_models import raw_memory_from_record
+
+    excluded = _excluded_capture_surfaces()
+    accepted: list[str] = []
+    scan = cursor
+    while True:
+        rows = await _content_rows(
+            "SELECT * FROM raw_captures "
+            "WHERE organization_id = $org AND uuid > $cursor "
+            "AND (capture_surface NOT IN $excluded OR capture_surface = NONE) "
+            "ORDER BY uuid ASC LIMIT $limit;",
+            org=group_id,
+            cursor=scan,
+            excluded=excluded,
+            limit=_SCAN_PAGE,
+        )
+        if not rows:
+            return accepted
+        scan = str(rows[-1]["uuid"])
+        accepted.extend(
+            memory.id
+            for memory in (raw_memory_from_record(row) for row in rows)
+            if product_accepts_source(memory, excluded=excluded)
+        )
+        if len(rows) < _SCAN_PAGE:
+            return accepted
+
+
+async def count_eligible_sources(group_id: str, cursor: str) -> int:
+    """Count the dream-eligible captures above the dispatch cursor.
+
+    Exact rather than optimistic: a SQL ``count()`` over the pager's predicate
+    alone over-counts by every row the product drops in Python, and each
+    over-count is a source budget the pager fills by wrapping.
+    """
+    return len(await eligible_source_ids_above(group_id, cursor))
 
 
 async def list_eligible_source_ids(group_id: str) -> list[str]:
@@ -669,9 +795,18 @@ async def _proposal_passes(
 ) -> dict[str, Any]:
     """Propose over every remaining source without ever wrapping the pager."""
     passes: list[dict[str, Any]] = []
+    ring_wrap: dict[str, Any] | None = None
+    stopped: str | None = None
+    previous: tuple[str, int] | None = None
     while True:
         cursor_id, cursor_revision = await load_cursor(config.group_id)
         remaining = await count_eligible_sources(config.group_id, cursor_id)
+        # A cursor-revision conflict leaves the cursor exactly where the pass
+        # found it, and the next pass would buy the same page again.
+        if previous == (cursor_id, remaining):
+            stopped = STOP_CURSOR_STALLED
+            break
+        previous = (cursor_id, remaining)
         budget = plan_source_page(remaining, config.source_page)
         if budget <= 0:
             break
@@ -688,6 +823,11 @@ async def _proposal_passes(
             source_limit=budget,
             context=context,
         )
+        consolidated = receipt_source_ids(receipt)
+        cursor_after, revision_after = await load_cursor(config.group_id)
+        ring_wrap = detect_ring_wrap(
+            cursor_before=cursor_id, cursor_after=cursor_after, source_ids=consolidated
+        )
         passes.append(
             {
                 **context,
@@ -695,8 +835,14 @@ async def _proposal_passes(
                 "sources_scanned": receipt.get("sources_scanned"),
                 "sources_reflected": receipt.get("sources_reflected"),
                 "run_id": receipt.get("run_id"),
+                "cursor_source_id_after": cursor_after,
+                "cursor_revision_after": revision_after,
+                "consolidated_sources": len(consolidated),
+                "ring_wrap": ring_wrap,
             }
         )
+        if ring_wrap is not None:
+            break
         if guard.exceeded:
             break
         if len(passes) > config.expected_sources:
@@ -705,6 +851,8 @@ async def _proposal_passes(
     return {
         "passes": passes,
         "remaining_above_cursor": await count_eligible_sources(config.group_id, cursor_id),
+        "ring_wrap": ring_wrap,
+        "stopped_reason": stopped,
     }
 
 
@@ -803,9 +951,12 @@ async def _dispatch_phases(
     receipt["original_source_ids"] = await list_eligible_source_ids(config.group_id)
     receipt["snapshot_before"] = await _snapshot(config)
     receipt["proposal"] = await _proposal_passes(config, evidence, guard)
-    if not guard.exceeded:
+    wrapped = receipt["proposal"]["ring_wrap"] is not None
+    if not guard.exceeded and not wrapped:
         receipt["drain"] = await _drain_passes(config, evidence, guard)
-    receipt["embedding_repair"] = await repair_embeddings(config.group_id)
+        # Embedding repair is the driver's one deliberate product write, and it
+        # calls the embedding provider, so a tripped ceiling has to skip it.
+        receipt["embedding_repair"] = await repair_embeddings(config.group_id)
     receipt["broker_health"] = await broker_health()
 
 
@@ -825,6 +976,8 @@ def _seal(
     receipt: dict[str, Any], guard: _CostGuard, evidence: _Evidence, errors: list[str]
 ) -> None:
     drain = receipt.get("drain") or {}
+    proposal = receipt.get("proposal") or {}
+    ring_wrap = proposal.get("ring_wrap") is not None
     predicates = receipt.get("predicates")
     if not isinstance(predicates, dict) or not predicates:
         predicates = {"a_no_pending_candidates": {"satisfied": False}}
@@ -832,9 +985,14 @@ def _seal(
         predicates,
         stuck_pending=drain.get("stuck_pending") or [],
         cost_ceiling_hit=guard.exceeded,
+        ring_wrap=ring_wrap,
+        proposal_stop=proposal.get("stopped_reason"),
     )
     if errors:
-        status = STATUS_COST_CEILING if guard.exceeded else STATUS_INCOMPLETE
+        if ring_wrap:
+            status = STATUS_RING_WRAP
+        else:
+            status = STATUS_COST_CEILING if guard.exceeded else STATUS_INCOMPLETE
         reasons = [*reasons, *(f"driver_error:{error}" for error in errors)]
     receipt.setdefault("usage", guard.usage)
     receipt["errors"] = errors
