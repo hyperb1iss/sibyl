@@ -12,6 +12,31 @@ cohort into packets that cannot carry complete evidence.
 Redis is a hard refusal rather than an override: a stray ``SIBYL_REDIS_*``
 points the coordination backend at a broker this phase does not own, and the
 consolidation work would leave the process.
+
+The ``preflight`` phase is the exception to all of that: it never starts the
+container and never reads the owner key. It runs every qualification a
+checkpoint runs before its first database read, so a staging mistake surfaces
+in seconds rather than as a ``STATUS_ERROR`` receipt halfway through a paid run.
+
+Invocation shape, from inside the staged source export::
+
+    cd $ROOT/source
+    PYTHONDONTWRITEBYTECODE=1 $ROOT/runtime/.venv/bin/python -B \\
+        -m benchmarks.agent_tasks.screen48.devbox.run_phase preflight \\
+        --output $ROOT/preflight-<utc>
+
+Both the ``-B`` and the environment variable are load-bearing, not belt and
+braces. ``runtime_pin.verify(..., worker=True)`` requires ``sys.executable`` to
+be exactly the interpreter the binding names, ``sys.dont_write_bytecode`` to be
+true and ``PYTHONDONTWRITEBYTECODE`` to be ``1``; and a single ``__pycache__``
+directory written under either the source export or the runtime root makes the
+second ``verify_owners()`` call at the end of ``qualify_originals`` disagree
+with the first. ``uv run`` is not a substitute: it would resolve a project
+environment inside the source tree, which is exactly the layout the pin rejects.
+
+``_source_commit`` reports ``unknown`` under a clean export, which has no
+``.git``. The commit that matters is the one the host binding carries, recorded
+by ``stage.sh`` and re-checked against the source manifest by ``CurrentOwners``.
 """
 
 # Imports of sibyl-facing modules stay inside functions so the phase
@@ -44,6 +69,13 @@ PHASE_ENVIRONMENT = {
 #: Passed through from the ambient environment when present, never invented.
 PASSTHROUGH_ENVIRONMENT = ("SIBYL_SURREAL_USERNAME", "SIBYL_SURREAL_PASSWORD")
 
+EXIT_OK = 0
+EXIT_PREFLIGHT_FAILED = 2
+
+#: A phase is handed its output directory, the flags this module did not parse,
+#: and the record it may add its own evidence to before the record is sealed.
+PhaseRunner = Callable[[Path, Sequence[str], dict[str, Any]], int]
+
 
 class PhaseError(RuntimeError):
     """The phase could not be prepared or run."""
@@ -70,30 +102,160 @@ def apply_environment(environ: dict[str, str] | None = None) -> list[str]:
     return sorted(names)
 
 
-def _run_cycle_phase(output: Path, extra: Sequence[str]) -> int:
+def _run_cycle_phase(output: Path, extra: Sequence[str], record: dict[str, Any]) -> int:
     from benchmarks.agent_tasks.screen48 import cycle
 
+    del record
     return cycle.main(["--output", str(output), *extra])
 
 
-def _checkpoint_phase(checkpoint: int) -> Callable[[Path, Sequence[str]], int]:
+def _checkpoint_phase(checkpoint: int) -> PhaseRunner:
     """Run one checkpoint's pack preparation, passing the host's own flags through."""
 
-    def run(output: Path, extra: Sequence[str]) -> int:
+    def run(output: Path, extra: Sequence[str], record: dict[str, Any]) -> int:
         from benchmarks.agent_tasks.screen48 import checkpoints
 
+        del record
         return checkpoints.main(["--checkpoint", str(checkpoint), "--output", str(output), *extra])
 
     return run
 
 
+def _record_check(checks: list[dict[str, Any]], name: str, call: Callable[[], Any]) -> Any:
+    """Run one preflight check and keep its outcome whether it passed or not."""
+    try:
+        detail = call()
+    except Exception as exc:  # the phase record is the evidence
+        checks.append({"check": name, "status": "failed", "error": f"{type(exc).__name__}: {exc}"})
+        return None
+    checks.append({"check": name, "status": "ok", "detail": detail})
+    return detail
+
+
+def _preflight_phase(output: Path, extra: Sequence[str], record: dict[str, Any]) -> int:
+    """Qualify the staged runtime without the owned database or the owner key.
+
+    Everything a checkpoint does before it reads a row is run here: the host
+    binding is loaded through the checkpoint phase's own loader, the private
+    dependency runtime is pinned as a worker, ``CurrentOwners`` qualifies the
+    source tree and the live import graph, the cohort archive is re-hashed over
+    the bytes ``archive_material`` consumes, and every hash-bound material file
+    is rebound. None of those touch SurrealDB.
+
+    What preflight cannot reach is named in ``not_covered`` rather than faked.
+    ``CurrentAuthority`` needs an authenticated intake context, so it needs the
+    owner key; ``qualify_originals`` reads the live ledger, the registered
+    assignments and all 233 capture snapshots, so it needs the database.
+    """
+    from benchmarks.agent_tasks.screen48 import checkpoints, contract
+    from benchmarks.agent_tasks.screen48.recall.owners import runtime_pin
+    from benchmarks.agent_tasks.screen48.recall.owners.cohort_authority import archive_material
+    from benchmarks.agent_tasks.screen48.recall.qualification import REQUIRED_OWNERS, CurrentOwners
+
+    parser = argparse.ArgumentParser(prog="screen48-preflight")
+    parser.add_argument("--host-binding", type=Path, default=None)
+    args = parser.parse_args(extra)
+
+    checks: list[dict[str, Any]] = []
+    record["checks"] = checks
+    record["database_started"] = False
+    record["owner_api_key_read"] = False
+    record["not_covered"] = {
+        "current_authority": "needs the owner API key to authenticate an intake context",
+        "qualify_originals": "needs the owned database for the ledger and the 233 snapshots",
+    }
+    record["output"] = str(output)
+
+    binding = _record_check(
+        checks,
+        "host_binding",
+        lambda: _binding_detail(checkpoints, contract, args.host_binding),
+    )
+    if binding is None:
+        return EXIT_PREFLIGHT_FAILED
+    owners = checkpoints.host_binding(args.host_binding)["owners"]
+
+    _record_check(
+        checks,
+        "dependency_runtime_pin",
+        lambda: runtime_pin.verify(owners["dependency_runtime"], worker=True),
+    )
+    _record_check(checks, "required_owners_imported", lambda: _import_owners(REQUIRED_OWNERS))
+    _record_check(checks, "current_owners_qualification", CurrentOwners(**owners))
+    _record_check(checks, "cohort_archive", lambda: _archive_detail(archive_material, binding))
+    _record_check(checks, "material_pins", lambda: _material_detail(checkpoints, contract))
+
+    failed = [check["check"] for check in checks if check["status"] != "ok"]
+    record["failed_checks"] = failed
+    return EXIT_OK if not failed else EXIT_PREFLIGHT_FAILED
+
+
+def _binding_detail(checkpoints: Any, contract: Any, path: Path | None) -> dict[str, Any]:
+    """Load the host binding and confirm it names the study's own cohort."""
+    binding = checkpoints.host_binding(path)
+    source = binding["source"]
+    if (source["organization_id"], source["principal_id"]) != (
+        contract.ORGANIZATION_ID,
+        contract.PRINCIPAL_ID,
+    ):
+        raise PhaseError("the host binding names another organization or principal")
+    owners = binding["owners"]
+    return {
+        "archive": binding["archive"],
+        "source_keys": sorted(source),
+        "source_commit": owners["source_commit"],
+        "source_root": owners["source"],
+        "source_manifest_sha256": owners["source_manifest_sha256"],
+        "owned_database_url": owners["owned_database_url"],
+        "dependency_runtime_root": owners["dependency_runtime"]["root"],
+    }
+
+
+def _import_owners(required: frozenset[str]) -> dict[str, str]:
+    """Import the owners the qualification pass insists are already loaded."""
+    import importlib
+
+    return {name: str(importlib.import_module(name).__file__) for name in sorted(required)}
+
+
+def _archive_detail(archive_material: Callable[..., dict], binding: dict[str, Any]) -> dict:
+    """Re-hash the signed cohort archive over the bytes the lane consumes."""
+    archive = binding["archive"]
+    material = archive_material(Path(archive["path"]), archive["sha256"])
+    return {
+        "sha256": archive["sha256"],
+        "members": len(material),
+        "roots": sorted(name for name in material if not name.startswith("attempts/")),
+        "attempt_members": sum(name.startswith("attempts/") for name in material),
+    }
+
+
+def _material_detail(checkpoints: Any, contract: Any) -> dict[str, Any]:
+    """Rebind every hash-pinned material file the checkpoint phase reads."""
+    library, _validator = checkpoints.summary_library()
+    geometry = contract.source_geometry()
+    tasks = {task: len(contract.public_task(task)[1]) for task in contract.TASKS}
+    return {
+        "summary_library_references": len(library),
+        "source_geometry_rows": len(geometry),
+        "training_families": len({row["training_family"] for row in geometry}),
+        "workspace_files_per_task": tasks,
+        "schedule_catalog_sha256": checkpoints.schedule_catalog_sha256(),
+    }
+
+
 #: ``--tokenizer-assets`` and ``--prior-root`` reach the checkpoint phases as
 #: unparsed extras, the same way the cycle phase receives its own flags.
-PHASES: dict[str, Callable[[Path, Sequence[str]], int]] = {
+PHASES: dict[str, PhaseRunner] = {
     "cycle": _run_cycle_phase,
     "checkpoint0": _checkpoint_phase(0),
     "checkpoint1": _checkpoint_phase(1),
+    "preflight": _preflight_phase,
 }
+
+#: Phases that read nothing out of SurrealDB, so the owned container stays as
+#: this lane found it.
+NO_DATABASE_PHASES = frozenset({"preflight"})
 
 
 def _source_commit() -> str:
@@ -128,6 +290,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = build_parser()
     args, extra = parser.parse_known_args(argv)
+    needs_database = args.phase not in NO_DATABASE_PHASES
     container_id = args.container_id or owned_db.DEFAULT_CONTAINER_ID
     socket_path = args.socket_path or owned_db.DEFAULT_SOCKET_PATH
 
@@ -138,7 +301,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "source_commit": None,
         "python_version": sys.version,
         "environment_keys_set": [],
-        "container_id": container_id,
+        "container_id": container_id if needs_database else None,
         "container_inspect_before": None,
         "container_inspect_after": None,
         "status": "error",
@@ -156,19 +319,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     exit_code = 2
+    record["database_required"] = needs_database
     try:
-        record["container_inspect_before"] = owned_db.start(container_id, socket_path=socket_path)
-        record["surreal_health"] = owned_db.wait_ready(SURREAL_URL, args.ready_timeout)
-        exit_code = PHASES[args.phase](args.output, extra)
+        if needs_database:
+            record["container_inspect_before"] = owned_db.start(
+                container_id, socket_path=socket_path
+            )
+            record["surreal_health"] = owned_db.wait_ready(SURREAL_URL, args.ready_timeout)
+        exit_code = PHASES[args.phase](args.output, extra, record)
         record["status"] = "ok" if exit_code == 0 else "failed"
     except Exception as exc:  # the phase record is the evidence
         record["status"] = "error"
         record["error"] = f"{type(exc).__name__}: {exc}"
     finally:
-        try:
-            record["container_inspect_after"] = owned_db.stop(container_id, socket_path=socket_path)
-        except owned_db.OwnedDatabaseError as exc:
-            record["stop_error"] = f"{type(exc).__name__}: {exc}"
+        if needs_database:
+            try:
+                record["container_inspect_after"] = owned_db.stop(
+                    container_id, socket_path=socket_path
+                )
+            except owned_db.OwnedDatabaseError as exc:
+                record["stop_error"] = f"{type(exc).__name__}: {exc}"
         record["exit_code"] = exit_code
         record["finished_at"] = datetime.now(UTC).isoformat()
         _write_phase_record(args.output, record)
