@@ -264,8 +264,9 @@ async def test_draining_candidates_clears_the_pending_set(tmp_path: Path, produc
 async def test_cost_ceiling_stops_dispatch_and_seals_the_receipt(
     tmp_path: Path, product: Any
 ) -> None:
-    # 10M input tokens at 5/M is 50 USD per invocation, so the first pass alone
-    # clears a 10 USD ceiling.
+    # 10M input tokens in one request sits in the long-context tier, so it bills
+    # at 10/M for 100 USD per invocation and the first pass alone clears a
+    # 10 USD ceiling.
     fake = product(
         FakeProduct(
             sources=[f"s{index:03d}" for index in range(233)],
@@ -279,7 +280,7 @@ async def test_cost_ceiling_stops_dispatch_and_seals_the_receipt(
     assert len(fake.calls) == 1, "dispatch must stop at the ceiling, not finish the ring"
     assert receipt["status"] == cycle.STATUS_COST_CEILING
     assert receipt["reasons"][0] == "cost_ceiling_exceeded"
-    assert Decimal(receipt["usage"]["cost_usd_exact"]) == Decimal("50")
+    assert Decimal(receipt["usage"]["cost_usd_exact"]) == Decimal("100")
     assert "drain" not in receipt
 
 
@@ -323,8 +324,9 @@ def test_usage_summation_mixes_complete_costs_tokens_and_failures() -> None:
 
     summary = cycle.summarize_usage(rows, **PRICES)
 
-    # 3.50 for the priced row, then 2M input at 5/M plus 100K output at 25/M.
-    assert Decimal(summary["cost_usd_exact"]) == Decimal("3.5") + Decimal("10") + Decimal("2.5")
+    # 3.50 for the priced row, then a 2M-input single request in the
+    # long-context tier: 2M at 10/M plus 100K output at 50/M.
+    assert Decimal(summary["cost_usd_exact"]) == Decimal("3.5") + Decimal("20") + Decimal("5")
     assert summary["rows"] == 4
     assert summary["rows_with_usage"] == 3
     assert summary["rows_cost_complete"] == 1
@@ -557,3 +559,17 @@ def test_apply_environment_stamps_the_study_allowance() -> None:
 
 def test_phase_registry_only_carries_cycle() -> None:
     assert sorted(run_phase.PHASES) == ["cycle"]
+
+
+def test_long_context_rows_bill_at_the_doubled_tier() -> None:
+    short = json.dumps({"input_tokens": 100_000, "output_tokens": 1_000, "requests": 1})
+    long = json.dumps({"input_tokens": 250_000, "output_tokens": 1_000, "requests": 1})
+    split = json.dumps({"input_tokens": 250_000, "output_tokens": 1_000, "requests": 2})
+    price = Decimal(10)
+    result = cycle.summarize_usage(
+        [{"state": "returned", "usage_json": row} for row in (short, long, split)],
+        price_input_per_million=price,
+        price_output_per_million=price,
+    )
+    # short: 101K tokens at 10/M = 1.01; long: 251K at 20/M = 5.02; split: 251K at 10/M = 2.51
+    assert result["cost_usd_exact"] == str(Decimal("1.01") + Decimal("5.02") + Decimal("2.51"))

@@ -130,18 +130,31 @@ def _as_int(value: object) -> int:
         return 0
 
 
+#: Requests whose input exceeds this many tokens bill at the long-context tier,
+#: which the pricing witness lists at twice the base input and output rates.
+LONG_CONTEXT_THRESHOLD_TOKENS = 200_000
+LONG_CONTEXT_MULTIPLIER = Decimal(2)
+
+
 def _token_cost(
     input_tokens: int,
     output_tokens: int,
     *,
     price_input_per_million: Decimal,
     price_output_per_million: Decimal,
+    requests: int = 1,
 ) -> Decimal:
     million = Decimal(1_000_000)
+    per_request = input_tokens / max(requests, 1)
+    tier = LONG_CONTEXT_MULTIPLIER if per_request > LONG_CONTEXT_THRESHOLD_TOKENS else Decimal(1)
     return (
-        Decimal(input_tokens) * price_input_per_million
-        + Decimal(output_tokens) * price_output_per_million
-    ) / million
+        (
+            Decimal(input_tokens) * price_input_per_million
+            + Decimal(output_tokens) * price_output_per_million
+        )
+        * tier
+        / million
+    )
 
 
 def summarize_usage(
@@ -198,6 +211,7 @@ def summarize_usage(
             output_tokens,
             price_input_per_million=price_input_per_million,
             price_output_per_million=price_output_per_million,
+            requests=max(_as_int(payload.get("requests")), 1),
         )
     return {
         **totals,
