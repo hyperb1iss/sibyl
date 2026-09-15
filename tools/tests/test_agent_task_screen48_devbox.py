@@ -4,10 +4,13 @@ Three modules are under test and one phase. ``source_manifest`` and
 ``runtime_manifest`` each mirror a verifier that lives elsewhere, so every test
 here checks the mirror against the original rather than against itself:
 ``runtime_manifest.write`` hands its output straight to ``runtime_pin.verify``,
-and the source tests assert the shape ``CurrentOwners`` reads. ``host_binding``
-is checked against ``checkpoints.OWNER_KEYS``. The ``preflight`` phase is
-checked for the one property that makes it safe to run on a live eval host: it
-never touches the owned container.
+and the differential test at the bottom walks a deliberately awkward tree with
+both ``source_manifest.inventory`` and the loop transcribed out of
+``CurrentOwners.__call__``, asserting the two agree. ``host_binding`` is checked
+against ``checkpoints.OWNER_KEYS``. The ``preflight`` phase is checked for the
+property that makes it safe to run on a live eval host, that it never touches
+the owned container, and for the one that makes it useful, that a staging
+failure lands as a named check rather than a traceback.
 
 No devbox, no database, no network.
 """
@@ -20,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -504,14 +508,24 @@ def test_a_binding_for_another_organization_is_refused(root_dir: Path) -> None:
         host_binding.validate(out)
 
 
-def test_no_credential_reaches_the_binding(root_dir: Path) -> None:
+def test_the_binding_invents_nothing_beyond_its_four_inputs(root_dir: Path) -> None:
+    """Asserting "no sk_ appears" would pass on a fixture that has no key in it.
+
+    The property that actually holds is narrower and checkable: every value in
+    the file comes from the archive arguments, the restore config's source row,
+    or stage.json. Nothing is read from the environment or from any other file,
+    so the only way a credential reaches the binding is if the operator's own
+    source row already carries one.
+    """
     stage_a_root(root_dir)
     archive = root_dir / "cohort.tar"
     digest = write_archive(archive)
-    config = write_source_config(root_dir / "source-config-v3.json")
-    out = root_dir / "host-binding.json"
+    config = write_source_config(
+        root_dir / "source-config-v3.json", stowaway="sk_a_key_the_source_row_carried"
+    )
+    monkeyed = root_dir / "host-binding.json"
     host_binding.write(
-        out,
+        monkeyed,
         host_binding.build(
             runtime_root=root_dir,
             archive=archive,
@@ -519,11 +533,37 @@ def test_no_credential_reaches_the_binding(root_dir: Path) -> None:
             source_config=config,
         ),
     )
+    written = json.loads(monkeyed.read_bytes())
 
-    text = out.read_text(encoding="utf-8")
-    assert "sk_" not in text
-    assert "api_key" not in text
-    assert "password" not in text
+    assert written["source"] == json.loads(config.read_bytes())["source"]
+    stage = json.loads((root_dir / "stage.json").read_bytes())
+    assert written["owners"]["source_commit"] == stage["source_commit"]
+    assert written["owners"]["dependency_runtime"] == stage["dependency_runtime"]
+    # Outside the verbatim source row, no value carries anything key-shaped.
+    elsewhere = json.dumps({k: v for k, v in written.items() if k != "source"})
+    assert "sk_" not in elsewhere
+    # And the stowaway rode in from the config rather than being invented here.
+    assert written["source"]["stowaway"] == "sk_a_key_the_source_row_carried"
+
+
+def test_the_environment_cannot_reach_the_binding(
+    root_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stage_a_root(root_dir)
+    archive = root_dir / "cohort.tar"
+    digest = write_archive(archive)
+    config = write_source_config(root_dir / "source-config-v3.json")
+    monkeypatch.setenv("SCREEN48_OWNER_API_KEY", "sk_must_never_be_read")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk_must_never_be_read_either")
+
+    binding = host_binding.build(
+        runtime_root=root_dir,
+        archive=archive,
+        archive_sha256=digest,
+        source_config=config,
+    )
+
+    assert "sk_must_never_be_read" not in json.dumps(binding)
 
 
 # ---------------------------------------------------------------------------
@@ -574,3 +614,163 @@ def test_preflight_never_drives_the_owned_container(
     assert record["checks"][0]["check"] == "host_binding"
     assert record["checks"][0]["status"] == "failed"
     assert sorted(record["not_covered"]) == ["current_authority", "qualify_originals"]
+
+
+def test_a_database_phase_still_drives_the_container(
+    root_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The PHASES signature changed, so prove the other phases kept their database."""
+    driven: list[str] = []
+    monkeypatch.setattr(owned_db, "start", lambda *a, **k: driven.append("start") or {"Id": "x"})
+    monkeypatch.setattr(owned_db, "stop", lambda *a, **k: driven.append("stop") or {"Id": "x"})
+    monkeypatch.setattr(run_phase, "_source_commit", lambda: "deadbeef")
+    monkeypatch.setattr(owned_db, "wait_ready", lambda *a, **k: {"status": "ok"})
+    monkeypatch.setitem(run_phase.PHASES, "cycle", lambda output, extra, record: 0)
+    for key in run_phase.PHASE_ENVIRONMENT:
+        monkeypatch.setenv(key, "restored-after-this-test")
+
+    exit_code = run_phase.main(["cycle", "--output", str(root_dir / "out")])
+
+    record = json.loads((root_dir / "out" / "phase.json").read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert driven == ["start", "stop"]
+    assert record["database_required"] is True
+    assert record["container_id"] is not None
+
+
+def preflight_binding(root_dir: Path, output: Path) -> Path:
+    """A staged root plus a binding, ready for a preflight run."""
+    stage_a_root(root_dir)
+    archive = root_dir / "cohort.tar"
+    digest = write_archive(archive)
+    config = write_source_config(root_dir / "source-config-v3.json")
+    out = root_dir / "host-binding.json"
+    host_binding.write(
+        out,
+        host_binding.build(
+            runtime_root=root_dir,
+            archive=archive,
+            archive_sha256=digest,
+            source_config=config,
+        ),
+    )
+    del output
+    return out
+
+
+def run_preflight(root_dir: Path, binding: Path, output: Path) -> dict[str, Any]:
+    exit_code = run_phase.main(
+        ["preflight", "--output", str(output), "--host-binding", str(binding)]
+    )
+    record = json.loads((output / "phase.json").read_text(encoding="utf-8"))
+    record["_exit_code"] = exit_code
+    return record
+
+
+def test_a_vanished_source_root_lands_as_a_named_check(
+    root_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CurrentOwners resolves its source strictly in __init__, before __call__.
+
+    Constructing it outside the per-check capture would send exactly this
+    failure, the one preflight exists to name, to the generic handler instead,
+    where it never reaches failed_checks.
+    """
+    monkeypatch.setattr(owned_db, "start", lambda *a, **k: pytest.fail("no container"))
+    for key in run_phase.PHASE_ENVIRONMENT:
+        monkeypatch.setenv(key, "restored-after-this-test")
+    output = root_dir / "out"
+    binding = preflight_binding(root_dir, output)
+    shutil.rmtree(root_dir / "source")
+
+    record = run_preflight(root_dir, binding, output)
+
+    named = {check["check"]: check for check in record["checks"]}
+    assert record["_exit_code"] == run_phase.EXIT_PREFLIGHT_FAILED
+    assert record["status"] == "failed"
+    assert named["host_binding"]["status"] == "ok"
+    # The pin cannot pass under pytest either, because worker=True demands that
+    # sys.executable be the binding's own interpreter. What matters is that both
+    # land as named checks rather than aborting the phase.
+    assert set(named) == {
+        "host_binding",
+        "dependency_runtime_pin",
+        "required_owners_imported",
+        "current_owners_qualification",
+        "cohort_archive",
+        "material_pins",
+    }
+    qualification = named["current_owners_qualification"]
+    assert qualification["status"] == "failed"
+    assert "FileNotFoundError" in qualification["error"]
+    assert "current_owners_qualification" in record["failed_checks"]
+
+
+def test_an_output_inside_a_qualified_tree_is_refused(
+    root_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(owned_db, "start", lambda *a, **k: pytest.fail("no container"))
+    for key in run_phase.PHASE_ENVIRONMENT:
+        monkeypatch.setenv(key, "restored-after-this-test")
+    output = root_dir / "out"
+    binding = preflight_binding(root_dir, output)
+
+    record = run_preflight(root_dir, binding, root_dir / "source" / "receipts")
+
+    assert record["_exit_code"] == run_phase.EXIT_PREFLIGHT_FAILED
+    assert record["checks"][0]["check"] == "host_binding"
+    assert "may not live inside the qualified source tree" in record["checks"][0]["error"]
+
+
+# ---------------------------------------------------------------------------
+# Differential: the mirror against the original
+# ---------------------------------------------------------------------------
+
+
+def current_owners_inventory(source: Path) -> tuple[dict[str, str], dict[str, str]]:
+    """The inventory loop transcribed verbatim from CurrentOwners.__call__.
+
+    Kept here on purpose. The manifest writer is only correct insofar as it
+    agrees with this loop, and agreement is a thing to measure rather than to
+    assert in a docstring.
+    """
+    files: dict[str, str] = {}
+    links: dict[str, str] = {}
+    for path in source.rglob("*"):
+        rel = str(path.relative_to(source))
+        if path.is_symlink():
+            links[rel] = str(path.readlink())
+            if not path.resolve(strict=True).is_relative_to(source):
+                raise AssertionError("source_symlink_escaped")
+        elif path.is_file():
+            files[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
+        elif not path.is_dir():
+            raise AssertionError("unsupported_source_file")
+    return files, links
+
+
+def test_the_manifest_walk_agrees_with_the_qualification_walk(root_dir: Path) -> None:
+    source = root_dir / "source"
+    (source / "nested" / "deep").mkdir(parents=True)
+    (source / "empty").mkdir()
+    (source / ".hidden_dir").mkdir()
+    (source / ".hidden_file").write_text("hidden\n", encoding="utf-8")
+    (source / ".hidden_dir" / "inside.py").write_text("h = 1\n", encoding="utf-8")
+    (source / "nested" / "deep" / "leaf.py").write_text("leaf = 1\n", encoding="utf-8")
+    (source / "name with spaces.md").write_text("spaced\n", encoding="utf-8")
+    (source / "ünïcodé.md").write_text("accented\n", encoding="utf-8")
+    executable = source / "run.sh"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    (source / "to_file").symlink_to("nested/deep/leaf.py")
+    (source / "to_dir").symlink_to("nested")
+    (source / "to_link").symlink_to("to_file")
+
+    files, symlinks, _modes = source_manifest.inventory(source)
+    expected_files, expected_links = current_owners_inventory(source)
+
+    assert files == expected_files
+    assert symlinks == expected_links
+    # Neither walk descends through the symlinked directory.
+    assert not any(rel.startswith("to_dir/") for rel in files)
+    assert set(symlinks) == {"to_file", "to_dir", "to_link"}

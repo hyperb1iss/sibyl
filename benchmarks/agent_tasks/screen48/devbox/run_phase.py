@@ -166,14 +166,19 @@ def _preflight_phase(output: Path, extra: Sequence[str], record: dict[str, Any])
     }
     record["output"] = str(output)
 
-    binding = _record_check(
+    # The binding is read exactly once. Everything that can raise stays inside a
+    # _record_check callable, including the CurrentOwners constructor, which
+    # resolves the source root strictly and so fails on precisely the staging
+    # mistake this phase exists to name.
+    loaded: dict[str, Any] = {}
+    detail = _record_check(
         checks,
         "host_binding",
-        lambda: _binding_detail(checkpoints, contract, args.host_binding),
+        lambda: _binding_detail(checkpoints, contract, args.host_binding, output, loaded),
     )
-    if binding is None:
+    if detail is None:
         return EXIT_PREFLIGHT_FAILED
-    owners = checkpoints.host_binding(args.host_binding)["owners"]
+    owners = loaded["binding"]["owners"]
 
     _record_check(
         checks,
@@ -181,8 +186,16 @@ def _preflight_phase(output: Path, extra: Sequence[str], record: dict[str, Any])
         lambda: runtime_pin.verify(owners["dependency_runtime"], worker=True),
     )
     _record_check(checks, "required_owners_imported", lambda: _import_owners(REQUIRED_OWNERS))
-    _record_check(checks, "current_owners_qualification", CurrentOwners(**owners))
-    _record_check(checks, "cohort_archive", lambda: _archive_detail(archive_material, binding))
+
+    def qualify_owners() -> dict[str, Any]:
+        # Constructed inside the check: __init__ resolves the source root
+        # strictly, so a moved export fails here rather than past the capture.
+        return CurrentOwners(**owners)()
+
+    _record_check(checks, "current_owners_qualification", qualify_owners)
+    _record_check(
+        checks, "cohort_archive", lambda: _archive_detail(archive_material, loaded["binding"])
+    )
     _record_check(checks, "material_pins", lambda: _material_detail(checkpoints, contract))
 
     failed = [check["check"] for check in checks if check["status"] != "ok"]
@@ -190,8 +203,14 @@ def _preflight_phase(output: Path, extra: Sequence[str], record: dict[str, Any])
     return EXIT_OK if not failed else EXIT_PREFLIGHT_FAILED
 
 
-def _binding_detail(checkpoints: Any, contract: Any, path: Path | None) -> dict[str, Any]:
-    """Load the host binding and confirm it names the study's own cohort."""
+def _binding_detail(
+    checkpoints: Any,
+    contract: Any,
+    path: Path | None,
+    output: Path,
+    loaded: dict[str, Any],
+) -> dict[str, Any]:
+    """Load the host binding, confirm the cohort, and place the output safely."""
     binding = checkpoints.host_binding(path)
     source = binding["source"]
     if (source["organization_id"], source["principal_id"]) != (
@@ -200,6 +219,16 @@ def _binding_detail(checkpoints: Any, contract: Any, path: Path | None) -> dict[
     ):
         raise PhaseError("the host binding names another organization or principal")
     owners = binding["owners"]
+    # A receipt written inside either manifested tree changes the inventory the
+    # owners just qualified, which surfaces much later as
+    # current_source_inventory_changed on a reused verify_owners.
+    for name, root in (
+        ("source", owners["source"]),
+        ("runtime", owners["dependency_runtime"]["root"]),
+    ):
+        if output.resolve().is_relative_to(Path(root).resolve()):
+            raise PhaseError(f"--output may not live inside the qualified {name} tree: {output}")
+    loaded["binding"] = binding
     return {
         "archive": binding["archive"],
         "source_keys": sorted(source),

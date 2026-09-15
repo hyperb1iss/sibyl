@@ -60,6 +60,20 @@ if [[ -e "$ROOT" ]]; then
   exit 1
 fi
 mkdir -p "$ROOT/git" "$ROOT/source" "$ROOT/runtime"
+# Staging is all-or-nothing, and the refusal above is what stops two runs from
+# sharing a root, so a failure that leaves the directory in place turns into a
+# manual rm before the next attempt. Move it aside rather than delete it: the
+# next run gets the clean name back, and a root that already cost a full uv
+# sync is still there to look at.
+set_aside() {
+  local rc=$?
+  if [[ $rc -ne 0 && -d "$ROOT" ]]; then
+    local failed="$ROOT.failed-$(date -u +%Y%m%dT%H%M%SZ)"
+    mv "$ROOT" "$failed"
+    echo "staging failed (exit $rc); moved the partial root to $failed" >&2
+  fi
+}
+trap set_aside EXIT
 
 # 1. The clone is the only remote conversation, and it never becomes the source.
 git clone --quiet "$REPO_URL" "$ROOT/git"
@@ -99,7 +113,7 @@ RUNTIME_RECEIPT="$(cd "$ROOT/source" && "$PYTHON" -B -m benchmarks.agent_tasks.s
   write --root "$ROOT/runtime" --interpreter "$PYTHON")"
 
 # 6. Host resources, inspected and never driven.
-inspect="$(curl -s --unix-socket "$SOCKET" "http://localhost/containers/${OWNED_CONTAINER}/json")"
+inspect="$(curl -sS --fail --max-time 30 --unix-socket "$SOCKET" "http://localhost/containers/${OWNED_CONTAINER}/json")"
 owned_name="$(printf '%s' "$inspect" | "$PYTHON" -B -c 'import json,sys; print(json.load(sys.stdin)["Name"])')"
 owned_state="$(printf '%s' "$inspect" | "$PYTHON" -B -c 'import json,sys; print(json.load(sys.stdin)["State"]["Status"])')"
 [[ "$owned_name" == "$OWNED_NAME_PREFIX"* ]] || { echo "container $OWNED_CONTAINER is $owned_name, not the owned restore" >&2; exit 1; }

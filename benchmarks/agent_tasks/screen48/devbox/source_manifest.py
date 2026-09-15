@@ -78,9 +78,10 @@ def assert_clean(root: Path) -> None:
 
 def build(root: Path, base_commit: str) -> dict[str, Any]:
     """Describe the staged tree as the manifest the owners read."""
-    resolved = root.resolve(strict=True)
-    if any(parent.is_symlink() for parent in (resolved, *resolved.parents)):
+    absolute = Path(root).absolute()
+    if any(parent.is_symlink() for parent in (absolute, *absolute.parents)):
         raise SourceManifestError(f"the staged source path traverses a symlink: {root}")
+    resolved = absolute.resolve(strict=True)
     files, symlinks, modes = inventory(resolved)
     return {
         "schema": SCHEMA,
