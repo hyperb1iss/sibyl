@@ -807,3 +807,30 @@ def test_the_manifest_walk_agrees_with_the_qualification_walk(root_dir: Path) ->
     # Neither walk descends through the symlinked directory.
     assert not any(rel.startswith("to_dir/") for rel in files)
     assert set(symlinks) == {"to_file", "to_dir", "to_link"}
+
+
+def test_eval_issuers_file_wraps_one_issuer_and_names_the_variable(tmp_path: Path) -> None:
+    issuer = {
+        "issuer_id": "issuer",
+        "organization_id": "org",
+        "experiment_id": "exp",
+        "experiment_revision": "rev",
+        "public_key_base64": "AAAA",
+        "controller_policy_sha256": "0" * 64,
+    }
+    path = tmp_path / "issuer.json"
+    path.write_text(json.dumps(issuer), encoding="utf-8")
+    environ: dict[str, str] = {}
+
+    names = run_phase.apply_environment(environ, eval_issuers_file=path)
+
+    assert json.loads(environ[run_phase.EVAL_ISSUERS_ENV]) == [issuer]
+    assert run_phase.EVAL_ISSUERS_ENV in names
+
+
+def test_eval_issuers_file_refuses_an_incomplete_issuer(tmp_path: Path) -> None:
+    path = tmp_path / "issuer.json"
+    path.write_text(json.dumps({"issuer_id": "only"}), encoding="utf-8")
+
+    with pytest.raises(run_phase.PhaseError, match="complete issuer"):
+        run_phase.load_eval_issuers(path)

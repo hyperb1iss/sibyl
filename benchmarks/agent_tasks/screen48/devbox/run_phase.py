@@ -71,7 +71,16 @@ PHASE_ENVIRONMENT = {
 }
 
 #: Passed through from the ambient environment when present, never invented.
-PASSTHROUGH_ENVIRONMENT = ("SIBYL_SURREAL_USERNAME", "SIBYL_SURREAL_PASSWORD")
+PASSTHROUGH_ENVIRONMENT = (
+    "SIBYL_SURREAL_USERNAME",
+    "SIBYL_SURREAL_PASSWORD",
+    "SIBYL_EVAL_ISSUERS",
+)
+
+#: The API settings field that authorizes an eval experiment's outcome issuer.
+#: The checkpoint phase requalifies the signed cohort archive through the
+#: product's eval routes, which refuse an issuer that is not in this list.
+EVAL_ISSUERS_ENV = "SIBYL_EVAL_ISSUERS"
 
 EXIT_OK = 0
 EXIT_PREFLIGHT_FAILED = 2
@@ -95,10 +104,39 @@ def assert_no_redis(environ: dict[str, str] | None = None) -> None:
         )
 
 
-def apply_environment(environ: dict[str, str] | None = None) -> list[str]:
+def load_eval_issuers(path: Path) -> str:
+    """Read an issuer file and return the JSON list the settings field expects.
+
+    The file holds either one issuer object or a list of them; a single object
+    is wrapped so the configured trust always parses as a list.
+    """
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise PhaseError(f"eval issuers file is unreadable: {path}: {exc}") from exc
+    issuers = payload if isinstance(payload, list) else [payload]
+    required = {
+        "issuer_id",
+        "organization_id",
+        "experiment_id",
+        "experiment_revision",
+        "public_key_base64",
+        "controller_policy_sha256",
+    }
+    for issuer in issuers:
+        if not isinstance(issuer, dict) or not required <= set(issuer):
+            raise PhaseError(f"eval issuers file lacks a complete issuer: {path}")
+    return json.dumps(issuers, sort_keys=True, separators=(",", ":"))
+
+
+def apply_environment(
+    environ: dict[str, str] | None = None, *, eval_issuers_file: Path | None = None
+) -> list[str]:
     """Stamp the phase environment and report the variable names that were set."""
     target = os.environ if environ is None else environ
     names: list[str] = []
+    if eval_issuers_file is not None:
+        target[EVAL_ISSUERS_ENV] = load_eval_issuers(eval_issuers_file)
     for key, value in PHASE_ENVIRONMENT.items():
         target[key] = value
         names.append(key)
@@ -330,6 +368,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--socket-path", default=None)
     parser.add_argument("--ready-timeout", type=float, default=120.0)
     parser.add_argument("--host-binding", type=Path, default=None)
+    parser.add_argument("--eval-issuers-file", type=Path, default=None)
     return parser
 
 
@@ -375,7 +414,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     }
     try:
         assert_no_redis()
-        record["environment_keys_set"] = apply_environment()
+        record["environment_keys_set"] = apply_environment(eval_issuers_file=args.eval_issuers_file)
         record["source_commit"] = _source_commit()
     except (PhaseError, OSError, ValueError) as exc:
         record["error"] = f"{type(exc).__name__}: {exc}"
