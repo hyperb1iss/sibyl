@@ -1074,7 +1074,7 @@ tasks:
       cache: false
 
   agent-task-test:
-    command: uv run pytest tools/tests/test_agent_task_transfer_report.py tools/tests/test_agent_task_sealed_report.py tools/tests/test_agent_task_sealed_evaluator.py tools/tests/test_agent_task_learning_run.py tools/tests/test_agent_task_runner.py tools/tests/test_agent_task_coding_controller.py tools/tests/test_agent_task_development_corpus.py tools/tests/test_agent_task_learning_corpus.py tools/tests/test_agent_task_screen48_recall.py tools/tests/test_agent_task_screen48_launch.py tools/tests/test_agent_task_screen48_cycle.py tools/tests/test_agent_task_screen48_checkpoints.py -v
+    command: uv run pytest tools/tests/test_agent_task_transfer_report.py tools/tests/test_agent_task_sealed_report.py tools/tests/test_agent_task_sealed_evaluator.py tools/tests/test_agent_task_learning_run.py tools/tests/test_agent_task_runner.py tools/tests/test_agent_task_coding_controller.py tools/tests/test_agent_task_development_corpus.py tools/tests/test_agent_task_learning_corpus.py tools/tests/test_agent_task_screen48_recall.py tools/tests/test_agent_task_screen48_launch.py tools/tests/test_agent_task_screen48_cycle.py tools/tests/test_agent_task_screen48_checkpoints.py tools/tests/test_agent_task_screen48_devbox.py -v
     inputs:
       - apps/api/src/**/*.py
       - packages/python/sibyl-core/src/**/*.py
@@ -1091,6 +1091,7 @@ tasks:
       - tools/tests/test_agent_task_screen48_launch.py
       - tools/tests/test_agent_task_screen48_cycle.py
       - tools/tests/test_agent_task_screen48_checkpoints.py
+      - tools/tests/test_agent_task_screen48_devbox.py
       - benchmarks/agent_tasks/development/**/*
       - benchmarks/agent_tasks/screen48/material/**/*
       - benchmarks/agent_tasks/screen48/schedule/**/*
@@ -1101,7 +1102,7 @@ tasks:
     command:
       uv run pytest tools/tests/test_agent_task_transfer_report.py tools/tests/test_agent_task_sealed_report.py tools/tests/test_agent_task_sealed_evaluator.py tools/tests/test_agent_task_learning_run.py tools/tests/test_agent_task_runner.py tools/tests/test_agent_task_coding_controller.py
       tools/tests/test_agent_task_development_corpus.py tools/tests/test_agent_task_learning_corpus.py
-      tools/tests/test_agent_task_screen48_recall.py tools/tests/test_agent_task_screen48_launch.py tools/tests/test_agent_task_screen48_cycle.py tools/tests/test_agent_task_screen48_checkpoints.py
+      tools/tests/test_agent_task_screen48_recall.py tools/tests/test_agent_task_screen48_launch.py tools/tests/test_agent_task_screen48_cycle.py tools/tests/test_agent_task_screen48_checkpoints.py tools/tests/test_agent_task_screen48_devbox.py
       tools/tests/test_evidence_bundle.py
       tools/tests/test_benchmark_git_provenance.py tools/tests/test_bench_gate.py
       tools/tests/test_compare_eval_reports.py tools/tests/test_context_pack_eval_script.py
