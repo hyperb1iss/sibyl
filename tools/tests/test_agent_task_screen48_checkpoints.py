@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -20,6 +21,7 @@ from uuid import UUID
 
 import pytest
 from benchmarks.agent_tasks.screen48 import checkpoints, contract, cycle, materialize
+from benchmarks.agent_tasks.screen48.recall import whole_items
 
 #: The frozen schedule's catalog digest, pinned here so a silent material or
 #: database swap cannot quietly agree with itself.
@@ -28,6 +30,12 @@ SCHEDULE_CATALOG_SHA256 = "d2d406d004e71ced67ae7dd8af52d2b2bbd0ac6330cf8616b6c3d
 MATERIALIZE_KEYS = frozenset(
     {"status", "reason", "checkpoint", "task", "arm", "memory", "counts", "catalog_sha256"}
 )
+
+#: A value that is not a credential, used only to prove nothing writes it down.
+OWNER_KEY_FIXTURE = "screen48-fixture-owner-value-not-a-credential"
+
+#: 24 receipts, 24 memory siblings, the catalog, the inventory and the receipt.
+CHECKPOINT_ARTIFACT_FLOOR = 50
 
 
 class FakeCatalog:
@@ -133,6 +141,45 @@ class FakeAdapter:
             "memory": memory,
             "counts": {"memory_tokens": len(memory), "fits": True},
         }
+
+
+class FakeSummaryCatalog:
+    """The catalog surface ``summary_items`` reads: families, and a bound receipt."""
+
+    def __init__(self, references: dict[str, Any]) -> None:
+        self.rows = {
+            source_id: {"training_family": family}
+            for family, reference in references.items()
+            for source_id in reference["source_ids"]
+        }
+        self.organization_id = contract.ORGANIZATION_ID
+        self.catalog_sha256 = contract.digest(self.receipt())
+
+    def receipt(self) -> dict[str, Any]:
+        return {"source_ids": sorted(self.rows)}
+
+
+class QuarterCounter:
+    """A summary counter well under the policy ceiling, so the ceiling is not what fails."""
+
+    def count(self, text: str) -> int:
+        return len(text) // 4
+
+
+def cell_pack(**overrides: Any) -> dict[str, Any]:
+    """A preparation receipt carrying the four coordinates, before any tampering."""
+    return {
+        "checkpoint": 0,
+        "task": contract.TASKS[0],
+        "arm": "raw_retrieval",
+        "catalog_sha256": SCHEDULE_CATALOG_SHA256,
+        **overrides,
+    }
+
+
+def rewrite_json(path: Path, payload: Any) -> None:
+    """Rewrite one sealed artifact in place, exactly as a tamperer would."""
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def raw_only_inventory(count: int = 2) -> tuple[dict, dict]:
@@ -389,6 +436,9 @@ def test_checkpoint_one_hands_the_prior_to_raw_and_summary_only(tmp_path: Path, 
 
     assert run(1, one, prior_root=zero) == 0
 
+    # The digest handed to the adapter is the one checkpoint 0 sealed for that
+    # cell, not one recomputed from the file the adapter is about to be given.
+    sealed_zero = {(row["task"], row["arm"]): row for row in receipt_of(zero)["cells"]}
     for call in state.calls:
         prior_expected = call["arm"] in checkpoints.CP1_PRIOR_ARMS
         assert (call["prior"] is not None) is prior_expected, call["arm"]
@@ -397,10 +447,18 @@ def test_checkpoint_one_hands_the_prior_to_raw_and_summary_only(tmp_path: Path, 
         prior = call["prior"]
         assert prior == pack_of(zero, 0, call["task"], call["arm"])
         assert (prior["checkpoint"], prior["task"], prior["arm"]) == (0, call["task"], call["arm"])
-        assert call["prior_sha256"] == contract.digest(prior)
+        assert (
+            call["prior_sha256"] == sealed_zero[(call["task"], call["arm"])]["pack_receipt_sha256"]
+        )
     assert sum(call["prior"] is not None for call in state.calls) == 12
 
-    rows = {(row["task"], row["arm"]): row for row in receipt_of(one)["cells"]}
+    receipt = receipt_of(one)
+    assert receipt["prior_bindings"] == {
+        "root": str(zero),
+        "bound_cells": 24,
+        "unbound_reason": None,
+    }
+    rows = {(row["task"], row["arm"]): row for row in receipt["cells"]}
     assert rows[(contract.TASKS[0], "raw_retrieval")]["prior"]["status"] == "loaded"
     assert rows[(contract.TASKS[0], "native")]["prior"] is None
 
@@ -436,6 +494,99 @@ def test_an_absent_prior_receipt_is_never_invented(tmp_path: Path, state: Any) -
     assert absent["prior"]["status"] == "absent"
     assert absent["status"] == "missing_pack"
     assert not (one / "packs" / "cp0" / contract.TASKS[0] / "raw_retrieval.txt").exists()
+
+
+def test_a_rewritten_prior_pack_is_unbound_and_never_reused(tmp_path: Path, state: Any) -> None:
+    """A cp0 pack rewritten on disk no longer matches what cp0 sealed for that cell."""
+    zero = tmp_path / "cp0"
+    assert run(0, zero) == 0
+    path = zero / "packs" / "cp0" / contract.TASKS[0] / "raw_retrieval.json"
+    tampered = json.loads(path.read_text(encoding="utf-8"))
+    tampered["memory"] = "pack cp0 venue-capacity-report raw_retrieval, rewritten by hand\n"
+    tampered["counts"] = {"memory_tokens": 7, "fits": True}
+    rewrite_json(path, tampered)
+    state.calls.clear()
+    state.items, state.inventory = consolidated_inventory()
+    one = tmp_path / "cp1"
+
+    assert run(1, one, prior_root=zero) == 2
+
+    sealed = receipt_of(one)
+    rows = {(row["task"], row["arm"]): row for row in sealed["cells"]}
+    row = rows[(contract.TASKS[0], "raw_retrieval")]
+    assert row["prior"] == {
+        "status": checkpoints.PRIOR_UNBOUND,
+        "reason": "prior_receipt_digest_mismatch",
+        "path": str(path),
+        "sha256": contract.digest(tampered),
+    }
+    assert row["status"] == "missing_pack"
+    assert row["reason"] == "qualified_checkpoint_zero_pack_missing"
+    assert sealed["prepared"] == 23
+    assert sealed["missing_reasons"] == {"qualified_checkpoint_zero_pack_missing": 1}
+    # The adapter was never handed the rewritten pack, and the other eleven
+    # reusing cells still bind, so the refusal is the tampering and nothing else.
+    handed = {(call["task"], call["arm"]): call for call in state.calls}
+    assert handed[(contract.TASKS[0], "raw_retrieval")]["prior"] is None
+    assert handed[(contract.TASKS[0], "raw_retrieval")]["prior_sha256"] is None
+    assert sum(call["prior"] is not None for call in state.calls) == 11
+
+
+def test_a_prior_root_sealed_against_another_catalog_binds_nothing(
+    tmp_path: Path, state: Any
+) -> None:
+    zero = tmp_path / "cp0"
+    assert run(0, zero) == 0
+    sealed_zero = json.loads((zero / checkpoints.RECEIPT_NAME).read_text(encoding="utf-8"))
+    sealed_zero["catalog_sha256"] = "0" * 64
+    rewrite_json(zero / checkpoints.RECEIPT_NAME, sealed_zero)
+    state.calls.clear()
+    one = tmp_path / "cp1"
+
+    assert run(1, one, prior_root=zero) == 2
+
+    sealed = receipt_of(one)
+    assert sealed["prior_bindings"] == {
+        "root": str(zero),
+        "bound_cells": 0,
+        "unbound_reason": "prior_checkpoint_receipt_catalog_disagrees",
+    }
+    assert sealed["prepared"] == 12
+    assert sealed["missing_reasons"] == {"qualified_checkpoint_zero_pack_missing": 12}
+    rows = {(row["task"], row["arm"]): row for row in sealed["cells"]}
+    assert rows[(contract.TASKS[0], "strong_summary")]["prior"] == {
+        "status": checkpoints.PRIOR_UNBOUND,
+        "reason": "prior_checkpoint_receipt_catalog_disagrees",
+        "path": str(zero / "packs" / "cp0" / contract.TASKS[0] / "strong_summary.json"),
+        "sha256": None,
+    }
+    assert all(call["prior"] is None for call in state.calls)
+
+
+def test_a_prior_root_that_is_not_checkpoint_zero_binds_nothing(tmp_path: Path) -> None:
+    root = tmp_path / "cp1-as-prior"
+    root.mkdir()
+    rewrite_json(
+        root / checkpoints.RECEIPT_NAME,
+        {"checkpoint": 1, "catalog_sha256": SCHEDULE_CATALOG_SHA256, "cells": []},
+    )
+    assert checkpoints.prior_bindings(root, catalog_sha256=SCHEDULE_CATALOG_SHA256) == (
+        {},
+        "prior_checkpoint_receipt_is_not_checkpoint_zero",
+    )
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert checkpoints.prior_bindings(empty, catalog_sha256=SCHEDULE_CATALOG_SHA256) == (
+        {},
+        "prior_checkpoint_receipt_absent",
+    )
+
+    (root / checkpoints.RECEIPT_NAME).write_text("{not json", encoding="utf-8")
+    assert checkpoints.prior_bindings(root, catalog_sha256=SCHEDULE_CATALOG_SHA256) == (
+        {},
+        "prior_checkpoint_receipt_unreadable",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -491,6 +642,63 @@ async def test_an_incomplete_catalog_fails_the_phase(tmp_path: Path, state: Any)
     assert receipt_of(output)["status"] == checkpoints.STATUS_ERROR
 
 
+def test_a_queue_that_will_not_drain_fails_a_full_checkpoint(
+    tmp_path: Path, state: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Twenty-four prepared cells and a wedged runtime is not a complete checkpoint."""
+
+    async def wedged() -> None:
+        raise RuntimeError("the job queue did not drain")
+
+    monkeypatch.setattr(cycle, "shutdown_runtime", wedged)
+    output = tmp_path / "cp0"
+
+    assert run(0, output) == 2
+
+    sealed = receipt_of(output)
+    assert sealed["prepared"] == sealed["denominator"] == 24
+    assert sealed["status"] == checkpoints.STATUS_PREPARED
+    assert sealed["errors"] == ["shutdown:RuntimeError: the job queue did not drain"]
+
+
+def test_an_unreadable_schedule_still_seals_a_receipt(
+    tmp_path: Path, state: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The receipt is reserved before the first binding is read, so nothing runs unrecorded."""
+
+    def unreadable() -> str:
+        raise checkpoints.CheckpointError("the frozen schedule names no source catalog")
+
+    monkeypatch.setattr(checkpoints, "schedule_catalog_sha256", unreadable)
+    output = tmp_path / "cp0"
+
+    assert run(0, output) == 2
+
+    sealed = receipt_of(output)
+    assert sealed["status"] == checkpoints.STATUS_ERROR
+    assert sealed["schedule_source_catalog_sha256"] is None
+    assert sealed["errors"] == ["CheckpointError: the frozen schedule names no source catalog"]
+    assert sealed["finished_at"] >= sealed["started_at"]
+    assert state.qualified == []
+
+
+def test_an_unexpected_failure_exits_two_rather_than_tracing_back(
+    tmp_path: Path, state: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    async def blows_up() -> None:
+        raise ZeroDivisionError("the runtime came apart")
+
+    monkeypatch.setattr(cycle, "bootstrap_runtime", blows_up)
+    output = tmp_path / "cp0"
+
+    assert run(0, output) == 2
+
+    sealed = receipt_of(output)
+    assert sealed["status"] == checkpoints.STATUS_ERROR
+    assert sealed["errors"] == ["ZeroDivisionError: the runtime came apart"]
+    assert "ZeroDivisionError: the runtime came apart" in capsys.readouterr().err
+
+
 @pytest.mark.asyncio
 async def test_an_unknown_checkpoint_is_refused(tmp_path: Path, state: Any) -> None:
     with pytest.raises(checkpoints.CheckpointError, match="unknown checkpoint"):
@@ -508,11 +716,54 @@ def test_a_receipt_outside_its_cell_is_refused() -> None:
 
 
 def test_an_unprepared_pack_may_not_carry_memory() -> None:
-    pack = {"status": "missing_pack", "reason": "raw_required_lane_incomplete", "memory": "text"}
+    pack = cell_pack(status="missing_pack", reason="raw_required_lane_incomplete", memory="text")
     with pytest.raises(checkpoints.CheckpointError, match="carries memory"):
         checkpoints.coordinate(
-            pack, checkpoint=0, task=contract.TASKS[0], arm="raw_retrieval", catalog="a" * 64
+            pack,
+            checkpoint=0,
+            task=contract.TASKS[0],
+            arm="raw_retrieval",
+            catalog=SCHEDULE_CATALOG_SHA256,
         )
+
+
+@pytest.mark.parametrize("absent", ["catalog_sha256", "arm", "task", "checkpoint"])
+def test_a_receipt_that_names_no_coordinate_is_refused(absent: str) -> None:
+    """A silent stamp would invent the coordinates this module promises never to invent."""
+    pack = cell_pack(status="prepared", memory="text", counts={"fits": True})
+    del pack[absent]
+
+    with pytest.raises(checkpoints.CheckpointError, match=f"disagrees on {absent}"):
+        checkpoints.coordinate(
+            pack,
+            checkpoint=0,
+            task=contract.TASKS[0],
+            arm="raw_retrieval",
+            catalog=SCHEDULE_CATALOG_SHA256,
+        )
+
+
+def test_the_no_memory_arm_carries_the_empty_string_and_nothing_else() -> None:
+    carrying = cell_pack(arm="no_memory", status="prepared", memory="a leaked summary")
+    with pytest.raises(checkpoints.CheckpointError, match="no-memory arm carries memory"):
+        checkpoints.coordinate(
+            carrying,
+            checkpoint=0,
+            task=contract.TASKS[0],
+            arm="no_memory",
+            catalog=SCHEDULE_CATALOG_SHA256,
+        )
+
+    empty = cell_pack(arm="no_memory", status="prepared", memory="")
+    document = checkpoints.coordinate(
+        empty,
+        checkpoint=0,
+        task=contract.TASKS[0],
+        arm="no_memory",
+        catalog=SCHEDULE_CATALOG_SHA256,
+    )
+    assert document["memory"] == ""
+    assert document["status"] == "prepared"
 
 
 # ---------------------------------------------------------------------------
@@ -551,6 +802,120 @@ def test_the_summary_library_validator_only_rebinds_the_accepted_library(
     rewritten = {**references, sorted(references)[0]: {"text": "invented"}}
     with pytest.raises(ValueError, match="not_the_accepted_library"):
         validate(rewritten, catalog_receipt)
+
+
+def test_the_vendored_library_builds_items_through_the_real_item_builder() -> None:
+    """The real validator, composed with the real ``summary_items``, on the real library."""
+    references, validate = checkpoints.summary_library()
+    catalog = FakeSummaryCatalog(references)
+    assert len(catalog.rows) == contract.SOURCE_COUNT
+
+    items = whole_items.summary_items(references, catalog, QuarterCounter(), validate)
+
+    assert [item.id for item in items] == sorted(references)
+    assert len(items) == contract.FAMILY_COUNT
+    first = sorted(references)[0]
+    assert items[0].block.startswith(f'<summary id="{first}" sha256=')
+    assert references[first]["text"] in items[0].block
+    # The evidence travels without the summary text it already carries in the block.
+    assert "text" not in items[0].evidence
+    assert items[0].evidence["text_sha256"] == references[first]["text_sha256"]
+
+    altered = {
+        **references,
+        first: {**references[first], "text": references[first]["text"] + " and one more claim"},
+    }
+    with pytest.raises(whole_items.MissingPack, match="not_the_accepted_library"):
+        whole_items.summary_items(altered, catalog, QuarterCounter(), validate)
+
+
+def bind_owner_key_path(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    auth: Any,
+    context: Any,
+    allows_rest: bool = True,
+) -> list[str]:
+    """Stand in for the product's own API-key path, recording the key it was handed."""
+    seen: list[str] = []
+
+    async def authenticate_api_key(raw_key: str) -> Any:
+        seen.append(raw_key)
+        return auth
+
+    async def resolve_auth_context(*, claims: Any) -> Any:
+        return context
+
+    monkeypatch.setitem(
+        sys.modules,
+        "sibyl.auth.dependencies",
+        SimpleNamespace(
+            _api_key_allows_rest=lambda *, scopes, method: allows_rest,
+            _api_key_claims=lambda auth, *, scopes: {"scopes": scopes},
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "sibyl.persistence.auth_runtime",
+        SimpleNamespace(
+            authenticate_api_key=authenticate_api_key,
+            resolve_auth_context=resolve_auth_context,
+        ),
+    )
+    return seen
+
+
+def owner_context(organization_id: str = contract.ORGANIZATION_ID) -> SimpleNamespace:
+    return SimpleNamespace(organization_id=organization_id, user_id=contract.PRINCIPAL_ID)
+
+
+@pytest.mark.asyncio
+async def test_the_owner_key_path_is_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    authenticated = SimpleNamespace(scopes=["memory:read"])
+    monkeypatch.delenv(checkpoints.OWNER_API_KEY_ENV, raising=False)
+    bind_owner_key_path(monkeypatch, auth=authenticated, context=owner_context())
+    with pytest.raises(checkpoints.CheckpointError, match="must carry the study organization"):
+        await checkpoints.authenticated_intake(contract.ORGANIZATION_ID, contract.PRINCIPAL_ID)
+
+    monkeypatch.setenv(checkpoints.OWNER_API_KEY_ENV, OWNER_KEY_FIXTURE)
+    bind_owner_key_path(monkeypatch, auth=None, context=owner_context())
+    with pytest.raises(checkpoints.CheckpointError, match="did not authenticate"):
+        await checkpoints.authenticated_intake(contract.ORGANIZATION_ID, contract.PRINCIPAL_ID)
+
+    bind_owner_key_path(monkeypatch, auth=authenticated, context=owner_context(), allows_rest=False)
+    with pytest.raises(checkpoints.CheckpointError, match="cannot read through REST"):
+        await checkpoints.authenticated_intake(contract.ORGANIZATION_ID, contract.PRINCIPAL_ID)
+
+    elsewhere = owner_context(organization_id="6f2f1a6c-0000-4000-8000-000000000000")
+    bind_owner_key_path(monkeypatch, auth=authenticated, context=elsewhere)
+    with pytest.raises(checkpoints.CheckpointError, match="belongs to another organization"):
+        await checkpoints.authenticated_intake(contract.ORGANIZATION_ID, contract.PRINCIPAL_ID)
+
+    context = owner_context()
+    seen = bind_owner_key_path(monkeypatch, auth=authenticated, context=context)
+    assert (
+        await checkpoints.authenticated_intake(contract.ORGANIZATION_ID, contract.PRINCIPAL_ID)
+        is context
+    )
+    assert seen == [OWNER_KEY_FIXTURE]
+
+
+def test_the_owner_key_never_reaches_the_output_tree(
+    tmp_path: Path, state: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(checkpoints.OWNER_API_KEY_ENV, OWNER_KEY_FIXTURE)
+    output = tmp_path / "cp0"
+
+    assert run(0, output) == 0
+
+    written = [path for path in output.rglob("*") if path.is_file()]
+    assert len(written) > CHECKPOINT_ARTIFACT_FLOOR
+    leaked = [
+        path
+        for path in written
+        if OWNER_KEY_FIXTURE in path.read_text(encoding="utf-8", errors="replace")
+    ]
+    assert leaked == []
 
 
 def test_the_host_binding_names_every_owner(tmp_path: Path) -> None:

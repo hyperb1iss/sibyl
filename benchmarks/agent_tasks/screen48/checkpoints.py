@@ -41,6 +41,12 @@ Outputs, all under ``--output``:
 ``packs/cp{checkpoint}/{task}/{arm}.json`` and ``{arm}.txt``
     One preparation receipt per cell, beside the exact memory bytes when the
     cell was prepared. ``materialize`` reads precisely this layout.
+
+At checkpoint 1 the two reusing arms are handed their checkpoint-0 pack, and the
+digest that travels with it is the one ``--prior-root``'s own sealed
+``checkpoint.json`` recorded for that cell, never a digest recomputed from the
+file just read. A prior whose bytes no longer hash to what checkpoint 0 sealed
+is therefore unbound rather than trusted, and the cell stays ``missing_pack``.
 """
 
 # Product-facing imports stay inside functions: run_phase stamps SIBYL_* into
@@ -127,6 +133,9 @@ STATUS_DERIVED_AT_ZERO = "native_inventory_not_raw_original_only"
 STATUS_CATALOG_DISAGREES = "source_catalog_disagrees_with_schedule"
 STATUS_ERROR = "error"
 STATUS_RUNNING = "running"
+
+#: A prior pack the sealed checkpoint-0 receipt does not vouch for.
+PRIOR_UNBOUND = "unbound"
 
 EXIT_OK = 0
 EXIT_INCOMPLETE = 2
@@ -305,7 +314,9 @@ def coordinate(pack: dict[str, Any], *, checkpoint: int, task: str, arm: str, ca
         "catalog_sha256": catalog,
     }
     for key, value in coordinates.items():
-        if pack.get(key, value) != value:
+        # A receipt that names no coordinate is not a receipt for this cell:
+        # stamping one would invent the pack this module promises never to invent.
+        if key not in pack or pack[key] != value:
             raise CheckpointError(f"preparation receipt disagrees on {key}: cp{checkpoint}/{task}")
     document = {**pack, **coordinates}
     if document.get("status") not in {"prepared", "missing_pack"}:
@@ -322,21 +333,72 @@ def coordinate(pack: dict[str, Any], *, checkpoint: int, task: str, arm: str, ca
     return document
 
 
-def load_prior(prior_root: Path | None, task: str, arm: str) -> tuple[dict | None, dict]:
+def prior_bindings(
+    prior_root: Path | None, *, catalog_sha256: str
+) -> tuple[dict[tuple[str, str], str], str | None]:
+    """Read the prior run's sealed receipt: the only authority on its own packs.
+
+    Returns the per-cell pack digests checkpoint 0 recorded, or the reason this
+    prior root binds nothing at all. Recomputing a digest from the pack file
+    would bind the file to itself and vouch for any rewrite of it.
+    """
+    if prior_root is None:
+        return {}, None
+    path = Path(prior_root) / RECEIPT_NAME
+    if path.is_symlink() or not path.is_file():
+        return {}, "prior_checkpoint_receipt_absent"
+    try:
+        sealed: Any = json.loads(path.read_bytes())
+    except ValueError:
+        sealed = None
+    reason: str | None = None
+    if not isinstance(sealed, dict):
+        reason = "prior_checkpoint_receipt_unreadable"
+    elif sealed.get("checkpoint") != 0:
+        reason = "prior_checkpoint_receipt_is_not_checkpoint_zero"
+    elif sealed.get("catalog_sha256") != catalog_sha256:
+        reason = "prior_checkpoint_receipt_catalog_disagrees"
+    if reason is not None:
+        return {}, reason
+    bindings: dict[tuple[str, str], str] = {}
+    for row in sealed.get("cells") or []:
+        sha256 = row.get("pack_receipt_sha256") if isinstance(row, dict) else None
+        if isinstance(sha256, str) and sha256:
+            bindings[(str(row.get("task")), str(row.get("arm")))] = sha256
+    return bindings, None
+
+
+def load_prior(
+    prior_root: Path | None,
+    task: str,
+    arm: str,
+    *,
+    bound_sha256: str | None = None,
+    unbound_reason: str | None = None,
+) -> tuple[dict | None, dict]:
     """Read one checkpoint-0 receipt; an absent prior stays absent, never invented."""
     if prior_root is None:
         return None, {"status": "no_prior_root", "path": None, "sha256": None}
     path = Path(prior_root) / PACKS_DIRNAME / "cp0" / task / f"{arm}.json"
     record = {"status": "absent", "path": str(path), "sha256": None}
+    if unbound_reason is not None:
+        return None, {**record, "status": PRIOR_UNBOUND, "reason": unbound_reason}
     if path.is_symlink() or not path.is_file():
         return None, record
     try:
-        prior = json.loads(path.read_bytes())
+        prior: Any = json.loads(path.read_bytes())
     except ValueError:
-        return None, {**record, "status": "unreadable"}
+        prior = None
     if not isinstance(prior, dict):
         return None, {**record, "status": "unreadable"}
-    return prior, {**record, "status": "loaded", "sha256": contract.digest(prior)}
+    record = {**record, "sha256": contract.digest(prior)}
+    if bound_sha256 is None:
+        reason = "prior_checkpoint_receipt_names_no_such_cell"
+    elif record["sha256"] != bound_sha256:
+        reason = "prior_receipt_digest_mismatch"
+    else:
+        return prior, {**record, "status": "loaded"}
+    return None, {**record, "status": PRIOR_UNBOUND, "reason": reason}
 
 
 def inventory_shape(items: dict, receipt: dict) -> dict[str, Any]:
@@ -385,6 +447,15 @@ async def _prepare_cells(
     cells: list[dict[str, Any]] = []
     reasons: dict[str, int] = {}
     prepared = 0
+    bindings: dict[tuple[str, str], str] = {}
+    unbound: str | None = None
+    if checkpoint == 1:
+        bindings, unbound = prior_bindings(prior_root, catalog_sha256=catalog_sha256)
+        receipt["prior_bindings"] = {
+            "root": str(prior_root) if prior_root is not None else None,
+            "bound_cells": len(bindings),
+            "unbound_reason": unbound,
+        }
     for task in contract.TASKS:
         for arm in contract.ARMS:
             arguments: dict[str, Any] = {}
@@ -394,10 +465,15 @@ async def _prepare_cells(
             if arm == SUMMARY_ARM:
                 arguments["references"] = references
             if checkpoint == 1 and arm in CP1_PRIOR_ARMS:
-                prior, prior_record = load_prior(prior_root, task, arm)
+                bound_sha256 = bindings.get((task, arm))
+                prior, prior_record = load_prior(
+                    prior_root, task, arm, bound_sha256=bound_sha256, unbound_reason=unbound
+                )
                 if prior is not None:
                     arguments["prior"] = prior
-                    arguments["prior_sha256"] = contract.digest(prior)
+                    # The digest the prior run sealed, so the adapter's own
+                    # binding check can actually fail on a rewritten pack.
+                    arguments["prior_sha256"] = bound_sha256
             pack = await adapter.prepare(checkpoint=checkpoint, task=task, arm=arm, **arguments)
             document = coordinate(
                 pack, checkpoint=checkpoint, task=task, arm=arm, catalog=catalog_sha256
@@ -553,11 +629,13 @@ async def prepare_checkpoint(
         "output": str(output),
         "prior_root": str(prior_root) if prior_root is not None else None,
         "tokenizer_assets": str(tokenizer_assets),
-        "schedule_source_catalog_sha256": schedule_catalog_sha256(),
+        # Read inside the try below: a failure there must still leave a receipt.
+        "schedule_source_catalog_sha256": None,
         "catalog_sha256": None,
         "catalog": None,
         "native_inventory": None,
         "tokenizer": None,
+        "prior_bindings": None,
         "denominator": CELLS_PER_CHECKPOINT,
         "prepared": 0,
         "cells": [],
@@ -571,6 +649,7 @@ async def prepare_checkpoint(
     }
     _reserve(output / RECEIPT_NAME, receipt)
     try:
+        receipt["schedule_source_catalog_sha256"] = schedule_catalog_sha256()
         await cycle.bootstrap_runtime()
         try:
             await _prepare(
@@ -634,6 +713,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (CheckpointError, MissingPack, OSError) as exc:
         sys.stderr.write(f"{exc}\n")
         return EXIT_INCOMPLETE
+    except Exception as exc:  # the receipt is already sealed; never exit on a traceback
+        sys.stderr.write(f"{type(exc).__name__}: {exc}\n")
+        return EXIT_INCOMPLETE
     sys.stdout.write(
         json.dumps(
             {
@@ -642,6 +724,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "prepared": receipt["prepared"],
                 "denominator": receipt["denominator"],
                 "missing_reasons": receipt["missing_reasons"],
+                "errors": receipt["errors"],
                 "catalog_sha256": receipt["catalog_sha256"],
                 "receipt": str(Path(receipt["output"]) / RECEIPT_NAME),
             },
@@ -649,7 +732,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         + "\n"
     )
-    return EXIT_OK if receipt["status"] == STATUS_PREPARED else EXIT_INCOMPLETE
+    # An error recorded after the last cell (a queue that would not drain) is
+    # still an incomplete checkpoint, whatever the cell count says.
+    if receipt["status"] != STATUS_PREPARED or receipt["errors"]:
+        return EXIT_INCOMPLETE
+    return EXIT_OK
 
 
 if __name__ == "__main__":
